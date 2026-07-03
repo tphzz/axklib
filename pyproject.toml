@@ -19,7 +19,8 @@ requires-python = ">=3.13"
 dependencies = [
     "pycdlib>=1.14.0",
     "pyfatfs>=1.1.0",
-    "setuptools>=82.0.1",
+    # pyfatfs imports pkg_resources, which setuptools 81+ no longer provides.
+    "setuptools<81",
 ]
 
 [project.scripts]
@@ -65,7 +66,8 @@ docs = [
 ]
 
 [build-system]
-requires = ["setuptools>=82.0.1"]
+# Keep the isolated build backend on a pkg_resources-providing setuptools release.
+requires = ["setuptools>=80,<81"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
