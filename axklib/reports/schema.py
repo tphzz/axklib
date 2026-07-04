@@ -100,6 +100,16 @@ OBJECT_REF_COLUMN_NAMES = {
 def _field_semantic_notes(name: str) -> str:
     if name in QUALITY_COLUMN_NAMES:
         return "DataQuality marker; exact allowed values are part of the quality model, not a free-form status string."
+    if name == "assignment_row_state":
+        return "Program assignment row classification; decoded-row means a PROG row was decoded and reported separately from active assignment state."
+    if name == "active_assignment_state":
+        return "Conservative active Program assignment classification from decoded row bytes when available; unknown means the row does not match a supported active/off value."
+    if name == "assignment_output1_byte_0x1d":
+        return "Decoded PROG assignment row +0x1d byte retained as raw per-row output data; it is not the Rch Assign display selector by itself."
+    if name == "assignment_rch_assign_gate_byte_0x28":
+        return "Decoded PROG assignment row byte used for active/off classification where 0xff is active and 0x00 is visible/off."
+    if name == "assignment_rch_assign_display":
+        return "Conservative visible Rch Assign family: off, =SMP, 01 through 16, BasicRch, B01 through B16, or unknown."
     if name in {"basis", "extraction_basis", "notes", "match_notes"}:
         return "Quality/basis origin field. Do not treat as decoded raw storage by itself."
     if name.startswith("raw_") or name.endswith("_offset") or name.endswith("_offset_hex"):

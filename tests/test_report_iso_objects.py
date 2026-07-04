@@ -48,7 +48,6 @@ def build_smpl_object() -> bytes:
     return bytes(header) + b"\x12\x34\x56\x78"
 
 
-
 def build_raw_sbac_impossible_capacity_object() -> bytes:
     payload = bytearray(0x200)
     payload[0:12] = b"FSFSDEV3SPLX"
@@ -56,6 +55,7 @@ def build_raw_sbac_impossible_capacity_object() -> bytes:
     payload[0x32:0x3A] = b"P5 RCDR "
     payload[0x144] = 80
     return bytes(payload)
+
 
 def write_iso(path: Path) -> None:
     import pycdlib
@@ -66,6 +66,7 @@ def write_iso(path: Path) -> None:
     iso.add_fp(BytesIO(smpl), len(smpl), iso_path="/F001.;1")
     iso.write(str(path))
     iso.close()
+
 
 class ReportIsoObjectsTests(unittest.TestCase):
     def test_walks_iso_and_hashes_smpl_payload(self) -> None:
@@ -94,7 +95,6 @@ class ReportIsoObjectsTests(unittest.TestCase):
             self.assertEqual(hashes[0].iso_recovery_quality, "clean-iso9660-object")
             self.assertEqual(strings[0].iso_recovery_quality, "clean-iso9660-object")
 
-
     def test_shared_object_source_loads_iso_objects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "fixture.iso"
@@ -107,7 +107,11 @@ class ReportIsoObjectsTests(unittest.TestCase):
             self.assertEqual(items[0].type, "SMPL")
             self.assertEqual(items[0].name, "TEST")
             self.assertEqual(items[0].fat_file, "F001")
-            self.assertIsNone(items[0].payload_offset)
+            self.assertIsInstance(items[0].payload_offset, int)
+            self.assertEqual(items[0].metadata["iso_data_offset"], items[0].payload_offset)
+            self.assertEqual(
+                items[0].metadata["iso_extent_sector"], items[0].payload_offset // SECTOR_SIZE
+            )
             self.assertEqual(items[0].payload_size, len(build_smpl_object()))
             self.assertIn("TESTVOL", items[0].scope_key)
             self.assertIn("iso9660", items[0].object_key)
@@ -127,8 +131,7 @@ class ReportIsoObjectsTests(unittest.TestCase):
             assert result.error is not None
             self.assertEqual(result.error.error_code, "CONTAINER_UNSUPPORTED_ISO9660")
             self.assertIn("unsupported ISO9660 image", result.error.message)
+
+
 if __name__ == "__main__":
     unittest.main()
-
-
-

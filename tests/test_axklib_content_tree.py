@@ -25,7 +25,7 @@ def _object(object_key: str, object_type: str, name: str, payload: bytes = b"") 
     )
 
 
-def test_content_tree_includes_hierarchical_relationship_children(monkeypatch) -> None:
+def test_content_tree_keeps_prog_sbac_rows_out_of_active_program_children(monkeypatch) -> None:
     prog_payload = bytearray(0x180)
     prog_payload[0x078:0x080] = b"T.MORIO "
     program = _object("prog1", "PROG", "001", bytes(prog_payload))
@@ -131,9 +131,10 @@ def test_content_tree_includes_hierarchical_relationship_children(monkeypatch) -
         if "Bank 1" in line and line.startswith("        ") and "A Bank 1" not in line
     )
     sample_line = next(line for line in lines if "Waveform 1" in line)
-    assert lines.index(program_line) < lines.index(early_group_line) < lines.index(early_bank_line)
+    assert lines.index(default_slot_line) == lines.index(program_line) + 1
+    assert lines.index(default_slot_line) < lines.index(early_group_line) < lines.index(early_bank_line)
     assert lines.index(early_bank_line) < lines.index(group_line) < lines.index(bank_line)
-    assert lines.index(bank_line) < lines.index(default_slot_line) < lines.index(sample_line)
+    assert lines.index(bank_line) < lines.index(sample_line)
     assert "[Known]" in program_line
     assert "[Known]" in group_line
     assert "Sample Bank Accessories" not in rendered

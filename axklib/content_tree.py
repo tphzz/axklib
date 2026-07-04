@@ -501,7 +501,7 @@ def _relationship_targets(value: str) -> tuple[str, ...]:
 
 
 _NAVIGABLE_RELATIONSHIP_TYPES = {
-    "PROG_ASSIGNMENT_TO_SBAC",
+    # PROG_ASSIGNMENT_TO_SBAC rows prove decoded row/inventory data, not active assignment.
     "PROG_ASSIGNMENT_TO_SBNK",
     "PROG_ASSIGNMENT_TO_OBJECT",
     "SBAC_SLOT_TO_SBNK",
