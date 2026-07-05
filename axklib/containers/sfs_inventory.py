@@ -16,7 +16,7 @@ from axklib.containers import sfs_dump as dumper
 from axklib.containers import sfs_extents, sfs_scan
 
 OBJECT_MAGIC = b"FSFSDEV3SPLX"
-OBJECT_PAYLOAD_KINDS = {"object", "legacy-object"}
+OBJECT_PAYLOAD_KINDS = {"object", "alternating-byte-object"}
 LEGACY_OBJECT_EVEN_MAGIC = OBJECT_MAGIC[:12:2]
 LEGACY_OBJECT_TYPES_BY_EVEN_LANE = {
     b"SP": "SMPL",
@@ -56,7 +56,7 @@ def printable_ascii(data: bytes) -> str:
     return "".join(chr(byte) if 0x20 <= byte < 0x7F else "." for byte in data)
 
 
-def has_legacy_marker_lane(payload: bytes, byte_count: int = 16) -> bool:
+def has_legacy_alternating_byte_pattern(payload: bytes, byte_count: int = 16) -> bool:
     if len(payload) < byte_count:
         return False
     for offset in range(1, byte_count, 2):
@@ -65,8 +65,8 @@ def has_legacy_marker_lane(payload: bytes, byte_count: int = 16) -> bool:
     return True
 
 
-def classify_legacy_object_type(payload: bytes) -> str:
-    if len(payload) < 16 or not has_legacy_marker_lane(payload, 16):
+def classify_alternating_byte_object_type(payload: bytes) -> str:
+    if len(payload) < 16 or not has_legacy_alternating_byte_pattern(payload, 16):
         return ""
     even_lane = payload[:16:2]
     if not even_lane.startswith(LEGACY_OBJECT_EVEN_MAGIC):
@@ -261,8 +261,8 @@ def match_quality_for(method: str) -> str:
         "directory-id",
         "link-id",
         "link-id+type",
-        "link-id+legacy",
-        "link-id+legacy-type",
+        "link-id+alternating-byte",
+        "link-id+alternating-byte-type",
     }:
         return "Known"
     if method == "link-id-type-mismatch":
@@ -483,9 +483,9 @@ def classify_payload(payload: bytes) -> tuple[str, str, str, int | None, int | N
             None,
             0,
         )
-    legacy_object_type = classify_legacy_object_type(payload)
-    if legacy_object_type:
-        return "legacy-object", legacy_object_type, "", None, None, 0
+    alternating_byte_object_type = classify_alternating_byte_object_type(payload)
+    if alternating_byte_object_type:
+        return "alternating-byte-object", alternating_byte_object_type, "", None, None, 0
     entries = parse_directory_entries(payload)
     dot_id = directory_dot_id(entries)
     if dot_id is not None:
@@ -687,10 +687,10 @@ def choose_object_record(
     exact = records_by_sfs_id.get(link_id)
     if exact is not None and exact.payload_kind in OBJECT_PAYLOAD_KINDS:
         if not expected_type or exact.object_type == expected_type:
-            if exact.payload_kind == "legacy-object":
+            if exact.payload_kind == "alternating-byte-object":
                 return (
                     exact,
-                    "link-id+legacy-type" if expected_type else "link-id+legacy",
+                    "link-id+alternating-byte-type" if expected_type else "link-id+alternating-byte",
                     "",
                     target_ynode,
                     [],
@@ -969,7 +969,7 @@ def write_summary(
     for record in records:
         if record.payload_kind == "object":
             by_type[record.object_type] += 1
-        elif record.payload_kind == "legacy-object":
+        elif record.payload_kind == "alternating-byte-object":
             legacy_by_type[record.object_type] += 1
     summary = {
         "partition_count": len(partitions),
@@ -981,7 +981,7 @@ def write_summary(
             1 for record in ynodes if record.payload_kind == "unknown"
         ),
         "legacy_object_record_count": sum(
-            1 for record in records if record.payload_kind == "legacy-object"
+            1 for record in records if record.payload_kind == "alternating-byte-object"
         ),
         "hidden_system_ynode_count": sum(
             1 for record in ynodes if record.visibility == "hidden-system"

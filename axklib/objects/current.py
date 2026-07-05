@@ -147,7 +147,7 @@ def summarize_current_smpl_compact_metadata(header: bytes) -> dict[str, object]:
     return asdict(decode_current_smpl_metadata(header))
 
 
-def marker_lane_payload_ok(payload: bytes) -> bool:
+def alternating_byte_payload_ok(payload: bytes) -> bool:
     if len(payload) < 2:
         return False
     limit = len(payload) if len(payload) % 2 == 0 else len(payload) - 1
@@ -162,15 +162,15 @@ def signed_8bit_lane_to_wav_bytes(data: bytes) -> bytes:
 
 
 def decode_current_smpl_payload_info(stored: bytes, bytes_per_sample: int) -> dict[str, object]:
-    if bytes_per_sample == 2 and marker_lane_payload_ok(stored):
+    if bytes_per_sample == 2 and alternating_byte_payload_ok(stored):
         useful_lane = stored[0::2]
         return {
             "pcm": signed_8bit_lane_to_wav_bytes(useful_lane),
-            "stored_payload_transform": "current-marker-lane-signed-high-byte",
+            "stored_payload_transform": "alternating-byte-signed-high-byte",
             "wav_sample_width_bytes": 1,
             "stored_sample_width_bytes": bytes_per_sample,
-            "marker_lane_payload_detected": True,
-            "marker_lane_useful_bytes": len(useful_lane),
+            "alternating_byte_payload_detected": True,
+            "alternating_byte_useful_bytes": len(useful_lane),
         }
     if bytes_per_sample == 2:
         return {
@@ -178,8 +178,8 @@ def decode_current_smpl_payload_info(stored: bytes, bytes_per_sample: int) -> di
             "stored_payload_transform": "byteswap16",
             "wav_sample_width_bytes": 2,
             "stored_sample_width_bytes": bytes_per_sample,
-            "marker_lane_payload_detected": False,
-            "marker_lane_useful_bytes": "",
+            "alternating_byte_payload_detected": False,
+            "alternating_byte_useful_bytes": "",
         }
     if bytes_per_sample == 1:
         return {
@@ -187,8 +187,8 @@ def decode_current_smpl_payload_info(stored: bytes, bytes_per_sample: int) -> di
             "stored_payload_transform": "raw",
             "wav_sample_width_bytes": 1,
             "stored_sample_width_bytes": bytes_per_sample,
-            "marker_lane_payload_detected": False,
-            "marker_lane_useful_bytes": "",
+            "alternating_byte_payload_detected": False,
+            "alternating_byte_useful_bytes": "",
         }
     raise ValueError(f"unsupported sample width guess: {bytes_per_sample}")
 
@@ -199,8 +199,8 @@ def decode_current_smpl_payload(stored: bytes, bytes_per_sample: int) -> tuple[b
 
 
 def current_smpl_field_quality(transform: str) -> dict[str, dict[str, str]]:
-    marker_lane = transform == "current-marker-lane-signed-high-byte"
-    marker_lane_artifact_note = (
+    alternating_byte = transform == "alternating-byte-signed-high-byte"
+    alternating_byte_artifact_note = (
         "Validated recopy rows for matched source data store ordinary current "
         "SMPL payloads instead. Treat this payload convention as a suspected third-party/conversion "
         "artifact at tentative quality; exact authorship remains unproven."
@@ -218,18 +218,18 @@ def current_smpl_field_quality(transform: str) -> dict[str, dict[str, str]]:
         },
         "stored_payload_transform": {
             "quality": "Likely"
-            if marker_lane
+            if alternating_byte
             else ("Known" if transform == "byteswap16" else "Likely"),
             "basis": (
-                "direct HDA marker-lane payload quality plus exact ISO high-byte-lane matches"
-                if marker_lane
+                "direct HDA alternating-byte payload quality plus exact ISO high-byte-lane matches"
+                if alternating_byte
                 else "null-test/image quality for current SMPL fixtures"
             ),
             "notes": (
                 "Current-looking SMPL object has alternating 0x55/0xaa marker bytes in the stored payload; "
                 "the useful even lane is exported as signed 8-bit converted to unsigned WAV bytes. This is "
-                f"not ordinary current 16-bit PCM and remains below write-side quality. {marker_lane_artifact_note}"
-                if marker_lane
+                f"not ordinary current 16-bit PCM and remains below write-side quality. {alternating_byte_artifact_note}"
+                if alternating_byte
                 else (
                     "16-bit current SMPL payloads are stored big-endian and export as little-endian WAV PCM."
                     if transform == "byteswap16"
@@ -245,14 +245,14 @@ def current_smpl_field_quality(transform: str) -> dict[str, dict[str, str]]:
         "sample_width_bytes": {
             "quality": "Likely",
             "basis": (
-                "marker-lane payload detection overrides the current SMPL header width for WAV output"
-                if marker_lane
+                "alternating-byte payload detection overrides the current SMPL header width for WAV output"
+                if alternating_byte
                 else "direct object header field SMPL+0x02a; repeated image/null-test quality"
             ),
             "notes": (
-                "For marker-lane payloads, the current header still says 2 bytes per sample, but the emitted WAV "
-                f"is 8-bit because only the useful high-byte lane is present. {marker_lane_artifact_note}"
-                if marker_lane
+                "For alternating-byte payloads, the current header still says 2 bytes per sample, but the emitted WAV "
+                f"is 8-bit because only the useful high-byte lane is present. {alternating_byte_artifact_note}"
+                if alternating_byte
                 else "Used as WAV metadata and payload transform selector for current SMPL objects."
             ),
         },
@@ -368,7 +368,7 @@ def write_current_smpl_wav(
     transform = str(decoded["stored_payload_transform"])
     wav_sample_width_value = decoded["wav_sample_width_bytes"]
     wav_sample_width = wav_sample_width_value if isinstance(wav_sample_width_value, int) else 0
-    marker_lane_payload_detected = bool(decoded["marker_lane_payload_detected"])
+    alternating_byte_payload_detected = bool(decoded["alternating_byte_payload_detected"])
 
     stem = f"{stem_prefix}_{safe_name(name)}"
     wav_path = output_dir / f"{stem}.wav"
@@ -408,16 +408,16 @@ def write_current_smpl_wav(
         "source_container": source_container,
         "container_kind": container_kind,
         "object_type": row.get("type"),
-        "extraction_quality": "Likely" if marker_lane_payload_detected else "Known",
+        "extraction_quality": "Likely" if alternating_byte_payload_detected else "Known",
         "extraction_basis": (
-            "direct FSFSDEV3SPLXSMPL object header plus marker-lane payload detection"
-            if marker_lane_payload_detected
+            "direct FSFSDEV3SPLXSMPL object header plus alternating-byte payload detection"
+            if alternating_byte_payload_detected
             else "direct FSFSDEV3SPLXSMPL object header and stored payload bytes"
         ),
         "extraction_notes": (
-            "The object header is current-format, but the stored waveform payload is marker-lane packed; "
+            "The object header is current-format, but the stored waveform payload is alternating-byte packed; "
             "the WAV contains the useful signed high-byte lane converted to unsigned 8-bit PCM."
-            if marker_lane_payload_detected
+            if alternating_byte_payload_detected
             else "PCM byte extraction is exact for the stored payload span; WAV playback metadata carries per-field quality."
         ),
         "header_size": header_size,
@@ -425,21 +425,21 @@ def write_current_smpl_wav(
         "stored_payload_size": payload_size,
         "decoded_pcm_size": len(pcm),
         "stored_payload_transform": transform,
-        "marker_lane_payload_detected": marker_lane_payload_detected,
+        "alternating_byte_payload_detected": alternating_byte_payload_detected,
         "conversion_artifact_label": (
             "suspected-third-party-or-conversion-payload-artifact"
-            if marker_lane_payload_detected
+            if alternating_byte_payload_detected
             else ""
         ),
-        "conversion_artifact_quality": "Tentative" if marker_lane_payload_detected else "",
+        "conversion_artifact_quality": "Tentative" if alternating_byte_payload_detected else "",
         "conversion_artifact_notes": (
             "Only the current SMPL payload lane convention is labeled as a suspected conversion artifact. "
             "Compared current-header fields match validated ordinary current recopy rows for shared "
             "source data; exact origin remains unresolved."
-            if marker_lane_payload_detected
+            if alternating_byte_payload_detected
             else ""
         ),
-        "marker_lane_useful_bytes": decoded["marker_lane_useful_bytes"],
+        "alternating_byte_useful_bytes": decoded["alternating_byte_useful_bytes"],
         "sample_rate": sample_rate,
         "channels": 1,
         "sample_width_bytes": wav_sample_width,

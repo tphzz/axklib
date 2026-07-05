@@ -130,7 +130,7 @@ class IsoObjectHashRow:
     decoded_pcm_sha256: str
     decoded_pcm_size: int | str
     stored_payload_transform: str
-    marker_lane_payload_detected: bool | str
+    alternating_byte_payload_detected: bool | str
     inventory_status: str = ""
     iso_recovery_quality: str = ""
     iso_recovery_notes: str = ""
@@ -479,7 +479,7 @@ def build_hash_rows(
             decoded_sha = ""
             decoded_size: int | str = ""
             transform = ""
-            marker_detected: bool | str = ""
+            alternating_byte_detected: bool | str = ""
             if row.object_type == "SMPL" and len(header) >= 0x2C:
                 summary = a_series_objects.summarize_object_header(header)
                 header_size_int = _int_value(summary.get("header_size"))
@@ -506,7 +506,7 @@ def build_hash_rows(
                         decoded_sha = sha256(decoded_pcm)
                         decoded_size = len(decoded_pcm)
                         transform = str(decoded["stored_payload_transform"])
-                        marker_detected = bool(decoded["marker_lane_payload_detected"])
+                        alternating_byte_detected = bool(decoded["alternating_byte_payload_detected"])
                     except ValueError:
                         transform = "unsupported-width"
             hashes.append(
@@ -531,7 +531,7 @@ def build_hash_rows(
                     decoded_pcm_sha256=decoded_sha,
                     decoded_pcm_size=decoded_size,
                     stored_payload_transform=transform,
-                    marker_lane_payload_detected=marker_detected,
+                    alternating_byte_payload_detected=alternating_byte_detected,
                     inventory_status=row.inventory_status,
                     iso_recovery_quality=row.iso_recovery_quality,
                     iso_recovery_notes=row.iso_recovery_notes,

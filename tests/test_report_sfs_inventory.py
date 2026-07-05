@@ -206,7 +206,7 @@ class ReportSfsInventoryTests(unittest.TestCase):
         self.assertIs(ynode, target)
         self.assertEqual(candidates, [])
 
-    def test_classify_payload_accepts_legacy_marker_lane_objects(self) -> None:
+    def test_classify_payload_accepts_compatibility_artifact_objects(self) -> None:
         payload = bytearray(512)
         payload[:16] = bytes.fromhex("46 55 46 aa 44 55 56 aa 53 55 4c aa 53 55 50 aa")
 
@@ -214,7 +214,7 @@ class ReportSfsInventoryTests(unittest.TestCase):
             report_sfs_inventory.classify_payload(bytes(payload))
         )
 
-        self.assertEqual(payload_kind, "legacy-object")
+        self.assertEqual(payload_kind, "alternating-byte-object")
         self.assertEqual(object_type, "SMPL")
         self.assertEqual(object_name, "")
         self.assertIsNone(directory_id)
@@ -223,7 +223,7 @@ class ReportSfsInventoryTests(unittest.TestCase):
 
     def test_choose_object_record_resolves_exact_legacy_link_target(self) -> None:
         target = report_sfs_inventory.YNodeRecord(
-            0, 9, 1234, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0, 0, "legacy-object", "SMPL", "", None, None, 0
+            0, 9, 1234, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0, 0, "alternating-byte-object", "SMPL", "", None, None, 0
         )
         record = report_sfs_inventory.ynode_to_index_record(target)
 
@@ -238,14 +238,14 @@ class ReportSfsInventoryTests(unittest.TestCase):
         )
 
         self.assertIs(resolved, record)
-        self.assertEqual(method, "link-id+legacy-type")
+        self.assertEqual(method, "link-id+alternating-byte-type")
         self.assertEqual(reason, "")
         self.assertIs(ynode, target)
         self.assertEqual(candidates, [])
 
     def test_choose_object_record_does_not_name_match_blank_legacy_records(self) -> None:
         target = report_sfs_inventory.YNodeRecord(
-            0, 9, 1234, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0, 0, "legacy-object", "SMPL", "", None, None, 0
+            0, 9, 1234, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0, 0, "alternating-byte-object", "SMPL", "", None, None, 0
         )
         record = report_sfs_inventory.ynode_to_index_record(target)
 

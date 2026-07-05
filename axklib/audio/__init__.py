@@ -40,7 +40,7 @@ class Waveform:
     frame_count: int
     stored_payload_size: int
     stored_payload_transform: str
-    marker_lane_payload_detected: bool
+    alternating_byte_payload_detected: bool
     root_key: int | None
     fine_tune: int | None
     loop_mode: int | None
@@ -217,19 +217,19 @@ def decode_waveform(sample: AxklibObject) -> Waveform:
     wav_sample_width_value = decoded["wav_sample_width_bytes"]
     wav_sample_width = wav_sample_width_value if isinstance(wav_sample_width_value, int) else 0
     transform = str(decoded["stored_payload_transform"])
-    marker_lane = bool(decoded["marker_lane_payload_detected"])
+    alternating_byte = bool(decoded["alternating_byte_payload_detected"])
     metadata = object_current.decode_current_smpl_metadata(payload[:0xAC])
     frame_count = len(pcm) // wav_sample_width if wav_sample_width else 0
     quality = AxklibQuality(
-        quality=DataQuality.LIKELY if marker_lane else DataQuality.KNOWN,
+        quality=DataQuality.LIKELY if alternating_byte else DataQuality.KNOWN,
         source=(
-            "direct FSFSDEV3SPLXSMPL object header plus marker-lane payload detection"
-            if marker_lane
+            "direct FSFSDEV3SPLXSMPL object header plus alternating-byte payload detection"
+            if alternating_byte
             else "direct FSFSDEV3SPLXSMPL object header and stored payload bytes"
         ),
         notes=(
-            "Current-looking marker-lane payload export is diagnostic salvage metadata, not write basis."
-            if marker_lane
+            "Current-looking alternating-byte payload export is diagnostic compatibility metadata, not a write-support basis."
+            if alternating_byte
             else "Current SMPL payload span decoded without trimming or padding."
         ),
     )
@@ -249,7 +249,7 @@ def decode_waveform(sample: AxklibObject) -> Waveform:
         frame_count=frame_count,
         stored_payload_size=stored_payload_size,
         stored_payload_transform=transform,
-        marker_lane_payload_detected=marker_lane,
+        alternating_byte_payload_detected=alternating_byte,
         root_key=metadata.root_key_midi_note_guess,
         fine_tune=metadata.fine_tune_cents_guess,
         loop_mode=metadata.loop_mode_candidate_0x085,
@@ -257,7 +257,7 @@ def decode_waveform(sample: AxklibObject) -> Waveform:
         loop_start=metadata.loop_start_frame_0x096,
         loop_length=metadata.loop_length_frames_0x09a,
         loop_end_a4000_ui=metadata.loop_end_frame_a4000_ui_guess,
-        exactness_status=("current-marker-lane-salvage" if marker_lane else "exact-current-mono"),
+        exactness_status=("alternating-byte-compatibility-export" if alternating_byte else "exact-current-mono"),
         quality=quality,
         field_quality=object_current.current_smpl_field_quality(transform),
         metadata={
@@ -332,7 +332,7 @@ def waveform_sidecar(waveform: Waveform, wav_path: Path) -> dict[str, object]:
         "stored_payload_size": waveform.stored_payload_size,
         "decoded_pcm_size": len(waveform.pcm),
         "stored_payload_transform": waveform.stored_payload_transform,
-        "marker_lane_payload_detected": waveform.marker_lane_payload_detected,
+        "alternating_byte_payload_detected": waveform.alternating_byte_payload_detected,
         "extraction_quality": waveform.quality.quality.value,
         "extraction_basis": waveform.quality.source,
         "extraction_notes": waveform.quality.notes,

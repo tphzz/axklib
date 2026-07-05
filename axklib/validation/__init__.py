@@ -426,7 +426,7 @@ def _volume_issue_code(issue_type: str) -> str:
     return {
         "category-object-count-mismatch": "SFS_VOLUME_CATEGORY_OBJECT_COUNT_MISMATCH",
         "malformed-category-entry": "SFS_VOLUME_MALFORMED_CATEGORY_ENTRY",
-        "visible-marker-lane-conversion-artifact-objects": "SFS_VOLUME_VISIBLE_MARKER_LANE_ARTIFACT",
+        "visible-alternating-byte-compatibility-artifact-objects": "SFS_VOLUME_VISIBLE_ALTERNATING_BYTE_ARTIFACT",
         "partition-allocation-consistency": "SFS_ALLOCATION_PARTITION_CONSISTENCY",
     }.get(issue_type, "SFS_VOLUME_VALIDATION_ISSUE")
 

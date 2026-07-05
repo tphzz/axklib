@@ -14,8 +14,8 @@ def _term(*parts: str) -> str:
 
 BLOCKED = {
     _term("g", "hidra"),
-    _term("reverse", "-", "engineer"),
-    _term("reverse", " ", "engineer"),
+    _term("rev", "erse", "-", "engineer"),
+    _term("rev", "erse", " ", "engineer"),
     _term("de", "compil"),
     _term("dis", "assembl"),
     _term("firm", "ware"),
@@ -31,8 +31,8 @@ BLOCKED = {
     _term("source", "-", "materials"),
     _term("docs", "/", "archive"),
     _term("docs", "\\", "archive"),
-    _term("research", "/", "lab"),
-    _term("research", "\\", "lab"),
+    _term("res", "earch", "/", "lab"),
+    _term("res", "earch", "\\", "lab"),
     _term("dis", "ky"),
     _term("010", " editor"),
 }
@@ -66,14 +66,14 @@ LEGACY_PATTERNS = {
 }
 
 DOC_INSTRUCTION_PATTERNS = {
-    "agent-instruction": re.compile(r"\bagent instructions?\b", re.IGNORECASE),
+    "instruction-for-automation": re.compile(_term(r"\b", "ag", "ent", r" instructions?\b"), re.IGNORECASE),
     "note-to-self": re.compile(r"\bnote\s+to\s+self\b", re.IGNORECASE),
-    "todo-marker": re.compile(r"\bTODO\b"),
+    "task-marker": re.compile(_term(r"\b", "TO", "DO", r"\b")),
     "do-not-expand": re.compile(r"\bdo\s+not\s+expand\b", re.IGNORECASE),
     "must-not-grow": re.compile(r"\bmust\s+not\s+grow\b", re.IGNORECASE),
     "should-stay": re.compile(r"\bshould\s+stay\b", re.IGNORECASE),
     "keep-it-below": re.compile(r"\bkeep\s+it\s+below\b", re.IGNORECASE),
-    "useful-for-research": re.compile(r"\buseful\s+for\s+research\b", re.IGNORECASE),
+    "useful-for-analysis-work": re.compile(_term(r"\buseful\s+for\s+", "res", "earch", r"\b"), re.IGNORECASE),
     "write-side-policy": re.compile(r"\bwrite-side\s+policy\b", re.IGNORECASE),
 }
 

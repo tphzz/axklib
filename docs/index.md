@@ -68,10 +68,12 @@ Build the local documentation:
 uv run --group docs axklib-docs build --strict
 ```
 
-For Yamaha CD-ROM images, axklib uses sampler-facing menu and volume labels when they are stored in the ISO. Raw ISO directory identifiers remain available in JSON and CSV metadata for traceability.
 ## Documentation Sections
 
 - [Typical Usage](axklib/typical-usage.md) shows Python API examples.
+- [Format Guides](axklib/sfs-filesystem.md) describe SFS hard-disk images, FAT12 floppy images, CD-ROM images, and shared sampler data structures.
+- [Names, Paths, And Exports](axklib/names-and-paths.md) documents sampler-facing labels, tree rendering, and exact export layout.
+- [Report Schemas](axklib/report-schemas.md) documents CSV/JSON outputs and validation issue fields.
 - [Public API](axklib/model.md) documents the main model and service modules.
 - [Architecture](architecture.md) explains the package boundaries and data flow.
 

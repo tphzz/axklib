@@ -320,7 +320,7 @@ def decode_prog(item: AxklibObject) -> DecodedObjectResult:
 
 
 def decode_object(item: AxklibObject) -> DecodedObjectResult:
-    if item.object_format == AxklibObjectFormat.MARKER_LANE_ARTIFACT:
+    if item.object_format == AxklibObjectFormat.ALTERNATING_BYTE_ARTIFACT:
         issue = DecodeIssue(
             code="OBJECT_ARTIFACT_SALVAGE_REQUIRED",
             severity="info",

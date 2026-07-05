@@ -3,7 +3,7 @@
 This is a report layer over ``report_sfs_inventory.py`` output. It is
 intended to separate volumes that are structurally valid but contain hidden or
 unmapped objects from volumes that likely fail sampler-side loading because a
-visible category directory contains malformed entries. It also warns when a visible tree contains marker-lane / suspected conversion-artifact objects whose sampler loadability is not proven.
+visible category directory contains malformed entries. It also warns when a visible tree contains alternating-byte compatibility artifact objects whose sampler loadability is not proven.
 """
 
 from __future__ import annotations
@@ -36,8 +36,8 @@ class VolumeValidationRow:
     malformed_category_entry_count: int
     category_count_mismatch_count: int
     current_object_entry_count: int
-    legacy_marker_lane_object_entry_count: int
-    legacy_marker_lane_smpl_entry_count: int
+    compatibility_artifact_object_entry_count: int
+    compatibility_artifact_smpl_entry_count: int
     fatal_issue_count: int
     warning_issue_count: int
     allocation_status: str
@@ -159,20 +159,20 @@ def load_volume_object_counts(
             key,
             {
                 "current_object_entry_count": 0,
-                "legacy_marker_lane_object_entry_count": 0,
-                "legacy_marker_lane_smpl_entry_count": 0,
-                "legacy_marker_lane_sbnk_entry_count": 0,
-                "legacy_marker_lane_sbac_entry_count": 0,
-                "legacy_marker_lane_prog_entry_count": 0,
+                "compatibility_artifact_object_entry_count": 0,
+                "compatibility_artifact_smpl_entry_count": 0,
+                "compatibility_artifact_sbnk_entry_count": 0,
+                "compatibility_artifact_sbac_entry_count": 0,
+                "compatibility_artifact_prog_entry_count": 0,
             },
         )
         match_method = row.get("match_method", "")
         if match_method == "link-id+type":
             counts["current_object_entry_count"] += 1
-        elif match_method == "link-id+legacy-type":
-            counts["legacy_marker_lane_object_entry_count"] += 1
+        elif match_method == "link-id+alternating-byte-type":
+            counts["compatibility_artifact_object_entry_count"] += 1
             category_code = row.get("category_code", "").lower()
-            key_name = f"legacy_marker_lane_{category_code}_entry_count"
+            key_name = f"compatibility_artifact_{category_code}_entry_count"
             if key_name in counts:
                 counts[key_name] += 1
     return counts_by_volume
@@ -256,8 +256,8 @@ def build_report(
         quality: list[str] = []
         object_counts = object_counts_by_volume.get(volume_key, {})
         current_object_entries = object_counts.get("current_object_entry_count", 0)
-        legacy_marker_lane_entries = object_counts.get("legacy_marker_lane_object_entry_count", 0)
-        legacy_marker_lane_smpl_entries = object_counts.get("legacy_marker_lane_smpl_entry_count", 0)
+        compatibility_artifact_entries = object_counts.get("compatibility_artifact_object_entry_count", 0)
+        compatibility_artifact_smpl_entries = object_counts.get("compatibility_artifact_smpl_entry_count", 0)
 
         for category in volume_categories:
             category_key = (source, partition_index, int_field(category, "directory_id"))
@@ -328,16 +328,16 @@ def build_report(
                 else:
                     valid_entries += 1
 
-        if legacy_marker_lane_entries:
+        if compatibility_artifact_entries:
             warning_count += 1
             legacy_details = (
-                f"visible marker-lane/conversion-artifact object entries: total={legacy_marker_lane_entries}, "
-                f"SMPL={legacy_marker_lane_smpl_entries}, "
-                f"SBNK={object_counts.get('legacy_marker_lane_sbnk_entry_count', 0)}, "
-                f"SBAC={object_counts.get('legacy_marker_lane_sbac_entry_count', 0)}, "
-                f"PROG={object_counts.get('legacy_marker_lane_prog_entry_count', 0)}; "
+                f"visible alternating-byte compatibility artifact object entries: total={compatibility_artifact_entries}, "
+                f"SMPL={compatibility_artifact_smpl_entries}, "
+                f"SBNK={object_counts.get('compatibility_artifact_sbnk_entry_count', 0)}, "
+                f"SBAC={object_counts.get('compatibility_artifact_sbac_entry_count', 0)}, "
+                f"PROG={object_counts.get('compatibility_artifact_prog_entry_count', 0)}; "
                 "filesystem tree/allocation validation does not prove sampler loadability "
-                "for this physical marker-lane artifact family"
+                "for this physical alternating-byte artifact family"
             )
             quality.append(legacy_details)
             issue_rows.append(
@@ -348,7 +348,7 @@ def build_report(
                     volume_name=volume_name,
                     volume_path=volume_path,
                     severity="warning",
-                    issue_type="visible-marker-lane-conversion-artifact-objects",
+                    issue_type="visible-alternating-byte-compatibility-artifact-objects",
                     category_code="",
                     category_name="",
                     category_directory_id=None,
@@ -358,7 +358,7 @@ def build_report(
                     link_id=None,
                     target_kind="object",
                     target_sfs_id=None,
-                    target_payload_kind="legacy-marker-lane-object",
+                    target_payload_kind="alternating-byte-compatibility-object",
                     match_quality="Likely",
                     unmatched_reason="",
                     details=legacy_details,
@@ -428,8 +428,8 @@ def build_report(
                 malformed_category_entry_count=malformed_entries,
                 category_count_mismatch_count=category_count_mismatches,
                 current_object_entry_count=current_object_entries,
-                legacy_marker_lane_object_entry_count=legacy_marker_lane_entries,
-                legacy_marker_lane_smpl_entry_count=legacy_marker_lane_smpl_entries,
+                compatibility_artifact_object_entry_count=compatibility_artifact_entries,
+                compatibility_artifact_smpl_entry_count=compatibility_artifact_smpl_entries,
                 fatal_issue_count=fatal_count,
                 warning_issue_count=warning_count,
                 allocation_status=allocation_status,
