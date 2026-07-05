@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import mmap
+import re
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -25,9 +26,9 @@ IMPOSSIBLE_INTERNAL_CAPACITY_QUALITIES = {
 }
 
 
-
 def _int_value(value: object, default: int = 0) -> int:
     return value if isinstance(value, int) else default
+
 
 def base_iso_recovery_quality(inventory_method: str, inventory_status: str) -> tuple[str, str]:
     if inventory_method == "iso9660" and inventory_status == "iso9660":
@@ -129,7 +130,7 @@ class IsoObjectHashRow:
     decoded_pcm_sha256: str
     decoded_pcm_size: int | str
     stored_payload_transform: str
-    marker_lane_payload_detected: bool | str
+    alternating_byte_payload_detected: bool | str
     inventory_status: str = ""
     iso_recovery_quality: str = ""
     iso_recovery_notes: str = ""
@@ -147,6 +148,12 @@ class IsoStringRow:
     inventory_status: str = ""
     iso_recovery_quality: str = ""
     iso_recovery_notes: str = ""
+
+
+@dataclass(frozen=True)
+class IsoMenuLabels:
+    group_labels: dict[str, str]
+    volume_labels: dict[tuple[str, str], str]
 
 
 class Iso9660Error(ValueError):
@@ -229,7 +236,9 @@ def walk_iso_files(path: Path) -> tuple[str, list[IsoFileRow]]:
     rows: list[IsoFileRow] = []
     with path.open("rb") as handle:
         volume_id, root = pvd_info(handle)
-        queue: list[tuple[str, int, int]] = [("", _int_value(root.get("extent_sector")), _int_value(root.get("size")))]
+        queue: list[tuple[str, int, int]] = [
+            ("", _int_value(root.get("extent_sector")), _int_value(root.get("size")))
+        ]
         while queue:
             parent, sector, size = queue.pop(0)
             directory_data = read_extent(handle, sector, size)
@@ -269,6 +278,77 @@ def walk_iso_files(path: Path) -> tuple[str, list[IsoFileRow]]:
                 rows.append(row)
     annotate_rows_with_inventory_status(rows, "iso9660")
     return volume_id, rows
+
+
+def _iso_path_parts(path: str) -> list[str]:
+    return [part for part in path.replace("\\", "/").split("/") if part]
+
+
+def _read_text_file(handle: BinaryIO, row: IsoFileRow) -> str:
+    return clean_text(read_at(handle, row.data_offset, row.size)).strip()
+
+
+def _decode_menu_volume_record(record: bytes) -> tuple[str, str] | None:
+    if len(record) < 22:
+        return None
+    match = re.search(rb"F\d{3}", record[:24])
+    if match is None:
+        return None
+    volume = match.group(0).decode("ascii")
+    label = clean_text(record[1:14]).strip()
+    if not label:
+        return None
+    return volume, label
+
+
+def decode_yamaha_menu_labels(path: Path, rows: Iterable[IsoFileRow]) -> IsoMenuLabels:
+    """Decode sampler-facing Yamaha CD-ROM menu labels from ISO files."""
+
+    row_by_path = {row.path: row for row in rows}
+    volume_dirs = {
+        (parts[0], parts[1])
+        for row in row_by_path.values()
+        if row.is_directory
+        for parts in [_iso_path_parts(row.path)]
+        if len(parts) == 2 and re.fullmatch(r"F\d{3}", parts[1])
+    }
+    groups = sorted({group for group, _volume in volume_dirs})
+    group_labels: dict[str, str] = {}
+    volume_labels: dict[tuple[str, str], str] = {}
+
+    with path.open("rb") as handle:
+        for group in groups:
+            label_rows = [
+                row
+                for row in row_by_path.values()
+                for parts in [_iso_path_parts(row.path)]
+                if (
+                    len(parts) == 2
+                    and parts[0] == group
+                    and not row.is_directory
+                    and re.fullmatch(r"F\d{3}", parts[1])
+                    and row.size <= 64
+                )
+            ]
+            for row in sorted(label_rows, key=lambda item: item.path):
+                label = _read_text_file(handle, row)
+                if label:
+                    group_labels[group] = label
+                    break
+
+            table_row = row_by_path.get(f"{group}/0000")
+            if table_row is None or table_row.is_directory:
+                continue
+            table = read_at(handle, table_row.data_offset, table_row.size)
+            for offset in range(0, len(table) - (len(table) % 32), 32):
+                decoded = _decode_menu_volume_record(table[offset : offset + 32])
+                if decoded is None:
+                    continue
+                volume, label = decoded
+                if (group, volume) in volume_dirs:
+                    volume_labels[(group, volume)] = label
+
+    return IsoMenuLabels(group_labels=group_labels, volume_labels=volume_labels)
 
 
 def object_span_from_header(data: bytes | mmap.mmap, offset: int, next_offset: int | None) -> int:
@@ -399,7 +479,7 @@ def build_hash_rows(
             decoded_sha = ""
             decoded_size: int | str = ""
             transform = ""
-            marker_detected: bool | str = ""
+            alternating_byte_detected: bool | str = ""
             if row.object_type == "SMPL" and len(header) >= 0x2C:
                 summary = a_series_objects.summarize_object_header(header)
                 header_size_int = _int_value(summary.get("header_size"))
@@ -426,7 +506,7 @@ def build_hash_rows(
                         decoded_sha = sha256(decoded_pcm)
                         decoded_size = len(decoded_pcm)
                         transform = str(decoded["stored_payload_transform"])
-                        marker_detected = bool(decoded["marker_lane_payload_detected"])
+                        alternating_byte_detected = bool(decoded["alternating_byte_payload_detected"])
                     except ValueError:
                         transform = "unsupported-width"
             hashes.append(
@@ -451,7 +531,7 @@ def build_hash_rows(
                     decoded_pcm_sha256=decoded_sha,
                     decoded_pcm_size=decoded_size,
                     stored_payload_transform=transform,
-                    marker_lane_payload_detected=marker_detected,
+                    alternating_byte_payload_detected=alternating_byte_detected,
                     inventory_status=row.inventory_status,
                     iso_recovery_quality=row.iso_recovery_quality,
                     iso_recovery_notes=row.iso_recovery_notes,

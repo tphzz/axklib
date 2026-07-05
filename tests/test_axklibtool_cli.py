@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from axklib import cli as axklibtool
+from axklib import content_tree as axklib_content_tree
 
 
 def _put_be16(buf: bytearray, offset: int, value: int) -> None:
@@ -64,6 +65,45 @@ def test_info_reports_bad_path_without_internal_error(
     assert "Traceback" not in captured.err
 
 
+def test_info_show_default_programs_forwards_content_tree_option(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: list[bool] = []
+
+    def fake_build_content_trees_for_paths(*args: object, **kwargs: object) -> object:
+        seen.append(bool(kwargs.get("include_default_programs")))
+        return axklib_content_tree.ContentTreeLoadResult(
+            trees=(
+                axklib_content_tree.ContentTree(
+                    source_path="fixture.hds",
+                    container_kind="sfs",
+                    detected_format="sfs",
+                    roots=(),
+                ),
+            ),
+            load_errors=(),
+        )
+
+    monkeypatch.setattr(
+        axklibtool, "build_content_trees_for_paths", fake_build_content_trees_for_paths
+    )
+
+    default_code = axklibtool.main(["info", "fixture.hds"])
+    verbose_code = axklibtool.main(["info", "--show-default-programs", "fixture.hds"])
+
+    capsys.readouterr()
+    assert default_code == 0
+    assert verbose_code == 0
+    assert seen == [False, True]
+
+
+def test_content_label_map_option_is_not_public() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        axklibtool.main(["info", "--content-label-map", "labels.json", "fixture.iso"])
+
+    assert exc_info.value.code == 2
+
+
 def test_broken_pipe_is_not_reported_as_internal_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -77,6 +117,7 @@ def test_broken_pipe_is_not_reported_as_internal_error(
     captured = capsys.readouterr()
     assert code == 0
     assert "internal error" not in captured.err
+
 
 def test_inventory_refuses_nonempty_output_directory(tmp_path: Path) -> None:
     output = tmp_path / "out"
@@ -157,12 +198,32 @@ def test_extract_waves_allows_existing_targets_with_overwrite(tmp_path: Path) ->
     _write_standalone_smpl(source)
 
     first = axklibtool.main(["extract", "waves", "-o", str(output), str(source)])
-    second = axklibtool.main(
-        ["extract", "waves", "--overwrite", "-o", str(output), str(source)]
-    )
+    second = axklibtool.main(["extract", "waves", "--overwrite", "-o", str(output), str(source)])
 
     assert first == 0
     assert second == 0
+
+
+def test_extract_waves_progress_always_reports_same_line_status(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "sample.smpl"
+    output = tmp_path / "waves"
+    _write_standalone_smpl(source)
+
+    code = axklibtool.main(
+        ["extract", "waves", "--progress", "always", "-o", str(output), str(source)]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "\rloading:" in captured.err
+    assert "\rdecoding:" in captured.err
+    assert "\rexporting:" in captured.err
+    assert "SMPL/S01.wav" in captured.err
+    assert "volume.axklib.json" in captured.err
+    assert captured.err.endswith("\n")
+
 
 def test_subcommand_help_output_is_available(capsys: pytest.CaptureFixture[str]) -> None:
     for argv in (["inventory", "--help"], ["extract", "waves", "--help"]):
@@ -176,7 +237,9 @@ def test_subcommand_help_output_is_available(capsys: pytest.CaptureFixture[str])
     assert "export exact current smpl waveforms" in help_text
 
 
-def test_debug_flag_controls_internal_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_debug_flag_controls_internal_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     output = tmp_path / "validate"
 
     code = axklibtool.main(["validate", "-o", str(output)])
@@ -205,7 +268,6 @@ def test_corpus_audit_writes_input_manifest(tmp_path: Path) -> None:
     assert (output / "_schemas" / "input_manifest.schema.json").exists()
 
 
-
 def test_organized_extract_waves_forwards_stereo_policy_and_writes_all_schema_manifests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -231,13 +293,17 @@ def test_organized_extract_waves_forwards_stereo_policy_and_writes_all_schema_ma
             encoding="utf-8",
         )
         (out_dir / "mono_exports.json").write_text('[{"object_offset": 1}]', encoding="utf-8")
-        (out_dir / "derived_object_locations.json").write_text('[{"object_offset": 1}]', encoding="utf-8")
+        (out_dir / "derived_object_locations.json").write_text(
+            '[{"object_offset": 1}]', encoding="utf-8"
+        )
         (out_dir / "summary.json").write_text('{"exact_stereo_wavs_exported": 0}', encoding="utf-8")
         return [FakePairExport(exact_stereo_representable=True)]
 
     monkeypatch.setattr(axklibtool.exact_export, "export_pairs", fake_export_pairs)
 
-    code = axklibtool.main(["extract", "waves", "--mono-dir", str(mono_dir), "-o", str(output), str(image)])
+    code = axklibtool.main(
+        ["extract", "waves", "--mono-dir", str(mono_dir), "-o", str(output), str(image)]
+    )
 
     assert code == 0
     assert seen["stereo_policy"] == "auto"
@@ -263,7 +329,9 @@ def test_organized_extract_waves_forwards_stereo_policy_and_writes_all_schema_ma
     assert seen["stereo_policy"] == "none"
 
 
-def test_validate_fails_if_detail_report_generation_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_validate_fails_if_detail_report_generation_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     image = tmp_path / "source.hds"
     image.write_bytes(b"fixture")
     output = tmp_path / "validate"
@@ -278,7 +346,9 @@ def test_validate_fails_if_detail_report_generation_fails(tmp_path: Path, monkey
     assert code == 4
 
 
-def test_info_defaults_to_tree_and_summary_remains_available(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_info_defaults_to_tree_and_summary_remains_available(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     source = tmp_path / "sample.smpl"
     _write_standalone_smpl(source)
 

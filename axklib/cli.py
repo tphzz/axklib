@@ -23,11 +23,9 @@ from axklib.audio import (
 )
 from axklib.containers import expand_inputs, sfs_inventory
 from axklib.content_tree import (
-    ContentLabelMap,
     ContentTreeRenderOptions,
     build_content_trees_for_paths,
     content_tree_to_json,
-    load_content_label_map,
     load_known_object_placements,
     render_content_tree_text,
     summary_line,
@@ -38,6 +36,7 @@ from axklib.objects.decoded import decode_objects, result_field_names, result_is
 from axklib.parameters import current as current_parameters
 from axklib.parameters import sbnk_links
 from axklib.relationships import (
+    ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE,
     build_relationship_graph,
     build_relationship_graph_for_loaded_results,
     build_relationship_graph_for_path_results,
@@ -60,18 +59,41 @@ from axklib.validation import volume as volume_validation
 VERSION = "0.1.0-plan008"
 
 
-def _content_label_map_from_args(args: argparse.Namespace) -> ContentLabelMap | None:
-    path = getattr(args, "content_label_map", None)
-    if not path:
-        return None
-    return load_content_label_map(Path(path))
+class _ProgressLine:
+    def __init__(self, mode: str) -> None:
+        self.enabled = mode == "always" or (mode == "auto" and sys.stderr.isatty())
+        self._last_length = 0
+        self._wrote = False
+
+    def update(self, stage: str, completed: int, total: int, message: str = "") -> None:
+        if not self.enabled:
+            return
+        percent = 100 if total <= 0 else max(0, min(100, int(completed * 100 / total)))
+        text = f"{stage}: {percent:3d}% ({completed}/{total})"
+        if message:
+            detail = str(message).replace("\r", " ").replace("\n", " ")
+            if len(detail) > 72:
+                detail = f"...{detail[-69:]}"
+            text = f"{text} {detail}"
+        padding = " " * max(0, self._last_length - len(text))
+        sys.stderr.write(f"\r{text}{padding}")
+        sys.stderr.flush()
+        self._last_length = len(text)
+        self._wrote = True
+
+    def finish(self) -> None:
+        if self.enabled and self._wrote:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
 
 
 def run_info(args: argparse.Namespace) -> int:
     options = axklib.OpenOptions(strict=args.strict, include_payloads=True)
-    content_label_map = _content_label_map_from_args(args)
     results = build_content_trees_for_paths(
-        _input_paths(args.paths), options=options, content_label_map=content_label_map
+        _input_paths(args.paths),
+        options=options,
+        include_unresolved=args.show_unresolved,
+        include_default_programs=args.show_default_programs,
     )
     exit_code = 0
     if args.format == "json":
@@ -80,7 +102,9 @@ def run_info(args: argparse.Namespace) -> int:
             "load_errors": [
                 {
                     "path": str(error.path),
-                    "error_code": error.error.error_code if error.error else "AXKLIB_CONTAINER_OPEN_FAILED",
+                    "error_code": error.error.error_code
+                    if error.error
+                    else "AXKLIB_CONTAINER_OPEN_FAILED",
                     "message": error.error.message if error.error else "unknown error",
                 }
                 for error in results.load_errors
@@ -113,13 +137,11 @@ def run_info(args: argparse.Namespace) -> int:
     return exit_code
 
 
-
 def _quality(value: str) -> DataQuality:
     for item in DataQuality:
         if item.value == value:
             return item
     return DataQuality.UNKNOWN
-
 
 
 def _result_objects_by_source_and_key(results: Sequence[object]) -> dict[tuple[str, str], Any]:
@@ -138,6 +160,14 @@ def _known_single_target(row: WaveformRelationship) -> str | None:
     return targets[0] if len(targets) == 1 else None
 
 
+def _relationship_drives_active_program_context(row: WaveformRelationship) -> bool:
+    if not row.relationship_type.startswith("PROG_ASSIGNMENT_TO_"):
+        return False
+    if not row.active_assignment_state:
+        return True
+    return row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE
+
+
 def _current_sbnk_parameter_context(
     waveform: Any,
     objects: dict[tuple[str, str], Any],
@@ -147,7 +177,8 @@ def _current_sbnk_parameter_context(
     for row in relationships:
         if (
             row.quality != "Known"
-            or row.relationship_type not in {"SBNK_LEFT_MEMBER_TO_SMPL", "SBNK_RIGHT_MEMBER_TO_SMPL"}
+            or row.relationship_type
+            not in {"SBNK_LEFT_MEMBER_TO_SMPL", "SBNK_RIGHT_MEMBER_TO_SMPL"}
             or row.source_image != waveform.source_image
             or _known_single_target(row) != waveform.object_key
         ):
@@ -202,7 +233,7 @@ def _current_prog_parameter_context(
             row.quality != "Known"
             or row.source_image != waveform.source_image
             or _known_single_target(row) not in targets
-            or not row.relationship_type.startswith("PROG_")
+            or not _relationship_drives_active_program_context(row)
         ):
             continue
         prog = objects.get((waveform.source_image, row.source_key))
@@ -243,8 +274,9 @@ def _enrich_waveform_parameter_metadata(
         enriched.append(replace(waveform, metadata=metadata))
     return tuple(enriched)
 
+
 def _wave_export_context(
-    results: Sequence[object], content_label_map: ContentLabelMap | None = None
+    results: Sequence[object],
 ) -> tuple[dict[str, WaveformPlacement], tuple[WaveformRelationship, ...]]:
     placements: dict[str, WaveformPlacement] = {}
     relationship_items: list[Any] = []
@@ -252,8 +284,10 @@ def _wave_export_context(
         container = getattr(result, "container", None)
         if container is None:
             continue
-        placement_rows, _issues = load_known_object_placements(container, content_label_map)
-        source_image = container.objects[0].image if container.objects else str(container.source_path)
+        placement_rows, _issues = load_known_object_placements(container)
+        source_image = (
+            container.objects[0].image if container.objects else str(container.source_path)
+        )
         for object_key, placement in placement_rows.items():
             placements[f"{source_image}\u241f{object_key}"] = WaveformPlacement(
                 partition_index=placement.partition_index,
@@ -264,6 +298,7 @@ def _wave_export_context(
                 quality=_quality(placement.quality),
                 source=placement.basis,
                 relationship_path=f"{placement.category_name or 'object'}-category-entry",
+                raw_volume_path=placement.raw_volume_path,
             )
         relationship_items.extend(container.objects)
     if relationship_items:
@@ -279,12 +314,18 @@ def _wave_export_context(
                 ambiguity_notes=row.ambiguity_notes,
                 source_image=row.source_image,
                 scope_key=row.scope_key,
+                assignment_index=row.assignment_index,
+                assignment_name=row.assignment_name,
+                assignment_row_state=row.assignment_row_state,
+                active_assignment_state=row.active_assignment_state,
+                assignment_rch_assign_display=row.assignment_rch_assign_display,
             )
             for row in graph.relationships
         )
     else:
         relationships = ()
     return placements, relationships
+
 
 def _ensure_output_dir(path: Path, *, overwrite: bool = False) -> None:
     if path.exists() and any(path.iterdir()) and not overwrite:
@@ -315,41 +356,64 @@ def _write_report_schema(
     )
 
 
-
 def _read_json_rows(path: Path) -> list[object]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(payload, list):
         return payload
     return [payload]
 
+
+def _object_origin_columns(raw: Any) -> dict[str, object]:
+    metadata = raw.metadata
+    return {
+        "iso_extent_sector": metadata.get("iso_extent_sector", ""),
+        "iso_data_offset": metadata.get("iso_data_offset", ""),
+        "iso_file_size": metadata.get("iso_file_size", ""),
+        "iso_raw_group": metadata.get("iso_raw_group", ""),
+        "iso_raw_volume": metadata.get("iso_raw_volume", ""),
+        "iso_group_label": metadata.get("iso_group_label", ""),
+        "iso_volume_label": metadata.get("iso_volume_label", ""),
+        "iso_group_label_source": metadata.get("iso_group_label_source", ""),
+        "iso_volume_label_source": metadata.get("iso_volume_label_source", ""),
+        "iso_recovery_quality": metadata.get("iso_recovery_quality", ""),
+        "fat_directory_offset": metadata.get("fat_directory_offset", ""),
+        "fat_first_cluster": metadata.get("fat_first_cluster", ""),
+        "fat_cluster_count": metadata.get("fat_cluster_count", ""),
+        "fat_file_size": metadata.get("fat_file_size", ""),
+        "fat_object_offset": metadata.get("fat_object_offset", ""),
+        "fat_stored_payload_offset": metadata.get("fat_stored_payload_offset", ""),
+    }
+
+
 def _inventory_rows(container: axklib.containers.AxklibContainer) -> list[dict[str, object]]:
     object_set = decode_objects(container)
     rows: list[dict[str, object]] = []
     for result in object_set.results:
         raw = result.raw_object
-        rows.append(
-            {
-                "source_path": str(container.source_path),
-                "container_kind": container.kind,
-                "detected_format": container.detected_format,
-                "scope_key": raw.container.scope_key,
-                "object_key": raw.object_key,
-                "partition_index": raw.ref.partition_index if raw.ref.partition_index is not None else "",
-                "sfs_id": raw.ref.sfs_id if raw.ref.sfs_id is not None else "",
-                "fat_file": raw.ref.fat_file,
-                "payload_offset": raw.ref.payload_offset if raw.ref.payload_offset is not None else "",
-                "payload_size": raw.payload_size,
-                "object_type": raw.type,
-                "object_name": raw.name,
-                "object_format": raw.object_format.value,
-                "decoded_kind": result.decoded.decoded_kind,
-                "decoded_field_count": len(result.decoded.fields),
-                "decoded_fields": result_field_names(result),
-                "decode_issue_count": len(result.issues),
-                "decode_issue_codes": result_issue_codes(result),
-                "iso_recovery_quality": raw.metadata.get("iso_recovery_quality", ""),
-            }
-        )
+        row: dict[str, object] = {
+            "source_path": str(container.source_path),
+            "container_kind": container.kind,
+            "detected_format": container.detected_format,
+            "scope_key": raw.container.scope_key,
+            "object_key": raw.object_key,
+            "partition_index": raw.ref.partition_index
+            if raw.ref.partition_index is not None
+            else "",
+            "sfs_id": raw.ref.sfs_id if raw.ref.sfs_id is not None else "",
+            "fat_file": raw.ref.fat_file,
+            "payload_offset": raw.ref.payload_offset if raw.ref.payload_offset is not None else "",
+            "payload_size": raw.payload_size,
+            "object_type": raw.type,
+            "object_name": raw.name,
+            "object_format": raw.object_format.value,
+            "decoded_kind": result.decoded.decoded_kind,
+            "decoded_field_count": len(result.decoded.fields),
+            "decoded_fields": result_field_names(result),
+            "decode_issue_count": len(result.issues),
+            "decode_issue_codes": result_issue_codes(result),
+        }
+        row.update(_object_origin_columns(raw))
+        rows.append(row)
     return rows
 
 
@@ -437,37 +501,57 @@ def run_inventory(args: argparse.Namespace) -> int:
         _write_report_schema(output_dir, "inventory_summary", [inventory_summary]),
     ]
     write_schema_index(_schema_dir(output_dir), schemas)
-    print(f"objects={len(all_rows)} decode_issues={len(all_issue_rows)} load_errors={len(load_errors)}")
+    print(
+        f"objects={len(all_rows)} decode_issues={len(all_issue_rows)} load_errors={len(load_errors)}"
+    )
     print(f"reports written to {output_dir}")
     return exit_code
 
 
 def run_extract_waves(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)
+    progress = _ProgressLine(args.progress)
     if args.mono_dir is not None:
         paths = _input_paths(args.paths)
         if len(paths) != 1:
-            raise ValueError("organized exact export with --mono-dir requires exactly one source image")
+            raise ValueError(
+                "organized exact export with --mono-dir requires exactly one source image"
+            )
         _ensure_output_dir(output_dir, overwrite=args.overwrite)
-        pair_exports = exact_export.export_pairs(
-            paths[0],
-            Path(args.mono_dir),
-            output_dir,
-            inventory_dir=Path(args.inventory_dir) if args.inventory_dir else None,
-            bank_relationships_dir=Path(args.bank_relationships_dir) if args.bank_relationships_dir else None,
-            sbac_volume_disambiguation_dir=(
-                Path(args.sbac_volume_disambiguation_dir)
-                if args.sbac_volume_disambiguation_dir
-                else None
-            ),
-            overwrite_policy="replace" if args.overwrite else "fail",
-            stereo_policy=args.stereo,
-        )
+        progress.update("exporting", 0, 1, "organizing exact stereo exports")
+        try:
+            pair_exports = exact_export.export_pairs(
+                paths[0],
+                Path(args.mono_dir),
+                output_dir,
+                inventory_dir=Path(args.inventory_dir) if args.inventory_dir else None,
+                bank_relationships_dir=Path(args.bank_relationships_dir)
+                if args.bank_relationships_dir
+                else None,
+                sbac_volume_disambiguation_dir=(
+                    Path(args.sbac_volume_disambiguation_dir)
+                    if args.sbac_volume_disambiguation_dir
+                    else None
+                ),
+                overwrite_policy="replace" if args.overwrite else "fail",
+                stereo_policy=args.stereo,
+            )
+            progress.update("exporting", 1, 1, "organized export complete")
+        finally:
+            progress.finish()
         schemas = [
             _write_report_schema(output_dir, "sbnk_exact_pairs", pair_exports),
-            _write_report_schema(output_dir, "mono_exports", _read_json_rows(output_dir / "mono_exports.json")),
-            _write_report_schema(output_dir, "derived_object_locations", _read_json_rows(output_dir / "derived_object_locations.json")),
-            _write_report_schema(output_dir, "summary", _read_json_rows(output_dir / "summary.json")),
+            _write_report_schema(
+                output_dir, "mono_exports", _read_json_rows(output_dir / "mono_exports.json")
+            ),
+            _write_report_schema(
+                output_dir,
+                "derived_object_locations",
+                _read_json_rows(output_dir / "derived_object_locations.json"),
+            ),
+            _write_report_schema(
+                output_dir, "summary", _read_json_rows(output_dir / "summary.json")
+            ),
         ]
         write_schema_index(_schema_dir(output_dir), schemas)
         print(f"SBNK pair sidecars: {len(pair_exports)}")
@@ -476,10 +560,20 @@ def run_extract_waves(args: argparse.Namespace) -> int:
         return 0
 
     options = axklib.OpenOptions(strict=args.strict, include_payloads=True)
-    results = axklib.open_many(_input_paths(args.paths), options=options)
+    paths = _input_paths(args.paths)
+    results: list[Any] = []
+    progress.update("loading", 0, len(paths), "opening inputs")
+    for index, path in enumerate(paths, start=1):
+        progress.update("loading", index - 1, len(paths), str(path))
+        results.extend(axklib.open_many([path], options=options))
+        progress.update("loading", index, len(paths), path.name)
+
     waveforms: list[Any] = []
     decode_errors = 0
     load_errors = 0
+    decodable_results = [result for result in results if result.container is not None]
+    progress.update("decoding", 0, len(decodable_results), "decoding waveform objects")
+    decoded_count = 0
     for result in results:
         if result.container is None:
             load_errors += 1
@@ -488,13 +582,15 @@ def run_extract_waves(args: argparse.Namespace) -> int:
             code = error.error_code if error else "AXKLIB_CONTAINER_OPEN_FAILED"
             print(f"{result.path}\tERROR\t{code}\t{message}")
             continue
+        progress.update("decoding", decoded_count, len(decodable_results), str(result.path))
         waveform_set = decode_container_waveforms(result.container, selection=args.name)
+        decoded_count += 1
+        progress.update("decoding", decoded_count, len(decodable_results), result.path.name)
         waveforms.extend(waveform_set.waveforms)
         decode_errors += len(waveform_set.issues)
         for issue in waveform_set.issues[:20]:
             print(f"{issue.object_key}\t{issue.code}\t{issue.message}")
-    content_label_map = _content_label_map_from_args(args)
-    placements, relationships = _wave_export_context(results, content_label_map)
+    placements, relationships = _wave_export_context(results)
     enriched_waveforms = _enrich_waveform_parameter_metadata(waveforms, results, relationships)
     request = WavExportRequest(
         output_dir=output_dir,
@@ -504,8 +600,14 @@ def run_extract_waves(args: argparse.Namespace) -> int:
         layout=args.layout,
         placements=placements,
         relationships=relationships,
+        progress_callback=lambda event: progress.update(
+            event.stage, event.completed, event.total, event.message
+        ),
     )
-    export_result = export_waveforms(request)
+    try:
+        export_result = export_waveforms(request)
+    finally:
+        progress.finish()
     if export_result.sidecar_records:
         schemas = [
             _write_report_schema(
@@ -530,7 +632,9 @@ def run_extract_waves(args: argparse.Namespace) -> int:
         ):
             report_path = output_dir / f"{report_name}.json"
             if report_path.exists():
-                schemas.append(_write_report_schema(output_dir, report_name, _read_json_rows(report_path)))
+                schemas.append(
+                    _write_report_schema(output_dir, report_name, _read_json_rows(report_path))
+                )
         write_schema_index(_schema_dir(output_dir), schemas)
     print(
         f"waveforms={len(waveforms)} written_files={len(export_result.written_files)} "
@@ -558,7 +662,14 @@ def run_objects(args: argparse.Namespace) -> int:
             if args.object_type and row["object_type"] != args.object_type:
                 continue
             rows.append(row)
-    rows.sort(key=lambda row: (str(row["source_path"]), str(row["scope_key"]), str(row["object_type"]), str(row["object_key"])))
+    rows.sort(
+        key=lambda row: (
+            str(row["source_path"]),
+            str(row["scope_key"]),
+            str(row["object_type"]),
+            str(row["object_key"]),
+        )
+    )
     write_dict_csv(output_dir / "objects.csv", rows)
     write_json(output_dir / "objects.json", rows)
     schemas = [
@@ -581,7 +692,9 @@ def _expand_corpus_paths(paths: list[Path]) -> list[Path]:
     for path in expand_inputs(paths):
         if path.is_dir():
             expanded.extend(
-                child for child in path.rglob("*") if child.is_file() and child.suffix.lower() in supported_suffixes
+                child
+                for child in path.rglob("*")
+                if child.is_file() and child.suffix.lower() in supported_suffixes
             )
         else:
             expanded.append(path)
@@ -740,7 +853,11 @@ def _write_validation_detail_reports(
                 {"source_path": str(image), "error": str(exc)},
             )
             continue
-        allocation_report = allocation_validation.analyze_image(image) if hasattr(allocation_validation, "analyze_image") else None
+        allocation_report = (
+            allocation_validation.analyze_image(image)
+            if hasattr(allocation_validation, "analyze_image")
+            else None
+        )
         if allocation_report is not None:
             allocation_summaries.extend(allocation_report.summaries)
             allocation_extents.extend(allocation_report.extents)
@@ -828,16 +945,28 @@ def _write_relationship_graph(output_dir: Path, graph: Any) -> None:
     write_rows_json(output_dir / "current_sbac_sbnk_links.json", list(graph.sbac_sbnk_rows))
     write_csv(output_dir / "current_prog_bank_links.csv", list(graph.prog_bank_rows))
     write_rows_json(output_dir / "current_prog_bank_links.json", list(graph.prog_bank_rows))
-    write_csv(output_dir / "current_prog_ignored_reserved_or_tail.csv", list(graph.prog_ignored_rows))
-    write_rows_json(output_dir / "current_prog_ignored_reserved_or_tail.json", list(graph.prog_ignored_rows))
-    write_csv(output_dir / "current_sbnk_program_bitmap_crosscheck.csv", list(graph.sbnk_bitmap_rows))
-    write_rows_json(output_dir / "current_sbnk_program_bitmap_crosscheck.json", list(graph.sbnk_bitmap_rows))
+    write_csv(
+        output_dir / "current_prog_ignored_reserved_or_tail.csv", list(graph.prog_ignored_rows)
+    )
+    write_rows_json(
+        output_dir / "current_prog_ignored_reserved_or_tail.json", list(graph.prog_ignored_rows)
+    )
+    write_csv(
+        output_dir / "current_sbnk_program_bitmap_crosscheck.csv", list(graph.sbnk_bitmap_rows)
+    )
+    write_rows_json(
+        output_dir / "current_sbnk_program_bitmap_crosscheck.json", list(graph.sbnk_bitmap_rows)
+    )
     schemas = [
         _write_report_schema(output_dir, "relationships", list(graph.relationships)),
         _write_report_schema(output_dir, "current_sbac_sbnk_links", list(graph.sbac_sbnk_rows)),
         _write_report_schema(output_dir, "current_prog_bank_links", list(graph.prog_bank_rows)),
-        _write_report_schema(output_dir, "current_prog_ignored_reserved_or_tail", list(graph.prog_ignored_rows)),
-        _write_report_schema(output_dir, "current_sbnk_program_bitmap_crosscheck", list(graph.sbnk_bitmap_rows)),
+        _write_report_schema(
+            output_dir, "current_prog_ignored_reserved_or_tail", list(graph.prog_ignored_rows)
+        ),
+        _write_report_schema(
+            output_dir, "current_sbnk_program_bitmap_crosscheck", list(graph.sbnk_bitmap_rows)
+        ),
     ]
     write_schema_index(_schema_dir(output_dir), schemas)
 
@@ -878,8 +1007,12 @@ def run_relationships(args: argparse.Namespace) -> int:
         _write_report_schema(output_dir, "relationships", list(graph.relationships)),
         _write_report_schema(output_dir, "current_sbac_sbnk_links", list(graph.sbac_sbnk_rows)),
         _write_report_schema(output_dir, "current_prog_bank_links", list(graph.prog_bank_rows)),
-        _write_report_schema(output_dir, "current_prog_ignored_reserved_or_tail", list(graph.prog_ignored_rows)),
-        _write_report_schema(output_dir, "current_sbnk_program_bitmap_crosscheck", list(graph.sbnk_bitmap_rows)),
+        _write_report_schema(
+            output_dir, "current_prog_ignored_reserved_or_tail", list(graph.prog_ignored_rows)
+        ),
+        _write_report_schema(
+            output_dir, "current_sbnk_program_bitmap_crosscheck", list(graph.sbnk_bitmap_rows)
+        ),
         _write_report_schema(output_dir, "load_errors", load_error_rows),
         summary_schema,
     ]
@@ -936,17 +1069,34 @@ def build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"%(prog)s {VERSION}",
     )
-    parser.add_argument("--debug", action="store_true", help="show traceback for unexpected internal errors")
+    parser.add_argument(
+        "--debug", action="store_true", help="show traceback for unexpected internal errors"
+    )
 
     subparsers = parser.add_subparsers(dest="command", metavar="command")
     info = subparsers.add_parser("info", help="summarize supported axklib containers")
     info.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
     info.add_argument("--strict", action="store_true", help="raise on the first load error")
-    info.add_argument("--format", choices=("tree", "json", "summary"), default="tree", help="output format; tree is the default contents view")
+    info.add_argument(
+        "--format",
+        choices=("tree", "json", "summary"),
+        default="tree",
+        help="output format; tree is the default contents view",
+    )
     info.add_argument("--max-depth", type=int, help="maximum tree depth for text output")
-    info.add_argument("--show-quality", action="store_true", help="show quality labels on all tree nodes")
-    info.add_argument("--show-unresolved", action="store_true", help="show unresolved/candidate notes when available")
-    info.add_argument("--content-label-map", help="JSON file with caller-supplied ISO content labels")
+    info.add_argument(
+        "--show-quality", action="store_true", help="show quality labels on all tree nodes"
+    )
+    info.add_argument(
+        "--show-unresolved",
+        action="store_true",
+        help="show unresolved/candidate notes when available",
+    )
+    info.add_argument(
+        "--show-default-programs",
+        action="store_true",
+        help="show empty default program slots in tree and JSON output",
+    )
     info.set_defaults(func=run_info)
 
     inventory = subparsers.add_parser(
@@ -955,52 +1105,92 @@ def build_parser() -> argparse.ArgumentParser:
         description="Decode object inventory through the axklib model.",
     )
     inventory.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
-    inventory.add_argument("-o", "--output-dir", required=True, help="directory for CSV/JSON inventory reports")
+    inventory.add_argument(
+        "-o", "--output-dir", required=True, help="directory for CSV/JSON inventory reports"
+    )
     inventory.add_argument("--strict", action="store_true", help="raise on the first load error")
-    inventory.add_argument("--overwrite", action="store_true", help="allow writing into a non-empty output directory")
+    inventory.add_argument(
+        "--overwrite", action="store_true", help="allow writing into a non-empty output directory"
+    )
     inventory.set_defaults(func=run_inventory)
 
-    validate = subparsers.add_parser("validate", help="validate containers and decoded object relationships")
+    validate = subparsers.add_parser(
+        "validate", help="validate containers and decoded object relationships"
+    )
     validate.add_argument("paths", nargs="*", help="input files, directories, or glob patterns")
     validate.add_argument("--exports", help="validate WAV/JSON sidecars under an export directory")
-    validate.add_argument("-o", "--output-dir", required=True, help="directory for validation CSV/JSON reports")
+    validate.add_argument(
+        "-o", "--output-dir", required=True, help="directory for validation CSV/JSON reports"
+    )
     validate.add_argument("--policy", choices=sorted(VALIDATION_POLICIES), default="normal")
     validate.add_argument("--strict", action="store_true", help="alias for --policy strict")
-    validate.add_argument("--overwrite", action="store_true", help="allow writing into a non-empty output directory")
+    validate.add_argument(
+        "--overwrite", action="store_true", help="allow writing into a non-empty output directory"
+    )
     validate.set_defaults(func=run_validate)
 
-    relationships = subparsers.add_parser("relationships", help="build current object relationship graph")
-    relationships.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
-    relationships.add_argument("-o", "--output-dir", required=True, help="directory for relationship CSV/JSON reports")
-    relationships.add_argument("--overwrite", action="store_true", help="allow writing into a non-empty output directory")
-    relationships.add_argument("--mono-dir", help="mono exact-export sidecar directory for detailed SBNK-link parity reports")
+    relationships = subparsers.add_parser(
+        "relationships", help="build current object relationship graph"
+    )
+    relationships.add_argument(
+        "paths", nargs="+", help="input files, directories, or glob patterns"
+    )
+    relationships.add_argument(
+        "-o", "--output-dir", required=True, help="directory for relationship CSV/JSON reports"
+    )
+    relationships.add_argument(
+        "--overwrite", action="store_true", help="allow writing into a non-empty output directory"
+    )
+    relationships.add_argument(
+        "--mono-dir",
+        help="mono exact-export sidecar directory for detailed SBNK-link parity reports",
+    )
     relationships.set_defaults(func=run_relationships)
 
     coverage = subparsers.add_parser("coverage", help="summarize current relationship coverage")
     coverage.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
-    coverage.add_argument("-o", "--output-dir", required=True, help="directory for coverage CSV/JSON reports")
-    coverage.add_argument("--overwrite", action="store_true", help="allow writing into a non-empty output directory")
+    coverage.add_argument(
+        "-o", "--output-dir", required=True, help="directory for coverage CSV/JSON reports"
+    )
+    coverage.add_argument(
+        "--overwrite", action="store_true", help="allow writing into a non-empty output directory"
+    )
     coverage.set_defaults(func=run_coverage)
 
     objects_cmd = subparsers.add_parser("objects", help="inspect raw and decoded object summaries")
     objects_cmd.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
-    objects_cmd.add_argument("-o", "--output-dir", required=True, help="directory for object reports")
-    objects_cmd.add_argument("--object-type", choices=("SMPL", "SBNK", "SBAC", "PROG", "SEQU", "PRF3"))
-    objects_cmd.add_argument("--with-payloads", action="store_true", help="load payloads and decoded fields instead of metadata summaries")
+    objects_cmd.add_argument(
+        "-o", "--output-dir", required=True, help="directory for object reports"
+    )
+    objects_cmd.add_argument(
+        "--object-type", choices=("SMPL", "SBNK", "SBAC", "PROG", "SEQU", "PRF3")
+    )
+    objects_cmd.add_argument(
+        "--with-payloads",
+        action="store_true",
+        help="load payloads and decoded fields instead of metadata summaries",
+    )
     objects_cmd.add_argument("--strict", action="store_true", help="raise on the first load error")
-    objects_cmd.add_argument("--overwrite", action="store_true", help="allow writing into a non-empty output directory")
+    objects_cmd.add_argument(
+        "--overwrite", action="store_true", help="allow writing into a non-empty output directory"
+    )
     objects_cmd.set_defaults(func=run_objects)
-
 
     corpus = subparsers.add_parser("corpus", help="run corpus-level workflows")
     corpus_subparsers = corpus.add_subparsers(dest="corpus_command", metavar="corpus-command")
-    audit = corpus_subparsers.add_parser("audit", help="run inventory, validation, relationship, and waveform smoke checks")
+    audit = corpus_subparsers.add_parser(
+        "audit", help="run inventory, validation, relationship, and waveform smoke checks"
+    )
     audit.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
-    audit.add_argument("-o", "--output-dir", required=True, help="directory for corpus audit reports")
+    audit.add_argument(
+        "-o", "--output-dir", required=True, help="directory for corpus audit reports"
+    )
     audit.add_argument("--policy", choices=sorted(VALIDATION_POLICIES), default="normal")
     audit.add_argument("--wave-smoke-limit", type=int, default=10)
     audit.add_argument("--skip-wave-smoke", action="store_true")
-    audit.add_argument("--overwrite", action="store_true", help="allow writing into a non-empty output directory")
+    audit.add_argument(
+        "--overwrite", action="store_true", help="allow writing into a non-empty output directory"
+    )
     audit.set_defaults(func=run_corpus_audit)
 
     extract = subparsers.add_parser("extract", help="extract data from supported axklib containers")
@@ -1012,17 +1202,49 @@ def build_parser() -> argparse.ArgumentParser:
     )
     waves.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
     waves.add_argument("-o", "--output-dir", required=True, help="directory for WAV/JSON exports")
-    waves.add_argument("--exact", action="store_true", help="require exact current SMPL export policy; currently the default")
-    waves.add_argument("--stereo", choices=("none", "auto"), default="auto", help="stereo export policy; default is auto")
-    waves.add_argument("--layout", choices=("structured", "flat"), default="structured", help="export directory layout; structured writes per-volume object graphs; flat is legacy")
-    waves.add_argument("--overwrite", action="store_true", help="replace existing WAV/JSON export files")
+    waves.add_argument(
+        "--exact",
+        action="store_true",
+        help="require exact current SMPL export policy; currently the default",
+    )
+    waves.add_argument(
+        "--stereo",
+        choices=("none", "auto"),
+        default="auto",
+        help="stereo export policy; default is auto",
+    )
+    waves.add_argument(
+        "--layout",
+        choices=("structured", "flat"),
+        default="structured",
+        help="export directory layout; structured writes per-volume object graphs; flat is legacy",
+    )
+    waves.add_argument(
+        "--overwrite", action="store_true", help="replace existing WAV/JSON export files"
+    )
     waves.add_argument("--name", help="optional sample-name or object-key substring filter")
-    waves.add_argument("--mono-dir", help="pre-extracted mono WAV/JSON directory for organized SBNK exact export")
-    waves.add_argument("--inventory-dir", help="inventory report directory with volume_objects.csv for organized placement")
-    waves.add_argument("--bank-relationships-dir", help="relationship report directory for PROG/SBAC/SBNK placement")
-    waves.add_argument("--sbac-volume-disambiguation-dir", help="SBAC volume disambiguation report directory for Likely placement rows")
+    waves.add_argument(
+        "--mono-dir", help="pre-extracted mono WAV/JSON directory for organized SBNK exact export"
+    )
+    waves.add_argument(
+        "--inventory-dir",
+        help="inventory report directory with volume_objects.csv for organized placement",
+    )
+    waves.add_argument(
+        "--bank-relationships-dir",
+        help="relationship report directory for PROG/SBAC/SBNK placement",
+    )
+    waves.add_argument(
+        "--sbac-volume-disambiguation-dir",
+        help="SBAC volume disambiguation report directory for Likely placement rows",
+    )
     waves.add_argument("--strict", action="store_true", help="raise on the first load error")
-    waves.add_argument("--content-label-map", help="JSON file with caller-supplied ISO content labels")
+    waves.add_argument(
+        "--progress",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="show same-line progress on stderr; default is auto for interactive terminals",
+    )
     waves.set_defaults(func=run_extract_waves)
     return parser
 
@@ -1049,4 +1271,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -24,13 +24,13 @@ class DataQuality(StrEnum):
 class AxklibObjectFormat(StrEnum):
     """Physical/object-format classification for a loaded Yamaha object.
 
-    Use this to keep normal current objects separate from marker-lane or
+    Use this to keep normal current objects separate from alternating-byte or
     artifact patterns that are readable but not promoted as ordinary
     supported storage.
     """
 
     NORMAL = "normal-fsfsdev3splx"
-    MARKER_LANE_ARTIFACT = "marker-lane-artifact"
+    ALTERNATING_BYTE_ARTIFACT = "alternating-byte-artifact"
     UNKNOWN = "unknown"
 
 
@@ -220,9 +220,9 @@ class IsoRecoveryMetadata(AxklibExtensionRecord):
 
 @dataclass(frozen=True)
 class ArtifactClassificationMetadata(AxklibExtensionRecord):
-    """Typed extension metadata for suspected conversion-artifact or marker-lane classifications.
+    """Typed extension metadata for suspected conversion-artifact or alternating-byte compatibility classifications.
     
-    Use it to keep salvage/export labels explicit without promoting those objects to normal supported-format quality."""
+    Use it to keep compatibility/export labels explicit without promoting those objects to normal supported-format quality."""
     label: str = ""
     classification_quality: DataQuality = DataQuality.UNKNOWN
     notes: str = ""

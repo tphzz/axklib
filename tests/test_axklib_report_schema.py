@@ -7,7 +7,17 @@ from axklib.reports.schema import make_schema_manifest, write_schema_index, writ
 
 def test_schema_manifest_records_columns_counts_and_quality_semantics(tmp_path) -> None:
     rows = [
-        {"object_type": "SMPL", "quality": "Known", "code": "OK", "raw_offset": 12},
+        {
+            "object_type": "SMPL",
+            "quality": "Known",
+            "code": "OK",
+            "raw_offset": 12,
+            "assignment_row_state": "decoded-row",
+            "active_assignment_state": "unknown",
+            "assignment_output1_byte_0x1d": "0xff",
+            "assignment_rch_assign_gate_byte_0x28": "0x00",
+            "assignment_rch_assign_display": "off",
+        },
         {"object_type": "SBNK", "quality": "Likely", "code": "WARN", "raw_offset": ""},
     ]
 
@@ -20,6 +30,11 @@ def test_schema_manifest_records_columns_counts_and_quality_semantics(tmp_path) 
 
     columns = {column.name: column for column in manifest.columns}
     assert columns["quality"].semantic_notes
+    assert columns["assignment_row_state"].semantic_notes
+    assert columns["active_assignment_state"].semantic_notes
+    assert columns["assignment_output1_byte_0x1d"].semantic_notes
+    assert columns["assignment_rch_assign_gate_byte_0x28"].semantic_notes
+    assert columns["assignment_rch_assign_display"].semantic_notes
     assert columns["raw_offset"].nullable
     assert manifest.quality_counts == {"Known": 1, "Likely": 1}
     assert manifest.issue_code_counts == {"OK": 1, "WARN": 1}

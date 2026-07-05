@@ -71,6 +71,14 @@ nav:
   - axklib:
       - Overview: axklib/index.md
       - Typical Usage: axklib/typical-usage.md
+      - Formats:
+          - SFS Filesystem: axklib/sfs-filesystem.md
+          - FAT12 Floppy Images: axklib/floppy.md
+          - CD-ROM Images: axklib/cdrom.md
+          - Sampler Data Structures: axklib/sampler-data.md
+      - Output Contracts:
+          - Names, Paths, And Exports: axklib/names-and-paths.md
+          - Report Schemas: axklib/report-schemas.md
       - Yamaha Glossary: axklib/glossary.md
       - Public API:
           - Data Model: axklib/model.md

@@ -185,7 +185,7 @@ class ReportSfsVolumeValidationTests(unittest.TestCase):
             self.assertEqual(rows[0].validation_status, "Pass")
             self.assertEqual(issues, [])
 
-    def test_visible_legacy_marker_lane_entries_warn_volume(self) -> None:
+    def test_visible_compatibility_artifact_entries_warn_volume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)
             inventory_dir = tmp / "inventory"
@@ -213,14 +213,14 @@ class ReportSfsVolumeValidationTests(unittest.TestCase):
                         "partition_index": 1,
                         "volume_path": "/Volume A",
                         "category_code": "SMPL",
-                        "match_method": "link-id+legacy-type",
+                        "match_method": "link-id+alternating-byte-type",
                     },
                     {
                         "source_image": "image.hda",
                         "partition_index": 1,
                         "volume_path": "/Volume A",
                         "category_code": "SBNK",
-                        "match_method": "link-id+legacy-type",
+                        "match_method": "link-id+alternating-byte-type",
                     },
                 ],
             )
@@ -233,9 +233,9 @@ class ReportSfsVolumeValidationTests(unittest.TestCase):
             self.assertEqual(summary.warn_count, 1)
             self.assertEqual(rows[0].validation_status, "Warn")
             self.assertEqual(rows[0].current_object_entry_count, 1)
-            self.assertEqual(rows[0].legacy_marker_lane_object_entry_count, 2)
-            self.assertEqual(rows[0].legacy_marker_lane_smpl_entry_count, 1)
-            self.assertTrue(any(issue.issue_type == "visible-marker-lane-conversion-artifact-objects" for issue in issues))
+            self.assertEqual(rows[0].compatibility_artifact_object_entry_count, 2)
+            self.assertEqual(rows[0].compatibility_artifact_smpl_entry_count, 1)
+            self.assertTrue(any(issue.issue_type == "visible-alternating-byte-compatibility-artifact-objects" for issue in issues))
 
     def test_allocation_summary_can_fail_volume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

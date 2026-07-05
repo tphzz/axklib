@@ -3,6 +3,8 @@
 Report helpers serialize dataclass rows and schema manifests for CSV/JSON
 outputs. These helpers keep user-facing report schemas explicit and testable.
 
+For the command output contract, validation issue fields, and `volume.axklib.json` layout, see [Report Schemas](report-schemas.md).
+
 ::: axklib.reports
     options:
       members:

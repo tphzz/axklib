@@ -62,7 +62,7 @@ def test_axklib_object_supports_canonical_nested_refs() -> None:
         ),
         volume=None,
         object_type=AxklibObjectType.SBNK,
-        object_format=AxklibObjectFormat.MARKER_LANE_ARTIFACT,
+        object_format=AxklibObjectFormat.ALTERNATING_BYTE_ARTIFACT,
         name="Bank",
         payload=b"12345678",
         quality=AxklibQuality(
@@ -76,7 +76,7 @@ def test_axklib_object_supports_canonical_nested_refs() -> None:
     assert item.container_kind == "iso"
     assert item.object_key == "fixture.iso:iso9660:P001"
     assert item.type == "SBNK"
-    assert item.format == "marker-lane-artifact"
+    assert item.format == "alternating-byte-artifact"
     assert item.quality.quality == DataQuality.TENTATIVE
 
 

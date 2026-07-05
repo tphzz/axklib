@@ -4,6 +4,7 @@ import wave
 from pathlib import Path
 
 from axklib.containers import fat as report_floppy_objects
+from axklib.containers import load_objects
 
 SECTOR_SIZE = 512
 TOTAL_SECTORS = 2880
@@ -107,6 +108,13 @@ class ReportFloppyObjectsTests(unittest.TestCase):
             self.assertEqual(rows[0]["object_offset"], DATA_OFFSET)
             self.assertEqual(rows[0]["stored_payload_offset"], DATA_OFFSET + 128)
 
+            loaded = load_objects(image_path, "fat12_floppy")
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0].payload_offset, DATA_OFFSET)
+            self.assertEqual(loaded[0].metadata["fat_directory_offset"], ROOT_OFFSET)
+            self.assertEqual(loaded[0].metadata["fat_first_cluster"], 2)
+            self.assertEqual(loaded[0].metadata["fat_stored_payload_offset"], DATA_OFFSET + 128)
+
             self.assertEqual(len(extracted), 1)
             self.assertIn("extraction_quality", extracted[0])
             self.assertIn("extraction_basis", extracted[0])
@@ -142,4 +150,3 @@ class ReportFloppyObjectsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import glob
-import warnings
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
-from typing import Any
 
+from axklib.containers import fat as fat_container
+from axklib.containers import iso_lowlevel, sfs_extents, sfs_scan
 from axklib.containers import sfs_dump as dumper
-from axklib.containers import sfs_extents, sfs_scan
 from axklib.containers import sfs_inventory as inventory
 from axklib.model import (
     AxklibContainerKind,
@@ -34,10 +32,40 @@ ISO_ID = b"CD001"
 
 
 @dataclass(frozen=True)
+class IsoObjectEntry:
+    volume_id: str
+    logical_path: str
+    payload: bytes
+    extent_sector: int
+    data_offset: int
+    file_size: int
+    inventory_status: str
+    recovery_quality: str
+    recovery_notes: str
+    raw_group: str = ""
+    raw_volume: str = ""
+    group_label: str = ""
+    volume_label: str = ""
+
+
+@dataclass(frozen=True)
+class FatObjectEntry:
+    fat_file: str
+    payload: bytes
+    directory_offset: int
+    first_cluster: int
+    cluster_count: int
+    file_size: int
+    object_offset: int
+    stored_payload_offset: int | None
+
+
+@dataclass(frozen=True)
 class OpenOptions:
     """Options that control container loading.
-    
+
     Use these when opening images to choose partition limits, whether payload bytes should be loaded, and whether unsupported or malformed inputs should fail strictly."""
+
     max_partitions: int | None = 8
     include_payloads: bool = True
     strict: bool = False
@@ -46,8 +74,9 @@ class OpenOptions:
 @dataclass(frozen=True)
 class AxklibContainer:
     """Loaded Yamaha-capable container with decoded object payloads.
-    
+
     Use this as the primary result of opening one SFS/HDA/HDS image, ISO9660 disc image, FAT floppy image, standalone object, or directory expansion."""
+
     source_path: Path
     kind: str
     detected_format: str
@@ -59,8 +88,9 @@ class AxklibContainer:
 @dataclass(frozen=True)
 class AxklibContainerLoadError:
     """Structured error for an input path that could not be opened as a supported container.
-    
+
     Use this in multi-input workflows so one bad file can be reported without discarding successfully loaded containers."""
+
     path: Path
     error_code: str
     message: str
@@ -71,22 +101,22 @@ class AxklibContainerLoadError:
 @dataclass(frozen=True)
 class AxklibContainerLoadResult:
     """Per-path load result containing either a container or a structured load error.
-    
+
     Use this for corpus scans and CLI commands that need deterministic failure reporting across many inputs."""
+
     path: Path
     container: AxklibContainer | None = None
     error: AxklibContainerLoadError | None = None
 
 
-
 class AxklibContainerUnsupportedError(ValueError):
     """Exception raised when a path is readable but not a supported axklib container.
-    
+
     The `code` attribute is intended for stable diagnostics rather than user-facing traceback text."""
+
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
-
 
 
 def expand_inputs(inputs: Iterable[Path]) -> list[Path]:
@@ -121,12 +151,19 @@ def detect_container_kind(path: Path) -> str:
         return AxklibContainerKind.FAT12_FLOPPY.value
     return AxklibContainerKind.UNKNOWN.value
 
+
 def _int_value(value: object, default: int = 0) -> int:
     return value if isinstance(value, int) else default
 
+
 def _parsed_partitions(parsed: dict[str, object]) -> list[dict[str, object]]:
     partitions = parsed.get("partitions", [])
-    return [partition for partition in partitions if isinstance(partition, dict)] if isinstance(partitions, list) else []
+    return (
+        [partition for partition in partitions if isinstance(partition, dict)]
+        if isinstance(partitions, list)
+        else []
+    )
+
 
 def object_header(payload: bytes) -> AxklibObjectHeader | None:
     if len(payload) < 0x24:
@@ -187,16 +224,11 @@ def make_object(
     )
 
 
-def _clean_volume_identifier(value: object, fallback: str) -> str:
-    if isinstance(value, bytes):
-        text = value.decode("ascii", errors="replace").strip(" \x00")
-        return text or fallback
-    return fallback
-
-
-def _strip_iso_version(name: str) -> str:
-    base = name.split(";", 1)[0] if ";" in name else name
-    return base.rstrip(".")
+def _iso_path_group_volume(logical_path: str) -> tuple[str, str]:
+    parts = [part for part in logical_path.replace("\\", "/").split("/") if part]
+    group = parts[0] if len(parts) >= 1 else ""
+    volume = parts[1] if len(parts) >= 2 else ""
+    return group, volume
 
 
 def _expand_iso_inputs(paths: Iterable[Path]) -> list[Path]:
@@ -204,110 +236,97 @@ def _expand_iso_inputs(paths: Iterable[Path]) -> list[Path]:
     for path in paths:
         if path.is_dir():
             out.extend(
-                sorted(child for child in path.rglob("*") if child.is_file() and child.suffix.lower() == ".iso")
+                sorted(
+                    child
+                    for child in path.rglob("*")
+                    if child.is_file() and child.suffix.lower() == ".iso"
+                )
             )
         else:
             out.append(path)
     return sorted(dict.fromkeys(out), key=lambda item: str(item).lower())
 
 
-def _pycdlib_open(path: Path) -> Any:
+def _iter_iso_objects(path: Path) -> Iterable[IsoObjectEntry]:
     try:
-        import pycdlib
-    except Exception as exc:  # pragma: no cover - dependency is part of runtime env
-        raise AxklibContainerUnsupportedError(
-            "CONTAINER_LIBRARY_UNAVAILABLE",
-            f"pycdlib is required for ISO/CD-ROM images: {exc}",
-        ) from exc
-    iso = pycdlib.PyCdlib()
-    try:
-        iso.open(str(path))
-    except Exception as exc:
-        try:
-            iso.close()
-        except Exception:
-            pass
+        volume_id, rows = iso_lowlevel.walk_iso_files(path)
+    except iso_lowlevel.Iso9660Error as exc:
         raise AxklibContainerUnsupportedError(
             "CONTAINER_UNSUPPORTED_ISO9660",
             f"unsupported ISO9660 image {path}: {exc}",
         ) from exc
-    return iso
-
-
-def _iter_pycdlib_objects(path: Path) -> Iterable[tuple[str, str, bytes]]:
-    iso = _pycdlib_open(path)
-    try:
-        pvd = getattr(iso, "pvd", None)
-        volume_id = _clean_volume_identifier(getattr(pvd, "volume_identifier", None), path.stem)
-        walk = getattr(iso, "walk", None)
-        if walk is None:
-            raise AxklibContainerUnsupportedError(
-                "CONTAINER_UNSUPPORTED_ISO9660",
-                f"pycdlib does not expose directory walking for {path}",
-            )
-        for dirname, _dirs, files in walk(iso_path="/"):
-            base = str(dirname).strip("/")
-            for file_name in files:
-                raw_name = str(file_name)
-                name = _strip_iso_version(raw_name)
-                iso_path = f"/{base}/{raw_name}" if base else f"/{raw_name}"
-                logical_path = (f"{base}/{name}" if base else name).strip("/")
-                with BytesIO() as handle:
-                    iso.get_file_from_iso_fp(handle, iso_path=iso_path)
-                    payload = handle.getvalue()
-                if payload.startswith(objects.OBJECT_MAGIC):
-                    yield volume_id, logical_path, payload
-    finally:
-        try:
-            iso.close()
-        except Exception:
-            pass
-
-
-def _pyfatfs_class() -> Any:
-    try:
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, module=r"fs(\.|$)")
-            from pyfatfs.PyFatFS import PyFatFS
-    except Exception as exc:  # pragma: no cover - dependency is part of runtime env
-        raise AxklibContainerUnsupportedError(
-            "CONTAINER_LIBRARY_UNAVAILABLE",
-            f"pyfatfs is required for FAT/floppy images: {exc}",
-        ) from exc
-    return PyFatFS
-
-
-def _iter_pyfatfs_objects(path: Path) -> Iterable[tuple[str, bytes]]:
-    PyFatFS = _pyfatfs_class()
-    fs: Any | None = None
-    try:
-        fs = PyFatFS(str(path), read_only=True)
-        names = sorted(str(name) for name in fs.listdir("/") if name not in {".", ".."})
-        for name in names:
-            file_path = f"/{name}"
-            if fs.isdir(file_path):
+    menu_labels = iso_lowlevel.decode_yamaha_menu_labels(path, rows)
+    with path.open("rb") as handle:
+        for row in rows:
+            if row.is_directory or row.object_type not in SUPPORTED_NORMAL_OBJECT_TYPES:
                 continue
-            with fs.openbin(file_path, "r") as handle:
-                payload = handle.read()
-            if payload.startswith(objects.OBJECT_MAGIC):
-                yield name, payload
-    except AxklibContainerUnsupportedError:
-        raise
-    except Exception as exc:
+            payload = iso_lowlevel.read_at(handle, row.data_offset, row.size)
+            quality, notes = iso_lowlevel.classify_iso_recovery(row, payload, row.inventory_status)
+            raw_group, raw_volume = _iso_path_group_volume(row.path)
+            yield IsoObjectEntry(
+                volume_id=volume_id,
+                logical_path=row.path,
+                payload=payload,
+                extent_sector=row.extent_sector,
+                data_offset=row.data_offset,
+                file_size=row.size,
+                inventory_status=row.inventory_status,
+                recovery_quality=quality,
+                recovery_notes=notes,
+                raw_group=raw_group,
+                raw_volume=raw_volume,
+                group_label=menu_labels.group_labels.get(raw_group, ""),
+                volume_label=menu_labels.volume_labels.get((raw_group, raw_volume), ""),
+            )
+
+
+def _iter_fat_objects(path: Path) -> Iterable[FatObjectEntry]:
+    image = path.read_bytes()
+    try:
+        geometry = fat_container.parse_geometry(image)
+    except ValueError as exc:
         raise AxklibContainerUnsupportedError(
             "CONTAINER_UNSUPPORTED_FAT",
             f"unsupported FAT/floppy image {path}: {exc}",
         ) from exc
-    finally:
-        if fs is not None:
-            try:
-                fs.close()
-            except Exception:
-                pass
+    for item in fat_container.iter_root_files(image, geometry):
+        payload = fat_container.read_file_bytes(image, geometry, item)
+        if not payload.startswith(objects.OBJECT_MAGIC):
+            continue
+        object_offset = fat_container.cluster_offset(geometry, item.first_cluster)
+        header = object_header(payload)
+        stored_payload_offset = (
+            object_offset + header.header_size
+            if header is not None and header.header_size is not None
+            else None
+        )
+        yield FatObjectEntry(
+            fat_file=item.name,
+            payload=payload,
+            directory_offset=item.directory_offset,
+            first_cluster=item.first_cluster,
+            cluster_count=len(fat_container.file_clusters(image, geometry, item)),
+            file_size=item.size,
+            object_offset=object_offset,
+            stored_payload_offset=stored_payload_offset,
+        )
+
+
+def _fat_metadata(entry: FatObjectEntry) -> dict[str, object]:
+    return {
+        "fat_directory_offset": entry.directory_offset,
+        "fat_first_cluster": entry.first_cluster,
+        "fat_cluster_count": entry.cluster_count,
+        "fat_file_size": entry.file_size,
+        "fat_object_offset": entry.object_offset,
+        "fat_stored_payload_offset": entry.stored_payload_offset,
+    }
+
 
 def load_fat_objects(path: Path) -> list[AxklibObject]:
     items: list[AxklibObject] = []
-    for fat_name, payload in _iter_pyfatfs_objects(path):
+    for entry in _iter_fat_objects(path):
+        payload = entry.payload
         object_type = payload[0x0C:0x10].decode("ascii", errors="replace")
         if object_type not in SUPPORTED_NORMAL_OBJECT_TYPES:
             continue
@@ -316,19 +335,21 @@ def load_fat_objects(path: Path) -> list[AxklibObject]:
                 image=path,
                 container_kind=AxklibContainerKind.FAT12_FLOPPY,
                 scope_key=f"{path}:fat-root",
-                object_key=f"{path.name}:{fat_name}",
+                object_key=f"{path.name}:{entry.fat_file}",
                 partition_index=None,
                 sfs_id=None,
-                fat_file=fat_name,
-                payload_offset=None,
+                fat_file=entry.fat_file,
+                payload_offset=entry.object_offset,
                 payload_size=len(payload),
                 object_type=object_type,
                 name=objects.clean_ascii(payload[0x32:0x42]),
                 payload=payload,
-                basis="FAT/floppy file read through pyfatfs containing plain FSFSDEV3SPLX object",
+                basis="FAT/floppy root file containing plain FSFSDEV3SPLX object",
+                metadata=_fat_metadata(entry),
             )
         )
     return items
+
 
 def load_sfs_objects(path: Path) -> list[AxklibObject]:
     parsed = dumper.parse_image(path, dumper.ReadOptions(max_nodes=4, include_node_payloads=False))
@@ -428,7 +449,8 @@ def make_summary_object(
 
 def load_fat_object_summaries(path: Path) -> list[AxklibObject]:
     items: list[AxklibObject] = []
-    for fat_name, payload in _iter_pyfatfs_objects(path):
+    for entry in _iter_fat_objects(path):
+        payload = entry.payload
         object_type = payload[0x0C:0x10].decode("ascii", errors="replace")
         if object_type not in SUPPORTED_NORMAL_OBJECT_TYPES:
             continue
@@ -437,18 +459,20 @@ def load_fat_object_summaries(path: Path) -> list[AxklibObject]:
                 image=path,
                 container_kind=AxklibContainerKind.FAT12_FLOPPY,
                 scope_key=f"{path}:fat-root",
-                object_key=f"{path.name}:{fat_name}",
+                object_key=f"{path.name}:{entry.fat_file}",
                 partition_index=None,
                 sfs_id=None,
-                fat_file=fat_name,
-                payload_offset=None,
+                fat_file=entry.fat_file,
+                payload_offset=entry.object_offset,
                 payload_size=len(payload),
                 object_type=object_type,
                 name=objects.clean_ascii(payload[0x32:0x42]),
-                basis="FAT/floppy root file metadata from pyfatfs",
+                basis="FAT/floppy root file metadata",
+                metadata=_fat_metadata(entry),
             )
         )
     return items
+
 
 def load_sfs_object_summaries(path: Path) -> list[AxklibObject]:
     parsed = dumper.parse_image(path, dumper.ReadOptions(max_nodes=4, include_node_payloads=False))
@@ -488,40 +512,54 @@ def load_sfs_object_summaries(path: Path) -> list[AxklibObject]:
     return items
 
 
+def _iso_metadata(entry: IsoObjectEntry, header: AxklibObjectHeader | None) -> dict[str, object]:
+    return {
+        "iso_inventory_method": "iso9660",
+        "iso_inventory_status": entry.inventory_status,
+        "iso_recovery_quality": entry.recovery_quality,
+        "iso_recovery_notes": entry.recovery_notes,
+        "iso_extent_sector": entry.extent_sector,
+        "iso_data_offset": entry.data_offset,
+        "iso_file_size": entry.file_size,
+        "iso_raw_group": entry.raw_group,
+        "iso_raw_volume": entry.raw_volume,
+        "iso_group_label": entry.group_label,
+        "iso_volume_label": entry.volume_label,
+        "iso_group_label_source": "yamaha-cdrom-menu-label" if entry.group_label else "",
+        "iso_volume_label_source": "yamaha-cdrom-menu-label" if entry.volume_label else "",
+        "iso_header_size": header.header_size if header else None,
+        "iso_stored_payload_size": header.stored_payload_size if header else None,
+    }
+
+
 def load_iso_object_summaries(path: Path) -> list[AxklibObject]:
     items: list[AxklibObject] = []
     for image in _expand_iso_inputs([path]):
-        for volume_id, object_path, payload in _iter_pycdlib_objects(image):
+        for entry in _iter_iso_objects(image):
+            payload = entry.payload
             object_type = payload[0x0C:0x10].decode("ascii", errors="replace")
             if object_type not in SUPPORTED_NORMAL_OBJECT_TYPES:
                 continue
             header = object_header(payload)
-            metadata: dict[str, object] = {
-                "iso_inventory_method": "iso9660",
-                "iso_inventory_status": "iso9660",
-                "iso_recovery_quality": "clean-iso9660-object",
-                "iso_recovery_notes": "object came from a pycdlib ISO9660 directory entry",
-                "iso_header_size": header.header_size if header else None,
-                "iso_stored_payload_size": header.stored_payload_size if header else None,
-            }
             items.append(
                 make_summary_object(
                     image=image,
                     container_kind=AxklibContainerKind.ISO,
-                    scope_key=f"{image}:iso:{volume_id}:iso9660",
-                    object_key=f"{image.name}:iso9660:{object_path}",
+                    scope_key=f"{image}:iso:{entry.volume_id}:iso9660",
+                    object_key=f"{image.name}:iso9660:{entry.logical_path}",
                     partition_index=None,
                     sfs_id=None,
-                    fat_file=object_path,
-                    payload_offset=None,
+                    fat_file=entry.logical_path,
+                    payload_offset=entry.data_offset,
                     payload_size=len(payload),
                     object_type=object_type,
                     name=objects.clean_ascii(payload[0x32:0x42]),
-                    basis="ISO/CD-ROM pycdlib directory object metadata summary",
-                    metadata=metadata,
+                    basis="ISO/CD-ROM directory object metadata summary",
+                    metadata=_iso_metadata(entry, header),
                 )
             )
     return items
+
 
 def load_object_summaries(path: Path, container: str) -> list[AxklibObject]:
     kind = detect_container_kind(path) if container == "auto" else container
@@ -539,38 +577,32 @@ def load_object_summaries(path: Path, container: str) -> list[AxklibObject]:
 def load_iso_objects(path: Path) -> list[AxklibObject]:
     items: list[AxklibObject] = []
     for image in _expand_iso_inputs([path]):
-        for volume_id, object_path, payload in _iter_pycdlib_objects(image):
+        for entry in _iter_iso_objects(image):
+            payload = entry.payload
             object_type = payload[0x0C:0x10].decode("ascii", errors="replace")
             if object_type not in SUPPORTED_NORMAL_OBJECT_TYPES:
                 continue
             header = object_header(payload)
-            metadata: dict[str, object] = {
-                "iso_inventory_method": "iso9660",
-                "iso_inventory_status": "iso9660",
-                "iso_recovery_quality": "clean-iso9660-object",
-                "iso_recovery_notes": "object came from a pycdlib ISO9660 directory entry",
-                "iso_header_size": header.header_size if header else None,
-                "iso_stored_payload_size": header.stored_payload_size if header else None,
-            }
             items.append(
                 make_object(
                     image=image,
                     container_kind=AxklibContainerKind.ISO,
-                    scope_key=f"{image}:iso:{volume_id}:iso9660",
-                    object_key=f"{image.name}:iso9660:{object_path}",
+                    scope_key=f"{image}:iso:{entry.volume_id}:iso9660",
+                    object_key=f"{image.name}:iso9660:{entry.logical_path}",
                     partition_index=None,
                     sfs_id=None,
-                    fat_file=object_path,
-                    payload_offset=None,
+                    fat_file=entry.logical_path,
+                    payload_offset=entry.data_offset,
                     payload_size=len(payload),
                     object_type=object_type,
                     name=objects.clean_ascii(payload[0x32:0x42]),
                     payload=payload,
-                    basis="ISO/CD-ROM pycdlib file containing plain FSFSDEV3SPLX object",
-                    metadata=metadata,
+                    basis="ISO/CD-ROM file containing plain FSFSDEV3SPLX object",
+                    metadata=_iso_metadata(entry, header),
                 )
             )
     return items
+
 
 def load_standalone_object(path: Path) -> list[AxklibObject]:
     payload = path.read_bytes()

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import csv
-import json
+import re
 import tempfile
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -20,8 +20,15 @@ from axklib.containers import (
 )
 from axklib.model import AxklibObject, DataQuality
 from axklib.parameters import current as current_parameters
-from axklib.relationships import Relationship, RelationshipGraph, build_relationship_graph
+from axklib.relationships import (
+    ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE,
+    ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT,
+    Relationship,
+    RelationshipGraph,
+    build_relationship_graph,
+)
 from axklib.reports import to_plain
+from axklib.validation import validate_container
 
 CATEGORY_ORDER = {
     "Programs": 0,
@@ -43,6 +50,27 @@ NODE_LABEL = {
     "SEQU": "sequence",
 }
 INTERNAL_OBJECT_TYPES = {"SBAC"}
+UNRESOLVED_PROGRAM_ASSIGNMENT_NODE = "unresolved_program_assignment"
+ACTIVE_MISSING_LOCAL_TARGET_BASIS = "assignment-active-missing-local-target"
+ACTIVE_MISSING_LOCAL_TARGET_NOTE = "active assignment references missing local target"
+
+
+TYPE_LABEL_BY_OBJECT = {
+    "PROG": "PROGRAM",
+    "SBAC": "SAMPLE BANK GROUP",
+    "SBNK": "SAMPLE BANK",
+    "SMPL": "WAVEFORM",
+    "SEQU": "SEQUENCE",
+}
+TYPE_LABEL_BY_NODE = {
+    "partition": "PARTITION",
+    "volume": "VOLUME",
+    "category": "CATEGORY",
+    "recovery_artifact": "RECOVERY",
+    "unresolved": "UNKNOWN",
+    "relationship_target": "UNKNOWN",
+    UNRESOLVED_PROGRAM_ASSIGNMENT_NODE: "UNKNOWN",
+}
 
 
 @dataclass(frozen=True)
@@ -51,6 +79,8 @@ class ContentTreeIssue:
     severity: str
     message: str
     source_path: str
+    sampler_path: str = ""
+    object_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -61,6 +91,7 @@ class ContentNode:
     object_key: str = ""
     object_type: str = ""
     count: int | None = None
+    details: tuple[str, ...] = ()
     quality: DataQuality = DataQuality.KNOWN
     basis: str = ""
     notes: str = ""
@@ -82,23 +113,149 @@ class ContentTreeLoadResult:
     load_errors: tuple[AxklibContainerLoadResult, ...]
 
 
+CONTENT_TREE_VALIDATION_CODES = {
+    "REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING",
+    "REL_SBNK_MEMBER_TARGET_MISSING",
+}
+
+
+def _issue_volume_path(issue: ContentTreeIssue) -> str:
+    return issue.sampler_path.split("|", 1)[0].strip()
+
+
+def _affected_error_volume_paths(issues: Sequence[ContentTreeIssue]) -> set[str]:
+    return {
+        path
+        for issue in issues
+        if issue.severity == "error" and (path := _issue_volume_path(issue))
+    }
+
+
+def _display_volume_name(name: str, raw_volume_path: str, affected_error_paths: set[str]) -> str:
+    display = _safe_display(name, "<unnamed volume>")
+    if raw_volume_path and raw_volume_path in affected_error_paths:
+        return f"{display} (errors detected)"
+    return display
+
+
+def _raw_volume_suffix(raw_volume_path: str) -> str:
+    parts = [part for part in raw_volume_path.replace("\\", "/").split("/") if part]
+    return parts[-1] if parts else ""
+
+
+def _disambiguated_volume_name(
+    name: str, raw_volume_path: str, duplicate_volume_names: Counter[str]
+) -> str:
+    if duplicate_volume_names[name] <= 1:
+        return name
+    suffix = _raw_volume_suffix(raw_volume_path)
+    if not suffix:
+        return name
+    return f"{name} ({suffix})"
+
+
+def _placement_volume_key(placement: ObjectPlacement) -> tuple[str, str]:
+    return (placement.volume_name, placement.raw_volume_path or placement.volume_name)
+
+
+def _compact_issue_message(issue: ContentTreeIssue) -> str:
+    if issue.code == "REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING":
+        text = issue.message.replace(" and are reachable from active Program assignments.", ".")
+        return f"active Program path may not load completely: {text}"
+    return issue.message
+
+
+def _compact_program_examples(sampler_path: str, *, limit: int = 2) -> str:
+    if "|" not in sampler_path:
+        return ""
+    raw_examples = [part.strip() for part in sampler_path.split("|", 1)[1].split(";")]
+    examples = [part for part in raw_examples if part and not part.startswith("+")]
+    more_count = 0
+    for part in raw_examples:
+        match = re.fullmatch(r"\+(\d+) more", part.strip())
+        if match:
+            more_count = int(match.group(1))
+            break
+    hidden_count = max(0, len(examples) - limit) + more_count
+    shown = examples[:limit]
+    if hidden_count:
+        shown.append(f"+{hidden_count} more")
+    return "; ".join(shown)
+
+
+def _validation_content_issues(container: AxklibContainer) -> tuple[ContentTreeIssue, ...]:
+    report = validate_container(container)
+    return tuple(
+        ContentTreeIssue(
+            code=issue.code,
+            severity=issue.severity.value,
+            message=issue.message,
+            source_path=issue.source_path,
+            sampler_path=issue.sampler_path,
+            object_key=issue.object_key,
+        )
+        for issue in report.issues
+        if issue.code in CONTENT_TREE_VALIDATION_CODES
+    )
+
+
+def _issue_display_path_map(container: AxklibContainer) -> dict[str, str]:
+    placements, _issues = load_known_object_placements(container)
+    volume_paths = {
+        (placement.partition_name, placement.volume_name, placement.raw_volume_path)
+        for placement in placements.values()
+        if placement.raw_volume_path
+    }
+    duplicate_names_by_partition: dict[str, Counter[str]] = defaultdict(Counter)
+    for partition_name, volume_name, _raw_volume_path in volume_paths:
+        duplicate_names_by_partition[partition_name][volume_name] += 1
+
+    result: dict[str, str] = {}
+    for placement in placements.values():
+        if not placement.raw_volume_path:
+            continue
+        volume_name = _disambiguated_volume_name(
+            placement.volume_name,
+            placement.raw_volume_path,
+            duplicate_names_by_partition[placement.partition_name],
+        )
+        display = (
+            f"{placement.partition_name}/{volume_name}" if placement.partition_name else volume_name
+        )
+        if display:
+            result[placement.raw_volume_path] = display
+    return result
+
+
+def _with_display_issue_paths(
+    issues: tuple[ContentTreeIssue, ...], container: AxklibContainer
+) -> tuple[ContentTreeIssue, ...]:
+    display_by_raw = _issue_display_path_map(container)
+    if not display_by_raw:
+        return issues
+    remapped: list[ContentTreeIssue] = []
+    for issue in issues:
+        sampler_path = issue.sampler_path
+        for raw, display in sorted(
+            display_by_raw.items(), key=lambda item: len(item[0]), reverse=True
+        ):
+            sampler_path = sampler_path.replace(raw, display)
+        remapped.append(replace(issue, sampler_path=sampler_path))
+    return tuple(remapped)
+
+
+def _with_validation_issues(tree: ContentTree, container: AxklibContainer) -> ContentTree:
+    issues = _with_display_issue_paths(_validation_content_issues(container), container)
+    if not issues:
+        return tree
+    return replace(tree, issues=(*tree.issues, *issues))
+
+
 @dataclass(frozen=True)
 class ContentTreeRenderOptions:
     max_depth: int | None = None
     show_quality: bool = False
     show_unresolved: bool = False
-
-
-@dataclass(frozen=True)
-class ContentLabelMap:
-    iso_group_labels: Mapping[tuple[str, str], str]
-    iso_volume_labels: Mapping[tuple[str, str, str], str]
-
-    def iso_group_label(self, source_key: str, raw_group: str) -> str | None:
-        return self.iso_group_labels.get((source_key, raw_group))
-
-    def iso_volume_label(self, source_key: str, raw_group: str, raw_volume: str) -> str | None:
-        return self.iso_volume_labels.get((source_key, raw_group, raw_volume))
 
 
 @dataclass(frozen=True)
@@ -111,48 +268,8 @@ class ObjectPlacement:
     entry_name: str
     quality: str
     basis: str
+    raw_volume_path: str = ""
 
-
-def _label_entry_string(entry: object, key: str) -> str:
-    if not isinstance(entry, dict):
-        raise ValueError("content label entries must be objects")
-    value = entry.get(key)
-    if not isinstance(value, str):
-        raise ValueError(f"content label entry missing string field: {key}")
-    return value
-
-
-def _label_entries(payload: Mapping[str, object], key: str) -> list[object]:
-    value = payload.get(key, [])
-    if not isinstance(value, list):
-        raise ValueError(f"content label map field must be a list: {key}")
-    return value
-
-
-def content_label_map_from_dict(payload: Mapping[str, object]) -> ContentLabelMap:
-    group_labels: dict[tuple[str, str], str] = {}
-    for entry in _label_entries(payload, "iso_group_labels"):
-        source = _label_entry_string(entry, "source")
-        raw_group = _label_entry_string(entry, "raw_group")
-        label = _label_entry_string(entry, "label")
-        group_labels[(source, raw_group)] = label
-
-    volume_labels: dict[tuple[str, str, str], str] = {}
-    for entry in _label_entries(payload, "iso_volume_labels"):
-        source = _label_entry_string(entry, "source")
-        raw_group = _label_entry_string(entry, "raw_group")
-        raw_volume = _label_entry_string(entry, "raw_volume")
-        label = _label_entry_string(entry, "label")
-        volume_labels[(source, raw_group, raw_volume)] = label
-
-    return ContentLabelMap(iso_group_labels=group_labels, iso_volume_labels=volume_labels)
-
-
-def load_content_label_map(path: str | Path) -> ContentLabelMap:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("content label map root must be an object")
-    return content_label_map_from_dict(cast(Mapping[str, object], payload))
 
 def _safe_display(value: object, fallback: str) -> str:
     text = str(value or "").strip()
@@ -204,6 +321,17 @@ def _default_program_slot_node(slot_number: int) -> ContentNode:
     )
 
 
+def _is_quiet_default_program_node(node: ContentNode) -> bool:
+    slot = _program_slot_sort_key(node)
+    if not 1 <= slot <= 128:
+        return False
+    if node.children or node.notes or node.quality != DataQuality.KNOWN:
+        return False
+    if node.node_type == "program_slot" and not node.object_key:
+        return True
+    return node.object_type == "PROG" and node.display_name == f"{slot:03d}: Pgm {slot:03d}"
+
+
 def _with_default_program_slots(nodes: Sequence[ContentNode]) -> tuple[ContentNode, ...]:
     by_slot: dict[int, ContentNode] = {}
     others: list[ContentNode] = []
@@ -220,11 +348,20 @@ def _with_default_program_slots(nodes: Sequence[ContentNode]) -> tuple[ContentNo
     return tuple(result)
 
 
+def _program_category_children(
+    nodes: Sequence[ContentNode], *, include_default_programs: bool
+) -> tuple[ContentNode, ...]:
+    if include_default_programs:
+        return _with_default_program_slots(nodes)
+    return tuple(node for node in _sort_nodes(nodes) if not _is_quiet_default_program_node(node))
+
+
 def _sort_nodes(nodes: Iterable[ContentNode]) -> tuple[ContentNode, ...]:
     return tuple(
         sorted(
             nodes,
             key=lambda node: (
+                0 if node.node_type == UNRESOLVED_PROGRAM_ASSIGNMENT_NODE else 1,
                 CATEGORY_ORDER.get(node.display_name, 99),
                 _program_slot_sort_key(node),
                 node.display_name.lower(),
@@ -256,6 +393,7 @@ def _object_node(
     quality: str = "Known",
     basis: str = "container object metadata",
     notes: str = "",
+    details: tuple[str, ...] = (),
     children: tuple[ContentNode, ...] = (),
 ) -> ContentNode:
     conf = DataQuality.KNOWN
@@ -269,6 +407,7 @@ def _object_node(
         display_name=display_name,
         object_key=object_key,
         object_type=object_type,
+        details=details,
         quality=conf,
         basis=basis,
         notes=notes,
@@ -309,6 +448,7 @@ def _load_sfs_placements(
                         entry_name=row.get("entry_name", ""),
                         quality=row.get("match_quality", ""),
                         basis=row.get("match_method", "SFS volume inventory"),
+                        raw_volume_path=row.get("volume_name", ""),
                     )
             return placements, ()
     except Exception as exc:
@@ -329,19 +469,14 @@ def _iso_raw_group_and_volume(item: AxklibObject) -> tuple[str, str]:
     return group, volume
 
 
-def _iso_source_key(container: AxklibContainer) -> str:
-    return Path(container.source_path).stem
+def _metadata_string(item: AxklibObject, key: str) -> str:
+    value = item.metadata.get(key)
+    return value if isinstance(value, str) else ""
 
 
-def _iso_group_label(
-    container: AxklibContainer, raw_group: str, content_label_map: ContentLabelMap | None = None
-) -> str:
-    source_key = _iso_source_key(container)
-    if content_label_map is not None:
-        known = content_label_map.iso_group_label(source_key, raw_group)
-        if known:
-            return known
-    return raw_group or "ISO objects"
+def _iso_group_label(item: AxklibObject, raw_group: str) -> str:
+    return _metadata_string(item, "iso_group_label") or raw_group or "ISO objects"
+
 
 def _display_name_for_iso_volume_fallback(item: AxklibObject) -> str:
     if item.type == "PROG":
@@ -356,17 +491,12 @@ def _display_name_for_iso_volume_fallback(item: AxklibObject) -> str:
 
 
 def _iso_content_derived_volume_labels(
-    container: AxklibContainer, content_label_map: ContentLabelMap | None = None
+    container: AxklibContainer,
 ) -> dict[tuple[str, str], str]:
     by_volume: dict[tuple[str, str], list[AxklibObject]] = defaultdict(list)
-    source_key = _iso_source_key(container)
     for item in container.objects:
         raw_group, raw_volume = _iso_raw_group_and_volume(item)
-        if not raw_group or not raw_volume:
-            continue
-        if content_label_map is not None and content_label_map.iso_volume_label(
-            source_key, raw_group, raw_volume
-        ):
+        if not raw_group or not raw_volume or _metadata_string(item, "iso_volume_label"):
             continue
         by_volume[(raw_group, raw_volume)].append(item)
 
@@ -397,33 +527,31 @@ def _iso_content_derived_volume_labels(
         labels[(raw_group, raw_volume)] = label
     return labels
 
+
 def _iso_volume_label_and_source(
-    container: AxklibContainer,
+    item: AxklibObject,
     raw_group: str,
     raw_volume: str,
     content_labels: dict[tuple[str, str], str] | None = None,
-    content_label_map: ContentLabelMap | None = None,
 ) -> tuple[str, str]:
-    source_key = _iso_source_key(container)
-    if content_label_map is not None:
-        known = content_label_map.iso_volume_label(source_key, raw_group, raw_volume)
-        if known:
-            return known, "ISO directory path plus caller-supplied content label"
+    known = _metadata_string(item, "iso_volume_label")
+    if known:
+        return known, "ISO Yamaha CD-ROM menu label metadata"
     if content_labels:
         derived = content_labels.get((raw_group, raw_volume))
         if derived:
             return derived, "ISO directory path plus content-derived volume label fallback"
     return (
-        raw_volume or _iso_group_label(container, raw_group, content_label_map),
+        raw_volume or _iso_group_label(item, raw_group),
         "ISO directory path raw volume label",
     )
+
 
 def _non_sfs_object_placement(
     container: AxklibContainer,
     item: AxklibObject,
     *,
     iso_content_volume_labels: dict[tuple[str, str], str] | None = None,
-    content_label_map: ContentLabelMap | None = None,
 ) -> ObjectPlacement:
     if container.kind == "fat12_floppy":
         partition_name = ""
@@ -431,13 +559,12 @@ def _non_sfs_object_placement(
         quality = "fat12_floppy container object metadata"
     elif container.kind == "iso":
         raw_group, raw_volume = _iso_raw_group_and_volume(item)
-        partition_name = _iso_group_label(container, raw_group, content_label_map)
+        partition_name = _iso_group_label(item, raw_group)
         volume_name, quality = _iso_volume_label_and_source(
-            container,
+            item,
             raw_group,
             raw_volume,
             iso_content_volume_labels,
-            content_label_map=content_label_map,
         )
     else:
         partition_name = ""
@@ -448,28 +575,28 @@ def _non_sfs_object_placement(
         partition_index=None,
         partition_name=partition_name,
         volume_name=volume_name,
-        category_name="Sample Banks" if item.type == "SBAC" else TYPE_CATEGORY.get(item.type, item.type),
+        category_name="Sample Banks"
+        if item.type == "SBAC"
+        else TYPE_CATEGORY.get(item.type, item.type),
         entry_name=item.name,
         quality="Known",
         basis=quality,
+        raw_volume_path=f"{raw_group}/{raw_volume}" if container.kind == "iso" else volume_name,
     )
+
 
 def load_known_object_placements(
     container: AxklibContainer,
-    content_label_map: ContentLabelMap | None = None,
 ) -> tuple[dict[str, ObjectPlacement], tuple[ContentTreeIssue, ...]]:
     if container.kind != "sfs":
         iso_content_volume_labels = (
-            _iso_content_derived_volume_labels(container, content_label_map)
-            if container.kind == "iso"
-            else None
+            _iso_content_derived_volume_labels(container) if container.kind == "iso" else None
         )
         return {
             item.object_key: _non_sfs_object_placement(
                 container,
                 item,
                 iso_content_volume_labels=iso_content_volume_labels,
-                content_label_map=content_label_map,
             )
             for item in container.objects
         }, ()
@@ -514,8 +641,69 @@ def _relationship_sort_key(row: Relationship) -> tuple[str, str, str, str]:
     return (row.relationship_type, row.quality, row.target_key, row.key)
 
 
+def _is_active_program_assignment(row: Relationship) -> bool:
+    if not row.relationship_type.startswith("PROG_ASSIGNMENT_TO_"):
+        return True
+    if not row.active_assignment_state:
+        return True
+    return row.active_assignment_state in {
+        ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE,
+        ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT,
+    }
+
+
+def _program_assignment_details(row: Relationship | None) -> tuple[str, ...]:
+    if row is None or not row.relationship_type.startswith("PROG_ASSIGNMENT_TO_"):
+        return ()
+    if row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT:
+        return ("Rch Assign: =SMP",)
+    if row.active_assignment_state != ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE:
+        return ()
+    value = row.assignment_rch_assign_display.strip()
+    if not value or value.lower() in {"off", "unknown"}:
+        return ()
+    return (f"Rch Assign: {value}",)
+
+
 def _is_navigable_relationship(row: Relationship) -> bool:
-    return row.quality == "Known" and row.relationship_type in _NAVIGABLE_RELATIONSHIP_TYPES
+    if row.relationship_type not in _NAVIGABLE_RELATIONSHIP_TYPES:
+        return False
+    if not _is_active_program_assignment(row):
+        return False
+    if row.relationship_type.startswith("PROG_ASSIGNMENT_TO_"):
+        return row.quality in {"Known", "Likely"}
+    return row.quality == "Known"
+
+
+def _is_active_missing_local_target(row: Relationship) -> bool:
+    return (
+        row.relationship_type.startswith("PROG_ASSIGNMENT_TO_")
+        and row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE
+        and row.quality == DataQuality.UNKNOWN.value
+        and row.basis == ACTIVE_MISSING_LOCAL_TARGET_BASIS
+    )
+
+
+def _unresolved_program_assignment_node(row: Relationship) -> ContentNode:
+    fallback_name = row.target_key
+    if not fallback_name:
+        fallback_name = (
+            f"assignment {row.assignment_index + 1}"
+            if row.assignment_index is not None
+            else "assignment"
+        )
+    name = _safe_display(row.assignment_name, fallback_name)
+    return ContentNode(
+        node_id=f"relationship:{row.key}:missing-local-target",
+        node_type=UNRESOLVED_PROGRAM_ASSIGNMENT_NODE,
+        display_name=name,
+        object_key=row.target_key,
+        object_type="SBNK",
+        details=_program_assignment_details(row),
+        quality=DataQuality.UNKNOWN,
+        basis=row.basis,
+        notes=ACTIVE_MISSING_LOCAL_TARGET_NOTE,
+    )
 
 
 def _has_known_sbac_parent(item: AxklibObject, graph: RelationshipGraph) -> bool:
@@ -529,7 +717,9 @@ def _sbnk_visible_name(item: AxklibObject) -> str:
     return _safe_display(item.name, f"<unnamed SBNK {item.object_key}>")
 
 
-def _sampler_sample_node(item: AxklibObject, relationship: Relationship | None = None) -> ContentNode:
+def _sampler_sample_node(
+    item: AxklibObject, relationship: Relationship | None = None
+) -> ContentNode:
     return _object_node(
         node_id=f"object:{item.object_key}",
         object_type=item.type,
@@ -538,6 +728,7 @@ def _sampler_sample_node(item: AxklibObject, relationship: Relationship | None =
         quality=relationship.quality if relationship else "Known",
         basis=relationship.basis if relationship else "container object metadata",
         notes=relationship.ambiguity_notes if relationship else "",
+        details=_program_assignment_details(relationship),
     )
 
 
@@ -547,29 +738,38 @@ def _sampler_sample_bank_group_node(
     graph: RelationshipGraph,
     object_by_key: dict[str, AxklibObject],
     relationship: Relationship | None = None,
+    with_children: bool = True,
 ) -> ContentNode:
     children: list[ContentNode] = []
-    for child_row in sorted(graph.children(item.object_key), key=_relationship_sort_key):
-        if (
-            child_row.relationship_type != "SBAC_SLOT_TO_SBNK"
-            or not _is_navigable_relationship(child_row)
-        ):
-            continue
-        child_target = object_by_key.get(child_row.target_key)
-        if child_target is None or child_target.type != "SBNK":
-            children.append(
-                ContentNode(
-                    node_id=f"relationship:{child_row.key}:{child_row.target_key}",
-                    node_type="relationship_target",
-                    display_name=child_row.target_key,
-                    object_key=child_row.target_key,
-                    quality=DataQuality.UNKNOWN,
-                    basis=child_row.basis,
-                    notes=child_row.ambiguity_notes,
+    if with_children:
+        for child_row in sorted(graph.children(item.object_key), key=_relationship_sort_key):
+            if child_row.relationship_type != "SBAC_SLOT_TO_SBNK" or not _is_navigable_relationship(
+                child_row
+            ):
+                continue
+            child_target = object_by_key.get(child_row.target_key)
+            if child_target is None or child_target.type != "SBNK":
+                children.append(
+                    ContentNode(
+                        node_id=f"relationship:{child_row.key}:{child_row.target_key}",
+                        node_type="relationship_target",
+                        display_name=child_row.target_key,
+                        object_key=child_row.target_key,
+                        details=_program_assignment_details(child_row),
+                        quality=DataQuality.UNKNOWN,
+                        basis=child_row.basis,
+                        notes=child_row.ambiguity_notes,
+                    )
                 )
-            )
-            continue
-        children.append(_sampler_sample_node(child_target, child_row))
+                continue
+            children.append(_sampler_sample_node(child_target, child_row))
+
+    quality = DataQuality.KNOWN
+    if relationship is not None:
+        for item_quality in DataQuality:
+            if relationship.quality == item_quality.value:
+                quality = item_quality
+                break
 
     return ContentNode(
         node_id=f"object:{item.object_key}",
@@ -577,10 +777,12 @@ def _sampler_sample_bank_group_node(
         display_name=f"B {_safe_display(item.name, f'<unnamed SBAC {item.object_key}>')}",
         object_key=item.object_key,
         object_type="SBAC",
-        quality=DataQuality.KNOWN,
+        details=_program_assignment_details(relationship),
+        quality=quality,
         basis=relationship.basis if relationship else "current SBAC slot relationships",
         children=_sort_nodes(children),
     )
+
 
 def _relationship_child_nodes(
     *,
@@ -589,6 +791,7 @@ def _relationship_child_nodes(
     object_by_key: dict[str, AxklibObject],
     depth: int,
     visited: frozenset[str],
+    include_unresolved: bool,
 ) -> list[ContentNode]:
     child_nodes: list[ContentNode] = []
     for target_key in _relationship_targets(relationship.target_key):
@@ -604,6 +807,7 @@ def _relationship_child_nodes(
                     graph=graph,
                     object_by_key=object_by_key,
                     relationship=relationship,
+                    with_children=False,
                 )
             )
             continue
@@ -616,6 +820,7 @@ def _relationship_child_nodes(
                     relationship=relationship,
                     depth=0,
                     visited=visited,
+                    include_unresolved=include_unresolved,
                 )
             )
             continue
@@ -627,6 +832,7 @@ def _relationship_child_nodes(
                 object_by_key=object_by_key,
                 depth=depth,
                 visited=visited,
+                include_unresolved=include_unresolved,
             )
         )
     return child_nodes
@@ -640,6 +846,7 @@ def _node_for_relationship_target(
     object_by_key: dict[str, AxklibObject],
     depth: int,
     visited: frozenset[str],
+    include_unresolved: bool,
 ) -> ContentNode:
     target = object_by_key.get(target_key)
     if target is None:
@@ -648,6 +855,7 @@ def _node_for_relationship_target(
             node_type="relationship_target",
             display_name=target_key,
             object_key=target_key,
+            details=_program_assignment_details(relationship),
             quality=DataQuality.TENTATIVE
             if relationship.quality == "Tentative"
             else DataQuality.UNKNOWN,
@@ -661,6 +869,7 @@ def _node_for_relationship_target(
         relationship=relationship,
         depth=depth,
         visited=visited,
+        include_unresolved=include_unresolved,
     )
 
 
@@ -672,6 +881,7 @@ def _relationship_object_node(
     relationship: Relationship | None,
     depth: int,
     visited: frozenset[str],
+    include_unresolved: bool,
 ) -> ContentNode:
     object_key = item.object_key
     object_type = item.type
@@ -685,6 +895,9 @@ def _relationship_object_node(
         next_visited = frozenset((*visited, object_key))
         child_nodes: list[ContentNode] = []
         for row in sorted(graph.children(object_key), key=_relationship_sort_key):
+            if include_unresolved and _is_active_missing_local_target(row):
+                child_nodes.append(_unresolved_program_assignment_node(row))
+                continue
             if not _is_navigable_relationship(row):
                 continue
             child_nodes.extend(
@@ -694,11 +907,12 @@ def _relationship_object_node(
                     object_by_key=object_by_key,
                     depth=depth - 1,
                     visited=next_visited,
+                    include_unresolved=include_unresolved,
                 )
             )
         children = _sort_nodes(child_nodes)
     quality = relationship.quality if relationship else "Known"
-    quality = relationship.basis if relationship else "container object metadata"
+    basis = relationship.basis if relationship else "container object metadata"
     notes = relationship.ambiguity_notes if relationship else ""
     return _object_node(
         node_id=f"object:{object_key}",
@@ -706,21 +920,27 @@ def _relationship_object_node(
         display_name=display_name,
         object_key=object_key,
         quality=quality,
-        basis=quality,
+        basis=basis,
         notes=notes,
+        details=_program_assignment_details(relationship),
         children=children,
     )
 
 
 def _build_sfs_tree(
-    container: AxklibContainer, content_label_map: ContentLabelMap | None = None
+    container: AxklibContainer,
+    *,
+    include_unresolved: bool = False,
+    include_default_programs: bool = False,
 ) -> ContentTree:
-    placements, issues = load_known_object_placements(container, content_label_map)
+    placements, issues = load_known_object_placements(container)
+    validation_issues = _validation_content_issues(container)
+    affected_error_paths = _affected_error_volume_paths(validation_issues)
     graph = build_relationship_graph(list(container.objects))
     object_by_key = {item.object_key: item for item in container.objects}
-    partition_children: dict[tuple[int | None, str], dict[str, dict[str, list[ContentNode]]]] = (
-        defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
-    )
+    partition_children: dict[
+        tuple[int | None, str], dict[tuple[str, str], dict[str, list[ContentNode]]]
+    ] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     unmapped: dict[str, list[ContentNode]] = defaultdict(list)
 
     for item in container.objects:
@@ -730,9 +950,8 @@ def _build_sfs_tree(
         placement = placements.get(item.object_key)
         if placement is None:
             for row in sorted(graph.children(item.object_key), key=_relationship_sort_key):
-                if (
-                    row.relationship_type != "SBAC_SLOT_TO_SBNK"
-                    or not _is_navigable_relationship(row)
+                if row.relationship_type != "SBAC_SLOT_TO_SBNK" or not _is_navigable_relationship(
+                    row
                 ):
                     continue
                 placement = placements.get(row.target_key)
@@ -740,7 +959,7 @@ def _build_sfs_tree(
                     break
         if placement is not None:
             pkey = (placement.partition_index, placement.partition_name)
-            partition_children[pkey][placement.volume_name]["Sample Banks"].append(node)
+            partition_children[pkey][_placement_volume_key(placement)]["Sample Banks"].append(node)
         elif node.children:
             unmapped["Sample Banks"].append(
                 ContentNode(
@@ -749,6 +968,7 @@ def _build_sfs_tree(
                     display_name=node.display_name,
                     object_key=node.object_key,
                     object_type=node.object_type,
+                    details=node.details,
                     quality=DataQuality.UNKNOWN,
                     basis=node.basis,
                     notes="no-known-volume",
@@ -773,11 +993,14 @@ def _build_sfs_tree(
                 relationship=None,
                 depth=3,
                 visited=frozenset(),
+                include_unresolved=include_unresolved,
             )
         if placement is not None:
             pkey = (placement.partition_index, placement.partition_name)
             display_category = TYPE_CATEGORY.get(item.type, placement.category_name)
-            partition_children[pkey][placement.volume_name][display_category].append(node)
+            partition_children[pkey][_placement_volume_key(placement)][display_category].append(
+                node
+            )
         else:
             unmapped[category].append(
                 _object_node(
@@ -787,6 +1010,7 @@ def _build_sfs_tree(
                     if item.type == "PROG"
                     else _safe_display(item.name, f"<unnamed {item.type} {item.object_key}>"),
                     object_key=item.object_key,
+                    details=node.details,
                     quality="Unknown",
                     basis="container object metadata",
                     notes="no-known-volume",
@@ -800,51 +1024,79 @@ def _build_sfs_tree(
         key=lambda row: ((row[0][0] if row[0][0] is not None else 999), row[0][1].lower()),
     ):
         volume_nodes: list[ContentNode] = []
-        for volume_name, categories in sorted(volumes.items(), key=lambda row: row[0].lower()):
-            category_nodes = [
-                _with_count(
-                    "category",
-                    category_name,
-                    _with_default_program_slots(objects)
+        duplicate_volume_names = Counter(volume_name for volume_name, _raw_path in volumes)
+        for (volume_name, raw_volume_path), categories in sorted(
+            volumes.items(), key=lambda row: (row[0][0].lower(), row[0][1].lower())
+        ):
+            category_nodes: list[ContentNode] = []
+            volume_display_name = _disambiguated_volume_name(
+                volume_name, raw_volume_path, duplicate_volume_names
+            )
+            volume_node_id = raw_volume_path or volume_name
+            for category_name, objects in categories.items():
+                children = (
+                    _program_category_children(
+                        objects, include_default_programs=include_default_programs
+                    )
                     if category_name == "Programs"
-                    else objects,
-                    f"category:{partition_index}:{volume_name}:{category_name}",
+                    else _sort_nodes(objects)
                 )
-                for category_name, objects in categories.items()
-            ]
+                if not children:
+                    continue
+                category_nodes.append(
+                    _with_count(
+                        "category",
+                        category_name,
+                        children,
+                        f"category:{partition_index}:{volume_node_id}:{category_name}",
+                    )
+                )
+            if not category_nodes:
+                continue
             volume_nodes.append(
                 _with_count(
                     "volume",
-                    _safe_display(volume_name, "<unnamed volume>"),
+                    _display_volume_name(
+                        volume_display_name,
+                        raw_volume_path,
+                        affected_error_paths,
+                    ),
                     category_nodes,
-                    f"volume:{partition_index}:{volume_name}",
+                    f"volume:{partition_index}:{volume_node_id}",
                 )
             )
         part_name = partition_name or (
             f"partition {partition_index}" if partition_index is not None else "partition"
         )
-        roots.append(
-            _with_count(
-                "partition",
-                f"partition {partition_index}: {part_name}"
-                if partition_index is not None
-                else part_name,
-                volume_nodes,
-                f"partition:{partition_index}",
+        if volume_nodes:
+            roots.append(
+                _with_count(
+                    "partition",
+                    f"partition {partition_index}: {part_name}"
+                    if partition_index is not None
+                    else part_name,
+                    volume_nodes,
+                    f"partition:{partition_index}",
+                )
             )
-        )
 
     if unmapped:
-        category_nodes = [
-            _with_count(
-                "category",
-                category_name,
-                _with_default_program_slots(objects) if category_name == "Programs" else objects,
-                f"unmapped:{category_name}",
+        category_nodes = []
+        for category_name, objects in unmapped.items():
+            children = (
+                _program_category_children(
+                    objects, include_default_programs=include_default_programs
+                )
+                if category_name == "Programs"
+                else _sort_nodes(objects)
             )
-            for category_name, objects in unmapped.items()
-        ]
-        roots.append(_with_count("unresolved", "_unmapped", category_nodes, "unmapped"))
+            if not children:
+                continue
+            category_nodes.append(
+                _with_count("category", category_name, children, f"unmapped:{category_name}")
+            )
+        if category_nodes:
+            roots.append(_with_count("unresolved", "_unmapped", category_nodes, "unmapped"))
 
     return ContentTree(
         source_path=str(container.source_path),
@@ -855,7 +1107,13 @@ def _build_sfs_tree(
     )
 
 
-def _build_scope_tree(container: AxklibContainer, scope_label: str) -> ContentTree:
+def _build_scope_tree(
+    container: AxklibContainer,
+    scope_label: str,
+    *,
+    include_unresolved: bool = False,
+    include_default_programs: bool = False,
+) -> ContentTree:
     graph = build_relationship_graph(list(container.objects))
     object_by_key = {item.object_key: item for item in container.objects}
     groups: dict[str, list[ContentNode]] = defaultdict(list)
@@ -884,6 +1142,7 @@ def _build_scope_tree(container: AxklibContainer, scope_label: str) -> ContentTr
                 relationship=None,
                 depth=3,
                 visited=frozenset(),
+                include_unresolved=include_unresolved,
             )
         )
         if quality == "raw-scan-impossible-internal-capacity":
@@ -893,6 +1152,7 @@ def _build_scope_tree(container: AxklibContainer, scope_label: str) -> ContentTr
                     object_type=item.type,
                     display_name=node.display_name,
                     object_key=item.object_key,
+                    details=node.details,
                     quality="Likely",
                     basis=str(item.quality.source),
                     notes=quality,
@@ -902,15 +1162,18 @@ def _build_scope_tree(container: AxklibContainer, scope_label: str) -> ContentTr
         else:
             groups[category].append(node)
 
-    category_nodes = [
-        _with_count(
-            "category",
-            category_name,
-            _with_default_program_slots(objects) if category_name == "Programs" else objects,
-            f"category:{category_name}",
+    category_nodes: list[ContentNode] = []
+    for category_name, objects in groups.items():
+        children = (
+            _program_category_children(objects, include_default_programs=include_default_programs)
+            if category_name == "Programs"
+            else _sort_nodes(objects)
         )
-        for category_name, objects in groups.items()
-    ]
+        if not children:
+            continue
+        category_nodes.append(
+            _with_count("category", category_name, children, f"category:{category_name}")
+        )
     if recovery:
         recovery_categories = [
             _with_count("category", category_name, objects, f"recovery:{category_name}")
@@ -928,20 +1191,41 @@ def _build_scope_tree(container: AxklibContainer, scope_label: str) -> ContentTr
         roots=(root,),
     )
 
+
 def build_content_tree_for_container(
-    container: AxklibContainer, content_label_map: ContentLabelMap | None = None
+    container: AxklibContainer,
+    *,
+    include_unresolved: bool = False,
+    include_default_programs: bool = False,
 ) -> ContentTree:
     if container.kind in {"sfs", "iso"}:
-        return _build_sfs_tree(container, content_label_map)
-    if container.kind == "fat12_floppy":
-        return _build_scope_tree(container, "FAT root")
-    return _build_scope_tree(container, "Standalone object")
+        tree = _build_sfs_tree(
+            container,
+            include_unresolved=include_unresolved,
+            include_default_programs=include_default_programs,
+        )
+    elif container.kind == "fat12_floppy":
+        tree = _build_scope_tree(
+            container,
+            "FAT root",
+            include_unresolved=include_unresolved,
+            include_default_programs=include_default_programs,
+        )
+    else:
+        tree = _build_scope_tree(
+            container,
+            "Standalone object",
+            include_unresolved=include_unresolved,
+            include_default_programs=include_default_programs,
+        )
+    return _with_validation_issues(tree, container)
 
 
 def build_content_trees_for_paths(
     paths: Sequence[str | Path],
     options: OpenOptions | None = None,
-    content_label_map: ContentLabelMap | None = None,
+    include_unresolved: bool = False,
+    include_default_programs: bool = False,
 ) -> ContentTreeLoadResult:
     opts = options or OpenOptions(include_payloads=False)
     results = open_many(paths, options=opts)
@@ -951,29 +1235,60 @@ def build_content_trees_for_paths(
         if result.container is None:
             errors.append(result)
         else:
-            trees.append(build_content_tree_for_container(result.container, content_label_map))
+            trees.append(
+                build_content_tree_for_container(
+                    result.container,
+                    include_unresolved=include_unresolved,
+                    include_default_programs=include_default_programs,
+                )
+            )
     return ContentTreeLoadResult(trees=tuple(trees), load_errors=tuple(errors))
+
+
+def _node_type_suffix(node: ContentNode) -> str:
+    if node.node_type in {UNRESOLVED_PROGRAM_ASSIGNMENT_NODE, "relationship_target"}:
+        return " [UNKNOWN]"
+    label = TYPE_LABEL_BY_NODE.get(node.node_type) or TYPE_LABEL_BY_OBJECT.get(node.object_type)
+    return f" [{label}]" if label else ""
 
 
 def _node_suffix(node: ContentNode, options: ContentTreeRenderOptions) -> str:
     parts: list[str] = []
     if node.count is not None:
         parts.append(f"({node.count})")
+    if node.details:
+        parts.append(f"- {'; '.join(node.details)}")
     if options.show_quality or node.quality != DataQuality.KNOWN:
         parts.append(f"[{node.quality.value}]")
-    if node.notes and (options.show_unresolved or node.quality != DataQuality.KNOWN):
+    if node.notes and node.quality in {DataQuality.UNKNOWN, DataQuality.TENTATIVE}:
         parts.append(f"- {node.notes}")
     return " " + " ".join(parts) if parts else ""
 
 
+def _should_render_node(node: ContentNode, options: ContentTreeRenderOptions, depth: int) -> bool:
+    if node.node_type == UNRESOLVED_PROGRAM_ASSIGNMENT_NODE and not options.show_unresolved:
+        return False
+    return options.max_depth is None or depth <= options.max_depth
+
+
 def _render_node(
-    node: ContentNode, lines: list[str], options: ContentTreeRenderOptions, depth: int
+    node: ContentNode,
+    lines: list[str],
+    options: ContentTreeRenderOptions,
+    depth: int,
+    prefix: str,
+    is_last: bool,
 ) -> None:
-    if options.max_depth is not None and depth > options.max_depth:
+    if not _should_render_node(node, options, depth):
         return
-    lines.append(f"{'  ' * depth}{node.display_name}{_node_suffix(node, options)}")
-    for child in node.children:
-        _render_node(child, lines, options, depth + 1)
+    connector = "`-- " if is_last else "|-- "
+    lines.append(
+        f"{prefix}{connector}{node.display_name}{_node_type_suffix(node)}{_node_suffix(node, options)}"
+    )
+    child_prefix = f"{prefix}{'    ' if is_last else '|   '}"
+    children = [child for child in node.children if _should_render_node(child, options, depth + 1)]
+    for index, child in enumerate(children):
+        _render_node(child, lines, options, depth + 1, child_prefix, index == len(children) - 1)
 
 
 def render_content_tree_text(
@@ -982,9 +1297,18 @@ def render_content_tree_text(
     opts = options or ContentTreeRenderOptions()
     lines = [f"{tree.source_path} [{tree.container_kind}]"]
     for issue in tree.issues:
-        lines.append(f"  warning: {issue.code}: {issue.message}")
-    for root in tree.roots:
-        _render_node(root, lines, opts, 1)
+        volume_path = _issue_volume_path(issue)
+        lines.append(f"{issue.severity}: {issue.code}: {_compact_issue_message(issue)}")
+        if volume_path:
+            lines.append(f"  volume: {volume_path}")
+        examples = _compact_program_examples(issue.sampler_path)
+        if examples:
+            lines.append(f"  active Program examples: {examples}")
+    if tree.issues:
+        lines.append("")
+    roots = [root for root in tree.roots if _should_render_node(root, opts, 1)]
+    for index, root in enumerate(roots):
+        _render_node(root, lines, opts, 1, "", index == len(roots) - 1)
     return "\n".join(lines)
 
 
@@ -1008,12 +1332,3 @@ def summary_line(container: AxklibContainer) -> str:
         f"{key}:{value}" for key, value in sorted(container.recovery_quality_summary.items())
     )
     return f"{container.source_path}\t{container.kind}\t{object_text}\trecovery={recovery or '-'}"
-
-
-
-
-
-
-
-
-

@@ -24,6 +24,8 @@ Summarize supported inputs:
 uv run axklib info <image-or-directory>
 ```
 
+The tree view omits empty default program slots by default. Use `--show-default-programs` when you need the full 128-slot Program list.
+
 Write an inventory report:
 
 ```powershell
@@ -60,40 +62,21 @@ Export waveform data:
 uv run axklib extract waves --exact --stereo auto -o build/exports/waves <image-or-directory>
 ```
 
+The extraction command reports progress while writing physical `SMPL` WAVs,
+rendered stereo WAVs, and per-volume `volume.axklib.json` graphs.
+
 Build the local documentation:
 
 ```powershell
 uv run --group docs axklib-docs build --strict
 ```
 
-Use caller-supplied ISO menu labels when a project has a separate label map:
-
-```powershell
-uv run axklib info --content-label-map labels.json <image-or-directory>
-uv run axklib extract waves --content-label-map labels.json -o build/exports/waves <image-or-directory>
-```
-
-Label maps are JSON objects with synthetic source stems and raw ISO path labels:
-
-```json
-{
-  "iso_group_labels": [
-    {"source": "example_disc", "raw_group": "GROUP_A", "label": "GROUP_ALPHA"}
-  ],
-  "iso_volume_labels": [
-    {
-      "source": "example_disc",
-      "raw_group": "GROUP_A",
-      "raw_volume": "V001",
-      "label": "Mapped Volume"
-    }
-  ]
-}
-```
-
 ## Documentation Sections
 
 - [Typical Usage](axklib/typical-usage.md) shows Python API examples.
+- [Format Guides](axklib/sfs-filesystem.md) describe SFS hard-disk images, FAT12 floppy images, CD-ROM images, and shared sampler data structures.
+- [Names, Paths, And Exports](axklib/names-and-paths.md) documents sampler-facing labels, tree rendering, and exact export layout.
+- [Report Schemas](axklib/report-schemas.md) documents CSV/JSON outputs and validation issue fields.
 - [Public API](axklib/model.md) documents the main model and service modules.
 - [Architecture](architecture.md) explains the package boundaries and data flow.
 
@@ -112,4 +95,5 @@ Build the documentation strictly:
 ```powershell
 uv run --group docs axklib-docs build --strict
 ```
+
 
