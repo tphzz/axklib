@@ -267,6 +267,23 @@ The graph manifest is the authoritative place to connect WAV files back to
 sampler objects. The folder layout is convenient for users; the JSON preserves
 object and relationship detail.
 
+Physical `SMPL` object rows keep storage-facing names and paths. When a physical
+waveform is referenced by sampler-visible `SBNK` members, the row includes
+`user_facing_aliases` entries with the member display name, object reference,
+optional sample-bank/group owner, and relationship quality. Consumers that want
+sampler-facing labels should prefer those aliases over parsing numeric duplicate
+suffixes from `SMPL/*.wav` filenames.
+
+Recommended display fallback order for future UI or export-index views, implemented by [`preferred_smpl_display_name()`](graph.md):
+
+1. `user_facing_aliases[0].display_name` when at least one alias is present.
+2. The physical `SMPL.display_name` when no sampler-visible alias is known.
+3. The physical `SMPL.wav_path` only as a file reference, not as a display label.
+
+`wav_path`, `source_ref`, object IDs, and relationship rows remain authoritative
+for exact files and graph references. Alias display names are presentation
+metadata and must not be used to rewrite or deduplicate exact WAV paths.
+
 ## Public API
 
 ::: axklib.reports
@@ -287,5 +304,4 @@ object and relationship detail.
         - make_schema_manifest
         - write_schema_manifest
         - write_schema_index
-
 

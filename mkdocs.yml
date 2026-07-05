@@ -85,6 +85,7 @@ nav:
           - Containers: axklib/containers.md
           - Objects: axklib/objects.md
           - Audio: axklib/audio.md
+          - Graph Helpers: axklib/graph.md
           - Relationships: axklib/relationships.md
           - Validation: axklib/validation.md
           - Reports: axklib/reports.md

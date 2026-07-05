@@ -236,14 +236,22 @@ Rules:
 | `_unplaced/` | Used when a waveform has no known placement. |
 | source scope prefix | Added when multiple input sources are exported together. |
 
-Physical WAV names come from `SMPL` storage names. Rendered stereo names come
-from sampler-facing sample/member names when a known stereo relationship supplies
-a better musical label. For paired sibling `SBNK` stereo, terminal `-L` and `-R`
-are removed from the rendered stem, so `Grand -L` and `Grand -R` render as
-`Grand.wav` while both physical `SMPL` WAVs remain present. If the paired member
-name is only distinguished by a sampler duplicate marker, the rendered stem uses
-the owning `B ...` sample-bank or group label when available, for example
-`Harpsi 2.1N - Harpsich031.wav` instead of a numeric duplicate suffix.
+Physical WAV names come from `SMPL` storage names. They stay storage-facing even
+when that produces a filesystem-safe numeric suffix from a sampler duplicate
+marker. When a physical waveform is referenced by sampler-visible `SBNK` members,
+`volume.axklib.json` records those member names in the `user_facing_aliases`
+field on the `SMPL` object. Display-oriented consumers should use [`preferred_smpl_display_name()`](graph.md) to use the first alias
+name when present and fall back to the physical `SMPL` display name only when no
+alias is known.
+
+Rendered stereo names come from sampler-facing sample/member names when a known
+stereo relationship supplies a better musical label. For paired sibling `SBNK`
+stereo, terminal `-L` and `-R` are removed from the rendered stem, so
+`Grand -L` and `Grand -R` render as `Grand.wav` while both physical `SMPL` WAVs
+remain present. If the paired member name is only distinguished by a sampler
+duplicate marker, the rendered stem uses the owning `B ...` sample-bank or group
+label when available, for example `Harpsi 2.1N - Harpsich031.wav` instead of a
+numeric duplicate suffix.
 
 ## Technical Fields That Stay In Reports
 

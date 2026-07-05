@@ -76,9 +76,28 @@ result = export_waveforms(
 print(len(result.written_files))
 ```
 
+## Read exported waveform labels
+
+Structured waveform export writes one `volume.axklib.json` graph per volume.
+Use graph helpers when building a display/index view so sampler-facing labels
+and exact file references stay separate.
+
+```python
+from pathlib import Path
+
+from axklib.graph import iter_volume_smpl_rows, preferred_smpl_display_name
+
+export_root = Path("build/exports/current-exact/00001_example")
+
+for graph_path in sorted(export_root.rglob("volume.axklib.json")):
+    for row in iter_volume_smpl_rows(graph_path):
+        print(preferred_smpl_display_name(row), "->", row["wav_path"])
+```
+
 ## Interpreting Quality Labels
 
 Quality labels describe how stable a decoded value is for downstream use.
 `Known` values are suitable for normal reporting and export decisions. Values
 marked `Tentative` or `Unknown` are included for inspection and are not stable
 inputs for generated or modified image workflows.
+

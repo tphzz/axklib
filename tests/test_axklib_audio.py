@@ -483,6 +483,77 @@ def test_duplicate_paired_sbnk_render_decisions_reuse_one_wav(tmp_path: Path) ->
     assert {row["wav_path"] for row in graph["rendered_audio"]} == {"RENDERED/Se_ff_024.wav"}
 
 
+def test_physical_smpl_duplicate_marker_keeps_exact_path_and_records_alias(
+    tmp_path: Path,
+) -> None:
+    waveform = replace(
+        decode_waveform(_sample_object(b"\x00\x01\x00\x02")),
+        sample_name="JP6 FatBs1b036 *",
+    )
+    placements = {
+        "p0:sbnk1": WaveformPlacement(
+            partition_index=0,
+            partition_name="hd1",
+            volume_name="Sy42 Ana4Bass",
+            category_name="Sample Banks",
+            display_name="J FatBs1b036",
+            quality=DataQuality.KNOWN,
+            source="test placement",
+        ),
+    }
+    relationships = (
+        WaveformRelationship(
+            "p0:sbnk1",
+            waveform.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=waveform.source_image,
+        ),
+    )
+
+    result = export_waveforms(
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(waveform,),
+            placements=placements,
+            relationships=relationships,
+        )
+    )
+
+    assert [
+        path.relative_to(tmp_path).as_posix()
+        for path in result.written_files
+        if path.suffix == ".wav"
+    ] == ["partition_00_hd1/Sy42 Ana4Bass/SMPL/JP6 FatBs1b036 (2).wav"]
+    graph = _graph(tmp_path / "partition_00_hd1" / "Sy42 Ana4Bass" / "volume.axklib.json")
+    smpl = graph["objects"]["smpl"][0]
+    assert smpl["display_name"] == "JP6 FatBs1b036 *"
+    assert smpl["wav_path"] == "SMPL/JP6 FatBs1b036 (2).wav"
+    aliases = smpl["user_facing_aliases"]
+    assert len(aliases) == 1
+    assert aliases[0]["id"]
+    assert aliases[0]["source_ref"]
+    assert {
+        key: aliases[0][key]
+        for key in (
+            "object_type",
+            "object_key",
+            "display_name",
+            "sample_bank_name",
+            "sample_bank_object_key",
+            "relationship_quality",
+        )
+    } == {
+        "object_type": "SBNK",
+        "object_key": "p0:sbnk1",
+        "display_name": "J FatBs1b036",
+        "sample_bank_name": "",
+        "sample_bank_object_key": "",
+        "relationship_quality": "Known",
+    }
+
+
 def test_paired_sbnk_duplicate_marker_uses_owner_label_for_rendered_stem(
     tmp_path: Path,
 ) -> None:

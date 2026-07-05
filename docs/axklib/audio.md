@@ -22,7 +22,8 @@ to that shared artifact. When a rendered stereo stem would otherwise come from a
 sampler duplicate marker such as a trailing `*`, axklib uses the owning
 sample-bank or group label in the rendered stem when available. Physical `SMPL`
 filenames still preserve exact storage-level names with filesystem-safe
-sanitization.
+sanitization, while `volume.axklib.json` records sampler-visible aliases for
+linked physical waveforms.
 
 `WavExportRequest.progress_callback` receives export progress events for
 physical WAV writes, rendered stereo writes, and per-volume graph writes. The

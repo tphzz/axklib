@@ -1657,6 +1657,7 @@ def _build_volume_graph(
                 "object_key": waveform.object_key,
                 "display_name": waveform.sample_name,
                 "wav_path": physical_refs[physical_key],
+                "user_facing_aliases": [],
                 "audio": {
                     "channels": waveform.channel_count,
                     "sample_rate": waveform.sample_rate,
@@ -1702,6 +1703,19 @@ def _build_volume_graph(
             sbnk_ref = _graph_source_ref(waveform.source_image, target.sampler_sample_key)
             sbnk_id = _graph_object_id("SBNK", waveform.source_image, target.sampler_sample_key)
             ref_to_id[sbnk_ref] = sbnk_id
+            alias: dict[str, object] = {
+                "object_type": "SBNK",
+                "id": sbnk_id,
+                "source_ref": sbnk_ref,
+                "object_key": target.sampler_sample_key,
+                "display_name": target.sampler_sample_name or target.sampler_sample_key,
+                "sample_bank_name": target.sample_bank_name,
+                "sample_bank_object_key": target.sample_bank_key,
+                "relationship_quality": _relationship_quality_summary(parents),
+            }
+            aliases = cast(list[dict[str, object]], smpl_objects[smpl_id]["user_facing_aliases"])
+            if alias not in aliases:
+                aliases.append(alias)
             sbnk = sbnk_objects.setdefault(
                 sbnk_id,
                 {
