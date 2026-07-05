@@ -7,6 +7,7 @@ from axklib.relationships import (
     ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE,
     ACTIVE_ASSIGNMENT_STATE_CONFIRMED_DUPLICATE_NOT_ACTIVE,
     ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF,
+    ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT,
     ACTIVE_ASSIGNMENT_STATE_UNKNOWN,
     ASSIGNMENT_ROW_STATE_DECODED,
     build_relationship_graph,
@@ -24,10 +25,11 @@ def _object(
     *,
     fat_file: str = "",
     metadata: dict[str, Any] | None = None,
+    container_kind: str = "sfs",
 ) -> AxklibObject:
     return AxklibObject(
         image="fixture.hds",
-        container_kind="sfs",
+        container_kind=container_kind,
         scope_key="fixture:partition:0",
         object_key=object_key,
         partition_index=0,
@@ -83,7 +85,9 @@ def _prog_payload(
     return bytes(payload)
 
 
-type ProgPayloadRow = tuple[str, int, int] | tuple[str, int, int, int] | tuple[str, int, int, int, int]
+type ProgPayloadRow = (
+    tuple[str, int, int] | tuple[str, int, int, int] | tuple[str, int, int, int, int]
+)
 
 
 def _prog_payload_rows(rows: list[ProgPayloadRow]) -> bytes:
@@ -101,6 +105,16 @@ def _prog_payload_rows(rows: list[ProgPayloadRow]) -> bytes:
         payload[offset + 0x15] = rch_assign_selector
         payload[offset + 0x28] = rch_assign_gate
     return bytes(payload)
+
+
+def _sfs_placement(volume_name: str) -> dict[str, Any]:
+    return {
+        "sfs_placement_partition_index": 0,
+        "sfs_placement_volume_name": volume_name,
+        "sfs_placement_category_name": "Sample Banks",
+        "sfs_placement_entry_name": "entry",
+        "sfs_placement_quality": "Known",
+    }
 
 
 def _smpl_payload(name: str, *, link_id: int = 0) -> bytes:
@@ -194,6 +208,7 @@ def test_active_assignment_classifier_uses_rch_assign_gate_byte() -> None:
         classify_active_assignment_state(assignment_row_state=ASSIGNMENT_ROW_STATE_DECODED)
         == ACTIVE_ASSIGNMENT_STATE_UNKNOWN
     )
+
 
 def test_relationship_graph_preserves_and_sorts_ambiguous_candidates() -> None:
     # Deliberately provide candidates in reverse object-key order. The graph output
@@ -305,6 +320,428 @@ def test_prog_assignment_prefers_same_folder_duplicate_candidate() -> None:
     assert relationship.quality == "Likely"
 
 
+def test_iso_source_load_prog_assignment_promotes_same_folder_sbnk_candidate() -> None:
+    items = [
+        _object(
+            "other-sbnk",
+            "SBNK",
+            "sine wave",
+            _sbnk_payload("sine wave"),
+            10,
+            fat_file="VOL/F002/SBNK/F002",
+            container_kind="iso",
+        ),
+        _object(
+            "local-sbnk",
+            "SBNK",
+            "sine wave",
+            _sbnk_payload("sine wave"),
+            20,
+            fat_file="VOL/F001/SBNK/F002",
+            container_kind="iso",
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("sine wave", kind_byte=0x10, rch_assign_gate=0x00),
+            30,
+            fat_file="VOL/F001/PROG/F003",
+            container_kind="iso",
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    prog_row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert prog_row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT
+    assert prog_row.match_quality == "Known"
+    assert prog_row.match_method == "assignment-kind-0x10+name+same-folder"
+    assert prog_row.matched_target_object_key == "local-sbnk"
+    assert prog_row.candidate_object_keys == "local-sbnk|other-sbnk"
+    relationship = next(
+        row for row in graph.relationships if row.relationship_type == "PROG_ASSIGNMENT_TO_SBNK"
+    )
+    assert relationship.target_key == "local-sbnk"
+    assert relationship.quality == "Known"
+
+
+def test_iso_source_load_prog_assignment_promotes_same_folder_sbac_candidate() -> None:
+    items = [
+        _object(
+            "other-sbac",
+            "SBAC",
+            "GROUP",
+            _sbac_payload("BANK"),
+            10,
+            fat_file="VOL/F002/SBAC/F001",
+            container_kind="iso",
+        ),
+        _object(
+            "local-sbac",
+            "SBAC",
+            "GROUP",
+            _sbac_payload("BANK"),
+            20,
+            fat_file="VOL/F001/SBAC/F001",
+            container_kind="iso",
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("GROUP", kind_byte=0x11, rch_assign_gate=0x00),
+            30,
+            fat_file="VOL/F001/PROG/F001",
+            container_kind="iso",
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    prog_row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert prog_row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT
+    assert prog_row.match_quality == "Known"
+    assert prog_row.match_method == "assignment-kind-0x11+name+same-folder"
+    assert prog_row.matched_target_object_key == "local-sbac"
+    relationship = next(
+        row for row in graph.relationships if row.relationship_type == "PROG_ASSIGNMENT_TO_SBAC"
+    )
+    assert relationship.target_key == "local-sbac"
+    assert relationship.quality == "Known"
+
+
+def test_prog_assignment_kind_selects_unique_sbac_when_sbnk_shares_name() -> None:
+    items = [
+        _object("same-name-sbnk", "SBNK", "GROUP", _sbnk_payload("GROUP"), 10),
+        _object("same-name-sbac", "SBAC", "GROUP", _sbac_payload("GROUP"), 20),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("GROUP", kind_byte=0x11, rch_assign_gate=0xFF),
+            30,
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE
+    assert row.match_quality == "Known"
+    assert row.match_method == "assignment-kind-0x11+name"
+    assert row.matched_target_type == "SBAC"
+    assert row.matched_target_object_key == "same-name-sbac"
+    relationship = next(
+        item for item in graph.relationships if item.relationship_type == "PROG_ASSIGNMENT_TO_SBAC"
+    )
+    assert relationship.quality == "Known"
+    assert relationship.target_key == "same-name-sbac"
+
+
+def test_prog_assignment_kind_selects_unique_sbnk_when_sbac_shares_name() -> None:
+    items = [
+        _object("same-name-sbac", "SBAC", "GROUP", _sbac_payload("GROUP"), 10),
+        _object("same-name-sbnk", "SBNK", "GROUP", _sbnk_payload("GROUP"), 20),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("GROUP", kind_byte=0x10, rch_assign_gate=0xFF),
+            30,
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE
+    assert row.match_quality == "Known"
+    assert row.match_method == "assignment-kind-0x10+name"
+    assert row.matched_target_type == "SBNK"
+    assert row.matched_target_object_key == "same-name-sbnk"
+    relationship = next(
+        item for item in graph.relationships if item.relationship_type == "PROG_ASSIGNMENT_TO_SBNK"
+    )
+    assert relationship.quality == "Known"
+    assert relationship.target_key == "same-name-sbnk"
+
+
+def test_active_prog_assignment_prefers_same_sfs_volume_sbac_candidate() -> None:
+    items = [
+        _object(
+            "vol-b-sbac",
+            "SBAC",
+            "GROUP",
+            _sbac_payload("BANK"),
+            10,
+            metadata=_sfs_placement("Vol B"),
+        ),
+        _object(
+            "vol-a-sbac",
+            "SBAC",
+            "GROUP",
+            _sbac_payload("BANK"),
+            20,
+            metadata=_sfs_placement("Vol A"),
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("GROUP", kind_byte=0x11, rch_assign_gate=0xFF),
+            30,
+            metadata=_sfs_placement("Vol A"),
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE
+    assert row.match_quality == "Likely"
+    assert row.match_method == "assignment-kind-0x11+name+same-volume"
+    assert row.matched_target_object_key == "vol-a-sbac"
+    assert row.candidate_object_keys == "vol-a-sbac|vol-b-sbac"
+
+
+def test_active_prog_assignment_prefers_same_sfs_volume_sbnk_candidate() -> None:
+    items = [
+        _object(
+            "vol-b-sbnk",
+            "SBNK",
+            "BD",
+            _sbnk_payload("BD"),
+            10,
+            metadata=_sfs_placement("Vol B"),
+        ),
+        _object(
+            "vol-a-sbnk",
+            "SBNK",
+            "BD",
+            _sbnk_payload("BD"),
+            20,
+            metadata=_sfs_placement("Vol A"),
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("BD", kind_byte=0x10, rch_assign_gate=0xFF),
+            30,
+            metadata=_sfs_placement("Vol A"),
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE
+    assert row.match_quality == "Likely"
+    assert row.match_method == "assignment-kind-0x10+name+same-volume"
+    assert row.matched_target_object_key == "vol-a-sbnk"
+    assert row.candidate_object_keys == "vol-a-sbnk|vol-b-sbnk"
+
+
+def test_same_sfs_volume_prog_assignment_rule_requires_active_row() -> None:
+    items = [
+        _object(
+            "vol-b-sbac",
+            "SBAC",
+            "GROUP",
+            _sbac_payload("BANK"),
+            10,
+            metadata=_sfs_placement("Vol B"),
+        ),
+        _object(
+            "vol-a-sbac",
+            "SBAC",
+            "GROUP",
+            _sbac_payload("BANK"),
+            20,
+            metadata=_sfs_placement("Vol A"),
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("GROUP", kind_byte=0x11, rch_assign_gate=0x00),
+            30,
+            metadata=_sfs_placement("Vol A"),
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+    assert row.match_quality == "Tentative"
+    assert row.match_method == "assignment-visible-off-name-ambiguous-sbac"
+    assert row.matched_target_object_key == ""
+    assert row.candidate_object_keys == "vol-a-sbac|vol-b-sbac"
+
+
+def test_iso_zeroed_matched_prog_assignment_is_source_load_not_hda_off() -> None:
+    items = [
+        _object(
+            "target-sbac",
+            "SBAC",
+            "CFIII DrkTmprd",
+            _sbac_payload("CFIII 026-S"),
+            10,
+            container_kind="iso",
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("CFIII DrkTmprd", kind_byte=0x11, rch_assign_gate=0x00),
+            20,
+            container_kind="iso",
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT
+    assert row.assignment_output1_byte_0x1d == 0x00
+    assert row.assignment_rch_assign_gate_byte_0x28 == 0x00
+    assert row.assignment_rch_assign_display == "unknown"
+    assert row.match_quality == "Known"
+    assert row.match_method == "assignment-kind-0x11+name"
+    assert row.matched_target_object_key == "target-sbac"
+    assert "source-load-assignment" in row.notes
+    relationship = next(
+        item for item in graph.relationships if item.relationship_type == "PROG_ASSIGNMENT_TO_SBAC"
+    )
+    assert relationship.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT
+    assert relationship.assignment_rch_assign_display == "unknown"
+
+
+def test_duplicate_iso_source_load_prog_assignment_marks_later_row_not_active() -> None:
+    items = [
+        _object(
+            "target-sbac",
+            "SBAC",
+            "CFIII DrkTmprd",
+            _sbac_payload("CFIII 026-S"),
+            10,
+            container_kind="iso",
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload_rows(
+                [
+                    ("CFIII DrkTmprd", 0x11, 0x09134910, 0x00),
+                    ("CFIII DrkTmprd", 0x11, 0x09134910, 0x00),
+                ]
+            ),
+            20,
+            container_kind="iso",
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    rows = sorted(graph.prog_bank_rows, key=lambda row: row.assignment_index)
+    assert [row.active_assignment_state for row in rows] == [
+        ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT,
+        ACTIVE_ASSIGNMENT_STATE_CONFIRMED_DUPLICATE_NOT_ACTIVE,
+    ]
+    assert [row.assignment_rch_assign_display for row in rows] == ["unknown", "unknown"]
+
+
+def test_visible_off_sbnk_ambiguous_prog_assignment_gets_diagnostic_label() -> None:
+    items = [
+        _object("sbnk-a", "SBNK", "PAD", _sbnk_payload("PAD"), 10),
+        _object("sbnk-b", "SBNK", "PAD", _sbnk_payload("PAD"), 20),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("PAD", kind_byte=0x10, rch_assign_gate=0x00),
+            30,
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+    assert row.match_quality == "Tentative"
+    assert row.match_method == "assignment-visible-off-name-ambiguous-sbnk"
+    assert row.matched_target_object_key == ""
+    assert row.candidate_categories == "SBNK|SBNK"
+    assert row.candidate_object_keys == "sbnk-a|sbnk-b"
+    assert "visible-off-name-ambiguous-sbnk" in row.notes
+
+
+def test_visible_off_non_target_category_ambiguous_prog_assignment_gets_diagnostic_label() -> None:
+    items = [
+        _object("smpl-a", "SMPL", "WAVE", _smpl_payload("WAVE"), 10),
+        _object("smpl-b", "SMPL", "WAVE", _smpl_payload("WAVE"), 20),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("WAVE", kind_byte=0x10, rch_assign_gate=0x00),
+            30,
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+    assert row.match_quality == "Tentative"
+    assert row.match_method == "assignment-visible-off-name-ambiguous-non-target-category"
+    assert row.selector_expected_category == "SBNK"
+    assert row.matched_target_object_key == ""
+    assert row.candidate_categories == "SMPL|SMPL"
+    assert row.candidate_object_keys == "smpl-a|smpl-b"
+    assert "visible-off-name-ambiguous-non-target-category" in row.notes
+
+
+def test_active_unmatched_direct_prog_assignment_stays_unresolved() -> None:
+    items = [
+        _object(
+            "local-sbnk",
+            "SBNK",
+            "INDIAN 1",
+            _sbnk_payload("INDIAN 1"),
+            10,
+            metadata=_sfs_placement("Vol A"),
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload(
+                "INDIAN         7",
+                kind_byte=0x10,
+                raw_handle=0x12345678,
+                rch_assign_gate=0xFF,
+            ),
+            20,
+            metadata=_sfs_placement("Vol A"),
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE
+    assert row.match_quality == "Unknown"
+    assert row.match_method == "assignment-active-missing-local-target"
+    assert row.matched_target_object_key == ""
+    assert row.candidate_object_keys == ""
+    assert "missing local target" in row.match_notes
+    assert "active-missing-local-target" in row.notes
+
+
 def test_duplicate_prog_assignment_rows_mark_later_rows_not_active() -> None:
     items = [
         _object("target-sbac", "SBAC", "GROUP", _sbac_payload("BANK"), 10),
@@ -409,7 +846,9 @@ def test_prog_assignment_uses_program_local_resolved_target_context() -> None:
 
     graph = build_relationship_graph(items)
 
-    context_row = next(row for row in graph.prog_bank_rows if row.assignment_name == "06 Santana nv")
+    context_row = next(
+        row for row in graph.prog_bank_rows if row.assignment_name == "06 Santana nv"
+    )
     assert context_row.match_quality == "Likely"
     assert context_row.match_method == "assignment-kind-0x11+program-local-target-context"
     assert context_row.assignment_raw_handle_0x10 == 0x09135930
@@ -443,6 +882,7 @@ def test_prog_assignment_context_resolver_requires_one_local_target() -> None:
     assert stale_row.match_quality == "Unknown"
     assert stale_row.match_method == "assignment-unmatched"
     assert stale_row.matched_target_object_key == ""
+
 
 def test_sbnk_member_name_only_unique_match_is_likely() -> None:
     items = [
@@ -606,7 +1046,11 @@ def test_reserved_prog_row_inside_active_assignment_range_stays_visible() -> Non
     assert graph.prog_bank_rows[0].assignment_index == 1
     assert len(graph.prog_ignored_rows) == 1
     assert graph.prog_ignored_rows[0].assignment_index == 0
-    assert graph.prog_ignored_rows[0].reason == "ignored-reserved-or-tail-slot-no-known-kind-and-no-name-match"
+    assert (
+        graph.prog_ignored_rows[0].reason
+        == "ignored-reserved-or-tail-slot-no-known-kind-and-no-name-match"
+    )
+
 
 def test_prog_assignment_raw_handle_does_not_select_same_folder_candidate() -> None:
     items = [
@@ -695,10 +1139,10 @@ def test_prog_assignment_raw_handle_does_not_use_sbac_slot_handle() -> None:
     prog_row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "handle-prog")
     assert prog_row.match_quality == "Unknown"
     assert prog_row.match_method == "assignment-unmatched-preserved-source-selector"
+    assert prog_row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_UNKNOWN
     assert prog_row.assignment_raw_handle_0x10 == 0x09137048
     assert prog_row.matched_target_object_key == ""
     assert prog_row.candidate_object_keys == ""
-
 
 
 def test_unmatched_direct_prog_assignment_reports_preserved_source_selector() -> None:
@@ -726,6 +1170,7 @@ def test_unmatched_direct_prog_assignment_reports_preserved_source_selector() ->
     prog_row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
     assert prog_row.match_quality == "Unknown"
     assert prog_row.match_method == "assignment-unmatched-preserved-source-selector"
+    assert prog_row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_UNKNOWN
     assert prog_row.assignment_raw_handle_0x10 == 0x091350A8
     assert prog_row.candidate_count == 0
     assert prog_row.candidate_object_keys == ""
@@ -739,3 +1184,97 @@ def test_unmatched_direct_prog_assignment_reports_preserved_source_selector() ->
     assert relationship.quality == "Unknown"
     assert relationship.target_key == ""
     assert relationship.basis == "assignment-unmatched-preserved-source-selector"
+
+
+def test_visible_off_direct_prog_assignment_reports_missing_local_target() -> None:
+    items = [
+        _object(
+            "local-sbnk",
+            "SBNK",
+            "AFOXE CAIXINHA1",
+            _sbnk_payload("AFOXE CAIXINHA1"),
+            10,
+            fat_file="VOL/F001/SBNK/F001",
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload(
+                "TripHop 1",
+                kind_byte=0x10,
+                raw_handle=0x091350A8,
+                rch_assign_gate=0x00,
+            ),
+            20,
+            fat_file="VOL/F001/PROG/F001",
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    prog_row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert prog_row.match_quality == "Unknown"
+    assert prog_row.match_method == "assignment-visible-off-missing-local-sbnk"
+    assert prog_row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+    assert prog_row.assignment_raw_handle_0x10 == 0x091350A8
+    assert prog_row.candidate_count == 0
+    assert prog_row.candidate_object_keys == ""
+    assert prog_row.matched_target_object_key == ""
+    assert "not treat it as active Program content" in prog_row.match_notes
+    assert "visible-off-missing-local-sbnk" in prog_row.notes
+    assert "raw-selector-diagnostic-only" in prog_row.notes
+
+    relationship = next(
+        row for row in graph.relationships if row.relationship_type == "PROG_ASSIGNMENT_TO_SBNK"
+    )
+    assert relationship.quality == "Unknown"
+    assert relationship.target_key == ""
+    assert relationship.basis == "assignment-visible-off-missing-local-sbnk"
+
+
+def test_visible_off_sbac_prog_assignment_reports_missing_local_group() -> None:
+    items = [
+        _object(
+            "local-sbac",
+            "SBAC",
+            "EXISTING GROUP",
+            _sbac_payload("EXISTING BANK"),
+            10,
+            fat_file="VOL/F001/SBAC/F001",
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload(
+                "Tower Chords",
+                kind_byte=0x11,
+                raw_handle=0x091350A8,
+                rch_assign_gate=0x00,
+            ),
+            20,
+            fat_file="VOL/F001/PROG/F001",
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    prog_row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert prog_row.match_quality == "Unknown"
+    assert prog_row.match_method == "assignment-visible-off-missing-local-sbac"
+    assert prog_row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+    assert prog_row.selector_expected_category == "SBAC"
+    assert prog_row.candidate_count == 0
+    assert prog_row.candidate_object_keys == ""
+    assert prog_row.matched_target_object_key == ""
+    assert "not treat it as active Program content" in prog_row.match_notes
+    assert "visible-off-missing-local-sbac" in prog_row.notes
+    assert "raw-selector-diagnostic-only" in prog_row.notes
+
+    relationship = next(
+        row for row in graph.relationships if row.relationship_type == "PROG_ASSIGNMENT_TO_SBAC"
+    )
+    assert relationship.quality == "Unknown"
+    assert relationship.target_key == ""
+    assert relationship.basis == "assignment-visible-off-missing-local-sbac"

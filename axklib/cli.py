@@ -23,11 +23,9 @@ from axklib.audio import (
 )
 from axklib.containers import expand_inputs, sfs_inventory
 from axklib.content_tree import (
-    ContentLabelMap,
     ContentTreeRenderOptions,
     build_content_trees_for_paths,
     content_tree_to_json,
-    load_content_label_map,
     load_known_object_placements,
     render_content_tree_text,
     summary_line,
@@ -38,6 +36,7 @@ from axklib.objects.decoded import decode_objects, result_field_names, result_is
 from axklib.parameters import current as current_parameters
 from axklib.parameters import sbnk_links
 from axklib.relationships import (
+    ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE,
     build_relationship_graph,
     build_relationship_graph_for_loaded_results,
     build_relationship_graph_for_path_results,
@@ -60,18 +59,13 @@ from axklib.validation import volume as volume_validation
 VERSION = "0.1.0-plan008"
 
 
-def _content_label_map_from_args(args: argparse.Namespace) -> ContentLabelMap | None:
-    path = getattr(args, "content_label_map", None)
-    if not path:
-        return None
-    return load_content_label_map(Path(path))
-
-
 def run_info(args: argparse.Namespace) -> int:
     options = axklib.OpenOptions(strict=args.strict, include_payloads=True)
-    content_label_map = _content_label_map_from_args(args)
     results = build_content_trees_for_paths(
-        _input_paths(args.paths), options=options, content_label_map=content_label_map
+        _input_paths(args.paths),
+        options=options,
+        include_unresolved=args.show_unresolved,
+        include_default_programs=args.show_default_programs,
     )
     exit_code = 0
     if args.format == "json":
@@ -136,6 +130,14 @@ def _result_objects_by_source_and_key(results: Sequence[object]) -> dict[tuple[s
 def _known_single_target(row: WaveformRelationship) -> str | None:
     targets = [part for part in row.target_key.split("|") if part]
     return targets[0] if len(targets) == 1 else None
+
+
+def _relationship_drives_active_program_context(row: WaveformRelationship) -> bool:
+    if not row.relationship_type.startswith("PROG_ASSIGNMENT_TO_"):
+        return False
+    if not row.active_assignment_state:
+        return True
+    return row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE
 
 
 def _current_sbnk_parameter_context(
@@ -203,7 +205,7 @@ def _current_prog_parameter_context(
             row.quality != "Known"
             or row.source_image != waveform.source_image
             or _known_single_target(row) not in targets
-            or not row.relationship_type.startswith("PROG_")
+            or not _relationship_drives_active_program_context(row)
         ):
             continue
         prog = objects.get((waveform.source_image, row.source_key))
@@ -246,7 +248,7 @@ def _enrich_waveform_parameter_metadata(
 
 
 def _wave_export_context(
-    results: Sequence[object], content_label_map: ContentLabelMap | None = None
+    results: Sequence[object],
 ) -> tuple[dict[str, WaveformPlacement], tuple[WaveformRelationship, ...]]:
     placements: dict[str, WaveformPlacement] = {}
     relationship_items: list[Any] = []
@@ -254,7 +256,7 @@ def _wave_export_context(
         container = getattr(result, "container", None)
         if container is None:
             continue
-        placement_rows, _issues = load_known_object_placements(container, content_label_map)
+        placement_rows, _issues = load_known_object_placements(container)
         source_image = (
             container.objects[0].image if container.objects else str(container.source_path)
         )
@@ -283,6 +285,11 @@ def _wave_export_context(
                 ambiguity_notes=row.ambiguity_notes,
                 source_image=row.source_image,
                 scope_key=row.scope_key,
+                assignment_index=row.assignment_index,
+                assignment_name=row.assignment_name,
+                assignment_row_state=row.assignment_row_state,
+                active_assignment_state=row.active_assignment_state,
+                assignment_rch_assign_display=row.assignment_rch_assign_display,
             )
             for row in graph.relationships
         )
@@ -333,6 +340,12 @@ def _object_origin_columns(raw: Any) -> dict[str, object]:
         "iso_extent_sector": metadata.get("iso_extent_sector", ""),
         "iso_data_offset": metadata.get("iso_data_offset", ""),
         "iso_file_size": metadata.get("iso_file_size", ""),
+        "iso_raw_group": metadata.get("iso_raw_group", ""),
+        "iso_raw_volume": metadata.get("iso_raw_volume", ""),
+        "iso_group_label": metadata.get("iso_group_label", ""),
+        "iso_volume_label": metadata.get("iso_volume_label", ""),
+        "iso_group_label_source": metadata.get("iso_group_label_source", ""),
+        "iso_volume_label_source": metadata.get("iso_volume_label_source", ""),
         "iso_recovery_quality": metadata.get("iso_recovery_quality", ""),
         "fat_directory_offset": metadata.get("fat_directory_offset", ""),
         "fat_first_cluster": metadata.get("fat_first_cluster", ""),
@@ -529,8 +542,7 @@ def run_extract_waves(args: argparse.Namespace) -> int:
         decode_errors += len(waveform_set.issues)
         for issue in waveform_set.issues[:20]:
             print(f"{issue.object_key}\t{issue.code}\t{issue.message}")
-    content_label_map = _content_label_map_from_args(args)
-    placements, relationships = _wave_export_context(results, content_label_map)
+    placements, relationships = _wave_export_context(results)
     enriched_waveforms = _enrich_waveform_parameter_metadata(waveforms, results, relationships)
     request = WavExportRequest(
         output_dir=output_dir,
@@ -1027,7 +1039,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="show unresolved/candidate notes when available",
     )
     info.add_argument(
-        "--content-label-map", help="JSON file with caller-supplied ISO content labels"
+        "--show-default-programs",
+        action="store_true",
+        help="show empty default program slots in tree and JSON output",
     )
     info.set_defaults(func=run_info)
 
@@ -1171,9 +1185,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="SBAC volume disambiguation report directory for Likely placement rows",
     )
     waves.add_argument("--strict", action="store_true", help="raise on the first load error")
-    waves.add_argument(
-        "--content-label-map", help="JSON file with caller-supplied ISO content labels"
-    )
     waves.set_defaults(func=run_extract_waves)
     return parser
 

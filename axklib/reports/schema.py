@@ -16,8 +16,9 @@ SCHEMA_VERSION = "1.0"
 @dataclass(frozen=True)
 class ReportColumnSchema:
     """Schema description for one column in a generated report.
-    
+
     Use it to document column name, inferred type, nullability, semantic notes, and deprecation notes for CSV/JSON outputs."""
+
     name: str
     type: str
     required: bool
@@ -29,8 +30,9 @@ class ReportColumnSchema:
 @dataclass(frozen=True)
 class ReportSchemaManifest:
     """Machine-readable schema manifest for one generated report.
-    
+
     Use it to track row counts, column schemas, quality counts, issue-code counts, object-reference columns, source command, and compatibility notes."""
+
     report_name: str
     schema_version: str
     row_count: int
@@ -103,7 +105,7 @@ def _field_semantic_notes(name: str) -> str:
     if name == "assignment_row_state":
         return "Program assignment row classification; decoded-row means a PROG row was decoded and reported separately from active assignment state."
     if name == "active_assignment_state":
-        return "Conservative active Program assignment classification from decoded row bytes when available; unknown means the row does not match a supported active/off value."
+        return "Conservative Program assignment classification. HDA/sampler-authored rows may be confirmed-active, confirmed-visible-off, or confirmed-duplicate-not-active; ISO source-load-assignment rows are matched source links whose loaded active state is reported separately from stored HDA active/off bytes."
     if name == "assignment_output1_byte_0x1d":
         return "Decoded PROG assignment row +0x1d byte retained as raw per-row output data; it is not the Rch Assign display selector by itself."
     if name == "assignment_rch_assign_gate_byte_0x28":
@@ -153,7 +155,12 @@ def make_schema_manifest(
     issue_code_counts: Counter[str] = Counter()
     object_type_counts: Counter[str] = Counter()
     for row in plain_rows:
-        for key in ("quality", "extraction_quality", "match_quality", "organization_relationship_quality"):
+        for key in (
+            "quality",
+            "extraction_quality",
+            "match_quality",
+            "organization_relationship_quality",
+        ):
             value = row.get(key)
             if value not in (None, ""):
                 quality_counts[str(value)] += 1

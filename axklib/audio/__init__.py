@@ -22,8 +22,9 @@ WaveExportLayout = Literal["structured", "flat"]
 @dataclass(frozen=True)
 class Waveform:
     """Decoded exact waveform payload and playback metadata for one SMPL object.
-    
+
     Use this as the in-memory audio unit before writing WAV files or building structured export graphs."""
+
     object_key: str
     source_image: str
     partition_index: int | None
@@ -56,8 +57,9 @@ class Waveform:
 @dataclass(frozen=True)
 class WaveformPlacement:
     """Best-known sampler-facing placement for a decoded waveform.
-    
+
     Use it to organize exports by partition, volume, category, and owner while keeping placement quality explicit."""
+
     partition_index: int | None = None
     partition_name: str = ""
     volume_name: str = ""
@@ -72,8 +74,9 @@ class WaveformPlacement:
 @dataclass(frozen=True)
 class WaveformRelationship:
     """Relationship edge relevant to waveform export context.
-    
+
     Use it to connect exported audio back to parent SBNK, SBAC, or PROG objects without re-running relationship inference inside the exporter."""
+
     source_key: str
     target_key: str
     relationship_type: str
@@ -83,12 +86,19 @@ class WaveformRelationship:
     ambiguity_notes: str = ""
     source_image: str = ""
     scope_key: str = ""
+    assignment_index: int | None = None
+    assignment_name: str = ""
+    assignment_row_state: str = ""
+    active_assignment_state: str = ""
+    assignment_rch_assign_display: str = ""
+
 
 @dataclass(frozen=True)
 class WaveformIssue:
     """Structured waveform decode issue for one object.
-    
+
     Use it when a waveform cannot be decoded exactly, has truncated payload bytes, or needs a stable warning/error code in corpus reports."""
+
     object_key: str
     sample_name: str
     code: str
@@ -99,8 +109,9 @@ class WaveformIssue:
 @dataclass(frozen=True)
 class WaveformSet:
     """Batch waveform decode result.
-    
+
     Use it to pass decoded waveforms and their non-fatal decode issues together through export and validation code."""
+
     waveforms: tuple[Waveform, ...]
     issues: tuple[WaveformIssue, ...]
 
@@ -108,8 +119,9 @@ class WaveformSet:
 @dataclass(frozen=True)
 class WavExportRequest:
     """Immutable request for writing decoded waveforms to disk.
-    
+
     Use it to specify output directory, stereo policy, overwrite policy, layout, placement hints, and relationship hints in one testable value."""
+
     output_dir: Path
     waveforms: tuple[Waveform, ...]
     stereo_policy: StereoPolicy = "auto"
@@ -123,8 +135,9 @@ class WavExportRequest:
 @dataclass(frozen=True)
 class WavExportResult:
     """Result summary from a WAV export run.
-    
+
     Use it to inspect written files, skipped files, warnings, and sidecar rows without scraping console output."""
+
     written_files: tuple[Path, ...]
     skipped_files: tuple[Path, ...]
     warnings: tuple[str, ...]
@@ -178,7 +191,9 @@ def decode_waveform(sample: AxklibObject) -> Waveform:
         raise ValueError(f"decode_waveform requires SMPL object, got {sample.type}")
     payload = sample.payload
     if len(payload) < 0xAC:
-        raise ValueError(f"SMPL payload too short for current waveform decode: {len(payload)} bytes")
+        raise ValueError(
+            f"SMPL payload too short for current waveform decode: {len(payload)} bytes"
+        )
     if not payload.startswith(object_current.OBJECT_MAGIC):
         raise ValueError("SMPL payload does not start with FSFSDEV3SPLX magic")
     if payload[0x0C:0x10] != b"SMPL":
@@ -254,6 +269,12 @@ def decode_waveform(sample: AxklibObject) -> Waveform:
             "smpl_link_id_0x078": metadata.smpl_link_id_0x078,
             "sample_rate_duplicate_0x07c": metadata.sample_rate_duplicate_0x07c,
             "wave_length_frames_0x092": metadata.wave_length_frames_0x092,
+            "iso_raw_group": sample.metadata.get("iso_raw_group", ""),
+            "iso_raw_volume": sample.metadata.get("iso_raw_volume", ""),
+            "iso_group_label": sample.metadata.get("iso_group_label", ""),
+            "iso_volume_label": sample.metadata.get("iso_volume_label", ""),
+            "iso_group_label_source": sample.metadata.get("iso_group_label_source", ""),
+            "iso_volume_label_source": sample.metadata.get("iso_volume_label_source", ""),
         },
     )
 
@@ -266,7 +287,11 @@ def decode_container_waveforms(
     for item in container.objects:
         if item.type != "SMPL":
             continue
-        if selection and selection.lower() not in item.name.lower() and selection != item.object_key:
+        if (
+            selection
+            and selection.lower() not in item.name.lower()
+            and selection != item.object_key
+        ):
             continue
         try:
             waveforms.append(decode_waveform(item))
@@ -283,7 +308,9 @@ def decode_container_waveforms(
     return WaveformSet(waveforms=tuple(waveforms), issues=tuple(issues))
 
 
-def iter_waveforms(container: AxklibContainer, *, selection: str | None = None) -> tuple[Waveform, ...]:
+def iter_waveforms(
+    container: AxklibContainer, *, selection: str | None = None
+) -> tuple[Waveform, ...]:
     return decode_container_waveforms(container, selection=selection).waveforms
 
 
@@ -359,10 +386,12 @@ def export_waveforms(request: WavExportRequest) -> WavExportResult:
             placements=request.placements,
             relationships=request.relationships,
         )
-        structured_written, structured_skipped, structured_warnings, structured_records = write_structured_export(
-            plan,
-            overwrite_policy=request.overwrite_policy,
-            stereo_policy=request.stereo_policy,
+        structured_written, structured_skipped, structured_warnings, structured_records = (
+            write_structured_export(
+                plan,
+                overwrite_policy=request.overwrite_policy,
+                stereo_policy=request.stereo_policy,
+            )
         )
         return WavExportResult(
             written_files=structured_written,
@@ -407,7 +436,9 @@ def export_waveforms(request: WavExportRequest) -> WavExportResult:
         records.append(record)
     manifest_rows = [
         {
-            "object_offset": record.get("object_offset") if record.get("object_offset") is not None else "",
+            "object_offset": record.get("object_offset")
+            if record.get("object_offset") is not None
+            else "",
             "name": record.get("name_guess", ""),
             "sample_rate": record.get("sample_rate", ""),
             "sample_width_bytes": record.get("sample_width_bytes", ""),
@@ -415,13 +446,17 @@ def export_waveforms(request: WavExportRequest) -> WavExportResult:
             "source_wav_path": record.get("wav_path", ""),
             "exported_wav_path": record.get("wav_path", ""),
             "exported_json_path": str(Path(str(record.get("wav_path", ""))).with_suffix(".json")),
-            "partition_index": record.get("partition_index") if record.get("partition_index") is not None else "",
+            "partition_index": record.get("partition_index")
+            if record.get("partition_index") is not None
+            else "",
             "partition_name": record.get("partition_name", ""),
             "volume_name": record.get("volume_name", ""),
             "category_name": record.get("category_name", ""),
             "organization_source": record.get("organization_source", ""),
             "organization_relationship_path": record.get("organization_relationship_path", ""),
-            "organization_relationship_quality": record.get("organization_relationship_quality", ""),
+            "organization_relationship_quality": record.get(
+                "organization_relationship_quality", ""
+            ),
             "organization_owner_object_offset": "",
         }
         for record in records
@@ -441,7 +476,9 @@ def export_waveforms(request: WavExportRequest) -> WavExportResult:
             os.replace(tmp_manifest_path, manifest_path)
             written.append(manifest_path)
     if request.stereo_policy == "auto":
-        warnings.append("stereo auto policy is reserved for the shared stereo service; mono exact exports were written")
+        warnings.append(
+            "stereo auto policy is reserved for the shared stereo service; mono exact exports were written"
+        )
     return WavExportResult(
         written_files=tuple(written),
         skipped_files=tuple(skipped),

@@ -24,6 +24,8 @@ Summarize supported inputs:
 uv run axklib info <image-or-directory>
 ```
 
+The tree view omits empty default program slots by default. Use `--show-default-programs` when you need the full 128-slot Program list.
+
 Write an inventory report:
 
 ```powershell
@@ -66,31 +68,7 @@ Build the local documentation:
 uv run --group docs axklib-docs build --strict
 ```
 
-Use caller-supplied ISO menu labels when a project has a separate label map:
-
-```powershell
-uv run axklib info --content-label-map labels.json <image-or-directory>
-uv run axklib extract waves --content-label-map labels.json -o build/exports/waves <image-or-directory>
-```
-
-Label maps are JSON objects with synthetic source stems and raw ISO path labels:
-
-```json
-{
-  "iso_group_labels": [
-    {"source": "example_disc", "raw_group": "GROUP_A", "label": "GROUP_ALPHA"}
-  ],
-  "iso_volume_labels": [
-    {
-      "source": "example_disc",
-      "raw_group": "GROUP_A",
-      "raw_volume": "V001",
-      "label": "Mapped Volume"
-    }
-  ]
-}
-```
-
+For Yamaha CD-ROM images, axklib uses sampler-facing menu and volume labels when they are stored in the ISO. Raw ISO directory identifiers remain available in JSON and CSV metadata for traceability.
 ## Documentation Sections
 
 - [Typical Usage](axklib/typical-usage.md) shows Python API examples.

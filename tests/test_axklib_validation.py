@@ -51,6 +51,70 @@ def _container(*objects: AxklibObject) -> AxklibContainer:
     )
 
 
+def _typed_object(
+    object_key: str,
+    object_type: str,
+    name: str,
+    payload: bytes,
+    *,
+    fat_file: str = "",
+    offset: int = 0,
+    container_kind: str = "sfs",
+) -> AxklibObject:
+    return AxklibObject(
+        image="fixture.hds",
+        container_kind=container_kind,
+        scope_key="fixture:partition:0",
+        object_key=object_key,
+        partition_index=0,
+        sfs_id=offset,
+        fat_file=fat_file,
+        payload_offset=offset,
+        payload_size=len(payload),
+        type=object_type,
+        name=name,
+        payload=payload,
+    )
+
+
+def _base_payload(object_type: str, name: str, size: int) -> bytearray:
+    payload = bytearray(size)
+    payload[0:12] = b"FSFSDEV3SPLX"
+    payload[0x0C:0x10] = object_type.encode("ascii")
+    payload[0x32 : 0x32 + len(name)] = name.encode("ascii")
+    return payload
+
+
+def _sbnk_payload(name: str, *, member_name: str = "", member_link_id: int = 0) -> bytes:
+    payload = _base_payload("SBNK", name, 0x200)
+    if member_name:
+        payload[0x078 : 0x078 + len(member_name)] = member_name.encode("ascii")
+        payload[0x0A0:0x0A4] = member_link_id.to_bytes(4, "big")
+    return bytes(payload)
+
+
+def _sbac_payload(slot_name: str) -> bytes:
+    payload = _base_payload("SBAC", "AC01", 0x180)
+    payload[0x144] = 1
+    payload[0x14C : 0x14C + len(slot_name)] = slot_name.encode("ascii")
+    return bytes(payload)
+
+
+def _prog_payload(
+    assignment_name: str,
+    *,
+    kind_byte: int,
+    rch_assign_gate: int = 0xFF,
+    rch_assign_selector: int = 0xFF,
+) -> bytes:
+    payload = _base_payload("PROG", "001", 0x200)
+    payload[0x120 : 0x120 + len(assignment_name)] = assignment_name.encode("ascii")
+    payload[0x134] = kind_byte
+    payload[0x135] = rch_assign_selector
+    payload[0x148] = rch_assign_gate
+    return bytes(payload)
+
+
 def test_validation_emits_stable_bad_magic_issue_code() -> None:
     report = validate_container(_container(_object(b"not-an-object")))
 
@@ -69,7 +133,6 @@ def test_validation_emits_stable_payload_truncated_issue_code() -> None:
     report = validate_container(_container(item))
 
     assert any(issue.code == "OBJECT_PAYLOAD_TRUNCATED" for issue in report.issues)
-
 
 
 def _partial_fat_smpl(path: Path, object_key: str, available_payload: int) -> AxklibObject:
@@ -131,11 +194,76 @@ def test_validate_paths_reports_probable_multi_floppy_span(
         ],
     )
 
-    report = __import__("axklib.validation", fromlist=["validate_paths"]).validate_paths([disk1, disk2])
+    report = __import__("axklib.validation", fromlist=["validate_paths"]).validate_paths(
+        [disk1, disk2]
+    )
 
     codes = {issue.code for issue in report.issues}
     assert "OBJECT_FLOPPY_SPANNED_PAYLOAD_PARTIAL" in codes
     assert "OBJECT_PAYLOAD_TRUNCATED" not in codes
+
+
+def test_validation_aggregates_unresolved_sbnk_members_by_object_group() -> None:
+    sbnk = _typed_object(
+        "sbnk-broken",
+        "SBNK",
+        "BROKEN",
+        _sbnk_payload("BROKEN", member_name="MISSING", member_link_id=0x1111),
+        fat_file="VOL/F001/SBNK/F001",
+        offset=20,
+    )
+
+    report = validate_container(_container(sbnk))
+
+    issue = next(issue for issue in report.issues if issue.code == "REL_SBNK_MEMBER_TARGET_MISSING")
+    assert issue.severity == ValidationSeverity.WARNING
+    assert issue.sampler_path == "VOL/F001"
+    assert issue.object_key == "sbnk-broken"
+    assert "1 sample-bank member link(s)" in issue.message
+    assert "REL_MISSING_TARGET" not in report.summary_counts
+    assert report.failed is False
+
+
+def test_validation_raises_unresolved_sbnk_members_reachable_from_active_program() -> None:
+    prog = _typed_object(
+        "prog",
+        "PROG",
+        "001",
+        _prog_payload("BANK", kind_byte=0x11, rch_assign_gate=0xFF),
+        fat_file="VOL/F001/PROG/F001",
+        offset=10,
+    )
+    sbac = _typed_object(
+        "sbac",
+        "SBAC",
+        "AC01",
+        _sbac_payload("BANK"),
+        fat_file="VOL/F001/SBAC/F001",
+        offset=20,
+    )
+    sbnk = _typed_object(
+        "sbnk-broken",
+        "SBNK",
+        "BANK",
+        _sbnk_payload("BANK", member_name="MISSING", member_link_id=0x1111),
+        fat_file="VOL/F001/SBNK/F001",
+        offset=30,
+    )
+
+    report = validate_container(_container(prog, sbac, sbnk))
+
+    issue = next(
+        issue
+        for issue in report.issues
+        if issue.code == "REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING"
+    )
+    assert issue.severity == ValidationSeverity.ERROR
+    assert issue.sampler_path.startswith("VOL/F001 | VOL/F001/PROG/F001: assignment 1 BANK")
+    assert issue.object_key == "sbnk-broken"
+    assert "reachable from active Program assignments" in issue.message
+    assert "REL_MISSING_TARGET" not in report.summary_counts
+    assert report.failed is True
+
 
 def test_validation_policy_strict_fails_on_warnings() -> None:
     warning = [
@@ -182,7 +310,18 @@ def test_validate_export_sidecars_checks_wav_header(tmp_path) -> None:
 
 def test_validation_issue_codes_use_stable_namespaces() -> None:
     report = validate_container(_container(_object(b"not-an-object")))
-    allowed_prefixes = ("CONTAINER_", "SFS_", "OBJECT_", "REL_", "AUDIO_", "REPORT_", "EXPORT_", "SIDECAR_", "CLI_", "ISO_")
+    allowed_prefixes = (
+        "CONTAINER_",
+        "SFS_",
+        "OBJECT_",
+        "REL_",
+        "AUDIO_",
+        "REPORT_",
+        "EXPORT_",
+        "SIDECAR_",
+        "CLI_",
+        "ISO_",
+    )
 
     assert report.issues
     assert all(issue.code.startswith(allowed_prefixes) for issue in report.issues)
@@ -306,6 +445,7 @@ def test_validate_export_sidecars_rejects_v2_path_escape(tmp_path) -> None:
 
     assert any(issue.code == "EXPORT_SIDECAR_PATH_ESCAPE" for issue in report.issues)
 
+
 def _write_test_wav(path, *, channels: int = 1) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as wav:
@@ -321,21 +461,25 @@ def test_validate_export_sidecars_checks_stereo_decision_outputs(tmp_path) -> No
     (tmp_path / "_schemas").mkdir()
     (tmp_path / "_schemas" / "stereo_decisions.schema.json").write_text("{}", encoding="utf-8")
     (tmp_path / "samples.json").write_text(
-        json.dumps([
-            {"wav_path": "Samples/Stereo.wav"},
-        ]),
+        json.dumps(
+            [
+                {"wav_path": "Samples/Stereo.wav"},
+            ]
+        ),
         encoding="utf-8",
     )
     (tmp_path / "stereo_decisions.json").write_text(
-        json.dumps([
-            {
-                "decision": "interleaved_stereo_written",
-                "sbnk_object_key": "p0:sfs10",
-                "stereo_wav_path": "Samples/Stereo.wav",
-                "left_mono_wav_path": "",
-                "right_mono_wav_path": "",
-            }
-        ]),
+        json.dumps(
+            [
+                {
+                    "decision": "interleaved_stereo_written",
+                    "sbnk_object_key": "p0:sfs10",
+                    "stereo_wav_path": "Samples/Stereo.wav",
+                    "left_mono_wav_path": "",
+                    "right_mono_wav_path": "",
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -350,28 +494,34 @@ def test_validate_export_sidecars_rejects_stale_suppressed_mono_listing(tmp_path
     (tmp_path / "_schemas").mkdir()
     (tmp_path / "_schemas" / "stereo_decisions.schema.json").write_text("{}", encoding="utf-8")
     (tmp_path / "samples.json").write_text(
-        json.dumps([
-            {"wav_path": "Samples/Stereo.wav"},
-            {"wav_path": "Waveforms/Left.wav"},
-        ]),
+        json.dumps(
+            [
+                {"wav_path": "Samples/Stereo.wav"},
+                {"wav_path": "Waveforms/Left.wav"},
+            ]
+        ),
         encoding="utf-8",
     )
     (tmp_path / "stereo_decisions.json").write_text(
-        json.dumps([
-            {
-                "decision": "interleaved_stereo_written",
-                "sbnk_object_key": "p0:sfs10",
-                "stereo_wav_path": "Samples/Stereo.wav",
-                "left_mono_wav_path": "Waveforms/Left.wav",
-                "right_mono_wav_path": "",
-            }
-        ]),
+        json.dumps(
+            [
+                {
+                    "decision": "interleaved_stereo_written",
+                    "sbnk_object_key": "p0:sfs10",
+                    "stereo_wav_path": "Samples/Stereo.wav",
+                    "left_mono_wav_path": "Waveforms/Left.wav",
+                    "right_mono_wav_path": "",
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
     report = validate_export_sidecars(tmp_path)
 
-    assert any(issue.code == "EXPORT_STEREO_SUPPRESSED_MONO_STILL_LISTED" for issue in report.issues)
+    assert any(
+        issue.code == "EXPORT_STEREO_SUPPRESSED_MONO_STILL_LISTED" for issue in report.issues
+    )
 
 
 def test_validate_export_sidecars_rejects_nonexact_missing_mono(tmp_path) -> None:
@@ -379,15 +529,17 @@ def test_validate_export_sidecars_rejects_nonexact_missing_mono(tmp_path) -> Non
     (tmp_path / "_schemas" / "stereo_decisions.schema.json").write_text("{}", encoding="utf-8")
     (tmp_path / "samples.json").write_text("[]", encoding="utf-8")
     (tmp_path / "stereo_decisions.json").write_text(
-        json.dumps([
-            {
-                "decision": "kept_mono_not_exact_representable",
-                "sbnk_object_key": "p0:sfs10",
-                "stereo_wav_path": "",
-                "left_mono_wav_path": "Waveforms/Left.wav",
-                "right_mono_wav_path": "Waveforms/Right.wav",
-            }
-        ]),
+        json.dumps(
+            [
+                {
+                    "decision": "kept_mono_not_exact_representable",
+                    "sbnk_object_key": "p0:sfs10",
+                    "stereo_wav_path": "",
+                    "left_mono_wav_path": "Waveforms/Left.wav",
+                    "right_mono_wav_path": "Waveforms/Right.wav",
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -398,22 +550,25 @@ def test_validate_export_sidecars_rejects_nonexact_missing_mono(tmp_path) -> Non
 
 def test_validate_export_sidecars_rejects_stereo_decision_without_schema(tmp_path) -> None:
     _write_test_wav(tmp_path / "Samples" / "Stereo.wav", channels=2)
-    (tmp_path / "samples.json").write_text(json.dumps([{"wav_path": "Samples/Stereo.wav"}]), encoding="utf-8")
+    (tmp_path / "samples.json").write_text(
+        json.dumps([{"wav_path": "Samples/Stereo.wav"}]), encoding="utf-8"
+    )
     (tmp_path / "stereo_decisions.json").write_text(
-        json.dumps([
-            {
-                "decision": "interleaved_stereo_written",
-                "sbnk_object_key": "p0:sfs10",
-                "stereo_wav_path": "Samples/Stereo.wav",
-            }
-        ]),
+        json.dumps(
+            [
+                {
+                    "decision": "interleaved_stereo_written",
+                    "sbnk_object_key": "p0:sfs10",
+                    "stereo_wav_path": "Samples/Stereo.wav",
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
     report = validate_export_sidecars(tmp_path)
 
     assert any(issue.code == "EXPORT_STEREO_DECISION_SCHEMA_MISSING" for issue in report.issues)
-
 
 
 def test_validate_export_sidecars_rejects_volume_graph_path_escape(tmp_path) -> None:

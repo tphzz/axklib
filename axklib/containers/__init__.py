@@ -42,6 +42,10 @@ class IsoObjectEntry:
     inventory_status: str
     recovery_quality: str
     recovery_notes: str
+    raw_group: str = ""
+    raw_volume: str = ""
+    group_label: str = ""
+    volume_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -220,6 +224,13 @@ def make_object(
     )
 
 
+def _iso_path_group_volume(logical_path: str) -> tuple[str, str]:
+    parts = [part for part in logical_path.replace("\\", "/").split("/") if part]
+    group = parts[0] if len(parts) >= 1 else ""
+    volume = parts[1] if len(parts) >= 2 else ""
+    return group, volume
+
+
 def _expand_iso_inputs(paths: Iterable[Path]) -> list[Path]:
     out: list[Path] = []
     for path in paths:
@@ -244,12 +255,14 @@ def _iter_iso_objects(path: Path) -> Iterable[IsoObjectEntry]:
             "CONTAINER_UNSUPPORTED_ISO9660",
             f"unsupported ISO9660 image {path}: {exc}",
         ) from exc
+    menu_labels = iso_lowlevel.decode_yamaha_menu_labels(path, rows)
     with path.open("rb") as handle:
         for row in rows:
             if row.is_directory or row.object_type not in SUPPORTED_NORMAL_OBJECT_TYPES:
                 continue
             payload = iso_lowlevel.read_at(handle, row.data_offset, row.size)
             quality, notes = iso_lowlevel.classify_iso_recovery(row, payload, row.inventory_status)
+            raw_group, raw_volume = _iso_path_group_volume(row.path)
             yield IsoObjectEntry(
                 volume_id=volume_id,
                 logical_path=row.path,
@@ -260,6 +273,10 @@ def _iter_iso_objects(path: Path) -> Iterable[IsoObjectEntry]:
                 inventory_status=row.inventory_status,
                 recovery_quality=quality,
                 recovery_notes=notes,
+                raw_group=raw_group,
+                raw_volume=raw_volume,
+                group_label=menu_labels.group_labels.get(raw_group, ""),
+                volume_label=menu_labels.volume_labels.get((raw_group, raw_volume), ""),
             )
 
 
@@ -504,6 +521,12 @@ def _iso_metadata(entry: IsoObjectEntry, header: AxklibObjectHeader | None) -> d
         "iso_extent_sector": entry.extent_sector,
         "iso_data_offset": entry.data_offset,
         "iso_file_size": entry.file_size,
+        "iso_raw_group": entry.raw_group,
+        "iso_raw_volume": entry.raw_volume,
+        "iso_group_label": entry.group_label,
+        "iso_volume_label": entry.volume_label,
+        "iso_group_label_source": "yamaha-cdrom-menu-label" if entry.group_label else "",
+        "iso_volume_label_source": "yamaha-cdrom-menu-label" if entry.volume_label else "",
         "iso_header_size": header.header_size if header else None,
         "iso_stored_payload_size": header.stored_payload_size if header else None,
     }

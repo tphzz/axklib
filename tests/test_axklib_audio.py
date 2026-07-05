@@ -85,7 +85,9 @@ def test_export_waveforms_writes_object_graph_and_wav_only_smpl(tmp_path: Path) 
     result = export_waveforms(WavExportRequest(output_dir=tmp_path, waveforms=(waveform,)))
 
     wav_paths = [path for path in result.written_files if path.suffix == ".wav"]
-    assert [path.relative_to(tmp_path).as_posix() for path in wav_paths] == ["_unplaced/SMPL/S01.wav"]
+    assert [path.relative_to(tmp_path).as_posix() for path in wav_paths] == [
+        "_unplaced/SMPL/S01.wav"
+    ]
     assert not list((tmp_path / "_unplaced" / "SMPL").glob("*.json"))
     graph_path = tmp_path / "_unplaced" / "volume.axklib.json"
     graph = _graph(graph_path)
@@ -165,7 +167,9 @@ def test_stereo_interleave_lives_in_audio_library() -> None:
 
 def test_object_graph_references_known_stereo_from_sbnk(tmp_path: Path) -> None:
     left = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
-    right = replace(left, object_key="p0:sfs2", object_offset=512, sample_name="S01 R", pcm=b"\x03\x00\x04\x00")
+    right = replace(
+        left, object_key="p0:sfs2", object_offset=512, sample_name="S01 R", pcm=b"\x03\x00\x04\x00"
+    )
     placements = {
         "p0:sfs10": WaveformPlacement(
             partition_index=0,
@@ -207,7 +211,11 @@ def test_object_graph_references_known_stereo_from_sbnk(tmp_path: Path) -> None:
         )
     )
 
-    wavs = sorted(path.relative_to(tmp_path).as_posix() for path in result.written_files if path.suffix == ".wav")
+    wavs = sorted(
+        path.relative_to(tmp_path).as_posix()
+        for path in result.written_files
+        if path.suffix == ".wav"
+    )
     assert wavs == [
         "partition_00_hd1/Vol 1/RENDERED/S01 Stereo.wav",
         "partition_00_hd1/Vol 1/SMPL/S01 R.wav",
@@ -219,9 +227,73 @@ def test_object_graph_references_known_stereo_from_sbnk(tmp_path: Path) -> None:
     assert [row["role"] for row in sbnk["physical_waveforms"]] == ["left", "right"]
     assert sbnk["rendered_audio"]["wav_path"] == "RENDERED/S01 Stereo.wav"
     assert graph["rendered_audio"][0]["wav_path"] == "RENDERED/S01 Stereo.wav"
-    with wave.open(str(tmp_path / "partition_00_hd1" / "Vol 1" / "RENDERED" / "S01 Stereo.wav"), "rb") as wav:
+    with wave.open(
+        str(tmp_path / "partition_00_hd1" / "Vol 1" / "RENDERED" / "S01 Stereo.wav"), "rb"
+    ) as wav:
         assert wav.getnchannels() == 2
         assert wav.getnframes() == 2
+
+
+def test_object_graph_records_program_assignment_active_state(tmp_path: Path) -> None:
+    waveform = decode_waveform(_sample_object())
+    placements = {
+        "p0:sfs10": WaveformPlacement(
+            partition_index=0,
+            partition_name="hd1",
+            volume_name="Vol 1",
+            category_name="Samples",
+            display_name="S01 Bank",
+            quality=DataQuality.KNOWN,
+            source="test placement",
+        ),
+    }
+    relationships = (
+        WaveformRelationship(
+            "p0:sfs10",
+            waveform.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "test member",
+            source_image=waveform.source_image,
+        ),
+        WaveformRelationship(
+            "p0:prog1",
+            "p0:sfs10",
+            "PROG_ASSIGNMENT_TO_SBNK",
+            "Known",
+            "test assignment",
+            source_image=waveform.source_image,
+            assignment_index=3,
+            assignment_name="S01 Bank",
+            assignment_row_state="decoded-row",
+            active_assignment_state="confirmed-active",
+            assignment_rch_assign_display="01",
+        ),
+    )
+
+    export_waveforms(
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(waveform,),
+            placements=placements,
+            relationships=relationships,
+        )
+    )
+
+    graph = _graph(tmp_path / "partition_00_hd1" / "Vol 1" / "volume.axklib.json")
+    assignment = graph["objects"]["prog"][0]["assignments"][0]
+    assert assignment["assignment_index"] == 3
+    assert assignment["assignment_name"] == "S01 Bank"
+    assert assignment["assignment_row_state"] == "decoded-row"
+    assert assignment["active_assignment_state"] == "confirmed-active"
+    assert assignment["assignment_rch_assign_display"] == "01"
+    relationship = next(
+        row
+        for row in graph["relationships"]
+        if row["relationship_type"] == "PROG_ASSIGNMENT_TO_SBNK"
+    )
+    assert relationship["active_assignment_state"] == "confirmed-active"
+    assert relationship["assignment_rch_assign_display"] == "01"
 
 
 def test_object_graph_scopes_multi_source_exports(tmp_path: Path) -> None:
@@ -229,9 +301,13 @@ def test_object_graph_scopes_multi_source_exports(tmp_path: Path) -> None:
 
     base = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
     left_a = replace(base, source_image="a.hds", sample_name="A L")
-    right_a = replace(base, source_image="a.hds", object_key="p0:sfs2", sample_name="A R", pcm=b"\x03\x00\x04\x00")
+    right_a = replace(
+        base, source_image="a.hds", object_key="p0:sfs2", sample_name="A R", pcm=b"\x03\x00\x04\x00"
+    )
     left_b = replace(base, source_image="b.hds", sample_name="B L", pcm=b"\x05\x00\x06\x00")
-    right_b = replace(base, source_image="b.hds", object_key="p0:sfs2", sample_name="B R", pcm=b"\x07\x00\x08\x00")
+    right_b = replace(
+        base, source_image="b.hds", object_key="p0:sfs2", sample_name="B R", pcm=b"\x07\x00\x08\x00"
+    )
     placements = {
         scoped_object_key("a.hds", "p0:sfs10"): WaveformPlacement(
             partition_index=0,
@@ -253,10 +329,42 @@ def test_object_graph_scopes_multi_source_exports(tmp_path: Path) -> None:
         ),
     }
     relationships = (
-        WaveformRelationship("p0:sfs10", "p0:sfs1", "SBNK_LEFT_MEMBER_TO_SMPL", "Known", "test A left", source_image="a.hds", scope_key="a:p0"),
-        WaveformRelationship("p0:sfs10", "p0:sfs2", "SBNK_RIGHT_MEMBER_TO_SMPL", "Known", "test A right", source_image="a.hds", scope_key="a:p0"),
-        WaveformRelationship("p0:sfs10", "p0:sfs1", "SBNK_LEFT_MEMBER_TO_SMPL", "Known", "test B left", source_image="b.hds", scope_key="b:p0"),
-        WaveformRelationship("p0:sfs10", "p0:sfs2", "SBNK_RIGHT_MEMBER_TO_SMPL", "Known", "test B right", source_image="b.hds", scope_key="b:p0"),
+        WaveformRelationship(
+            "p0:sfs10",
+            "p0:sfs1",
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "test A left",
+            source_image="a.hds",
+            scope_key="a:p0",
+        ),
+        WaveformRelationship(
+            "p0:sfs10",
+            "p0:sfs2",
+            "SBNK_RIGHT_MEMBER_TO_SMPL",
+            "Known",
+            "test A right",
+            source_image="a.hds",
+            scope_key="a:p0",
+        ),
+        WaveformRelationship(
+            "p0:sfs10",
+            "p0:sfs1",
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "test B left",
+            source_image="b.hds",
+            scope_key="b:p0",
+        ),
+        WaveformRelationship(
+            "p0:sfs10",
+            "p0:sfs2",
+            "SBNK_RIGHT_MEMBER_TO_SMPL",
+            "Known",
+            "test B right",
+            source_image="b.hds",
+            scope_key="b:p0",
+        ),
     )
 
     export_waveforms(
@@ -269,7 +377,9 @@ def test_object_graph_scopes_multi_source_exports(tmp_path: Path) -> None:
         )
     )
 
-    graph_paths = sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("volume.axklib.json"))
+    graph_paths = sorted(
+        path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("volume.axklib.json")
+    )
     assert graph_paths == [
         "src0001_a/partition_00_hdA/Vol A/volume.axklib.json",
         "src0002_b/partition_00_hdB/Vol B/volume.axklib.json",
@@ -315,7 +425,9 @@ def test_object_graph_uses_container_scope_placement_without_fake_partition(tmp_
         )
     }
 
-    export_waveforms(WavExportRequest(output_dir=tmp_path, waveforms=(waveform,), placements=placements))
+    export_waveforms(
+        WavExportRequest(output_dir=tmp_path, waveforms=(waveform,), placements=placements)
+    )
 
     assert (tmp_path / "ISO objects" / "volume.axklib.json").exists()
     assert not list(tmp_path.glob("partition_unknown*"))
@@ -327,25 +439,84 @@ def test_object_graph_uses_container_scope_placement_without_fake_partition(tmp_
 def test_object_graph_keeps_duplicate_sbnk_references_without_duplicate_wav(tmp_path: Path) -> None:
     waveform = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
     placements = {
-        "p0:sfs10": WaveformPlacement(volume_name="Vol 1", category_name="Sample Banks", display_name="Smp", quality=DataQuality.KNOWN, source="test sample placement"),
-        "p0:sfs11": WaveformPlacement(volume_name="Vol 1", category_name="Sample Banks", display_name="Smp *", quality=DataQuality.KNOWN, source="test duplicate sample placement"),
-        "p0:sbac1": WaveformPlacement(volume_name="Vol 1", category_name="Sample Banks", display_name="Bank", quality=DataQuality.KNOWN, source="test bank placement"),
-        "p0:sbac2": WaveformPlacement(volume_name="Vol 1", category_name="Sample Banks", display_name="Bank *", quality=DataQuality.KNOWN, source="test duplicate bank placement"),
+        "p0:sfs10": WaveformPlacement(
+            volume_name="Vol 1",
+            category_name="Sample Banks",
+            display_name="Smp",
+            quality=DataQuality.KNOWN,
+            source="test sample placement",
+        ),
+        "p0:sfs11": WaveformPlacement(
+            volume_name="Vol 1",
+            category_name="Sample Banks",
+            display_name="Smp *",
+            quality=DataQuality.KNOWN,
+            source="test duplicate sample placement",
+        ),
+        "p0:sbac1": WaveformPlacement(
+            volume_name="Vol 1",
+            category_name="Sample Banks",
+            display_name="Bank",
+            quality=DataQuality.KNOWN,
+            source="test bank placement",
+        ),
+        "p0:sbac2": WaveformPlacement(
+            volume_name="Vol 1",
+            category_name="Sample Banks",
+            display_name="Bank *",
+            quality=DataQuality.KNOWN,
+            source="test duplicate bank placement",
+        ),
     }
     relationships = (
-        WaveformRelationship("p0:sfs10", waveform.object_key, "SBNK_LEFT_MEMBER_TO_SMPL", "Known", "test", source_image=waveform.source_image),
-        WaveformRelationship("p0:sfs11", waveform.object_key, "SBNK_LEFT_MEMBER_TO_SMPL", "Known", "test", source_image=waveform.source_image),
-        WaveformRelationship("p0:sbac1", "p0:sfs10", "SBAC_SLOT_TO_SBNK", "Known", "test", source_image=waveform.source_image),
-        WaveformRelationship("p0:sbac2", "p0:sfs11", "SBAC_SLOT_TO_SBNK", "Known", "test", source_image=waveform.source_image),
+        WaveformRelationship(
+            "p0:sfs10",
+            waveform.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "test",
+            source_image=waveform.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sfs11",
+            waveform.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "test",
+            source_image=waveform.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac1",
+            "p0:sfs10",
+            "SBAC_SLOT_TO_SBNK",
+            "Known",
+            "test",
+            source_image=waveform.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac2",
+            "p0:sfs11",
+            "SBAC_SLOT_TO_SBNK",
+            "Known",
+            "test",
+            source_image=waveform.source_image,
+        ),
     )
 
     result = export_waveforms(
-        WavExportRequest(output_dir=tmp_path, waveforms=(waveform,), placements=placements, relationships=relationships)
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(waveform,),
+            placements=placements,
+            relationships=relationships,
+        )
     )
 
-    assert [path.relative_to(tmp_path).as_posix() for path in result.written_files if path.suffix == ".wav"] == [
-        "Vol 1/SMPL/S01.wav"
-    ]
+    assert [
+        path.relative_to(tmp_path).as_posix()
+        for path in result.written_files
+        if path.suffix == ".wav"
+    ] == ["Vol 1/SMPL/S01.wav"]
     graph = _graph(tmp_path / "Vol 1" / "volume.axklib.json")
     assert len(graph["objects"]["smpl"]) == 1
     assert sorted(row["display_name"] for row in graph["objects"]["sbnk"]) == ["Smp", "Smp *"]
@@ -354,7 +525,14 @@ def test_object_graph_keeps_duplicate_sbnk_references_without_duplicate_wav(tmp_
 
 def test_object_graph_records_padding_for_rendered_stereo(tmp_path: Path) -> None:
     left = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
-    right = replace(left, object_key="p0:sfs2", object_offset=512, sample_name="S01 R", pcm=b"\x03\x00\x04\x00\x05\x00", frame_count=3)
+    right = replace(
+        left,
+        object_key="p0:sfs2",
+        object_offset=512,
+        sample_name="S01 R",
+        pcm=b"\x03\x00\x04\x00\x05\x00",
+        frame_count=3,
+    )
     placements = {
         "p0:sfs10": WaveformPlacement(
             partition_index=0,
@@ -367,12 +545,31 @@ def test_object_graph_records_padding_for_rendered_stereo(tmp_path: Path) -> Non
         ),
     }
     relationships = (
-        WaveformRelationship("p0:sfs10", left.object_key, "SBNK_LEFT_MEMBER_TO_SMPL", "Known", "test", source_image=left.source_image),
-        WaveformRelationship("p0:sfs10", right.object_key, "SBNK_RIGHT_MEMBER_TO_SMPL", "Known", "test", source_image=right.source_image),
+        WaveformRelationship(
+            "p0:sfs10",
+            left.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "test",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sfs10",
+            right.object_key,
+            "SBNK_RIGHT_MEMBER_TO_SMPL",
+            "Known",
+            "test",
+            source_image=right.source_image,
+        ),
     )
 
     result = export_waveforms(
-        WavExportRequest(output_dir=tmp_path, waveforms=(left, right), placements=placements, relationships=relationships)
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(left, right),
+            placements=placements,
+            relationships=relationships,
+        )
     )
 
     rendered = next(path for path in result.written_files if path.parent.name == "RENDERED")
@@ -385,17 +582,37 @@ def test_object_graph_records_padding_for_rendered_stereo(tmp_path: Path) -> Non
     assert graph["stereo_decisions"][0]["reason_code"] == "STEREO_PADDED_SHORTER"
 
 
-def test_filtered_export_suppresses_stereo_warning_when_neither_side_selected(tmp_path: Path) -> None:
+def test_filtered_export_suppresses_stereo_warning_when_neither_side_selected(
+    tmp_path: Path,
+) -> None:
     left = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
-    right = replace(left, object_key="p0:sfs2", object_offset=512, sample_name="S01 R", pcm=b"\x03\x00\x04\x00")
+    right = replace(
+        left, object_key="p0:sfs2", object_offset=512, sample_name="S01 R", pcm=b"\x03\x00\x04\x00"
+    )
     unrelated = replace(left, object_key="p0:sfs99", object_offset=2048, sample_name="Other")
     relationships = (
-        WaveformRelationship("p0:sfs10", left.object_key, "SBNK_LEFT_MEMBER_TO_SMPL", "Known", "test", source_image=left.source_image),
-        WaveformRelationship("p0:sfs10", right.object_key, "SBNK_RIGHT_MEMBER_TO_SMPL", "Known", "test", source_image=right.source_image),
+        WaveformRelationship(
+            "p0:sfs10",
+            left.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "test",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sfs10",
+            right.object_key,
+            "SBNK_RIGHT_MEMBER_TO_SMPL",
+            "Known",
+            "test",
+            source_image=right.source_image,
+        ),
     )
 
     result = export_waveforms(
-        WavExportRequest(output_dir=tmp_path, waveforms=(unrelated,), placements={}, relationships=relationships)
+        WavExportRequest(
+            output_dir=tmp_path, waveforms=(unrelated,), placements={}, relationships=relationships
+        )
     )
 
     assert result.warnings == ()
@@ -405,14 +622,32 @@ def test_filtered_export_suppresses_stereo_warning_when_neither_side_selected(tm
 
 def test_filtered_export_warns_when_only_one_stereo_side_is_selected(tmp_path: Path) -> None:
     left = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
-    right = replace(left, object_key="p0:sfs2", object_offset=512, sample_name="S01 R", pcm=b"\x03\x00\x04\x00")
+    right = replace(
+        left, object_key="p0:sfs2", object_offset=512, sample_name="S01 R", pcm=b"\x03\x00\x04\x00"
+    )
     relationships = (
-        WaveformRelationship("p0:sfs10", left.object_key, "SBNK_LEFT_MEMBER_TO_SMPL", "Known", "test", source_image=left.source_image),
-        WaveformRelationship("p0:sfs10", right.object_key, "SBNK_RIGHT_MEMBER_TO_SMPL", "Known", "test", source_image=right.source_image),
+        WaveformRelationship(
+            "p0:sfs10",
+            left.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "test",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sfs10",
+            right.object_key,
+            "SBNK_RIGHT_MEMBER_TO_SMPL",
+            "Known",
+            "test",
+            source_image=right.source_image,
+        ),
     )
 
     result = export_waveforms(
-        WavExportRequest(output_dir=tmp_path, waveforms=(left,), placements={}, relationships=relationships)
+        WavExportRequest(
+            output_dir=tmp_path, waveforms=(left,), placements={}, relationships=relationships
+        )
     )
 
     assert len(result.warnings) == 1
@@ -426,7 +661,14 @@ def test_filtered_export_warns_when_only_one_stereo_side_is_selected(tmp_path: P
 
 def test_object_graph_keeps_non_interleavable_stereo_as_physical_waveforms(tmp_path: Path) -> None:
     left = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
-    right = replace(left, object_key="p0:sfs2", object_offset=512, sample_name="S01 R", sample_rate=48000, pcm=b"\x03\x00\x04\x00")
+    right = replace(
+        left,
+        object_key="p0:sfs2",
+        object_offset=512,
+        sample_name="S01 R",
+        sample_rate=48000,
+        pcm=b"\x03\x00\x04\x00",
+    )
     placements = {
         "p0:sfs10": WaveformPlacement(
             partition_index=0,
@@ -439,12 +681,31 @@ def test_object_graph_keeps_non_interleavable_stereo_as_physical_waveforms(tmp_p
         ),
     }
     relationships = (
-        WaveformRelationship("p0:sfs10", left.object_key, "SBNK_LEFT_MEMBER_TO_SMPL", "Known", "test", source_image=left.source_image),
-        WaveformRelationship("p0:sfs10", right.object_key, "SBNK_RIGHT_MEMBER_TO_SMPL", "Known", "test", source_image=right.source_image),
+        WaveformRelationship(
+            "p0:sfs10",
+            left.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "test",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sfs10",
+            right.object_key,
+            "SBNK_RIGHT_MEMBER_TO_SMPL",
+            "Known",
+            "test",
+            source_image=right.source_image,
+        ),
     )
 
     result = export_waveforms(
-        WavExportRequest(output_dir=tmp_path, waveforms=(left, right), placements=placements, relationships=relationships)
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(left, right),
+            placements=placements,
+            relationships=relationships,
+        )
     )
 
     assert result.warnings

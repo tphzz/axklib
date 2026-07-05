@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import csv
 import json
+import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from axklib.containers import AxklibContainerLoadResult, OpenOptions, open_many
+from axklib.containers import (
+    AxklibContainer,
+    AxklibContainerLoadResult,
+    OpenOptions,
+    open_many,
+    sfs_inventory,
+)
 from axklib.model import AxklibObject as ObjectItem
 from axklib.objects import current as objects
 from axklib.parameters.current import (
@@ -26,11 +34,13 @@ ACTIVE_ASSIGNMENT_STATE_UNKNOWN = "unknown"
 ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE = "confirmed-active"
 ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF = "confirmed-visible-off"
 ACTIVE_ASSIGNMENT_STATE_CONFIRMED_DUPLICATE_NOT_ACTIVE = "confirmed-duplicate-not-active"
+ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT = "source-load-assignment"
 ACTIVE_ASSIGNMENT_STATES = (
     ACTIVE_ASSIGNMENT_STATE_UNKNOWN,
     ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE,
     ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF,
     ACTIVE_ASSIGNMENT_STATE_CONFIRMED_DUPLICATE_NOT_ACTIVE,
+    ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT,
 )
 RCH_ASSIGN_DISPLAY_UNKNOWN = "unknown"
 RCH_ASSIGN_DISPLAY_OFF = "off"
@@ -79,6 +89,27 @@ def classify_active_assignment_state(
     return ACTIVE_ASSIGNMENT_STATE_UNKNOWN
 
 
+def classify_source_load_assignment_state(
+    *,
+    container_kind: str,
+    matched_target_object_key: str,
+    active_assignment_state: str,
+    assignment_output1_byte_0x1d: int | None,
+    assignment_rch_assign_gate_byte_0x28: int | None,
+) -> str:
+    """Separate ISO source links from sampler-authored active/off state."""
+
+    if (
+        container_kind == "iso"
+        and matched_target_object_key
+        and active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+        and assignment_output1_byte_0x1d == 0x00
+        and assignment_rch_assign_gate_byte_0x28 == 0x00
+    ):
+        return ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT
+    return active_assignment_state
+
+
 @dataclass(frozen=True)
 class Relationship:
     """Directed object relationship with quality and quality.
@@ -95,6 +126,11 @@ class Relationship:
     ambiguity_notes: str = ""
     source_image: str = ""
     scope_key: str = ""
+    assignment_index: int | None = None
+    assignment_name: str = ""
+    assignment_row_state: str = ""
+    active_assignment_state: str = ""
+    assignment_rch_assign_display: str = ""
 
 
 @dataclass(frozen=True)
@@ -158,6 +194,11 @@ class ObjectRef:
     fat_file_size: int | None = None
     fat_object_offset: int | None = None
     fat_stored_payload_offset: int | None = None
+    placement_partition_index: int | None = None
+    placement_volume_name: str = ""
+    placement_category_name: str = ""
+    placement_entry_name: str = ""
+    placement_quality: str = ""
 
 
 @dataclass(frozen=True)
@@ -436,6 +477,73 @@ def metadata_str(metadata: dict[str, object], key: str) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _parse_int_cell(value: str) -> int | None:
+    if not value:
+        return None
+    try:
+        return int(value, 0)
+    except ValueError:
+        return None
+
+
+def _sfs_placement_metadata_by_offset(container: AxklibContainer) -> dict[int, dict[str, object]]:
+    if container.kind != "sfs":
+        return {}
+    try:
+        with tempfile.TemporaryDirectory(prefix="axklib-relationships-") as tmp:
+            inventory_dir = Path(tmp) / "inventory"
+            sfs_inventory.build_inventory(container.source_path, inventory_dir)
+            path = inventory_dir / "volume_objects.csv"
+            result: dict[int, dict[str, object]] = {}
+            with path.open("r", newline="", encoding="utf-8") as handle:
+                for row in csv.DictReader(handle):
+                    object_offset = _parse_int_cell(row.get("object_offset", ""))
+                    if object_offset is None:
+                        continue
+                    partition_index = _parse_int_cell(row.get("partition_index", ""))
+                    result[object_offset] = {
+                        "sfs_placement_partition_index": partition_index,
+                        "sfs_placement_volume_name": row.get("volume_name", ""),
+                        "sfs_placement_category_name": row.get("category_name", ""),
+                        "sfs_placement_entry_name": row.get("entry_name", ""),
+                        "sfs_placement_quality": row.get("match_quality", ""),
+                    }
+            return result
+    except Exception:
+        return {}
+
+
+def _object_with_metadata(item: ObjectItem, metadata: dict[str, object]) -> ObjectItem:
+    merged = dict(item.metadata)
+    merged.update(metadata)
+    return ObjectItem(
+        ref=item.ref,
+        container=item.container,
+        volume=item.volume,
+        object_type=item.object_type,
+        object_format=item.object_format,
+        name=item.name,
+        payload=item.payload,
+        header=item.header,
+        quality=item.quality,
+        metadata=merged,
+        temporary_extensions=item.temporary_extensions,
+    )
+
+
+def _objects_with_sfs_placement_metadata(container: AxklibContainer) -> tuple[ObjectItem, ...]:
+    metadata_by_offset = _sfs_placement_metadata_by_offset(container)
+    if not metadata_by_offset:
+        return container.objects
+    items: list[ObjectItem] = []
+    for item in container.objects:
+        metadata = (
+            metadata_by_offset.get(item.payload_offset) if item.payload_offset is not None else None
+        )
+        items.append(_object_with_metadata(item, metadata) if metadata is not None else item)
+    return tuple(items)
+
+
 def object_ref(item: ObjectItem) -> ObjectRef:
     return ObjectRef(
         image=item.image,
@@ -459,6 +567,11 @@ def object_ref(item: ObjectItem) -> ObjectRef:
         fat_file_size=metadata_int(item.metadata, "fat_file_size"),
         fat_object_offset=metadata_int(item.metadata, "fat_object_offset"),
         fat_stored_payload_offset=metadata_int(item.metadata, "fat_stored_payload_offset"),
+        placement_partition_index=metadata_int(item.metadata, "sfs_placement_partition_index"),
+        placement_volume_name=metadata_str(item.metadata, "sfs_placement_volume_name"),
+        placement_category_name=metadata_str(item.metadata, "sfs_placement_category_name"),
+        placement_entry_name=metadata_str(item.metadata, "sfs_placement_entry_name"),
+        placement_quality=metadata_str(item.metadata, "sfs_placement_quality"),
     )
 
 
@@ -526,6 +639,27 @@ def colocated_candidates(source_ref: ObjectRef, candidates: list[ObjectRef]) -> 
     return [ref for ref in candidates if logical_object_group(ref) == source_group]
 
 
+def same_sfs_volume_candidates(
+    source_ref: ObjectRef, candidates: list[ObjectRef]
+) -> list[ObjectRef]:
+    if (
+        source_ref.container_kind != "sfs"
+        or source_ref.placement_quality != "Known"
+        or not source_ref.placement_volume_name
+    ):
+        return []
+    return [
+        ref
+        for ref in candidates
+        if ref.container_kind == "sfs"
+        and ref.image == source_ref.image
+        and ref.scope_key == source_ref.scope_key
+        and ref.placement_quality == "Known"
+        and ref.placement_partition_index == source_ref.placement_partition_index
+        and ref.placement_volume_name == source_ref.placement_volume_name
+    ]
+
+
 def match_unique_sbnk_name(
     name: str,
     *,
@@ -580,17 +714,17 @@ def match_prog_assignment(
     source_ref: ObjectRef,
     by_name: dict[str, list[ObjectRef]],
     by_type_name: dict[str, dict[str, list[ObjectRef]]],
+    active_assignment_state: str = ACTIVE_ASSIGNMENT_STATE_UNKNOWN,
 ) -> MatchResult:
     all_candidates = by_name.get(name, [])
     expected_category = PROG_SLOT_KIND_TARGET_CATEGORY.get(kind_byte, "")
     if expected_category:
         typed_candidates = by_type_name.get(expected_category, {}).get(name, [])
         if len(typed_candidates) == 1:
-            quality = "Likely" if len(all_candidates) > 1 else "Known"
             return MatchResult(
                 ref=typed_candidates[0],
                 method=f"assignment-kind-0x{kind_byte:02x}+name",
-                quality=quality,
+                quality="Known",
                 notes=(
                     "Input consistency: assignment name matches a same-scope object, "
                     f"and assignment kind byte 0x{kind_byte:02x} selects {expected_category} in tested current-object corpora. "
@@ -608,6 +742,23 @@ def match_prog_assignment(
                     notes=(
                         f"Assignment kind byte 0x{kind_byte:02x} points at {expected_category}, "
                         "and exactly one duplicate-name candidate is in the same logical object folder as the PROG."
+                    ),
+                    candidate_refs=typed_candidates,
+                )
+            same_volume = (
+                same_sfs_volume_candidates(source_ref, typed_candidates)
+                if active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE
+                else []
+            )
+            if len(same_volume) == 1:
+                return MatchResult(
+                    ref=same_volume[0],
+                    method=f"assignment-kind-0x{kind_byte:02x}+name+same-volume",
+                    quality="Likely",
+                    notes=(
+                        f"Assignment kind byte 0x{kind_byte:02x} points at {expected_category}, "
+                        "multiple same-scope SFS objects share that name and category, "
+                        "and exactly one active-row candidate is in the same SFS volume as the PROG."
                     ),
                     candidate_refs=typed_candidates,
                 )
@@ -706,8 +857,12 @@ def resolve_prog_rows_from_program_context(
         if target_ref is None:
             resolved_rows.append(row)
             continue
-        child_count = sbac_child_counts.get(target_ref.object_key) if target_ref.type == "SBAC" else None
-        method = f"assignment-kind-0x{row.assignment_kind_byte_0x14:02x}+program-local-target-context"
+        child_count = (
+            sbac_child_counts.get(target_ref.object_key) if target_ref.type == "SBAC" else None
+        )
+        method = (
+            f"assignment-kind-0x{row.assignment_kind_byte_0x14:02x}+program-local-target-context"
+        )
         resolved_rows.append(
             replace(
                 row,
@@ -747,8 +902,42 @@ def resolve_prog_rows_from_program_context(
     return resolved_rows
 
 
+def promote_source_load_same_folder_rows(prog_rows: list[ProgBankRow]) -> list[ProgBankRow]:
+    """Promote validated ISO source-load same-folder Program assignment matches."""
+
+    promoted_rows: list[ProgBankRow] = []
+    promoted_methods = {
+        "SBNK": ("assignment-kind-0x10+name+same-folder", "0x10"),
+        "SBAC": ("assignment-kind-0x11+name+same-folder", "0x11"),
+    }
+    for row in prog_rows:
+        method_and_kind = promoted_methods.get(row.selector_expected_category)
+        if (
+            row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT
+            and method_and_kind is not None
+            and row.match_method == method_and_kind[0]
+            and row.match_quality == "Likely"
+            and row.matched_target_object_key
+        ):
+            promoted_rows.append(
+                replace(
+                    row,
+                    match_quality="Known",
+                    match_notes=(
+                        f"Input consistency: assignment kind byte {method_and_kind[1]} points at "
+                        f"{row.selector_expected_category}, the row is a source-load assignment, "
+                        "and exactly one duplicate-name candidate is in the same logical object "
+                        "folder as the PROG."
+                    ),
+                )
+            )
+            continue
+        promoted_rows.append(row)
+    return promoted_rows
+
+
 def classify_duplicate_prog_assignment_rows(prog_rows: list[ProgBankRow]) -> list[ProgBankRow]:
-    """Mark repeated off rows to the same target as non-active duplicates."""
+    """Mark repeated non-active/source-load rows to the same target as duplicates."""
 
     grouped: dict[tuple[str, str, str, str], list[ProgBankRow]] = defaultdict(list)
     for row in prog_rows:
@@ -774,39 +963,165 @@ def classify_duplicate_prog_assignment_rows(prog_rows: list[ProgBankRow]) -> lis
     return [
         replace(row, active_assignment_state=ACTIVE_ASSIGNMENT_STATE_CONFIRMED_DUPLICATE_NOT_ACTIVE)
         if (row.prog_object_key, row.assignment_index) in duplicate_keys
-        and row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+        and row.active_assignment_state
+        in {
+            ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF,
+            ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT,
+        }
         else row
         for row in prog_rows
     ]
 
 
 def classify_unresolved_direct_prog_rows(prog_rows: list[ProgBankRow]) -> list[ProgBankRow]:
-    """Label unresolved direct SBNK assignments without promoting candidates."""
+    """Label unresolved Program assignments without promoting raw selectors."""
 
     classified_rows: list[ProgBankRow] = []
     for row in prog_rows:
-        if (
+        if not (
             row.match_method == "assignment-unmatched"
-            and row.selector_expected_category == "SBNK"
             and row.assignment_raw_handle_0x10 != 0
             and row.candidate_count == 0
             and not row.matched_target_object_key
         ):
-            notes = [note for note in row.notes.split(";") if note]
-            notes.append("raw-selector-diagnostic-only")
+            classified_rows.append(row)
+            continue
+
+        notes = [note for note in row.notes.split(";") if note]
+        if (
+            row.selector_expected_category == "SBNK"
+            and row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE
+        ):
+            notes.extend(["active-missing-local-target", "raw-selector-diagnostic-only"])
             classified_rows.append(
                 replace(
                     row,
-                    match_method="assignment-unmatched-preserved-source-selector",
+                    match_method="assignment-active-missing-local-target",
                     match_notes=(
-                        "No same-scope SBNK object name matches this direct PROG assignment name. "
-                        "The row +0x10..+0x13 selector is preserved for diagnostics only and is not used "
-                        "to select a local SBNK target."
+                        "This active direct PROG assignment names an SBNK object that is not present "
+                        "as an exact same-scope target. Preserve the row as an active decoded Program "
+                        "row with a missing local target; the row +0x10..+0x13 selector is "
+                        "diagnostic only and is not used to select a neighboring SBNK target."
                     ),
                     notes=";".join(notes),
                 )
             )
             continue
+
+        notes.append("raw-selector-diagnostic-only")
+        if row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF:
+            if row.selector_expected_category == "SBNK":
+                notes.append("visible-off-missing-local-sbnk")
+                classified_rows.append(
+                    replace(
+                        row,
+                        match_method="assignment-visible-off-missing-local-sbnk",
+                        match_notes=(
+                            "This visible/off direct PROG assignment names an SBNK object that is not "
+                            "present as an exact same-scope target. Preserve the row as decoded "
+                            "Program inventory, but do not treat it as active Program content; the "
+                            "row +0x10..+0x13 selector is diagnostic only."
+                        ),
+                        notes=";".join(notes),
+                    )
+                )
+                continue
+            if row.selector_expected_category == "SBAC":
+                notes.append("visible-off-missing-local-sbac")
+                classified_rows.append(
+                    replace(
+                        row,
+                        match_method="assignment-visible-off-missing-local-sbac",
+                        match_notes=(
+                            "This visible/off PROG assignment names an SBAC group object that is not "
+                            "present as an exact same-scope target. Preserve the row as decoded "
+                            "Program inventory, but do not treat it as active Program content; the "
+                            "row +0x10..+0x13 selector is diagnostic only."
+                        ),
+                        notes=";".join(notes),
+                    )
+                )
+                continue
+
+        if row.selector_expected_category == "SBNK":
+            classified_rows.append(
+                replace(
+                    row,
+                    match_method="assignment-unmatched-preserved-source-selector",
+                    match_notes=(
+                        "No same-scope SBNK object name matches this direct PROG assignment name, "
+                        "and the active/off state is not classified by the current public rule. "
+                        "The row +0x10..+0x13 selector is preserved for diagnostics only and is "
+                        "not used to select a local SBNK target."
+                    ),
+                    notes=";".join(notes),
+                )
+            )
+            continue
+        classified_rows.append(row)
+    return classified_rows
+
+
+def classify_visible_off_ambiguous_prog_rows(prog_rows: list[ProgBankRow]) -> list[ProgBankRow]:
+    """Label visible/off ambiguous rows as inventory diagnostics, not active content loss."""
+
+    classified_rows: list[ProgBankRow] = []
+    for row in prog_rows:
+        if (
+            row.active_assignment_state != ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+            or row.matched_target_object_key
+        ):
+            classified_rows.append(row)
+            continue
+
+        notes = [note for note in row.notes.split(";") if note]
+        if row.match_method == "assignment-kind-0x11+name-ambiguous":
+            notes.append("visible-off-name-ambiguous-sbac")
+            classified_rows.append(
+                replace(
+                    row,
+                    match_method="assignment-visible-off-name-ambiguous-sbac",
+                    match_notes=(
+                        "This visible/off PROG assignment names an SBAC group, but multiple "
+                        "same-scope SBAC objects share that name. Preserve the candidate set as "
+                        "decoded Program inventory, but do not treat the row as active Program content."
+                    ),
+                    notes=";".join(notes),
+                )
+            )
+            continue
+        if row.match_method == "assignment-kind-0x10+name-ambiguous":
+            notes.append("visible-off-name-ambiguous-sbnk")
+            classified_rows.append(
+                replace(
+                    row,
+                    match_method="assignment-visible-off-name-ambiguous-sbnk",
+                    match_notes=(
+                        "This visible/off direct PROG assignment names an SBNK object, but multiple "
+                        "same-scope SBNK objects share that name. Preserve the candidate set as "
+                        "decoded Program inventory, but do not treat the row as active Program content."
+                    ),
+                    notes=";".join(notes),
+                )
+            )
+            continue
+        if row.match_method == "assignment-name-ambiguous":
+            notes.append("visible-off-name-ambiguous-non-target-category")
+            classified_rows.append(
+                replace(
+                    row,
+                    match_method="assignment-visible-off-name-ambiguous-non-target-category",
+                    match_notes=(
+                        "This visible/off PROG assignment has duplicate same-scope name matches, "
+                        "but the ambiguous candidates do not match the decoded target category. "
+                        "Preserve the candidate set as decoded Program inventory, but do not treat "
+                        "the row as active Program content."
+                    ),
+                    notes=";".join(notes),
+                )
+            )
+            continue
+
         classified_rows.append(row)
     return classified_rows
 
@@ -1210,6 +1525,15 @@ def scan_scope(
             raw_handle = assignment.raw_handle_0x10
             kind_byte = assignment.kind_byte_0x14
             flag_byte = assignment.flag_byte_0x15
+            active_assignment_state = classify_active_assignment_state(
+                assignment_row_state=ASSIGNMENT_ROW_STATE_DECODED,
+                rch_assign_gate_byte_0x28=assignment.output2_0x28,
+            )
+            rch_assign_display = classify_rch_assign_display(
+                assignment_row_state=ASSIGNMENT_ROW_STATE_DECODED,
+                midi_receive_channel_assign_byte_0x15=assignment.midi_receive_channel_assign_0x15,
+                rch_assign_gate_byte_0x28=assignment.output2_0x28,
+            )
             if kind_byte not in PROG_SLOT_KIND_TARGET_CATEGORY and assignment_name not in by_name:
                 item_ignored_rows.append(
                     ProgIgnoredRow(
@@ -1239,6 +1563,7 @@ def scan_scope(
                 source_ref=source_ref,
                 by_name=by_name,
                 by_type_name=by_type_name,
+                active_assignment_state=active_assignment_state,
             )
             if match.quality == "Unknown" and raw_handle == 0:
                 item_ignored_rows.append(
@@ -1263,11 +1588,26 @@ def scan_scope(
                     )
                 )
                 continue
+            reported_active_assignment_state = classify_source_load_assignment_state(
+                container_kind=item.container_kind,
+                matched_target_object_key=match.ref.object_key if match.ref else "",
+                active_assignment_state=active_assignment_state,
+                assignment_output1_byte_0x1d=assignment.output1_0x1d,
+                assignment_rch_assign_gate_byte_0x28=assignment.output2_0x28,
+            )
+            reported_rch_assign_display = (
+                RCH_ASSIGN_DISPLAY_UNKNOWN
+                if reported_active_assignment_state
+                == ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT
+                else rch_assign_display
+            )
             prog_notes: list[str] = []
             if match.quality not in {"Known", "Likely"}:
                 prog_notes.append(f"match_method={match.method}")
             if kind_byte not in PROG_SLOT_KIND_TARGET_CATEGORY:
                 prog_notes.append("unmapped_assignment_kind_byte")
+            if reported_active_assignment_state == ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT:
+                prog_notes.append("source-load-assignment")
             child_count = (
                 sbac_child_counts.get(match.ref.object_key)
                 if match.ref is not None and match.ref.type == "SBAC"
@@ -1293,17 +1633,10 @@ def scan_scope(
                     assignment_flag_byte_0x15=flag_byte,
                     assignment_output1_byte_0x1d=assignment.output1_0x1d,
                     assignment_rch_assign_gate_byte_0x28=assignment.output2_0x28,
-                    assignment_rch_assign_display=classify_rch_assign_display(
-                        assignment_row_state=ASSIGNMENT_ROW_STATE_DECODED,
-                        midi_receive_channel_assign_byte_0x15=assignment.midi_receive_channel_assign_0x15,
-                        rch_assign_gate_byte_0x28=assignment.output2_0x28,
-                    ),
+                    assignment_rch_assign_display=reported_rch_assign_display,
                     selector_expected_category=PROG_SLOT_KIND_TARGET_CATEGORY.get(kind_byte, ""),
                     assignment_row_state=ASSIGNMENT_ROW_STATE_DECODED,
-                    active_assignment_state=classify_active_assignment_state(
-                        assignment_row_state=ASSIGNMENT_ROW_STATE_DECODED,
-                        rch_assign_gate_byte_0x28=assignment.output2_0x28,
-                    ),
+                    active_assignment_state=reported_active_assignment_state,
                     match_method=match.method,
                     match_quality=match.quality,
                     match_notes=match.notes,
@@ -1369,7 +1702,9 @@ def scan_scope(
             or row.assignment_index <= last_active_assignment_index
         )
     prog_rows = resolve_prog_rows_from_program_context(prog_rows, refs_by_key, sbac_child_counts)
+    prog_rows = promote_source_load_same_folder_rows(prog_rows)
     prog_rows = classify_unresolved_direct_prog_rows(prog_rows)
+    prog_rows = classify_visible_off_ambiguous_prog_rows(prog_rows)
     prog_rows = classify_duplicate_prog_assignment_rows(prog_rows)
     sbnk_bitmap_rows = build_sbnk_program_bitmap_rows(items, sbac_rows, prog_rows)
     return sbac_rows, prog_rows, ignored_rows, sbnk_bitmap_rows
@@ -1555,6 +1890,11 @@ def build_relationship_graph(items: list[ObjectItem]) -> RelationshipGraph:
                     ambiguity_notes=prog_row.match_notes,
                     source_image=prog_row.image,
                     scope_key=prog_row.scope_key,
+                    assignment_index=prog_row.assignment_index,
+                    assignment_name=prog_row.assignment_name,
+                    assignment_row_state=prog_row.assignment_row_state,
+                    active_assignment_state=prog_row.active_assignment_state,
+                    assignment_rch_assign_display=prog_row.assignment_rch_assign_display,
                 )
             )
         for bitmap_row in sbnk_bitmap_rows:
@@ -1633,7 +1973,7 @@ def build_relationship_graph_for_loaded_results(
         if result.container is None:
             load_errors.append(result)
             continue
-        items.extend(result.container.objects)
+        items.extend(_objects_with_sfs_placement_metadata(result.container))
     return RelationshipGraphLoadResult(
         graph=build_relationship_graph(items),
         load_errors=tuple(load_errors),

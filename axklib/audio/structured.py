@@ -133,6 +133,7 @@ def _safe_display_path_name(value: str, fallback: str = "sample") -> str:
     text = re.sub(r"_+", "_", text)
     return (text.strip(" ._") + duplicate_suffix) or fallback
 
+
 def user_category_name(raw_category: str | None, *, object_type: str = "") -> str:
     if object_type == "SMPL":
         return "Waveforms"
@@ -163,12 +164,17 @@ def source_scopes(waveforms: tuple[Waveform, ...]) -> dict[str, str]:
         for index, source in enumerate(sources, start=1)
     }
 
-def stable_id(waveform: Waveform, source_scope: str, used: set[str], *, logical_key: str = "") -> str:
+
+def stable_id(
+    waveform: Waveform, source_scope: str, used: set[str], *, logical_key: str = ""
+) -> str:
     object_key = _safe_name((logical_key or waveform.object_key).replace(":", "_"))
     base = f"{source_scope}__{object_key}" if source_scope else object_key
     candidate = base
     if candidate in used:
-        digest = hashlib.sha1(f"{waveform.source_image}|{waveform.object_key}|{logical_key}".encode()).hexdigest()[:10]
+        digest = hashlib.sha1(
+            f"{waveform.source_image}|{waveform.object_key}|{logical_key}".encode()
+        ).hexdigest()[:10]
         candidate = f"{base}__{digest}"
     if candidate in used:
         raise ValueError(f"stable ID collision after hash disambiguation: {candidate}")
@@ -178,7 +184,9 @@ def stable_id(waveform: Waveform, source_scope: str, used: set[str], *, logical_
 
 def _partition_dir(placement: WaveformPlacement) -> str:
     if placement.partition_index is None:
-        return _safe_display_path_name(placement.partition_name or "partition_unknown", "partition_unknown")
+        return _safe_display_path_name(
+            placement.partition_name or "partition_unknown", "partition_unknown"
+        )
     name = _safe_name(placement.partition_name or f"partition_{placement.partition_index:02d}")
     return f"partition_{placement.partition_index:02d}_{name}"
 
@@ -186,7 +194,9 @@ def _partition_dir(placement: WaveformPlacement) -> str:
 def _placement_for(
     placement_map: dict[str, WaveformPlacement], source_image: str, object_key: str
 ) -> WaveformPlacement | None:
-    return placement_map.get(scoped_object_key(source_image, object_key)) or placement_map.get(object_key)
+    return placement_map.get(scoped_object_key(source_image, object_key)) or placement_map.get(
+        object_key
+    )
 
 
 def _single_target_key(row: WaveformRelationship) -> str | None:
@@ -207,7 +217,9 @@ def _sample_parent_rows(
         and _relationship_source_matches(row, waveform.source_image)
         and _single_target_key(row) == waveform.object_key
     ]
-    return tuple(sorted(rows, key=lambda row: (row.source_image, row.source_key, row.relationship_type)))
+    return tuple(
+        sorted(rows, key=lambda row: (row.source_image, row.source_key, row.relationship_type))
+    )
 
 
 def _sample_bank_parent_row(
@@ -229,7 +241,9 @@ def _base_parts(source_scope: str, placement: WaveformPlacement | None) -> list[
     if placement is not None and placement.quality == DataQuality.KNOWN:
         if placement.partition_index is not None or placement.partition_name:
             parts.append(_partition_dir(placement))
-        parts.append(_safe_display_path_name(placement.volume_name or "unknown_volume", "unknown_volume"))
+        parts.append(
+            _safe_display_path_name(placement.volume_name or "unknown_volume", "unknown_volume")
+        )
     else:
         parts.append("_unplaced")
     return parts
@@ -271,7 +285,6 @@ def target_paths(
     return base / f"{name}.wav", base / f"{name}.json"
 
 
-
 def _volume_root(source_scope: str, placement: WaveformPlacement | None) -> Path:
     return Path(*_base_parts(source_scope, placement))
 
@@ -299,10 +312,15 @@ def _graph_relationship_id(row: WaveformRelationship) -> str:
                 row.relationship_type,
                 row.target_key,
                 row.basis,
+                "" if row.assignment_index is None else str(row.assignment_index),
+                row.assignment_row_state,
+                row.active_assignment_state,
+                row.assignment_rch_assign_display,
             )
         ).encode()
     ).hexdigest()[:12]
     return f"REL:{digest}"
+
 
 def build_export_plan(
     output_dir: Path,
@@ -319,13 +337,19 @@ def build_export_plan(
     targets: list[SampleExportTarget] = []
     for waveform in waveforms:
         scope = scopes[waveform.source_image]
-        waveform_placement = _placement_for(placement_map, waveform.source_image, waveform.object_key)
+        waveform_placement = _placement_for(
+            placement_map, waveform.source_image, waveform.object_key
+        )
         parent_rows = _sample_parent_rows(waveform, relationships)
         if not parent_rows:
             item_id = stable_id(waveform, scope, used_ids)
             placement = waveform_placement
             quality = DataQuality.UNKNOWN if placement is None else placement.quality
-            source = "no volume/category placement quality supplied" if placement is None else placement.source
+            source = (
+                "no volume/category placement quality supplied"
+                if placement is None
+                else placement.source
+            )
             notes = (
                 "Structured export used source-scoped unplaced waveform directory."
                 if placement is None
@@ -361,10 +385,14 @@ def build_export_plan(
             sample_placement = _placement_for(placement_map, waveform.source_image, sample_key)
             bank_row = _sample_bank_parent_row(waveform.source_image, sample_key, relationships)
             bank_key = bank_row.source_key if bank_row else ""
-            bank_placement = _placement_for(placement_map, waveform.source_image, bank_key) if bank_key else None
+            bank_placement = (
+                _placement_for(placement_map, waveform.source_image, bank_key) if bank_key else None
+            )
             placement = sample_placement or bank_placement or waveform_placement
             sample_name = (sample_placement.display_name if sample_placement else "") or sample_key
-            bank_name = (bank_placement.display_name if bank_placement else "") if bank_placement else ""
+            bank_name = (
+                (bank_placement.display_name if bank_placement else "") if bank_placement else ""
+            )
             item_id = stable_id(waveform, scope, used_ids, logical_key=sample_key)
             export_category = "Sample Banks" if bank_name else "Samples"
             wav_rel, json_rel = target_paths(
@@ -402,11 +430,18 @@ def build_export_plan(
         relationships=tuple(
             sorted(
                 relationships,
-                key=lambda row: (row.source_image, row.scope_key, row.source_key, row.relationship_type, row.target_key),
+                key=lambda row: (
+                    row.source_image,
+                    row.scope_key,
+                    row.source_key,
+                    row.relationship_type,
+                    row.target_key,
+                ),
             )
         ),
         issues=(),
     )
+
 
 def legacy_sidecar_fields(waveform: Waveform, wav_path: Path) -> dict[str, object]:
     return {
@@ -458,15 +493,21 @@ def _relationship_sidecar_row(row: WaveformRelationship) -> dict[str, object]:
     payload.pop("ambiguity_notes", None)
     return payload
 
-def _parents(plan: WaveExportPlan, source_image: str, object_key: str) -> tuple[WaveformRelationship, ...]:
+
+def _parents(
+    plan: WaveExportPlan, source_image: str, object_key: str
+) -> tuple[WaveformRelationship, ...]:
     return tuple(
         row
         for row in plan.relationships
-        if _relationship_source_matches(row, source_image) and object_key in _targets(row.target_key)
+        if _relationship_source_matches(row, source_image)
+        and object_key in _targets(row.target_key)
     )
 
 
-def _children(plan: WaveExportPlan, source_image: str, object_key: str) -> tuple[WaveformRelationship, ...]:
+def _children(
+    plan: WaveExportPlan, source_image: str, object_key: str
+) -> tuple[WaveformRelationship, ...]:
     return tuple(
         row
         for row in plan.relationships
@@ -474,7 +515,9 @@ def _children(plan: WaveExportPlan, source_image: str, object_key: str) -> tuple
     )
 
 
-def _ancestors(plan: WaveExportPlan, source_image: str, object_key: str) -> tuple[WaveformRelationship, ...]:
+def _ancestors(
+    plan: WaveExportPlan, source_image: str, object_key: str
+) -> tuple[WaveformRelationship, ...]:
     seen_keys: set[str] = set()
     queued: deque[tuple[str, str]] = deque([(source_image, object_key)])
     rows: list[WaveformRelationship] = []
@@ -502,14 +545,19 @@ def _parent_entries(rows: tuple[WaveformRelationship, ...], prefix: str) -> list
         if row.relationship_type.startswith(prefix)
     ]
 
-def _target_parent_rows(target: SampleExportTarget, parents: tuple[WaveformRelationship, ...]) -> tuple[WaveformRelationship, ...]:
+
+def _target_parent_rows(
+    target: SampleExportTarget, parents: tuple[WaveformRelationship, ...]
+) -> tuple[WaveformRelationship, ...]:
     if not target.sampler_sample_key:
         return parents
     rows = tuple(row for row in parents if row.source_key == target.sampler_sample_key)
     return rows or parents
 
 
-def _target_ancestor_rows(target: SampleExportTarget, ancestors: tuple[WaveformRelationship, ...]) -> tuple[WaveformRelationship, ...]:
+def _target_ancestor_rows(
+    target: SampleExportTarget, ancestors: tuple[WaveformRelationship, ...]
+) -> tuple[WaveformRelationship, ...]:
     if not target.sampler_sample_key:
         return ancestors
     rows = [row for row in ancestors if row.source_key == target.sampler_sample_key]
@@ -539,8 +587,12 @@ def sidecar_v2(
     relative_wav = target.relative_wav_path.as_posix()
     duration = waveform.frame_count / waveform.sample_rate if waveform.sample_rate else 0.0
     placement = target.placement
-    parents = _target_parent_rows(target, _parents(plan, waveform.source_image, waveform.object_key))
-    ancestors = _target_ancestor_rows(target, _ancestors(plan, waveform.source_image, waveform.object_key))
+    parents = _target_parent_rows(
+        target, _parents(plan, waveform.source_image, waveform.object_key)
+    )
+    ancestors = _target_ancestor_rows(
+        target, _ancestors(plan, waveform.source_image, waveform.object_key)
+    )
     parent_banks = _parent_entries(parents, "SBNK_")
     parent_sbac = _parent_entries(ancestors, "SBAC_")
     parent_programs = _parent_entries(ancestors, "PROG_")
@@ -556,7 +608,9 @@ def sidecar_v2(
         "loop_start_frame": waveform.loop_start,
         "loop_end_frame": waveform.loop_end_a4000_ui,
         "loop_length_frames": waveform.loop_length,
-        "one_shot": waveform.loop_mode_label.startswith("One") if waveform.loop_mode_label else None,
+        "one_shot": waveform.loop_mode_label.startswith("One")
+        if waveform.loop_mode_label
+        else None,
         "key_low": None,
         "key_high": None,
         "velocity_low": None,
@@ -570,7 +624,9 @@ def sidecar_v2(
     stereo_warnings: list[str] = []
     if stereo_context is not None:
         decision, role = stereo_context
-        counterpart = decision.right_mono_wav_path if role == "left" else decision.left_mono_wav_path
+        counterpart = (
+            decision.right_mono_wav_path if role == "left" else decision.left_mono_wav_path
+        )
         stereo_relationships.update(
             {
                 "stereo_role": role,
@@ -591,7 +647,9 @@ def sidecar_v2(
         if decision.decision != _STEREO_DECISION_SUCCESS:
             stereo_warnings.append(f"Stereo pair kept as mono: {decision.reason}")
     conversion_warnings = (
-        [] if target.placement_quality == DataQuality.KNOWN else ["No known sampler-facing placement was supplied."]
+        []
+        if target.placement_quality == DataQuality.KNOWN
+        else ["No known sampler-facing placement was supplied."]
     )
     conversion_warnings.extend(stereo_warnings)
     return {
@@ -638,8 +696,12 @@ def sidecar_v2(
             "sample_playback": playback,
             "sample_bank_membership": parent_banks,
             "program_membership": parent_programs,
-            "decoded_current_sbnk_member_parameters": waveform.metadata.get("decoded_current_sbnk_member_parameters", {}),
-            "decoded_current_prog_parameters": waveform.metadata.get("decoded_current_prog_parameters", {}),
+            "decoded_current_sbnk_member_parameters": waveform.metadata.get(
+                "decoded_current_sbnk_member_parameters", {}
+            ),
+            "decoded_current_prog_parameters": waveform.metadata.get(
+                "decoded_current_prog_parameters", {}
+            ),
         },
         "conversion": {
             "recommended_import_name": sampler_sample_name,
@@ -667,9 +729,17 @@ def sidecar_v2(
             "payload_offset": waveform.object_offset,
             "sfs_id": waveform.object_key if waveform.object_key.startswith("p") else "",
             "fat_file": "",
+            "iso_raw_group": waveform.metadata.get("iso_raw_group", ""),
+            "iso_raw_volume": waveform.metadata.get("iso_raw_volume", ""),
+            "iso_group_label": waveform.metadata.get("iso_group_label", ""),
+            "iso_volume_label": waveform.metadata.get("iso_volume_label", ""),
+            "iso_group_label_source": waveform.metadata.get("iso_group_label_source", ""),
+            "iso_volume_label_source": waveform.metadata.get("iso_volume_label_source", ""),
             "iso_recovery_quality": waveform.metadata.get("iso_recovery_quality", ""),
             "source_recovered_metadata": {
-                key: value for key, value in waveform.metadata.items() if key.startswith("source_recovered_")
+                key: value
+                for key, value in waveform.metadata.items()
+                if key.startswith("source_recovered_")
             },
         },
     }
@@ -699,7 +769,9 @@ def _stereo_pcm_and_padding(left: Waveform, right: Waveform) -> tuple[bytes, int
 
 
 def _stereo_wav_bytes(left: Waveform, right: Waveform) -> tuple[bytes, int, int, int]:
-    pcm, output_frames, left_padding_frames, right_padding_frames = _stereo_pcm_and_padding(left, right)
+    pcm, output_frames, left_padding_frames, right_padding_frames = _stereo_pcm_and_padding(
+        left, right
+    )
     handle = BytesIO()
     with wave.open(handle, "wb") as wav:
         wav.setnchannels(2)
@@ -826,7 +898,9 @@ def _stereo_output_frame_count(left: Waveform, right: Waveform, reason_code: str
 def _stereo_padding_frames(left: Waveform, right: Waveform, reason_code: str) -> tuple[int, int]:
     if reason_code != _STEREO_REASON_PADDED:
         return 0, 0
-    return max(0, right.frame_count - left.frame_count), max(0, left.frame_count - right.frame_count)
+    return max(0, right.frame_count - left.frame_count), max(
+        0, left.frame_count - right.frame_count
+    )
 
 
 def _decision_row_targets(
@@ -866,8 +940,8 @@ def _build_stereo_decisions(plan: WaveExportPlan) -> tuple[StereoExportDecision,
                 if target is not None:
                     source_image = target.waveform.source_image
                     break
-        partition_name, volume_name, category_name, sample_bank_name, sample_name = _decision_context(
-            left_target, right_target
+        partition_name, volume_name, category_name, sample_bank_name, sample_name = (
+            _decision_context(left_target, right_target)
         )
         if left_target is None or right_target is None:
             if left_target is None and right_target is None:
@@ -889,16 +963,26 @@ def _build_stereo_decisions(plan: WaveExportPlan) -> tuple[StereoExportDecision,
                     left_waveform_name=left_target.waveform.sample_name if left_target else "",
                     right_waveform_name=right_target.waveform.sample_name if right_target else "",
                     left_waveform_object_key=left_target.waveform.object_key if left_target else "",
-                    right_waveform_object_key=right_target.waveform.object_key if right_target else "",
+                    right_waveform_object_key=right_target.waveform.object_key
+                    if right_target
+                    else "",
                     decision=_STEREO_DECISION_MISSING_SIDE,
                     reason_code=_STEREO_REASON_MISSING_SIDE,
                     reason="Stereo companion not selected/exported",
-                    left_mono_wav_path=left_target.relative_wav_path.as_posix() if left_target else "",
-                    right_mono_wav_path=right_target.relative_wav_path.as_posix() if right_target else "",
+                    left_mono_wav_path=left_target.relative_wav_path.as_posix()
+                    if left_target
+                    else "",
+                    right_mono_wav_path=right_target.relative_wav_path.as_posix()
+                    if right_target
+                    else "",
                     left_sample_rate=left_target.waveform.sample_rate if left_target else None,
                     right_sample_rate=right_target.waveform.sample_rate if right_target else None,
-                    left_sample_width_bytes=left_target.waveform.sample_width_bytes if left_target else None,
-                    right_sample_width_bytes=right_target.waveform.sample_width_bytes if right_target else None,
+                    left_sample_width_bytes=left_target.waveform.sample_width_bytes
+                    if left_target
+                    else None,
+                    right_sample_width_bytes=right_target.waveform.sample_width_bytes
+                    if right_target
+                    else None,
                     left_frame_count=left_target.waveform.frame_count if left_target else None,
                     right_frame_count=right_target.waveform.frame_count if right_target else None,
                 )
@@ -913,15 +997,22 @@ def _build_stereo_decisions(plan: WaveExportPlan) -> tuple[StereoExportDecision,
             reason = "L/R relationship is not known; mono files kept to avoid hiding candidate waveform objects"
             decision = _STEREO_DECISION_UNKNOWN
         else:
-            reason_code, reason = _stereo_interleave_reason(left_target.waveform, right_target.waveform)
+            reason_code, reason = _stereo_interleave_reason(
+                left_target.waveform, right_target.waveform
+            )
             interleavable = reason_code in {_STEREO_REASON_EXACT, _STEREO_REASON_PADDED}
-            if interleavable and left_target.relative_wav_path.parent != right_target.relative_wav_path.parent:
+            if (
+                interleavable
+                and left_target.relative_wav_path.parent != right_target.relative_wav_path.parent
+            ):
                 decision = _STEREO_DECISION_PARENT_CONFLICT
                 reason_code = _STEREO_REASON_PARENT_CONFLICT
                 reason = "L/R interleavable targets have different sampler-facing export parents"
             else:
                 decision = _STEREO_DECISION_SUCCESS if interleavable else _STEREO_DECISION_NOT_EXACT
-                output_frame_count = _stereo_output_frame_count(left_target.waveform, right_target.waveform, reason_code)
+                output_frame_count = _stereo_output_frame_count(
+                    left_target.waveform, right_target.waveform, reason_code
+                )
                 left_padding_frames, right_padding_frames = _stereo_padding_frames(
                     left_target.waveform,
                     right_target.waveform,
@@ -984,7 +1075,11 @@ def _stereo_display_name(left_target: SampleExportTarget, right_target: SampleEx
     left_name = left_target.waveform.sample_name.strip()
     right_name = right_target.waveform.sample_name.strip()
     if left_name and right_name:
-        if left_name.endswith("-L") and right_name.endswith("-R") and left_name[:-2] == right_name[:-2]:
+        if (
+            left_name.endswith("-L")
+            and right_name.endswith("-R")
+            and left_name[:-2] == right_name[:-2]
+        ):
             return _safe_display_path_name(left_name[:-2], "stereo sample")
         return _safe_display_path_name(f"{left_name} + {right_name}", "stereo sample")
     return "stereo sample"
@@ -1000,7 +1095,9 @@ def _stereo_target_paths(
     return _dedupe_pair(parent / f"{stem}.wav", parent / f"{stem}.json", used_paths)
 
 
-def _exact_stereo_replacement_ids(plan: WaveExportPlan, decisions: tuple[StereoExportDecision, ...]) -> set[str]:
+def _exact_stereo_replacement_ids(
+    plan: WaveExportPlan, decisions: tuple[StereoExportDecision, ...]
+) -> set[str]:
     suppressed_waveforms = {
         scoped_object_key(decision.source_image, waveform_key)
         for decision in decisions
@@ -1011,7 +1108,8 @@ def _exact_stereo_replacement_ids(plan: WaveExportPlan, decisions: tuple[StereoE
     return {
         target.stable_id
         for target in plan.targets
-        if scoped_object_key(target.waveform.source_image, target.waveform.object_key) in suppressed_waveforms
+        if scoped_object_key(target.waveform.source_image, target.waveform.object_key)
+        in suppressed_waveforms
     }
 
 
@@ -1062,7 +1160,9 @@ def _stereo_warning(decision: StereoExportDecision) -> str:
         if value
     ]
     label = " / ".join(path_bits) or decision.sample_name or decision.sbnk_object_key
-    return f"{label}: kept mono because {decision.reason}. Technical key: {decision.sbnk_object_key}"
+    return (
+        f"{label}: kept mono because {decision.reason}. Technical key: {decision.sbnk_object_key}"
+    )
 
 
 def _stereo_decision_row(decision: StereoExportDecision) -> dict[str, object]:
@@ -1080,7 +1180,6 @@ def _write_csv_manifest(path: Path, rows: list[dict[str, object]], *, overwrite:
         writer.writeheader()
         writer.writerows(rows)
     tmp.replace(path)
-
 
 
 def _target_volume_root(target: SampleExportTarget) -> Path:
@@ -1101,7 +1200,9 @@ def _dedupe_audio_path(base: Path, used_paths: set[str]) -> Path:
     return candidate
 
 
-def _sbnk_member_role(target: SampleExportTarget, relationships: tuple[WaveformRelationship, ...]) -> str:
+def _sbnk_member_role(
+    target: SampleExportTarget, relationships: tuple[WaveformRelationship, ...]
+) -> str:
     if not target.sampler_sample_key:
         return "mono"
     for row in relationships:
@@ -1139,8 +1240,12 @@ def _write_physical_smpl_wavs(
         if key in refs:
             continue
         stem = _safe_display_path_name(target.waveform.sample_name, "waveform")
-        rel_path = _dedupe_audio_path(volume_root / "SMPL" / f"{stem}.wav", used_by_volume[volume_root.as_posix()])
-        _atomic_write_bytes(plan.output_dir / rel_path, _wav_bytes(target.waveform), overwrite=overwrite)
+        rel_path = _dedupe_audio_path(
+            volume_root / "SMPL" / f"{stem}.wav", used_by_volume[volume_root.as_posix()]
+        )
+        _atomic_write_bytes(
+            plan.output_dir / rel_path, _wav_bytes(target.waveform), overwrite=overwrite
+        )
         refs[key] = _volume_relative(rel_path, volume_root)
         written.append(plan.output_dir / rel_path)
     return refs, written
@@ -1183,7 +1288,9 @@ def _write_rendered_stereo_wavs(
             continue
         volume_root = _target_volume_root(left_target)
         stem = _stereo_display_name(left_target, right_target)
-        rel_path = _dedupe_audio_path(volume_root / "RENDERED" / f"{stem}.wav", used_by_volume[volume_root.as_posix()])
+        rel_path = _dedupe_audio_path(
+            volume_root / "RENDERED" / f"{stem}.wav", used_by_volume[volume_root.as_posix()]
+        )
         wav_bytes, output_frames, left_padding, right_padding = _stereo_wav_bytes(
             left_target.waveform,
             right_target.waveform,
@@ -1195,7 +1302,9 @@ def _write_rendered_stereo_wavs(
             "id": rendered_id,
             "kind": "interleaved_stereo",
             "wav_path": volume_rel,
-            "source_sbnk_id": _graph_object_id("SBNK", decision.source_image, decision.sbnk_object_key),
+            "source_sbnk_id": _graph_object_id(
+                "SBNK", decision.source_image, decision.sbnk_object_key
+            ),
             "source_sbnk_ref": _graph_source_ref(decision.source_image, decision.sbnk_object_key),
             "channels": 2,
             "sample_rate": left_target.waveform.sample_rate,
@@ -1209,14 +1318,20 @@ def _write_rendered_stereo_wavs(
             "reason": decision.reason,
             "relationship_quality": decision.relationship_quality,
             "basis": decision.basis,
-            "left_smpl_id": _graph_object_id("SMPL", left_target.waveform.source_image, left_target.waveform.object_key),
-            "right_smpl_id": _graph_object_id("SMPL", right_target.waveform.source_image, right_target.waveform.object_key),
+            "left_smpl_id": _graph_object_id(
+                "SMPL", left_target.waveform.source_image, left_target.waveform.object_key
+            ),
+            "right_smpl_id": _graph_object_id(
+                "SMPL", right_target.waveform.source_image, right_target.waveform.object_key
+            ),
             "padding": {
                 "left_frames": left_padding,
                 "right_frames": right_padding,
             },
         }
-        rendered_by_sbnk[scoped_object_key(decision.source_image, decision.sbnk_object_key)] = rendered
+        rendered_by_sbnk[scoped_object_key(decision.source_image, decision.sbnk_object_key)] = (
+            rendered
+        )
         next_decision = replace(
             decision,
             stereo_wav_path=rel_path.as_posix(),
@@ -1232,7 +1347,9 @@ def _write_rendered_stereo_wavs(
     return rendered_by_sbnk, tuple(updated), written, warnings
 
 
-def _relationship_graph_row(row: WaveformRelationship, ref_to_id: dict[str, str]) -> dict[str, object]:
+def _relationship_graph_row(
+    row: WaveformRelationship, ref_to_id: dict[str, str]
+) -> dict[str, object]:
     targets = [_graph_source_ref(row.source_image, target) for target in _targets(row.target_key)]
     return {
         "id": _graph_relationship_id(row),
@@ -1247,6 +1364,11 @@ def _relationship_graph_row(row: WaveformRelationship, ref_to_id: dict[str, str]
         "ambiguity_notes": row.ambiguity_notes,
         "source_image": row.source_image,
         "scope_key": row.scope_key,
+        "assignment_index": row.assignment_index,
+        "assignment_name": row.assignment_name,
+        "assignment_row_state": row.assignment_row_state,
+        "active_assignment_state": row.active_assignment_state,
+        "assignment_rch_assign_display": row.assignment_rch_assign_display,
     }
 
 
@@ -1265,7 +1387,9 @@ def _build_volume_graph(
     prog_objects: dict[str, dict[str, object]] = {}
     relationship_rows: dict[str, WaveformRelationship] = {}
 
-    def remember_relationships(rows: tuple[WaveformRelationship, ...], fallback_source: str) -> None:
+    def remember_relationships(
+        rows: tuple[WaveformRelationship, ...], fallback_source: str
+    ) -> None:
         for row in rows:
             normalized = row if row.source_image else replace(row, source_image=fallback_source)
             relationship_rows[_graph_relationship_id(normalized)] = normalized
@@ -1317,8 +1441,12 @@ def _build_volume_graph(
                 },
             },
         )
-        parents = _target_parent_rows(target, _parents(plan, waveform.source_image, waveform.object_key))
-        ancestors = _target_ancestor_rows(target, _ancestors(plan, waveform.source_image, waveform.object_key))
+        parents = _target_parent_rows(
+            target, _parents(plan, waveform.source_image, waveform.object_key)
+        )
+        ancestors = _target_ancestor_rows(
+            target, _ancestors(plan, waveform.source_image, waveform.object_key)
+        )
         remember_relationships(parents, waveform.source_image)
         remember_relationships(ancestors, waveform.source_image)
         if target.sampler_sample_key:
@@ -1393,8 +1521,16 @@ def _build_volume_graph(
                 assignment: dict[str, object] = {
                     "relationship_id": _graph_relationship_id(row),
                     "relationship_type": row.relationship_type,
-                    "target_refs": [_graph_source_ref(row.source_image, value) for value in _targets(row.target_key)],
+                    "target_refs": [
+                        _graph_source_ref(row.source_image, value)
+                        for value in _targets(row.target_key)
+                    ],
                     "quality": row.quality,
+                    "assignment_index": row.assignment_index,
+                    "assignment_name": row.assignment_name,
+                    "assignment_row_state": row.assignment_row_state,
+                    "active_assignment_state": row.active_assignment_state,
+                    "assignment_rch_assign_display": row.assignment_rch_assign_display,
                 }
                 assignments = cast(list[dict[str, object]], prog["assignments"])
                 if assignment not in assignments:
@@ -1404,7 +1540,13 @@ def _build_volume_graph(
         _relationship_graph_row(row, ref_to_id)
         for row in sorted(
             relationship_rows.values(),
-            key=lambda item: (item.source_image, item.scope_key, item.source_key, item.relationship_type, item.target_key),
+            key=lambda item: (
+                item.source_image,
+                item.scope_key,
+                item.source_key,
+                item.relationship_type,
+                item.target_key,
+            ),
         )
     ]
     first_target = targets[0]
@@ -1415,7 +1557,8 @@ def _build_volume_graph(
         if decision.source_image in {target.waveform.source_image for target in targets}
         and (
             _graph_source_ref(decision.source_image, decision.left_waveform_object_key) in ref_to_id
-            or _graph_source_ref(decision.source_image, decision.right_waveform_object_key) in ref_to_id
+            or _graph_source_ref(decision.source_image, decision.right_waveform_object_key)
+            in ref_to_id
             or _graph_source_ref(decision.source_image, decision.sbnk_object_key) in ref_to_id
         )
     ]
@@ -1467,13 +1610,20 @@ def _build_volume_graph(
         ],
     }
 
+
 def _write_stereo_exports(
     plan: WaveExportPlan,
     *,
     overwrite: bool,
     mono_replacement_ids: set[str],
     decisions: tuple[StereoExportDecision, ...],
-) -> tuple[list[Path], list[str], list[dict[str, object]], list[dict[str, object]], tuple[StereoExportDecision, ...]]:
+) -> tuple[
+    list[Path],
+    list[str],
+    list[dict[str, object]],
+    list[dict[str, object]],
+    tuple[StereoExportDecision, ...],
+]:
     written: list[Path] = []
     warnings: list[str] = []
     rows: list[dict[str, object]] = []
@@ -1490,7 +1640,12 @@ def _write_stereo_exports(
         left_target = by_id.get(decision.left_target_id)
         right_target = by_id.get(decision.right_target_id)
         if decision.decision != _STEREO_DECISION_SUCCESS:
-            if decision.decision in {_STEREO_DECISION_NOT_EXACT, _STEREO_DECISION_MISSING_SIDE, _STEREO_DECISION_PARENT_CONFLICT, _STEREO_DECISION_UNKNOWN}:
+            if decision.decision in {
+                _STEREO_DECISION_NOT_EXACT,
+                _STEREO_DECISION_MISSING_SIDE,
+                _STEREO_DECISION_PARENT_CONFLICT,
+                _STEREO_DECISION_UNKNOWN,
+            }:
                 warnings.append(_stereo_warning(decision))
             updated_decisions.append(decision)
             continue
@@ -1569,13 +1724,17 @@ def _write_stereo_exports(
         conversion["warnings"] = (
             [decision.reason] if decision.reason_code == _STEREO_REASON_PADDED else []
         )
-        wav_bytes, actual_output_frames, actual_left_padding, actual_right_padding = _stereo_wav_bytes(
-            left_target.waveform,
-            right_target.waveform,
+        wav_bytes, actual_output_frames, actual_left_padding, actual_right_padding = (
+            _stereo_wav_bytes(
+                left_target.waveform,
+                right_target.waveform,
+            )
         )
         _atomic_write_bytes(wav_path, wav_bytes, overwrite=overwrite)
         try:
-            _atomic_write_text(json_path, json.dumps(to_plain(sidecar), indent=2) + "\n", overwrite=overwrite)
+            _atomic_write_text(
+                json_path, json.dumps(to_plain(sidecar), indent=2) + "\n", overwrite=overwrite
+            )
         except Exception:
             try:
                 wav_path.unlink()
@@ -1598,6 +1757,7 @@ def _write_stereo_exports(
         updated_decisions.append(updated)
     return written, warnings, rows, manifest_rows, tuple(updated_decisions)
 
+
 def write_structured_export(
     plan: WaveExportPlan,
     *,
@@ -1617,10 +1777,12 @@ def write_structured_export(
     rendered_by_sbnk: dict[str, dict[str, object]] = {}
     final_stereo_decisions: tuple[StereoExportDecision, ...] = stereo_decisions
     if stereo_policy == "auto":
-        rendered_by_sbnk, final_stereo_decisions, rendered_written, stereo_warnings = _write_rendered_stereo_wavs(
-            plan,
-            stereo_decisions,
-            overwrite=overwrite,
+        rendered_by_sbnk, final_stereo_decisions, rendered_written, stereo_warnings = (
+            _write_rendered_stereo_wavs(
+                plan,
+                stereo_decisions,
+                overwrite=overwrite,
+            )
         )
         written.extend(rendered_written)
         warnings.extend(stereo_warnings)
@@ -1650,6 +1812,7 @@ def write_structured_export(
 
     return tuple(written), tuple(skipped), tuple(warnings), tuple(records)
 
+
 def _sample_manifest_row(target: SampleExportTarget) -> dict[str, object]:
     placement = target.placement
     sample_name = target.sampler_sample_name or target.waveform.sample_name
@@ -1664,7 +1827,9 @@ def _sample_manifest_row(target: SampleExportTarget) -> dict[str, object]:
         "waveform_object_key": target.waveform.object_key,
         "source_image": target.waveform.source_image,
         "scoped_sample_key": scoped_object_key(target.waveform.source_image, sample_key),
-        "scoped_waveform_key": scoped_object_key(target.waveform.source_image, target.waveform.object_key),
+        "scoped_waveform_key": scoped_object_key(
+            target.waveform.source_image, target.waveform.object_key
+        ),
         "wav_path": target.relative_wav_path.as_posix(),
         "json_path": target.relative_json_path.as_posix(),
         "sample_rate": target.waveform.sample_rate,
@@ -1677,6 +1842,7 @@ def _sample_manifest_row(target: SampleExportTarget) -> dict[str, object]:
         "placement_quality": target.placement_quality.value,
         "placement_source": target.placement_source,
     }
+
 
 def _write_manifests(
     plan: WaveExportPlan,
@@ -1691,7 +1857,9 @@ def _write_manifests(
     written.append(plan.output_dir / "samples.json")
     if plan.relationships:
         relationship_rows = [_relationship_row(row) for row in plan.relationships]
-        write_manifest(plan.output_dir / "relationships.json", relationship_rows, overwrite=overwrite)
+        write_manifest(
+            plan.output_dir / "relationships.json", relationship_rows, overwrite=overwrite
+        )
         written.append(plan.output_dir / "relationships.json")
         for filename, rows in _relationship_manifests(plan.relationships).items():
             if rows:
@@ -1709,24 +1877,38 @@ def _write_manifests(
         "quality_counts": dict(Counter(row["placement_quality"] for row in sample_manifest)),
         "stereo_decisions_total": len(stereo_decisions),
         "stereo_interleaved_written": stereo_counts.get(_STEREO_DECISION_SUCCESS, 0),
-        "stereo_kept_physical_only_not_exact_representable": stereo_counts.get(_STEREO_DECISION_NOT_EXACT, 0),
-        "stereo_kept_physical_only_missing_side": stereo_counts.get(_STEREO_DECISION_MISSING_SIDE, 0),
-        "stereo_kept_physical_only_placement_conflict": stereo_counts.get(_STEREO_DECISION_PARENT_CONFLICT, 0),
-        "stereo_kept_physical_only_unknown_relationship": stereo_counts.get(_STEREO_DECISION_UNKNOWN, 0),
+        "stereo_kept_physical_only_not_exact_representable": stereo_counts.get(
+            _STEREO_DECISION_NOT_EXACT, 0
+        ),
+        "stereo_kept_physical_only_missing_side": stereo_counts.get(
+            _STEREO_DECISION_MISSING_SIDE, 0
+        ),
+        "stereo_kept_physical_only_placement_conflict": stereo_counts.get(
+            _STEREO_DECISION_PARENT_CONFLICT, 0
+        ),
+        "stereo_kept_physical_only_unknown_relationship": stereo_counts.get(
+            _STEREO_DECISION_UNKNOWN, 0
+        ),
     }
     write_manifest(plan.output_dir / "export_summary.json", summary, overwrite=overwrite)
     written.append(plan.output_dir / "export_summary.json")
     return written
 
 
-def _relationship_manifests(relationships: tuple[WaveformRelationship, ...]) -> dict[str, list[dict[str, object]]]:
+def _relationship_manifests(
+    relationships: tuple[WaveformRelationship, ...],
+) -> dict[str, list[dict[str, object]]]:
     sample_banks: dict[str, list[dict[str, object]]] = defaultdict(list)
     sbacs: dict[str, list[dict[str, object]]] = defaultdict(list)
     programs: dict[str, list[dict[str, object]]] = defaultdict(list)
     source_by_group: dict[str, tuple[str, str]] = {}
     for row in relationships:
         entry = _relationship_row(row)
-        group_key = scoped_object_key(row.source_image, row.source_key) if row.source_image else row.source_key
+        group_key = (
+            scoped_object_key(row.source_image, row.source_key)
+            if row.source_image
+            else row.source_key
+        )
         source_by_group[group_key] = (row.source_image, row.source_key)
         if row.relationship_type.startswith("SBNK_"):
             sample_banks[group_key].append(entry)

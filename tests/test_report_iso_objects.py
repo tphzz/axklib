@@ -132,6 +132,69 @@ class ReportIsoObjectsTests(unittest.TestCase):
             self.assertEqual(result.error.error_code, "CONTAINER_UNSUPPORTED_ISO9660")
             self.assertIn("unsupported ISO9660 image", result.error.message)
 
+    def test_decodes_yamaha_cdrom_menu_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "labels.bin"
+            image = bytearray(SECTOR_SIZE * 4)
+            table = bytearray(64)
+            table[0] = 0xDD
+            table[1:15] = b"Ep31 CP80     "
+            table[15:18] = b"5me"
+            table[18:22] = b"F001"
+            table[32] = 0xAA
+            table[33:47] = b"Ignored       "
+            table[50:54] = b"F999"
+            image[SECTOR_SIZE : SECTOR_SIZE + len(table)] = table
+            image[SECTOR_SIZE * 2 : SECTOR_SIZE * 2 + 16] = b"PIANO/KEYS/SYNTH"
+            path.write_bytes(image)
+
+            rows = [
+                iso_lowlevel.IsoFileRow(
+                    image=str(path),
+                    volume_id="TEST",
+                    path="GROUP/F001",
+                    extent_sector=10,
+                    data_offset=SECTOR_SIZE * 3,
+                    size=0,
+                    is_directory=True,
+                    known_type=False,
+                    object_type="",
+                    name_guess="",
+                    inventory_method="iso9660",
+                ),
+                iso_lowlevel.IsoFileRow(
+                    image=str(path),
+                    volume_id="TEST",
+                    path="GROUP/0000",
+                    extent_sector=1,
+                    data_offset=SECTOR_SIZE,
+                    size=len(table),
+                    is_directory=False,
+                    known_type=False,
+                    object_type="",
+                    name_guess="",
+                    inventory_method="iso9660",
+                ),
+                iso_lowlevel.IsoFileRow(
+                    image=str(path),
+                    volume_id="TEST",
+                    path="GROUP/F002",
+                    extent_sector=2,
+                    data_offset=SECTOR_SIZE * 2,
+                    size=16,
+                    is_directory=False,
+                    known_type=False,
+                    object_type="",
+                    name_guess="",
+                    inventory_method="iso9660",
+                ),
+            ]
+
+            labels = iso_lowlevel.decode_yamaha_menu_labels(path, rows)
+
+            self.assertEqual(labels.group_labels, {"GROUP": "PIANO/KEYS/SYNTH"})
+            self.assertEqual(labels.volume_labels, {("GROUP", "F001"): "Ep31 CP80"})
+
 
 if __name__ == "__main__":
     unittest.main()

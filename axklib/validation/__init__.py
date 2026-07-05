@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import wave
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -15,13 +15,20 @@ from axklib.containers import AxklibContainer, AxklibContainerLoadResult, OpenOp
 from axklib.model import AxklibObject, DataQuality
 from axklib.objects import current as object_current
 from axklib.objects.decoded import decode_object
-from axklib.relationships import build_relationship_graph
+from axklib.relationships import (
+    ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE,
+    ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT,
+    Relationship,
+    RelationshipGraph,
+    build_relationship_graph,
+)
 
 
 class ValidationSeverity(StrEnum):
     """Severity level for validation issues.
-    
+
     Use it to decide whether a validation policy should fail, warn, or merely record informational quality."""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -30,8 +37,9 @@ class ValidationSeverity(StrEnum):
 
 class ValidationScope(StrEnum):
     """Part of the system affected by a validation issue.
-    
+
     Use it to separate container, object, relationship, export, and sidecar problems in reports and CLI output."""
+
     CONTAINER = "container"
     PARTITION = "partition"
     VOLUME = "volume"
@@ -45,8 +53,9 @@ class ValidationScope(StrEnum):
 @dataclass(frozen=True)
 class ValidationIssue:
     """One stable validation finding.
-    
+
     Use it for machine-readable validation output with a stable code, severity, source path, sampler path, quality, and recommended follow-up."""
+
     severity: ValidationSeverity
     code: str
     message: str
@@ -62,8 +71,9 @@ class ValidationIssue:
 @dataclass(frozen=True)
 class ValidationReport:
     """Collection of validation issues evaluated under a policy.
-    
+
     Use it to get summary counts and a deterministic pass/fail result for normal, strict, or salvage-aware validation modes."""
+
     issues: tuple[ValidationIssue, ...]
     policy: str = "normal"
 
@@ -83,12 +93,20 @@ class ValidationReport:
 VALIDATION_POLICIES = {"normal", "strict", "salvage-aware"}
 
 
-def validation_failed(issues: tuple[ValidationIssue, ...] | list[ValidationIssue], policy: str) -> bool:
+def validation_failed(
+    issues: tuple[ValidationIssue, ...] | list[ValidationIssue], policy: str
+) -> bool:
     if policy not in VALIDATION_POLICIES:
         raise ValueError(f"unknown validation policy: {policy}")
     if policy == "strict":
-        return any(issue.severity in {ValidationSeverity.WARNING, ValidationSeverity.ERROR, ValidationSeverity.FATAL} for issue in issues)
-    return any(issue.severity in {ValidationSeverity.ERROR, ValidationSeverity.FATAL} for issue in issues)
+        return any(
+            issue.severity
+            in {ValidationSeverity.WARNING, ValidationSeverity.ERROR, ValidationSeverity.FATAL}
+            for issue in issues
+        )
+    return any(
+        issue.severity in {ValidationSeverity.ERROR, ValidationSeverity.FATAL} for issue in issues
+    )
 
 
 def _issue(
@@ -118,6 +136,150 @@ def _issue(
     )
 
 
+_ACTIVE_PROGRAM_ASSIGNMENT_STATES = {
+    ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE,
+    ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT,
+}
+_SBNK_MEMBER_RELATIONSHIP_TYPES = {
+    "SBNK_LEFT_MEMBER_TO_SMPL",
+    "SBNK_RIGHT_MEMBER_TO_SMPL",
+}
+
+
+def _relationship_target_keys(target_key: str) -> tuple[str, ...]:
+    return tuple(part for part in target_key.split("|") if part)
+
+
+def _object_report_path(objects_by_key: dict[str, AxklibObject], object_key: str) -> str:
+    item = objects_by_key.get(object_key)
+    if item is None:
+        return object_key
+    return item.fat_file or item.object_key
+
+
+def _logical_object_group_path(objects_by_key: dict[str, AxklibObject], object_key: str) -> str:
+    item = objects_by_key.get(object_key)
+    if item is None:
+        return object_key
+    path = item.fat_file.replace("\\", "/")
+    parts = path.split("/")
+    if len(parts) >= 3 and parts[-2] in {"PROG", "SBAC", "SBNK", "SMPL", "SEQU", "PRF3"}:
+        return "/".join(parts[:-2])
+    return path or item.scope_key or item.object_key
+
+
+def _active_program_assignment_label(
+    objects_by_key: dict[str, AxklibObject], row: Relationship
+) -> str:
+    program_path = _object_report_path(objects_by_key, row.source_key)
+    assignment_name = row.assignment_name or row.target_key or "unnamed assignment"
+    if row.assignment_index is None:
+        return f"{program_path}: {assignment_name}"
+    return f"{program_path}: assignment {row.assignment_index + 1} {assignment_name}"
+
+
+def _sbnk_member_target_issues(
+    container: AxklibContainer, graph: RelationshipGraph, source_path: str
+) -> tuple[list[ValidationIssue], set[str]]:
+    objects_by_key = {item.object_key: item for item in container.objects}
+    sbac_to_sbnk: dict[str, set[str]] = defaultdict(set)
+    reachable_from_active_program: dict[str, list[str]] = defaultdict(list)
+
+    for row in graph.relationships:
+        if row.relationship_type != "SBAC_SLOT_TO_SBNK":
+            continue
+        if row.quality not in {"Known", "Likely"}:
+            continue
+        for target_key in _relationship_target_keys(row.target_key):
+            sbac_to_sbnk[row.source_key].add(target_key)
+
+    for row in graph.relationships:
+        if row.relationship_type not in {"PROG_ASSIGNMENT_TO_SBAC", "PROG_ASSIGNMENT_TO_SBNK"}:
+            continue
+        if row.active_assignment_state not in _ACTIVE_PROGRAM_ASSIGNMENT_STATES:
+            continue
+        if row.quality not in {"Known", "Likely"}:
+            continue
+        label = _active_program_assignment_label(objects_by_key, row)
+        for target_key in _relationship_target_keys(row.target_key):
+            target_item = objects_by_key.get(target_key)
+            target_is_sbnk = target_item is not None and target_item.type == "SBNK"
+            if row.relationship_type == "PROG_ASSIGNMENT_TO_SBNK" or target_is_sbnk:
+                reachable_from_active_program[target_key].append(label)
+            else:
+                for sbnk_key in sbac_to_sbnk.get(target_key, ()):
+                    reachable_from_active_program[sbnk_key].append(label)
+
+    grouped_rows: dict[tuple[str, bool], list[Relationship]] = defaultdict(list)
+    grouped_active_labels: dict[tuple[str, bool], set[str]] = defaultdict(set)
+    covered_relationship_keys: set[str] = set()
+    for row in graph.relationships:
+        if row.relationship_type not in _SBNK_MEMBER_RELATIONSHIP_TYPES or row.quality != "Unknown":
+            continue
+        active_labels = reachable_from_active_program.get(row.source_key, [])
+        group_path = _logical_object_group_path(objects_by_key, row.source_key)
+        group_key = (group_path, bool(active_labels))
+        grouped_rows[group_key].append(row)
+        grouped_active_labels[group_key].update(active_labels)
+        covered_relationship_keys.add(row.key)
+
+    issues: list[ValidationIssue] = []
+    for (group_path, is_active_reachable), rows in sorted(grouped_rows.items()):
+        source_objects = {row.source_key for row in rows}
+        member_count = len(rows)
+        sbnk_count = len(source_objects)
+        first_source_object = sorted(source_objects)[0]
+        if is_active_reachable:
+            active_labels = sorted(grouped_active_labels[(group_path, is_active_reachable)])
+            active_summary = "; ".join(active_labels[:4])
+            if len(active_labels) > 4:
+                active_summary += f"; +{len(active_labels) - 4} more"
+            issues.append(
+                _issue(
+                    severity=ValidationSeverity.ERROR,
+                    code="REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING",
+                    message=(
+                        f"{member_count} sample-bank member link(s) across {sbnk_count} "
+                        "sample bank(s) do not resolve to physical sample objects and are "
+                        "reachable from active Program assignments."
+                    ),
+                    scope=ValidationScope.RELATIONSHIP,
+                    source_path=source_path,
+                    sampler_path=f"{group_path} | {active_summary}",
+                    object_key=first_source_object,
+                    quality=DataQuality.UNKNOWN,
+                    basis="SBNK member target aggregation",
+                    recommended_next_check=(
+                        "Treat the affected Program/sample-bank path as incomplete until the "
+                        "missing physical sample objects are found or the source is confirmed "
+                        "partially loadable."
+                    ),
+                )
+            )
+        else:
+            issues.append(
+                _issue(
+                    severity=ValidationSeverity.WARNING,
+                    code="REL_SBNK_MEMBER_TARGET_MISSING",
+                    message=(
+                        f"{member_count} sample-bank member link(s) across {sbnk_count} "
+                        "sample bank(s) do not resolve to physical sample objects."
+                    ),
+                    scope=ValidationScope.RELATIONSHIP,
+                    source_path=source_path,
+                    sampler_path=group_path,
+                    object_key=first_source_object,
+                    quality=DataQuality.UNKNOWN,
+                    basis="SBNK member target aggregation",
+                    recommended_next_check=(
+                        "Inspect the sample-bank member links before treating this object group "
+                        "as complete."
+                    ),
+                )
+            )
+    return issues, covered_relationship_keys
+
+
 def validate_container(container: AxklibContainer, *, policy: str = "normal") -> ValidationReport:
     issues: list[ValidationIssue] = []
     source_path = str(container.source_path)
@@ -133,9 +295,21 @@ def validate_container(container: AxklibContainer, *, policy: str = "normal") ->
                     object_key=item.object_key,
                 )
             )
-        if item.payload and item.payload.startswith(object_current.OBJECT_MAGIC) and len(item.payload) >= 0x24:
-            header_size = item.header.header_size if item.header else int.from_bytes(item.payload[0x10:0x14], "big")
-            stored_size = item.header.stored_payload_size if item.header else int.from_bytes(item.payload[0x1C:0x20], "big")
+        if (
+            item.payload
+            and item.payload.startswith(object_current.OBJECT_MAGIC)
+            and len(item.payload) >= 0x24
+        ):
+            header_size = (
+                item.header.header_size
+                if item.header
+                else int.from_bytes(item.payload[0x10:0x14], "big")
+            )
+            stored_size = (
+                item.header.stored_payload_size
+                if item.header
+                else int.from_bytes(item.payload[0x1C:0x20], "big")
+            )
             required = (header_size or 0) + (stored_size or 0)
             if required > len(item.payload):
                 issues.append(
@@ -196,7 +370,13 @@ def validate_container(container: AxklibContainer, *, policy: str = "normal") ->
                 )
             )
     graph = build_relationship_graph(list(container.objects))
+    member_target_issues, aggregated_member_relationship_keys = _sbnk_member_target_issues(
+        container, graph, source_path
+    )
+    issues.extend(member_target_issues)
     for row in graph.relationships:
+        if row.key in aggregated_member_relationship_keys:
+            continue
         if row.quality == "Tentative":
             issues.append(
                 _issue(
@@ -224,8 +404,15 @@ def validate_container(container: AxklibContainer, *, policy: str = "normal") ->
                     basis=row.basis,
                 )
             )
-    return ValidationReport(tuple(sorted(issues, key=lambda issue: (issue.source_path, issue.code, issue.object_key, issue.message))), policy=policy)
-
+    return ValidationReport(
+        tuple(
+            sorted(
+                issues,
+                key=lambda issue: (issue.source_path, issue.code, issue.object_key, issue.message),
+            )
+        ),
+        policy=policy,
+    )
 
 
 def _quality_from_text(value: str) -> DataQuality:
@@ -322,7 +509,8 @@ def _sfs_allocation_issues(source_path: Path) -> list[ValidationIssue]:
                 _issue(
                     severity=ValidationSeverity.WARNING,
                     code="SFS_ALLOCATION_WARNING",
-                    message=summary.warnings or f"{summary.warning_count} allocation analysis warnings.",
+                    message=summary.warnings
+                    or f"{summary.warning_count} allocation analysis warnings.",
                     scope=ValidationScope.PARTITION,
                     source_path=str(source_path),
                     sampler_path=sampler_path,
@@ -398,8 +586,13 @@ def _sfs_detail_issues(source_path: Path) -> list[ValidationIssue]:
         return []
     return [*_sfs_allocation_issues(source_path), *_sfs_volume_issues(source_path)]
 
-def _fat_span_issue_groups(containers: Sequence[AxklibContainer]) -> tuple[set[str], list[ValidationIssue]]:
-    candidates: dict[tuple[str, str, str, str, int, int], list[tuple[AxklibContainer, AxklibObject, int]]] = {}
+
+def _fat_span_issue_groups(
+    containers: Sequence[AxklibContainer],
+) -> tuple[set[str], list[ValidationIssue]]:
+    candidates: dict[
+        tuple[str, str, str, str, int, int], list[tuple[AxklibContainer, AxklibObject, int]]
+    ] = {}
     for container in containers:
         if container.kind != "fat12_floppy":
             continue
@@ -480,10 +673,7 @@ def validate_path_results(
         container_issues = [
             issue
             for issue in validate_container(result.container, policy=policy).issues
-            if not (
-                issue.code == "OBJECT_PAYLOAD_TRUNCATED"
-                and issue.object_key in fat_span_keys
-            )
+            if not (issue.code == "OBJECT_PAYLOAD_TRUNCATED" and issue.object_key in fat_span_keys)
         ]
         issues.extend(container_issues)
         issues.extend(_sfs_detail_issues(Path(result.path)))
@@ -507,6 +697,7 @@ def validate_path_results(
 def validate_paths(paths: Sequence[str | Path], *, policy: str = "normal") -> ValidationReport:
     results = open_many(paths, options=OpenOptions(include_payloads=True))
     return validate_path_results(results, policy=policy)
+
 
 def _load_json_rows(path: Path) -> list[dict[str, object]]:
     try:
@@ -534,7 +725,11 @@ def _stereo_decision_export_issues(export_dir: Path) -> list[ValidationIssue]:
     if not decisions_path.exists():
         return issues
     decisions = _load_json_rows(decisions_path)
-    samples = _load_json_rows(export_dir / "samples.json") if (export_dir / "samples.json").exists() else []
+    samples = (
+        _load_json_rows(export_dir / "samples.json")
+        if (export_dir / "samples.json").exists()
+        else []
+    )
     listed_wavs = {str(row.get("wav_path", "")) for row in samples}
     for row in decisions:
         decision = str(row.get("decision", ""))
@@ -585,20 +780,26 @@ def _stereo_decision_export_issues(export_dir: Path) -> list[ValidationIssue]:
                     _issue(
                         severity=ValidationSeverity.ERROR,
                         code="EXPORT_STEREO_SUPPRESSED_MONO_STILL_LISTED",
-                        message="Suppressed mono paths are still listed in samples.json: " + ", ".join(stale),
+                        message="Suppressed mono paths are still listed in samples.json: "
+                        + ", ".join(stale),
                         scope=ValidationScope.EXPORT,
                         source_path=source_path,
                         object_key=sbnk_key,
                     )
                 )
         elif decision.startswith(("kept_mono", "kept_physical_only")):
-            missing = [path for path in (left_mono, right_mono) if path and not (export_dir / path).exists()]
+            missing = [
+                path
+                for path in (left_mono, right_mono)
+                if path and not (export_dir / path).exists()
+            ]
             if missing:
                 issues.append(
                     _issue(
                         severity=ValidationSeverity.ERROR,
                         code="EXPORT_STEREO_MONO_MISSING_FOR_NONEXACT",
-                        message="Mono path missing for non-interleaved stereo decision: " + ", ".join(missing),
+                        message="Mono path missing for non-interleaved stereo decision: "
+                        + ", ".join(missing),
                         scope=ValidationScope.EXPORT,
                         source_path=source_path,
                         object_key=sbnk_key,
@@ -618,8 +819,9 @@ def _stereo_decision_export_issues(export_dir: Path) -> list[ValidationIssue]:
     return issues
 
 
-
-def _relative_export_path_issue(path_text: str, *, source_path: str, object_key: str, field_name: str) -> ValidationIssue | None:
+def _relative_export_path_issue(
+    path_text: str, *, source_path: str, object_key: str, field_name: str
+) -> ValidationIssue | None:
     rel = Path(path_text)
     if rel.is_absolute() or ".." in rel.parts:
         return _issue(
@@ -660,12 +862,18 @@ def _volume_graph_wav_issues(export_dir: Path) -> list[ValidationIssue]:
             for row in smpl_rows:
                 if isinstance(row, dict):
                     audio = row.get("audio", {})
-                    expected_channels = int(audio.get("channels", 0)) if isinstance(audio, dict) and audio.get("channels") is not None else None
+                    expected_channels = (
+                        int(audio.get("channels", 0))
+                        if isinstance(audio, dict) and audio.get("channels") is not None
+                        else None
+                    )
                     checks.append((row, "wav_path", expected_channels))
         if isinstance(rendered_rows, list):
             for row in rendered_rows:
                 if isinstance(row, dict):
-                    channels = int(row.get("channels", 0)) if row.get("channels") is not None else None
+                    channels = (
+                        int(row.get("channels", 0)) if row.get("channels") is not None else None
+                    )
                     checks.append((row, "wav_path", channels))
         for row, field_name, expected_channels in checks:
             object_key = str(row.get("source_ref", row.get("id", "")))
@@ -718,6 +926,7 @@ def _volume_graph_wav_issues(export_dir: Path) -> list[ValidationIssue]:
                     )
                 )
     return issues
+
 
 def validate_export_sidecars(export_dir: Path, *, policy: str = "normal") -> ValidationReport:
     issues: list[ValidationIssue] = []
@@ -780,7 +989,15 @@ def validate_export_sidecars(export_dir: Path, *, policy: str = "normal") -> Val
                 object_key = str(identity.get("object_key", object_key))
             missing_sections = [
                 key
-                for key in ("identity", "audio", "playback", "relationships", "parameters", "conversion", "origin")
+                for key in (
+                    "identity",
+                    "audio",
+                    "playback",
+                    "relationships",
+                    "parameters",
+                    "conversion",
+                    "origin",
+                )
                 if key not in record
             ]
             if missing_sections:
@@ -885,4 +1102,12 @@ def validate_export_sidecars(export_dir: Path, *, policy: str = "normal") -> Val
                     )
                 )
     issues.extend(_stereo_decision_export_issues(export_dir))
-    return ValidationReport(tuple(sorted(issues, key=lambda issue: (issue.source_path, issue.code, issue.object_key, issue.message))), policy=policy)
+    return ValidationReport(
+        tuple(
+            sorted(
+                issues,
+                key=lambda issue: (issue.source_path, issue.code, issue.object_key, issue.message),
+            )
+        ),
+        policy=policy,
+    )
