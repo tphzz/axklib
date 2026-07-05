@@ -205,7 +205,7 @@ Rules:
 | Invalid path characters `< > : " / \ | ? *` | Replaced with `_`. |
 | Control characters | Replaced with `_`. |
 | Repeated whitespace | Collapsed to one space in display-path components. |
-| Trailing duplicate stars | Converted to numeric suffixes: `*` -> ` (2)`, `**` -> ` (3)`. |
+| Trailing duplicate stars | Converted to numeric suffixes by default: `*` -> ` (2)`, `**` -> ` (3)`. Rendered stereo stems can use an owning sample-bank/group label instead when that is clearer. |
 | Repeated `_` | Collapsed. |
 | Leading/trailing dots, spaces, `_` | Trimmed from path components. |
 
@@ -236,6 +236,15 @@ Rules:
 | `_unplaced/` | Used when a waveform has no known placement. |
 | source scope prefix | Added when multiple input sources are exported together. |
 
+Physical WAV names come from `SMPL` storage names. Rendered stereo names come
+from sampler-facing sample/member names when a known stereo relationship supplies
+a better musical label. For paired sibling `SBNK` stereo, terminal `-L` and `-R`
+are removed from the rendered stem, so `Grand -L` and `Grand -R` render as
+`Grand.wav` while both physical `SMPL` WAVs remain present. If the paired member
+name is only distinguished by a sampler duplicate marker, the rendered stem uses
+the owning `B ...` sample-bank or group label when available, for example
+`Harpsi 2.1N - Harpsich031.wav` instead of a numeric duplicate suffix.
+
 ## Technical Fields That Stay In Reports
 
 Normal CLI text leads with sampler-facing names. These fields remain available in
@@ -248,3 +257,4 @@ CSV/JSON reports for traceability:
 | ISO placement | `iso_raw_group`, `iso_raw_volume`, `iso_extent_sector`, `iso_data_offset`. |
 | Relationship diagnostics | `basis`, `raw_fields`, candidate object keys, assignment row bytes. |
 | Quality labels | `quality`, `match_quality`, `placement_quality`. |
+

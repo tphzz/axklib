@@ -59,6 +59,34 @@ from axklib.validation import volume as volume_validation
 VERSION = "0.1.0-plan008"
 
 
+class _ProgressLine:
+    def __init__(self, mode: str) -> None:
+        self.enabled = mode == "always" or (mode == "auto" and sys.stderr.isatty())
+        self._last_length = 0
+        self._wrote = False
+
+    def update(self, stage: str, completed: int, total: int, message: str = "") -> None:
+        if not self.enabled:
+            return
+        percent = 100 if total <= 0 else max(0, min(100, int(completed * 100 / total)))
+        text = f"{stage}: {percent:3d}% ({completed}/{total})"
+        if message:
+            detail = str(message).replace("\r", " ").replace("\n", " ")
+            if len(detail) > 72:
+                detail = f"...{detail[-69:]}"
+            text = f"{text} {detail}"
+        padding = " " * max(0, self._last_length - len(text))
+        sys.stderr.write(f"\r{text}{padding}")
+        sys.stderr.flush()
+        self._last_length = len(text)
+        self._wrote = True
+
+    def finish(self) -> None:
+        if self.enabled and self._wrote:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+
+
 def run_info(args: argparse.Namespace) -> int:
     options = axklib.OpenOptions(strict=args.strict, include_payloads=True)
     results = build_content_trees_for_paths(
@@ -270,6 +298,7 @@ def _wave_export_context(
                 quality=_quality(placement.quality),
                 source=placement.basis,
                 relationship_path=f"{placement.category_name or 'object'}-category-entry",
+                raw_volume_path=placement.raw_volume_path,
             )
         relationship_items.extend(container.objects)
     if relationship_items:
@@ -481,6 +510,7 @@ def run_inventory(args: argparse.Namespace) -> int:
 
 def run_extract_waves(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)
+    progress = _ProgressLine(args.progress)
     if args.mono_dir is not None:
         paths = _input_paths(args.paths)
         if len(paths) != 1:
@@ -488,22 +518,27 @@ def run_extract_waves(args: argparse.Namespace) -> int:
                 "organized exact export with --mono-dir requires exactly one source image"
             )
         _ensure_output_dir(output_dir, overwrite=args.overwrite)
-        pair_exports = exact_export.export_pairs(
-            paths[0],
-            Path(args.mono_dir),
-            output_dir,
-            inventory_dir=Path(args.inventory_dir) if args.inventory_dir else None,
-            bank_relationships_dir=Path(args.bank_relationships_dir)
-            if args.bank_relationships_dir
-            else None,
-            sbac_volume_disambiguation_dir=(
-                Path(args.sbac_volume_disambiguation_dir)
-                if args.sbac_volume_disambiguation_dir
-                else None
-            ),
-            overwrite_policy="replace" if args.overwrite else "fail",
-            stereo_policy=args.stereo,
-        )
+        progress.update("exporting", 0, 1, "organizing exact stereo exports")
+        try:
+            pair_exports = exact_export.export_pairs(
+                paths[0],
+                Path(args.mono_dir),
+                output_dir,
+                inventory_dir=Path(args.inventory_dir) if args.inventory_dir else None,
+                bank_relationships_dir=Path(args.bank_relationships_dir)
+                if args.bank_relationships_dir
+                else None,
+                sbac_volume_disambiguation_dir=(
+                    Path(args.sbac_volume_disambiguation_dir)
+                    if args.sbac_volume_disambiguation_dir
+                    else None
+                ),
+                overwrite_policy="replace" if args.overwrite else "fail",
+                stereo_policy=args.stereo,
+            )
+            progress.update("exporting", 1, 1, "organized export complete")
+        finally:
+            progress.finish()
         schemas = [
             _write_report_schema(output_dir, "sbnk_exact_pairs", pair_exports),
             _write_report_schema(
@@ -525,10 +560,20 @@ def run_extract_waves(args: argparse.Namespace) -> int:
         return 0
 
     options = axklib.OpenOptions(strict=args.strict, include_payloads=True)
-    results = axklib.open_many(_input_paths(args.paths), options=options)
+    paths = _input_paths(args.paths)
+    results: list[Any] = []
+    progress.update("loading", 0, len(paths), "opening inputs")
+    for index, path in enumerate(paths, start=1):
+        progress.update("loading", index - 1, len(paths), str(path))
+        results.extend(axklib.open_many([path], options=options))
+        progress.update("loading", index, len(paths), path.name)
+
     waveforms: list[Any] = []
     decode_errors = 0
     load_errors = 0
+    decodable_results = [result for result in results if result.container is not None]
+    progress.update("decoding", 0, len(decodable_results), "decoding waveform objects")
+    decoded_count = 0
     for result in results:
         if result.container is None:
             load_errors += 1
@@ -537,7 +582,10 @@ def run_extract_waves(args: argparse.Namespace) -> int:
             code = error.error_code if error else "AXKLIB_CONTAINER_OPEN_FAILED"
             print(f"{result.path}\tERROR\t{code}\t{message}")
             continue
+        progress.update("decoding", decoded_count, len(decodable_results), str(result.path))
         waveform_set = decode_container_waveforms(result.container, selection=args.name)
+        decoded_count += 1
+        progress.update("decoding", decoded_count, len(decodable_results), result.path.name)
         waveforms.extend(waveform_set.waveforms)
         decode_errors += len(waveform_set.issues)
         for issue in waveform_set.issues[:20]:
@@ -552,8 +600,14 @@ def run_extract_waves(args: argparse.Namespace) -> int:
         layout=args.layout,
         placements=placements,
         relationships=relationships,
+        progress_callback=lambda event: progress.update(
+            event.stage, event.completed, event.total, event.message
+        ),
     )
-    export_result = export_waveforms(request)
+    try:
+        export_result = export_waveforms(request)
+    finally:
+        progress.finish()
     if export_result.sidecar_records:
         schemas = [
             _write_report_schema(
@@ -1185,6 +1239,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="SBAC volume disambiguation report directory for Likely placement rows",
     )
     waves.add_argument("--strict", action="store_true", help="raise on the first load error")
+    waves.add_argument(
+        "--progress",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="show same-line progress on stderr; default is auto for interactive terminals",
+    )
     waves.set_defaults(func=run_extract_waves)
     return parser
 

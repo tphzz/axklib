@@ -204,6 +204,27 @@ def test_extract_waves_allows_existing_targets_with_overwrite(tmp_path: Path) ->
     assert second == 0
 
 
+def test_extract_waves_progress_always_reports_same_line_status(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "sample.smpl"
+    output = tmp_path / "waves"
+    _write_standalone_smpl(source)
+
+    code = axklibtool.main(
+        ["extract", "waves", "--progress", "always", "-o", str(output), str(source)]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "\rloading:" in captured.err
+    assert "\rdecoding:" in captured.err
+    assert "\rexporting:" in captured.err
+    assert "SMPL/S01.wav" in captured.err
+    assert "volume.axklib.json" in captured.err
+    assert captured.err.endswith("\n")
+
+
 def test_subcommand_help_output_is_available(capsys: pytest.CaptureFixture[str]) -> None:
     for argv in (["inventory", "--help"], ["extract", "waves", "--help"]):
         with pytest.raises(SystemExit) as exc_info:

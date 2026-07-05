@@ -171,6 +171,23 @@ Known rows are used for exact export sidecars and stereo render planning. Rows
 with missing or ambiguous targets remain diagnostic and can raise validation
 issues when reachable from active Program assignments.
 
+### Paired SBNK Stereo
+
+Some containers represent stereo as two sampler-visible `SBNK` siblings under
+the same `SBAC` group instead of one `SBNK` with a right-member `SMPL` link. The
+public rule for rendering this pattern is intentionally narrow:
+
+| Requirement | Rule |
+| --- | --- |
+| Grouping | Both `SBNK` objects are known members of the same `SBAC`. |
+| Names | The sampler-facing `SBNK` names share the same base and differ only by terminal `-L` and `-R`. |
+| Waveforms | Each `SBNK` has a known left-member link to a distinct physical `SMPL` object. |
+| Export | Exact mono `SMPL` WAVs are still exported once; the stereo WAV is an additional `RENDERED/` artifact. |
+
+The graph records this as a stereo decision with a basis containing
+`same-sbac-sbnk-name-lr-pair`. It does not convert the paired `SBNK` objects into
+a synthetic right-member link.
+
 ## SBNK Program-Link Bitmaps
 
 Each `SBNK` has four 32-bit Program-link bitmap words at `0x0c0..0x0cf`. These
@@ -221,3 +238,4 @@ Unresolved placeholders sort before normal Program children when
         - build_relationship_graph_for_paths
         - classify_rch_assign_display
         - classify_active_assignment_state
+

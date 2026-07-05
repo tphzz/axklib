@@ -159,8 +159,15 @@ physical waveform storage and carry most sample/member parameters.
 | `0x0c8` | 4 | u32be | linked Programs 065-096 bitmap |
 | `0x0cc` | 4 | u32be | linked Programs 097-128 bitmap |
 
-Program-link bitmap decoding:
+The ordinary stereo layout uses the left and right member link fields on one
+`SBNK`. Some source media instead stores stereo as two sibling `SBNK` objects
+under the same `SBAC` group, with sampler-facing names ending in `-L` and `-R`.
+In that layout each sibling still uses its own left-member `SMPL` link. axklib
+keeps both `SBNK` objects and both physical `SMPL` exports, then writes an
+additive rendered stereo WAV when the sibling names and links are known and
+compatible.
 
+Program-link bitmap decoding:
 ```text
 for word_index in 0..3:
     base_program = word_index * 32 + 1

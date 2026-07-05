@@ -8,6 +8,7 @@ import json
 import re
 import wave
 from collections import Counter, defaultdict, deque
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, replace
 from io import BytesIO
 from pathlib import Path
@@ -19,6 +20,7 @@ from axklib.audio import (
     Waveform,
     WaveformPlacement,
     WaveformRelationship,
+    WavExportProgress,
     _atomic_write_bytes,
     _atomic_write_text,
     _safe_name,
@@ -199,6 +201,43 @@ def _placement_for(
     )
 
 
+def _raw_volume_suffix(raw_volume_path: str) -> str:
+    parts = [part for part in raw_volume_path.replace("\\", "/").split("/") if part]
+    return parts[-1] if parts else ""
+
+
+def _export_volume_names_by_raw_path(
+    placements: Iterable[WaveformPlacement],
+) -> dict[str, str]:
+    entries = {
+        (placement.partition_name, placement.volume_name, placement.raw_volume_path)
+        for placement in placements
+        if placement.raw_volume_path
+    }
+    duplicate_names: Counter[tuple[str, str]] = Counter()
+    for partition_name, volume_name, _raw_volume_path in entries:
+        duplicate_names[(partition_name, volume_name)] += 1
+    names: dict[str, str] = {}
+    for partition_name, volume_name, raw_volume_path in entries:
+        if duplicate_names[(partition_name, volume_name)] <= 1:
+            continue
+        suffix = _raw_volume_suffix(raw_volume_path)
+        if suffix:
+            names[raw_volume_path] = f"{volume_name} ({suffix})"
+    return names
+
+
+def _placement_for_export(
+    placement: WaveformPlacement | None, volume_names_by_raw_path: dict[str, str]
+) -> WaveformPlacement | None:
+    if placement is None or not placement.raw_volume_path:
+        return placement
+    volume_name = volume_names_by_raw_path.get(placement.raw_volume_path)
+    if not volume_name or volume_name == placement.volume_name:
+        return placement
+    return replace(placement, volume_name=volume_name)
+
+
 def _single_target_key(row: WaveformRelationship) -> str | None:
     targets = _targets(row.target_key)
     if len(targets) != 1:
@@ -332,13 +371,15 @@ def build_export_plan(
 ) -> WaveExportPlan:
     scopes = source_scopes(waveforms)
     placement_map = placements or {}
+    volume_names_by_raw_path = _export_volume_names_by_raw_path(placement_map.values())
     used_ids: set[str] = set()
     used_paths: set[str] = set()
     targets: list[SampleExportTarget] = []
     for waveform in waveforms:
         scope = scopes[waveform.source_image]
-        waveform_placement = _placement_for(
-            placement_map, waveform.source_image, waveform.object_key
+        waveform_placement = _placement_for_export(
+            _placement_for(placement_map, waveform.source_image, waveform.object_key),
+            volume_names_by_raw_path,
         )
         parent_rows = _sample_parent_rows(waveform, relationships)
         if not parent_rows:
@@ -382,11 +423,17 @@ def build_export_plan(
 
         for row in parent_rows:
             sample_key = row.source_key
-            sample_placement = _placement_for(placement_map, waveform.source_image, sample_key)
+            sample_placement = _placement_for_export(
+                _placement_for(placement_map, waveform.source_image, sample_key),
+                volume_names_by_raw_path,
+            )
             bank_row = _sample_bank_parent_row(waveform.source_image, sample_key, relationships)
             bank_key = bank_row.source_key if bank_row else ""
-            bank_placement = (
-                _placement_for(placement_map, waveform.source_image, bank_key) if bank_key else None
+            bank_placement = _placement_for_export(
+                _placement_for(placement_map, waveform.source_image, bank_key)
+                if bank_key
+                else None,
+                volume_names_by_raw_path,
             )
             placement = sample_placement or bank_placement or waveform_placement
             sample_name = (sample_placement.display_name if sample_placement else "") or sample_key
@@ -824,6 +871,26 @@ def _scoped_row_source(row: WaveformRelationship) -> str:
     return row.source_image or row.scope_key
 
 
+def _trailing_duplicate_base(value: str) -> str | None:
+    match = re.search(r"\s*\*+$", value.strip())
+    if match is None:
+        return None
+    base = value.strip()[: match.start()].rstrip()
+    return base or None
+
+
+def _terminal_lr_name(value: str) -> tuple[str, str] | None:
+    match = re.match(r"^(.+?\s*)-([LR])(\*+)?$", value.strip())
+    if match is None:
+        return None
+    base = match.group(1).rstrip()
+    suffix = match.group(3) or ""
+    side = "left" if match.group(2) == "L" else "right"
+    if not base:
+        return None
+    return f"{base}{suffix}", side
+
+
 def _stereo_member_rows(plan: WaveExportPlan) -> dict[str, dict[str, WaveformRelationship]]:
     members: dict[str, dict[str, WaveformRelationship]] = defaultdict(dict)
     for row in plan.relationships:
@@ -914,9 +981,136 @@ def _decision_row_targets(
     return _targets_for_relationship_member(plan.targets, row, target_key)
 
 
+def _same_sbac_paired_sbnk_decisions(
+    plan: WaveExportPlan, member_rows: dict[str, dict[str, WaveformRelationship]]
+) -> tuple[StereoExportDecision, ...]:
+    by_sbnk: dict[str, tuple[WaveformRelationship, SampleExportTarget, tuple[str, str]]] = {}
+    for scoped_sbnk_key, rows in member_rows.items():
+        if "right_row" in rows:
+            continue
+        left_row = rows.get("left_row")
+        if left_row is None or left_row.quality != "Known":
+            continue
+        targets = _decision_row_targets(plan, left_row)
+        if len(targets) != 1:
+            continue
+        target = targets[0]
+        lr_name = _terminal_lr_name(target.sampler_sample_name)
+        if lr_name is None:
+            continue
+        by_sbnk[scoped_sbnk_key] = (left_row, target, lr_name)
+
+    grouped: dict[
+        tuple[str, str, str], dict[str, tuple[WaveformRelationship, SampleExportTarget]]
+    ] = defaultdict(dict)
+    bases: dict[tuple[str, str, str], str] = {}
+    sbac_basis: dict[tuple[str, str, str], str] = {}
+    for row in plan.relationships:
+        if row.quality != "Known" or row.relationship_type != "SBAC_SLOT_TO_SBNK":
+            continue
+        target_keys = _targets(row.target_key)
+        if len(target_keys) != 1:
+            continue
+        source_image = _scoped_row_source(row)
+        scoped_sbnk_key = scoped_object_key(source_image, target_keys[0])
+        entry = by_sbnk.get(scoped_sbnk_key)
+        if entry is None:
+            continue
+        _left_row, target, (base, side) = entry
+        key = (source_image, row.source_key, base)
+        if side in grouped[key]:
+            grouped[key]["ambiguous"] = (row, target)
+            continue
+        grouped[key][side] = (row, target)
+        bases[key] = base
+        sbac_basis[key] = row.basis
+
+    decisions: list[StereoExportDecision] = []
+    for key, sides in sorted(grouped.items()):
+        source_image, _sbac_key, base = key
+        if "ambiguous" in sides or set(sides) != {"left", "right"}:
+            continue
+        _left_sbac_row, left_target = sides["left"]
+        _right_sbac_row, right_target = sides["right"]
+        if left_target.waveform.object_key == right_target.waveform.object_key:
+            continue
+        left_member = by_sbnk[scoped_object_key(source_image, left_target.sampler_sample_key)][0]
+        right_member = by_sbnk[scoped_object_key(source_image, right_target.sampler_sample_key)][0]
+        partition_name, volume_name, category_name, sample_bank_name, _sample_name = (
+            _decision_context(left_target, right_target)
+        )
+        reason_code, reason = _stereo_interleave_reason(left_target.waveform, right_target.waveform)
+        interleavable = reason_code in {_STEREO_REASON_EXACT, _STEREO_REASON_PADDED}
+        output_frame_count: int | None = None
+        left_padding_frames = 0
+        right_padding_frames = 0
+        if (
+            interleavable
+            and left_target.relative_wav_path.parent != right_target.relative_wav_path.parent
+        ):
+            decision = _STEREO_DECISION_PARENT_CONFLICT
+            reason_code = _STEREO_REASON_PARENT_CONFLICT
+            reason = "L/R interleavable targets have different sampler-facing export parents"
+        else:
+            decision = _STEREO_DECISION_SUCCESS if interleavable else _STEREO_DECISION_NOT_EXACT
+            output_frame_count = _stereo_output_frame_count(
+                left_target.waveform, right_target.waveform, reason_code
+            )
+            left_padding_frames, right_padding_frames = _stereo_padding_frames(
+                left_target.waveform,
+                right_target.waveform,
+                reason_code,
+            )
+        decisions.append(
+            StereoExportDecision(
+                source_image=source_image,
+                scoped_sbnk_key=scoped_object_key(source_image, left_target.sampler_sample_key),
+                sbnk_object_key=left_target.sampler_sample_key,
+                relationship_quality="Known",
+                basis="+".join(
+                    sorted(
+                        {
+                            sbac_basis[key],
+                            left_member.basis,
+                            right_member.basis,
+                            "same-sbac-sbnk-name-lr-pair",
+                        }
+                    )
+                ),
+                partition_name=partition_name,
+                volume_name=volume_name,
+                category_name=category_name,
+                sample_bank_name=sample_bank_name,
+                sample_name=_stereo_display_name(left_target, right_target),
+                left_target_id=left_target.stable_id,
+                right_target_id=right_target.stable_id,
+                left_waveform_name=left_target.waveform.sample_name,
+                right_waveform_name=right_target.waveform.sample_name,
+                left_waveform_object_key=left_target.waveform.object_key,
+                right_waveform_object_key=right_target.waveform.object_key,
+                decision=decision,
+                reason_code=reason_code,
+                reason=reason,
+                left_mono_wav_path=left_target.relative_wav_path.as_posix(),
+                right_mono_wav_path=right_target.relative_wav_path.as_posix(),
+                left_sample_rate=left_target.waveform.sample_rate,
+                right_sample_rate=right_target.waveform.sample_rate,
+                left_sample_width_bytes=left_target.waveform.sample_width_bytes,
+                right_sample_width_bytes=right_target.waveform.sample_width_bytes,
+                left_frame_count=left_target.waveform.frame_count,
+                right_frame_count=right_target.waveform.frame_count,
+                output_frame_count=output_frame_count,
+                left_padding_frames=left_padding_frames,
+                right_padding_frames=right_padding_frames,
+            )
+        )
+    return tuple(decisions)
+
+
 def _build_stereo_decisions(plan: WaveExportPlan) -> tuple[StereoExportDecision, ...]:
     decisions: list[StereoExportDecision] = []
-    for scoped_sbnk_key, rows in sorted(_stereo_member_rows(plan).items()):
+    member_rows = _stereo_member_rows(plan)
+    for scoped_sbnk_key, rows in sorted(member_rows.items()):
         left_row = rows.get("left_row")
         right_row = rows.get("right_row")
         if left_row is None or right_row is None:
@@ -1052,6 +1246,7 @@ def _build_stereo_decisions(plan: WaveExportPlan) -> tuple[StereoExportDecision,
                 right_padding_frames=right_padding_frames,
             )
         )
+    decisions.extend(_same_sbac_paired_sbnk_decisions(plan, member_rows))
     return tuple(decisions)
 
 
@@ -1064,6 +1259,27 @@ def _stereo_compatible(left: Waveform, right: Waveform) -> bool:
 
 
 def _stereo_display_name(left_target: SampleExportTarget, right_target: SampleExportTarget) -> str:
+    left_sample_lr = _terminal_lr_name(left_target.sampler_sample_name)
+    right_sample_lr = _terminal_lr_name(right_target.sampler_sample_name)
+    if (
+        left_sample_lr is not None
+        and right_sample_lr is not None
+        and left_sample_lr[0] == right_sample_lr[0]
+        and left_sample_lr[1] == "left"
+        and right_sample_lr[1] == "right"
+    ):
+        duplicate_base = _trailing_duplicate_base(left_sample_lr[0])
+        if duplicate_base and left_target.sample_bank_name:
+            return _safe_display_path_name(
+                f"{left_target.sample_bank_name} - {duplicate_base}", "stereo sample"
+            )
+        return _safe_display_path_name(left_sample_lr[0], "stereo sample")
+    for candidate in (left_target, right_target):
+        duplicate_base = _trailing_duplicate_base(candidate.sampler_sample_name)
+        if duplicate_base and candidate.sample_bank_name:
+            return _safe_display_path_name(
+                f"{candidate.sample_bank_name} - {duplicate_base}", "stereo sample"
+            )
     for value in (
         left_target.sampler_sample_name,
         right_target.sampler_sample_name,
@@ -1222,6 +1438,8 @@ def _write_physical_smpl_wavs(
     plan: WaveExportPlan,
     *,
     overwrite: bool,
+    progress_start: Callable[[str], None] | None = None,
+    progress_done: Callable[[str], None] | None = None,
 ) -> tuple[dict[str, str], list[Path]]:
     used_by_volume: dict[str, set[str]] = defaultdict(set)
     refs: dict[str, str] = {}
@@ -1243,12 +1461,27 @@ def _write_physical_smpl_wavs(
         rel_path = _dedupe_audio_path(
             volume_root / "SMPL" / f"{stem}.wav", used_by_volume[volume_root.as_posix()]
         )
+        if progress_start is not None:
+            progress_start(f"writing {rel_path.as_posix()}")
         _atomic_write_bytes(
             plan.output_dir / rel_path, _wav_bytes(target.waveform), overwrite=overwrite
         )
         refs[key] = _volume_relative(rel_path, volume_root)
         written.append(plan.output_dir / rel_path)
+        if progress_done is not None:
+            progress_done(f"wrote {rel_path.as_posix()}")
     return refs, written
+
+
+def _rendered_stereo_audio_key(
+    left_target: SampleExportTarget, right_target: SampleExportTarget
+) -> tuple[str, str, str]:
+    volume_root = _target_volume_root(left_target)
+    return (
+        volume_root.as_posix().lower(),
+        scoped_object_key(left_target.waveform.source_image, left_target.waveform.object_key),
+        scoped_object_key(right_target.waveform.source_image, right_target.waveform.object_key),
+    )
 
 
 def _write_rendered_stereo_wavs(
@@ -1256,9 +1489,12 @@ def _write_rendered_stereo_wavs(
     decisions: tuple[StereoExportDecision, ...],
     *,
     overwrite: bool,
+    progress_start: Callable[[str], None] | None = None,
+    progress_done: Callable[[str], None] | None = None,
 ) -> tuple[dict[str, dict[str, object]], tuple[StereoExportDecision, ...], list[Path], list[str]]:
     by_id = _target_by_id(plan)
     used_by_volume: dict[str, set[str]] = defaultdict(set)
+    rendered_path_by_audio: dict[tuple[str, str, str], Path] = {}
     rendered_by_sbnk: dict[str, dict[str, object]] = {}
     updated: list[StereoExportDecision] = []
     written: list[Path] = []
@@ -1288,14 +1524,28 @@ def _write_rendered_stereo_wavs(
             continue
         volume_root = _target_volume_root(left_target)
         stem = _stereo_display_name(left_target, right_target)
-        rel_path = _dedupe_audio_path(
-            volume_root / "RENDERED" / f"{stem}.wav", used_by_volume[volume_root.as_posix()]
+        audio_key = _rendered_stereo_audio_key(left_target, right_target)
+        rel_path = rendered_path_by_audio.get(audio_key)
+        output_frames = decision.output_frame_count or max(
+            left_target.waveform.frame_count, right_target.waveform.frame_count
         )
-        wav_bytes, output_frames, left_padding, right_padding = _stereo_wav_bytes(
-            left_target.waveform,
-            right_target.waveform,
-        )
-        _atomic_write_bytes(plan.output_dir / rel_path, wav_bytes, overwrite=overwrite)
+        left_padding = decision.left_padding_frames
+        right_padding = decision.right_padding_frames
+        if rel_path is None:
+            rel_path = _dedupe_audio_path(
+                volume_root / "RENDERED" / f"{stem}.wav", used_by_volume[volume_root.as_posix()]
+            )
+            rendered_path_by_audio[audio_key] = rel_path
+            if progress_start is not None:
+                progress_start(f"writing {rel_path.as_posix()}")
+            wav_bytes, output_frames, left_padding, right_padding = _stereo_wav_bytes(
+                left_target.waveform,
+                right_target.waveform,
+            )
+            _atomic_write_bytes(plan.output_dir / rel_path, wav_bytes, overwrite=overwrite)
+            written.append(plan.output_dir / rel_path)
+            if progress_done is not None:
+                progress_done(f"wrote {rel_path.as_posix()}")
         volume_rel = _volume_relative(rel_path, volume_root)
         rendered_id = _graph_object_id("RENDERED", decision.source_image, decision.sbnk_object_key)
         rendered = {
@@ -1343,7 +1593,6 @@ def _write_rendered_stereo_wavs(
             right_padding_frames=right_padding,
         )
         updated.append(next_decision)
-        written.append(plan.output_dir / rel_path)
     return rendered_by_sbnk, tuple(updated), written, warnings
 
 
@@ -1758,11 +2007,36 @@ def _write_stereo_exports(
     return written, warnings, rows, manifest_rows, tuple(updated_decisions)
 
 
+def _structured_export_progress_total(
+    plan: WaveExportPlan,
+    stereo_decisions: tuple[StereoExportDecision, ...],
+    stereo_policy: StereoPolicy,
+) -> int:
+    physical_keys = {
+        f"{_target_volume_root(target).as_posix()}|{_graph_source_ref(target.waveform.source_image, target.waveform.object_key)}"
+        for target in plan.targets
+    }
+    rendered_keys: set[tuple[str, str, str]] = set()
+    if stereo_policy == "auto":
+        by_id = _target_by_id(plan)
+        for decision in stereo_decisions:
+            if decision.decision != _STEREO_DECISION_SUCCESS:
+                continue
+            left_target = by_id.get(decision.left_target_id)
+            right_target = by_id.get(decision.right_target_id)
+            if left_target is None or right_target is None:
+                continue
+            rendered_keys.add(_rendered_stereo_audio_key(left_target, right_target))
+    graph_count = len({_target_volume_root(target).as_posix() for target in plan.targets})
+    return len(physical_keys) + len(rendered_keys) + graph_count
+
+
 def write_structured_export(
     plan: WaveExportPlan,
     *,
     overwrite_policy: OverwritePolicy,
     stereo_policy: StereoPolicy = "auto",
+    progress_callback: Callable[[WavExportProgress], None] | None = None,
 ) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[str, ...], tuple[dict[str, object], ...]]:
     overwrite = overwrite_policy == "replace"
     skipped: list[Path] = []
@@ -1771,7 +2045,48 @@ def write_structured_export(
     written: list[Path] = []
 
     stereo_decisions = _build_stereo_decisions(plan) if stereo_policy == "auto" else ()
-    physical_refs, physical_written = _write_physical_smpl_wavs(plan, overwrite=overwrite)
+    progress_total = _structured_export_progress_total(plan, stereo_decisions, stereo_policy)
+    progress_completed = 0
+
+    def report_progress(message: str) -> None:
+        if progress_callback is not None:
+            progress_callback(
+                WavExportProgress(
+                    stage="exporting",
+                    completed=progress_completed,
+                    total=progress_total,
+                    message=message,
+                )
+            )
+
+    def advance_progress(message: str) -> None:
+        nonlocal progress_completed
+        progress_completed += 1
+        if progress_callback is not None:
+            progress_callback(
+                WavExportProgress(
+                    stage="exporting",
+                    completed=progress_completed,
+                    total=progress_total,
+                    message=message,
+                )
+            )
+
+    if progress_callback is not None:
+        progress_callback(
+            WavExportProgress(
+                stage="exporting",
+                completed=0,
+                total=progress_total,
+                message="building export plan",
+            )
+        )
+    physical_refs, physical_written = _write_physical_smpl_wavs(
+        plan,
+        overwrite=overwrite,
+        progress_start=report_progress,
+        progress_done=advance_progress,
+    )
     written.extend(physical_written)
 
     rendered_by_sbnk: dict[str, dict[str, object]] = {}
@@ -1782,6 +2097,8 @@ def write_structured_export(
                 plan,
                 stereo_decisions,
                 overwrite=overwrite,
+                progress_start=report_progress,
+                progress_done=advance_progress,
             )
         )
         written.extend(rendered_written)
@@ -1797,6 +2114,8 @@ def write_structured_export(
 
     for key in sorted(groups):
         root = roots[key]
+        graph_rel_path = root / "volume.axklib.json"
+        report_progress(f"building {graph_rel_path.as_posix()}")
         graph = _build_volume_graph(
             plan,
             root,
@@ -1805,10 +2124,11 @@ def write_structured_export(
             rendered_by_sbnk,
             final_stereo_decisions,
         )
-        graph_path = plan.output_dir / root / "volume.axklib.json"
+        graph_path = plan.output_dir / graph_rel_path
         write_manifest(graph_path, graph, overwrite=overwrite)
         written.append(graph_path)
         records.append(graph)
+        advance_progress(f"wrote {graph_rel_path.as_posix()}")
 
     return tuple(written), tuple(skipped), tuple(warnings), tuple(records)
 

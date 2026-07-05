@@ -62,6 +62,9 @@ Export waveform data:
 uv run axklib extract waves --exact --stereo auto -o build/exports/waves <image-or-directory>
 ```
 
+The extraction command reports progress while writing physical `SMPL` WAVs,
+rendered stereo WAVs, and per-volume `volume.axklib.json` graphs.
+
 Build the local documentation:
 
 ```powershell
@@ -92,4 +95,5 @@ Build the documentation strictly:
 ```powershell
 uv run --group docs axklib-docs build --strict
 ```
+
 

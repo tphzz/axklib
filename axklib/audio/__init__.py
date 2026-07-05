@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import wave
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
@@ -17,6 +18,16 @@ from axklib.reports import to_plain
 StereoPolicy = Literal["none", "auto"]
 OverwritePolicy = Literal["fail", "replace"]
 WaveExportLayout = Literal["structured", "flat"]
+
+
+@dataclass(frozen=True)
+class WavExportProgress:
+    """Progress event emitted while writing WAV exports."""
+
+    stage: str
+    completed: int
+    total: int
+    message: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,6 +80,7 @@ class WaveformPlacement:
     source: str = ""
     relationship_path: str = ""
     owner_object_key: str = ""
+    raw_volume_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -130,6 +142,7 @@ class WavExportRequest:
     layout: WaveExportLayout = "structured"
     placements: dict[str, WaveformPlacement] = field(default_factory=dict)
     relationships: tuple[WaveformRelationship, ...] = ()
+    progress_callback: Callable[[WavExportProgress], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -257,7 +270,9 @@ def decode_waveform(sample: AxklibObject) -> Waveform:
         loop_start=metadata.loop_start_frame_0x096,
         loop_length=metadata.loop_length_frames_0x09a,
         loop_end_a4000_ui=metadata.loop_end_frame_a4000_ui_guess,
-        exactness_status=("alternating-byte-compatibility-export" if alternating_byte else "exact-current-mono"),
+        exactness_status=(
+            "alternating-byte-compatibility-export" if alternating_byte else "exact-current-mono"
+        ),
         quality=quality,
         field_quality=object_current.current_smpl_field_quality(transform),
         metadata={
@@ -391,6 +406,7 @@ def export_waveforms(request: WavExportRequest) -> WavExportResult:
                 plan,
                 overwrite_policy=request.overwrite_policy,
                 stereo_policy=request.stereo_policy,
+                progress_callback=request.progress_callback,
             )
         )
         return WavExportResult(
@@ -406,6 +422,15 @@ def export_waveforms(request: WavExportRequest) -> WavExportResult:
     records: list[dict[str, object]] = []
     overwrite = request.overwrite_policy == "replace"
     request.output_dir.mkdir(parents=True, exist_ok=True)
+    if request.progress_callback is not None:
+        request.progress_callback(
+            WavExportProgress(
+                stage="exporting",
+                completed=0,
+                total=len(request.waveforms),
+                message="writing WAV files",
+            )
+        )
     for index, waveform in enumerate(request.waveforms, start=1):
         source_stem = _safe_name(Path(waveform.source_image).stem or "source")
         sample_name = _safe_name(waveform.sample_name)
@@ -434,6 +459,15 @@ def export_waveforms(request: WavExportRequest) -> WavExportResult:
             raise
         written.extend([wav_path, sidecar_path])
         records.append(record)
+        if request.progress_callback is not None:
+            request.progress_callback(
+                WavExportProgress(
+                    stage="exporting",
+                    completed=index,
+                    total=len(request.waveforms),
+                    message=waveform.sample_name,
+                )
+            )
     manifest_rows = [
         {
             "object_offset": record.get("object_offset")

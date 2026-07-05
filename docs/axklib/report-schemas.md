@@ -226,8 +226,19 @@ Exact export writes physical WAV files and per-volume graph metadata.
 | `volume.axklib.json` | Object graph metadata for one volume. |
 | schema manifests | Report schema metadata for generated CSV/JSON outputs. |
 
-Stereo decisions use these public reason-code families:
+Rendered stereo is additive. A successful render does not suppress or replace the
+physical `SMPL/*.wav` rows. When several sampler objects reference the same
+physical left/right pair in one volume, they can share one rendered WAV path.
+Stereo decision rows identify the source objects, mono WAV paths, rendered WAV
+path, reason code, relationship quality, and basis.
+Known basis values include:
 
+| Basis fragment | Meaning |
+| --- | --- |
+| `SBNK_LEFT_MEMBER_TO_SMPL` / `SBNK_RIGHT_MEMBER_TO_SMPL` relationship rows | Ordinary single-`SBNK` left/right member render. |
+| `same-sbac-sbnk-name-lr-pair` | Paired sibling `SBNK` render under one `SBAC`, using terminal `-L` / `-R` sampler-facing names. |
+
+Stereo decisions use these public reason-code families:
 | Reason | Meaning |
 | --- | --- |
 | `STEREO_EXACT_INTERLEAVED` | Left/right members were written as exact interleaved stereo. |
@@ -276,3 +287,5 @@ object and relationship detail.
         - make_schema_manifest
         - write_schema_manifest
         - write_schema_index
+
+

@@ -125,6 +125,27 @@ def test_export_waveforms_replaces_existing_targets_with_explicit_overwrite(tmp_
         assert wav.readframes(wav.getnframes()) == b"\x03\x00\x04\x00"
 
 
+def test_export_waveforms_reports_structured_progress(tmp_path: Path) -> None:
+    waveform = decode_waveform(_sample_object())
+    events = []
+
+    export_waveforms(
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(waveform,),
+            progress_callback=events.append,
+        )
+    )
+
+    assert events[0].stage == "exporting"
+    assert events[0].completed == 0
+    assert events[0].total == 2
+    assert any(event.message.endswith("SMPL/S01.wav") for event in events)
+    assert any(event.message.startswith("building ") for event in events)
+    assert events[-1].completed == events[-1].total == 2
+    assert events[-1].message.endswith("volume.axklib.json")
+
+
 def test_decode_container_waveforms_preserves_decode_issue_for_bad_sample() -> None:
     from axklib.containers import AxklibContainer
 
@@ -232,6 +253,318 @@ def test_object_graph_references_known_stereo_from_sbnk(tmp_path: Path) -> None:
     ) as wav:
         assert wav.getnchannels() == 2
         assert wav.getnframes() == 2
+
+
+def test_paired_sbnk_siblings_render_additive_stereo(tmp_path: Path) -> None:
+    left = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
+    right = replace(
+        left,
+        object_key="p0:sfs2",
+        object_offset=512,
+        sample_name="SMP 002411 -L",
+        pcm=b"\x03\x00\x04\x00",
+    )
+    placements = {
+        "p0:sbac1": WaveformPlacement(
+            partition_index=0,
+            partition_name="hd1",
+            volume_name="Ap11 Grand 1",
+            category_name="Sample Banks",
+            display_name="B 01 Se_ff<St",
+            quality=DataQuality.KNOWN,
+            source="test placement",
+        ),
+        "p0:sbnk-l": WaveformPlacement(
+            partition_index=0,
+            partition_name="hd1",
+            volume_name="Ap11 Grand 1",
+            category_name="Sample Banks",
+            display_name="Se_ff_024 -L",
+            quality=DataQuality.KNOWN,
+            source="test placement",
+        ),
+        "p0:sbnk-r": WaveformPlacement(
+            partition_index=0,
+            partition_name="hd1",
+            volume_name="Ap11 Grand 1",
+            category_name="Sample Banks",
+            display_name="Se_ff_024 -R",
+            quality=DataQuality.KNOWN,
+            source="test placement",
+        ),
+    }
+    relationships = (
+        WaveformRelationship(
+            "p0:sbnk-l",
+            left.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbnk-r",
+            right.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=right.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac1",
+            "p0:sbnk-l",
+            "SBAC_SLOT_TO_SBNK",
+            "Known",
+            "sample-bank-slot",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac1",
+            "p0:sbnk-r",
+            "SBAC_SLOT_TO_SBNK",
+            "Known",
+            "sample-bank-slot",
+            source_image=right.source_image,
+        ),
+    )
+
+    result = export_waveforms(
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(left, right),
+            placements=placements,
+            relationships=relationships,
+        )
+    )
+
+    wavs = sorted(
+        path.relative_to(tmp_path).as_posix()
+        for path in result.written_files
+        if path.suffix == ".wav"
+    )
+    assert wavs == [
+        "partition_00_hd1/Ap11 Grand 1/RENDERED/Se_ff_024.wav",
+        "partition_00_hd1/Ap11 Grand 1/SMPL/S01.wav",
+        "partition_00_hd1/Ap11 Grand 1/SMPL/SMP 002411 -L.wav",
+    ]
+    rendered_path = tmp_path / "partition_00_hd1" / "Ap11 Grand 1" / "RENDERED" / "Se_ff_024.wav"
+    with wave.open(str(rendered_path), "rb") as wav:
+        assert wav.getnchannels() == 2
+        assert wav.getnframes() == 2
+        assert wav.readframes(2) == b"\x01\x00\x03\x00\x02\x00\x04\x00"
+    graph = _graph(tmp_path / "partition_00_hd1" / "Ap11 Grand 1" / "volume.axklib.json")
+    assert sorted(row["display_name"] for row in graph["objects"]["sbnk"]) == [
+        "Se_ff_024 -L",
+        "Se_ff_024 -R",
+    ]
+    assert sorted(row["display_name"] for row in graph["objects"]["smpl"]) == [
+        "S01",
+        "SMP 002411 -L",
+    ]
+    assert graph["rendered_audio"][0]["wav_path"] == "RENDERED/Se_ff_024.wav"
+    assert graph["stereo_decisions"][0]["sample_name"] == "Se_ff_024"
+    assert graph["stereo_decisions"][0]["reason_code"] == "STEREO_EXACT_INTERLEAVED"
+    assert "same-sbac-sbnk-name-lr-pair" in graph["stereo_decisions"][0]["basis"]
+
+
+def test_duplicate_paired_sbnk_render_decisions_reuse_one_wav(tmp_path: Path) -> None:
+    left = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
+    right = replace(
+        left,
+        object_key="p0:sfs2",
+        object_offset=512,
+        sample_name="SMP 002411 -L",
+        pcm=b"\x03\x00\x04\x00",
+    )
+    placements = {
+        key: WaveformPlacement(
+            partition_index=0,
+            partition_name="hd1",
+            volume_name="Ap11 Grand 1",
+            category_name="Sample Banks",
+            display_name=display,
+            quality=DataQuality.KNOWN,
+            source="test placement",
+        )
+        for key, display in {
+            "p0:sbac1": "B 01 Se_ff<St",
+            "p0:sbac2": "B 01 Se_ff<St *",
+            "p0:sbnk-l1": "Se_ff_024 -L",
+            "p0:sbnk-r1": "Se_ff_024 -R",
+            "p0:sbnk-l2": "Se_ff_024 -L*",
+            "p0:sbnk-r2": "Se_ff_024 -R*",
+        }.items()
+    }
+    relationships = (
+        WaveformRelationship(
+            "p0:sbnk-l1",
+            left.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbnk-r1",
+            right.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=right.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbnk-l2",
+            left.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbnk-r2",
+            right.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=right.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac1",
+            "p0:sbnk-l1",
+            "SBAC_SLOT_TO_SBNK",
+            "Known",
+            "sample-bank-slot",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac1",
+            "p0:sbnk-r1",
+            "SBAC_SLOT_TO_SBNK",
+            "Known",
+            "sample-bank-slot",
+            source_image=right.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac2",
+            "p0:sbnk-l2",
+            "SBAC_SLOT_TO_SBNK",
+            "Known",
+            "sample-bank-slot",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac2",
+            "p0:sbnk-r2",
+            "SBAC_SLOT_TO_SBNK",
+            "Known",
+            "sample-bank-slot",
+            source_image=right.source_image,
+        ),
+    )
+
+    result = export_waveforms(
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(left, right),
+            placements=placements,
+            relationships=relationships,
+        )
+    )
+
+    rendered_wavs = sorted(
+        path.relative_to(tmp_path).as_posix()
+        for path in result.written_files
+        if path.suffix == ".wav" and path.parent.name == "RENDERED"
+    )
+    assert rendered_wavs == ["partition_00_hd1/Ap11 Grand 1/RENDERED/Se_ff_024.wav"]
+    graph = _graph(tmp_path / "partition_00_hd1" / "Ap11 Grand 1" / "volume.axklib.json")
+    decision_paths = {row["stereo_wav_path"] for row in graph["stereo_decisions"]}
+    assert decision_paths == {"partition_00_hd1/Ap11 Grand 1/RENDERED/Se_ff_024.wav"}
+    assert {row["wav_path"] for row in graph["rendered_audio"]} == {"RENDERED/Se_ff_024.wav"}
+
+
+def test_paired_sbnk_duplicate_marker_uses_owner_label_for_rendered_stem(
+    tmp_path: Path,
+) -> None:
+    left = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
+    right = replace(
+        left,
+        object_key="p0:sfs2",
+        object_offset=512,
+        sample_name="Harpsichrd 031-R",
+        pcm=b"\x03\x00\x04\x00",
+    )
+    left = replace(left, sample_name="Harpsichrd 031-L")
+    placements = {
+        key: WaveformPlacement(
+            partition_index=0,
+            partition_name="hd1",
+            volume_name="Ky22 Harpsi2",
+            category_name="Sample Banks",
+            display_name=display,
+            quality=DataQuality.KNOWN,
+            source="test placement",
+        )
+        for key, display in {
+            "p0:sbac1": "Harpsi 2.1N",
+            "p0:sbnk-l": "Harpsich031 -L*",
+            "p0:sbnk-r": "Harpsich031 -R*",
+        }.items()
+    }
+    relationships = (
+        WaveformRelationship(
+            "p0:sbnk-l",
+            left.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbnk-r",
+            right.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=right.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac1",
+            "p0:sbnk-l",
+            "SBAC_SLOT_TO_SBNK",
+            "Known",
+            "sample-bank-slot",
+            source_image=left.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac1",
+            "p0:sbnk-r",
+            "SBAC_SLOT_TO_SBNK",
+            "Known",
+            "sample-bank-slot",
+            source_image=right.source_image,
+        ),
+    )
+
+    result = export_waveforms(
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(left, right),
+            placements=placements,
+            relationships=relationships,
+        )
+    )
+
+    rendered_wavs = sorted(
+        path.relative_to(tmp_path).as_posix()
+        for path in result.written_files
+        if path.suffix == ".wav" and path.parent.name == "RENDERED"
+    )
+    assert rendered_wavs == ["partition_00_hd1/Ky22 Harpsi2/RENDERED/Harpsi 2.1N - Harpsich031.wav"]
+    assert not list((tmp_path / "partition_00_hd1" / "Ky22 Harpsi2" / "RENDERED").glob("*(2).wav"))
+    graph = _graph(tmp_path / "partition_00_hd1" / "Ky22 Harpsi2" / "volume.axklib.json")
+    assert graph["stereo_decisions"][0]["sample_name"] == "Harpsi 2.1N - Harpsich031"
+    assert graph["rendered_audio"][0]["wav_path"] == "RENDERED/Harpsi 2.1N - Harpsich031.wav"
 
 
 def test_object_graph_records_program_assignment_active_state(tmp_path: Path) -> None:
@@ -434,6 +767,62 @@ def test_object_graph_uses_container_scope_placement_without_fake_partition(tmp_
     graph = _graph(tmp_path / "ISO objects" / "volume.axklib.json")
     assert graph["volume"]["name"] == "ISO objects"
     assert graph["objects"]["smpl"][0]["wav_path"] == "SMPL/ISO Wave.wav"
+
+
+def test_structured_export_disambiguates_duplicate_iso_volume_labels(tmp_path: Path) -> None:
+    first = replace(
+        decode_waveform(_sample_object(b"\x00\x01\x00\x02")),
+        source_image="fixture.iso",
+        container_kind="iso",
+        partition_index=None,
+        object_key="fixture.iso:iso9660:G001/F001/SMPL/F001",
+        sample_name="Same",
+    )
+    second = replace(
+        decode_waveform(_sample_object(b"\x00\x03\x00\x04")),
+        source_image="fixture.iso",
+        container_kind="iso",
+        partition_index=None,
+        object_key="fixture.iso:iso9660:G001/F002/SMPL/F001",
+        sample_name="Same",
+    )
+    placements = {
+        first.object_key: WaveformPlacement(
+            partition_index=None,
+            partition_name="ORGANS",
+            volume_name="Or11 Argent",
+            category_name="Waveforms",
+            display_name="Same",
+            quality=DataQuality.KNOWN,
+            source="ISO Yamaha CD-ROM menu label metadata",
+            raw_volume_path="G001/F001",
+        ),
+        second.object_key: WaveformPlacement(
+            partition_index=None,
+            partition_name="ORGANS",
+            volume_name="Or11 Argent",
+            category_name="Waveforms",
+            display_name="Same",
+            quality=DataQuality.KNOWN,
+            source="ISO Yamaha CD-ROM menu label metadata",
+            raw_volume_path="G001/F002",
+        ),
+    }
+
+    result = export_waveforms(
+        WavExportRequest(output_dir=tmp_path, waveforms=(first, second), placements=placements)
+    )
+
+    assert sorted(
+        path.relative_to(tmp_path).as_posix()
+        for path in result.written_files
+        if path.suffix == ".wav"
+    ) == [
+        "ORGANS/Or11 Argent (F001)/SMPL/Same.wav",
+        "ORGANS/Or11 Argent (F002)/SMPL/Same.wav",
+    ]
+    assert (tmp_path / "ORGANS" / "Or11 Argent (F001)" / "volume.axklib.json").exists()
+    assert (tmp_path / "ORGANS" / "Or11 Argent (F002)" / "volume.axklib.json").exists()
 
 
 def test_object_graph_keeps_duplicate_sbnk_references_without_duplicate_wav(tmp_path: Path) -> None:

@@ -160,8 +160,18 @@ Public behavior:
 The raw selector bytes in Program rows are diagnostic fields. They are not used
 as public target IDs.
 
-## Path Mapping
+## Paired Sample-Member Stereo
 
+Some CD-ROM volumes store stereo material as paired sampler-visible `SBNK`
+members in one `SBAC` group. The left and right members have matching names with
+terminal `-L` and `-R`, and each member links to its own physical `SMPL` object.
+Structured waveform export keeps the physical mono `SMPL` files and writes an
+additional `RENDERED/` stereo WAV when the pair is known and audio-compatible.
+For rendered stereo names, duplicate-marked paired members can use the owning
+sample-bank or group label so the output path remains sampler-facing instead of
+only numeric.
+
+## Path Mapping
 CD-ROM path mapping combines raw folder identity and decoded labels:
 
 ```text
@@ -198,3 +208,4 @@ CD-ROM validation and diagnostics cover:
 8. Decode shared object payloads.
 9. Build relationships and source-load Program assignment rows.
 10. Render user-facing paths with duplicate-label disambiguation.
+
