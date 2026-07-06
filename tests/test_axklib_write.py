@@ -38,6 +38,15 @@ def _index_record(data: bytes, sfs_id: int) -> bytes:
     record_offset = index_offset + block * 1024 + slot * 72
     return data[record_offset : record_offset + 72]
 
+def _index_record_in_partition(data: bytes, partition_index: int, sfs_id: int) -> bytes:
+    partition_start = _be32(data, 0xA8 + partition_index * 8)
+    partition_offset = partition_start * 512
+    index_cluster = _be32(data, partition_offset + 0xA4)
+    index_offset = (partition_start + index_cluster * 2) * 512
+    block = sfs_id // 14
+    slot = sfs_id % 14
+    record_offset = index_offset + block * 1024 + slot * 72
+    return data[record_offset : record_offset + 72]
 
 def _record_payload(data: bytes, record: bytes) -> bytes:
     partition_start = _be32(data, 0xA8)
@@ -46,6 +55,12 @@ def _record_payload(data: bytes, record: bytes) -> bytes:
     payload_offset = (partition_start + cluster_offset * 2) * 512
     return data[payload_offset : payload_offset + size]
 
+def _record_payload_in_partition(data: bytes, partition_index: int, record: bytes) -> bytes:
+    partition_start = _be32(data, 0xA8 + partition_index * 8)
+    cluster_offset = _be32(record, 0x0A)
+    size = _be32(record, 0x06)
+    payload_offset = (partition_start + cluster_offset * 2) * 512
+    return data[payload_offset : payload_offset + size]
 
 def _entry_names(payload: bytes) -> list[str]:
     names: list[str] = []
@@ -68,6 +83,14 @@ def test_hds_writer_rejects_single_partition_above_one_gib() -> None:
     builder.add_partition("hd1")
 
     with pytest.raises(ValueError, match="exceed 1 GiB"):
+        builder.plan()
+
+def test_hds_writer_rejects_unproven_multi_partition_profile() -> None:
+    builder = HdsImageBuilder(size_bytes=256 * 1024 * 1024)
+    builder.add_partition("hd1")
+    builder.add_partition("hd2")
+
+    with pytest.raises(ValueError, match="512 MiB / two-partition profile"):
         builder.plan()
 
 
@@ -312,6 +335,86 @@ def test_hds_writer_creates_two_volumes_without_cross_linking(tmp_path: Path) ->
     assert sorted((row.source_key, row.target_key, row.quality, row.basis) for row in relationships) == [
         ("p0:sfs10", "p0:sfs9", "Known", "sbnk-member-link+name"),
         ("p0:sfs18", "p0:sfs17", "Known", "sbnk-member-link+name"),
+    ]
+def test_hds_writer_creates_two_partitions_with_independent_volumes(tmp_path: Path) -> None:
+    source_a = tmp_path / "partition-a.wav"
+    source_b = tmp_path / "partition-b.wav"
+    _write_mono_wav(source_a, samples=(0, 700, -700, 1400, -1400))
+    _write_mono_wav(source_b, samples=(250, -250, 750, -750, 0))
+    image_path = tmp_path / "HD00_512_writer_two_partitions.hds"
+
+    builder = HdsImageBuilder(size_bytes=512 * 1024 * 1024)
+    partition_a = builder.add_partition("hd1")
+    volume_a = partition_a.add_volume("PartA")
+    wave_a = volume_a.add_waveform_from_wav(name="WaveA", path=source_a, root_key=60)
+    volume_a.add_sample_bank(
+        name="BankA",
+        waveform=wave_a,
+        root_key=60,
+        key_low=0,
+        key_high=63,
+        level=100,
+    )
+    partition_b = builder.add_partition("hd2")
+    volume_b = partition_b.add_volume("PartB")
+    wave_b = volume_b.add_waveform_from_wav(name="WaveB", path=source_b, root_key=64)
+    volume_b.add_sample_bank(
+        name="BankB",
+        waveform=wave_b,
+        root_key=64,
+        key_low=64,
+        key_high=127,
+        level=90,
+    )
+
+    result = builder.write(image_path)
+
+    assert result.partitions == 2
+    assert [(item.partition_index, item.object_type, item.name, item.sfs_id) for item in result.objects] == [
+        (0, "SMPL", "WaveA", 9),
+        (0, "SBNK", "BankA", 10),
+        (1, "SMPL", "WaveB", 9),
+        (1, "SBNK", "BankB", 10),
+    ]
+    image_bytes = image_path.read_bytes()
+    assert _be32(image_bytes, 0xA8) == 3
+    assert _be32(image_bytes, 0xAC) == 524_286
+    assert _be32(image_bytes, 0xB0) == 524_290
+    assert _be32(image_bytes, 0xB4) == 524_286
+    assert image_bytes[1024:1032] == b"bb736200"
+    assert image_bytes[1024 + 0x1A : 1024 + 0x2A] == b"hd1             "
+    assert image_bytes[1024 + 0x48 : 1024 + 0x58] == b"hd2             "
+    pre_partition_b = (524_290 - 1) * 512
+    assert image_bytes[pre_partition_b : pre_partition_b + 8] == b"bb736201"
+
+    partition_a_offset = _be32(image_bytes, 0xA8) * 512
+    partition_b_offset = _be32(image_bytes, 0xB0) * 512
+    assert image_bytes[partition_a_offset + 0x100 : partition_a_offset + 0x108] == bytes.fromhex(
+        "0000000000000003"
+    )
+    assert image_bytes[partition_b_offset + 0x40 : partition_b_offset + 0x50] == b"hd2            1"
+    assert image_bytes[partition_b_offset + 0xAF] == 1
+    assert image_bytes[partition_b_offset + 0x100 : partition_b_offset + 0x108] == bytes.fromhex(
+        "0000000000080002"
+    )
+
+    root_a = _record_payload_in_partition(image_bytes, 0, _index_record_in_partition(image_bytes, 0, 1))
+    root_b = _record_payload_in_partition(image_bytes, 1, _index_record_in_partition(image_bytes, 1, 1))
+    volume_a_payload = _record_payload_in_partition(image_bytes, 0, _index_record_in_partition(image_bytes, 0, 3))
+    volume_b_payload = _record_payload_in_partition(image_bytes, 1, _index_record_in_partition(image_bytes, 1, 3))
+    assert _entry_names(root_a) == [".", "..", "sfserrlog", "sfserram", "PartA           "]
+    assert _entry_names(root_b) == [".", "..", "sfserrlog", "sfserram", "PartB           "]
+    assert _entry_names(volume_a_payload) == [".", "..", "SMPL", "SBNK", "SBAC", "SEQU", "PROG"]
+    assert _entry_names(volume_b_payload) == [".", "..", "SMPL", "SBNK", "SBAC", "SEQU", "PROG"]
+
+    objects = load_sfs_objects(image_path)
+    graph = build_relationship_graph(objects)
+    relationships = [
+        row for row in graph.relationships if row.relationship_type == "SBNK_LEFT_MEMBER_TO_SMPL"
+    ]
+    assert sorted((row.source_key, row.target_key, row.quality, row.basis) for row in relationships) == [
+        ("p0:sfs10", "p0:sfs9", "Known", "sbnk-member-link+name"),
+        ("p1:sfs10", "p1:sfs9", "Known", "sbnk-member-link+name"),
     ]
 
 def test_hds_writer_scales_bitmap_and_index_geometry_for_256_mib(tmp_path: Path) -> None:

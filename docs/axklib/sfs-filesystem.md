@@ -332,7 +332,7 @@ The first writer scope is intentionally narrow:
 - WAV input must be mono, 16-bit PCM;
 - generated sampler objects are current `FSFSDEV3SPLX` `SMPL` and `SBNK` records;
 - generated `SBNK` objects link one waveform member by name and link ID;
-- generated disk headers include the standard superblock mode metadata, initialized sector-2 disk metadata, full primary and duplicate partition-header sectors for the supported 256 MiB hard-disk metadata profile, and the early first-bitmap-sector mirror used by A-series hard-disk images;
+- generated disk headers include the standard superblock mode metadata, initialized sector-2 disk metadata, full primary and duplicate partition-header sectors for the supported hard-disk metadata profile, and the early first-bitmap-sector mirror used by A-series hard-disk images;
 - generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;
 - generated current `SMPL` object payloads use a `0x200` object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;
 - generated current `SBNK` object payloads use the current single-member sample-bank object span, populated default parameter/control block, and header fields for a normal sample bank that references one waveform object.
@@ -341,17 +341,24 @@ Callers should treat this as a generated-image API, not as an image repair or
 mutation API. Use `axklib info`, `axklib validate`, and `axklib extract wav file`
 on generated images before testing them on hardware.
 
-Hardware loading of a minimal current `SMPL` plus single-member `SBNK` image has
-shown that sector 2 and the full partition-header sectors are required for a
-loadable generated image. axklib now serializes the known-compatible 256 MiB
-hard-disk metadata profile for that outer container shape. A fully generated
-minimal single-partition image using that profile, multiple volumes, multiple
-current `SMPL` objects, and multiple direct single-member `SBNK` objects has
-loaded successfully on hardware. The tested generated SBNK root key, key
+Hardware loading has shown that sector 2, per-partition metadata sectors, and
+full partition-header sectors are part of the loadable generated-image contract.
+axklib serializes only the currently hardware-tested profiles: 256 MiB with one
+SFS partition, and 512 MiB with two SFS partitions. The 512 MiB profile includes
+a metadata sector immediately before the second partition and a distinct second
+partition-header metadata profile. A fully generated 256 MiB single-partition
+image using the first profile, multiple volumes, multiple current `SMPL` objects,
+and multiple direct single-member `SBNK` objects has loaded successfully on
+hardware. A fully generated 512 MiB two-partition image using the second
+profile, with two generated volumes per partition and two direct single-member
+`SBNK` objects per volume, has also loaded successfully; the same profile has
+also loaded with one volume grown to eight direct single-member `SBNK` objects
+while the other volumes remain smaller; this isolated-growth case has been
+hardware-tested on both partition indices. The tested generated SBNK root key, key
 range, and sample level fields are sampler-visible. Copying non-logical
-allocated-cluster tail bytes was not required for that case. axklib
-treats those tail bytes as storage padding unless a later compatibility case
-proves otherwise.
+allocated-cluster tail bytes was not required for those cases. axklib treats
+those tail bytes as storage padding unless a later compatibility case proves
+otherwise.
 
 ## Minimal Read Walkthrough
 

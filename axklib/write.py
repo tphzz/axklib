@@ -37,12 +37,31 @@ SECTOR2_METADATA_MARKER = bytes.fromhex("23 44 01 54 23 94")
 SECTOR2_FLAGS_OFFSET = 0x2B
 SECTOR2_FLAGS_VALUE = 0x90
 SUPPORTED_HARDWARE_METADATA_PARTITION_SECTORS = 524_285
+SUPPORTED_TWO_PARTITION_IMAGE_BYTES = 512 * 1024 * 1024
+SUPPORTED_TWO_PARTITION_SECTORS = 524_286
+SUPPORTED_TWO_PARTITION_STRIDE_SECTORS = 524_287
 PARTITION_HEADER_METADATA_256M = bytes.fromhex(
     "000000000000000300001388000002000000000200000000000000030007fffd00000400000320000017ab4a01529f34"
     "001aa5400152a3fc00000002000000c800001388016f5bf0000000000008000001529fa0000000000152a3fc00000000"
     "000000000152a3fc0000000800000400000aa30e01529f78000000030007fffd001aa5400152a3fc0000138800000400"
     "000000000000000100000000000000000000000200000000000000000000000000000000000a9f760152a22400000000"
     "00000001000000000000000100186cc4016eb30c000002021f000018426c75650043000001529fb400000002000000c8"
+    "00000400000000000000000000000000"
+)
+PARTITION_HEADER_METADATA_512M_2P_P0 = bytes.fromhex(
+    "000000000000000300001388000002000000000200000000000000030007fffe00000400000320000017ab4a01529f34"
+    "001aa5400152a3fc00000002000000c800001388016f5bf0000000000010000001529fa0000000000152a3fc00000000"
+    "000000000152a3fc0000000800000400000aa30e01529f78000000030007fffe001aa5400152a3fc0000138800000400"
+    "000000000000000200000000000000000000000200000000000000000000000000000000000a9f760152a224016eb30c"
+    "01529fd4001857ae00000000000000000017c372000002021f000018426c75650043000001529fb400000002000000c8"
+    "00000400000000000000000000000000"
+)
+PARTITION_HEADER_METADATA_512M_2P_P1 = bytes.fromhex(
+    "000000000008000200001388000002000000000200000020000800020007fffe00000400000320000017ab4a01529f34"
+    "001aa5400152a40d00000002000000c800001388015d6cc0000000000010000001529fa0000000010152a40d00000020"
+    "0007fffe0152a40d0000000800000400000aa30e01529f78000800020007fffe001aa5400152a40d0000138800000400"
+    "000000000000000200000000000000000000000200000000000000010000000000000000000a9f760152a224016eb30c"
+    "01529fd4001857ae00000000000000000017c372000002021f000018426c75650043000001529fb400000002000000c8"
     "00000400000000000000000000000000"
 )
 OBJECT_MAGIC = b"FSFSDEV3SPLX"
@@ -407,44 +426,68 @@ def _layout_partitions(size_bytes: int, partitions: list[PartitionBuilder]) -> l
     if available_sectors <= 0:
         raise ValueError("image is too small for an SFS partition")
     partition_count = len(partitions)
-    sectors_per_partition = available_sectors // partition_count
     max_partition_sectors = MAX_PARTITION_SIZE_BYTES // SECTOR_SIZE
+    if partition_count > 1:
+        if size_bytes != SUPPORTED_TWO_PARTITION_IMAGE_BYTES or partition_count != 2:
+            raise ValueError(
+                "multi-partition writing currently supports only the hardware-proven "
+                "512 MiB / two-partition profile"
+            )
+        return [
+            _make_partition_plan(
+                partition,
+                index=index,
+                start_sector=PARTITION_START_SECTOR
+                + index * SUPPORTED_TWO_PARTITION_STRIDE_SECTORS,
+                sector_count=SUPPORTED_TWO_PARTITION_SECTORS,
+            )
+            for index, partition in enumerate(partitions)
+        ]
+
+    sectors_per_partition = available_sectors
     if sectors_per_partition > max_partition_sectors:
         raise ValueError(
             "partition size would exceed 1 GiB; add more partitions or reduce image size"
         )
     if sectors_per_partition < 2045:
         raise ValueError("partition is too small for the generated SFS layout")
-    plans: list[_PartitionPlan] = []
-    start = PARTITION_START_SECTOR
-    for index, partition in enumerate(partitions):
-        sector_count = sectors_per_partition
-        if index == partition_count - 1:
-            sector_count = available_sectors - sectors_per_partition * (partition_count - 1)
-        if sector_count > max_partition_sectors:
-            raise ValueError("final partition size would exceed 1 GiB")
-        cluster_count = sector_count // SECTORS_PER_CLUSTER
-        bitmap_cluster_count = _ceil_div(_ceil_div(cluster_count, 8), CLUSTER_SIZE)
-        bitmap_cluster = 2 + bitmap_cluster_count
-        directory_index_cluster = bitmap_cluster + bitmap_cluster_count
-        first_payload_cluster = directory_index_cluster + DIRECTORY_INDEX_SPAN_CLUSTERS
-        plans.append(
-            _PartitionPlan(
-                builder=partition,
-                index=index,
-                start_sector=start,
-                sector_count=sector_count,
-                cluster_count=cluster_count,
-                bitmap_cluster=bitmap_cluster,
-                bitmap_cluster_count=bitmap_cluster_count,
-                directory_index_cluster=directory_index_cluster,
-                first_payload_cluster=first_payload_cluster,
-                records=[],
-            )
+    return [
+        _make_partition_plan(
+            partitions[0],
+            index=0,
+            start_sector=PARTITION_START_SECTOR,
+            sector_count=sectors_per_partition,
         )
-        start += sector_count
-    return plans
+    ]
 
+
+def _make_partition_plan(
+    partition: PartitionBuilder,
+    *,
+    index: int,
+    start_sector: int,
+    sector_count: int,
+) -> _PartitionPlan:
+    max_partition_sectors = MAX_PARTITION_SIZE_BYTES // SECTOR_SIZE
+    if sector_count > max_partition_sectors:
+        raise ValueError("partition size would exceed 1 GiB")
+    cluster_count = sector_count // SECTORS_PER_CLUSTER
+    bitmap_cluster_count = _ceil_div(_ceil_div(cluster_count, 8), CLUSTER_SIZE)
+    bitmap_cluster = 2 + bitmap_cluster_count
+    directory_index_cluster = bitmap_cluster + bitmap_cluster_count
+    first_payload_cluster = directory_index_cluster + DIRECTORY_INDEX_SPAN_CLUSTERS
+    return _PartitionPlan(
+        builder=partition,
+        index=index,
+        start_sector=start_sector,
+        sector_count=sector_count,
+        cluster_count=cluster_count,
+        bitmap_cluster=bitmap_cluster,
+        bitmap_cluster_count=bitmap_cluster_count,
+        directory_index_cluster=directory_index_cluster,
+        first_payload_cluster=first_payload_cluster,
+        records=[],
+    )
 
 def _build_partition_records(plan: _PartitionPlan) -> None:
     records: list[_RecordPlan] = [
@@ -666,14 +709,31 @@ def _superblock_writes(size_bytes: int, plans: list[_PartitionPlan]) -> list[tup
         rel = 0x0A8 + plan.index * 8
         _put_be32(block, rel, plan.start_sector)
         _put_be32(block, rel + 4, plan.sector_count)
-    return [
+    writes = [
         (0, bytes(block)),
         (SECTOR_SIZE, bytes(block)),
         (SECTOR_SIZE * 2, _sector2_metadata(plans)),
     ]
+    if _is_supported_two_partition_profile(plans):
+        writes.append(
+            ((plans[1].start_sector - 1) * SECTOR_SIZE, _sector2_metadata(plans, 1))
+        )
+    return writes
 
 
-def _sector2_metadata(plans: list[_PartitionPlan]) -> bytes:
+def _is_supported_two_partition_profile(plans: list[_PartitionPlan]) -> bool:
+    return (
+        len(plans) == 2
+        and plans[0].start_sector == PARTITION_START_SECTOR
+        and plans[1].start_sector
+        == PARTITION_START_SECTOR + SUPPORTED_TWO_PARTITION_STRIDE_SECTORS
+        and all(plan.sector_count == SUPPORTED_TWO_PARTITION_SECTORS for plan in plans)
+    )
+
+
+def _sector2_metadata(plans: list[_PartitionPlan], sequence: int = 0) -> bytes:
+    if _is_supported_two_partition_profile(plans):
+        return _two_partition_sector_metadata(plans, sequence)
     metadata = bytearray(SECTOR_SIZE)
     metadata[0:8] = SECTOR2_PRIMARY_IDENTIFIER
     metadata[9:17] = DEFAULT_DISK_IDENTIFIER
@@ -685,11 +745,29 @@ def _sector2_metadata(plans: list[_PartitionPlan]) -> bytes:
     return bytes(metadata)
 
 
+def _two_partition_sector_metadata(plans: list[_PartitionPlan], sequence: int) -> bytes:
+    if sequence not in {0, 1}:
+        raise ValueError("two-partition metadata sequence must be 0 or 1")
+    metadata = bytearray(SECTOR_SIZE)
+    metadata[0:8] = f"bb73620{sequence}".encode("ascii")
+    metadata[9:17] = SECTOR2_PRIMARY_IDENTIFIER
+    metadata[0x12:0x18] = SECTOR2_METADATA_MARKER
+    metadata[0x19] = 0x13
+    metadata[0x1A:0x2A] = _ascii_field(plans[0].builder.name, 16)
+    metadata[SECTOR2_FLAGS_OFFSET] = SECTOR2_FLAGS_VALUE
+    metadata[0x30:0x38] = bytes.fromhex("01 01 00 18 5c 30 5c 00")
+    metadata[0x38:0x3F] = b"2b4e600"
+    metadata[0x40:0x46] = SECTOR2_METADATA_MARKER
+    metadata[0x47] = 0x13
+    metadata[0x48:0x58] = _ascii_field(plans[1].builder.name, 16)
+    metadata[0x59] = SECTOR2_FLAGS_VALUE
+    return bytes(metadata)
+
 def _partition_writes(plan: _PartitionPlan) -> list[tuple[int, bytes]]:
     start_offset = plan.start_sector * SECTOR_SIZE
     header = bytearray(1024)
     header[0 : len(b"YAMAHA_dev3")] = b"YAMAHA_dev3"
-    header[0x40:0x50] = _ascii_field(plan.builder.name, 16)
+    header[0x40:0x50] = _partition_header_name(plan)
     _put_be32(header, 0x80, 2)
     _put_be32(header, 0x84, 200)
     header[0x88:0x90] = b"\xff" * 8
@@ -726,8 +804,30 @@ def _partition_writes(plan: _PartitionPlan) -> list[tuple[int, bytes]]:
     ]
 
 
+def _partition_header_name(plan: _PartitionPlan) -> bytes:
+    if (
+        plan.sector_count == SUPPORTED_TWO_PARTITION_SECTORS
+        and plan.start_sector
+        == PARTITION_START_SECTOR + plan.index * SUPPORTED_TWO_PARTITION_STRIDE_SECTORS
+        and plan.index > 0
+    ):
+        return _ascii_field(plan.builder.name, 15) + str(plan.index).encode("ascii")
+    return _ascii_field(plan.builder.name, 16)
+
+
 def _apply_partition_metadata_profile(header: bytearray, plan: _PartitionPlan) -> None:
-    if plan.sector_count == SUPPORTED_HARDWARE_METADATA_PARTITION_SECTORS:
+    if (
+        plan.sector_count == SUPPORTED_TWO_PARTITION_SECTORS
+        and plan.start_sector
+        == PARTITION_START_SECTOR + plan.index * SUPPORTED_TWO_PARTITION_STRIDE_SECTORS
+    ):
+        header[0xAF] = plan.index
+        header[0x100:0x200] = (
+            PARTITION_HEADER_METADATA_512M_2P_P0
+            if plan.index == 0
+            else PARTITION_HEADER_METADATA_512M_2P_P1
+        )
+    elif plan.sector_count == SUPPORTED_HARDWARE_METADATA_PARTITION_SECTORS:
         header[0x100:0x200] = PARTITION_HEADER_METADATA_256M
 
 
