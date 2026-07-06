@@ -78,6 +78,7 @@ nav:
           - Sampler Data Structures: axklib/sampler-data.md
       - Output Contracts:
           - Names, Paths, And Exports: axklib/names-and-paths.md
+          - SFZ Export: axklib/sfz.md
           - Report Schemas: axklib/report-schemas.md
       - Yamaha Glossary: axklib/glossary.md
       - Public API:

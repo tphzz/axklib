@@ -8,7 +8,7 @@ import json
 import re
 import wave
 from collections import Counter, defaultdict, deque
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, replace
 from io import BytesIO
 from pathlib import Path
@@ -27,6 +27,7 @@ from axklib.audio import (
     _wav_bytes,
 )
 from axklib.audio.stereo import interleave, pad_to_match
+from axklib.key_limits import int_value, resolve_sbnk_key_range
 from axklib.model import DataQuality
 from axklib.reports import to_plain
 
@@ -533,6 +534,29 @@ def _targets(value: str) -> tuple[str, ...]:
 
 def _relationship_row(row: WaveformRelationship) -> dict[str, object]:
     return asdict(row)
+
+
+def _decoded_member_parameters(decoded: object) -> Mapping[str, object]:
+    if isinstance(decoded, Mapping):
+        return decoded
+    if isinstance(decoded, list):
+        for item in decoded:
+            if not isinstance(item, Mapping):
+                continue
+            member_parameters = item.get("member_parameters")
+            if isinstance(member_parameters, Mapping):
+                return member_parameters
+    return {}
+
+
+def _resolved_key_range_parameters(decoded: object) -> dict[str, object] | None:
+    params = _decoded_member_parameters(decoded)
+    if not params:
+        return None
+    root_key = int_value(params.get("left_root_key_0x0d6"))
+    if root_key is None:
+        root_key = int_value(params.get("right_root_key_0x0d7"))
+    return resolve_sbnk_key_range(params, root_key=root_key)
 
 
 def _relationship_sidecar_row(row: WaveformRelationship) -> dict[str, object]:
@@ -1716,6 +1740,16 @@ def _build_volume_graph(
             aliases = cast(list[dict[str, object]], smpl_objects[smpl_id]["user_facing_aliases"])
             if alias not in aliases:
                 aliases.append(alias)
+            decoded_sbnk_params = waveform.metadata.get(
+                "decoded_current_sbnk_member_parameters",
+                [],
+            )
+            sbnk_parameters: dict[str, object] = {
+                "decoded_current_sbnk_member_parameters": decoded_sbnk_params
+            }
+            resolved_key_range = _resolved_key_range_parameters(decoded_sbnk_params)
+            if resolved_key_range:
+                sbnk_parameters["resolved_key_range"] = resolved_key_range
             sbnk = sbnk_objects.setdefault(
                 sbnk_id,
                 {
@@ -1726,12 +1760,7 @@ def _build_volume_graph(
                     "sample_bank_id": "",
                     "physical_waveforms": [],
                     "rendered_audio": None,
-                    "parameters": {
-                        "decoded_current_sbnk_member_parameters": waveform.metadata.get(
-                            "decoded_current_sbnk_member_parameters",
-                            [],
-                        )
-                    },
+                    "parameters": sbnk_parameters,
                 },
             )
             waveform_entry: dict[str, object] = {
@@ -1799,6 +1828,50 @@ def _build_volume_graph(
                 if assignment not in assignments:
                     assignments.append(assignment)
 
+    sbac_display_names: dict[tuple[str, str], str] = {}
+    for row in relationship_rows.values():
+        if row.relationship_type != "PROG_ASSIGNMENT_TO_SBAC":
+            continue
+        sbac_assignment_name = row.assignment_name
+        if not sbac_assignment_name:
+            continue
+        for target_key in _targets(row.target_key):
+            sbac_display_names.setdefault((row.source_image, target_key), sbac_assignment_name)
+
+    for row in relationship_rows.values():
+        if row.relationship_type != "SBAC_SLOT_TO_SBNK" or row.quality not in {"Known", "Likely"}:
+            continue
+        target_keys = _targets(row.target_key)
+        if len(target_keys) != 1:
+            continue
+        sbnk_ref = _graph_source_ref(row.source_image, target_keys[0])
+        sbac_member_sbnk_id = ref_to_id.get(sbnk_ref)
+        if not sbac_member_sbnk_id or sbac_member_sbnk_id not in sbnk_objects:
+            continue
+        sbac_ref = _graph_source_ref(row.source_image, row.source_key)
+        sbac_id = _graph_object_id("SBAC", row.source_image, row.source_key)
+        ref_to_id[sbac_ref] = sbac_id
+        display_name = sbac_display_names.get((row.source_image, row.source_key), row.source_key)
+        sbac = sbac_objects.setdefault(
+            sbac_id,
+            {
+                "id": sbac_id,
+                "source_ref": sbac_ref,
+                "object_key": row.source_key,
+                "display_name": display_name,
+                "members": [],
+            },
+        )
+        if not sbnk_objects[sbac_member_sbnk_id].get("sample_bank_id"):
+            sbnk_objects[sbac_member_sbnk_id]["sample_bank_id"] = sbac_id
+        sbac_member: dict[str, object] = {
+            "sbnk_id": sbac_member_sbnk_id,
+            "sbnk_ref": sbnk_ref,
+            "relationship_quality": row.quality,
+        }
+        members = cast(list[dict[str, object]], sbac["members"])
+        if sbac_member not in members:
+            members.append(sbac_member)
     relationship_entries = [
         _relationship_graph_row(row, ref_to_id)
         for row in sorted(

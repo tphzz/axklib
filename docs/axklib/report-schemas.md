@@ -141,7 +141,7 @@ Important field families:
 | --- | --- |
 | Shared header | `type`, `known_type`, `header_size`, `payload_bytes_0x1c`, `name_guess`. |
 | SMPL metadata | sample rate, sample width, root key, loop fields, compact record bytes. |
-| SBNK metadata | member names, link IDs, Program bitmaps, sample parameter fields. |
+| SBNK metadata | member names, link IDs, Program bitmaps, raw sample parameter fields, and resolved sampler-facing key ranges. |
 | SBAC metadata | active slot count, slot names, value-enable bitmap fields. |
 | PROG metadata | Program display name, assignment rows, common fields, effect blocks. |
 
@@ -255,6 +255,21 @@ Stereo decisions use these public reason-code families:
 | `STEREO_EXPORT_PARENT_CONFLICT` | Placement conflict prevents one rendered parent path. |
 | `STEREO_RELATIONSHIP_NOT_KNOWN` | Relationship quality is not strong enough for rendering. |
 
+## `axklib extract sfz`
+
+`extract sfz` runs the same structured waveform export used by `extract waves`,
+then writes SFZ instruments and per-volume SFZ manifests.
+
+| Output | Description |
+| --- | --- |
+| `SFZ/*.sfz` | Volume-scoped SFZ instrument files. Each `sample=` path is relative to the containing SFZ file. |
+| `sfz_exports.csv` | Per-volume SFZ generation summary. |
+| `sfz_exports.json` | JSON form of the same per-volume SFZ generation summary. |
+
+`sfz_exports` rows include the volume path, instrument type, instrument name,
+relative SFZ path, rendered and physical region counts, skipped region count,
+status, and notes. The SFZ files prefer rendered stereo WAVs when present in the
+volume graph and fall back to exact physical WAV references otherwise.
 ## `volume.axklib.json`
 
 `volume.axklib.json` is the per-volume graph manifest written by structured

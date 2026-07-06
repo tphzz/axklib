@@ -10,7 +10,7 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import axklib
 from axklib.audio import (
@@ -47,6 +47,7 @@ from axklib.reports.schema import (
     write_schema_index,
     write_schema_manifest,
 )
+from axklib.sfz import SfzExportRequest, export_sfz
 from axklib.validation import (
     VALIDATION_POLICIES,
     validate_export_sidecars,
@@ -363,6 +364,101 @@ def _read_json_rows(path: Path) -> list[object]:
     return [payload]
 
 
+def _run_structured_wave_export(
+    args: argparse.Namespace,
+    output_dir: Path,
+    progress: _ProgressLine,
+    *,
+    layout: Literal["structured", "flat"],
+) -> tuple[list[Any], Any, int, int]:
+    options = axklib.OpenOptions(strict=args.strict, include_payloads=True)
+    paths = _input_paths(args.paths)
+    results: list[Any] = []
+    progress.update("loading", 0, len(paths), "opening inputs")
+    for index, path in enumerate(paths, start=1):
+        progress.update("loading", index - 1, len(paths), str(path))
+        results.extend(axklib.open_many([path], options=options))
+        progress.update("loading", index, len(paths), path.name)
+
+    waveforms: list[Any] = []
+    decode_errors = 0
+    load_errors = 0
+    decodable_results = [result for result in results if result.container is not None]
+    progress.update("decoding", 0, len(decodable_results), "decoding waveform objects")
+    decoded_count = 0
+    for result in results:
+        if result.container is None:
+            load_errors += 1
+            error = result.error
+            message = error.message if error else "unknown error"
+            code = error.error_code if error else "AXKLIB_CONTAINER_OPEN_FAILED"
+            print(f"{result.path}\tERROR\t{code}\t{message}")
+            continue
+        progress.update("decoding", decoded_count, len(decodable_results), str(result.path))
+        waveform_set = decode_container_waveforms(result.container, selection=args.name)
+        decoded_count += 1
+        progress.update("decoding", decoded_count, len(decodable_results), result.path.name)
+        waveforms.extend(waveform_set.waveforms)
+        decode_errors += len(waveform_set.issues)
+        for issue in waveform_set.issues[:20]:
+            print(f"{issue.object_key}\t{issue.code}\t{issue.message}")
+    placements, relationships = _wave_export_context(results)
+    enriched_waveforms = _enrich_waveform_parameter_metadata(waveforms, results, relationships)
+    request = WavExportRequest(
+        output_dir=output_dir,
+        waveforms=enriched_waveforms,
+        stereo_policy=args.stereo,
+        overwrite_policy="replace" if args.overwrite else "fail",
+        layout=layout,
+        placements=placements,
+        relationships=relationships,
+        progress_callback=lambda event: progress.update(
+            event.stage, event.completed, event.total, event.message
+        ),
+    )
+    export_result = export_waveforms(request)
+    return waveforms, export_result, decode_errors, load_errors
+
+
+def _write_volume_graph_schemas(
+    output_dir: Path,
+    sidecar_records: Sequence[object],
+    extra_schemas: Sequence[ReportSchemaManifest] = (),
+) -> None:
+    if not sidecar_records and not extra_schemas:
+        return
+    schemas: list[ReportSchemaManifest] = []
+    if sidecar_records:
+        schemas.append(
+            _write_report_schema(
+                output_dir,
+                "volume_graphs",
+                list(sidecar_records),
+                semantic_notes="Per-volume axklib object graph manifests generated from decoded container objects and relationships.",
+                replacement_notes="This is the canonical graph schema for axklib extract waves.",
+            )
+        )
+    for report_name in (
+        "samples",
+        "sample_banks",
+        "sample_bank_accessories",
+        "programs",
+        "sequences",
+        "relationships",
+        "unresolved",
+        "stereo_decisions",
+        "stereo_exports",
+        "export_summary",
+    ):
+        report_path = output_dir / f"{report_name}.json"
+        if report_path.exists():
+            schemas.append(
+                _write_report_schema(output_dir, report_name, _read_json_rows(report_path))
+            )
+    schemas.extend(extra_schemas)
+    write_schema_index(_schema_dir(output_dir), schemas)
+
+
 def _object_origin_columns(raw: Any) -> dict[str, object]:
     metadata = raw.metadata
     return {
@@ -559,83 +655,16 @@ def run_extract_waves(args: argparse.Namespace) -> int:
         print(f"exports written to {output_dir}")
         return 0
 
-    options = axklib.OpenOptions(strict=args.strict, include_payloads=True)
-    paths = _input_paths(args.paths)
-    results: list[Any] = []
-    progress.update("loading", 0, len(paths), "opening inputs")
-    for index, path in enumerate(paths, start=1):
-        progress.update("loading", index - 1, len(paths), str(path))
-        results.extend(axklib.open_many([path], options=options))
-        progress.update("loading", index, len(paths), path.name)
-
-    waveforms: list[Any] = []
-    decode_errors = 0
-    load_errors = 0
-    decodable_results = [result for result in results if result.container is not None]
-    progress.update("decoding", 0, len(decodable_results), "decoding waveform objects")
-    decoded_count = 0
-    for result in results:
-        if result.container is None:
-            load_errors += 1
-            error = result.error
-            message = error.message if error else "unknown error"
-            code = error.error_code if error else "AXKLIB_CONTAINER_OPEN_FAILED"
-            print(f"{result.path}\tERROR\t{code}\t{message}")
-            continue
-        progress.update("decoding", decoded_count, len(decodable_results), str(result.path))
-        waveform_set = decode_container_waveforms(result.container, selection=args.name)
-        decoded_count += 1
-        progress.update("decoding", decoded_count, len(decodable_results), result.path.name)
-        waveforms.extend(waveform_set.waveforms)
-        decode_errors += len(waveform_set.issues)
-        for issue in waveform_set.issues[:20]:
-            print(f"{issue.object_key}\t{issue.code}\t{issue.message}")
-    placements, relationships = _wave_export_context(results)
-    enriched_waveforms = _enrich_waveform_parameter_metadata(waveforms, results, relationships)
-    request = WavExportRequest(
-        output_dir=output_dir,
-        waveforms=enriched_waveforms,
-        stereo_policy=args.stereo,
-        overwrite_policy="replace" if args.overwrite else "fail",
-        layout=args.layout,
-        placements=placements,
-        relationships=relationships,
-        progress_callback=lambda event: progress.update(
-            event.stage, event.completed, event.total, event.message
-        ),
-    )
     try:
-        export_result = export_waveforms(request)
+        waveforms, export_result, decode_errors, load_errors = _run_structured_wave_export(
+            args,
+            output_dir,
+            progress,
+            layout=args.layout,
+        )
     finally:
         progress.finish()
-    if export_result.sidecar_records:
-        schemas = [
-            _write_report_schema(
-                output_dir,
-                "volume_graphs",
-                list(export_result.sidecar_records),
-                semantic_notes="Per-volume axklib object graph manifests generated from decoded container objects and relationships.",
-                replacement_notes="This is the canonical graph schema for axklib extract waves.",
-            )
-        ]
-        for report_name in (
-            "samples",
-            "sample_banks",
-            "sample_bank_accessories",
-            "programs",
-            "sequences",
-            "relationships",
-            "unresolved",
-            "stereo_decisions",
-            "stereo_exports",
-            "export_summary",
-        ):
-            report_path = output_dir / f"{report_name}.json"
-            if report_path.exists():
-                schemas.append(
-                    _write_report_schema(output_dir, report_name, _read_json_rows(report_path))
-                )
-        write_schema_index(_schema_dir(output_dir), schemas)
+    _write_volume_graph_schemas(output_dir, export_result.sidecar_records)
     print(
         f"waveforms={len(waveforms)} written_files={len(export_result.written_files)} "
         f"skipped_files={len(export_result.skipped_files)} decode_errors={decode_errors} load_errors={load_errors}"
@@ -644,6 +673,55 @@ def run_extract_waves(args: argparse.Namespace) -> int:
         print(f"warning: {warning}")
     if len(export_result.warnings) > 20:
         print(f"... {len(export_result.warnings) - 20} more warnings")
+    return 1 if load_errors or export_result.skipped_files else 0
+
+
+def run_extract_sfz(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output_dir)
+    progress = _ProgressLine(args.progress)
+    try:
+        waveforms, export_result, decode_errors, load_errors = _run_structured_wave_export(
+            args,
+            output_dir,
+            progress,
+            layout="structured",
+        )
+        sfz_result = export_sfz(
+            SfzExportRequest(
+                output_dir=output_dir,
+                volume_graphs=export_result.sidecar_records,
+                overwrite_policy="replace" if args.overwrite else "fail",
+                progress_callback=lambda event: progress.update(
+                    event.stage, event.completed, event.total, event.message
+                ),
+            )
+        )
+    finally:
+        progress.finish()
+    sfz_schema_rows: list[object] = []
+    for graph in export_result.sidecar_records:
+        if not isinstance(graph, dict):
+            continue
+        volume = graph.get("volume")
+        if not isinstance(volume, dict):
+            continue
+        volume_path = volume.get("path")
+        if not isinstance(volume_path, str) or not volume_path:
+            continue
+        report_path = output_dir / volume_path / "sfz_exports.json"
+        if report_path.exists():
+            sfz_schema_rows.extend(_read_json_rows(report_path))
+    extra_schemas: list[ReportSchemaManifest] = []
+    if sfz_schema_rows:
+        extra_schemas.append(_write_report_schema(output_dir, "sfz_exports", sfz_schema_rows))
+    _write_volume_graph_schemas(output_dir, export_result.sidecar_records, extra_schemas)
+    print(
+        f"waveforms={len(waveforms)} written_files={len(export_result.written_files)} "
+        f"sfz_files={sum(1 for path in sfz_result.written_files if path.suffix.lower() == '.sfz')} "
+        f"skipped_files={len(export_result.skipped_files)} decode_errors={decode_errors} load_errors={load_errors}"
+    )
+    for warning in (*export_result.warnings[:20], *sfz_result.warnings[:20]):
+        print(f"warning: {warning}")
     return 1 if load_errors or export_result.skipped_files else 0
 
 
@@ -1246,6 +1324,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="show same-line progress on stderr; default is auto for interactive terminals",
     )
     waves.set_defaults(func=run_extract_waves)
+
+    sfz = extract_subparsers.add_parser(
+        "sfz",
+        help="export WAVs and generate volume-scoped SFZ files",
+        description="Export exact current SMPL waveforms and generate volume-scoped SFZ files.",
+    )
+    sfz.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
+    sfz.add_argument("-o", "--output-dir", required=True, help="directory for WAV/SFZ/JSON exports")
+    sfz.add_argument(
+        "--stereo",
+        choices=("none", "auto"),
+        default="auto",
+        help="stereo export policy; default is auto",
+    )
+    sfz.add_argument("--overwrite", action="store_true", help="replace existing export files")
+    sfz.add_argument("--name", help="optional sample-name or object-key substring filter")
+    sfz.add_argument("--strict", action="store_true", help="raise on the first load error")
+    sfz.add_argument(
+        "--progress",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="show same-line progress on stderr; default is auto for interactive terminals",
+    )
+    sfz.set_defaults(func=run_extract_sfz)
     return parser
 
 

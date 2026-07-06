@@ -200,6 +200,14 @@ field names currently exposed by the decoder.
 | `0x0e2` | u8 | key_range_high_0x0e2 |
 | `0x0e3` | u8 | key_range_low_0x0e3 |
 | `0x0e6` | u16be | loop_tempo_0x0e6 |
+
+Key-range values `0..127` are concrete MIDI key limits. The sampler also
+uses direction-specific sentinel bytes for the UI value `Orig`: raw `128` in
+`key_range_high_0x0e2` and raw `255` in `key_range_low_0x0e3`. axklib
+preserves those raw values and exposes a `resolved_key_range` projection in
+volume graphs. The projection resolves `Orig` to the member root key so export
+formats with only concrete MIDI limits can emit bounded zones.
+
 | `0x0e8` | u32be | left_wave_start_address_0x0e8 |
 | `0x0ea` | u16be | left_wave_start_low16_0x0ea |
 | `0x0ec` | u32be | right_wave_start_address_0x0ec |
@@ -496,3 +504,4 @@ Exact export keeps physical and rendered audio separate:
 
 The original `SMPL` objects remain represented even when a rendered stereo WAV is
 created.
+

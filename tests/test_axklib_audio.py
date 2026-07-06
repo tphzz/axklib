@@ -983,6 +983,131 @@ def test_object_graph_keeps_duplicate_sbnk_references_without_duplicate_wav(tmp_
     assert sorted(row["display_name"] for row in graph["objects"]["sbac"]) == ["Bank", "Bank *"]
 
 
+def test_object_graph_materializes_likely_sbac_membership(tmp_path: Path) -> None:
+    waveform = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
+    placements = {
+        "p0:sbnk1": WaveformPlacement(
+            partition_index=0,
+            partition_name="hd1",
+            volume_name="Or11 Argent",
+            category_name="Sample Banks",
+            display_name="Or Argent 36   8",
+            quality=DataQuality.KNOWN,
+            source="test placement",
+        )
+    }
+    relationships = (
+        WaveformRelationship(
+            "p0:sbnk1",
+            waveform.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=waveform.source_image,
+        ),
+        WaveformRelationship(
+            "p0:sbac1",
+            "p0:sbnk1",
+            "SBAC_SLOT_TO_SBNK",
+            "Likely",
+            "active-sbac-slot-name+same-folder",
+            source_image=waveform.source_image,
+        ),
+        WaveformRelationship(
+            "p0:prog1",
+            "p0:sbac1",
+            "PROG_ASSIGNMENT_TO_SBAC",
+            "Likely",
+            "assignment-kind-0x11+name+same-folder",
+            source_image=waveform.source_image,
+            assignment_name="01 Argent",
+        ),
+    )
+
+    export_waveforms(
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(waveform,),
+            placements=placements,
+            relationships=relationships,
+        )
+    )
+
+    graph = _graph(tmp_path / "partition_00_hd1" / "Or11 Argent" / "volume.axklib.json")
+    assert [row["display_name"] for row in graph["objects"]["sbac"]] == ["01 Argent"]
+    sbac = graph["objects"]["sbac"][0]
+    sbnk = graph["objects"]["sbnk"][0]
+    assert sbnk["sample_bank_id"] == sbac["id"]
+    assert sbac["members"] == [
+        {
+            "sbnk_id": sbnk["id"],
+            "sbnk_ref": sbnk["source_ref"],
+            "relationship_quality": "Likely",
+        }
+    ]
+
+
+
+
+def test_object_graph_resolves_sampler_orig_key_limit(tmp_path: Path) -> None:
+    waveform = replace(
+        decode_waveform(_sample_object(b"\x00\x01\x00\x02")),
+        metadata={
+            "decoded_current_sbnk_member_parameters": {
+                "left_root_key_0x0d6": 36,
+                "right_root_key_0x0d7": 36,
+                "key_range_low_0x0e3": 255,
+                "key_range_high_0x0e2": 128,
+            }
+        },
+    )
+    placements = {
+        "p0:sbnk1": WaveformPlacement(
+            partition_index=0,
+            partition_name="hd1",
+            volume_name="Or11 Argent",
+            category_name="Sample Banks",
+            display_name="Or Argent 36   8",
+            quality=DataQuality.KNOWN,
+            source="test placement",
+        )
+    }
+    relationships = (
+        WaveformRelationship(
+            "p0:sbnk1",
+            waveform.object_key,
+            "SBNK_LEFT_MEMBER_TO_SMPL",
+            "Known",
+            "sbnk-member-link+name",
+            source_image=waveform.source_image,
+        ),
+    )
+
+    export_waveforms(
+        WavExportRequest(
+            output_dir=tmp_path,
+            waveforms=(waveform,),
+            placements=placements,
+            relationships=relationships,
+        )
+    )
+
+    graph = _graph(tmp_path / "partition_00_hd1" / "Or11 Argent" / "volume.axklib.json")
+    parameters = graph["objects"]["sbnk"][0]["parameters"]
+    raw = parameters["decoded_current_sbnk_member_parameters"]
+    assert raw["key_range_low_0x0e3"] == 255
+    assert raw["key_range_high_0x0e2"] == 128
+    assert parameters["resolved_key_range"] == {
+        "low_midi": 36,
+        "high_midi": 36,
+        "low_display": "Orig",
+        "high_display": "Orig",
+        "low_raw": 255,
+        "high_raw": 128,
+        "basis": "sampler-orig-key-limit",
+    }
+
+
 def test_object_graph_records_padding_for_rendered_stereo(tmp_path: Path) -> None:
     left = decode_waveform(_sample_object(b"\x00\x01\x00\x02"))
     right = replace(
@@ -1176,3 +1301,4 @@ def test_object_graph_keeps_non_interleavable_stereo_as_physical_waveforms(tmp_p
     assert sbnk["rendered_audio"] is None
     assert [row["role"] for row in sbnk["physical_waveforms"]] == ["left", "right"]
     assert graph["stereo_decisions"][0]["reason_code"] == "STEREO_SAMPLE_RATE_MISMATCH"
+

@@ -225,8 +225,27 @@ def test_extract_waves_progress_always_reports_same_line_status(
     assert captured.err.endswith("\n")
 
 
+def test_extract_sfz_runs_wave_export_then_writes_manifest(tmp_path: Path) -> None:
+    source = tmp_path / "sample.smpl"
+    output = tmp_path / "sfz"
+    _write_standalone_smpl(source)
+
+    code = axklibtool.main(["extract", "sfz", "-o", str(output), str(source)])
+
+    assert code == 0
+    wav_files = sorted(path.relative_to(output).as_posix() for path in output.rglob("*.wav"))
+    sfz_files = sorted(path.relative_to(output).as_posix() for path in output.rglob("*.sfz"))
+    assert wav_files == ["Standalone object/SMPL/S01.wav"]
+    assert sfz_files == []
+    assert (output / "Standalone object" / "sfz_exports.json").read_text(encoding="utf-8") == "[]\n"
+
+
 def test_subcommand_help_output_is_available(capsys: pytest.CaptureFixture[str]) -> None:
-    for argv in (["inventory", "--help"], ["extract", "waves", "--help"]):
+    for argv in (
+        ["inventory", "--help"],
+        ["extract", "waves", "--help"],
+        ["extract", "sfz", "--help"],
+    ):
         with pytest.raises(SystemExit) as exc_info:
             axklibtool.main(list(argv))
         assert exc_info.value.code == 0
@@ -235,6 +254,19 @@ def test_subcommand_help_output_is_available(capsys: pytest.CaptureFixture[str])
     help_text = captured.out.lower()
     assert "decode object inventory" in help_text
     assert "export exact current smpl waveforms" in help_text
+    assert "generate volume-scoped sfz files" in help_text
+
+
+def test_extract_sfz_fails_on_existing_targets_without_overwrite(tmp_path: Path) -> None:
+    source = tmp_path / "sample.smpl"
+    output = tmp_path / "sfz"
+    _write_standalone_smpl(source)
+
+    first = axklibtool.main(["extract", "sfz", "-o", str(output), str(source)])
+    second = axklibtool.main(["extract", "sfz", "-o", str(output), str(source)])
+
+    assert first == 0
+    assert second == 1
 
 
 def test_debug_flag_controls_internal_traceback(

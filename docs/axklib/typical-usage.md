@@ -76,6 +76,18 @@ result = export_waveforms(
 print(len(result.written_files))
 ```
 
+## Export SFZ instruments
+
+`extract sfz` runs structured WAV export first, then writes volume-scoped SFZ
+files that reference those WAVs with relative paths.
+
+```powershell
+uv run axklib extract sfz HD00_512_example.hda -o build/exports/sfz/00001_example
+```
+
+Rendered stereo WAVs are referenced when available. Otherwise the SFZ falls back
+to exact physical WAV exports, including panned left/right regions when a safe
+rendered stereo file was not produced.
 ## Read exported waveform labels
 
 Structured waveform export writes one `volume.axklib.json` graph per volume.
@@ -100,3 +112,4 @@ Quality labels describe how stable a decoded value is for downstream use.
 `Known` values are suitable for normal reporting and export decisions. Values
 marked `Tentative` or `Unknown` are included for inspection and are not stable
 inputs for generated or modified image workflows.
+
