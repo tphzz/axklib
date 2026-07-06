@@ -63,7 +63,15 @@ Partition entry layout:
 | `+0x00` | 4 | u32be | Partition start sector. |
 | `+0x04` | 4 | u32be | Partition sector count. |
 
-A partition entry is active when both values are non-zero.
+A partition entry is active when both values are non-zero. Fresh generated
+images also populate the observed disk mode metadata area so the duplicate
+superblocks match sampler-authored hard-disk images of the same size class.
+
+A-series hard-disk images also use sector 2 as an auxiliary disk metadata and
+identifier sector. axklib does not expose that sector as part of the directory
+or object tree, but generated images intended for hardware loading must
+initialize it. A zero-filled sector 2 can still leave an image readable by a
+permissive parser while failing later in the sampler load path.
 
 ## Partition Header
 
@@ -84,6 +92,12 @@ is 1024 bytes and is followed by a duplicate copy.
 | `0x0a0` | 4 | u32be | Reserved value; currently not interpreted by public APIs. |
 | `0x0a4` | 4 | u32be | Cluster offset to the directory/file index. |
 | `0x0a8` | 4 | u32be | Reserved value; currently not interpreted by public APIs. |
+
+For generated images, the full primary and duplicate 1024-byte partition-header
+sectors are part of the write contract. The named fields above are sufficient
+for ordinary parsing, but hardware loading also depends on initialized metadata
+bytes in the otherwise uninterpreted header area. Do not synthesize those header
+sectors by writing only the named fields and leaving the remaining bytes zero.
 
 Cluster offsets are partition-relative. Convert a cluster offset to an absolute
 byte offset with:
@@ -120,6 +134,12 @@ then compares it with the stored bitmap:
 
 Mismatch reports use inclusive cluster ranges so large gaps can be reviewed
 without listing every cluster.
+
+A-series 256 MiB images also carry an early mirror of the first
+allocation-bitmap sector immediately after the duplicate partition header.
+Generated images write that mirror as well, while the partition header field
+`0x09c` remains the authoritative primary bitmap location for reads and
+validation.
 
 ## Directory And File Index
 
@@ -296,6 +316,42 @@ Container checks include:
 Relationship and sampler-data validation is reported separately so a caller can
 distinguish a broken filesystem from a readable filesystem that contains broken
 sampler object links.
+
+## Generated Image Writing
+
+`axklib.write` provides an initial API for creating fresh HDS/SFS images from a
+small typed model. The current writer creates a new hard-disk image, partitions,
+volumes, current-format `SMPL` waveform objects, and direct single-member `SBNK`
+sample-bank objects. It does not modify existing images and does not require a
+template container image.
+
+The first writer scope is intentionally narrow:
+
+- image size is capped at `2_147_483_648` bytes;
+- each generated partition is capped at `1_073_741_824` bytes;
+- WAV input must be mono, 16-bit PCM;
+- generated sampler objects are current `FSFSDEV3SPLX` `SMPL` and `SBNK` records;
+- generated `SBNK` objects link one waveform member by name and link ID;
+- generated disk headers include the standard superblock mode metadata, initialized sector-2 disk metadata, full primary and duplicate partition-header sectors for the supported 256 MiB hard-disk metadata profile, and the early first-bitmap-sector mirror used by A-series hard-disk images;
+- generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;
+- generated current `SMPL` object payloads use a `0x200` object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;
+- generated current `SBNK` object payloads use the current single-member sample-bank object span, populated default parameter/control block, and header fields for a normal sample bank that references one waveform object.
+
+Callers should treat this as a generated-image API, not as an image repair or
+mutation API. Use `axklib info`, `axklib validate`, and `axklib extract wav file`
+on generated images before testing them on hardware.
+
+Hardware loading of a minimal current `SMPL` plus single-member `SBNK` image has
+shown that sector 2 and the full partition-header sectors are required for a
+loadable generated image. axklib now serializes the known-compatible 256 MiB
+hard-disk metadata profile for that outer container shape. A fully generated
+minimal single-partition image using that profile, multiple volumes, multiple
+current `SMPL` objects, and multiple direct single-member `SBNK` objects has
+loaded successfully on hardware. The tested generated SBNK root key, key
+range, and sample level fields are sampler-visible. Copying non-logical
+allocated-cluster tail bytes was not required for that case. axklib
+treats those tail bytes as storage padding unless a later compatibility case
+proves otherwise.
 
 ## Minimal Read Walkthrough
 

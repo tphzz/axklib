@@ -132,6 +132,10 @@ PCM export mapping:
 
 `header_size` is the start offset of stored waveform bytes inside the `SMPL`
 payload. `payload_bytes_0x1c` is the stored byte count read by exact export.
+Generated images may store a short compatibility tail after the logical waveform
+frames. In that case the stored byte count includes the tail, while
+`wave_length_frames_0x092` and `loop_length_frames_0x09a` describe the logical
+sample window.
 
 When the alternating-byte compatibility pattern is detected, audio APIs set
 `Waveform.alternating_byte_payload_detected` and sidecars write
@@ -206,7 +210,9 @@ uses direction-specific sentinel bytes for the UI value `Orig`: raw `128` in
 `key_range_high_0x0e2` and raw `255` in `key_range_low_0x0e3`. axklib
 preserves those raw values and exposes a `resolved_key_range` projection in
 volume graphs. The projection resolves `Orig` to the member root key so export
-formats with only concrete MIDI limits can emit bounded zones.
+formats with only concrete MIDI limits can emit bounded zones. Generated direct
+single-member `SBNK` objects have been hardware-tested with concrete root key
+and key-range values.
 
 | `0x0e8` | u32be | left_wave_start_address_0x0e8 |
 | `0x0ea` | u16be | left_wave_start_low16_0x0ea |
@@ -233,6 +239,9 @@ formats with only concrete MIDI limits can emit bounded zones.
 | `0x114` | u8 | expand_width_0x114 |
 | `0x115` | u8 | random_pitch_0x115 |
 | `0x116` | u8 | sample_level_0x116 |
+
+Generated direct single-member `SBNK` objects have been hardware-tested with
+sample level values in the normal `0..127` range.
 | `0x117` | u8 | pan_0x117 |
 | `0x118` | u8 | velocity_low_limit_0x118 |
 | `0x119` | u8 | velocity_offset_0x119 |
