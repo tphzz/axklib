@@ -131,6 +131,7 @@ def _safe_display_path_name(value: str, fallback: str = "sample") -> str:
     if duplicate_match:
         duplicate_suffix = f" ({len(duplicate_match.group(1)) + 1})"
         text = text[: duplicate_match.start()].rstrip() or fallback
+    text = text.replace("<", "_lt_").replace(">", "_gt_")
     text = _INVALID_PATH_CHARS.sub("_", text)
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"_+", "_", text)

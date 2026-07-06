@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
+from axklib.audio.structured import _safe_display_path_name
 from axklib.containers import (
     AxklibContainer,
     AxklibContainerLoadResult,
@@ -95,6 +96,7 @@ class ContentNode:
     quality: DataQuality = DataQuality.KNOWN
     basis: str = ""
     notes: str = ""
+    selector_path: str = ""
     children: tuple[ContentNode, ...] = ()
 
 
@@ -105,6 +107,17 @@ class ContentTree:
     detected_format: str
     roots: tuple[ContentNode, ...]
     issues: tuple[ContentTreeIssue, ...] = ()
+
+
+@dataclass(frozen=True)
+class ContentTreePathRow:
+    source_path: str
+    scope: str
+    path: str
+    display_name: str
+    node_type: str
+    object_type: str = ""
+    object_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -371,6 +384,105 @@ def _sort_nodes(nodes: Iterable[ContentNode]) -> tuple[ContentNode, ...]:
         )
     )
 
+
+
+def _selector_component(node: ContentNode) -> str:
+    if node.node_type == "partition":
+        partition_index: int | None = None
+        raw_index = node.node_id.split(":", 1)[1] if ":" in node.node_id else ""
+        if raw_index and raw_index != "None":
+            try:
+                partition_index = int(raw_index)
+            except ValueError:
+                partition_index = None
+        partition_name = node.display_name
+        prefix = f"partition {partition_index}: " if partition_index is not None else ""
+        if prefix and partition_name.startswith(prefix):
+            partition_name = partition_name[len(prefix) :]
+        if partition_index is None:
+            return _safe_display_path_name(partition_name, "partition")
+        safe_name = re.sub(
+            r"[^A-Za-z0-9._ -]+",
+            "_",
+            partition_name.strip() or f"partition_{partition_index:02d}",
+        )
+        safe_name = re.sub(r"\s+", "_", safe_name).strip("._-")
+        return f"partition_{partition_index:02d}_{safe_name or f'partition_{partition_index:02d}'}"
+    if node.node_type == "volume":
+        name = node.display_name.removesuffix(" (errors detected)")
+        return _safe_display_path_name(name, "volume")
+    return node.display_name.replace("/", "_").replace("\\", "_").strip() or node.node_type
+
+
+def _join_selector_path(parent: str, component: str) -> str:
+    if not parent:
+        return component
+    return f"{parent}/{component}"
+
+
+def _with_selector_paths_for_node(node: ContentNode, parent: str = "") -> ContentNode:
+    selector_path = _join_selector_path(parent, _selector_component(node))
+    children = tuple(_with_selector_paths_for_node(child, selector_path) for child in node.children)
+    return replace(node, selector_path=selector_path, children=children)
+
+
+def _with_selector_paths(tree: ContentTree) -> ContentTree:
+    return replace(tree, roots=tuple(_with_selector_paths_for_node(root) for root in tree.roots))
+
+
+def _path_scope(node: ContentNode) -> str:
+    if node.node_type == "volume":
+        return "volume"
+    if node.object_type == "PROG":
+        return "program"
+    if node.object_type == "SBAC":
+        return "sbac"
+    if node.object_type == "SBNK":
+        return "sbnk"
+    return ""
+
+
+def content_tree_path_rows(tree: ContentTree) -> tuple[ContentTreePathRow, ...]:
+    rows: list[ContentTreePathRow] = []
+
+    def visit(node: ContentNode) -> None:
+        scope = _path_scope(node)
+        if scope and node.selector_path:
+            rows.append(
+                ContentTreePathRow(
+                    source_path=tree.source_path,
+                    scope=scope,
+                    path=node.selector_path,
+                    display_name=node.display_name,
+                    node_type=node.node_type,
+                    object_type=node.object_type,
+                    object_key=node.object_key,
+                )
+            )
+        for child in node.children:
+            visit(child)
+
+    for root in tree.roots:
+        visit(root)
+    return tuple(rows)
+
+
+def render_content_tree_paths(tree: ContentTree) -> str:
+    lines = ["source_path\tscope\tpath\tdisplay_name\tobject_type\tobject_key"]
+    for row in content_tree_path_rows(tree):
+        lines.append(
+            "\t".join(
+                (
+                    row.source_path,
+                    row.scope,
+                    row.path,
+                    row.display_name,
+                    row.object_type,
+                    row.object_key,
+                )
+            )
+        )
+    return "\n".join(lines)
 
 def _with_count(
     node_type: str, name: str, children: Sequence[ContentNode], node_id: str
@@ -1197,6 +1309,7 @@ def build_content_tree_for_container(
     *,
     include_unresolved: bool = False,
     include_default_programs: bool = False,
+    include_validation: bool = True,
 ) -> ContentTree:
     if container.kind in {"sfs", "iso"}:
         tree = _build_sfs_tree(
@@ -1218,7 +1331,9 @@ def build_content_tree_for_container(
             include_unresolved=include_unresolved,
             include_default_programs=include_default_programs,
         )
-    return _with_validation_issues(tree, container)
+    if include_validation:
+        tree = _with_validation_issues(tree, container)
+    return _with_selector_paths(tree)
 
 
 def build_content_trees_for_paths(
@@ -1226,6 +1341,7 @@ def build_content_trees_for_paths(
     options: OpenOptions | None = None,
     include_unresolved: bool = False,
     include_default_programs: bool = False,
+    include_validation: bool = True,
 ) -> ContentTreeLoadResult:
     opts = options or OpenOptions(include_payloads=False)
     results = open_many(paths, options=opts)
@@ -1240,6 +1356,7 @@ def build_content_trees_for_paths(
                     result.container,
                     include_unresolved=include_unresolved,
                     include_default_programs=include_default_programs,
+                    include_validation=include_validation,
                 )
             )
     return ContentTreeLoadResult(trees=tuple(trees), load_errors=tuple(errors))
@@ -1332,3 +1449,8 @@ def summary_line(container: AxklibContainer) -> str:
         f"{key}:{value}" for key, value in sorted(container.recovery_quality_summary.items())
     )
     return f"{container.source_path}\t{container.kind}\t{object_text}\trecovery={recovery or '-'}"
+
+
+
+
+

@@ -209,7 +209,7 @@ public rule for rendering this pattern is intentionally narrow:
 | Grouping | Both `SBNK` objects are known members of the same `SBAC`. |
 | Names | The sampler-facing `SBNK` names share the same base and differ only by terminal `-L` and `-R`. |
 | Waveforms | Each `SBNK` has a known left-member link to a distinct physical `SMPL` object. |
-| Export | Exact mono `SMPL` WAVs are still exported once; the stereo WAV is an additional `RENDERED/` artifact. |
+| Export | Exact mono `SMPL` WAVs are still exported once; the stereo WAV is an additional `_samples/rendered/` artifact. |
 
 The graph records this as a stereo decision with a basis containing
 `same-sbac-sbnk-name-lr-pair`. It does not convert the paired `SBNK` objects into

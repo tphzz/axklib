@@ -10,23 +10,28 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import axklib
 from axklib.audio import (
+    WaveformIssue,
     WaveformPlacement,
     WaveformRelationship,
-    WavExportRequest,
     decode_container_waveforms,
-    exact_export,
-    export_waveforms,
+    decode_waveform,
 )
+from axklib.audio.structured import build_export_plan
 from axklib.containers import expand_inputs, sfs_inventory
 from axklib.content_tree import (
+    ContentNode,
+    ContentTree,
     ContentTreeRenderOptions,
+    build_content_tree_for_container,
     build_content_trees_for_paths,
+    content_tree_path_rows,
     content_tree_to_json,
     load_known_object_placements,
+    render_content_tree_paths,
     render_content_tree_text,
     summary_line,
 )
@@ -47,7 +52,12 @@ from axklib.reports.schema import (
     write_schema_index,
     write_schema_manifest,
 )
-from axklib.sfz import SfzExportRequest, export_sfz
+from axklib.targeted import (
+    TargetedExportRequest,
+    TargetedExportResult,
+    TargetScope,
+    export_targeted,
+)
 from axklib.validation import (
     VALIDATION_POLICIES,
     validate_export_sidecars,
@@ -120,6 +130,11 @@ def run_info(args: argparse.Namespace) -> int:
         message = error.message if error else "unknown error"
         code = error.error_code if error else "AXKLIB_CONTAINER_OPEN_FAILED"
         print(f"{error_result.path}\tERROR\t{code}\t{message}")
+
+    if args.format == "paths":
+        for tree in results.trees:
+            print(render_content_tree_paths(tree))
+        return exit_code
 
     if args.format == "summary":
         open_results = axklib.open_many(_input_paths(args.paths), options=options)
@@ -364,60 +379,350 @@ def _read_json_rows(path: Path) -> list[object]:
     return [payload]
 
 
-def _run_structured_wave_export(
-    args: argparse.Namespace,
-    output_dir: Path,
-    progress: _ProgressLine,
+_TARGET_SCOPES = {"file", "volume", "program", "sbac", "sbnk"}
+
+
+def _load_extract_results(
+    paths: Sequence[Path],
     *,
-    layout: Literal["structured", "flat"],
-) -> tuple[list[Any], Any, int, int]:
-    options = axklib.OpenOptions(strict=args.strict, include_payloads=True)
-    paths = _input_paths(args.paths)
+    strict: bool,
+    progress: _ProgressLine,
+) -> tuple[list[Any], int]:
+    options = axklib.OpenOptions(
+        strict=strict, include_payloads=True, lazy_payloads=True
+    )
     results: list[Any] = []
+    load_errors = 0
     progress.update("loading", 0, len(paths), "opening inputs")
     for index, path in enumerate(paths, start=1):
         progress.update("loading", index - 1, len(paths), str(path))
-        results.extend(axklib.open_many([path], options=options))
+        path_results = axklib.open_many([path], options=options)
+        results.extend(path_results)
+        for result in path_results:
+            if result.container is None:
+                load_errors += 1
+                error = result.error
+                message = error.message if error else "unknown error"
+                code = error.error_code if error else "AXKLIB_CONTAINER_OPEN_FAILED"
+                print(f"{result.path}\tERROR\t{code}\t{message}")
         progress.update("loading", index, len(paths), path.name)
+    return results, load_errors
 
+
+def _content_trees_for_results(results: Sequence[object]) -> tuple[ContentTree, ...]:
+    trees: list[ContentTree] = []
+    for result in results:
+        container = getattr(result, "container", None)
+        if container is not None:
+            trees.append(build_content_tree_for_container(container, include_validation=False))
+    return tuple(trees)
+
+
+def _selector_object_keys_from_trees(
+    trees: Sequence[ContentTree],
+    scope: TargetScope,
+    selector_paths: Sequence[str],
+) -> tuple[tuple[str, str], ...]:
+    if scope == "file":
+        return (("", ""),)
+    cleaned = tuple(path for path in selector_paths if path)
+    if not cleaned:
+        raise ValueError(
+            f"extract {scope} requires at least one --path from `axklib info --format paths`"
+        )
+    rows = [row for tree in trees for row in content_tree_path_rows(tree)]
+    selections: list[tuple[str, str]] = []
+    for selector_path in cleaned:
+        matches = [row for row in rows if row.scope == scope and row.path == selector_path]
+        if not matches:
+            raise ValueError(
+                f"selector path not found for {scope}: {selector_path}. "
+                "Run `axklib info --format paths` and copy the path column."
+            )
+        object_keys = {row.object_key for row in matches}
+        if len(object_keys) > 1:
+            raise ValueError(f"selector path is ambiguous for {scope}: {selector_path}")
+        selections.append((selector_path, matches[0].object_key))
+    return tuple(selections)
+
+
+def _find_selector_node(
+    trees: Sequence[ContentTree], scope: TargetScope, selector_path: str
+) -> ContentNode | None:
+    def visit(node: ContentNode) -> ContentNode | None:
+        if node.selector_path == selector_path:
+            if scope == "volume" and node.node_type == "volume":
+                return node
+            if scope == "program" and node.object_type == "PROG":
+                return node
+            if scope == "sbac" and node.object_type == "SBAC":
+                return node
+            if scope == "sbnk" and node.object_type == "SBNK":
+                return node
+        for child in node.children:
+            found = visit(child)
+            if found is not None:
+                return found
+        return None
+
+    for tree in trees:
+        for root in tree.roots:
+            found = visit(root)
+            if found is not None:
+                return found
+    return None
+
+
+def _descendant_keys(node: ContentNode) -> dict[str, set[str]]:
+    keys: dict[str, set[str]] = {"PROG": set(), "SBAC": set(), "SBNK": set(), "SMPL": set()}
+
+    def visit(current: ContentNode) -> None:
+        if current.object_type in keys and current.object_key:
+            keys[current.object_type].add(current.object_key)
+        for child in current.children:
+            visit(child)
+
+    visit(node)
+    return keys
+
+
+def _target_keys(value: str) -> tuple[str, ...]:
+    return tuple(part for part in value.split("|") if part)
+
+
+def _relationship_target_type(relationship_type: str) -> str:
+    if relationship_type.endswith("_TO_SBAC"):
+        return "SBAC"
+    if relationship_type.endswith("_TO_SBNK"):
+        return "SBNK"
+    if relationship_type.endswith("_TO_SMPL"):
+        return "SMPL"
+    return ""
+
+
+def _row_is_active_assignment(row: WaveformRelationship) -> bool:
+    if not row.relationship_type.startswith("PROG_ASSIGNMENT_TO_"):
+        return False
+    return row.active_assignment_state not in {
+        "confirmed-visible-off",
+        "confirmed-duplicate-not-active",
+    }
+
+
+def _all_smpl_refs(results: Sequence[object]) -> set[tuple[str, str]]:
+    refs: set[tuple[str, str]] = set()
+    for result in results:
+        container = getattr(result, "container", None)
+        if container is None:
+            continue
+        for obj in container.objects:
+            if obj.type == "SMPL":
+                refs.add((obj.image, obj.object_key))
+    return refs
+
+
+def _smpl_refs_for_selection(
+    *,
+    results: Sequence[object],
+    trees: Sequence[ContentTree],
+    relationships: Sequence[WaveformRelationship],
+    scope: TargetScope,
+    selector_path: str,
+    selector_object_key: str,
+) -> set[tuple[str, str]]:
+    if scope == "file":
+        return _all_smpl_refs(results)
+
+    by_type: dict[str, set[str]] = {"PROG": set(), "SBAC": set(), "SBNK": set(), "SMPL": set()}
+    if scope == "volume":
+        node = _find_selector_node(trees, scope, selector_path)
+        if node is not None:
+            by_type = _descendant_keys(node)
+    elif scope == "program":
+        by_type["PROG"].add(selector_object_key)
+    elif scope == "sbac":
+        by_type["SBAC"].add(selector_object_key)
+    elif scope == "sbnk":
+        by_type["SBNK"].add(selector_object_key)
+
+    source_by_key: dict[str, set[str]] = {}
+    for result in results:
+        container = getattr(result, "container", None)
+        if container is None:
+            continue
+        for obj in container.objects:
+            source_by_key.setdefault(obj.object_key, set()).add(obj.image)
+
+    smpl_refs: set[tuple[str, str]] = {
+        (source, key)
+        for key in by_type["SMPL"]
+        for source in source_by_key.get(key, set())
+    }
+    changed = True
+    while changed:
+        changed = False
+        for row in relationships:
+            target_type = _relationship_target_type(row.relationship_type)
+            if row.quality not in {"Known", "Likely"}:
+                continue
+            if row.relationship_type.startswith("PROG_ASSIGNMENT_TO_"):
+                if row.source_key not in by_type["PROG"] or not _row_is_active_assignment(row):
+                    continue
+                for target in _target_keys(row.target_key):
+                    if target_type in {"SBAC", "SBNK", "SMPL"} and target not in by_type[target_type]:
+                        by_type[target_type].add(target)
+                        changed = True
+            elif row.relationship_type == "SBAC_SLOT_TO_SBNK":
+                if row.source_key not in by_type["SBAC"]:
+                    continue
+                for target in _target_keys(row.target_key):
+                    if target not in by_type["SBNK"]:
+                        by_type["SBNK"].add(target)
+                        changed = True
+            elif row.relationship_type in {"SBNK_LEFT_MEMBER_TO_SMPL", "SBNK_RIGHT_MEMBER_TO_SMPL"}:
+                if row.source_key not in by_type["SBNK"]:
+                    continue
+                for target in _target_keys(row.target_key):
+                    ref = (row.source_image, target)
+                    if ref not in smpl_refs:
+                        smpl_refs.add(ref)
+                        changed = True
+    return smpl_refs
+
+
+def _decode_selected_waveforms(
+    results: Sequence[object],
+    selected_refs: set[tuple[str, str]],
+    progress: _ProgressLine,
+) -> tuple[list[Any], int]:
+    objects: list[Any] = []
+    for result in results:
+        container = getattr(result, "container", None)
+        if container is None:
+            continue
+        objects.extend(
+            obj
+            for obj in container.objects
+            if obj.type == "SMPL" and (obj.image, obj.object_key) in selected_refs
+        )
     waveforms: list[Any] = []
     decode_errors = 0
+    progress.update("reading", 0, len(objects), "reading selected waveform payloads")
+    for index, obj in enumerate(objects, start=1):
+        progress.update("reading", index - 1, len(objects), obj.name or obj.object_key)
+        try:
+            waveforms.append(decode_waveform(obj))
+        except ValueError as exc:
+            decode_errors += 1
+            issue = WaveformIssue(
+                object_key=obj.object_key,
+                sample_name=obj.name,
+                code="WAVEFORM_DECODE_FAILED",
+                severity="error",
+                message=str(exc),
+            )
+            if decode_errors <= 20:
+                print(f"{issue.object_key}\t{issue.code}\t{issue.message}")
+        progress.update("reading", index, len(objects), obj.name or obj.object_key)
+    return waveforms, decode_errors
+
+
+def _run_targeted_extract(
+    args: argparse.Namespace,
+    *,
+    scope: TargetScope,
+    paths: Sequence[Path],
+    write_sfz_files: bool,
+) -> int:
+    output_dir = Path(args.output_dir)
+    _ensure_output_dir(output_dir, overwrite=args.overwrite)
+    selector_paths = tuple(getattr(args, "selector_paths", ()) or ())
+    progress = _ProgressLine(args.progress)
+    all_written_files: list[Path] = []
+    all_selection_graphs: list[dict[str, object]] = []
+    targeted_results: list[TargetedExportResult] = []
+    decode_errors = 0
     load_errors = 0
-    decodable_results = [result for result in results if result.container is not None]
-    progress.update("decoding", 0, len(decodable_results), "decoding waveform objects")
-    decoded_count = 0
-    for result in results:
-        if result.container is None:
-            load_errors += 1
-            error = result.error
-            message = error.message if error else "unknown error"
-            code = error.error_code if error else "AXKLIB_CONTAINER_OPEN_FAILED"
-            print(f"{result.path}\tERROR\t{code}\t{message}")
-            continue
-        progress.update("decoding", decoded_count, len(decodable_results), str(result.path))
-        waveform_set = decode_container_waveforms(result.container, selection=args.name)
-        decoded_count += 1
-        progress.update("decoding", decoded_count, len(decodable_results), result.path.name)
-        waveforms.extend(waveform_set.waveforms)
-        decode_errors += len(waveform_set.issues)
-        for issue in waveform_set.issues[:20]:
-            print(f"{issue.object_key}\t{issue.code}\t{issue.message}")
-    placements, relationships = _wave_export_context(results)
-    enriched_waveforms = _enrich_waveform_parameter_metadata(waveforms, results, relationships)
-    request = WavExportRequest(
-        output_dir=output_dir,
-        waveforms=enriched_waveforms,
-        stereo_policy=args.stereo,
-        overwrite_policy="replace" if args.overwrite else "fail",
-        layout=layout,
-        placements=placements,
-        relationships=relationships,
-        progress_callback=lambda event: progress.update(
-            event.stage, event.completed, event.total, event.message
-        ),
+    waveforms: list[Any] = []
+    try:
+        results, load_errors = _load_extract_results(paths, strict=args.strict, progress=progress)
+        trees = _content_trees_for_results(results)
+        selections = _selector_object_keys_from_trees(trees, scope, selector_paths)
+        progress.update("resolving", 0, 3, "building placement and relationship context")
+        placements, relationships = _wave_export_context(results)
+        progress.update("resolving", 1, 3, "computing selected dependency closure")
+        selected_refs: set[tuple[str, str]] = set()
+        for selector_path, selector_key in selections:
+            selected_refs.update(
+                _smpl_refs_for_selection(
+                    results=results,
+                    trees=trees,
+                    relationships=relationships,
+                    scope=scope,
+                    selector_path=selector_path,
+                    selector_object_key=selector_key,
+                )
+            )
+        progress.update("resolving", 2, 3, f"selected waveform objects: {len(selected_refs)}")
+        waveforms, decode_errors = _decode_selected_waveforms(results, selected_refs, progress)
+        progress.update("resolving", 3, 3, "building export plan")
+        enriched_waveforms = _enrich_waveform_parameter_metadata(waveforms, results, relationships)
+        plan = build_export_plan(
+            output_dir,
+            enriched_waveforms,
+            layout="structured",
+            placements=placements,
+            relationships=relationships,
+        )
+        for selector_path, selector_key in selections:
+            targeted = export_targeted(
+                TargetedExportRequest(
+                    output_dir=output_dir,
+                    plan=plan,
+                    scope=scope,
+                    selector_path=selector_path,
+                    selector_object_key=selector_key,
+                    write_sfz=write_sfz_files,
+                    stereo_policy=args.stereo,
+                    overwrite_policy="replace" if args.overwrite else "fail",
+                    progress_callback=lambda event: progress.update(
+                        event.stage, event.completed, event.total, event.message
+                    ),
+                )
+            )
+            targeted_results.append(targeted)
+            all_written_files.extend(targeted.written_files)
+            all_selection_graphs.extend(targeted.selection_graphs)
+    finally:
+        progress.finish()
+    sfz_count = 0
+    warning_count = 0
+    skipped_files: list[Path] = []
+    for targeted in targeted_results:
+        warning_count += len(targeted.warnings)
+        skipped_files.extend(targeted.skipped_files)
+        if targeted.sfz_result is not None:
+            sfz_count += sum(1 for path in targeted.sfz_result.written_files if path.suffix == ".sfz")
+    print(
+        f"waveforms={len(waveforms)} written_files={len(dict.fromkeys(all_written_files))} "
+        f"selection_graphs={len(all_selection_graphs)} sfz_files={sfz_count} "
+        f"decode_errors={decode_errors} load_errors={load_errors}"
     )
-    export_result = export_waveforms(request)
-    return waveforms, export_result, decode_errors, load_errors
+    shown_warnings = 0
+    for targeted in targeted_results:
+        for warning in targeted.warnings[: max(0, 20 - shown_warnings)]:
+            print(f"warning: {warning}")
+            shown_warnings += 1
+            if shown_warnings >= 20:
+                break
+    if warning_count > shown_warnings:
+        print(f"warning: +{warning_count - shown_warnings} more warnings")
+    return 1 if load_errors or skipped_files else 0
+
+
+def run_extract_wav(args: argparse.Namespace) -> int:
+    paths = _input_paths(args.paths)
+    return _run_targeted_extract(args, scope=args.scope, paths=paths, write_sfz_files=False)
 
 
 def _write_volume_graph_schemas(
@@ -435,7 +740,7 @@ def _write_volume_graph_schemas(
                 "volume_graphs",
                 list(sidecar_records),
                 semantic_notes="Per-volume axklib object graph manifests generated from decoded container objects and relationships.",
-                replacement_notes="This is the canonical graph schema for axklib extract waves.",
+                replacement_notes="This is the canonical graph schema for axklib extract wav file.",
             )
         )
     for report_name in (
@@ -604,126 +909,9 @@ def run_inventory(args: argparse.Namespace) -> int:
     return exit_code
 
 
-def run_extract_waves(args: argparse.Namespace) -> int:
-    output_dir = Path(args.output_dir)
-    progress = _ProgressLine(args.progress)
-    if args.mono_dir is not None:
-        paths = _input_paths(args.paths)
-        if len(paths) != 1:
-            raise ValueError(
-                "organized exact export with --mono-dir requires exactly one source image"
-            )
-        _ensure_output_dir(output_dir, overwrite=args.overwrite)
-        progress.update("exporting", 0, 1, "organizing exact stereo exports")
-        try:
-            pair_exports = exact_export.export_pairs(
-                paths[0],
-                Path(args.mono_dir),
-                output_dir,
-                inventory_dir=Path(args.inventory_dir) if args.inventory_dir else None,
-                bank_relationships_dir=Path(args.bank_relationships_dir)
-                if args.bank_relationships_dir
-                else None,
-                sbac_volume_disambiguation_dir=(
-                    Path(args.sbac_volume_disambiguation_dir)
-                    if args.sbac_volume_disambiguation_dir
-                    else None
-                ),
-                overwrite_policy="replace" if args.overwrite else "fail",
-                stereo_policy=args.stereo,
-            )
-            progress.update("exporting", 1, 1, "organized export complete")
-        finally:
-            progress.finish()
-        schemas = [
-            _write_report_schema(output_dir, "sbnk_exact_pairs", pair_exports),
-            _write_report_schema(
-                output_dir, "mono_exports", _read_json_rows(output_dir / "mono_exports.json")
-            ),
-            _write_report_schema(
-                output_dir,
-                "derived_object_locations",
-                _read_json_rows(output_dir / "derived_object_locations.json"),
-            ),
-            _write_report_schema(
-                output_dir, "summary", _read_json_rows(output_dir / "summary.json")
-            ),
-        ]
-        write_schema_index(_schema_dir(output_dir), schemas)
-        print(f"SBNK pair sidecars: {len(pair_exports)}")
-        print(f"exact stereo WAVs: {sum(1 for row in pair_exports if row.stereo_wav_path)}")
-        print(f"exports written to {output_dir}")
-        return 0
-
-    try:
-        waveforms, export_result, decode_errors, load_errors = _run_structured_wave_export(
-            args,
-            output_dir,
-            progress,
-            layout=args.layout,
-        )
-    finally:
-        progress.finish()
-    _write_volume_graph_schemas(output_dir, export_result.sidecar_records)
-    print(
-        f"waveforms={len(waveforms)} written_files={len(export_result.written_files)} "
-        f"skipped_files={len(export_result.skipped_files)} decode_errors={decode_errors} load_errors={load_errors}"
-    )
-    for warning in export_result.warnings[:20]:
-        print(f"warning: {warning}")
-    if len(export_result.warnings) > 20:
-        print(f"... {len(export_result.warnings) - 20} more warnings")
-    return 1 if load_errors or export_result.skipped_files else 0
-
-
 def run_extract_sfz(args: argparse.Namespace) -> int:
-    output_dir = Path(args.output_dir)
-    progress = _ProgressLine(args.progress)
-    try:
-        waveforms, export_result, decode_errors, load_errors = _run_structured_wave_export(
-            args,
-            output_dir,
-            progress,
-            layout="structured",
-        )
-        sfz_result = export_sfz(
-            SfzExportRequest(
-                output_dir=output_dir,
-                volume_graphs=export_result.sidecar_records,
-                overwrite_policy="replace" if args.overwrite else "fail",
-                progress_callback=lambda event: progress.update(
-                    event.stage, event.completed, event.total, event.message
-                ),
-            )
-        )
-    finally:
-        progress.finish()
-    sfz_schema_rows: list[object] = []
-    for graph in export_result.sidecar_records:
-        if not isinstance(graph, dict):
-            continue
-        volume = graph.get("volume")
-        if not isinstance(volume, dict):
-            continue
-        volume_path = volume.get("path")
-        if not isinstance(volume_path, str) or not volume_path:
-            continue
-        report_path = output_dir / volume_path / "sfz_exports.json"
-        if report_path.exists():
-            sfz_schema_rows.extend(_read_json_rows(report_path))
-    extra_schemas: list[ReportSchemaManifest] = []
-    if sfz_schema_rows:
-        extra_schemas.append(_write_report_schema(output_dir, "sfz_exports", sfz_schema_rows))
-    _write_volume_graph_schemas(output_dir, export_result.sidecar_records, extra_schemas)
-    print(
-        f"waveforms={len(waveforms)} written_files={len(export_result.written_files)} "
-        f"sfz_files={sum(1 for path in sfz_result.written_files if path.suffix.lower() == '.sfz')} "
-        f"skipped_files={len(export_result.skipped_files)} decode_errors={decode_errors} load_errors={load_errors}"
-    )
-    for warning in (*export_result.warnings[:20], *sfz_result.warnings[:20]):
-        print(f"warning: {warning}")
-    return 1 if load_errors or export_result.skipped_files else 0
-
+    paths = _input_paths(args.paths)
+    return _run_targeted_extract(args, scope=args.scope, paths=paths, write_sfz_files=True)
 
 def run_objects(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)
@@ -1157,7 +1345,7 @@ def build_parser() -> argparse.ArgumentParser:
     info.add_argument("--strict", action="store_true", help="raise on the first load error")
     info.add_argument(
         "--format",
-        choices=("tree", "json", "summary"),
+        choices=("tree", "json", "summary", "paths"),
         default="tree",
         help="output format; tree is the default contents view",
     )
@@ -1273,65 +1461,45 @@ def build_parser() -> argparse.ArgumentParser:
 
     extract = subparsers.add_parser("extract", help="extract data from supported axklib containers")
     extract_subparsers = extract.add_subparsers(dest="extract_command", metavar="extract-command")
-    waves = extract_subparsers.add_parser(
-        "waves",
-        help="export exact current SMPL waveforms to WAV",
-        description="Export exact current SMPL waveforms to WAV.",
+    wav = extract_subparsers.add_parser(
+        "wav",
+        help="export targeted WAVs to a shared sample pool",
+        description="Export targeted WAVs to a shared sample pool.",
     )
-    waves.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
-    waves.add_argument("-o", "--output-dir", required=True, help="directory for WAV/JSON exports")
-    waves.add_argument(
-        "--exact",
-        action="store_true",
-        help="require exact current SMPL export policy; currently the default",
+    wav.add_argument("scope", choices=sorted(_TARGET_SCOPES), help="selection scope")
+    wav.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
+    wav.add_argument("-o", "--output-dir", required=True, help="directory for targeted exports")
+    wav.add_argument(
+        "--path",
+        action="append",
+        dest="selector_paths",
+        default=[],
+        help="selector path copied from `axklib info --format paths`; repeatable; required except for file scope",
     )
-    waves.add_argument(
+    wav.add_argument(
         "--stereo",
         choices=("none", "auto"),
         default="auto",
         help="stereo export policy; default is auto",
     )
-    waves.add_argument(
-        "--layout",
-        choices=("structured", "flat"),
-        default="structured",
-        help="export directory layout; structured writes per-volume object graphs; flat is legacy",
-    )
-    waves.add_argument(
-        "--overwrite", action="store_true", help="replace existing WAV/JSON export files"
-    )
-    waves.add_argument("--name", help="optional sample-name or object-key substring filter")
-    waves.add_argument(
-        "--mono-dir", help="pre-extracted mono WAV/JSON directory for organized SBNK exact export"
-    )
-    waves.add_argument(
-        "--inventory-dir",
-        help="inventory report directory with volume_objects.csv for organized placement",
-    )
-    waves.add_argument(
-        "--bank-relationships-dir",
-        help="relationship report directory for PROG/SBAC/SBNK placement",
-    )
-    waves.add_argument(
-        "--sbac-volume-disambiguation-dir",
-        help="SBAC volume disambiguation report directory for Likely placement rows",
-    )
-    waves.add_argument("--strict", action="store_true", help="raise on the first load error")
-    waves.add_argument(
+    wav.add_argument("--overwrite", action="store_true", help="replace existing export files")
+    wav.add_argument("--strict", action="store_true", help="raise on the first load error")
+    wav.add_argument(
         "--progress",
         choices=("auto", "always", "never"),
         default="auto",
         help="show same-line progress on stderr; default is auto for interactive terminals",
     )
-    waves.set_defaults(func=run_extract_waves)
+    wav.set_defaults(func=run_extract_wav)
 
     sfz = extract_subparsers.add_parser(
         "sfz",
-        help="export WAVs and generate volume-scoped SFZ files",
-        description="Export exact current SMPL waveforms and generate volume-scoped SFZ files.",
+        help="export targeted WAVs and generate SFZ files",
+        description="Export targeted WAVs to a shared sample pool and generate SFZ files.",
     )
+    sfz.add_argument("scope", choices=sorted(_TARGET_SCOPES), help="selection scope")
     sfz.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
-    sfz.add_argument("-o", "--output-dir", required=True, help="directory for WAV/SFZ/JSON exports")
+    sfz.add_argument("-o", "--output-dir", required=True, help="directory for WAV/SFZ exports")
     sfz.add_argument(
         "--stereo",
         choices=("none", "auto"),
@@ -1339,7 +1507,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="stereo export policy; default is auto",
     )
     sfz.add_argument("--overwrite", action="store_true", help="replace existing export files")
-    sfz.add_argument("--name", help="optional sample-name or object-key substring filter")
+    sfz.add_argument(
+        "--path",
+        action="append",
+        dest="selector_paths",
+        default=[],
+        help="selector path copied from `axklib info --format paths`; repeatable; required except for file scope",
+    )
     sfz.add_argument("--strict", action="store_true", help="raise on the first load error")
     sfz.add_argument(
         "--progress",

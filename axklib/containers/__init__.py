@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import glob
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from axklib.containers import fat as fat_container
@@ -36,6 +37,7 @@ class IsoObjectEntry:
     volume_id: str
     logical_path: str
     payload: bytes
+    payload_loader: Callable[[], bytes] | None
     extent_sector: int
     data_offset: int
     file_size: int
@@ -52,6 +54,7 @@ class IsoObjectEntry:
 class FatObjectEntry:
     fat_file: str
     payload: bytes
+    payload_loader: Callable[[], bytes] | None
     directory_offset: int
     first_cluster: int
     cluster_count: int
@@ -69,6 +72,7 @@ class OpenOptions:
     max_partitions: int | None = 8
     include_payloads: bool = True
     strict: bool = False
+    lazy_payloads: bool = False
 
 
 @dataclass(frozen=True)
@@ -192,7 +196,9 @@ def make_object(
     payload_size: int,
     object_type: str,
     name: str,
-    payload: bytes,
+    payload: bytes | None = None,
+    payload_loader: Callable[[], bytes] | None = None,
+    header_payload: bytes | None = None,
     basis: str,
     metadata: dict[str, object] | None = None,
 ) -> AxklibObject:
@@ -215,7 +221,8 @@ def make_object(
         object_format=AxklibObjectFormat.NORMAL,
         name=name,
         payload=payload,
-        header=object_header(payload),
+        payload_loader=payload_loader,
+        header=object_header(header_payload if header_payload is not None else payload or b""),
         quality=AxklibQuality(
             quality=DataQuality.KNOWN,
             source=basis,
@@ -247,7 +254,12 @@ def _expand_iso_inputs(paths: Iterable[Path]) -> list[Path]:
     return sorted(dict.fromkeys(out), key=lambda item: str(item).lower())
 
 
-def _iter_iso_objects(path: Path) -> Iterable[IsoObjectEntry]:
+def _read_iso_payload(path: Path, offset: int, size: int) -> bytes:
+    with path.open("rb") as handle:
+        return iso_lowlevel.read_at(handle, offset, size)
+
+
+def _iter_iso_objects(path: Path, *, lazy_payloads: bool = False) -> Iterable[IsoObjectEntry]:
     try:
         volume_id, rows = iso_lowlevel.walk_iso_files(path)
     except iso_lowlevel.Iso9660Error as exc:
@@ -260,13 +272,18 @@ def _iter_iso_objects(path: Path) -> Iterable[IsoObjectEntry]:
         for row in rows:
             if row.is_directory or row.object_type not in SUPPORTED_NORMAL_OBJECT_TYPES:
                 continue
-            payload = iso_lowlevel.read_at(handle, row.data_offset, row.size)
+            prefix_size = min(row.size, max(0x200, iso_lowlevel.SBAC_SLOT_COUNT_OFFSET + 1))
+            prefix = iso_lowlevel.read_at(handle, row.data_offset, prefix_size)
+            payload = prefix if lazy_payloads else iso_lowlevel.read_at(handle, row.data_offset, row.size)
             quality, notes = iso_lowlevel.classify_iso_recovery(row, payload, row.inventory_status)
             raw_group, raw_volume = _iso_path_group_volume(row.path)
             yield IsoObjectEntry(
                 volume_id=volume_id,
                 logical_path=row.path,
                 payload=payload,
+                payload_loader=partial(_read_iso_payload, path, row.data_offset, row.size)
+                if lazy_payloads
+                else None,
                 extent_sector=row.extent_sector,
                 data_offset=row.data_offset,
                 file_size=row.size,
@@ -280,7 +297,30 @@ def _iter_iso_objects(path: Path) -> Iterable[IsoObjectEntry]:
             )
 
 
-def _iter_fat_objects(path: Path) -> Iterable[FatObjectEntry]:
+
+def _read_fat_file_prefix(image: bytes, geometry: fat_container.FatGeometry, item: fat_container.FatFile, size: int) -> bytes:
+    output = bytearray()
+    remaining = min(size, item.size)
+    for cluster in fat_container.file_clusters(image, geometry, item):
+        offset = fat_container.cluster_offset(geometry, cluster)
+        chunk = image[offset : offset + geometry.cluster_size]
+        take = min(remaining, len(chunk))
+        output.extend(chunk[:take])
+        remaining -= take
+        if remaining <= 0:
+            break
+    return bytes(output)
+
+
+def _read_fat_payload(path: Path, directory_offset: int) -> bytes:
+    image = path.read_bytes()
+    geometry = fat_container.parse_geometry(image)
+    for item in fat_container.iter_root_files(image, geometry):
+        if item.directory_offset == directory_offset:
+            return fat_container.read_file_bytes(image, geometry, item)
+    raise FileNotFoundError(f"FAT object at directory offset {directory_offset} no longer exists in {path}")
+
+def _iter_fat_objects(path: Path, *, lazy_payloads: bool = False) -> Iterable[FatObjectEntry]:
     image = path.read_bytes()
     try:
         geometry = fat_container.parse_geometry(image)
@@ -290,9 +330,10 @@ def _iter_fat_objects(path: Path) -> Iterable[FatObjectEntry]:
             f"unsupported FAT/floppy image {path}: {exc}",
         ) from exc
     for item in fat_container.iter_root_files(image, geometry):
-        payload = fat_container.read_file_bytes(image, geometry, item)
-        if not payload.startswith(objects.OBJECT_MAGIC):
+        prefix = _read_fat_file_prefix(image, geometry, item, 0x200)
+        if not prefix.startswith(objects.OBJECT_MAGIC):
             continue
+        payload = prefix if lazy_payloads else fat_container.read_file_bytes(image, geometry, item)
         object_offset = fat_container.cluster_offset(geometry, item.first_cluster)
         header = object_header(payload)
         stored_payload_offset = (
@@ -303,6 +344,9 @@ def _iter_fat_objects(path: Path) -> Iterable[FatObjectEntry]:
         yield FatObjectEntry(
             fat_file=item.name,
             payload=payload,
+            payload_loader=partial(_read_fat_payload, path, item.directory_offset)
+            if lazy_payloads
+            else None,
             directory_offset=item.directory_offset,
             first_cluster=item.first_cluster,
             cluster_count=len(fat_container.file_clusters(image, geometry, item)),
@@ -323,9 +367,9 @@ def _fat_metadata(entry: FatObjectEntry) -> dict[str, object]:
     }
 
 
-def load_fat_objects(path: Path) -> list[AxklibObject]:
+def load_fat_objects(path: Path, *, lazy_payloads: bool = False) -> list[AxklibObject]:
     items: list[AxklibObject] = []
-    for entry in _iter_fat_objects(path):
+    for entry in _iter_fat_objects(path, lazy_payloads=lazy_payloads):
         payload = entry.payload
         object_type = payload[0x0C:0x10].decode("ascii", errors="replace")
         if object_type not in SUPPORTED_NORMAL_OBJECT_TYPES:
@@ -340,10 +384,12 @@ def load_fat_objects(path: Path) -> list[AxklibObject]:
                 sfs_id=None,
                 fat_file=entry.fat_file,
                 payload_offset=entry.object_offset,
-                payload_size=len(payload),
+                payload_size=entry.file_size,
                 object_type=object_type,
                 name=objects.clean_ascii(payload[0x32:0x42]),
-                payload=payload,
+                payload=None if lazy_payloads else payload,
+                payload_loader=entry.payload_loader,
+                header_payload=payload,
                 basis="FAT/floppy root file containing plain FSFSDEV3SPLX object",
                 metadata=_fat_metadata(entry),
             )
@@ -351,7 +397,28 @@ def load_fat_objects(path: Path) -> list[AxklibObject]:
     return items
 
 
-def load_sfs_objects(path: Path) -> list[AxklibObject]:
+def _read_sfs_payload(
+    path: Path,
+    record_offset: int,
+    *,
+    partition_start_sector: int,
+    sector_size: int,
+    sectors_per_cluster: int,
+    cluster_count_limit: int,
+) -> bytes:
+    with dumper.ImageReader(path) as reader:
+        index_record = reader.read_at(record_offset, inventory.INDEX_RECORD_SIZE)
+        return sfs_extents.read_index_record_data(
+            reader,
+            index_record,
+            partition_start_sector=partition_start_sector,
+            sector_size=sector_size,
+            sectors_per_cluster=sectors_per_cluster,
+            cluster_count_limit=cluster_count_limit,
+        ).data
+
+
+def load_sfs_objects(path: Path, *, lazy_payloads: bool = False) -> list[AxklibObject]:
     parsed = dumper.parse_image(path, dumper.ReadOptions(max_nodes=4, include_node_payloads=False))
     sector_size = _int_value(parsed.get("sector_size_bytes"), dumper.DEFAULT_SECTOR_SIZE)
     object_rows = sfs_scan.scan_image(path, max_nodes=4)
@@ -361,7 +428,7 @@ def load_sfs_objects(path: Path) -> list[AxklibObject]:
             partition_index = _int_value(partition.get("index"))
             start_sector = _int_value(partition.get("start_sector"))
             sectors_per_cluster = inventory.field_value(partition, "sectors_per_cluster") or 2
-            cluster_count_limit = inventory.field_value(partition, "number_of_clusters")
+            cluster_count_limit = inventory.field_value(partition, "number_of_clusters") or 0
             ynodes = inventory.scan_ynode_records(
                 path,
                 partition,
@@ -374,18 +441,31 @@ def load_sfs_objects(path: Path) -> list[AxklibObject]:
                     or record.object_type not in SUPPORTED_NORMAL_OBJECT_TYPES
                 ):
                     continue
-                index_record = reader.read_at(record.record_offset, inventory.INDEX_RECORD_SIZE)
-                extent_read = sfs_extents.read_index_record_data(
-                    reader,
-                    index_record,
-                    partition_start_sector=start_sector,
-                    sector_size=sector_size,
-                    sectors_per_cluster=sectors_per_cluster,
-                    cluster_count_limit=cluster_count_limit,
-                )
-                payload = extent_read.data
-                if not payload.startswith(objects.OBJECT_MAGIC):
-                    continue
+                payload = b""
+                payload_loader = None
+                if lazy_payloads:
+                    payload_loader = partial(
+                        _read_sfs_payload,
+                        path,
+                        record.record_offset,
+                        partition_start_sector=start_sector,
+                        sector_size=sector_size,
+                        sectors_per_cluster=sectors_per_cluster,
+                        cluster_count_limit=cluster_count_limit,
+                    )
+                else:
+                    index_record = reader.read_at(record.record_offset, inventory.INDEX_RECORD_SIZE)
+                    extent_read = sfs_extents.read_index_record_data(
+                        reader,
+                        index_record,
+                        partition_start_sector=start_sector,
+                        sector_size=sector_size,
+                        sectors_per_cluster=sectors_per_cluster,
+                        cluster_count_limit=cluster_count_limit,
+                    )
+                    payload = extent_read.data
+                    if not payload.startswith(objects.OBJECT_MAGIC):
+                        continue
                 items.append(
                     make_object(
                         image=path,
@@ -398,8 +478,9 @@ def load_sfs_objects(path: Path) -> list[AxklibObject]:
                         payload_offset=record.payload_offset,
                         payload_size=record.data_size,
                         object_type=record.object_type,
-                        name=objects.clean_ascii(payload[0x32:0x42]),
-                        payload=payload,
+                        name=record.object_name if lazy_payloads else objects.clean_ascii(payload[0x32:0x42]),
+                        payload=None if lazy_payloads else payload,
+                        payload_loader=payload_loader,
                         basis="SFS allocated Y-node containing plain FSFSDEV3SPLX object",
                     )
                 )
@@ -574,10 +655,10 @@ def load_object_summaries(path: Path, container: str) -> list[AxklibObject]:
     raise ValueError(f"unsupported or unknown container kind for {path}: {kind}")
 
 
-def load_iso_objects(path: Path) -> list[AxklibObject]:
+def load_iso_objects(path: Path, *, lazy_payloads: bool = False) -> list[AxklibObject]:
     items: list[AxklibObject] = []
     for image in _expand_iso_inputs([path]):
-        for entry in _iter_iso_objects(image):
+        for entry in _iter_iso_objects(image, lazy_payloads=lazy_payloads):
             payload = entry.payload
             object_type = payload[0x0C:0x10].decode("ascii", errors="replace")
             if object_type not in SUPPORTED_NORMAL_OBJECT_TYPES:
@@ -593,10 +674,12 @@ def load_iso_objects(path: Path) -> list[AxklibObject]:
                     sfs_id=None,
                     fat_file=entry.logical_path,
                     payload_offset=entry.data_offset,
-                    payload_size=len(payload),
+                    payload_size=entry.file_size,
                     object_type=object_type,
                     name=objects.clean_ascii(payload[0x32:0x42]),
-                    payload=payload,
+                    payload=None if lazy_payloads else payload,
+                    payload_loader=entry.payload_loader,
+                    header_payload=payload,
                     basis="ISO/CD-ROM file containing plain FSFSDEV3SPLX object",
                     metadata=_iso_metadata(entry, header),
                 )
@@ -630,14 +713,14 @@ def load_standalone_object(path: Path) -> list[AxklibObject]:
     ]
 
 
-def load_objects(path: Path, container: str) -> list[AxklibObject]:
+def load_objects(path: Path, container: str, *, lazy_payloads: bool = False) -> list[AxklibObject]:
     kind = detect_container_kind(path) if container == "auto" else container
     if kind == AxklibContainerKind.SFS.value:
-        return load_sfs_objects(path)
+        return load_sfs_objects(path, lazy_payloads=lazy_payloads)
     if kind in {"fat", AxklibContainerKind.FAT12_FLOPPY.value, "floppy"}:
-        return load_fat_objects(path)
+        return load_fat_objects(path, lazy_payloads=lazy_payloads)
     if kind in {AxklibContainerKind.ISO.value, "cdrom"}:
-        return load_iso_objects(path)
+        return load_iso_objects(path, lazy_payloads=lazy_payloads)
     if kind == STANDALONE_OBJECT_KIND:
         return load_standalone_object(path)
     raise ValueError(f"unsupported or unknown container kind for {path}: {kind}")
@@ -659,7 +742,9 @@ def open(path: str | Path, *, options: OpenOptions | None = None) -> AxklibConta
     if kind == AxklibContainerKind.UNKNOWN.value and opts.strict:
         raise ValueError(f"unsupported or unknown container kind for {source}")
     items = (
-        load_objects(source, kind) if opts.include_payloads else load_object_summaries(source, kind)
+        load_objects(source, kind, lazy_payloads=opts.lazy_payloads)
+        if opts.include_payloads
+        else load_object_summaries(source, kind)
     )
     return AxklibContainer(
         source_path=source,

@@ -1,22 +1,26 @@
 """Helpers for consuming axklib structured export graphs."""
 
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
-GraphInput = Mapping[str, object] | str | Path
+GraphInput = Mapping[str, object] | Sequence[Mapping[str, object]] | str | Path
 
 __all__ = ["GraphInput", "iter_volume_smpl_rows", "preferred_smpl_display_name"]
 
 
-def _load_graph(graph_or_path: GraphInput) -> Mapping[str, object]:
+def _load_graphs(graph_or_path: GraphInput) -> tuple[Mapping[str, object], ...]:
     if isinstance(graph_or_path, str | Path):
         graph = json.loads(Path(graph_or_path).read_text(encoding="utf-8"))
     else:
         graph = graph_or_path
-    if not isinstance(graph, Mapping):
-        raise ValueError("volume graph must be a JSON object")
-    return graph
+    if isinstance(graph, Mapping):
+        return (graph,)
+    if isinstance(graph, Sequence) and not isinstance(graph, str | bytes):
+        graphs = tuple(item for item in graph if isinstance(item, Mapping))
+        if len(graphs) == len(graph):
+            return graphs
+    raise ValueError("graph must be a JSON object or an array of JSON objects")
 
 
 def _text_value(value: object) -> str:
@@ -28,14 +32,14 @@ def _text_value(value: object) -> str:
 def preferred_smpl_display_name(smpl_row: Mapping[str, object]) -> str:
     """Return the best sampler-facing display name for a physical SMPL graph row.
 
-    Structured exports keep ``SMPL/*.wav`` paths storage-facing. When a physical
+    Structured exports keep physical WAV paths storage-facing. When a physical
     waveform is linked from sampler-visible ``SBNK`` rows, the graph row can
     include ``user_facing_aliases``. Display-oriented consumers should prefer
     the first non-empty alias display name and use the physical ``SMPL``
     ``display_name`` only when no alias is available.
 
     Args:
-        smpl_row: One row from ``volume.axklib.json`` ``objects.smpl``.
+        smpl_row: One row from a graph ``objects.smpl`` list.
 
     Returns:
         The preferred display label, or an empty string if the graph row has no
@@ -53,27 +57,29 @@ def preferred_smpl_display_name(smpl_row: Mapping[str, object]) -> str:
 
 
 def iter_volume_smpl_rows(graph_or_path: GraphInput) -> Iterator[Mapping[str, object]]:
-    """Yield physical SMPL rows from a structured export volume graph.
+    """Yield physical SMPL rows from one graph or a selection graph array.
 
     Args:
-        graph_or_path: A parsed ``volume.axklib.json`` mapping or a path to one.
+        graph_or_path: A parsed graph mapping, a parsed selection graph array,
+            or a path to either JSON shape.
 
     Yields:
         Mapping rows from ``objects.smpl``. Non-mapping entries are ignored so
         display/index consumers can iterate defensively over graph files.
 
     Raises:
-        ValueError: The loaded graph is not a JSON object.
+        ValueError: The loaded graph is not a JSON object or array of JSON
+            objects.
         OSError: The graph path cannot be read.
         json.JSONDecodeError: The graph path does not contain valid JSON.
     """
-    graph = _load_graph(graph_or_path)
-    objects = graph.get("objects")
-    if not isinstance(objects, Mapping):
-        return
-    smpl_rows = objects.get("smpl")
-    if not isinstance(smpl_rows, list):
-        return
-    for row in smpl_rows:
-        if isinstance(row, Mapping):
-            yield row
+    for graph in _load_graphs(graph_or_path):
+        objects = graph.get("objects")
+        if not isinstance(objects, Mapping):
+            continue
+        smpl_rows = objects.get("smpl")
+        if not isinstance(smpl_rows, list):
+            continue
+        for row in smpl_rows:
+            if isinstance(row, Mapping):
+                yield row

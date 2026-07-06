@@ -782,3 +782,4 @@ def test_duplicate_iso_volume_labels_keep_raw_volumes_separate() -> None:
     assert "Or11 Argent [VOLUME]" not in rendered
     assert "Or11 Argent (F001) [VOLUME]" in rendered
     assert "Or11 Argent (F002) [VOLUME]" in rendered
+

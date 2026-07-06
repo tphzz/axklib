@@ -498,10 +498,9 @@ Exact export keeps physical and rendered audio separate:
 
 | Output | Source level | Meaning |
 | --- | --- | --- |
-| `SMPL/*.wav` | `SMPL` | Exact mono physical waveform export. |
-| `RENDERED/*.wav` | linked `SBNK` pair | Interleaved stereo render when left/right members are compatible. |
-| `volume.axklib.json` | objects and relationships | Per-volume graph metadata for objects, relationships, WAV references, quality labels, and diagnostics. |
+| `_samples/physical/*.wav` | `SMPL` | Exact mono physical waveform export. |
+| `_samples/rendered/*.wav` | linked `SBNK` pair | Interleaved stereo render when left/right members are compatible. |
+| optional selection graph JSON | objects and relationships | Scoped graph metadata for objects, relationships, WAV references, quality labels, and diagnostics. |
 
 The original `SMPL` objects remain represented even when a rendered stereo WAV is
 created.
-

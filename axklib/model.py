@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -252,7 +252,8 @@ class AxklibObject:
     object_type: AxklibObjectType
     object_format: AxklibObjectFormat
     name: str
-    payload: bytes
+    _payload: bytes | None
+    _payload_loader: Callable[[], bytes] | None
     header: AxklibObjectHeader | None
     quality: AxklibQuality
     metadata: dict[str, Any]
@@ -267,7 +268,8 @@ class AxklibObject:
         object_type: AxklibObjectType | str | None = None,
         object_format: AxklibObjectFormat | str = AxklibObjectFormat.NORMAL,
         name: str,
-        payload: bytes,
+        payload: bytes | None = None,
+        payload_loader: Callable[[], bytes] | None = None,
         header: AxklibObjectHeader | None = None,
         quality: AxklibQuality | None = None,
         metadata: dict[str, Any] | None = None,
@@ -307,7 +309,7 @@ class AxklibObject:
                 sfs_id=sfs_id,
                 fat_file=fat_file,
                 payload_offset=payload_offset,
-                payload_size=len(payload) if payload_size is None else payload_size,
+                payload_size=len(payload or b"") if payload_size is None else payload_size,
             )
         if quality is None:
             quality = AxklibQuality(
@@ -321,7 +323,8 @@ class AxklibObject:
         object.__setattr__(self, "object_type", normalized_type)
         object.__setattr__(self, "object_format", normalized_format)
         object.__setattr__(self, "name", name)
-        object.__setattr__(self, "payload", payload)
+        object.__setattr__(self, "_payload", payload)
+        object.__setattr__(self, "_payload_loader", payload_loader)
         object.__setattr__(self, "header", header)
         object.__setattr__(self, "quality", quality)
         object.__setattr__(self, "metadata", {} if metadata is None else dict(metadata))
@@ -330,6 +333,16 @@ class AxklibObject:
             "temporary_extensions",
             {} if temporary_extensions is None else dict(temporary_extensions),
         )
+
+    @property
+    def payload(self) -> bytes:
+        payload = self._payload
+        if payload is None:
+            loader = self._payload_loader
+            payload = b"" if loader is None else loader()
+            object.__setattr__(self, "_payload", payload)
+            object.__setattr__(self, "_payload_loader", None)
+        return payload
 
     @property
     def image(self) -> str:

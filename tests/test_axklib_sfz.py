@@ -108,13 +108,13 @@ def test_export_sfz_prefers_rendered_audio_and_relative_paths(tmp_path: Path) ->
     result = export_sfz(SfzExportRequest(output_dir=tmp_path, volume_graphs=[_graph()]))
 
     sfz_files = sorted(path.relative_to(volume_root).as_posix() for path in result.written_files)
-    assert "SFZ/B Bank.sfz" in sfz_files
-    assert "SFZ/Standalone Mono.sfz" in sfz_files
-    bank_text = (volume_root / "SFZ" / "B Bank.sfz").read_text(encoding="utf-8")
-    assert "sample=../RENDERED/Stereo Member.wav" in bank_text
-    assert "sample=../SMPL/Left.wav" not in bank_text
+    assert "B Bank.sfz" in sfz_files
+    assert "Standalone Mono.sfz" in sfz_files
+    bank_text = (volume_root / "B Bank.sfz").read_text(encoding="utf-8")
+    assert "sample=RENDERED/Stereo Member.wav" in bank_text
+    assert "sample=SMPL/Left.wav" not in bank_text
     region_line = next(line for line in bank_text.splitlines() if line.startswith("<region>"))
-    assert region_line.endswith("sample=../RENDERED/Stereo Member.wav")
+    assert region_line.endswith("sample=RENDERED/Stereo Member.wav")
     assert "lokey=48" in region_line
     assert "hikey=72" in region_line
     assert "pitch_keycenter=60" in region_line
@@ -123,12 +123,33 @@ def test_export_sfz_prefers_rendered_audio_and_relative_paths(tmp_path: Path) ->
     assert "loop_mode=loop_continuous" in region_line
     assert "loop_start=10" in region_line
     assert "loop_end=89" in region_line
-    mono_text = (volume_root / "SFZ" / "Standalone Mono.sfz").read_text(encoding="utf-8")
+    mono_text = (volume_root / "Standalone Mono.sfz").read_text(encoding="utf-8")
     mono_region = next(line for line in mono_text.splitlines() if line.startswith("<region>"))
-    assert "sample=../SMPL/Mono.wav" in mono_region
+    assert "sample=SMPL/Mono.wav" in mono_region
     assert "pan=" not in mono_region
+    assert result.manifest_rows
+    assert not (volume_root / "sfz_exports.csv").exists()
+    assert not (volume_root / "sfz_exports.json").exists()
+
+
+def test_export_sfz_writes_manifest_when_requested(tmp_path: Path) -> None:
+    volume_root = tmp_path / "partition_00_hd1" / "Vol 1"
+    (volume_root / "RENDERED").mkdir(parents=True)
+    (volume_root / "SMPL").mkdir()
+    (volume_root / "RENDERED" / "Stereo Member.wav").write_bytes(b"wav")
+    (volume_root / "SMPL" / "Mono.wav").write_bytes(b"wav")
+
+    export_sfz(
+        SfzExportRequest(
+            output_dir=tmp_path,
+            volume_graphs=[_graph()],
+            write_manifests=True,
+        )
+    )
+
     manifest = json.loads((volume_root / "sfz_exports.json").read_text(encoding="utf-8"))
     assert [row["instrument_name"] for row in manifest] == ["B Bank", "Standalone Mono"]
+    assert (volume_root / "sfz_exports.csv").exists()
 
 
 def test_export_sfz_uses_physical_fallback_with_pan(tmp_path: Path) -> None:
@@ -139,11 +160,11 @@ def test_export_sfz_uses_physical_fallback_with_pan(tmp_path: Path) -> None:
 
     result = export_sfz(SfzExportRequest(output_dir=tmp_path, volume_graphs=[graph]))
 
-    bank_text = (tmp_path / "partition_00_hd1" / "Vol 1" / "SFZ" / "B Bank.sfz").read_text(
+    bank_text = (tmp_path / "partition_00_hd1" / "Vol 1" / "B Bank.sfz").read_text(
         encoding="utf-8"
     )
-    assert "sample=../SMPL/Left.wav" in bank_text
-    assert "sample=../SMPL/Right.wav" in bank_text
+    assert "sample=SMPL/Left.wav" in bank_text
+    assert "sample=SMPL/Right.wav" in bank_text
     assert "pan=-100" in bank_text
     assert "pan=100" in bank_text
     assert sum(1 for path in result.written_files if path.suffix == ".sfz") == 2
@@ -175,7 +196,7 @@ def test_export_sfz_resolves_sampler_orig_key_limit_from_graph(tmp_path: Path) -
 
     export_sfz(SfzExportRequest(output_dir=tmp_path, volume_graphs=[graph]))
 
-    text = (volume_root / "SFZ" / "B Bank.sfz").read_text(encoding="utf-8")
+    text = (volume_root / "B Bank.sfz").read_text(encoding="utf-8")
     region_line = next(line for line in text.splitlines() if line.startswith("<region>"))
     assert "lokey=0" in region_line
     assert "hikey=60" in region_line
@@ -197,7 +218,7 @@ def test_export_sfz_falls_back_to_raw_orig_key_limit_for_older_graphs(tmp_path: 
 
     export_sfz(SfzExportRequest(output_dir=tmp_path, volume_graphs=[graph]))
 
-    text = (volume_root / "SFZ" / "B Bank.sfz").read_text(encoding="utf-8")
+    text = (volume_root / "B Bank.sfz").read_text(encoding="utf-8")
     region_line = next(line for line in text.splitlines() if line.startswith("<region>"))
     assert "lokey=38" in region_line
     assert "hikey=38" in region_line
@@ -224,7 +245,7 @@ def test_export_sfz_warns_when_orig_key_limit_has_no_root(tmp_path: Path) -> Non
 
     result = export_sfz(SfzExportRequest(output_dir=tmp_path, volume_graphs=[graph]))
 
-    text = (volume_root / "SFZ" / "B Bank.sfz").read_text(encoding="utf-8")
+    text = (volume_root / "B Bank.sfz").read_text(encoding="utf-8")
     region_line = next(line for line in text.splitlines() if line.startswith("<region>"))
     assert "lokey=" not in region_line
     assert "hikey=" not in region_line

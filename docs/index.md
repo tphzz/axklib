@@ -24,7 +24,7 @@ Summarize supported inputs:
 uv run axklib info <image-or-directory>
 ```
 
-The tree view omits empty default program slots by default. Use `--show-default-programs` when you need the full 128-slot Program list.
+The tree view omits empty default program slots by default. Use `--show-default-programs` when you need the full 128-slot Program list. Use `--format paths` when you need copy/paste selector paths for targeted extraction.
 
 Write an inventory report:
 
@@ -59,11 +59,19 @@ uv run axklib validate -o build/reports/validation <image-or-directory>
 Export waveform data:
 
 ```powershell
-uv run axklib extract waves --exact --stereo auto -o build/exports/waves <image-or-directory>
+uv run axklib extract wav file -o build/exports/wav <image-or-directory>
 ```
 
-The extraction command reports progress while writing physical `SMPL` WAVs,
-rendered stereo WAVs, and per-volume `volume.axklib.json` graphs.
+For SFZ export, use `file` for a whole-input export or copy selectors from `info --format paths` for narrower scoped exports:
+
+```powershell
+uv run axklib info <image-or-directory> --format paths
+uv run axklib extract sfz file <image-or-directory> -o build/exports/sfz/00001_file
+uv run axklib extract sfz program <image-or-directory> --path "PIANO_KEYS_SYNTH/Ap11 Grand 1/Programs/001: GRND1 A" -o build/exports/sfz/00002_program
+```
+
+The extraction commands report progress while writing physical `SMPL` WAVs,
+rendered stereo WAVs, and graph manifests.
 
 Build the local documentation:
 
@@ -95,5 +103,3 @@ Build the documentation strictly:
 ```powershell
 uv run --group docs axklib-docs build --strict
 ```
-
-

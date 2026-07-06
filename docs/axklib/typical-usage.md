@@ -78,20 +78,40 @@ print(len(result.written_files))
 
 ## Export SFZ instruments
 
-`extract sfz` runs structured WAV export first, then writes volume-scoped SFZ
-files that reference those WAVs with relative paths.
+`extract sfz file` runs WAV export first, then writes SFZ files that reference those
+WAVs with relative paths. Use `file` as the whole-input scope.
 
 ```powershell
-uv run axklib extract sfz HD00_512_example.hda -o build/exports/sfz/00001_example
+uv run axklib extract sfz file HD00_512_example.hda -o build/exports/sfz/00001_example
+```
+
+For narrower exports, copy one or more selectors from `info --format paths` and pass them to
+the matching scope with repeatable `--path`. The scoped workflow writes shared samples under `_samples/`
+and places SFZ files directly under the selection folder. It decodes
+and writes only the selected scope plus the physical waveform dependencies
+required by that scope, and waveform payload bytes are loaded lazily once the
+selected dependency closure is known.
+
+```powershell
+uv run axklib info HD00_512_example.hda --format paths
+uv run axklib extract sfz program HD00_512_example.hda --path "partition_00_hd1/A3K Disk 1/Programs/001: TSUYOSHI" -o build/exports/sfz/00002_tsuyoshi
+```
+
+For WAV-only whole-input extraction, use `extract wav file`:
+
+```powershell
+uv run axklib extract wav file HD00_512_example.hda -o build/exports/wav/00001_example
 ```
 
 Rendered stereo WAVs are referenced when available. Otherwise the SFZ falls back
 to exact physical WAV exports, including panned left/right regions when a safe
 rendered stereo file was not produced.
+
 ## Read exported waveform labels
 
-Structured waveform export writes one `volume.axklib.json` graph per volume.
-Use graph helpers when building a display/index view so sampler-facing labels
+When an API workflow returns or writes selection graph rows, they use the same
+row structure as older per-volume `volume.axklib.json` files. Use graph helpers
+when building a display/index view so sampler-facing labels
 and exact file references stay separate.
 
 ```python
@@ -99,11 +119,10 @@ from pathlib import Path
 
 from axklib.graph import iter_volume_smpl_rows, preferred_smpl_display_name
 
-export_root = Path("build/exports/current-exact/00001_example")
+graph_path = Path("build/exports/wav/00001_example/selection.axklib.json")  # optional graph output
 
-for graph_path in sorted(export_root.rglob("volume.axklib.json")):
-    for row in iter_volume_smpl_rows(graph_path):
-        print(preferred_smpl_display_name(row), "->", row["wav_path"])
+for row in iter_volume_smpl_rows(graph_path):
+    print(preferred_smpl_display_name(row), "->", row["wav_path"])
 ```
 
 ## Interpreting Quality Labels
@@ -112,4 +131,3 @@ Quality labels describe how stable a decoded value is for downstream use.
 `Known` values are suitable for normal reporting and export decisions. Values
 marked `Tentative` or `Unknown` are included for inspection and are not stable
 inputs for generated or modified image workflows.
-

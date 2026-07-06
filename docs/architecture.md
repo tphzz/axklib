@@ -40,15 +40,15 @@ flowchart LR
     Relationships --> Reports[CSV and JSON reports]
     Relationships --> Validation[Validation reports]
     Decoding --> Export[Structured WAV export]
-    Export --> Graph[volume.axklib.json]
-    Export --> WavFiles[SMPL and RENDERED WAV files]
+    Export --> Graph[selection.axklib.json]
+    Export --> WavFiles[_samples physical/rendered WAV files]
 ```
 
 ## Reports And Schemas
 
 CSV and JSON reports are views over the shared model objects. Report directories include schema manifests under `_schemas/` so callers can inspect columns, row counts, quality labels, issue-code counts, and schema notes.
 
-Structured waveform export writes one `volume.axklib.json` graph per volume. The graph links object identity, physical `SMPL` waveform refs, `SBNK` sample/member refs, `SBAC` bank-group refs, `PROG` assignment refs, rendered audio refs, decoded relationships, parameters, quality labels, and unresolved warnings. The sibling `SMPL\` and `RENDERED\` directories contain WAV files referenced by the graph.
+Scoped waveform export writes `selection.axklib.json` graph arrays for the selected scope. Each graph links object identity, physical `SMPL` waveform refs, `SBNK` sample/member refs, `SBAC` bank-group refs, `PROG` assignment refs, rendered audio refs, decoded relationships, parameters, quality labels, and unresolved warnings. Shared `_samples\physical` and `_samples\rendered` directories contain WAV files referenced by the graph.
 
 ## Export Behavior
 

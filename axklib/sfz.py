@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from axklib.audio.structured import _safe_display_path_name
 from axklib.key_limits import int_value, is_orig_key_limit, resolve_sbnk_key_range
 from axklib.reports import write_csv, write_json
 
@@ -37,12 +38,15 @@ class SfzExportRequest:
         overwrite_policy: ``"replace"`` permits replacing existing SFZ and
             manifest files. ``"fail"`` raises if a target already exists.
         progress_callback: Optional callback for CLI progress reporting.
+        write_manifests: Write ``sfz_exports.csv`` and ``sfz_exports.json`` beside
+            generated SFZ files. Defaults to ``False`` so normal CLI exports stay compact.
     """
 
     output_dir: Path
     volume_graphs: Sequence[Mapping[str, object]]
     overwrite_policy: OverwritePolicy = "fail"
     progress_callback: Callable[[SfzExportProgress], None] | None = None
+    write_manifests: bool = False
 
 
 @dataclass(frozen=True)
@@ -95,8 +99,7 @@ def _int(value: object) -> int | None:
 
 
 def _safe_filename_stem(name: str, fallback: str) -> str:
-    cleaned = _INVALID_FILENAME_CHARS.sub("_", name).strip(" .")
-    return cleaned or fallback
+    return _safe_display_path_name(name, fallback)
 
 
 def _dedupe_path(path: Path, used: set[Path]) -> Path:
@@ -391,11 +394,13 @@ def _sbac_instruments(
     instruments: list[tuple[str, str, str, list[Mapping[str, object]]]] = []
     for sbac in _object_rows(graph, "sbac"):
         members: list[Mapping[str, object]] = []
+        seen_members: set[str] = set()
         for item in _list(sbac.get("members")):
             if not isinstance(item, Mapping):
                 continue
             member_id = _text(item.get("sbnk_id"))
-            if member_id and member_id in sbnk_by_id:
+            if member_id and member_id in sbnk_by_id and member_id not in seen_members:
+                seen_members.add(member_id)
                 members.append(sbnk_by_id[member_id])
         if members:
             name = _text(sbac.get("display_name")) or _id(sbac)
@@ -460,7 +465,7 @@ def export_sfz(request: SfzExportRequest) -> SfzExportResult:
     for index, graph in enumerate(request.volume_graphs, start=1):
         volume_rel = _volume_path(graph)
         volume_root = request.output_dir / Path(volume_rel)
-        sfz_dir = volume_root / "SFZ"
+        sfz_dir = volume_root
         request.progress_callback and request.progress_callback(
             SfzExportProgress("sfz", index - 1, total, volume_rel)
         )
@@ -520,7 +525,8 @@ def export_sfz(request: SfzExportRequest) -> SfzExportResult:
             manifest_rows.append(row)
             for note in notes:
                 warnings.append(f"{volume_rel}: {instrument_name}: {note}")
-        written_files.extend(_write_manifest(volume_root, volume_rows, request.overwrite_policy))
+        if request.write_manifests:
+            written_files.extend(_write_manifest(volume_root, volume_rows, request.overwrite_policy))
         request.progress_callback and request.progress_callback(
             SfzExportProgress("sfz", index, total, volume_rel)
         )
@@ -534,5 +540,3 @@ __all__ = [
     "SfzExportResult",
     "export_sfz",
 ]
-
-

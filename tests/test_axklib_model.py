@@ -80,6 +80,35 @@ def test_axklib_object_supports_canonical_nested_refs() -> None:
     assert item.quality.quality == DataQuality.TENTATIVE
 
 
+def test_axklib_object_payload_loader_materializes_once() -> None:
+    calls = 0
+
+    def load_payload() -> bytes:
+        nonlocal calls
+        calls += 1
+        return b"lazy-payload"
+
+    item = AxklibObject(
+        image="image.hds",
+        container_kind="sfs",
+        scope_key="scope",
+        object_key="p0:sfs9",
+        partition_index=0,
+        sfs_id=9,
+        fat_file="",
+        payload_offset=0,
+        payload_size=12,
+        type="SMPL",
+        name="S01",
+        payload_loader=load_payload,
+    )
+
+    assert calls == 0
+    assert item.payload == b"lazy-payload"
+    assert item.payload == b"lazy-payload"
+    assert calls == 1
+
+
 def test_axklib_object_supports_typed_temporary_extensions() -> None:
     quality = AxklibQuality(quality=DataQuality.LIKELY, source="unit test")
     extension = SourceMatchMetadata(

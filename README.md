@@ -27,7 +27,7 @@ uv run axklib info <image-or-directory>
 Export waveform data:
 
 ```powershell
-uv run axklib extract waves --exact --stereo auto -o build/exports/waves <image-or-directory>
+uv run axklib extract wav file -o build/exports/wav <image-or-directory>
 ```
 
 Write validation reports:

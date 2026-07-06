@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -46,7 +47,7 @@ def test_iter_volume_smpl_rows_reads_parsed_graph() -> None:
     assert list(iter_volume_smpl_rows(graph)) == [first, second]
 
 
-def test_iter_volume_smpl_rows_reads_graph_path(tmp_path) -> None:
+def test_iter_volume_smpl_rows_reads_graph_path(tmp_path: Path) -> None:
     graph_path = tmp_path / "volume.axklib.json"
     graph_path.write_text(
         json.dumps({"objects": {"smpl": [{"display_name": "From File"}]}}),
@@ -56,9 +57,27 @@ def test_iter_volume_smpl_rows_reads_graph_path(tmp_path) -> None:
     assert list(iter_volume_smpl_rows(graph_path)) == [{"display_name": "From File"}]
 
 
-def test_iter_volume_smpl_rows_rejects_non_object_graph(tmp_path) -> None:
-    graph_path = tmp_path / "volume.axklib.json"
-    graph_path.write_text("[]", encoding="utf-8")
+def test_iter_volume_smpl_rows_reads_selection_graph_array(tmp_path: Path) -> None:
+    graph_path = tmp_path / "selection.axklib.json"
+    graph_path.write_text(
+        json.dumps(
+            [
+                {"objects": {"smpl": [{"display_name": "One"}]}},
+                {"objects": {"smpl": [{"display_name": "Two"}]}},
+            ]
+        ),
+        encoding="utf-8",
+    )
 
-    with pytest.raises(ValueError, match="volume graph must be a JSON object"):
+    assert list(iter_volume_smpl_rows(graph_path)) == [
+        {"display_name": "One"},
+        {"display_name": "Two"},
+    ]
+
+
+def test_iter_volume_smpl_rows_rejects_non_object_graph(tmp_path: Path) -> None:
+    graph_path = tmp_path / "volume.axklib.json"
+    graph_path.write_text("[1]", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="graph must be a JSON object"):
         list(iter_volume_smpl_rows(graph_path))

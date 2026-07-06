@@ -220,22 +220,22 @@ Content-tree validation currently highlights these relationship issues in
 When a volume has an error-level issue, `info` can append `(errors detected)` to
 the affected volume label.
 
-### `axklib extract waves --exact --stereo auto`
+### `axklib extract wav file`
 
-Exact export writes physical WAV files and per-volume graph metadata.
+Scoped WAV export writes shared WAV files for the selected object graph. Use
+`file` for whole-input extraction, or a narrower scope with one or more `--path`
+selectors copied from `info --format paths`.
 
 | Output | Meaning |
 | --- | --- |
-| `SMPL/*.wav` | Exact mono physical waveform exports. |
-| `RENDERED/*.wav` | Interleaved stereo render when compatible left/right members are identified. |
-| `volume.axklib.json` | Object graph metadata for one volume. |
-| schema manifests | Report schema metadata for generated CSV/JSON outputs. |
+| `_samples/physical/*.wav` | Exact mono physical waveform exports. |
+| `_samples/rendered/*.wav` | Interleaved stereo render when compatible left/right members are identified. |
 
 Rendered stereo is additive. A successful render does not suppress or replace the
-physical `SMPL/*.wav` rows. When several sampler objects reference the same
-physical left/right pair in one volume, they can share one rendered WAV path.
-Stereo decision rows identify the source objects, mono WAV paths, rendered WAV
-path, reason code, relationship quality, and basis.
+physical WAV rows. When several sampler objects reference the same physical
+left/right pair in one selection, they can share one rendered WAV path. Stereo
+decision rows identify the source objects, mono WAV paths, rendered WAV path,
+reason code, relationship quality, and basis.
 Known basis values include:
 
 | Basis fragment | Meaning |
@@ -255,25 +255,51 @@ Stereo decisions use these public reason-code families:
 | `STEREO_EXPORT_PARENT_CONFLICT` | Placement conflict prevents one rendered parent path. |
 | `STEREO_RELATIONSHIP_NOT_KNOWN` | Relationship quality is not strong enough for rendering. |
 
-## `axklib extract sfz`
+## `axklib info --format paths`
 
-`extract sfz` runs the same structured waveform export used by `extract waves`,
-then writes SFZ instruments and per-volume SFZ manifests.
+The path format prints tab-separated selector rows for copy/paste workflows.
+Use the `path` column with targeted extraction commands.
+
+| Column | Meaning |
+| --- | --- |
+| `source_path` | Input container path. |
+| `scope` | Selectable scope: `volume`, `program`, `sbac`, or `sbnk`. |
+| `path` | Source-relative selector accepted by targeted `extract wav` and `extract sfz`. |
+| `display_name` | Sampler-facing label for the selected node. |
+| `object_type` | Object type when the row targets a sampler object. |
+| `object_key` | Technical object key for diagnostics and API consumers. |
+
+## `axklib extract sfz file`
+
+`extract sfz <scope>` runs scoped waveform export first, then writes SFZ
+instrument files from the selection graphs. Use `file` for whole-input SFZ
+export. Use `volume`, `program`, `sbac`, or `sbnk` with repeatable `--path`
+selectors for narrower exports.
 
 | Output | Description |
 | --- | --- |
-| `SFZ/*.sfz` | Volume-scoped SFZ instrument files. Each `sample=` path is relative to the containing SFZ file. |
-| `sfz_exports.csv` | Per-volume SFZ generation summary. |
-| `sfz_exports.json` | JSON form of the same per-volume SFZ generation summary. |
+| `<instrument>.sfz` | Selection-scoped SFZ instrument file written directly under the selection folder. Each `sample=` path is relative to the containing SFZ file. |
 
-`sfz_exports` rows include the volume path, instrument type, instrument name,
+SFZ result rows include the selection path, instrument type, instrument name,
 relative SFZ path, rendered and physical region counts, skipped region count,
-status, and notes. The SFZ files prefer rendered stereo WAVs when present in the
-volume graph and fall back to exact physical WAV references otherwise.
+status, and notes. They are returned by the library API but are not written as
+CSV/JSON sidecars by default. The SFZ files prefer rendered stereo WAVs when
+present in the graph and fall back to exact physical WAV references otherwise.
+
+Shared WAV files are stored under `_samples/physical/` and
+`_samples/rendered/`. Narrow scopes write only the selected dependency closure
+instead of a hidden full-input staging export. The scoped loader defers waveform
+payload reads until selected objects are decoded; SFZ sample paths remain
+relative to the containing SFZ file. Selection graph rows are returned by the
+library API and can be written by request-level graph output, but they are not
+default CLI sidecars.
+
 ## `volume.axklib.json`
 
-`volume.axklib.json` is the per-volume graph manifest written by structured
-exact export. It records:
+`volume.axklib.json` is the per-volume graph manifest shape used by structured
+graph exports. Scoped extraction uses arrays of the same graph records in
+memory, and API callers may write them as selection graph JSON. Each graph
+record contains:
 
 | Section | Meaning |
 | --- | --- |
@@ -292,7 +318,7 @@ waveform is referenced by sampler-visible `SBNK` members, the row includes
 `user_facing_aliases` entries with the member display name, object reference,
 optional sample-bank/group owner, and relationship quality. Consumers that want
 sampler-facing labels should prefer those aliases over parsing numeric duplicate
-suffixes from `SMPL/*.wav` filenames.
+suffixes from physical WAV filenames.
 
 Recommended display fallback order for future UI or export-index views, implemented by [`preferred_smpl_display_name()`](graph.md):
 
@@ -324,4 +350,3 @@ metadata and must not be used to rewrite or deduplicate exact WAV paths.
         - make_schema_manifest
         - write_schema_manifest
         - write_schema_index
-

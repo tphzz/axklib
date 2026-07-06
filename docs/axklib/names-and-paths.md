@@ -211,36 +211,54 @@ Rules:
 
 ## Exact Export Layout
 
-Exact export plans paths from placement and relationships.
+Scoped extraction writes one shared sample pool plus folders for the selected
+scope. Use `extract wav file` or `extract sfz file` for whole-input
+exports. Use narrower scopes with `--path` values copied from
+`info --format paths`.
 
-Typical SFS export layout:
+Typical whole-input export layout:
 
 ```text
 <output>/
-  partition_00_Main/
-    Piano Volume/
-      SMPL/
-        Grand C4.wav
-      RENDERED/
-        Grand Stereo.wav
-      volume.axklib.json
+  _samples/
+    physical/
+      Grand C4__a1b2c3d4e5f6.wav
+    rendered/
+      Grand Stereo__b1c2d3e4f5a6.wav
+  file/
+```
+
+Typical scoped Program export layout:
+
+```text
+<output>/
+  _samples/
+    physical/
+    rendered/
+  program/
+    partition_00_Main/
+      Piano Volume/
+        Programs/
+          001_ Grand/
+            Grand.sfz
 ```
 
 Rules:
 
 | Output | Rule |
 | --- | --- |
-| `SMPL/` | Contains exact physical mono WAV files. |
-| `RENDERED/` | Contains interleaved stereo WAVs when a compatible pair is rendered. |
-| `volume.axklib.json` | Contains object graph metadata for the volume. |
-| `_unplaced/` | Used when a waveform has no known placement. |
-| source scope prefix | Added when multiple input sources are exported together. |
+| `_samples/physical/` | Contains exact physical mono WAV files. |
+| `_samples/rendered/` | Contains interleaved stereo WAVs when a compatible pair is rendered. |
+| `file/` | Whole-input selection folder. |
+| `<scope>/<selector>/` | Narrow selected scope folder. |
 
-Physical WAV names come from `SMPL` storage names. They stay storage-facing even
-when that produces a filesystem-safe numeric suffix from a sampler duplicate
-marker. When a physical waveform is referenced by sampler-visible `SBNK` members,
-`volume.axklib.json` records those member names in the `user_facing_aliases`
-field on the `SMPL` object. Display-oriented consumers should use [`preferred_smpl_display_name()`](graph.md) to use the first alias
+Physical WAV names come from `SMPL` storage names plus a short content hash so
+several selections can share one pool without collisions. They stay
+storage-facing even when that produces a filesystem-safe numeric suffix from a
+sampler duplicate marker. When a physical waveform is referenced by
+sampler-visible `SBNK` members, the graph records those member names in the
+`user_facing_aliases` field on the `SMPL` object. Display-oriented consumers
+should use [`preferred_smpl_display_name()`](graph.md) to use the first alias
 name when present and fall back to the physical `SMPL` display name only when no
 alias is known.
 
@@ -252,7 +270,6 @@ remain present. If the paired member name is only distinguished by a sampler
 duplicate marker, the rendered stem uses the owning `B ...` sample-bank or group
 label when available, for example `Harpsi 2.1N - Harpsich031.wav` instead of a
 numeric duplicate suffix.
-
 ## Technical Fields That Stay In Reports
 
 Normal CLI text leads with sampler-facing names. These fields remain available in
@@ -265,4 +282,3 @@ CSV/JSON reports for traceability:
 | ISO placement | `iso_raw_group`, `iso_raw_volume`, `iso_extent_sector`, `iso_data_offset`. |
 | Relationship diagnostics | `basis`, `raw_fields`, candidate object keys, assignment row bytes. |
 | Quality labels | `quality`, `match_quality`, `placement_quality`. |
-

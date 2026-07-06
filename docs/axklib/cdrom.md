@@ -171,7 +171,7 @@ Some CD-ROM volumes store stereo material as paired sampler-visible `SBNK`
 members in one `SBAC` group. The left and right members have matching names with
 terminal `-L` and `-R`, and each member links to its own physical `SMPL` object.
 Structured waveform export keeps the physical mono `SMPL` files and writes an
-additional `RENDERED/` stereo WAV when the pair is known and audio-compatible.
+additional `_samples/rendered/` stereo WAV when the pair is known and audio-compatible.
 For rendered stereo names, duplicate-marked paired members can use the owning
 sample-bank or group label so the output path remains sampler-facing instead of
 only numeric.

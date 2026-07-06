@@ -1683,3 +1683,36 @@ def test_visible_off_sbac_prog_assignment_reports_missing_local_group() -> None:
     assert relationship.target_key == ""
     assert relationship.basis == "assignment-visible-off-missing-local-sbac"
     assert relationship.diagnostic_category == "visible-off-assignment"
+
+
+def test_metadata_copy_preserves_lazy_payload_loader() -> None:
+    from axklib.relationships import _object_with_metadata
+
+    calls = 0
+
+    def load_payload() -> bytes:
+        nonlocal calls
+        calls += 1
+        return b"FSFSDEV3SPLXSMPL"
+
+    item = AxklibObject(
+        image="image.hds",
+        container_kind="sfs",
+        scope_key="scope",
+        object_key="p0:sfs9",
+        partition_index=0,
+        sfs_id=9,
+        fat_file="",
+        payload_offset=0,
+        payload_size=16,
+        type="SMPL",
+        name="S01",
+        payload_loader=load_payload,
+    )
+
+    copied = _object_with_metadata(item, {"placement": "known"})
+
+    assert calls == 0
+    assert copied.metadata["placement"] == "known"
+    assert copied.payload == b"FSFSDEV3SPLXSMPL"
+    assert calls == 1

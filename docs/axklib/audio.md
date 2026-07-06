@@ -1,12 +1,12 @@
 # Audio
 
 Audio APIs decode exact current `SMPL` waveform payloads and export WAV files.
-Structured export writes physical `SMPL` WAVs, rendered stereo WAVs when safe,
-and one per-volume graph JSON that carries musical relationships and quality.
+Scoped export writes physical `SMPL` WAVs, rendered stereo WAVs when safe,
+and in-memory selection graph data that carries musical relationships and quality.
 
 Physical `SMPL` WAVs are always preserved as exact mono exports. Rendered stereo
-is additive: compatible left/right material is written under `RENDERED/` and the
-source `SMPL` files remain under `SMPL/`. Stereo render planning currently uses
+is additive: compatible left/right material is written under `_samples/rendered/` and the
+source `SMPL` files remain under `_samples/physical/`. Stereo render planning currently uses
 two public patterns:
 
 - one `SBNK` with known left and right `SMPL` member links;
@@ -22,11 +22,11 @@ to that shared artifact. When a rendered stereo stem would otherwise come from a
 sampler duplicate marker such as a trailing `*`, axklib uses the owning
 sample-bank or group label in the rendered stem when available. Physical `SMPL`
 filenames still preserve exact storage-level names with filesystem-safe
-sanitization, while `volume.axklib.json` records sampler-visible aliases for
+sanitization, while graph JSON records sampler-visible aliases for
 linked physical waveforms.
 
 `WavExportRequest.progress_callback` receives export progress events for
-physical WAV writes, rendered stereo writes, and per-volume graph writes. The
+physical WAV writes, rendered stereo writes, and graph writes. The
 CLI uses the same progress stream to show the file currently being written.
 `Waveform.alternating_byte_payload_detected` is true when a current-looking
 `SMPL` object stores waveform bytes with the alternating-byte compatibility
@@ -47,4 +47,3 @@ that export path separate from ordinary current mono PCM.
         - WavExportResult
         - decode_container_waveforms
         - export_waveforms
-

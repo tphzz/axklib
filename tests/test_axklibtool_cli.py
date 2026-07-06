@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -179,71 +178,89 @@ def test_coverage_reports_load_failure_without_traceback(
     assert (output / "load_errors.csv").exists()
 
 
-def test_extract_waves_fails_on_existing_targets_without_overwrite(tmp_path: Path) -> None:
+def test_extract_wav_file_fails_on_existing_targets_without_overwrite(tmp_path: Path) -> None:
     source = tmp_path / "sample.smpl"
-    output = tmp_path / "waves"
+    output = tmp_path / "wav"
     _write_standalone_smpl(source)
 
-    first = axklibtool.main(["extract", "waves", "-o", str(output), str(source)])
-    second = axklibtool.main(["extract", "waves", "-o", str(output), str(source)])
+    first = axklibtool.main(["extract", "wav", "file", "-o", str(output), str(source)])
+    second = axklibtool.main(["extract", "wav", "file", "-o", str(output), str(source)])
 
     assert first == 0
     assert second == 1
     assert any(path.suffix == ".wav" for path in output.rglob("*.wav"))
 
 
-def test_extract_waves_allows_existing_targets_with_overwrite(tmp_path: Path) -> None:
+def test_extract_wav_file_allows_existing_targets_with_overwrite(tmp_path: Path) -> None:
     source = tmp_path / "sample.smpl"
-    output = tmp_path / "waves"
+    output = tmp_path / "wav"
     _write_standalone_smpl(source)
 
-    first = axklibtool.main(["extract", "waves", "-o", str(output), str(source)])
-    second = axklibtool.main(["extract", "waves", "--overwrite", "-o", str(output), str(source)])
+    first = axklibtool.main(["extract", "wav", "file", "-o", str(output), str(source)])
+    second = axklibtool.main(
+        ["extract", "wav", "file", "--overwrite", "-o", str(output), str(source)]
+    )
 
     assert first == 0
     assert second == 0
 
 
-def test_extract_waves_progress_always_reports_same_line_status(
+def test_extract_wav_file_progress_always_reports_same_line_status(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = tmp_path / "sample.smpl"
-    output = tmp_path / "waves"
+    output = tmp_path / "wav"
     _write_standalone_smpl(source)
 
     code = axklibtool.main(
-        ["extract", "waves", "--progress", "always", "-o", str(output), str(source)]
+        ["extract", "wav", "file", "--progress", "always", "-o", str(output), str(source)]
     )
 
     captured = capsys.readouterr()
     assert code == 0
     assert "\rloading:" in captured.err
-    assert "\rdecoding:" in captured.err
+    assert "\rresolving:" in captured.err
+    assert "\rreading:" in captured.err
     assert "\rexporting:" in captured.err
-    assert "SMPL/S01.wav" in captured.err
-    assert "volume.axklib.json" in captured.err
+    assert "_samples/physical/S01__" in captured.err
     assert captured.err.endswith("\n")
 
 
-def test_extract_sfz_runs_wave_export_then_writes_manifest(tmp_path: Path) -> None:
+def test_extract_wav_file_writes_shared_sample_pool(tmp_path: Path) -> None:
+    source = tmp_path / "sample.smpl"
+    output = tmp_path / "targeted-wav"
+    _write_standalone_smpl(source)
+
+    code = axklibtool.main(["extract", "wav", "file", "-o", str(output), str(source)])
+
+    assert code == 0
+    wav_files = sorted(path.relative_to(output).as_posix() for path in output.rglob("*.wav"))
+    assert len(wav_files) == 1
+    assert wav_files[0].startswith("_samples/physical/S01__")
+    assert not (output / "file" / "selection.axklib.json").exists()
+    assert not any(path.name.startswith(".axklib_stage_") for path in output.iterdir())
+
+
+def test_extract_sfz_file_runs_wave_export_without_manifest_lists(tmp_path: Path) -> None:
     source = tmp_path / "sample.smpl"
     output = tmp_path / "sfz"
     _write_standalone_smpl(source)
 
-    code = axklibtool.main(["extract", "sfz", "-o", str(output), str(source)])
+    code = axklibtool.main(["extract", "sfz", "file", "-o", str(output), str(source)])
 
     assert code == 0
     wav_files = sorted(path.relative_to(output).as_posix() for path in output.rglob("*.wav"))
     sfz_files = sorted(path.relative_to(output).as_posix() for path in output.rglob("*.sfz"))
-    assert wav_files == ["Standalone object/SMPL/S01.wav"]
+    assert len(wav_files) == 1
+    assert wav_files[0].startswith("_samples/physical/S01__")
     assert sfz_files == []
-    assert (output / "Standalone object" / "sfz_exports.json").read_text(encoding="utf-8") == "[]\n"
+    assert not any(path.name in {"selection.axklib.json", "selection_exports.csv", "selection_exports.json", "sfz_exports.csv", "sfz_exports.json"} for path in output.rglob("*"))
 
 
 def test_subcommand_help_output_is_available(capsys: pytest.CaptureFixture[str]) -> None:
     for argv in (
         ["inventory", "--help"],
-        ["extract", "waves", "--help"],
+        ["extract", "wav", "--help"],
         ["extract", "sfz", "--help"],
     ):
         with pytest.raises(SystemExit) as exc_info:
@@ -253,21 +270,29 @@ def test_subcommand_help_output_is_available(capsys: pytest.CaptureFixture[str])
     captured = capsys.readouterr()
     help_text = captured.out.lower()
     assert "decode object inventory" in help_text
-    assert "export exact current smpl waveforms" in help_text
-    assert "generate volume-scoped sfz files" in help_text
+    assert "export targeted wavs" in help_text
+    assert "generate sfz files" in help_text
 
 
-def test_extract_sfz_fails_on_existing_targets_without_overwrite(tmp_path: Path) -> None:
+def test_extract_waves_command_is_not_public(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        axklibtool.main(["extract", "waves", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "invalid choice" in captured.err
+
+
+def test_extract_sfz_file_fails_on_existing_targets_without_overwrite(tmp_path: Path) -> None:
     source = tmp_path / "sample.smpl"
     output = tmp_path / "sfz"
     _write_standalone_smpl(source)
 
-    first = axklibtool.main(["extract", "sfz", "-o", str(output), str(source)])
-    second = axklibtool.main(["extract", "sfz", "-o", str(output), str(source)])
+    first = axklibtool.main(["extract", "sfz", "file", "-o", str(output), str(source)])
+    second = axklibtool.main(["extract", "sfz", "file", "-o", str(output), str(source)])
 
     assert first == 0
     assert second == 1
-
 
 def test_debug_flag_controls_internal_traceback(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -298,68 +323,6 @@ def test_corpus_audit_writes_input_manifest(tmp_path: Path) -> None:
     assert (output / "input_manifest.csv").exists()
     assert (output / "input_manifest.json").exists()
     assert (output / "_schemas" / "input_manifest.schema.json").exists()
-
-
-def test_organized_extract_waves_forwards_stereo_policy_and_writes_all_schema_manifests(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    image = tmp_path / "source.hds"
-    image.write_bytes(b"fixture")
-    mono_dir = tmp_path / "mono"
-    mono_dir.mkdir()
-    output = tmp_path / "organized"
-    seen: dict[str, object] = {}
-
-    @dataclass
-    class FakePairExport:
-        exact_stereo_representable: bool
-        stereo_wav_path: str = ""
-        match_quality: str = "Known"
-
-    def fake_export_pairs(*args: object, **kwargs: object) -> list[FakePairExport]:
-        seen["stereo_policy"] = kwargs.get("stereo_policy")
-        out_dir = Path(args[2])
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "sbnk_exact_pairs.json").write_text(
-            '[{"exact_stereo_representable": true, "match_quality": "Known"}]',
-            encoding="utf-8",
-        )
-        (out_dir / "mono_exports.json").write_text('[{"object_offset": 1}]', encoding="utf-8")
-        (out_dir / "derived_object_locations.json").write_text(
-            '[{"object_offset": 1}]', encoding="utf-8"
-        )
-        (out_dir / "summary.json").write_text('{"exact_stereo_wavs_exported": 0}', encoding="utf-8")
-        return [FakePairExport(exact_stereo_representable=True)]
-
-    monkeypatch.setattr(axklibtool.exact_export, "export_pairs", fake_export_pairs)
-
-    code = axklibtool.main(
-        ["extract", "waves", "--mono-dir", str(mono_dir), "-o", str(output), str(image)]
-    )
-
-    assert code == 0
-    assert seen["stereo_policy"] == "auto"
-    for report_name in ("sbnk_exact_pairs", "mono_exports", "derived_object_locations", "summary"):
-        assert (output / "_schemas" / f"{report_name}.schema.json").exists()
-
-    mono_only_output = tmp_path / "organized-mono-only"
-    code = axklibtool.main(
-        [
-            "extract",
-            "waves",
-            "--stereo",
-            "none",
-            "--mono-dir",
-            str(mono_dir),
-            "-o",
-            str(mono_only_output),
-            str(image),
-        ]
-    )
-
-    assert code == 0
-    assert seen["stereo_policy"] == "none"
-
 
 def test_validate_fails_if_detail_report_generation_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -394,12 +357,3 @@ def test_info_defaults_to_tree_and_summary_remains_available(
     assert "Waveforms" in tree_output
     assert summary_code == 0
     assert "objects=1" in summary_output
-
-
-def test_extract_waves_help_mentions_layout(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as exc_info:
-        axklibtool.main(["extract", "waves", "--help"])
-
-    captured = capsys.readouterr()
-    assert exc_info.value.code == 0
-    assert "--layout" in captured.out
