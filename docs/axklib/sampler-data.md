@@ -457,6 +457,11 @@ Normal `info` output shows active Program children and CD-ROM source-load
 children that are suitable for user-facing display. CSV and JSON relationship
 reports keep all decoded rows, raw selector values, and inactive rows.
 
+Relationship target matching is reported separately from active/off state. Rows
+that are useful for diagnostics but should not become normal Program children use
+`diagnostic_category` values such as `visible-off-assignment`,
+`program-link-bitmap`, `sbnk-member-link`, or
+`active-assignment-missing-target`.
 ## SEQU And PRF3
 
 `SEQU` and `PRF3` are loaded as supported object identities when their payloads

@@ -160,6 +160,11 @@ Public behavior:
 The raw selector bytes in Program rows are diagnostic fields. They are not used
 as public target IDs.
 
+CD-ROM visible/off rows with missing local SBAC targets stay relationship
+diagnostics, not Program children. A CD-ROM SBNK member link that selects one
+physical waveform in another ISO object folder but whose member name does not
+confirm the target stays `Tentative` and is reported as an `sbnk-member-link`
+diagnostic.
 ## Paired Sample-Member Stereo
 
 Some CD-ROM volumes store stereo material as paired sampler-visible `SBNK`
