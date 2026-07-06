@@ -13,6 +13,7 @@ from axklib.containers.sfs_allocation import (
     AllocationReport,
 )
 from axklib.model import AxklibObject, AxklibObjectHeader
+from axklib.relationships import Relationship, RelationshipGraph
 from axklib.validation import (
     ValidationIssue,
     ValidationScope,
@@ -60,6 +61,7 @@ def _typed_object(
     fat_file: str = "",
     offset: int = 0,
     container_kind: str = "sfs",
+    metadata: dict[str, object] | None = None,
 ) -> AxklibObject:
     return AxklibObject(
         image="fixture.hds",
@@ -74,6 +76,7 @@ def _typed_object(
         type=object_type,
         name=name,
         payload=payload,
+        metadata=metadata,
     )
 
 
@@ -263,6 +266,321 @@ def test_validation_raises_unresolved_sbnk_members_reachable_from_active_program
     assert "reachable from active Program assignments" in issue.message
     assert "REL_MISSING_TARGET" not in report.summary_counts
     assert report.failed is True
+
+
+def _relationship_graph_with(*relationships: Relationship) -> RelationshipGraph:
+    return RelationshipGraph(
+        relationships=relationships,
+        sbac_sbnk_rows=(),
+        prog_bank_rows=(),
+        prog_ignored_rows=(),
+        sbnk_bitmap_rows=(),
+    )
+
+
+def test_validation_describes_visible_off_missing_assignment_as_diagnostic(monkeypatch) -> None:
+    prog = _typed_object(
+        "prog",
+        "PROG",
+        "001",
+        _prog_payload("MISSING", kind_byte=0x10, rch_assign_gate=0x00),
+        fat_file="VOL/F001/PROG/F001",
+        offset=10,
+    )
+    relationship = Relationship(
+        key="rel",
+        source_key="prog",
+        target_key="",
+        relationship_type="PROG_ASSIGNMENT_TO_SBNK",
+        quality="Unknown",
+        basis="assignment-visible-off-missing-local-sbnk",
+        assignment_index=0,
+        assignment_name="MISSING",
+        active_assignment_state="confirmed-visible-off",
+        assignment_rch_assign_display="off",
+    )
+    monkeypatch.setattr(
+        "axklib.validation.build_relationship_graph",
+        lambda _objects: _relationship_graph_with(relationship),
+    )
+
+    report = validate_container(_container(prog))
+
+    issue = next(
+        issue for issue in report.issues if issue.code == "REL_VISIBLE_OFF_ASSIGNMENT_DIAGNOSTIC"
+    )
+    assert "REL_MISSING_TARGET" not in report.summary_counts
+    assert issue.message.startswith(
+        "Visible/off Program assignment row names a missing local sample-bank target"
+    )
+    assert "not active Program content loss" in issue.message
+    assert issue.sampler_path == "VOL/F001/PROG/F001: assignment 1 MISSING"
+    assert issue.basis == "assignment-visible-off-missing-local-sbnk"
+    assert "diagnostic/off-row data" in issue.recommended_next_check
+
+
+def test_validation_describes_visible_off_same_volume_diagnostic(monkeypatch) -> None:
+    prog = _typed_object(
+        "prog",
+        "PROG",
+        "001",
+        _prog_payload("GROUP", kind_byte=0x11, rch_assign_gate=0x00),
+        fat_file="VOL/F001/PROG/F001",
+        offset=10,
+    )
+    relationship = Relationship(
+        key="rel",
+        source_key="prog",
+        target_key="sbac-a|sbac-b",
+        relationship_type="PROG_ASSIGNMENT_TO_SBAC",
+        quality="Tentative",
+        basis="assignment-visible-off-same-volume-sbac-diagnostic",
+        assignment_index=0,
+        assignment_name="GROUP",
+        active_assignment_state="confirmed-visible-off",
+        assignment_rch_assign_display="off",
+    )
+    monkeypatch.setattr(
+        "axklib.validation.build_relationship_graph",
+        lambda _objects: _relationship_graph_with(relationship),
+    )
+
+    report = validate_container(_container(prog))
+
+    issue = next(
+        issue for issue in report.issues if issue.code == "REL_VISIBLE_OFF_ASSIGNMENT_DIAGNOSTIC"
+    )
+    assert "REL_AMBIGUOUS_TARGET" not in report.summary_counts
+    assert issue.message.startswith(
+        "Visible/off Program assignment row names a sample-bank group with one same-volume diagnostic candidate"
+    )
+    assert "not active Program content loss" in issue.message
+    assert issue.sampler_path == "VOL/F001/PROG/F001: assignment 1 GROUP"
+    assert issue.basis == "assignment-visible-off-same-volume-sbac-diagnostic"
+    assert "must not create an active Program child" in issue.recommended_next_check
+
+
+def test_validation_codes_visible_off_name_ambiguity_as_assignment_diagnostic(monkeypatch) -> None:
+    prog = _typed_object(
+        "prog",
+        "PROG",
+        "001",
+        _prog_payload("GROUP", kind_byte=0x11, rch_assign_gate=0x00),
+        fat_file="VOL/F001/PROG/F001",
+        offset=10,
+    )
+    relationship = Relationship(
+        key="rel",
+        source_key="prog",
+        target_key="sbac-a|sbac-b",
+        relationship_type="PROG_ASSIGNMENT_TO_SBAC",
+        quality="Tentative",
+        basis="assignment-visible-off-name-ambiguous-sbac",
+        assignment_index=0,
+        assignment_name="GROUP",
+        active_assignment_state="confirmed-visible-off",
+        assignment_rch_assign_display="off",
+    )
+    monkeypatch.setattr(
+        "axklib.validation.build_relationship_graph",
+        lambda _objects: _relationship_graph_with(relationship),
+    )
+
+    report = validate_container(_container(prog))
+
+    issue = next(
+        issue for issue in report.issues if issue.code == "REL_VISIBLE_OFF_ASSIGNMENT_DIAGNOSTIC"
+    )
+    assert "REL_AMBIGUOUS_TARGET" not in report.summary_counts
+    assert issue.basis == "assignment-visible-off-name-ambiguous-sbac"
+    assert "not active Program content loss" in issue.message
+
+
+def test_validation_uses_known_sfs_placement_for_relationship_warning_path(monkeypatch) -> None:
+    prog = _typed_object(
+        "prog",
+        "PROG",
+        "001",
+        _prog_payload("MISSING", kind_byte=0x10, rch_assign_gate=0x00),
+        fat_file="",
+        offset=10,
+        metadata={
+            "sfs_placement_partition_index": 0,
+            "sfs_placement_volume_name": "Demo Volume",
+            "sfs_placement_category_name": "Programs",
+            "sfs_placement_entry_name": "001: Demo Program",
+            "sfs_placement_quality": "Known",
+        },
+    )
+    relationship = Relationship(
+        key="rel",
+        source_key="prog",
+        target_key="",
+        relationship_type="PROG_ASSIGNMENT_TO_SBNK",
+        quality="Unknown",
+        basis="assignment-active-missing-local-target",
+        assignment_index=1,
+        assignment_name="MISSING",
+        active_assignment_state="confirmed-active",
+    )
+    monkeypatch.setattr(
+        "axklib.validation.build_relationship_graph",
+        lambda _objects: _relationship_graph_with(relationship),
+    )
+
+    report = validate_container(_container(prog))
+
+    issue = next(
+        issue for issue in report.issues if issue.code == "REL_ACTIVE_ASSIGNMENT_MISSING_TARGET"
+    )
+    assert "REL_MISSING_TARGET" not in report.summary_counts
+    assert issue.sampler_path == (
+        "partition 0/Demo Volume/Programs/001: Demo Program: assignment 2 MISSING"
+    )
+    assert issue.message == "Active Program assignment references a missing local target."
+
+
+def test_validation_describes_sbac_slot_ambiguity_with_actionable_grouping(monkeypatch) -> None:
+    sbac = _typed_object(
+        "sbac",
+        "SBAC",
+        "GROUP",
+        _sbac_payload("DUPLICATE"),
+        fat_file="VOL/F001/SBAC/F001",
+        offset=10,
+    )
+    relationship = Relationship(
+        key="rel",
+        source_key="sbac",
+        target_key="sbnk-a|sbnk-b",
+        relationship_type="SBAC_SLOT_TO_SBNK",
+        quality="Tentative",
+        basis="active-sbac-slot-name-ambiguous",
+    )
+    monkeypatch.setattr(
+        "axklib.validation.build_relationship_graph",
+        lambda _objects: _relationship_graph_with(relationship),
+    )
+
+    report = validate_container(_container(sbac))
+
+    issue = next(issue for issue in report.issues if issue.code == "REL_AMBIGUOUS_TARGET")
+    assert (
+        issue.message == "Sample-bank group slot has multiple possible sample-bank member targets."
+    )
+    assert issue.sampler_path == "VOL/F001/SBAC/F001"
+    assert issue.basis == "active-sbac-slot-name-ambiguous"
+    assert "duplicate same-name sample-bank candidates" in issue.recommended_next_check
+
+
+def test_validation_describes_sbnk_member_link_id_only_name_mismatch(monkeypatch) -> None:
+    sbnk = _typed_object(
+        "sbnk",
+        "SBNK",
+        "BANK",
+        _sbnk_payload("BANK"),
+        fat_file="VOL/F001/SBNK/F001",
+        offset=10,
+    )
+    relationship = Relationship(
+        key="rel",
+        source_key="sbnk",
+        target_key="smpl",
+        relationship_type="SBNK_LEFT_MEMBER_TO_SMPL",
+        quality="Tentative",
+        basis="sbnk-member-link-id-only-name-mismatch",
+    )
+    monkeypatch.setattr(
+        "axklib.validation.build_relationship_graph",
+        lambda _objects: _relationship_graph_with(relationship),
+    )
+
+    report = validate_container(_container(sbnk))
+
+    issue = next(
+        issue for issue in report.issues if issue.code == "REL_SBNK_MEMBER_LINK_DIAGNOSTIC"
+    )
+    assert "REL_AMBIGUOUS_TARGET" not in report.summary_counts
+    assert issue.message.startswith("Sample-bank member link ID points to one physical waveform")
+    assert issue.sampler_path == "VOL/F001/SBNK/F001"
+    assert issue.basis == "sbnk-member-link-id-only-name-mismatch"
+    assert "before treating this member link as exact" in issue.recommended_next_check
+
+
+def test_validation_describes_sbnk_member_link_id_only_iso_cross_folder_name_mismatch(
+    monkeypatch,
+) -> None:
+    sbnk = _typed_object(
+        "sbnk",
+        "SBNK",
+        "BANK",
+        _sbnk_payload("BANK"),
+        fat_file="VOL/F003/SBNK/F062",
+        offset=10,
+        container_kind="iso",
+    )
+    relationship = Relationship(
+        key="rel",
+        source_key="sbnk",
+        target_key="smpl",
+        relationship_type="SBNK_LEFT_MEMBER_TO_SMPL",
+        quality="Tentative",
+        basis="sbnk-member-link-id-only-iso-cross-folder-name-mismatch",
+    )
+    monkeypatch.setattr(
+        "axklib.validation.build_relationship_graph",
+        lambda _objects: _relationship_graph_with(relationship),
+    )
+
+    report = validate_container(_container(sbnk))
+
+    issue = next(
+        issue for issue in report.issues if issue.code == "REL_SBNK_MEMBER_LINK_DIAGNOSTIC"
+    )
+    assert "REL_AMBIGUOUS_TARGET" not in report.summary_counts
+    assert "another ISO object folder" in issue.message
+    assert issue.sampler_path == "VOL/F003/SBNK/F062"
+    assert issue.basis == "sbnk-member-link-id-only-iso-cross-folder-name-mismatch"
+
+
+def test_validation_describes_sbnk_program_bitmap_mismatch_diagnostic(monkeypatch) -> None:
+    sbnk = _typed_object(
+        "sbnk",
+        "SBNK",
+        "BANK",
+        _sbnk_payload("BANK"),
+        fat_file="VOL/F001/SBNK/F001",
+        offset=10,
+    )
+    relationship = Relationship(
+        key="rel",
+        source_key="sbnk",
+        target_key="001",
+        relationship_type="SBNK_PROGRAM_BITMAP_TO_PROG",
+        quality="Tentative",
+        basis="sbnk-program-link-bitmap-bitmap-disambiguates-ambiguous-direct-assignment-diagnostic",
+    )
+    monkeypatch.setattr(
+        "axklib.validation.build_relationship_graph",
+        lambda _objects: _relationship_graph_with(relationship),
+    )
+
+    report = validate_container(_container(sbnk))
+
+    issue = next(
+        issue for issue in report.issues if issue.code == "REL_PROGRAM_LINK_BITMAP_DIAGNOSTIC"
+    )
+    assert "REL_AMBIGUOUS_TARGET" not in report.summary_counts
+    assert (
+        issue.message
+        == "Sample-bank Program-link bitmap points to one Program from an ambiguous direct-assignment set."
+    )
+    assert issue.sampler_path == "VOL/F001/SBNK/F001"
+    assert (
+        issue.basis
+        == "sbnk-program-link-bitmap-bitmap-disambiguates-ambiguous-direct-assignment-diagnostic"
+    )
+    assert "bitmap consistency data only" in issue.recommended_next_check
 
 
 def test_validation_policy_strict_fails_on_warnings() -> None:

@@ -42,6 +42,13 @@ ACTIVE_ASSIGNMENT_STATES = (
     ACTIVE_ASSIGNMENT_STATE_CONFIRMED_DUPLICATE_NOT_ACTIVE,
     ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT,
 )
+RELATIONSHIP_DIAGNOSTIC_VISIBLE_OFF_ASSIGNMENT = "visible-off-assignment"
+RELATIONSHIP_DIAGNOSTIC_PROGRAM_LINK_BITMAP = "program-link-bitmap"
+RELATIONSHIP_DIAGNOSTIC_SBNK_MEMBER_LINK = "sbnk-member-link"
+RELATIONSHIP_DIAGNOSTIC_ACTIVE_ASSIGNMENT_MISSING_TARGET = "active-assignment-missing-target"
+RELATIONSHIP_DIAGNOSTIC_AMBIGUOUS_TARGET = "ambiguous-target"
+RELATIONSHIP_DIAGNOSTIC_MISSING_TARGET = "missing-target"
+SBNK_PROGRAM_LINK_BITMAP_DIAGNOSTIC_BASIS_PREFIX = "sbnk-program-link-bitmap-"
 RCH_ASSIGN_DISPLAY_UNKNOWN = "unknown"
 RCH_ASSIGN_DISPLAY_OFF = "off"
 RCH_ASSIGN_DISPLAY_SAMPLE_FOLLOW = "=SMP"
@@ -131,6 +138,25 @@ class Relationship:
     assignment_row_state: str = ""
     active_assignment_state: str = ""
     assignment_rch_assign_display: str = ""
+    diagnostic_category: str = ""
+
+
+def relationship_diagnostic_category(row: Relationship) -> str:
+    """Return the high-level diagnostic bucket for report consumers."""
+
+    if row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF:
+        return RELATIONSHIP_DIAGNOSTIC_VISIBLE_OFF_ASSIGNMENT
+    if row.basis.startswith(SBNK_PROGRAM_LINK_BITMAP_DIAGNOSTIC_BASIS_PREFIX):
+        return RELATIONSHIP_DIAGNOSTIC_PROGRAM_LINK_BITMAP
+    if row.basis.startswith("sbnk-member-link-id-only"):
+        return RELATIONSHIP_DIAGNOSTIC_SBNK_MEMBER_LINK
+    if row.basis == "assignment-active-missing-local-target":
+        return RELATIONSHIP_DIAGNOSTIC_ACTIVE_ASSIGNMENT_MISSING_TARGET
+    if row.quality == "Tentative":
+        return RELATIONSHIP_DIAGNOSTIC_AMBIGUOUS_TARGET
+    if row.quality == "Unknown":
+        return RELATIONSHIP_DIAGNOSTIC_MISSING_TARGET
+    return ""
 
 
 @dataclass(frozen=True)
@@ -463,6 +489,13 @@ def classify_sbnk_program_bitmap_mismatch(
     return "mixed:" + "+".join(sorted(classes))
 
 
+def sbnk_program_bitmap_relationship_basis(row: SbnkProgramBitmapRow) -> str:
+    if row.quality != "Tentative":
+        return "program-link-bitmap"
+    slug = row.mismatch_class.replace(":", "-").replace("_", "-").replace("+", "-")
+    return f"{SBNK_PROGRAM_LINK_BITMAP_DIAGNOSTIC_BASIS_PREFIX}{slug}-diagnostic"
+
+
 def joined(values: Sequence[object]) -> str:
     return "|".join(str(value) for value in values)
 
@@ -639,6 +672,16 @@ def colocated_candidates(source_ref: ObjectRef, candidates: list[ObjectRef]) -> 
     return [ref for ref in candidates if logical_object_group(ref) == source_group]
 
 
+def is_iso_cross_folder_match(source_ref: ObjectRef, target_ref: ObjectRef) -> bool:
+    """Return true when two ISO objects are in different logical object folders."""
+
+    if source_ref.container_kind != "iso" or target_ref.container_kind != "iso":
+        return False
+    source_group = logical_object_group(source_ref)
+    target_group = logical_object_group(target_ref)
+    return bool(source_group and target_group and source_group != target_group)
+
+
 def same_sfs_volume_candidates(
     source_ref: ObjectRef, candidates: list[ObjectRef]
 ) -> list[ObjectRef]:
@@ -688,6 +731,18 @@ def match_unique_sbnk_name(
                 notes=(
                     "Multiple same-scope SBNK objects share the counted SBAC slot name, "
                     "but exactly one candidate is in the same logical object folder as the SBAC."
+                ),
+                candidate_refs=candidates,
+            )
+        same_volume = same_sfs_volume_candidates(source_ref, candidates)
+        if len(same_volume) == 1:
+            return MatchResult(
+                ref=same_volume[0],
+                method="active-sbac-slot-name+same-volume",
+                quality="Likely",
+                notes=(
+                    "Multiple same-scope SBNK objects share the counted SBAC slot name, "
+                    "but exactly one candidate is in the same SFS volume as the SBAC."
                 ),
                 candidate_refs=candidates,
             )
@@ -1027,11 +1082,16 @@ def classify_unresolved_direct_prog_rows(prog_rows: list[ProgBankRow]) -> list[P
                 )
                 continue
             if row.selector_expected_category == "SBAC":
-                notes.append("visible-off-missing-local-sbac")
+                method = (
+                    "assignment-visible-off-iso-missing-local-sbac"
+                    if row.container_kind == "iso"
+                    else "assignment-visible-off-missing-local-sbac"
+                )
+                notes.append(method)
                 classified_rows.append(
                     replace(
                         row,
-                        match_method="assignment-visible-off-missing-local-sbac",
+                        match_method=method,
                         match_notes=(
                             "This visible/off PROG assignment names an SBAC group object that is not "
                             "present as an exact same-scope target. Preserve the row as decoded "
@@ -1062,7 +1122,9 @@ def classify_unresolved_direct_prog_rows(prog_rows: list[ProgBankRow]) -> list[P
     return classified_rows
 
 
-def classify_visible_off_ambiguous_prog_rows(prog_rows: list[ProgBankRow]) -> list[ProgBankRow]:
+def classify_visible_off_ambiguous_prog_rows(
+    prog_rows: list[ProgBankRow], refs_by_key: dict[str, ObjectRef]
+) -> list[ProgBankRow]:
     """Label visible/off ambiguous rows as inventory diagnostics, not active content loss."""
 
     classified_rows: list[ProgBankRow] = []
@@ -1075,6 +1137,34 @@ def classify_visible_off_ambiguous_prog_rows(prog_rows: list[ProgBankRow]) -> li
             continue
 
         notes = [note for note in row.notes.split(";") if note]
+        source_ref = refs_by_key.get(row.prog_object_key)
+        candidate_refs = [refs_by_key[key] for key in candidate_key_set(row) if key in refs_by_key]
+        same_volume = (
+            same_sfs_volume_candidates(source_ref, candidate_refs) if source_ref is not None else []
+        )
+        if (
+            row.match_method
+            in {"assignment-kind-0x10+name-ambiguous", "assignment-kind-0x11+name-ambiguous"}
+            and len(same_volume) == 1
+        ):
+            expected = "SBNK object" if row.selector_expected_category == "SBNK" else "SBAC group"
+            target_slug = "sbnk" if row.selector_expected_category == "SBNK" else "sbac"
+            method = f"assignment-visible-off-same-volume-{target_slug}-diagnostic"
+            notes.append(method)
+            classified_rows.append(
+                replace(
+                    row,
+                    match_method=method,
+                    match_notes=(
+                        f"This visible/off PROG assignment names an {expected}, and exactly one "
+                        "duplicate-name candidate is in the same SFS volume as the PROG. Preserve "
+                        "the same-volume candidate as diagnostic Program inventory only; do not "
+                        "treat the row as active Program content or a resolved target."
+                    ),
+                    notes=";".join(notes),
+                )
+            )
+            continue
         if row.match_method == "assignment-kind-0x11+name-ambiguous":
             notes.append("visible-off-name-ambiguous-sbac")
             classified_rows.append(
@@ -1106,17 +1196,29 @@ def classify_visible_off_ambiguous_prog_rows(prog_rows: list[ProgBankRow]) -> li
             )
             continue
         if row.match_method == "assignment-name-ambiguous":
-            notes.append("visible-off-name-ambiguous-non-target-category")
+            candidate_categories = {ref.type for ref in candidate_refs}
+            if row.selector_expected_category == "SBNK" and candidate_categories == {"SMPL"}:
+                method = "assignment-visible-off-name-ambiguous-smpl-candidates"
+                note = (
+                    "This visible/off direct PROG assignment names an SBNK object, but only "
+                    "duplicate physical SMPL waveform objects match that name. Preserve the "
+                    "candidate set as decoded Program inventory, but do not treat the row as "
+                    "active Program content."
+                )
+            else:
+                method = "assignment-visible-off-name-ambiguous-non-target-category"
+                note = (
+                    "This visible/off PROG assignment has duplicate same-scope name matches, "
+                    "but the ambiguous candidates do not match the decoded target category. "
+                    "Preserve the candidate set as decoded Program inventory, but do not treat "
+                    "the row as active Program content."
+                )
+            notes.append(method)
             classified_rows.append(
                 replace(
                     row,
-                    match_method="assignment-visible-off-name-ambiguous-non-target-category",
-                    match_notes=(
-                        "This visible/off PROG assignment has duplicate same-scope name matches, "
-                        "but the ambiguous candidates do not match the decoded target category. "
-                        "Preserve the candidate set as decoded Program inventory, but do not treat "
-                        "the row as active Program content."
-                    ),
+                    match_method=method,
+                    match_notes=note,
                     notes=";".join(notes),
                 )
             )
@@ -1184,9 +1286,20 @@ def _match_sbnk_member(
             candidate_refs=name_candidates,
         )
     if len(link_candidates) == 1:
+        if is_iso_cross_folder_match(source_ref, link_candidates[0]):
+            return MatchResult(
+                ref=link_candidates[0],
+                method="sbnk-member-link-id-only-iso-cross-folder-name-mismatch",
+                quality="Tentative",
+                notes=(
+                    "Current SBNK member link ID uniquely matches a same-scope SMPL object "
+                    "in another ISO object folder, but the member name did not confirm it."
+                ),
+                candidate_refs=link_candidates,
+            )
         return MatchResult(
             ref=link_candidates[0],
-            method="sbnk-member-link-only",
+            method="sbnk-member-link-id-only-name-mismatch",
             quality="Tentative",
             notes="Current SBNK member link ID uniquely matches a same-scope SMPL object, but the member name did not confirm it.",
             candidate_refs=link_candidates,
@@ -1704,7 +1817,7 @@ def scan_scope(
     prog_rows = resolve_prog_rows_from_program_context(prog_rows, refs_by_key, sbac_child_counts)
     prog_rows = promote_source_load_same_folder_rows(prog_rows)
     prog_rows = classify_unresolved_direct_prog_rows(prog_rows)
-    prog_rows = classify_visible_off_ambiguous_prog_rows(prog_rows)
+    prog_rows = classify_visible_off_ambiguous_prog_rows(prog_rows, refs_by_key)
     prog_rows = classify_duplicate_prog_assignment_rows(prog_rows)
     sbnk_bitmap_rows = build_sbnk_program_bitmap_rows(items, sbac_rows, prog_rows)
     return sbac_rows, prog_rows, ignored_rows, sbnk_bitmap_rows
@@ -1899,25 +2012,30 @@ def build_relationship_graph(items: list[ObjectItem]) -> RelationshipGraph:
             )
         for bitmap_row in sbnk_bitmap_rows:
             if bitmap_row.bitmap_programs:
+                basis = sbnk_program_bitmap_relationship_basis(bitmap_row)
                 relationships.append(
                     Relationship(
                         key=_relationship_key(
                             bitmap_row.sbnk_object_key,
                             "SBNK_PROGRAM_BITMAP_TO_PROG",
                             bitmap_row.bitmap_programs,
-                            "program-link-bitmap",
+                            basis,
                         ),
                         source_key=bitmap_row.sbnk_object_key,
                         target_key=bitmap_row.bitmap_programs,
                         relationship_type="SBNK_PROGRAM_BITMAP_TO_PROG",
                         quality=bitmap_row.quality,
-                        basis="program-link-bitmap",
+                        basis=basis,
                         raw_fields="SBNK+0x0c0..0x0cf",
                         ambiguity_notes=bitmap_row.notes,
                         source_image=bitmap_row.image,
                         scope_key=bitmap_row.scope_key,
                     )
                 )
+    relationships = [
+        replace(row, diagnostic_category=relationship_diagnostic_category(row))
+        for row in relationships
+    ]
     return RelationshipGraph(
         relationships=tuple(sorted(relationships, key=_relationship_sort_key)),
         sbac_sbnk_rows=tuple(

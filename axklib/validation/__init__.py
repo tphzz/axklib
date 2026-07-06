@@ -17,9 +17,12 @@ from axklib.objects import current as object_current
 from axklib.objects.decoded import decode_object
 from axklib.relationships import (
     ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE,
+    ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF,
     ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT,
+    SBNK_PROGRAM_LINK_BITMAP_DIAGNOSTIC_BASIS_PREFIX,
     Relationship,
     RelationshipGraph,
+    _objects_with_sfs_placement_metadata,
     build_relationship_graph,
 )
 
@@ -150,11 +153,31 @@ def _relationship_target_keys(target_key: str) -> tuple[str, ...]:
     return tuple(part for part in target_key.split("|") if part)
 
 
+def _placement_report_path(item: AxklibObject) -> str:
+    metadata = item.metadata
+    placement_quality = metadata.get("sfs_placement_quality")
+    if placement_quality != "Known":
+        return ""
+    parts: list[str] = []
+    partition_index = metadata.get("sfs_placement_partition_index")
+    if isinstance(partition_index, int):
+        parts.append(f"partition {partition_index}")
+    for key in (
+        "sfs_placement_volume_name",
+        "sfs_placement_category_name",
+        "sfs_placement_entry_name",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, str) and value:
+            parts.append(value)
+    return "/".join(parts)
+
+
 def _object_report_path(objects_by_key: dict[str, AxklibObject], object_key: str) -> str:
     item = objects_by_key.get(object_key)
     if item is None:
         return object_key
-    return item.fat_file or item.object_key
+    return _placement_report_path(item) or item.fat_file or item.object_key
 
 
 def _logical_object_group_path(objects_by_key: dict[str, AxklibObject], object_key: str) -> str:
@@ -176,6 +199,158 @@ def _active_program_assignment_label(
     if row.assignment_index is None:
         return f"{program_path}: {assignment_name}"
     return f"{program_path}: assignment {row.assignment_index + 1} {assignment_name}"
+
+
+def _relationship_issue_path(objects_by_key: dict[str, AxklibObject], row: Relationship) -> str:
+    if row.relationship_type.startswith("PROG_ASSIGNMENT_"):
+        return _active_program_assignment_label(objects_by_key, row)
+    return _object_report_path(objects_by_key, row.source_key)
+
+
+def _ambiguous_relationship_message(row: Relationship) -> tuple[str, str]:
+    if row.basis in {
+        "assignment-visible-off-same-volume-sbac-diagnostic",
+        "assignment-visible-off-same-volume-sbnk-diagnostic",
+    }:
+        target = (
+            "sample-bank group"
+            if row.basis == "assignment-visible-off-same-volume-sbac-diagnostic"
+            else "sample-bank"
+        )
+        return (
+            f"Visible/off Program assignment row names a {target} with one same-volume diagnostic candidate plus other duplicate-name candidates; "
+            "this is decoded Program inventory, not active Program content loss.",
+            (
+                "Use relationships.csv candidate fields when auditing off rows; the same-volume candidate "
+                "is diagnostic only and must not create an active Program child."
+            ),
+        )
+    if row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF:
+        return (
+            "Visible/off Program assignment row has multiple possible local targets; "
+            "this is decoded Program inventory, not active Program content loss.",
+            (
+                "Use relationships.csv candidate fields only when auditing off rows; "
+                "do not treat this warning as a missing active Program child."
+            ),
+        )
+    if row.relationship_type == "PROG_ASSIGNMENT_TO_SBAC":
+        return (
+            "Program assignment to a sample-bank group has multiple possible targets.",
+            "Verify the sampler-visible Program assignment and group target before promotion.",
+        )
+    if row.relationship_type == "PROG_ASSIGNMENT_TO_SBNK":
+        return (
+            "Direct Program assignment has multiple possible sample-bank targets.",
+            "Verify the sampler-visible Program assignment target before promotion.",
+        )
+    if row.relationship_type == "SBAC_SLOT_TO_SBNK":
+        return (
+            "Sample-bank group slot has multiple possible sample-bank member targets.",
+            "Inspect duplicate same-name sample-bank candidates before using this group slot as authoritative.",
+        )
+    if row.basis == "sbnk-member-link-id-only-iso-cross-folder-name-mismatch":
+        return (
+            "Sample-bank member link ID points to one physical waveform in another ISO object folder, but the member name does not confirm it.",
+            "Inspect the waveform candidate before treating this member link as exact.",
+        )
+    if row.basis == "sbnk-member-link-id-only-name-mismatch":
+        return (
+            "Sample-bank member link ID points to one physical waveform, but the member name does not confirm it.",
+            "Inspect the waveform candidate before treating this member link as exact.",
+        )
+    if row.relationship_type.startswith("SBNK_") and row.relationship_type.endswith("_TO_SMPL"):
+        return (
+            "Sample-bank member link has multiple possible physical waveform targets.",
+            "Inspect candidate waveform objects before treating this sample-bank member link as exact.",
+        )
+    if row.basis.startswith(SBNK_PROGRAM_LINK_BITMAP_DIAGNOSTIC_BASIS_PREFIX):
+        if "disambiguates-ambiguous-direct-assignment" in row.basis:
+            message = "Sample-bank Program-link bitmap points to one Program from an ambiguous direct-assignment set."
+        elif "known-direct-assignment-missing-bitmap" in row.basis:
+            message = "Known direct Program assignment is missing from the sample-bank Program-link bitmap."
+        elif "nondefault-flag-direct-assignment-without-bitmap" in row.basis:
+            message = "Nondefault direct Program assignment is missing from the sample-bank Program-link bitmap."
+        else:
+            message = (
+                "Sample-bank Program-link bitmap differs from resolved direct Program assignments."
+            )
+        return (
+            message,
+            (
+                "Use this as bitmap consistency data only; do not treat it as Program content "
+                "loss unless another public rule proves the bitmap is authoritative."
+            ),
+        )
+    if row.relationship_type == "SBNK_PROGRAM_BITMAP_TO_PROG":
+        return (
+            "Sample-bank Program-link bitmap maps to multiple possible Program slots.",
+            "Use this as bitmap consistency data only until the Program target is disambiguated.",
+        )
+    return (
+        "Relationship has ambiguous candidate targets.",
+        "Inspect candidate set before using for authoritative placement.",
+    )
+
+
+def _tentative_relationship_code(row: Relationship) -> str:
+    if row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF:
+        return "REL_VISIBLE_OFF_ASSIGNMENT_DIAGNOSTIC"
+    if row.basis.startswith(SBNK_PROGRAM_LINK_BITMAP_DIAGNOSTIC_BASIS_PREFIX):
+        return "REL_PROGRAM_LINK_BITMAP_DIAGNOSTIC"
+    if row.basis.startswith("sbnk-member-link-id-only"):
+        return "REL_SBNK_MEMBER_LINK_DIAGNOSTIC"
+    return "REL_AMBIGUOUS_TARGET"
+
+
+def _missing_relationship_code(row: Relationship) -> str:
+    if row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF:
+        return "REL_VISIBLE_OFF_ASSIGNMENT_DIAGNOSTIC"
+    if row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE:
+        return "REL_ACTIVE_ASSIGNMENT_MISSING_TARGET"
+    return "REL_MISSING_TARGET"
+
+
+def _missing_relationship_message(row: Relationship) -> tuple[str, str]:
+    if row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_ACTIVE:
+        return (
+            "Active Program assignment references a missing local target.",
+            (
+                "Inspect the Program assignment and source object group; user-facing info may show "
+                "an unresolved placeholder instead of a normal Program child."
+            ),
+        )
+    if row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF:
+        expected = (
+            "sample-bank group"
+            if row.relationship_type == "PROG_ASSIGNMENT_TO_SBAC"
+            else "sample-bank"
+        )
+        return (
+            f"Visible/off Program assignment row names a missing local {expected} target; "
+            "this is decoded Program inventory, not active Program content loss.",
+            (
+                "Keep this row as diagnostic/off-row data unless sampler-visible checks prove "
+                "it should become an active assignment."
+            ),
+        )
+    if row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_SOURCE_LOAD_ASSIGNMENT:
+        return (
+            "Source-load Program assignment row has no resolved local target.",
+            (
+                "Keep the selector as diagnostic source data until sampler-loaded placement "
+                "or another public rule proves a target."
+            ),
+        )
+    if row.relationship_type.startswith("SBNK_") and row.relationship_type.endswith("_TO_SMPL"):
+        return (
+            "Sample-bank member link does not resolve to a physical waveform target.",
+            "Inspect the object group before treating this sample-bank member as complete.",
+        )
+    return (
+        "Relationship target could not be resolved.",
+        "Inspect the relationship row and decoded source object before treating the target as present.",
+    )
 
 
 def _sbnk_member_target_issues(
@@ -369,7 +544,9 @@ def validate_container(container: AxklibContainer, *, policy: str = "normal") ->
                     recommended_next_check="Treat as recovery artifact unless source directory quality proves object extent.",
                 )
             )
-    graph = build_relationship_graph(list(container.objects))
+    relationship_items = _objects_with_sfs_placement_metadata(container)
+    graph = build_relationship_graph(list(relationship_items))
+    objects_by_key = {item.object_key: item for item in relationship_items}
     member_target_issues, aggregated_member_relationship_keys = _sbnk_member_target_issues(
         container, graph, source_path
     )
@@ -378,30 +555,37 @@ def validate_container(container: AxklibContainer, *, policy: str = "normal") ->
         if row.key in aggregated_member_relationship_keys:
             continue
         if row.quality == "Tentative":
+            message, recommended_next_check = _ambiguous_relationship_message(row)
+            code = _tentative_relationship_code(row)
             issues.append(
                 _issue(
                     severity=ValidationSeverity.WARNING,
-                    code="REL_AMBIGUOUS_TARGET",
-                    message="Relationship has ambiguous candidate targets.",
+                    code=code,
+                    message=message,
                     scope=ValidationScope.RELATIONSHIP,
                     source_path=source_path,
+                    sampler_path=_relationship_issue_path(objects_by_key, row),
                     object_key=row.source_key,
                     quality=DataQuality.TENTATIVE,
                     basis=row.basis,
-                    recommended_next_check="Inspect candidate set before using for authoritative placement.",
+                    recommended_next_check=recommended_next_check,
                 )
             )
         elif row.quality == "Unknown":
+            message, recommended_next_check = _missing_relationship_message(row)
+            code = _missing_relationship_code(row)
             issues.append(
                 _issue(
                     severity=ValidationSeverity.WARNING,
-                    code="REL_MISSING_TARGET",
-                    message="Relationship target could not be resolved.",
+                    code=code,
+                    message=message,
                     scope=ValidationScope.RELATIONSHIP,
                     source_path=source_path,
+                    sampler_path=_relationship_issue_path(objects_by_key, row),
                     object_key=row.source_key,
                     quality=DataQuality.UNKNOWN,
                     basis=row.basis,
+                    recommended_next_check=recommended_next_check,
                 )
             )
     return ValidationReport(

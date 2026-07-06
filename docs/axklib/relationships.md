@@ -35,6 +35,7 @@ The stable edge type is `Relationship`.
 | `assignment_row_state` | Program row decode state, usually `decoded-row`. |
 | `active_assignment_state` | Conservative active/off/source-load classification. |
 | `assignment_rch_assign_display` | Display family such as `=SMP`, `01`, `BasicRch`, or `off`. |
+| `diagnostic_category` | High-level diagnostic grouping for unresolved or reporting-only rows. Empty for ordinary graph edges. |
 
 The relationship graph also carries diagnostic row tables:
 
@@ -76,6 +77,7 @@ Matching methods:
 | --- | --- | --- |
 | `active-sbac-slot-name` | `Known` | Slot name uniquely matches one same-scope `SBNK` name. |
 | `active-sbac-slot-name+same-folder` | `Likely` | Duplicate names exist, but exactly one candidate is in the same logical object folder. |
+| `active-sbac-slot-name+same-volume` | `Likely` | Duplicate names exist, but exactly one SFS candidate is in the same volume as the Sample Bank Group. |
 | `active-sbac-slot-name-ambiguous` | `Tentative` | Multiple same-scope `SBNK` candidates remain. |
 | `active-sbac-slot-unmatched` | `Unknown` | No same-scope `SBNK` name matches the slot. |
 
@@ -114,11 +116,36 @@ they are not confused with active Program content loss:
 | Method family | Meaning |
 | --- | --- |
 | `assignment-visible-off-missing-local-sbnk` | Visible/off row names a missing SBNK target. |
-| `assignment-visible-off-missing-local-sbac` | Visible/off row names a missing SBAC target. |
+| `assignment-visible-off-missing-local-sbac` | Visible/off SFS/FAT row names a missing SBAC target. |
+| `assignment-visible-off-iso-missing-local-sbac` | Visible/off ISO row names a missing SBAC target. |
+| `assignment-visible-off-same-volume-sbac-diagnostic` | Visible/off SBAC row has one same-volume diagnostic candidate plus other duplicate-name candidates. |
+| `assignment-visible-off-same-volume-sbnk-diagnostic` | Visible/off SBNK row has one same-volume diagnostic candidate plus other duplicate-name candidates. |
 | `assignment-visible-off-name-ambiguous-sbnk` | Visible/off SBNK row has duplicate candidates. |
 | `assignment-visible-off-name-ambiguous-sbac` | Visible/off SBAC row has duplicate candidates. |
+| `assignment-visible-off-name-ambiguous-smpl-candidates` | Visible/off SBNK row has only duplicate SMPL waveform candidates with the same name. |
 | `assignment-visible-off-name-ambiguous-non-target-category` | Visible/off row matches a non-selected category. |
 | `assignment-active-missing-local-target` | Active row references a target missing from the local object set. |
+
+Relationship rows also expose `diagnostic_category` for coarse grouping without
+parsing every `basis` value:
+
+| Category | Meaning |
+| --- | --- |
+| `visible-off-assignment` | Decoded Program inventory row with Rch Assign off. Not active Program content. |
+| `program-link-bitmap` | SBNK Program-link bitmap consistency diagnostic. |
+| `sbnk-member-link` | SBNK member-link diagnostic where link and name values do not fully agree. |
+| `active-assignment-missing-target` | Active Program assignment whose named local target is missing. |
+| `ambiguous-target` | Generic ambiguous relationship fallback. |
+| `missing-target` | Generic unresolved relationship fallback. |
+
+For ordinary `Known` and `Likely` graph edges, `diagnostic_category` is empty.
+
+SBNK member-link diagnostics can use `sbnk-member-link-id-only-name-mismatch`
+when a member link ID selects one physical waveform but the member name does not
+confirm it. CD-ROM rows can use the more specific
+`sbnk-member-link-id-only-iso-cross-folder-name-mismatch` when that waveform is
+in another ISO object folder. Both variants remain `Tentative` until the member
+name and link agree or another public rule confirms the relationship.
 
 ## Active Assignment State
 
@@ -205,6 +232,12 @@ Mismatch classes include:
 | `nondefault_flag_direct_assignment_without_bitmap` | Direct row lacks a matching bitmap and has a nondefault flag. |
 | `known_direct_assignment_missing_bitmap` | Known direct assignment is absent from the bitmap. |
 | `mixed:...` | More than one mismatch class applies. |
+
+Tentative bitmap graph rows with non-empty `bitmap_programs` use a basis value of
+`sbnk-program-link-bitmap-<mismatch-class>-diagnostic`, where the mismatch class
+is converted to hyphenated form. These rows keep `diagnostic_category` set to
+`program-link-bitmap`; they do not create Program children or resolve assignment
+targets.
 
 ## Content Tree Filtering
 

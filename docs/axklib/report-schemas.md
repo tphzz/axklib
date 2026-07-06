@@ -170,6 +170,7 @@ Important relationship fields:
 | `assignment_row_state` | Program row decode state. |
 | `active_assignment_state` | Active/off/source-load classification. |
 | `assignment_rch_assign_display` | Rch Assign display family. |
+| `diagnostic_category` | Coarse grouping for diagnostic relationship rows; empty for ordinary graph edges. |
 
 ### `axklib coverage`
 
@@ -188,6 +189,10 @@ Coverage reports summarize relationship graph completeness. The summary includes
 
 Coverage buckets are diagnostic. They should not be treated as missing active
 Program content unless the active-state field says the affected row is active.
+
+SBNK member-link diagnostics keep link/name disagreements separate from Program
+assignment diagnostics; CD-ROM cross-folder link/name mismatches use their own
+basis value while retaining the shared `sbnk-member-link` category.
 
 ### `axklib validate`
 

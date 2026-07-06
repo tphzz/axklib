@@ -275,6 +275,94 @@ def test_sbac_slot_prefers_same_folder_duplicate_candidate() -> None:
     assert relationship.quality == "Likely"
 
 
+def test_sbac_slot_prefers_same_sfs_volume_duplicate_candidate() -> None:
+    items = [
+        _object(
+            "vol-b-sbnk",
+            "SBNK",
+            "BANK",
+            _sbnk_payload("BANK"),
+            10,
+            metadata=_sfs_placement("Vol B"),
+        ),
+        _object(
+            "vol-a-sbnk",
+            "SBNK",
+            "BANK",
+            _sbnk_payload("BANK"),
+            20,
+            metadata=_sfs_placement("Vol A"),
+        ),
+        _object(
+            "sbac",
+            "SBAC",
+            "AC01",
+            _sbac_payload("BANK"),
+            30,
+            metadata=_sfs_placement("Vol A"),
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    sbac_row = next(row for row in graph.sbac_sbnk_rows if row.sbac_object_key == "sbac")
+    assert sbac_row.match_quality == "Likely"
+    assert sbac_row.match_method == "active-sbac-slot-name+same-volume"
+    assert sbac_row.matched_sbnk_object_key == "vol-a-sbnk"
+    assert sbac_row.candidate_object_keys == "vol-a-sbnk|vol-b-sbnk"
+    relationship = next(
+        row for row in graph.relationships if row.relationship_type == "SBAC_SLOT_TO_SBNK"
+    )
+    assert relationship.target_key == "vol-a-sbnk"
+    assert relationship.quality == "Likely"
+    assert relationship.basis == "active-sbac-slot-name+same-volume"
+
+
+def test_sbac_same_sfs_volume_rule_requires_unique_candidate() -> None:
+    items = [
+        _object(
+            "vol-a-sbnk-1",
+            "SBNK",
+            "BANK",
+            _sbnk_payload("BANK"),
+            10,
+            metadata=_sfs_placement("Vol A"),
+        ),
+        _object(
+            "vol-a-sbnk-2",
+            "SBNK",
+            "BANK",
+            _sbnk_payload("BANK"),
+            20,
+            metadata=_sfs_placement("Vol A"),
+        ),
+        _object(
+            "vol-b-sbnk",
+            "SBNK",
+            "BANK",
+            _sbnk_payload("BANK"),
+            30,
+            metadata=_sfs_placement("Vol B"),
+        ),
+        _object(
+            "sbac",
+            "SBAC",
+            "AC01",
+            _sbac_payload("BANK"),
+            40,
+            metadata=_sfs_placement("Vol A"),
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    sbac_row = next(row for row in graph.sbac_sbnk_rows if row.sbac_object_key == "sbac")
+    assert sbac_row.match_quality == "Tentative"
+    assert sbac_row.match_method == "active-sbac-slot-name-ambiguous"
+    assert sbac_row.matched_sbnk_object_key == ""
+    assert sbac_row.candidate_object_keys == "vol-a-sbnk-1|vol-a-sbnk-2|vol-b-sbnk"
+
+
 def test_prog_assignment_prefers_same_folder_duplicate_candidate() -> None:
     items = [
         _object(
@@ -543,7 +631,7 @@ def test_active_prog_assignment_prefers_same_sfs_volume_sbnk_candidate() -> None
     assert row.candidate_object_keys == "vol-a-sbnk|vol-b-sbnk"
 
 
-def test_same_sfs_volume_prog_assignment_rule_requires_active_row() -> None:
+def test_same_sfs_volume_prog_assignment_classifies_visible_off_as_diagnostic() -> None:
     items = [
         _object(
             "vol-b-sbac",
@@ -576,9 +664,114 @@ def test_same_sfs_volume_prog_assignment_rule_requires_active_row() -> None:
     row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
     assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
     assert row.match_quality == "Tentative"
-    assert row.match_method == "assignment-visible-off-name-ambiguous-sbac"
+    assert row.match_method == "assignment-visible-off-same-volume-sbac-diagnostic"
     assert row.matched_target_object_key == ""
     assert row.candidate_object_keys == "vol-a-sbac|vol-b-sbac"
+    assert "assignment-visible-off-same-volume-sbac-diagnostic" in row.notes
+    relationship = next(
+        item for item in graph.relationships if item.relationship_type == "PROG_ASSIGNMENT_TO_SBAC"
+    )
+    assert relationship.quality == "Tentative"
+    assert relationship.basis == "assignment-visible-off-same-volume-sbac-diagnostic"
+    assert relationship.diagnostic_category == "visible-off-assignment"
+    assert relationship.target_key == "vol-a-sbac|vol-b-sbac"
+
+
+def test_same_sfs_volume_visible_off_sbnk_assignment_gets_sbnk_diagnostic() -> None:
+    items = [
+        _object(
+            "vol-b-sbnk",
+            "SBNK",
+            "PAD",
+            _sbnk_payload("PAD"),
+            10,
+            metadata=_sfs_placement("Vol B"),
+        ),
+        _object(
+            "vol-a-sbnk",
+            "SBNK",
+            "PAD",
+            _sbnk_payload("PAD"),
+            20,
+            metadata=_sfs_placement("Vol A"),
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("PAD", kind_byte=0x10, rch_assign_gate=0x00),
+            30,
+            metadata=_sfs_placement("Vol A"),
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+    assert row.match_quality == "Tentative"
+    assert row.match_method == "assignment-visible-off-same-volume-sbnk-diagnostic"
+    assert row.matched_target_object_key == ""
+    assert row.candidate_object_keys == "vol-a-sbnk|vol-b-sbnk"
+    assert "assignment-visible-off-same-volume-sbnk-diagnostic" in row.notes
+    relationship = next(
+        item for item in graph.relationships if item.relationship_type == "PROG_ASSIGNMENT_TO_SBNK"
+    )
+    assert relationship.quality == "Tentative"
+    assert relationship.basis == "assignment-visible-off-same-volume-sbnk-diagnostic"
+    assert relationship.diagnostic_category == "visible-off-assignment"
+    assert relationship.target_key == "vol-a-sbnk|vol-b-sbnk"
+
+
+def test_visible_off_same_volume_diagnostic_requires_unique_candidate() -> None:
+    items = [
+        _object(
+            "vol-a-sbac-1",
+            "SBAC",
+            "GROUP",
+            _sbac_payload("BANK"),
+            10,
+            metadata=_sfs_placement("Vol A"),
+        ),
+        _object(
+            "vol-a-sbac-2",
+            "SBAC",
+            "GROUP",
+            _sbac_payload("BANK"),
+            20,
+            metadata=_sfs_placement("Vol A"),
+        ),
+        _object(
+            "vol-b-sbac",
+            "SBAC",
+            "GROUP",
+            _sbac_payload("BANK"),
+            30,
+            metadata=_sfs_placement("Vol B"),
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("GROUP", kind_byte=0x11, rch_assign_gate=0x00),
+            40,
+            metadata=_sfs_placement("Vol A"),
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+    assert row.match_quality == "Tentative"
+    assert row.match_method == "assignment-visible-off-name-ambiguous-sbac"
+    assert row.matched_target_object_key == ""
+    assert row.candidate_object_keys == "vol-a-sbac-1|vol-a-sbac-2|vol-b-sbac"
+
+    relationship = next(
+        item for item in graph.relationships if item.relationship_type == "PROG_ASSIGNMENT_TO_SBAC"
+    )
+    assert relationship.diagnostic_category == "visible-off-assignment"
 
 
 def test_iso_zeroed_matched_prog_assignment_is_source_load_not_hda_off() -> None:
@@ -678,6 +871,11 @@ def test_visible_off_sbnk_ambiguous_prog_assignment_gets_diagnostic_label() -> N
     assert row.candidate_object_keys == "sbnk-a|sbnk-b"
     assert "visible-off-name-ambiguous-sbnk" in row.notes
 
+    relationship = next(
+        item for item in graph.relationships if item.relationship_type == "PROG_ASSIGNMENT_TO_SBNK"
+    )
+    assert relationship.diagnostic_category == "visible-off-assignment"
+
 
 def test_visible_off_non_target_category_ambiguous_prog_assignment_gets_diagnostic_label() -> None:
     items = [
@@ -697,12 +895,17 @@ def test_visible_off_non_target_category_ambiguous_prog_assignment_gets_diagnost
     row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
     assert row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
     assert row.match_quality == "Tentative"
-    assert row.match_method == "assignment-visible-off-name-ambiguous-non-target-category"
+    assert row.match_method == "assignment-visible-off-name-ambiguous-smpl-candidates"
     assert row.selector_expected_category == "SBNK"
     assert row.matched_target_object_key == ""
     assert row.candidate_categories == "SMPL|SMPL"
     assert row.candidate_object_keys == "smpl-a|smpl-b"
-    assert "visible-off-name-ambiguous-non-target-category" in row.notes
+    assert "assignment-visible-off-name-ambiguous-smpl-candidates" in row.notes
+
+    relationship = next(
+        item for item in graph.relationships if item.relationship_type == "PROG_ASSIGNMENT_TO_SBNK"
+    )
+    assert relationship.diagnostic_category == "visible-off-assignment"
 
 
 def test_active_unmatched_direct_prog_assignment_stays_unresolved() -> None:
@@ -740,6 +943,11 @@ def test_active_unmatched_direct_prog_assignment_stays_unresolved() -> None:
     assert row.candidate_object_keys == ""
     assert "missing local target" in row.match_notes
     assert "active-missing-local-target" in row.notes
+
+    relationship = next(
+        item for item in graph.relationships if item.relationship_type == "PROG_ASSIGNMENT_TO_SBNK"
+    )
+    assert relationship.diagnostic_category == "active-assignment-missing-target"
 
 
 def test_duplicate_prog_assignment_rows_mark_later_rows_not_active() -> None:
@@ -904,6 +1112,153 @@ def test_sbnk_member_name_only_unique_match_is_likely() -> None:
     assert relationship.target_key == "smpl"
     assert relationship.quality == "Likely"
     assert relationship.basis == "sbnk-member-name-only"
+
+
+def test_sbnk_member_link_id_only_name_mismatch_gets_precise_basis() -> None:
+    items = [
+        _object("smpl", "SMPL", "OTHER", _smpl_payload("OTHER", link_id=0x1111), 10),
+        _object(
+            "sbnk",
+            "SBNK",
+            "BANK",
+            _sbnk_payload("BANK", member_name="SAMPLE", member_link_id=0x1111),
+            20,
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    relationship = next(
+        row for row in graph.relationships if row.relationship_type == "SBNK_LEFT_MEMBER_TO_SMPL"
+    )
+    assert relationship.target_key == "smpl"
+    assert relationship.quality == "Tentative"
+    assert relationship.basis == "sbnk-member-link-id-only-name-mismatch"
+    assert relationship.diagnostic_category == "sbnk-member-link"
+
+
+def test_sbnk_member_link_id_only_iso_cross_folder_name_mismatch_gets_precise_basis() -> None:
+    items = [
+        _object(
+            "smpl",
+            "SMPL",
+            "OTHER",
+            _smpl_payload("OTHER", link_id=0x1111),
+            10,
+            container_kind="iso",
+            fat_file="VOL/F002/SMPL/F029",
+        ),
+        _object(
+            "sbnk",
+            "SBNK",
+            "BANK",
+            _sbnk_payload("BANK", member_name="SAMPLE", member_link_id=0x1111),
+            20,
+            container_kind="iso",
+            fat_file="VOL/F003/SBNK/F062",
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    relationship = next(
+        row for row in graph.relationships if row.relationship_type == "SBNK_LEFT_MEMBER_TO_SMPL"
+    )
+    assert relationship.target_key == "smpl"
+    assert relationship.quality == "Tentative"
+    assert relationship.basis == "sbnk-member-link-id-only-iso-cross-folder-name-mismatch"
+    assert relationship.diagnostic_category == "sbnk-member-link"
+
+
+def test_sbnk_program_bitmap_mismatch_gets_diagnostic_basis() -> None:
+    payload = bytearray(_sbnk_payload("BANK"))
+    payload[0x0C0:0x0C4] = (1).to_bytes(4, "big")
+    items = [_object("sbnk", "SBNK", "BANK", bytes(payload), 10)]
+
+    graph = build_relationship_graph(items)
+
+    relationship = next(
+        row for row in graph.relationships if row.relationship_type == "SBNK_PROGRAM_BITMAP_TO_PROG"
+    )
+    assert relationship.target_key == "001"
+    assert relationship.quality == "Tentative"
+    assert (
+        relationship.basis
+        == "sbnk-program-link-bitmap-bitmap-without-decoded-direct-assignment-diagnostic"
+    )
+    assert relationship.diagnostic_category == "program-link-bitmap"
+
+
+def test_sbnk_program_bitmap_disambiguates_ambiguous_direct_assignment_basis() -> None:
+    payload = bytearray(_sbnk_payload("BANK"))
+    payload[0x0C0:0x0C4] = (1).to_bytes(4, "big")
+    items = [
+        _object("sbnk-a", "SBNK", "BANK", bytes(payload), 10),
+        _object("sbnk-b", "SBNK", "BANK", _sbnk_payload("BANK"), 20),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload("BANK", kind_byte=0x10, rch_assign_gate=0xFF),
+            30,
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    bitmap_row = next(row for row in graph.sbnk_bitmap_rows if row.sbnk_object_key == "sbnk-a")
+    assert bitmap_row.mismatch_class == "bitmap_disambiguates_ambiguous_direct_assignment"
+    relationship = next(
+        row
+        for row in graph.relationships
+        if row.relationship_type == "SBNK_PROGRAM_BITMAP_TO_PROG" and row.source_key == "sbnk-a"
+    )
+    assert relationship.target_key == "001"
+    assert relationship.quality == "Tentative"
+    assert (
+        relationship.basis
+        == "sbnk-program-link-bitmap-bitmap-disambiguates-ambiguous-direct-assignment-diagnostic"
+    )
+    assert relationship.diagnostic_category == "program-link-bitmap"
+
+
+def test_sbnk_program_bitmap_known_direct_assignment_missing_basis() -> None:
+    payload = bytearray(_sbnk_payload("BANK"))
+    payload[0x0C0:0x0C4] = (1).to_bytes(4, "big")
+    items = [
+        _object("sbnk", "SBNK", "BANK", bytes(payload), 10),
+        _object(
+            "prog-001",
+            "PROG",
+            "001",
+            _prog_payload("BANK", kind_byte=0x10, rch_assign_gate=0xFF),
+            20,
+        ),
+        _object(
+            "prog-002",
+            "PROG",
+            "002",
+            _prog_payload("BANK", kind_byte=0x10, rch_assign_gate=0xFF),
+            30,
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    bitmap_row = next(row for row in graph.sbnk_bitmap_rows if row.sbnk_object_key == "sbnk")
+    assert bitmap_row.mismatch_class == "known_direct_assignment_missing_bitmap"
+    assert bitmap_row.bitmap_programs == "001"
+    assert bitmap_row.direct_assignment_without_bitmap_programs == "002"
+    relationship = next(
+        row for row in graph.relationships if row.relationship_type == "SBNK_PROGRAM_BITMAP_TO_PROG"
+    )
+    assert relationship.target_key == "001"
+    assert relationship.quality == "Tentative"
+    assert (
+        relationship.basis
+        == "sbnk-program-link-bitmap-known-direct-assignment-missing-bitmap-diagnostic"
+    )
+    assert relationship.diagnostic_category == "program-link-bitmap"
 
 
 def test_prog_assignment_keeps_raw_handle_diagnostic_when_name_is_unmatched() -> None:
@@ -1231,6 +1586,55 @@ def test_visible_off_direct_prog_assignment_reports_missing_local_target() -> No
     assert relationship.quality == "Unknown"
     assert relationship.target_key == ""
     assert relationship.basis == "assignment-visible-off-missing-local-sbnk"
+    assert relationship.diagnostic_category == "visible-off-assignment"
+
+
+def test_iso_visible_off_sbac_prog_assignment_reports_missing_local_group() -> None:
+    items = [
+        _object(
+            "local-sbac",
+            "SBAC",
+            "EXISTING GROUP",
+            _sbac_payload("EXISTING BANK"),
+            10,
+            fat_file="VOL/F001/SBAC/F001",
+            container_kind="iso",
+        ),
+        _object(
+            "prog",
+            "PROG",
+            "001",
+            _prog_payload(
+                "Tower Chords",
+                kind_byte=0x11,
+                raw_handle=0x091350A8,
+                rch_assign_gate=0x00,
+            ),
+            20,
+            fat_file="VOL/F001/PROG/F001",
+            container_kind="iso",
+        ),
+    ]
+
+    graph = build_relationship_graph(items)
+
+    prog_row = next(row for row in graph.prog_bank_rows if row.prog_object_key == "prog")
+    assert prog_row.match_quality == "Unknown"
+    assert prog_row.match_method == "assignment-visible-off-iso-missing-local-sbac"
+    assert prog_row.active_assignment_state == ACTIVE_ASSIGNMENT_STATE_CONFIRMED_VISIBLE_OFF
+    assert prog_row.selector_expected_category == "SBAC"
+    assert prog_row.candidate_count == 0
+    assert prog_row.matched_target_object_key == ""
+    assert "assignment-visible-off-iso-missing-local-sbac" in prog_row.notes
+    assert "raw-selector-diagnostic-only" in prog_row.notes
+
+    relationship = next(
+        row for row in graph.relationships if row.relationship_type == "PROG_ASSIGNMENT_TO_SBAC"
+    )
+    assert relationship.quality == "Unknown"
+    assert relationship.target_key == ""
+    assert relationship.basis == "assignment-visible-off-iso-missing-local-sbac"
+    assert relationship.diagnostic_category == "visible-off-assignment"
 
 
 def test_visible_off_sbac_prog_assignment_reports_missing_local_group() -> None:
@@ -1278,3 +1682,4 @@ def test_visible_off_sbac_prog_assignment_reports_missing_local_group() -> None:
     assert relationship.quality == "Unknown"
     assert relationship.target_key == ""
     assert relationship.basis == "assignment-visible-off-missing-local-sbac"
+    assert relationship.diagnostic_category == "visible-off-assignment"
