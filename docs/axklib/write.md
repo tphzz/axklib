@@ -26,7 +26,10 @@ partition metadata, primary/duplicate partition headers, allocation bitmaps,
 directory indexes, and volume directories. Object-record writing is currently
 validated on the 256 MiB and 512 MiB profiles; the 768 MiB sparse profile is
 limited to empty volume skeletons until object payloads are validated on that
-profile. The 256 MiB profile has been hardware-tested with multiple volumes,
+profile. Profile support is not just a size and partition-count match: the
+writer also emits the complete metadata profile for that supported layout. Do
+not create unlisted hard-disk layouts by writing only the named superblock and
+partition-header fields. The 256 MiB profile has been hardware-tested with multiple volumes,
 current waveforms, and direct single-member sample banks. The 512 MiB profile
 has been hardware-tested with two generated volumes per partition and two
 generated direct sample banks per volume, plus isolated per-volume growth to
