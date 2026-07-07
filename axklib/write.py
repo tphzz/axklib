@@ -48,25 +48,6 @@ SECTOR2_METADATA_MARKER = bytes.fromhex("23 44 01 54 23 94")
 SECTOR2_ENTRY_STATE_VALUE = 0x13
 SECTOR2_ENTRY_FLAGS_VALUE = 0x90
 SECTOR2_ENTRY_NAME_SIZE = 16
-# Still unresolved two-partition sector-2 prefix bytes at +0x30..+0x3e.
-# They vary by sector-2 profile, so they are written explicitly instead of hidden in a blob.
-SECTOR2_TWO_PARTITION_UNRESOLVED_BYTES = {
-    0x30: 0x01,
-    0x31: 0x01,
-    0x32: 0x00,
-    0x33: 0x18,
-    0x34: 0x5C,
-    0x35: 0x30,
-    0x36: 0x5C,
-    0x37: 0x00,
-    0x38: 0x32,
-    0x39: 0x62,
-    0x3A: 0x34,
-    0x3B: 0x65,
-    0x3C: 0x36,
-    0x3D: 0x30,
-    0x3E: 0x30,
-}
 SUPPORTED_HARDWARE_METADATA_PARTITION_SECTORS = 524_285
 SUPPORTED_TWO_PARTITION_IMAGE_BYTES = 512 * 1024 * 1024
 SUPPORTED_TWO_PARTITION_SECTORS = 524_286
@@ -79,46 +60,6 @@ PARTITION_HEADER_TAIL_OPAQUE_TEMPLATE = bytes.fromhex(
     "001aa540000000000000138800000400000000000000000000000000000000000000000200000000000000000000000000000000000a9f760152a22400000000"
     "00000000000000000000000000000000000000000000000000000000000000000000000001529fb400000002000000c800000400000000000000000000000000"
 )
-# Profile-dependent compatibility words outside the public partition geometry
-# model. Keep them explicit and scoped to hardware-proven writer profiles.
-PARTITION_HEADER_PROFILE_COMPATIBILITY_WORDS = {
-    "single_256m": {
-        0x1BC: 0x00000000,
-        0x1C0: 0x00000001,
-        0x1C4: 0x00000000,
-        0x1C8: 0x00000001,
-        0x1CC: 0x00186CC4,
-        0x1D0: 0x016EB30C,
-        0x1D4: 0x00000202,
-        0x1D8: 0x1F000018,
-        0x1DC: 0x426C7565,
-        0x1E0: 0x00430000,
-    },
-    "two_partition_512m": {
-        0x1BC: 0x016EB30C,
-        0x1C0: 0x01529FD4,
-        0x1C4: 0x001857AE,
-        0x1C8: 0x00000000,
-        0x1CC: 0x00000000,
-        0x1D0: 0x0017C372,
-        0x1D4: 0x00000202,
-        0x1D8: 0x1F000018,
-        0x1DC: 0x426C7565,
-        0x1E0: 0x00430000,
-    },
-    "sparse_768m_3p": {
-        0x1BC: 0x00800000,
-        0x1C0: 0x00000000,
-        0x1C4: 0x00000000,
-        0x1C8: 0x00000000,
-        0x1CC: 0x00000000,
-        0x1D0: 0xFFFFA018,
-        0x1D4: 0x0152A030,
-        0x1D8: 0x00000000,
-        0x1DC: 0x01728688,
-        0x1E0: 0x00000000,
-    },
-}
 PARTITION_HEADER_TAIL_VARIABLE_OFFSETS = (
     0x104,
     0x114,
@@ -940,7 +881,6 @@ def _two_partition_sector_metadata(plans: list[_PartitionPlan], sequence: int) -
     metadata[0:8] = _two_partition_sector_identifier(sequence)
     metadata[9:17] = SECTOR2_PRIMARY_IDENTIFIER
     _write_sector2_labeled_entry(metadata, marker_offset=0x12, name=plans[0].builder.name)
-    _write_unresolved_sector2_two_partition_bytes(metadata)
     _write_sector2_labeled_entry(metadata, marker_offset=0x40, name=plans[1].builder.name)
     return bytes(metadata)
 
@@ -956,12 +896,6 @@ def _write_sector2_labeled_entry(metadata: bytearray, *, marker_offset: int, nam
         name, SECTOR2_ENTRY_NAME_SIZE
     )
     metadata[marker_offset + 0x19] = SECTOR2_ENTRY_FLAGS_VALUE
-
-
-def _write_unresolved_sector2_two_partition_bytes(metadata: bytearray) -> None:
-    for offset, value in SECTOR2_TWO_PARTITION_UNRESOLVED_BYTES.items():
-        metadata[offset] = value
-
 
 def _partition_writes(plan: _PartitionPlan) -> list[tuple[int, bytes]]:
     start_offset = plan.start_sector * SECTOR_SIZE
@@ -1105,23 +1039,7 @@ def _partition_header_tail_values(plan: _PartitionPlan) -> dict[int, int]:
         0x194: _partition_header_profile_count_marker(plan),
         0x1A8: plan.index,
     }
-    values.update(
-        PARTITION_HEADER_PROFILE_COMPATIBILITY_WORDS[
-            _partition_header_tail_profile_key(plan)
-        ]
-    )
     return values
-
-
-def _partition_header_tail_profile_key(plan: _PartitionPlan) -> str:
-    if _is_single_partition_256m_plan(plan):
-        return "single_256m"
-    if _is_two_partition_plan(plan):
-        return "two_partition_512m"
-    if _is_sparse_multi_partition_plan(plan):
-        return "sparse_768m_3p"
-    raise ValueError("partition header tail profile is not supported for this plan")
-
 
 def _partition_header_dynamic_word(partition_index: int) -> int:
     return PARTITION_HEADER_DYNAMIC_BASE_WORD + partition_index * PARTITION_HEADER_DYNAMIC_WORD_STEP

@@ -77,6 +77,15 @@ def _entry_names(payload: bytes) -> list[str]:
     return names
 
 
+def _assert_partition_header_residue_zero(data: bytes, partition_index: int) -> None:
+    partition_start = _be32(data, 0xA8 + partition_index * 8)
+    partition_offset = partition_start * 512
+    assert data[partition_offset + 0x1BC : partition_offset + 0x1E4] == b"\x00" * 40
+    assert data[
+        partition_offset + 1024 + 0x1BC : partition_offset + 1024 + 0x1E4
+    ] == b"\x00" * 40
+
+
 def test_hds_writer_rejects_images_above_a_series_cap() -> None:
     with pytest.raises(ValueError, match="exceeds A-series cap"):
         HdsImageBuilder(size_bytes=MAX_IMAGE_SIZE_BYTES + 512)
@@ -401,9 +410,11 @@ def test_hds_writer_creates_two_partitions_with_independent_volumes(tmp_path: Pa
     assert _be32(image_bytes, 0xB4) == 524_286
     assert image_bytes[1024:1032] == b"bb736200"
     assert image_bytes[1024 + 0x1A : 1024 + 0x2A] == b"hd1             "
+    assert image_bytes[1024 + 0x30 : 1024 + 0x3F] == b"\x00" * 15
     assert image_bytes[1024 + 0x48 : 1024 + 0x58] == b"hd2             "
     pre_partition_b = (524_290 - 1) * 512
     assert image_bytes[pre_partition_b : pre_partition_b + 8] == b"bb736201"
+    assert image_bytes[pre_partition_b + 0x30 : pre_partition_b + 0x3F] == b"\x00" * 15
 
     partition_a_offset = _be32(image_bytes, 0xA8) * 512
     partition_b_offset = _be32(image_bytes, 0xB0) * 512
@@ -415,6 +426,8 @@ def test_hds_writer_creates_two_partitions_with_independent_volumes(tmp_path: Pa
     assert image_bytes[partition_b_offset + 0x100 : partition_b_offset + 0x108] == bytes.fromhex(
         "0000000000080002"
     )
+    _assert_partition_header_residue_zero(image_bytes, 0)
+    _assert_partition_header_residue_zero(image_bytes, 1)
 
     root_a = _record_payload_in_partition(
         image_bytes, 0, _index_record_in_partition(image_bytes, 0, 1)
@@ -487,9 +500,7 @@ def test_hds_writer_scales_bitmap_and_index_geometry_for_256_mib(tmp_path: Path)
     assert image_bytes[partition_offset + 0x11C : partition_offset + 0x120] == (524_285).to_bytes(
         4, "big"
     )
-    assert image_bytes[partition_offset + 0x1D8 : partition_offset + 0x1E2] == bytes.fromhex(
-        "1f000018426c75650043"
-    )
+    _assert_partition_header_residue_zero(image_bytes, 0)
     assert (
         image_bytes[partition_offset : partition_offset + 1024]
         == image_bytes[partition_offset + 1024 : partition_offset + 2048]
@@ -541,6 +552,7 @@ def test_hds_writer_creates_sparse_768m_three_partition_empty_volume_image(tmp_p
         assert _be32(image_bytes, partition_offset + 0x154) == index
         assert _be32(image_bytes, partition_offset + 0x160) == index * 524_286
         assert _be32(image_bytes, partition_offset + 0x1A8) == index
+        _assert_partition_header_residue_zero(image_bytes, index)
 
         root_payload = _record_payload_in_partition(
             image_bytes, index, _index_record_in_partition(image_bytes, index, 1)

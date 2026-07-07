@@ -376,9 +376,11 @@ extents from the typed image model. Fields with known formulas, such as
 partition slot placement, partition-header start/count words, partition-index
 words, sector-2 labels, and dynamic header words, are generated explicitly. The
 supported partition-header tail profiles share one fixed compatibility template
-after variable words are removed; remaining profile-dependent compatibility
-words and sector-2 compatibility bytes are generated separately and kept scoped to validated writer
-profiles.
+after variable words are removed. The validated non-required residue range at
+`+0x1bc..+0x1e3` is zero-generated for all currently supported writer
+profiles. Sector-2 labeled-entry metadata remains scoped to validated writer
+profiles; the current two-partition +0x30..+0x3e range is deliberately
+zeroed.
 
 
 ### Writer profile metadata
@@ -392,15 +394,15 @@ The supported writer profiles currently use these rules:
 | Metadata area | Public contract |
 | --- | --- |
 | Superblock descriptor words at `+0x80..+0x98` | Written as fixed profile constants for the currently supported hard-disk writer profiles. |
-| Sector-2 two-partition bytes at `+0x30..+0x3e` | Written only for the supported 512 MiB / two-partition profile; other supported profiles leave this range zeroed. |
-| Partition-header compatibility words at `+0x1bc..+0x1e0` | Written from explicit profile tables for the supported 256 MiB / one-partition, 512 MiB / two-partition, and 768 MiB / three-partition profiles. |
+| Sector-2 two-partition range at `+0x30..+0x3e` | Zeroed for all currently supported writer profiles after hardware validation showed it is not required. |
+| Partition-header residue range at `+0x1bc..+0x1e3` | Zeroed for all currently supported writer profiles after hardware validation showed it is not required. |
 | Sparse partition-header `+0x14c` | Written as image sector count minus one for the supported sparse profile. |
 | Sparse partition-header `+0x194` | Written as zero for the supported sparse profile. |
 
-These fields are part of the compatibility envelope for generated images. Their
-byte values are stable for the supported profiles, but their user-facing meaning
-is not exposed as public API. Applications should select one of the supported
-writer profiles rather than constructing these fields manually.
+These fields are part of the compatibility envelope for generated images. Bytes
+that hardware validation shows are not required are deliberately zeroed.
+Applications should select one of the supported writer profiles rather than
+constructing these fields manually.
 
 ## Minimal Read Walkthrough
 
