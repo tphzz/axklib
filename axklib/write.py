@@ -20,12 +20,15 @@ SECTOR_SIZE = 512
 SECTORS_PER_CLUSTER = 2
 CLUSTER_SIZE = SECTOR_SIZE * SECTORS_PER_CLUSTER
 MAX_IMAGE_SIZE_BYTES = 2_147_483_648
-MAX_PARTITION_SIZE_BYTES = 1_073_741_824
+MAX_PARTITION_SLOT_BYTES = 1_073_741_824
 MIN_IMAGE_SIZE_BYTES = 1_048_576
 PARTITION_START_SECTOR = 3
 PARTITION_HEADER_SIZE = 1024
 PARTITION_ENTRY_COUNT = 8
 DIRECTORY_INDEX_SPAN_CLUSTERS = 358
+PARTITION_HEADER_CAPACITY_VALUE = 200
+PARTITION_HEADER_INITIAL_RESERVED_CLUSTER = 2
+PARTITION_HEADER_INDEX_CAPACITY_VALUE = 5012
 DIRECT_EXTENT_CLUSTER_LIMIT = 0xFFFF
 MIN_ALLOCATED_RECORD_CLUSTERS = 2
 DISK_MODE_METADATA = bytes.fromhex(
@@ -40,6 +43,8 @@ SUPPORTED_HARDWARE_METADATA_PARTITION_SECTORS = 524_285
 SUPPORTED_TWO_PARTITION_IMAGE_BYTES = 512 * 1024 * 1024
 SUPPORTED_TWO_PARTITION_SECTORS = 524_286
 SUPPORTED_TWO_PARTITION_STRIDE_SECTORS = 524_287
+SUPPORTED_SPARSE_768M_IMAGE_BYTES = 768 * 1024 * 1024
+SUPPORTED_SPARSE_768M_PARTITIONS = 3
 PARTITION_HEADER_METADATA_256M = bytes.fromhex(
     "000000000000000300001388000002000000000200000000000000030007fffd00000400000320000017ab4a01529f34"
     "001aa5400152a3fc00000002000000c800001388016f5bf0000000000008000001529fa0000000000152a3fc00000000"
@@ -64,6 +69,16 @@ PARTITION_HEADER_METADATA_512M_2P_P1 = bytes.fromhex(
     "01529fd4001857ae00000000000000000017c372000002021f000018426c75650043000001529fb400000002000000c8"
     "00000400000000000000000000000000"
 )
+PARTITION_HEADER_METADATA_SPARSE_MULTI_BASE = bytes.fromhex(
+    "000000000000000300001388000002000000000200000000000000030007fffe00000400000320000017ab4a01529f34"
+    "001aa5400152a3fc00000002000000c800001388016f5bf0000000000017ffff01529fa0000000000152a3fc00000000"
+    "000000000152a3fc0000000800000400000aa30e01529f78000000030007fffe001aa5400152a3fc0000138800000400"
+    "000000000000000000000000000000000000000200000000000000000000000000000000000a9f760152a22400800000"
+    "00000000000000000000000000000000ffffa0180152a03000000000017286880000000001529fb400000002000000c8"
+    "00000400000000000000000000000000"
+)
+SPARSE_MULTI_METADATA_BASE_WORD = 0x0152A3FC
+SPARSE_MULTI_METADATA_WORD_STEP = 0x11
 OBJECT_MAGIC = b"FSFSDEV3SPLX"
 SMPL_COMPACT_HEADER_SIZE = 0xAC
 SMPL_OBJECT_HEADER_SIZE = 0x200
@@ -116,6 +131,7 @@ def _directory_entry(
     *,
     fixed_name_width: int | None = None,
     directory_id: int | None = None,
+    dot_partition_marker: int = 0,
 ) -> bytes:
     name_bytes = (
         _ascii_field(name, fixed_name_width)
@@ -134,6 +150,7 @@ def _directory_entry(
         entry[10:12] = b"\x4f\x58"
         entry[16:20] = b"\x00\x17\x82\x1a"
         entry[24:28] = b"\xff" * 4
+        entry[31] = dot_partition_marker & 0xFF
     elif name == "..":
         if directory_id is None:
             raise ValueError("directory_id is required for parent directory entries")
@@ -148,9 +165,17 @@ def _directory_payload(
     directory_id: int,
     parent_id: int,
     entries: Sequence[tuple[str, int, int | None]],
+    dot_partition_marker: int = 0,
 ) -> bytes:
     payload = bytearray()
-    payload.extend(_directory_entry(".", directory_id, directory_id=directory_id))
+    payload.extend(
+        _directory_entry(
+            ".",
+            directory_id,
+            directory_id=directory_id,
+            dot_partition_marker=dot_partition_marker,
+        )
+    )
     payload.extend(_directory_entry("..", parent_id, directory_id=directory_id))
     for name, link_id, fixed_name_width in entries:
         payload.extend(_directory_entry(name, link_id, fixed_name_width=fixed_name_width))
@@ -426,23 +451,27 @@ def _layout_partitions(size_bytes: int, partitions: list[PartitionBuilder]) -> l
     if available_sectors <= 0:
         raise ValueError("image is too small for an SFS partition")
     partition_count = len(partitions)
-    max_partition_sectors = MAX_PARTITION_SIZE_BYTES // SECTOR_SIZE
+    max_partition_sectors = MAX_PARTITION_SLOT_BYTES // SECTOR_SIZE
     if partition_count > 1:
-        if size_bytes != SUPPORTED_TWO_PARTITION_IMAGE_BYTES or partition_count != 2:
-            raise ValueError(
-                "multi-partition writing currently supports only the hardware-proven "
-                "512 MiB / two-partition profile"
+        if _is_supported_two_partition_layout(
+            size_bytes, partition_count
+        ) or _is_supported_sparse_768m_layout(size_bytes, partition_count):
+            start_sector, sector_count = _supported_multi_partition_slot_geometry(
+                size_bytes, partition_count
             )
-        return [
-            _make_partition_plan(
-                partition,
-                index=index,
-                start_sector=PARTITION_START_SECTOR
-                + index * SUPPORTED_TWO_PARTITION_STRIDE_SECTORS,
-                sector_count=SUPPORTED_TWO_PARTITION_SECTORS,
-            )
-            for index, partition in enumerate(partitions)
-        ]
+            return [
+                _make_partition_plan(
+                    partition,
+                    index=index,
+                    start_sector=start_sector + index * (sector_count + 1),
+                    sector_count=sector_count,
+                )
+                for index, partition in enumerate(partitions)
+            ]
+        raise ValueError(
+            "multi-partition writing currently supports only the hardware-proven "
+            "512 MiB / two-partition and sparse 768 MiB / three-partition profiles"
+        )
 
     sectors_per_partition = available_sectors
     if sectors_per_partition > max_partition_sectors:
@@ -461,6 +490,27 @@ def _layout_partitions(size_bytes: int, partitions: list[PartitionBuilder]) -> l
     ]
 
 
+def _is_supported_two_partition_layout(size_bytes: int, partition_count: int) -> bool:
+    return size_bytes == SUPPORTED_TWO_PARTITION_IMAGE_BYTES and partition_count == 2
+
+
+def _is_supported_sparse_768m_layout(size_bytes: int, partition_count: int) -> bool:
+    return (
+        size_bytes == SUPPORTED_SPARSE_768M_IMAGE_BYTES
+        and partition_count == SUPPORTED_SPARSE_768M_PARTITIONS
+    )
+
+
+def _supported_multi_partition_slot_geometry(
+    size_bytes: int, partition_count: int
+) -> tuple[int, int]:
+    """Return the proven A-series partition slot geometry for supported layouts."""
+    slot_span = (size_bytes // SECTOR_SIZE - (PARTITION_START_SECTOR - 1)) // partition_count
+    max_slot_span = MAX_PARTITION_SLOT_BYTES // SECTOR_SIZE
+    if slot_span > max_slot_span:
+        slot_span = max_slot_span
+    return PARTITION_START_SECTOR, slot_span - 1
+
 def _make_partition_plan(
     partition: PartitionBuilder,
     *,
@@ -468,7 +518,7 @@ def _make_partition_plan(
     start_sector: int,
     sector_count: int,
 ) -> _PartitionPlan:
-    max_partition_sectors = MAX_PARTITION_SIZE_BYTES // SECTOR_SIZE
+    max_partition_sectors = MAX_PARTITION_SLOT_BYTES // SECTOR_SIZE
     if sector_count > max_partition_sectors:
         raise ValueError("partition size would exceed 1 GiB")
     cluster_count = sector_count // SECTORS_PER_CLUSTER
@@ -489,6 +539,7 @@ def _make_partition_plan(
         records=[],
     )
 
+
 def _build_partition_records(plan: _PartitionPlan) -> None:
     records: list[_RecordPlan] = [
         _RecordPlan(0, b"\x00" * (32 * CLUSTER_SIZE), "hidden"),
@@ -498,6 +549,7 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
         ("sfserrlog", SFS_ERROR_LOG_ID, None),
         ("sfserram", 0, None),
     ]
+    directory_dot_marker = plan.index * 0x78 if _is_sparse_multi_partition_plan(plan) else 0
     next_id = SFS_ERROR_LOG_ID + 1
     for volume in plan.builder._volumes:
         volume_id = next_id
@@ -549,7 +601,12 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
         records.append(
             _RecordPlan(
                 volume_id,
-                _directory_payload(volume_id, ROOT_DIRECTORY_ID, volume_entries),
+                _directory_payload(
+                    volume_id,
+                    ROOT_DIRECTORY_ID,
+                    volume_entries,
+                    dot_partition_marker=directory_dot_marker,
+                ),
                 "directory",
                 directory_tail_value=2 + len(volume_entries),
             )
@@ -557,7 +614,12 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
         records.append(
             _RecordPlan(
                 category_ids["SMPL"],
-                _directory_payload(category_ids["SMPL"], volume_id, smpl_entries),
+                _directory_payload(
+                    category_ids["SMPL"],
+                    volume_id,
+                    smpl_entries,
+                    dot_partition_marker=directory_dot_marker,
+                ),
                 "directory",
                 directory_tail_value=2,
             )
@@ -565,7 +627,12 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
         records.append(
             _RecordPlan(
                 category_ids["SBNK"],
-                _directory_payload(category_ids["SBNK"], volume_id, sbnk_entries),
+                _directory_payload(
+                    category_ids["SBNK"],
+                    volume_id,
+                    sbnk_entries,
+                    dot_partition_marker=directory_dot_marker,
+                ),
                 "directory",
                 directory_tail_value=2,
             )
@@ -574,7 +641,12 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
             records.append(
                 _RecordPlan(
                     category_ids[category_name],
-                    _directory_payload(category_ids[category_name], volume_id, []),
+                    _directory_payload(
+                        category_ids[category_name],
+                        volume_id,
+                        [],
+                        dot_partition_marker=directory_dot_marker,
+                    ),
                     "directory",
                     directory_tail_value=2,
                 )
@@ -715,9 +787,12 @@ def _superblock_writes(size_bytes: int, plans: list[_PartitionPlan]) -> list[tup
         (SECTOR_SIZE * 2, _sector2_metadata(plans)),
     ]
     if _is_supported_two_partition_profile(plans):
-        writes.append(
-            ((plans[1].start_sector - 1) * SECTOR_SIZE, _sector2_metadata(plans, 1))
-        )
+        writes.append(((plans[1].start_sector - 1) * SECTOR_SIZE, _sector2_metadata(plans, 1)))
+    elif _is_supported_sparse_multi_profile(plans):
+        for plan in plans[1:]:
+            writes.append(
+                ((plan.start_sector - 1) * SECTOR_SIZE, _sector2_metadata(plans, plan.index))
+            )
     return writes
 
 
@@ -725,8 +800,20 @@ def _is_supported_two_partition_profile(plans: list[_PartitionPlan]) -> bool:
     return (
         len(plans) == 2
         and plans[0].start_sector == PARTITION_START_SECTOR
-        and plans[1].start_sector
-        == PARTITION_START_SECTOR + SUPPORTED_TWO_PARTITION_STRIDE_SECTORS
+        and plans[1].start_sector == PARTITION_START_SECTOR + SUPPORTED_TWO_PARTITION_STRIDE_SECTORS
+        and all(plan.sector_count == SUPPORTED_TWO_PARTITION_SECTORS for plan in plans)
+    )
+
+
+def _is_supported_sparse_multi_profile(plans: list[_PartitionPlan]) -> bool:
+    return (
+        len(plans) == SUPPORTED_SPARSE_768M_PARTITIONS
+        and plans[0].start_sector == PARTITION_START_SECTOR
+        and all(
+            plan.start_sector
+            == PARTITION_START_SECTOR + plan.index * SUPPORTED_TWO_PARTITION_STRIDE_SECTORS
+            for plan in plans
+        )
         and all(plan.sector_count == SUPPORTED_TWO_PARTITION_SECTORS for plan in plans)
     )
 
@@ -734,6 +821,8 @@ def _is_supported_two_partition_profile(plans: list[_PartitionPlan]) -> bool:
 def _sector2_metadata(plans: list[_PartitionPlan], sequence: int = 0) -> bytes:
     if _is_supported_two_partition_profile(plans):
         return _two_partition_sector_metadata(plans, sequence)
+    if _is_supported_sparse_multi_profile(plans):
+        return _sparse_partition_sector_metadata(sequence)
     metadata = bytearray(SECTOR_SIZE)
     metadata[0:8] = SECTOR2_PRIMARY_IDENTIFIER
     metadata[9:17] = DEFAULT_DISK_IDENTIFIER
@@ -742,6 +831,14 @@ def _sector2_metadata(plans: list[_PartitionPlan], sequence: int = 0) -> bytes:
         metadata[0x19] = 0x13
         metadata[0x1A:0x2A] = _ascii_field(plans[0].builder.name, 16)
     metadata[SECTOR2_FLAGS_OFFSET] = SECTOR2_FLAGS_VALUE
+    return bytes(metadata)
+
+
+def _sparse_partition_sector_metadata(sequence: int) -> bytes:
+    if sequence < 0 or sequence >= PARTITION_ENTRY_COUNT:
+        raise ValueError("sparse partition metadata sequence is out of range")
+    metadata = bytearray(SECTOR_SIZE)
+    metadata[0:8] = f"ab43210{sequence}".encode("ascii")
     return bytes(metadata)
 
 
@@ -763,19 +860,20 @@ def _two_partition_sector_metadata(plans: list[_PartitionPlan], sequence: int) -
     metadata[0x59] = SECTOR2_FLAGS_VALUE
     return bytes(metadata)
 
+
 def _partition_writes(plan: _PartitionPlan) -> list[tuple[int, bytes]]:
     start_offset = plan.start_sector * SECTOR_SIZE
     header = bytearray(1024)
     header[0 : len(b"YAMAHA_dev3")] = b"YAMAHA_dev3"
     header[0x40:0x50] = _partition_header_name(plan)
-    _put_be32(header, 0x80, 2)
-    _put_be32(header, 0x84, 200)
+    _put_be32(header, 0x80, SECTORS_PER_CLUSTER)
+    _put_be32(header, 0x84, PARTITION_HEADER_CAPACITY_VALUE)
     header[0x88:0x90] = b"\xff" * 8
     _put_be32(header, 0x90, plan.cluster_count)
     _put_be32(header, 0x94, SECTORS_PER_CLUSTER)
-    _put_be32(header, 0x98, 2)
+    _put_be32(header, 0x98, PARTITION_HEADER_INITIAL_RESERVED_CLUSTER)
     _put_be32(header, 0x9C, plan.bitmap_cluster)
-    _put_be32(header, 0xA0, 5012)
+    _put_be32(header, 0xA0, PARTITION_HEADER_INDEX_CAPACITY_VALUE)
     _put_be32(header, 0xA4, plan.directory_index_cluster)
     _put_be32(header, 0xA8, DIRECTORY_INDEX_SPAN_CLUSTERS)
     _apply_partition_metadata_profile(header, plan)
@@ -816,19 +914,62 @@ def _partition_header_name(plan: _PartitionPlan) -> bytes:
 
 
 def _apply_partition_metadata_profile(header: bytearray, plan: _PartitionPlan) -> None:
-    if (
-        plan.sector_count == SUPPORTED_TWO_PARTITION_SECTORS
-        and plan.start_sector
-        == PARTITION_START_SECTOR + plan.index * SUPPORTED_TWO_PARTITION_STRIDE_SECTORS
-    ):
+    if _is_two_partition_plan(plan):
         header[0xAF] = plan.index
         header[0x100:0x200] = (
             PARTITION_HEADER_METADATA_512M_2P_P0
             if plan.index == 0
             else PARTITION_HEADER_METADATA_512M_2P_P1
         )
+    elif _is_sparse_multi_partition_plan(plan):
+        header[0x100:0x200] = _sparse_multi_partition_metadata(plan)
     elif plan.sector_count == SUPPORTED_HARDWARE_METADATA_PARTITION_SECTORS:
         header[0x100:0x200] = PARTITION_HEADER_METADATA_256M
+
+
+def _is_two_partition_plan(plan: _PartitionPlan) -> bool:
+    return (
+        plan.sector_count == SUPPORTED_TWO_PARTITION_SECTORS
+        and plan.start_sector
+        == PARTITION_START_SECTOR + plan.index * SUPPORTED_TWO_PARTITION_STRIDE_SECTORS
+        and plan.builder._image.size_bytes == SUPPORTED_TWO_PARTITION_IMAGE_BYTES
+        and len(plan.builder._image._partitions) == 2
+    )
+
+
+def _is_sparse_multi_partition_plan(plan: _PartitionPlan) -> bool:
+    return (
+        plan.sector_count == SUPPORTED_TWO_PARTITION_SECTORS
+        and plan.start_sector
+        == PARTITION_START_SECTOR + plan.index * SUPPORTED_TWO_PARTITION_STRIDE_SECTORS
+        and _is_supported_sparse_768m_layout(
+            plan.builder._image.size_bytes, len(plan.builder._image._partitions)
+        )
+    )
+
+
+def _sparse_multi_partition_metadata(plan: _PartitionPlan) -> bytes:
+    metadata = bytearray(PARTITION_HEADER_METADATA_SPARSE_MULTI_BASE)
+    dynamic_word = SPARSE_MULTI_METADATA_BASE_WORD + plan.index * SPARSE_MULTI_METADATA_WORD_STEP
+    first_object_hint = 0x016F5BF0 if plan.index == 0 else 0x015D6CC0
+    for offset, value in {
+        0x104: plan.start_sector,
+        0x114: plan.index * 0x20,
+        0x118: plan.start_sector,
+        0x134: dynamic_word,
+        0x144: first_object_hint,
+        0x154: plan.index,
+        0x158: dynamic_word,
+        0x15C: plan.index * 0x20,
+        0x160: plan.index * plan.sector_count,
+        0x164: dynamic_word,
+        0x178: plan.start_sector,
+        0x184: dynamic_word,
+        0x1A8: plan.index,
+    }.items():
+        relative_offset = offset - 0x100
+        metadata[relative_offset : relative_offset + 4] = _be32(value)
+    return bytes(metadata)
 
 
 def _object_refs(plan: _PartitionPlan) -> list[WrittenObjectRef]:
@@ -901,7 +1042,7 @@ __all__ = [
     "HdsImageBuilder",
     "HdsWriteResult",
     "MAX_IMAGE_SIZE_BYTES",
-    "MAX_PARTITION_SIZE_BYTES",
+    "MAX_PARTITION_SLOT_BYTES",
     "SampleBankRef",
     "WaveformRef",
     "WrittenObjectRef",

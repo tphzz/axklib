@@ -38,6 +38,7 @@ def _index_record(data: bytes, sfs_id: int) -> bytes:
     record_offset = index_offset + block * 1024 + slot * 72
     return data[record_offset : record_offset + 72]
 
+
 def _index_record_in_partition(data: bytes, partition_index: int, sfs_id: int) -> bytes:
     partition_start = _be32(data, 0xA8 + partition_index * 8)
     partition_offset = partition_start * 512
@@ -48,6 +49,7 @@ def _index_record_in_partition(data: bytes, partition_index: int, sfs_id: int) -
     record_offset = index_offset + block * 1024 + slot * 72
     return data[record_offset : record_offset + 72]
 
+
 def _record_payload(data: bytes, record: bytes) -> bytes:
     partition_start = _be32(data, 0xA8)
     cluster_offset = _be32(record, 0x0A)
@@ -55,12 +57,14 @@ def _record_payload(data: bytes, record: bytes) -> bytes:
     payload_offset = (partition_start + cluster_offset * 2) * 512
     return data[payload_offset : payload_offset + size]
 
+
 def _record_payload_in_partition(data: bytes, partition_index: int, record: bytes) -> bytes:
     partition_start = _be32(data, 0xA8 + partition_index * 8)
     cluster_offset = _be32(record, 0x0A)
     size = _be32(record, 0x06)
     payload_offset = (partition_start + cluster_offset * 2) * 512
     return data[payload_offset : payload_offset + size]
+
 
 def _entry_names(payload: bytes) -> list[str]:
     names: list[str] = []
@@ -85,12 +89,15 @@ def test_hds_writer_rejects_single_partition_above_one_gib() -> None:
     with pytest.raises(ValueError, match="exceed 1 GiB"):
         builder.plan()
 
+
 def test_hds_writer_rejects_unproven_multi_partition_profile() -> None:
     builder = HdsImageBuilder(size_bytes=256 * 1024 * 1024)
     builder.add_partition("hd1")
     builder.add_partition("hd2")
 
-    with pytest.raises(ValueError, match="512 MiB / two-partition profile"):
+    with pytest.raises(
+        ValueError, match="512 MiB / two-partition and sparse 768 MiB / three-partition profiles"
+    ):
         builder.plan()
 
 
@@ -202,6 +209,7 @@ def test_hds_writer_creates_parseable_current_smpl_and_sbnk(tmp_path: Path) -> N
     assert relationships[0].quality == "Known"
     assert relationships[0].basis == "sbnk-member-link+name"
 
+
 def test_hds_writer_creates_two_waveforms_and_banks_with_distinct_links(tmp_path: Path) -> None:
     source_a = tmp_path / "tone-a.wav"
     source_b = tmp_path / "tone-b.wav"
@@ -261,10 +269,14 @@ def test_hds_writer_creates_two_waveforms_and_banks_with_distinct_links(tmp_path
     relationships = [
         row for row in graph.relationships if row.relationship_type == "SBNK_LEFT_MEMBER_TO_SMPL"
     ]
-    assert sorted((row.source_key, row.target_key, row.quality, row.basis) for row in relationships) == [
+    assert sorted(
+        (row.source_key, row.target_key, row.quality, row.basis) for row in relationships
+    ) == [
         ("p0:sfs11", "p0:sfs9", "Known", "sbnk-member-link+name"),
         ("p0:sfs12", "p0:sfs10", "Known", "sbnk-member-link+name"),
     ]
+
+
 def test_hds_writer_creates_two_volumes_without_cross_linking(tmp_path: Path) -> None:
     source_a = tmp_path / "volume-a.wav"
     source_b = tmp_path / "volume-b.wav"
@@ -332,10 +344,14 @@ def test_hds_writer_creates_two_volumes_without_cross_linking(tmp_path: Path) ->
     relationships = [
         row for row in graph.relationships if row.relationship_type == "SBNK_LEFT_MEMBER_TO_SMPL"
     ]
-    assert sorted((row.source_key, row.target_key, row.quality, row.basis) for row in relationships) == [
+    assert sorted(
+        (row.source_key, row.target_key, row.quality, row.basis) for row in relationships
+    ) == [
         ("p0:sfs10", "p0:sfs9", "Known", "sbnk-member-link+name"),
         ("p0:sfs18", "p0:sfs17", "Known", "sbnk-member-link+name"),
     ]
+
+
 def test_hds_writer_creates_two_partitions_with_independent_volumes(tmp_path: Path) -> None:
     source_a = tmp_path / "partition-a.wav"
     source_b = tmp_path / "partition-b.wav"
@@ -370,7 +386,9 @@ def test_hds_writer_creates_two_partitions_with_independent_volumes(tmp_path: Pa
     result = builder.write(image_path)
 
     assert result.partitions == 2
-    assert [(item.partition_index, item.object_type, item.name, item.sfs_id) for item in result.objects] == [
+    assert [
+        (item.partition_index, item.object_type, item.name, item.sfs_id) for item in result.objects
+    ] == [
         (0, "SMPL", "WaveA", 9),
         (0, "SBNK", "BankA", 10),
         (1, "SMPL", "WaveB", 9),
@@ -398,10 +416,18 @@ def test_hds_writer_creates_two_partitions_with_independent_volumes(tmp_path: Pa
         "0000000000080002"
     )
 
-    root_a = _record_payload_in_partition(image_bytes, 0, _index_record_in_partition(image_bytes, 0, 1))
-    root_b = _record_payload_in_partition(image_bytes, 1, _index_record_in_partition(image_bytes, 1, 1))
-    volume_a_payload = _record_payload_in_partition(image_bytes, 0, _index_record_in_partition(image_bytes, 0, 3))
-    volume_b_payload = _record_payload_in_partition(image_bytes, 1, _index_record_in_partition(image_bytes, 1, 3))
+    root_a = _record_payload_in_partition(
+        image_bytes, 0, _index_record_in_partition(image_bytes, 0, 1)
+    )
+    root_b = _record_payload_in_partition(
+        image_bytes, 1, _index_record_in_partition(image_bytes, 1, 1)
+    )
+    volume_a_payload = _record_payload_in_partition(
+        image_bytes, 0, _index_record_in_partition(image_bytes, 0, 3)
+    )
+    volume_b_payload = _record_payload_in_partition(
+        image_bytes, 1, _index_record_in_partition(image_bytes, 1, 3)
+    )
     assert _entry_names(root_a) == [".", "..", "sfserrlog", "sfserram", "PartA           "]
     assert _entry_names(root_b) == [".", "..", "sfserrlog", "sfserram", "PartB           "]
     assert _entry_names(volume_a_payload) == [".", "..", "SMPL", "SBNK", "SBAC", "SEQU", "PROG"]
@@ -412,10 +438,13 @@ def test_hds_writer_creates_two_partitions_with_independent_volumes(tmp_path: Pa
     relationships = [
         row for row in graph.relationships if row.relationship_type == "SBNK_LEFT_MEMBER_TO_SMPL"
     ]
-    assert sorted((row.source_key, row.target_key, row.quality, row.basis) for row in relationships) == [
+    assert sorted(
+        (row.source_key, row.target_key, row.quality, row.basis) for row in relationships
+    ) == [
         ("p0:sfs10", "p0:sfs9", "Known", "sbnk-member-link+name"),
         ("p1:sfs10", "p1:sfs9", "Known", "sbnk-member-link+name"),
     ]
+
 
 def test_hds_writer_scales_bitmap_and_index_geometry_for_256_mib(tmp_path: Path) -> None:
     source_wav = tmp_path / "tone.wav"
@@ -455,18 +484,83 @@ def test_hds_writer_scales_bitmap_and_index_geometry_for_256_mib(tmp_path: Path)
     assert image_bytes[partition_offset + 0x100 : partition_offset + 0x108] == bytes.fromhex(
         "0000000000000003"
     )
-    assert image_bytes[partition_offset + 0x11C : partition_offset + 0x120] == (
-        524_285
-    ).to_bytes(4, "big")
+    assert image_bytes[partition_offset + 0x11C : partition_offset + 0x120] == (524_285).to_bytes(
+        4, "big"
+    )
     assert image_bytes[partition_offset + 0x1D8 : partition_offset + 0x1E2] == bytes.fromhex(
         "1f000018426c75650043"
     )
-    assert image_bytes[partition_offset : partition_offset + 1024] == image_bytes[
-        partition_offset + 1024 : partition_offset + 2048
-    ]
+    assert (
+        image_bytes[partition_offset : partition_offset + 1024]
+        == image_bytes[partition_offset + 1024 : partition_offset + 2048]
+    )
     assert image_bytes[7 * 512 : 8 * 512] == image_bytes[71 * 512 : 72 * 512]
     assert any(image_bytes[7 * 512 : 8 * 512])
     hidden_record = _index_record(image_bytes, 0)
     root_record = _index_record(image_bytes, 1)
     assert _be32(hidden_record, 0x0A) == 424
     assert _be32(root_record, 0x0A) == 456
+
+
+def test_hds_writer_creates_sparse_768m_three_partition_empty_volume_image(tmp_path: Path) -> None:
+    image_path = tmp_path / "HD00_512_sparse_768m_3p_empty_volumes.hds"
+
+    builder = HdsImageBuilder(size_bytes=768 * 1024 * 1024)
+    for _index in range(3):
+        partition = builder.add_partition("New Partition")
+        partition.add_volume("New Volume")
+
+    result = builder.write(image_path)
+
+    assert result.partitions == 3
+    assert result.objects == ()
+    image_bytes = image_path.read_bytes()
+    assert len(image_bytes) == 768 * 1024 * 1024
+    assert [_be32(image_bytes, 0xA8 + index * 8) for index in range(3)] == [
+        3,
+        524_290,
+        1_048_577,
+    ]
+    assert [_be32(image_bytes, 0xAC + index * 8) for index in range(3)] == [
+        524_286,
+        524_286,
+        524_286,
+    ]
+    for index, sector in enumerate([2, 524_289, 1_048_576]):
+        assert image_bytes[sector * 512 : sector * 512 + 8] == f"ab43210{index}".encode("ascii")
+        assert image_bytes[sector * 512 + 8 : sector * 512 + 512] == b"\x00" * 504
+
+    for index in range(3):
+        partition_offset = _be32(image_bytes, 0xA8 + index * 8) * 512
+        expected_name = "New Partition" if index == 0 else f"New Partition  {index}"
+        assert image_bytes[
+            partition_offset + 0x40 : partition_offset + 0x50
+        ] == expected_name.encode("ascii").ljust(16)
+        assert image_bytes[partition_offset + 0xAF] == 0
+        assert _be32(image_bytes, partition_offset + 0x104) == [3, 524_290, 1_048_577][index]
+        assert _be32(image_bytes, partition_offset + 0x154) == index
+        assert _be32(image_bytes, partition_offset + 0x160) == index * 524_286
+        assert _be32(image_bytes, partition_offset + 0x1A8) == index
+
+        root_payload = _record_payload_in_partition(
+            image_bytes, index, _index_record_in_partition(image_bytes, index, 1)
+        )
+        volume_payload = _record_payload_in_partition(
+            image_bytes, index, _index_record_in_partition(image_bytes, index, 3)
+        )
+        assert _entry_names(root_payload) == [
+            ".",
+            "..",
+            "sfserrlog",
+            "sfserram",
+            "New Volume      ",
+        ]
+        assert _entry_names(volume_payload) == [
+            ".",
+            "..",
+            "SMPL",
+            "SBNK",
+            "SBAC",
+            "SEQU",
+            "PROG",
+        ]

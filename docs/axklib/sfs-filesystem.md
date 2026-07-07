@@ -343,22 +343,29 @@ on generated images before testing them on hardware.
 
 Hardware loading has shown that sector 2, per-partition metadata sectors, and
 full partition-header sectors are part of the loadable generated-image contract.
-axklib serializes only the currently hardware-tested profiles: 256 MiB with one
-SFS partition, and 512 MiB with two SFS partitions. The 512 MiB profile includes
-a metadata sector immediately before the second partition and a distinct second
-partition-header metadata profile. A fully generated 256 MiB single-partition
-image using the first profile, multiple volumes, multiple current `SMPL` objects,
-and multiple direct single-member `SBNK` objects has loaded successfully on
-hardware. A fully generated 512 MiB two-partition image using the second
-profile, with two generated volumes per partition and two direct single-member
-`SBNK` objects per volume, has also loaded successfully; the same profile has
-also loaded with one volume grown to eight direct single-member `SBNK` objects
-while the other volumes remain smaller; this isolated-growth case has been
-hardware-tested on both partition indices. The tested generated SBNK root key, key
-range, and sample level fields are sampler-visible. Copying non-logical
-allocated-cluster tail bytes was not required for those cases. axklib treats
-those tail bytes as storage padding unless a later compatibility case proves
-otherwise.
+Generated hard-disk partitions use 512-byte sectors, two-sector clusters, and
+1 GiB partition slots for the currently supported multi-partition layouts.
+axklib serializes only the currently tested profiles: 256 MiB with one SFS
+partition, 512 MiB with two SFS partitions, and a narrow 768 MiB three-partition
+sparse formatter profile for empty volume skeletons. The 512 MiB profile
+includes a metadata sector immediately before the second partition and a
+distinct second partition-header metadata profile. A fully generated 256 MiB
+single-partition image using the first profile, multiple volumes, multiple
+current `SMPL` objects, and multiple direct single-member `SBNK` objects has
+loaded successfully on hardware. A fully generated 512 MiB two-partition image
+using the second profile, with two generated volumes per partition and two
+direct single-member `SBNK` objects per volume, has also loaded successfully;
+the same profile has also loaded with one volume grown to eight direct
+single-member `SBNK` objects while the other volumes remain smaller; this
+isolated-growth case has been hardware-tested on both partition indices. The
+tested generated SBNK root key, key range, and sample level fields are
+sampler-visible. Copying non-logical allocated-cluster tail bytes was not
+required for those cases. axklib treats those tail bytes as storage padding
+unless a later compatibility case proves otherwise. The 768 MiB sparse profile
+currently initializes partition headers, pre-partition marker sectors, root
+directories, empty `New Volume` directories, and the standard empty `SMPL`,
+`SBNK`, `SBAC`, `SEQU`, and `PROG` category directories; generated sampler
+objects on that profile should be validated as a separate expansion.
 
 ## Minimal Read Walkthrough
 

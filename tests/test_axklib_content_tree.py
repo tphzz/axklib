@@ -783,3 +783,27 @@ def test_duplicate_iso_volume_labels_keep_raw_volumes_separate() -> None:
     assert "Or11 Argent (F001) [VOLUME]" in rendered
     assert "Or11 Argent (F002) [VOLUME]" in rendered
 
+
+def test_content_tree_shows_empty_sfs_volumes_from_inventory(tmp_path: Path) -> None:
+    from axklib.containers import open as open_container
+    from axklib.write import HdsImageBuilder
+
+    image_path = tmp_path / "HD00_512_sparse_768m_3p_empty_volumes.hds"
+    builder = HdsImageBuilder(size_bytes=768 * 1024 * 1024)
+    for _index in range(3):
+        partition = builder.add_partition("New Partition")
+        partition.add_volume("New Volume")
+    builder.write(image_path)
+
+    container = open_container(image_path)
+    tree = content_tree.build_content_tree_for_container(container, include_validation=False)
+    rendered = content_tree.render_content_tree_text(tree)
+    paths = content_tree.render_content_tree_paths(tree)
+
+    assert rendered.count("New Volume [VOLUME] (0)") == 3
+    assert "partition 0: New Partition [PARTITION] (1)" in rendered
+    assert "partition 1: New Partition  1 [PARTITION] (1)" in rendered
+    assert "partition 2: New Partition  2 [PARTITION] (1)" in rendered
+    assert "partition_00_New_Partition/New Volume" in paths
+    assert "partition_01_New_Partition_1/New Volume" in paths
+    assert "partition_02_New_Partition_2/New Volume" in paths

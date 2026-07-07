@@ -284,6 +284,14 @@ class ObjectPlacement:
     raw_volume_path: str = ""
 
 
+@dataclass(frozen=True)
+class SfsVolumePlacement:
+    partition_index: int | None
+    partition_name: str
+    volume_name: str
+    raw_volume_path: str
+
+
 def _safe_display(value: object, fallback: str) -> str:
     text = str(value or "").strip()
     return text or fallback
@@ -385,7 +393,6 @@ def _sort_nodes(nodes: Iterable[ContentNode]) -> tuple[ContentNode, ...]:
     )
 
 
-
 def _selector_component(node: ContentNode) -> str:
     if node.node_type == "partition":
         partition_index: int | None = None
@@ -484,6 +491,7 @@ def render_content_tree_paths(tree: ContentTree) -> str:
         )
     return "\n".join(lines)
 
+
 def _with_count(
     node_type: str, name: str, children: Sequence[ContentNode], node_id: str
 ) -> ContentNode:
@@ -565,6 +573,47 @@ def _load_sfs_placements(
             return placements, ()
     except Exception as exc:
         return {}, (
+            ContentTreeIssue(
+                code="CONTENT_TREE_SFS_INVENTORY_FAILED",
+                severity="warning",
+                message=f"SFS volume/category inventory was unavailable: {exc}",
+                source_path=str(container.source_path),
+            ),
+        )
+
+
+def _load_sfs_volume_placements(
+    container: AxklibContainer,
+) -> tuple[tuple[SfsVolumePlacement, ...], tuple[ContentTreeIssue, ...]]:
+    if container.kind != "sfs":
+        return (), ()
+    try:
+        with tempfile.TemporaryDirectory(prefix="axklib-content-tree-") as tmp:
+            inventory_dir = Path(tmp) / "inventory"
+            sfs_inventory.build_inventory(container.source_path, inventory_dir)
+            path = inventory_dir / "volumes.csv"
+            volumes: list[SfsVolumePlacement] = []
+            with path.open("r", newline="", encoding="utf-8") as handle:
+                for row in csv.DictReader(handle):
+                    try:
+                        partition = int(row.get("partition_index", ""))
+                    except ValueError:
+                        partition = None
+                    volume_name = row.get("volume_name", "")
+                    volume_path = row.get("volume_path", "").strip("/")
+                    if not volume_name:
+                        continue
+                    volumes.append(
+                        SfsVolumePlacement(
+                            partition_index=partition,
+                            partition_name=row.get("partition_name", ""),
+                            volume_name=volume_name,
+                            raw_volume_path=volume_path or volume_name,
+                        )
+                    )
+            return tuple(volumes), ()
+    except Exception as exc:
+        return (), (
             ContentTreeIssue(
                 code="CONTENT_TREE_SFS_INVENTORY_FAILED",
                 severity="warning",
@@ -1046,6 +1095,8 @@ def _build_sfs_tree(
     include_default_programs: bool = False,
 ) -> ContentTree:
     placements, issues = load_known_object_placements(container)
+    volume_placements, volume_issues = _load_sfs_volume_placements(container)
+    issues = (*issues, *volume_issues)
     validation_issues = _validation_content_issues(container)
     affected_error_paths = _affected_error_volume_paths(validation_issues)
     graph = build_relationship_graph(list(container.objects))
@@ -1054,6 +1105,10 @@ def _build_sfs_tree(
         tuple[int | None, str], dict[tuple[str, str], dict[str, list[ContentNode]]]
     ] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     unmapped: dict[str, list[ContentNode]] = defaultdict(list)
+
+    for volume in volume_placements:
+        pkey = (volume.partition_index, volume.partition_name)
+        partition_children[pkey][(volume.volume_name, volume.raw_volume_path)]
 
     for item in container.objects:
         if item.type != "SBAC":
@@ -1163,8 +1218,6 @@ def _build_sfs_tree(
                         f"category:{partition_index}:{volume_node_id}:{category_name}",
                     )
                 )
-            if not category_nodes:
-                continue
             volume_nodes.append(
                 _with_count(
                     "volume",
@@ -1449,8 +1502,3 @@ def summary_line(container: AxklibContainer) -> str:
         f"{key}:{value}" for key, value in sorted(container.recovery_quality_summary.items())
     )
     return f"{container.source_path}\t{container.kind}\t{object_text}\trecovery={recovery or '-'}"
-
-
-
-
-
