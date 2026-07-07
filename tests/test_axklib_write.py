@@ -564,3 +564,257 @@ def test_hds_writer_creates_sparse_768m_three_partition_empty_volume_image(tmp_p
             "SEQU",
             "PROG",
         ]
+
+
+def test_hds_writer_creates_sparse_768m_object_volume_on_first_partition(
+    tmp_path: Path,
+) -> None:
+    source_wav = tmp_path / "tone.wav"
+    _write_mono_wav(source_wav)
+    image_path = tmp_path / "HD00_512_sparse_768m_3p_p0_object.hds"
+
+    builder = HdsImageBuilder(size_bytes=768 * 1024 * 1024)
+    partition_a = builder.add_partition("New Partition")
+    volume_a = partition_a.add_volume("New Volume")
+    waveform = volume_a.add_waveform_from_wav(
+        name="Tone0001", path=source_wav, root_key=60
+    )
+    volume_a.add_sample_bank(
+        name="Bank0001",
+        waveform=waveform,
+        root_key=60,
+        key_low=60,
+        key_high=60,
+        level=100,
+    )
+    for _index in range(2):
+        partition = builder.add_partition("New Partition")
+        partition.add_volume("New Volume")
+
+    result = builder.write(image_path)
+
+    assert result.partitions == 3
+    assert [
+        (obj.partition_index, obj.sfs_id, obj.object_type, obj.name)
+        for obj in result.objects
+    ] == [
+        (0, 9, "SMPL", "Tone0001"),
+        (0, 10, "SBNK", "Bank0001"),
+    ]
+    image_bytes = image_path.read_bytes()
+    assert len(image_bytes) == 768 * 1024 * 1024
+    assert [_be32(image_bytes, 0xA8 + index * 8) for index in range(3)] == [
+        3,
+        524_290,
+        1_048_577,
+    ]
+
+    root_a = _record_payload_in_partition(
+        image_bytes, 0, _index_record_in_partition(image_bytes, 0, 1)
+    )
+    volume_a_payload = _record_payload_in_partition(
+        image_bytes, 0, _index_record_in_partition(image_bytes, 0, 3)
+    )
+    smpl_category = _record_payload_in_partition(
+        image_bytes, 0, _index_record_in_partition(image_bytes, 0, 4)
+    )
+    sbnk_category = _record_payload_in_partition(
+        image_bytes, 0, _index_record_in_partition(image_bytes, 0, 5)
+    )
+    smpl_payload = _record_payload_in_partition(
+        image_bytes, 0, _index_record_in_partition(image_bytes, 0, 9)
+    )
+    sbnk_payload = _record_payload_in_partition(
+        image_bytes, 0, _index_record_in_partition(image_bytes, 0, 10)
+    )
+    assert _entry_names(root_a) == [
+        ".",
+        "..",
+        "sfserrlog",
+        "sfserram",
+        "New Volume      ",
+    ]
+    assert _entry_names(volume_a_payload) == [
+        ".",
+        "..",
+        "SMPL",
+        "SBNK",
+        "SBAC",
+        "SEQU",
+        "PROG",
+    ]
+    assert _entry_names(smpl_category) == [".", "..", "Tone0001        "]
+    assert _entry_names(sbnk_category) == [".", "..", "Bank0001        "]
+    assert smpl_payload[0x0C:0x10] == b"SMPL"
+    assert sbnk_payload[0x0C:0x10] == b"SBNK"
+    assert sbnk_payload[0x0D6] == 60
+    assert sbnk_payload[0x0E2:0x0E4] == bytes([60, 60])
+    assert sbnk_payload[0x116] == 100
+
+    for index in (1, 2):
+        root_payload = _record_payload_in_partition(
+            image_bytes, index, _index_record_in_partition(image_bytes, index, 1)
+        )
+        volume_payload = _record_payload_in_partition(
+            image_bytes, index, _index_record_in_partition(image_bytes, index, 3)
+        )
+        smpl_payload = _record_payload_in_partition(
+            image_bytes, index, _index_record_in_partition(image_bytes, index, 4)
+        )
+        sbnk_payload = _record_payload_in_partition(
+            image_bytes, index, _index_record_in_partition(image_bytes, index, 5)
+        )
+        assert _entry_names(root_payload) == [
+            ".",
+            "..",
+            "sfserrlog",
+            "sfserram",
+            "New Volume      ",
+        ]
+        assert _entry_names(volume_payload) == [
+            ".",
+            "..",
+            "SMPL",
+            "SBNK",
+            "SBAC",
+            "SEQU",
+            "PROG",
+        ]
+        assert _entry_names(smpl_payload) == [".", ".."]
+        assert _entry_names(sbnk_payload) == [".", ".."]
+
+def test_hds_writer_creates_sparse_768m_object_volume_on_second_partition(
+    tmp_path: Path,
+) -> None:
+    source_wav = tmp_path / "tone.wav"
+    _write_mono_wav(source_wav)
+    image_path = tmp_path / "HD00_512_sparse_768m_3p_p1_object.hds"
+
+    builder = HdsImageBuilder(size_bytes=768 * 1024 * 1024)
+    partition_a = builder.add_partition("New Partition")
+    partition_a.add_volume("New Volume")
+    partition_b = builder.add_partition("New Partition")
+    volume_b = partition_b.add_volume("New Volume")
+    waveform = volume_b.add_waveform_from_wav(
+        name="Tone0001", path=source_wav, root_key=60
+    )
+    volume_b.add_sample_bank(
+        name="Bank0001",
+        waveform=waveform,
+        root_key=60,
+        key_low=60,
+        key_high=60,
+        level=100,
+    )
+    partition_c = builder.add_partition("New Partition")
+    partition_c.add_volume("New Volume")
+
+    result = builder.write(image_path)
+
+    assert [
+        (obj.partition_index, obj.sfs_id, obj.object_type, obj.name)
+        for obj in result.objects
+    ] == [
+        (1, 9, "SMPL", "Tone0001"),
+        (1, 10, "SBNK", "Bank0001"),
+    ]
+    image_bytes = image_path.read_bytes()
+    assert [_be32(image_bytes, 0xA8 + index * 8) for index in range(3)] == [
+        3,
+        524_290,
+        1_048_577,
+    ]
+
+    for index, expected_smpl, expected_sbnk in (
+        (0, [".", ".."], [".", ".."]),
+        (1, [".", "..", "Tone0001        "], [".", "..", "Bank0001        "]),
+        (2, [".", ".."], [".", ".."]),
+    ):
+        smpl_category = _record_payload_in_partition(
+            image_bytes, index, _index_record_in_partition(image_bytes, index, 4)
+        )
+        sbnk_category = _record_payload_in_partition(
+            image_bytes, index, _index_record_in_partition(image_bytes, index, 5)
+        )
+        assert _entry_names(smpl_category) == expected_smpl
+        assert _entry_names(sbnk_category) == expected_sbnk
+
+    smpl_payload = _record_payload_in_partition(
+        image_bytes, 1, _index_record_in_partition(image_bytes, 1, 9)
+    )
+    sbnk_payload = _record_payload_in_partition(
+        image_bytes, 1, _index_record_in_partition(image_bytes, 1, 10)
+    )
+    assert smpl_payload[0x0C:0x10] == b"SMPL"
+    assert sbnk_payload[0x0C:0x10] == b"SBNK"
+    assert sbnk_payload[0x0D6] == 60
+    assert sbnk_payload[0x0E2:0x0E4] == bytes([60, 60])
+    assert sbnk_payload[0x116] == 100
+
+def test_hds_writer_creates_sparse_768m_object_volume_on_third_partition(
+    tmp_path: Path,
+) -> None:
+    source_wav = tmp_path / "tone.wav"
+    _write_mono_wav(source_wav)
+    image_path = tmp_path / "HD00_512_sparse_768m_3p_p2_object.hds"
+
+    builder = HdsImageBuilder(size_bytes=768 * 1024 * 1024)
+    partition_a = builder.add_partition("New Partition")
+    partition_a.add_volume("New Volume")
+    partition_b = builder.add_partition("New Partition")
+    partition_b.add_volume("New Volume")
+    partition_c = builder.add_partition("New Partition")
+    volume_c = partition_c.add_volume("New Volume")
+    waveform = volume_c.add_waveform_from_wav(
+        name="Tone0001", path=source_wav, root_key=60
+    )
+    volume_c.add_sample_bank(
+        name="Bank0001",
+        waveform=waveform,
+        root_key=60,
+        key_low=60,
+        key_high=60,
+        level=100,
+    )
+
+    result = builder.write(image_path)
+
+    assert [
+        (obj.partition_index, obj.sfs_id, obj.object_type, obj.name)
+        for obj in result.objects
+    ] == [
+        (2, 9, "SMPL", "Tone0001"),
+        (2, 10, "SBNK", "Bank0001"),
+    ]
+    image_bytes = image_path.read_bytes()
+    assert [_be32(image_bytes, 0xA8 + index * 8) for index in range(3)] == [
+        3,
+        524_290,
+        1_048_577,
+    ]
+
+    for index, expected_smpl, expected_sbnk in (
+        (0, [".", ".."], [".", ".."]),
+        (1, [".", ".."], [".", ".."]),
+        (2, [".", "..", "Tone0001        "], [".", "..", "Bank0001        "]),
+    ):
+        smpl_category = _record_payload_in_partition(
+            image_bytes, index, _index_record_in_partition(image_bytes, index, 4)
+        )
+        sbnk_category = _record_payload_in_partition(
+            image_bytes, index, _index_record_in_partition(image_bytes, index, 5)
+        )
+        assert _entry_names(smpl_category) == expected_smpl
+        assert _entry_names(sbnk_category) == expected_sbnk
+
+    smpl_payload = _record_payload_in_partition(
+        image_bytes, 2, _index_record_in_partition(image_bytes, 2, 9)
+    )
+    sbnk_payload = _record_payload_in_partition(
+        image_bytes, 2, _index_record_in_partition(image_bytes, 2, 10)
+    )
+    assert smpl_payload[0x0C:0x10] == b"SMPL"
+    assert sbnk_payload[0x0C:0x10] == b"SBNK"
+    assert sbnk_payload[0x0D6] == 60
+    assert sbnk_payload[0x0E2:0x0E4] == bytes([60, 60])
+    assert sbnk_payload[0x116] == 100

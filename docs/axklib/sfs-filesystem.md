@@ -332,7 +332,7 @@ The first writer scope is intentionally narrow:
 - WAV input must be mono, 16-bit PCM;
 - generated sampler objects are current `FSFSDEV3SPLX` `SMPL` and `SBNK` records;
 - generated `SBNK` objects link one waveform member by name and link ID;
-- generated disk headers include the standard superblock mode metadata, initialized sector-2 disk metadata, full primary and duplicate partition-header sectors for the supported hard-disk metadata profile, and the early first-bitmap-sector mirror used by A-series hard-disk images;
+- generated disk headers include explicit superblock descriptor words, initialized sector-2 disk metadata, full primary and duplicate partition-header sectors for the supported hard-disk metadata profile, and the early first-bitmap-sector mirror used by A-series hard-disk images;
 - generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;
 - generated current `SMPL` object payloads use a `0x200` object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;
 - generated current `SBNK` object payloads use the current single-member sample-bank object span, populated default parameter/control block, and header fields for a normal sample bank that references one waveform object.
@@ -347,7 +347,7 @@ Generated hard-disk partitions use 512-byte sectors, two-sector clusters, and
 1 GiB partition slots for the currently supported multi-partition layouts.
 axklib serializes only the currently tested profiles: 256 MiB with one SFS
 partition, 512 MiB with two SFS partitions, and a narrow 768 MiB three-partition
-sparse formatter profile for empty volume skeletons. The 512 MiB profile
+sparse formatter profile. The 512 MiB profile
 includes a metadata sector immediately before the second partition and a
 distinct second partition-header metadata profile. A fully generated 256 MiB
 single-partition image using the first profile, multiple volumes, multiple
@@ -362,10 +362,45 @@ tested generated SBNK root key, key range, and sample level fields are
 sampler-visible. Copying non-logical allocated-cluster tail bytes was not
 required for those cases. axklib treats those tail bytes as storage padding
 unless a later compatibility case proves otherwise. The 768 MiB sparse profile
-currently initializes partition headers, pre-partition marker sectors, root
-directories, empty `New Volume` directories, and the standard empty `SMPL`,
-`SBNK`, `SBAC`, `SEQU`, and `PROG` category directories; generated sampler
-objects on that profile should be validated as a separate expansion.
+has loaded successfully on hardware with one simple object-bearing volume on
+partition 0 (`hd1`), partition 1 (`hd2`), or partition 2 (`hd3`), while the
+other sparse partitions remain empty loadable volumes. The tested
+object-bearing volume contains one generated current `SMPL` waveform and one
+direct single-member `SBNK` sample bank. Multiple object-bearing sparse
+volumes and larger sparse object counts remain outside the currently validated
+write profile.
+
+The writer constructs the superblock, partition table, sector-2 metadata,
+partition headers, allocation bitmap, directory index, and object payload
+extents from the typed image model. Fields with known formulas, such as
+partition slot placement, partition-header start/count words, partition-index
+words, sector-2 labels, and dynamic header words, are generated explicitly. The
+supported partition-header tail profiles share one fixed compatibility template
+after variable words are removed; remaining profile-dependent compatibility
+words and sector-2 compatibility bytes are generated separately and kept scoped to validated writer
+profiles.
+
+
+### Writer profile metadata
+
+The writer keeps profile-dependent compatibility metadata explicit. Values that
+vary by supported image profile are generated from named profile tables or from
+small formulas; they are not embedded inside broad binary templates.
+
+The supported writer profiles currently use these rules:
+
+| Metadata area | Public contract |
+| --- | --- |
+| Superblock descriptor words at `+0x80..+0x98` | Written as fixed profile constants for the currently supported hard-disk writer profiles. |
+| Sector-2 two-partition bytes at `+0x30..+0x3e` | Written only for the supported 512 MiB / two-partition profile; other supported profiles leave this range zeroed. |
+| Partition-header compatibility words at `+0x1bc..+0x1e0` | Written from explicit profile tables for the supported 256 MiB / one-partition, 512 MiB / two-partition, and 768 MiB / three-partition profiles. |
+| Sparse partition-header `+0x14c` | Written as image sector count minus one for the supported sparse profile. |
+| Sparse partition-header `+0x194` | Written as zero for the supported sparse profile. |
+
+These fields are part of the compatibility envelope for generated images. Their
+byte values are stable for the supported profiles, but their user-facing meaning
+is not exposed as public API. Applications should select one of the supported
+writer profiles rather than constructing these fields manually.
 
 ## Minimal Read Walkthrough
 

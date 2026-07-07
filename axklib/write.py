@@ -31,54 +31,125 @@ PARTITION_HEADER_INITIAL_RESERVED_CLUSTER = 2
 PARTITION_HEADER_INDEX_CAPACITY_VALUE = 5012
 DIRECT_EXTENT_CLUSTER_LIMIT = 0xFFFF
 MIN_ALLOCATED_RECORD_CLUSTERS = 2
-DISK_MODE_METADATA = bytes.fromhex(
-    "a1 e0 01 52 a2 2c 00 00 00 00 00 17 09 10 00 00 00 00 00 17 09 10 00 00 01 00 01 52"
+# Profile constant for current writer profiles. Placement is known at superblock
+# +0x80..+0x9b; field semantics are still unresolved.
+DISK_DESCRIPTOR_UNRESOLVED_WORDS = (
+    (0x80, 0xA1E00152),
+    (0x84, 0xA22C0000),
+    (0x88, 0x00000017),
+    (0x8C, 0x09100000),
+    (0x90, 0x00000017),
+    (0x94, 0x09100000),
+    (0x98, 0x01000152),
 )
 DEFAULT_DISK_IDENTIFIER = b"ab432100"
 SECTOR2_PRIMARY_IDENTIFIER = b"c2b4e600"
 SECTOR2_METADATA_MARKER = bytes.fromhex("23 44 01 54 23 94")
-SECTOR2_FLAGS_OFFSET = 0x2B
-SECTOR2_FLAGS_VALUE = 0x90
+SECTOR2_ENTRY_STATE_VALUE = 0x13
+SECTOR2_ENTRY_FLAGS_VALUE = 0x90
+SECTOR2_ENTRY_NAME_SIZE = 16
+# Still unresolved two-partition sector-2 prefix bytes at +0x30..+0x3e.
+# They vary by sector-2 profile, so they are written explicitly instead of hidden in a blob.
+SECTOR2_TWO_PARTITION_UNRESOLVED_BYTES = {
+    0x30: 0x01,
+    0x31: 0x01,
+    0x32: 0x00,
+    0x33: 0x18,
+    0x34: 0x5C,
+    0x35: 0x30,
+    0x36: 0x5C,
+    0x37: 0x00,
+    0x38: 0x32,
+    0x39: 0x62,
+    0x3A: 0x34,
+    0x3B: 0x65,
+    0x3C: 0x36,
+    0x3D: 0x30,
+    0x3E: 0x30,
+}
 SUPPORTED_HARDWARE_METADATA_PARTITION_SECTORS = 524_285
 SUPPORTED_TWO_PARTITION_IMAGE_BYTES = 512 * 1024 * 1024
 SUPPORTED_TWO_PARTITION_SECTORS = 524_286
 SUPPORTED_TWO_PARTITION_STRIDE_SECTORS = 524_287
 SUPPORTED_SPARSE_768M_IMAGE_BYTES = 768 * 1024 * 1024
 SUPPORTED_SPARSE_768M_PARTITIONS = 3
-PARTITION_HEADER_METADATA_256M = bytes.fromhex(
-    "000000000000000300001388000002000000000200000000000000030007fffd00000400000320000017ab4a01529f34"
-    "001aa5400152a3fc00000002000000c800001388016f5bf0000000000008000001529fa0000000000152a3fc00000000"
-    "000000000152a3fc0000000800000400000aa30e01529f78000000030007fffd001aa5400152a3fc0000138800000400"
-    "000000000000000100000000000000000000000200000000000000000000000000000000000a9f760152a22400000000"
-    "00000001000000000000000100186cc4016eb30c000002021f000018426c75650043000001529fb400000002000000c8"
-    "00000400000000000000000000000000"
+PARTITION_HEADER_TAIL_OPAQUE_TEMPLATE = bytes.fromhex(
+    "000000000000000000001388000002000000000200000000000000000000000000000400000320000017ab4a01529f34001aa5400000000000000002000000c8"
+    "0000138800000000000000000000000001529fa000000000000000000000000000000000000000000000000800000400000aa30e01529f780000000000000000"
+    "001aa540000000000000138800000400000000000000000000000000000000000000000200000000000000000000000000000000000a9f760152a22400000000"
+    "00000000000000000000000000000000000000000000000000000000000000000000000001529fb400000002000000c800000400000000000000000000000000"
 )
-PARTITION_HEADER_METADATA_512M_2P_P0 = bytes.fromhex(
-    "000000000000000300001388000002000000000200000000000000030007fffe00000400000320000017ab4a01529f34"
-    "001aa5400152a3fc00000002000000c800001388016f5bf0000000000010000001529fa0000000000152a3fc00000000"
-    "000000000152a3fc0000000800000400000aa30e01529f78000000030007fffe001aa5400152a3fc0000138800000400"
-    "000000000000000200000000000000000000000200000000000000000000000000000000000a9f760152a224016eb30c"
-    "01529fd4001857ae00000000000000000017c372000002021f000018426c75650043000001529fb400000002000000c8"
-    "00000400000000000000000000000000"
+# Profile-dependent compatibility words outside the public partition geometry
+# model. Keep them explicit and scoped to hardware-proven writer profiles.
+PARTITION_HEADER_PROFILE_COMPATIBILITY_WORDS = {
+    "single_256m": {
+        0x1BC: 0x00000000,
+        0x1C0: 0x00000001,
+        0x1C4: 0x00000000,
+        0x1C8: 0x00000001,
+        0x1CC: 0x00186CC4,
+        0x1D0: 0x016EB30C,
+        0x1D4: 0x00000202,
+        0x1D8: 0x1F000018,
+        0x1DC: 0x426C7565,
+        0x1E0: 0x00430000,
+    },
+    "two_partition_512m": {
+        0x1BC: 0x016EB30C,
+        0x1C0: 0x01529FD4,
+        0x1C4: 0x001857AE,
+        0x1C8: 0x00000000,
+        0x1CC: 0x00000000,
+        0x1D0: 0x0017C372,
+        0x1D4: 0x00000202,
+        0x1D8: 0x1F000018,
+        0x1DC: 0x426C7565,
+        0x1E0: 0x00430000,
+    },
+    "sparse_768m_3p": {
+        0x1BC: 0x00800000,
+        0x1C0: 0x00000000,
+        0x1C4: 0x00000000,
+        0x1C8: 0x00000000,
+        0x1CC: 0x00000000,
+        0x1D0: 0xFFFFA018,
+        0x1D4: 0x0152A030,
+        0x1D8: 0x00000000,
+        0x1DC: 0x01728688,
+        0x1E0: 0x00000000,
+    },
+}
+PARTITION_HEADER_TAIL_VARIABLE_OFFSETS = (
+    0x104,
+    0x114,
+    0x118,
+    0x11C,
+    0x134,
+    0x144,
+    0x14C,
+    0x154,
+    0x158,
+    0x15C,
+    0x160,
+    0x164,
+    0x178,
+    0x17C,
+    0x184,
+    0x194,
+    0x1A8,
+    0x1BC,
+    0x1C0,
+    0x1C4,
+    0x1C8,
+    0x1CC,
+    0x1D0,
+    0x1D4,
+    0x1D8,
+    0x1DC,
+    0x1E0,
 )
-PARTITION_HEADER_METADATA_512M_2P_P1 = bytes.fromhex(
-    "000000000008000200001388000002000000000200000020000800020007fffe00000400000320000017ab4a01529f34"
-    "001aa5400152a40d00000002000000c800001388015d6cc0000000000010000001529fa0000000010152a40d00000020"
-    "0007fffe0152a40d0000000800000400000aa30e01529f78000800020007fffe001aa5400152a40d0000138800000400"
-    "000000000000000200000000000000000000000200000000000000010000000000000000000a9f760152a224016eb30c"
-    "01529fd4001857ae00000000000000000017c372000002021f000018426c75650043000001529fb400000002000000c8"
-    "00000400000000000000000000000000"
-)
-PARTITION_HEADER_METADATA_SPARSE_MULTI_BASE = bytes.fromhex(
-    "000000000000000300001388000002000000000200000000000000030007fffe00000400000320000017ab4a01529f34"
-    "001aa5400152a3fc00000002000000c800001388016f5bf0000000000017ffff01529fa0000000000152a3fc00000000"
-    "000000000152a3fc0000000800000400000aa30e01529f78000000030007fffe001aa5400152a3fc0000138800000400"
-    "000000000000000000000000000000000000000200000000000000000000000000000000000a9f760152a22400800000"
-    "00000000000000000000000000000000ffffa0180152a03000000000017286880000000001529fb400000002000000c8"
-    "00000400000000000000000000000000"
-)
-SPARSE_MULTI_METADATA_BASE_WORD = 0x0152A3FC
-SPARSE_MULTI_METADATA_WORD_STEP = 0x11
+PARTITION_HEADER_DYNAMIC_BASE_WORD = 0x0152A3FC
+PARTITION_HEADER_DYNAMIC_WORD_STEP = 0x11
 OBJECT_MAGIC = b"FSFSDEV3SPLX"
 SMPL_COMPACT_HEADER_SIZE = 0xAC
 SMPL_OBJECT_HEADER_SIZE = 0x200
@@ -511,6 +582,7 @@ def _supported_multi_partition_slot_geometry(
         slot_span = max_slot_span
     return PARTITION_START_SECTOR, slot_span - 1
 
+
 def _make_partition_plan(
     partition: PartitionBuilder,
     *,
@@ -772,18 +844,10 @@ def _serialize_sbnk(bank: _SampleBankSpec, waveform: _LoadedWaveform) -> bytes:
 
 
 def _superblock_writes(size_bytes: int, plans: list[_PartitionPlan]) -> list[tuple[int, bytes]]:
-    block = bytearray(SECTOR_SIZE)
-    block[0 : len(b"YAMAHA_dev3")] = b"YAMAHA_dev3"
-    block[0x80:0x9C] = DISK_MODE_METADATA
-    _put_be32(block, 0x9C, SECTOR_SIZE)
-    _put_be32(block, 0xA0, size_bytes // SECTOR_SIZE)
-    for plan in plans:
-        rel = 0x0A8 + plan.index * 8
-        _put_be32(block, rel, plan.start_sector)
-        _put_be32(block, rel + 4, plan.sector_count)
+    block = _build_superblock(size_bytes, plans)
     writes = [
-        (0, bytes(block)),
-        (SECTOR_SIZE, bytes(block)),
+        (0, block),
+        (SECTOR_SIZE, block),
         (SECTOR_SIZE * 2, _sector2_metadata(plans)),
     ]
     if _is_supported_two_partition_profile(plans):
@@ -794,6 +858,28 @@ def _superblock_writes(size_bytes: int, plans: list[_PartitionPlan]) -> list[tup
                 ((plan.start_sector - 1) * SECTOR_SIZE, _sector2_metadata(plans, plan.index))
             )
     return writes
+
+
+def _build_superblock(size_bytes: int, plans: list[_PartitionPlan]) -> bytes:
+    block = bytearray(SECTOR_SIZE)
+    block[0 : len(b"YAMAHA_dev3")] = b"YAMAHA_dev3"
+    _write_disk_descriptor(block)
+    _put_be32(block, 0x9C, SECTOR_SIZE)
+    _put_be32(block, 0xA0, size_bytes // SECTOR_SIZE)
+    _write_partition_table(block, plans)
+    return bytes(block)
+
+
+def _write_disk_descriptor(block: bytearray) -> None:
+    for offset, value in DISK_DESCRIPTOR_UNRESOLVED_WORDS:
+        _put_be32(block, offset, value)
+
+
+def _write_partition_table(block: bytearray, plans: list[_PartitionPlan]) -> None:
+    for plan in plans:
+        rel = 0x0A8 + plan.index * 8
+        _put_be32(block, rel, plan.start_sector)
+        _put_be32(block, rel + 4, plan.sector_count)
 
 
 def _is_supported_two_partition_profile(plans: list[_PartitionPlan]) -> bool:
@@ -823,14 +909,15 @@ def _sector2_metadata(plans: list[_PartitionPlan], sequence: int = 0) -> bytes:
         return _two_partition_sector_metadata(plans, sequence)
     if _is_supported_sparse_multi_profile(plans):
         return _sparse_partition_sector_metadata(sequence)
+    return _single_partition_sector_metadata(plans)
+
+
+def _single_partition_sector_metadata(plans: list[_PartitionPlan]) -> bytes:
     metadata = bytearray(SECTOR_SIZE)
     metadata[0:8] = SECTOR2_PRIMARY_IDENTIFIER
     metadata[9:17] = DEFAULT_DISK_IDENTIFIER
-    metadata[0x12:0x18] = SECTOR2_METADATA_MARKER
     if plans:
-        metadata[0x19] = 0x13
-        metadata[0x1A:0x2A] = _ascii_field(plans[0].builder.name, 16)
-    metadata[SECTOR2_FLAGS_OFFSET] = SECTOR2_FLAGS_VALUE
+        _write_sector2_labeled_entry(metadata, marker_offset=0x12, name=plans[0].builder.name)
     return bytes(metadata)
 
 
@@ -838,46 +925,47 @@ def _sparse_partition_sector_metadata(sequence: int) -> bytes:
     if sequence < 0 or sequence >= PARTITION_ENTRY_COUNT:
         raise ValueError("sparse partition metadata sequence is out of range")
     metadata = bytearray(SECTOR_SIZE)
-    metadata[0:8] = f"ab43210{sequence}".encode("ascii")
+    metadata[0:8] = _sparse_sector_identifier(sequence)
     return bytes(metadata)
+
+
+def _sparse_sector_identifier(sequence: int) -> bytes:
+    return f"ab43210{sequence}".encode("ascii")
 
 
 def _two_partition_sector_metadata(plans: list[_PartitionPlan], sequence: int) -> bytes:
     if sequence not in {0, 1}:
         raise ValueError("two-partition metadata sequence must be 0 or 1")
     metadata = bytearray(SECTOR_SIZE)
-    metadata[0:8] = f"bb73620{sequence}".encode("ascii")
+    metadata[0:8] = _two_partition_sector_identifier(sequence)
     metadata[9:17] = SECTOR2_PRIMARY_IDENTIFIER
-    metadata[0x12:0x18] = SECTOR2_METADATA_MARKER
-    metadata[0x19] = 0x13
-    metadata[0x1A:0x2A] = _ascii_field(plans[0].builder.name, 16)
-    metadata[SECTOR2_FLAGS_OFFSET] = SECTOR2_FLAGS_VALUE
-    metadata[0x30:0x38] = bytes.fromhex("01 01 00 18 5c 30 5c 00")
-    metadata[0x38:0x3F] = b"2b4e600"
-    metadata[0x40:0x46] = SECTOR2_METADATA_MARKER
-    metadata[0x47] = 0x13
-    metadata[0x48:0x58] = _ascii_field(plans[1].builder.name, 16)
-    metadata[0x59] = SECTOR2_FLAGS_VALUE
+    _write_sector2_labeled_entry(metadata, marker_offset=0x12, name=plans[0].builder.name)
+    _write_unresolved_sector2_two_partition_bytes(metadata)
+    _write_sector2_labeled_entry(metadata, marker_offset=0x40, name=plans[1].builder.name)
     return bytes(metadata)
+
+
+def _two_partition_sector_identifier(sequence: int) -> bytes:
+    return f"bb73620{sequence}".encode("ascii")
+
+
+def _write_sector2_labeled_entry(metadata: bytearray, *, marker_offset: int, name: str) -> None:
+    metadata[marker_offset : marker_offset + len(SECTOR2_METADATA_MARKER)] = SECTOR2_METADATA_MARKER
+    metadata[marker_offset + 0x07] = SECTOR2_ENTRY_STATE_VALUE
+    metadata[marker_offset + 0x08 : marker_offset + 0x08 + SECTOR2_ENTRY_NAME_SIZE] = _ascii_field(
+        name, SECTOR2_ENTRY_NAME_SIZE
+    )
+    metadata[marker_offset + 0x19] = SECTOR2_ENTRY_FLAGS_VALUE
+
+
+def _write_unresolved_sector2_two_partition_bytes(metadata: bytearray) -> None:
+    for offset, value in SECTOR2_TWO_PARTITION_UNRESOLVED_BYTES.items():
+        metadata[offset] = value
 
 
 def _partition_writes(plan: _PartitionPlan) -> list[tuple[int, bytes]]:
     start_offset = plan.start_sector * SECTOR_SIZE
-    header = bytearray(1024)
-    header[0 : len(b"YAMAHA_dev3")] = b"YAMAHA_dev3"
-    header[0x40:0x50] = _partition_header_name(plan)
-    _put_be32(header, 0x80, SECTORS_PER_CLUSTER)
-    _put_be32(header, 0x84, PARTITION_HEADER_CAPACITY_VALUE)
-    header[0x88:0x90] = b"\xff" * 8
-    _put_be32(header, 0x90, plan.cluster_count)
-    _put_be32(header, 0x94, SECTORS_PER_CLUSTER)
-    _put_be32(header, 0x98, PARTITION_HEADER_INITIAL_RESERVED_CLUSTER)
-    _put_be32(header, 0x9C, plan.bitmap_cluster)
-    _put_be32(header, 0xA0, PARTITION_HEADER_INDEX_CAPACITY_VALUE)
-    _put_be32(header, 0xA4, plan.directory_index_cluster)
-    _put_be32(header, 0xA8, DIRECTORY_INDEX_SPAN_CLUSTERS)
-    _apply_partition_metadata_profile(header, plan)
-
+    header = _build_partition_header(plan)
     bitmap = bytearray(plan.bitmap_cluster_count * CLUSTER_SIZE)
     index = bytearray(_ceil_div(len(plan.records) * 72, 1024) * 1024)
     payload_writes: list[tuple[int, bytes]] = []
@@ -902,6 +990,24 @@ def _partition_writes(plan: _PartitionPlan) -> list[tuple[int, bytes]]:
     ]
 
 
+def _build_partition_header(plan: _PartitionPlan) -> bytes:
+    header = bytearray(PARTITION_HEADER_SIZE)
+    header[0 : len(b"YAMAHA_dev3")] = b"YAMAHA_dev3"
+    header[0x40:0x50] = _partition_header_name(plan)
+    _put_be32(header, 0x80, SECTORS_PER_CLUSTER)
+    _put_be32(header, 0x84, PARTITION_HEADER_CAPACITY_VALUE)
+    header[0x88:0x90] = b"\xff" * 8
+    _put_be32(header, 0x90, plan.cluster_count)
+    _put_be32(header, 0x94, SECTORS_PER_CLUSTER)
+    _put_be32(header, 0x98, PARTITION_HEADER_INITIAL_RESERVED_CLUSTER)
+    _put_be32(header, 0x9C, plan.bitmap_cluster)
+    _put_be32(header, 0xA0, PARTITION_HEADER_INDEX_CAPACITY_VALUE)
+    _put_be32(header, 0xA4, plan.directory_index_cluster)
+    _put_be32(header, 0xA8, DIRECTORY_INDEX_SPAN_CLUSTERS)
+    _apply_partition_metadata_profile(header, plan)
+    return bytes(header)
+
+
 def _partition_header_name(plan: _PartitionPlan) -> bytes:
     if (
         plan.sector_count == SUPPORTED_TWO_PARTITION_SECTORS
@@ -916,15 +1022,24 @@ def _partition_header_name(plan: _PartitionPlan) -> bytes:
 def _apply_partition_metadata_profile(header: bytearray, plan: _PartitionPlan) -> None:
     if _is_two_partition_plan(plan):
         header[0xAF] = plan.index
-        header[0x100:0x200] = (
-            PARTITION_HEADER_METADATA_512M_2P_P0
-            if plan.index == 0
-            else PARTITION_HEADER_METADATA_512M_2P_P1
-        )
-    elif _is_sparse_multi_partition_plan(plan):
-        header[0x100:0x200] = _sparse_multi_partition_metadata(plan)
-    elif plan.sector_count == SUPPORTED_HARDWARE_METADATA_PARTITION_SECTORS:
-        header[0x100:0x200] = PARTITION_HEADER_METADATA_256M
+    if _has_partition_header_tail_profile(plan):
+        header[0x100:0x200] = _partition_header_tail_metadata(plan)
+
+
+def _has_partition_header_tail_profile(plan: _PartitionPlan) -> bool:
+    return (
+        _is_single_partition_256m_plan(plan)
+        or _is_two_partition_plan(plan)
+        or _is_sparse_multi_partition_plan(plan)
+    )
+
+
+def _is_single_partition_256m_plan(plan: _PartitionPlan) -> bool:
+    return (
+        plan.index == 0
+        and plan.sector_count == SUPPORTED_HARDWARE_METADATA_PARTITION_SECTORS
+        and len(plan.builder._image._partitions) == 1
+    )
 
 
 def _is_two_partition_plan(plan: _PartitionPlan) -> bool:
@@ -948,28 +1063,88 @@ def _is_sparse_multi_partition_plan(plan: _PartitionPlan) -> bool:
     )
 
 
-def _sparse_multi_partition_metadata(plan: _PartitionPlan) -> bytes:
-    metadata = bytearray(PARTITION_HEADER_METADATA_SPARSE_MULTI_BASE)
-    dynamic_word = SPARSE_MULTI_METADATA_BASE_WORD + plan.index * SPARSE_MULTI_METADATA_WORD_STEP
-    first_object_hint = 0x016F5BF0 if plan.index == 0 else 0x015D6CC0
-    for offset, value in {
+def _partition_header_tail_metadata(plan: _PartitionPlan) -> bytes:
+    metadata = _partition_header_tail_template(
+        PARTITION_HEADER_TAIL_OPAQUE_TEMPLATE,
+        dynamic_offsets=PARTITION_HEADER_TAIL_VARIABLE_OFFSETS,
+    )
+    for offset, value in _partition_header_tail_values(plan).items():
+        relative_offset = offset - 0x100
+        metadata[relative_offset : relative_offset + 4] = _be32(value)
+    return bytes(metadata)
+
+
+def _partition_header_tail_template(
+    template: bytes, *, dynamic_offsets: Sequence[int] = ()
+) -> bytearray:
+    metadata = bytearray(template)
+    for offset in dynamic_offsets:
+        relative_offset = offset - 0x100
+        metadata[relative_offset : relative_offset + 4] = b"\x00" * 4
+    return metadata
+
+
+def _partition_header_tail_values(plan: _PartitionPlan) -> dict[int, int]:
+    dynamic_word = _partition_header_dynamic_word(plan.index)
+    values = {
         0x104: plan.start_sector,
         0x114: plan.index * 0x20,
         0x118: plan.start_sector,
+        0x11C: plan.sector_count,
         0x134: dynamic_word,
-        0x144: first_object_hint,
+        0x144: _partition_header_first_object_hint(plan.index),
+        0x14C: _partition_header_image_sector_marker(plan),
         0x154: plan.index,
         0x158: dynamic_word,
         0x15C: plan.index * 0x20,
         0x160: plan.index * plan.sector_count,
         0x164: dynamic_word,
         0x178: plan.start_sector,
+        0x17C: plan.sector_count,
         0x184: dynamic_word,
+        0x194: _partition_header_profile_count_marker(plan),
         0x1A8: plan.index,
-    }.items():
-        relative_offset = offset - 0x100
-        metadata[relative_offset : relative_offset + 4] = _be32(value)
-    return bytes(metadata)
+    }
+    values.update(
+        PARTITION_HEADER_PROFILE_COMPATIBILITY_WORDS[
+            _partition_header_tail_profile_key(plan)
+        ]
+    )
+    return values
+
+
+def _partition_header_tail_profile_key(plan: _PartitionPlan) -> str:
+    if _is_single_partition_256m_plan(plan):
+        return "single_256m"
+    if _is_two_partition_plan(plan):
+        return "two_partition_512m"
+    if _is_sparse_multi_partition_plan(plan):
+        return "sparse_768m_3p"
+    raise ValueError("partition header tail profile is not supported for this plan")
+
+
+def _partition_header_dynamic_word(partition_index: int) -> int:
+    return PARTITION_HEADER_DYNAMIC_BASE_WORD + partition_index * PARTITION_HEADER_DYNAMIC_WORD_STEP
+
+
+def _partition_header_first_object_hint(partition_index: int) -> int:
+    # Profile byte branch observed in sampler-formatted images; not a general allocation rule.
+    return 0x016F5BF0 if partition_index == 0 else 0x015D6CC0
+
+
+def _partition_header_image_sector_marker(plan: _PartitionPlan) -> int:
+    total_sectors = plan.builder._image.size_bytes // SECTOR_SIZE
+    # Sparse profiles use this formula; the public semantic role is not exposed.
+    if _is_sparse_multi_partition_plan(plan):
+        return total_sectors - 1
+    return total_sectors
+
+
+def _partition_header_profile_count_marker(plan: _PartitionPlan) -> int:
+    # Sparse profiles use zero here; the public semantic role is not exposed.
+    if _is_sparse_multi_partition_plan(plan):
+        return 0
+    return len(plan.builder._image._partitions)
 
 
 def _object_refs(plan: _PartitionPlan) -> list[WrittenObjectRef]:
