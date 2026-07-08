@@ -280,6 +280,70 @@ def test_hds_writer_can_zero_single_member_inactive_right_lane(tmp_path: Path) -
     assert relationships[0].quality == "Known"
 
 
+def test_hds_writer_serializes_single_member_sbnk_from_explicit_defaults(tmp_path: Path) -> None:
+    source_wav = tmp_path / "tone.wav"
+    _write_mono_wav(source_wav)
+    image_path = tmp_path / "HD00_512_writer_explicit_sbnk.hds"
+
+    builder = HdsImageBuilder(
+        size_bytes=4 * 1024 * 1024,
+        _sbnk_single_member_inactive_right_policy=sbnk_contract.CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_ZERO,
+    )
+    partition = builder.add_partition("hd1")
+    volume = partition.add_volume("WriterVol")
+    waveform = volume.add_waveform_from_wav(name="Tone0001", path=source_wav, root_key=60)
+    volume.add_sample_bank(
+        name="Bank0001",
+        waveform=waveform,
+        root_key=60,
+        key_low=60,
+        key_high=60,
+        level=100,
+    )
+
+    builder.write(image_path)
+
+    image_bytes = image_path.read_bytes()
+    sbnk_record = _index_record(image_bytes, 10)
+    sbnk_payload = _record_payload(image_bytes, sbnk_record)
+    assert sbnk_payload[0x10:0x20] == bytes.fromhex("00000000000000040000013400000158")
+    assert sbnk_payload[0x30:0x32] == bytes.fromhex("100c")
+    assert sbnk_payload[0x43:0x4A] == bytes.fromhex("b8000af67a0154")
+    assert _be32(sbnk_payload, 0x68) == 0x01443C30
+    assert sbnk_payload[0x6C:0x70] == b"\x00" * 4
+    assert sbnk_payload[0x74:0x78] == b"\x00" * 4
+    assert sbnk_payload[0x78:0x88] == b"Tone0001        "
+    assert sbnk_payload[0x88:0x98] == b"\x00" * 16
+    assert _be32(sbnk_payload, 0x98) == 0x01443C30
+    assert _be32(sbnk_payload, 0xA0) == 0x016B1DBC
+    assert _be32(sbnk_payload, 0xA4) == 0
+    assert sbnk_payload[0xA8:0xB8] == bytes.fromhex("4a04012047050120490b01e0480c01e0")
+    assert sbnk_payload[0xD0] == 0x02
+    assert sbnk_payload[0xD1] == 0
+    assert sbnk_payload[0xD2:0xD6] == bytes.fromhex("00000200")
+    assert sbnk_payload[0xD6] == 60
+    assert sbnk_payload[0xD7] == 0
+    assert sbnk_payload[0xD8:0xDC] == bytes.fromhex("ac440000")
+    assert sbnk_payload[0xDD] == 0
+    assert sbnk_payload[0xE0:0xE2] == b"\x00" * 2
+    assert sbnk_payload[0xE2:0xE8] == bytes.fromhex("3c3c30012328")
+    assert sbnk_payload[0x108:0x118] == bytes.fromhex("00007f04007f0000000000003f006400")
+    assert sbnk_payload[0x152:0x157] == bytes.fromhex("c1e01e3a20")
+    assert sbnk_payload[0x158:0x15C] == bytes.fromhex("3e20e1c6")
+    assert sbnk_payload[0x164:0x17C] == bytes(
+        [74, 4, 1, 32, 71, 5, 1, 32, 73, 11, 1, 224, 72, 12, 1, 224, 0, 0, 0, 0, 0, 0, 0, 0]
+    )
+    assert sbnk_payload[0x17C:0x185] == bytes.fromhex("0000017f007f005a5a")
+
+    objects = load_sfs_objects(image_path)
+    graph = build_relationship_graph(objects)
+    relationships = [
+        row for row in graph.relationships if row.relationship_type == "SBNK_LEFT_MEMBER_TO_SMPL"
+    ]
+    assert len(relationships) == 1
+    assert relationships[0].quality == "Known"
+
+
 def test_hds_writer_creates_two_waveforms_and_banks_with_distinct_links(tmp_path: Path) -> None:
     source_a = tmp_path / "tone-a.wav"
     source_b = tmp_path / "tone-b.wav"

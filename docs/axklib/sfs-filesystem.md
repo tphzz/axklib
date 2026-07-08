@@ -337,7 +337,12 @@ The first writer scope is intentionally narrow:
 - generated disk headers include explicit superblock descriptor words, initialized sector-2 disk metadata, full primary and duplicate partition-header sectors for the supported hard-disk metadata profile, and the early first-bitmap-sector mirror used by A-series hard-disk images;
 - generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;
 - generated current `SMPL` object payloads use a `0x200` object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;
-- generated current `SBNK` object payloads use the current single-member sample-bank object span, populated default parameter/control block, and header fields for a normal sample bank that references one waveform object.
+- generated current `SBNK` object payloads use the current single-member sample-bank object span, populated default parameter/control block, and header fields for a normal sample bank that references one waveform object;
+- generated direct single-member `SBNK` objects include hardware-tested reserved
+  Sample Parameter defaults at `SBNK+0x152..0x15b`. Yamaha labels the
+  corresponding decimal Sample Parameter offsets `0170..0179` as reserved, but
+  generated images need compatible values there for audible playback and normal
+  tone.
 
 Callers should treat this as a generated-image API, not as an image repair or
 mutation API. Use `axklib info`, `axklib validate`, and `axklib extract wav file`

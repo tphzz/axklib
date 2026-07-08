@@ -243,7 +243,18 @@ as inactive compatibility fields rather than as a second playback region.
 | `0x116` | u8 | sample_level_0x116 |
 
 Generated direct single-member `SBNK` objects have been hardware-tested with
-sample level values in the normal `0..127` range.
+sample level values in the normal `0..127` range. The writer also carries a
+conservative current-format default set for fields that are not yet surfaced as
+public write inputs, including filter, envelope, LFO, output, portamento, and
+sample-control defaults for this direct single-member scope.
+
+The Yamaha Sample Parameter table labels decimal offsets `0170..0179` as
+reserved. With the current `0x0a8` Sample Parameter base, those reserved bytes
+map to `SBNK+0x152..0x15b`. Hardware-tested generated direct single-member
+`SBNK` objects require compatible values in this reserved range: `0x152..0x156`
+gates audible playback, and `0x158..0x15b` restores the normal unfiltered tone
+for this writer scope.
+
 | `0x117` | u8 | pan_0x117 |
 | `0x118` | u8 | velocity_low_limit_0x118 |
 | `0x119` | u8 | velocity_offset_0x119 |
@@ -296,6 +307,8 @@ sample level values in the normal `0..127` range.
 | `0x14b` | u8 | lfo_pitch_mod_depth_0x14b |
 | `0x14c` | u8 | lfo_amp_mod_depth_0x14c |
 | `0x151` | s8 | filter_gain_0x151 |
+| `0x152..0x156` | 5 | bytes | single_member_reserved_playback_default_0x152_0x156 |
+| `0x158..0x15b` | 4 | bytes | single_member_reserved_tone_default_0x158_0x15b |
 | `0x15c` | u32be | wave_end_address_0x15c |
 | `0x160` | u32be | loop_end_address_0x160 |
 | `0x17c` | u8 | velocity_xfade_high_0x17c |

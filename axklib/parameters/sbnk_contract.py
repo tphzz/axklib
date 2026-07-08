@@ -88,17 +88,27 @@ CURRENT_SBNK_LOOP_CACHE_POLICIES = {
     CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_ONE_SHOT_REVERSE,
 }
 CURRENT_SBNK_SAMPLE_PARAMETER_BASE = object_fields.SBNK_SAMPLE_PARAMETER_BASE
-CURRENT_SINGLE_MEMBER_SBNK_SEED_PAYLOAD = bytes.fromhex(
-    "465346534445563353504c5853424e4b0000000000000004000001340000015800000000000000000000000000000000"
-    "100c73696e6520776176652020202020202000b8000af67a015400000000000000000000000000000000000000000000"
-    "000000000000000001443c3073696e580000000001443c3073696e652077617665202020202020200000000000000000"
-    "000000000000000001443c3000000000016b1dbc000000004a04012047050120490b01e0480c01e00000000000000000"
-    "000000000000000000000000000000000200000002004242bb80bb80ecec154215427f00300123280000000000000000"
-    "00000080000000000000000000000000000000800000000000007f04007f0000000000003f00640000007f00007f7f7f"
-    "00001a400a007f7f7f00000000000000007f7f7f000000000000000c7f7f7e087f7f0000000001270001000000017f00"
-    "7f00c1e01e3a20003e20e1c600000080000000804a04012047050120490b01e0480c01e000000000000000000000017f"
-    "007f005a5a000000"
-).ljust(CURRENT_SBNK_CONTRACT_PAYLOAD_SIZE, b"\x00")
+CURRENT_SBNK_OBJECT_HEADER_DEFAULT_0X10_0X1F = bytes.fromhex("00000000000000040000013400000158")
+CURRENT_SBNK_NAME_BLOCK_DEFAULT_PREFIX_0X30_0X31 = bytes.fromhex("100c")
+CURRENT_SBNK_NAME_BLOCK_DEFAULT_SUFFIX_0X43_0X49 = bytes.fromhex("b8000af67a0154")
+CURRENT_SBNK_OBJECT_HANDLE_DEFAULT = 0x01443C30
+CURRENT_SBNK_MEMBER_PARAMETER_BASE_DEFAULT_0X0A8_0X0B7 = bytes.fromhex(
+    "4a04012047050120490b01e0480c01e0"
+)
+CURRENT_SBNK_SINGLE_MEMBER_RESERVED_PLAYBACK_DEFAULT_0X152_0X156 = bytes.fromhex(
+    "c1e01e3a20"
+)
+CURRENT_SBNK_SINGLE_MEMBER_RESERVED_TONE_DEFAULT_0X158_0X15B = bytes.fromhex(
+    "3e20e1c6"
+)
+CURRENT_SINGLE_MEMBER_SBNK_DEFAULT_SAMPLE_CONTROL_RECORDS = (
+    (74, 4, 1, 32),
+    (71, 5, 1, 32),
+    (73, 11, 1, -32),
+    (72, 12, 1, -32),
+    (0, 0, 0, 0),
+    (0, 0, 0, 0),
+)
 
 
 def sbnk_sample_parameter_offset(sysex_sample_parameter_offset: int) -> int:
@@ -664,6 +674,48 @@ def validate_current_sbnk_template(template: bytes, *, require_single_member: bo
         raise ValueError("single-member SBNK template must have an empty right sample-name field")
 
 
+def apply_current_single_member_sbnk_explicit_defaults(data: bytearray) -> None:
+    data[0x10:0x20] = CURRENT_SBNK_OBJECT_HEADER_DEFAULT_0X10_0X1F
+    data[0x30:0x32] = CURRENT_SBNK_NAME_BLOCK_DEFAULT_PREFIX_0X30_0X31
+    data[0x43:0x4A] = CURRENT_SBNK_NAME_BLOCK_DEFAULT_SUFFIX_0X43_0X49
+    put_be32(data, 0x68, CURRENT_SBNK_OBJECT_HANDLE_DEFAULT)
+    put_be32(data, 0x98, CURRENT_SBNK_OBJECT_HANDLE_DEFAULT)
+    data[0xA8:0xB8] = CURRENT_SBNK_MEMBER_PARAMETER_BASE_DEFAULT_0X0A8_0X0B7
+    data[0x0D0] = 0x02
+    data[0x0D1] = 0x00
+    data[0x0E4] = 0x30
+    data[0x0E5] = 0x01
+    data[0x152:0x157] = CURRENT_SBNK_SINGLE_MEMBER_RESERVED_PLAYBACK_DEFAULT_0X152_0X156
+    data[0x158:0x15C] = CURRENT_SBNK_SINGLE_MEMBER_RESERVED_TONE_DEFAULT_0X158_0X15B
+
+
+def write_current_sbnk_sample_control_records(
+    data: bytearray,
+    records: tuple[tuple[int, int, int, int], ...],
+) -> None:
+    if len(records) != SAMPLE_CONTROL_RECORD_COUNT:
+        raise ValueError(
+            f"generated SBNK sample-control records require {SAMPLE_CONTROL_RECORD_COUNT} records"
+        )
+    for index, (device, function, control_type, control_range) in enumerate(records):
+        require_unsigned_range(f"generated SBNK sample-control {index + 1} device", device, 0x7F)
+        require_unsigned_range(
+            f"generated SBNK sample-control {index + 1} function", function, 0x7F
+        )
+        require_unsigned_range(
+            f"generated SBNK sample-control {index + 1} type", control_type, 0x03
+        )
+        if not -128 <= control_range <= 127:
+            raise ValueError(
+                f"generated SBNK sample-control {index + 1} range out of range: {control_range}"
+            )
+        offset = sample_control_record_offset(index + 1)
+        data[offset] = device
+        data[offset + 1] = function
+        data[offset + 2] = control_type
+        put_s8(data, offset + 3, control_range)
+
+
 def apply_current_sbnk_single_member_inactive_right_policy(
     data: bytearray,
     *,
@@ -716,13 +768,98 @@ def serialize_current_single_member_sbnk_payload(
             left=left,
             right=None,
             instrument_name=instrument_name,
-            template=CURRENT_SINGLE_MEMBER_SBNK_SEED_PAYLOAD,
+            template=None,
+            allow_zero_inactive_right_slot_without_template=True,
             loop_cache_policy=loop_cache_policy,
-            key_range_high_0x0e2=key_range_high_0x0e2,
-            key_range_low_0x0e3=key_range_low_0x0e3,
-            sample_level_0x116=sample_level_0x116,
+            key_range_high_0x0e2=(
+                127 if key_range_high_0x0e2 is None else key_range_high_0x0e2
+            ),
+            key_range_low_0x0e3=(0 if key_range_low_0x0e3 is None else key_range_low_0x0e3),
+            midi_receive_channel_0x0d2=0,
+            pitch_bend_type_0x0d3=0,
+            pitch_bend_range_0x0d4=2,
+            coarse_tune_0x0d5=0,
+            loop_tempo_0x0e6=9000,
+            filter_type_0x109=0,
+            filter_cutoff_0x10a=127,
+            filter_q_width_0x10b=4,
+            filter_cutoff_key_scaling_break1_0x10c=0,
+            filter_cutoff_key_scaling_break2_0x10d=127,
+            filter_cutoff_key_scaling_level1_0x10e=0,
+            filter_cutoff_key_scaling_level2_0x10f=0,
+            filter_cutoff_velocity_sensitivity_0x110=0,
+            filter_q_width_velocity_sensitivity_0x111=0,
+            expand_detune_0x112=0,
+            expand_dephase_0x113=0,
+            expand_width_0x114=63,
+            random_pitch_0x115=0,
+            sample_level_0x116=(100 if sample_level_0x116 is None else sample_level_0x116),
+            pan_0x117=0,
+            velocity_low_limit_0x118=0,
+            velocity_offset_0x119=0,
+            velocity_range_high_0x11a=127,
+            velocity_range_low_0x11b=0,
+            level_scaling_break1_0x11c=0,
+            level_scaling_break2_0x11d=127,
+            level_scaling_level1_0x11e=127,
+            level_scaling_level2_0x11f=127,
+            velocity_sensitivity_0x120=0,
+            alternate_group_0x121=0,
+            sample_eq_frequency_0x122=26,
+            sample_eq_gain_0x123=64,
+            sample_eq_width_0x124=10,
+            filter_cutoff_distance_0x125=0,
+            feg_attack_rate_0x126=127,
+            feg_decay_rate_0x127=127,
+            feg_release_rate_0x128=127,
+            feg_init_level_0x129=0,
+            feg_attack_level_0x12a=0,
+            feg_sustain_level_0x12b=0,
+            feg_release_level_0x12c=0,
+            feg_rate_key_scaling_0x12d=0,
+            feg_rate_velocity_sensitivity_0x12e=0,
+            feg_attack_level_velocity_sensitivity_0x12f=0,
+            feg_level_velocity_sensitivity_0x130=0,
+            peg_attack_rate_0x131=127,
+            peg_decay_rate_0x132=127,
+            peg_release_rate_0x133=127,
+            peg_init_level_0x134=0,
+            peg_attack_level_0x135=0,
+            peg_sustain_level_0x136=0,
+            peg_release_level_0x137=0,
+            peg_rate_key_scaling_0x138=0,
+            peg_rate_velocity_sensitivity_0x139=0,
+            peg_level_velocity_sensitivity_0x13a=0,
+            peg_range_0x13b=12,
+            aeg_attack_rate_0x13c=127,
+            aeg_decay_rate_0x13d=127,
+            aeg_release_rate_0x13e=126,
+            aeg_sustain_level_0x141=127,
+            aeg_attack_mode_0x143=0,
+            aeg_rate_key_scaling_0x144=0,
+            aeg_rate_velocity_sensitivity_0x145=0,
+            lfo_wave_0x146=1,
+            lfo_speed_0x147=39,
+            lfo_delay_time_0x148=0,
+            lfo_flags_0x149=1,
+            lfo_cutoff_mod_depth_0x14a=0,
+            lfo_pitch_mod_depth_0x14b=0,
+            lfo_amp_mod_depth_0x14c=0,
+            start_address_velocity_sensitivity_0x108=0,
+            filter_gain_0x151=0,
+            sample_control_records_0x164=CURRENT_SINGLE_MEMBER_SBNK_DEFAULT_SAMPLE_CONTROL_RECORDS,
+            velocity_xfade_high_0x17c=0,
+            velocity_xfade_low_0x17d=0,
+            output1_0x17e=1,
+            output1_level_0x17f=127,
+            output2_0x180=0,
+            output2_level_0x181=127,
+            sample_portamento_type_0x182=0,
+            sample_portamento_rate_0x183=90,
+            sample_portamento_time_0x184=90,
         )
     )
+    apply_current_single_member_sbnk_explicit_defaults(payload)
     apply_current_sbnk_single_member_inactive_right_policy(
         payload,
         left=left,
@@ -961,6 +1098,7 @@ def serialize_current_sbnk_contract_payload(
     lfo_amp_mod_depth_0x14c: int | None = None,
     start_address_velocity_sensitivity_0x108: int | None = None,
     filter_gain_0x151: int | None = None,
+    sample_control_records_0x164: tuple[tuple[int, int, int, int], ...] | None = None,
     velocity_xfade_high_0x17c: int | None = None,
     velocity_xfade_low_0x17d: int | None = None,
     output1_0x17e: int | None = None,
@@ -1407,6 +1545,8 @@ def serialize_current_sbnk_contract_payload(
         if not -31 <= filter_gain_0x151 <= 31:
             raise ValueError(f"generated SBNK filter gain out of range: {filter_gain_0x151}")
         put_s8(data, 0x151, filter_gain_0x151)
+    if sample_control_records_0x164 is not None:
+        write_current_sbnk_sample_control_records(data, sample_control_records_0x164)
     if velocity_xfade_high_0x17c is not None:
         require_unsigned_range(
             "generated SBNK velocity x-fade high", velocity_xfade_high_0x17c, 0x7F
