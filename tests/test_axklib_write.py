@@ -409,12 +409,16 @@ def test_hds_writer_creates_two_partitions_with_independent_volumes(tmp_path: Pa
     assert _be32(image_bytes, 0xB0) == 524_290
     assert _be32(image_bytes, 0xB4) == 524_286
     assert image_bytes[1024:1032] == b"bb736200"
-    assert image_bytes[1024 + 0x1A : 1024 + 0x2A] == b"hd1             "
+    assert image_bytes[1024 + 0x09 : 1024 + 0x11] == b"c2b4e600"
+    assert image_bytes[1024 + 0x12 : 1024 + 0x2C] == b"\x00" * 0x1A
     assert image_bytes[1024 + 0x30 : 1024 + 0x3F] == b"\x00" * 15
-    assert image_bytes[1024 + 0x48 : 1024 + 0x58] == b"hd2             "
+    assert image_bytes[1024 + 0x40 : 1024 + 0x5A] == b"\x00" * 0x1A
     pre_partition_b = (524_290 - 1) * 512
     assert image_bytes[pre_partition_b : pre_partition_b + 8] == b"bb736201"
+    assert image_bytes[pre_partition_b + 0x09 : pre_partition_b + 0x11] == b"c2b4e600"
+    assert image_bytes[pre_partition_b + 0x12 : pre_partition_b + 0x2C] == b"\x00" * 0x1A
     assert image_bytes[pre_partition_b + 0x30 : pre_partition_b + 0x3F] == b"\x00" * 15
+    assert image_bytes[pre_partition_b + 0x40 : pre_partition_b + 0x5A] == b"\x00" * 0x1A
 
     partition_a_offset = _be32(image_bytes, 0xA8) * 512
     partition_b_offset = _be32(image_bytes, 0xB0) * 512
@@ -485,10 +489,7 @@ def test_hds_writer_scales_bitmap_and_index_geometry_for_256_mib(tmp_path: Path)
     assert image_bytes[512 + 0x80 : 512 + 0x9C] == image_bytes[0x80:0x9C]
     assert image_bytes[1024:1032] == b"c2b4e600"
     assert image_bytes[1033:1041] == b"ab432100"
-    assert image_bytes[1042:1048] == bytes.fromhex("23 44 01 54 23 94")
-    assert image_bytes[1049] == 0x13
-    assert image_bytes[1050:1066] == b"hd1             "
-    assert image_bytes[1067] == 0x90
+    assert image_bytes[1042:1068] == b"\x00" * 0x1A
     partition_start = _be32(image_bytes, 0xA8)
     partition_offset = partition_start * 512
     assert _be32(image_bytes, partition_offset + 0x9C) == 34

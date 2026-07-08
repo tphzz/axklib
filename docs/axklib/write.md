@@ -22,7 +22,8 @@ supported hard-disk profiles are:
 - 768 MiB, three SFS partitions using the sparse formatter profile for empty volume skeletons.
 
 These profiles initialize sector 2 or the corresponding sparse marker sectors,
-partition metadata, primary/duplicate partition headers, allocation bitmaps,
+while leaving unneeded sector-2 label-entry record areas zeroed. They also
+initialize partition metadata, primary/duplicate partition headers, allocation bitmaps,
 directory indexes, and volume directories. Object-record writing is currently
 validated on the 256 MiB and 512 MiB profiles; the 768 MiB sparse profile is
 limited to empty volume skeletons until object payloads are validated on that

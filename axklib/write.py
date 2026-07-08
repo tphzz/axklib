@@ -44,10 +44,6 @@ DISK_DESCRIPTOR_UNRESOLVED_WORDS = (
 )
 DEFAULT_DISK_IDENTIFIER = b"ab432100"
 SECTOR2_PRIMARY_IDENTIFIER = b"c2b4e600"
-SECTOR2_METADATA_MARKER = bytes.fromhex("23 44 01 54 23 94")
-SECTOR2_ENTRY_STATE_VALUE = 0x13
-SECTOR2_ENTRY_FLAGS_VALUE = 0x90
-SECTOR2_ENTRY_NAME_SIZE = 16
 SUPPORTED_HARDWARE_METADATA_PARTITION_SECTORS = 524_285
 SUPPORTED_TWO_PARTITION_IMAGE_BYTES = 512 * 1024 * 1024
 SUPPORTED_TWO_PARTITION_SECTORS = 524_286
@@ -857,8 +853,6 @@ def _single_partition_sector_metadata(plans: list[_PartitionPlan]) -> bytes:
     metadata = bytearray(SECTOR_SIZE)
     metadata[0:8] = SECTOR2_PRIMARY_IDENTIFIER
     metadata[9:17] = DEFAULT_DISK_IDENTIFIER
-    if plans:
-        _write_sector2_labeled_entry(metadata, marker_offset=0x12, name=plans[0].builder.name)
     return bytes(metadata)
 
 
@@ -880,8 +874,6 @@ def _two_partition_sector_metadata(plans: list[_PartitionPlan], sequence: int) -
     metadata = bytearray(SECTOR_SIZE)
     metadata[0:8] = _two_partition_sector_identifier(sequence)
     metadata[9:17] = SECTOR2_PRIMARY_IDENTIFIER
-    _write_sector2_labeled_entry(metadata, marker_offset=0x12, name=plans[0].builder.name)
-    _write_sector2_labeled_entry(metadata, marker_offset=0x40, name=plans[1].builder.name)
     return bytes(metadata)
 
 
@@ -889,13 +881,6 @@ def _two_partition_sector_identifier(sequence: int) -> bytes:
     return f"bb73620{sequence}".encode("ascii")
 
 
-def _write_sector2_labeled_entry(metadata: bytearray, *, marker_offset: int, name: str) -> None:
-    metadata[marker_offset : marker_offset + len(SECTOR2_METADATA_MARKER)] = SECTOR2_METADATA_MARKER
-    metadata[marker_offset + 0x07] = SECTOR2_ENTRY_STATE_VALUE
-    metadata[marker_offset + 0x08 : marker_offset + 0x08 + SECTOR2_ENTRY_NAME_SIZE] = _ascii_field(
-        name, SECTOR2_ENTRY_NAME_SIZE
-    )
-    metadata[marker_offset + 0x19] = SECTOR2_ENTRY_FLAGS_VALUE
 
 def _partition_writes(plan: _PartitionPlan) -> list[tuple[int, bytes]]:
     start_offset = plan.start_sector * SECTOR_SIZE

@@ -67,11 +67,13 @@ A partition entry is active when both values are non-zero. Fresh generated
 images also populate the observed disk mode metadata area so the duplicate
 superblocks match sampler-authored hard-disk images of the same size class.
 
-A-series hard-disk images also use sector 2 as an auxiliary disk metadata and
-identifier sector. axklib does not expose that sector as part of the directory
+A-series hard-disk images also use sector 2, and in multi-partition profiles the
+sectors immediately before later partitions, as auxiliary disk metadata and
+identifier sectors. axklib does not expose those sectors as part of the directory
 or object tree, but generated images intended for hardware loading must
-initialize it. A zero-filled sector 2 can still leave an image readable by a
-permissive parser while failing later in the sampler load path.
+initialize their proven identifier bytes. For currently supported generated
+profiles, older label-entry marker/name records in those sectors are
+intentionally zero-generated; they are not required for hardware loading.
 
 ## Partition Header
 
@@ -374,13 +376,13 @@ The writer constructs the superblock, partition table, sector-2 metadata,
 partition headers, allocation bitmap, directory index, and object payload
 extents from the typed image model. Fields with known formulas, such as
 partition slot placement, partition-header start/count words, partition-index
-words, sector-2 labels, and dynamic header words, are generated explicitly. The
+words, sector-2 identifiers, and dynamic header words, are generated explicitly. The
 supported partition-header tail profiles share one fixed compatibility template
 after variable words are removed. The validated non-required residue range at
 `+0x1bc..+0x1e3` is zero-generated for all currently supported writer
-profiles. Sector-2 labeled-entry metadata remains scoped to validated writer
-profiles; the current two-partition +0x30..+0x3e range is deliberately
-zeroed.
+profiles. Sector-2 label-entry records and the current two-partition
++0x30..+0x3e range are deliberately zero-generated for currently supported
+writer profiles.
 
 
 ### Writer profile metadata
