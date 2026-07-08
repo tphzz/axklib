@@ -8,6 +8,7 @@ import pytest
 from axklib.audio import decode_waveform
 from axklib.containers import load_sfs_objects
 from axklib.model import AxklibObjectType
+from axklib.parameters import sbnk_contract
 from axklib.relationships import build_relationship_graph
 from axklib.write import MAX_IMAGE_SIZE_BYTES, HdsImageBuilder
 
@@ -81,9 +82,7 @@ def _assert_partition_header_residue_zero(data: bytes, partition_index: int) -> 
     partition_start = _be32(data, 0xA8 + partition_index * 8)
     partition_offset = partition_start * 512
     assert data[partition_offset + 0x1BC : partition_offset + 0x1E4] == b"\x00" * 40
-    assert data[
-        partition_offset + 1024 + 0x1BC : partition_offset + 1024 + 0x1E4
-    ] == b"\x00" * 40
+    assert data[partition_offset + 1024 + 0x1BC : partition_offset + 1024 + 0x1E4] == b"\x00" * 40
 
 
 def test_hds_writer_rejects_images_above_a_series_cap() -> None:
@@ -167,6 +166,16 @@ def test_hds_writer_creates_parseable_current_smpl_and_sbnk(tmp_path: Path) -> N
     assert sbnk_payload[0x98:0x9C] == bytes.fromhex("01443c30")
     assert sbnk_payload[0xA0:0xA4] == bytes.fromhex("016b1dbc")
     assert sbnk_payload[0xA8:0xB8] == bytes.fromhex("4a04012047050120490b01e0480c01e0")
+    assert sbnk_payload[0x088:0x098] == b"\x00" * 16
+    assert _be32(sbnk_payload, 0x0A4) == 0
+    assert sbnk_payload[0x0D7] == 0
+    assert sbnk_payload[0x0DA:0x0DC] == b"\x00\x00"
+    assert sbnk_payload[0x0DD] == 0
+    assert sbnk_payload[0x0E0:0x0E2] == b"\x00\x00"
+    assert sbnk_payload[0x0EC:0x0F0] == b"\x00" * 4
+    assert _be32(sbnk_payload, 0x0F4) == 0
+    assert _be32(sbnk_payload, 0x0FC) == 0
+    assert _be32(sbnk_payload, 0x104) == 0
     assert len(sbnk_payload) == 0x188
     assert root_payload[10:12] == b"\x4f\x58"
     assert root_payload[16:20] == b"\x00\x17\x82\x1a"
@@ -217,6 +226,58 @@ def test_hds_writer_creates_parseable_current_smpl_and_sbnk(tmp_path: Path) -> N
     assert len(relationships) == 1
     assert relationships[0].quality == "Known"
     assert relationships[0].basis == "sbnk-member-link+name"
+
+
+def test_hds_writer_can_zero_single_member_inactive_right_lane(tmp_path: Path) -> None:
+    source_wav = tmp_path / "tone.wav"
+    _write_mono_wav(source_wav)
+    image_path = tmp_path / "HD00_512_writer_zero_inactive_right.hds"
+
+    builder = HdsImageBuilder(
+        size_bytes=4 * 1024 * 1024,
+        _sbnk_single_member_inactive_right_policy=sbnk_contract.CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_ZERO,
+    )
+    partition = builder.add_partition("hd1")
+    volume = partition.add_volume("WriterVol")
+    waveform = volume.add_waveform_from_wav(name="Tone0001", path=source_wav, root_key=60)
+    volume.add_sample_bank(
+        name="Bank0001",
+        waveform=waveform,
+        root_key=60,
+        key_low=60,
+        key_high=60,
+        level=100,
+    )
+
+    builder.write(image_path)
+
+    image_bytes = image_path.read_bytes()
+    sbnk_record = _index_record(image_bytes, 10)
+    sbnk_payload = _record_payload(image_bytes, sbnk_record)
+    assert sbnk_payload[0x078:0x088] == b"Tone0001        "
+    assert sbnk_payload[0x088:0x098] == b"\x00" * 16
+    assert _be32(sbnk_payload, 0x0A0) == 0x016B1DBC
+    assert _be32(sbnk_payload, 0x0A4) == 0
+    assert sbnk_payload[0x0D6] == 60
+    assert sbnk_payload[0x0D7] == 0
+    assert sbnk_payload[0x0D8:0x0DC] == b"\xac\x44\x00\x00"
+    assert sbnk_payload[0x0DD] == 0
+    assert sbnk_payload[0x0E0:0x0E2] == b"\x00\x00"
+    assert sbnk_payload[0x0EC:0x0F0] == b"\x00" * 4
+    assert _be32(sbnk_payload, 0x0F0) == 5
+    assert _be32(sbnk_payload, 0x0F4) == 0
+    assert _be32(sbnk_payload, 0x0F8) == 0
+    assert _be32(sbnk_payload, 0x0FC) == 0
+    assert _be32(sbnk_payload, 0x100) == 5
+    assert _be32(sbnk_payload, 0x104) == 0
+
+    objects = load_sfs_objects(image_path)
+    graph = build_relationship_graph(objects)
+    relationships = [
+        row for row in graph.relationships if row.relationship_type == "SBNK_LEFT_MEMBER_TO_SMPL"
+    ]
+    assert len(relationships) == 1
+    assert relationships[0].quality == "Known"
 
 
 def test_hds_writer_creates_two_waveforms_and_banks_with_distinct_links(tmp_path: Path) -> None:
@@ -589,9 +650,7 @@ def test_hds_writer_creates_sparse_768m_object_volume_on_first_partition(
     builder = HdsImageBuilder(size_bytes=768 * 1024 * 1024)
     partition_a = builder.add_partition("New Partition")
     volume_a = partition_a.add_volume("New Volume")
-    waveform = volume_a.add_waveform_from_wav(
-        name="Tone0001", path=source_wav, root_key=60
-    )
+    waveform = volume_a.add_waveform_from_wav(name="Tone0001", path=source_wav, root_key=60)
     volume_a.add_sample_bank(
         name="Bank0001",
         waveform=waveform,
@@ -608,8 +667,7 @@ def test_hds_writer_creates_sparse_768m_object_volume_on_first_partition(
 
     assert result.partitions == 3
     assert [
-        (obj.partition_index, obj.sfs_id, obj.object_type, obj.name)
-        for obj in result.objects
+        (obj.partition_index, obj.sfs_id, obj.object_type, obj.name) for obj in result.objects
     ] == [
         (0, 9, "SMPL", "Tone0001"),
         (0, 10, "SBNK", "Bank0001"),
@@ -696,6 +754,7 @@ def test_hds_writer_creates_sparse_768m_object_volume_on_first_partition(
         assert _entry_names(smpl_payload) == [".", ".."]
         assert _entry_names(sbnk_payload) == [".", ".."]
 
+
 def test_hds_writer_creates_sparse_768m_object_volume_on_second_partition(
     tmp_path: Path,
 ) -> None:
@@ -708,9 +767,7 @@ def test_hds_writer_creates_sparse_768m_object_volume_on_second_partition(
     partition_a.add_volume("New Volume")
     partition_b = builder.add_partition("New Partition")
     volume_b = partition_b.add_volume("New Volume")
-    waveform = volume_b.add_waveform_from_wav(
-        name="Tone0001", path=source_wav, root_key=60
-    )
+    waveform = volume_b.add_waveform_from_wav(name="Tone0001", path=source_wav, root_key=60)
     volume_b.add_sample_bank(
         name="Bank0001",
         waveform=waveform,
@@ -725,8 +782,7 @@ def test_hds_writer_creates_sparse_768m_object_volume_on_second_partition(
     result = builder.write(image_path)
 
     assert [
-        (obj.partition_index, obj.sfs_id, obj.object_type, obj.name)
-        for obj in result.objects
+        (obj.partition_index, obj.sfs_id, obj.object_type, obj.name) for obj in result.objects
     ] == [
         (1, 9, "SMPL", "Tone0001"),
         (1, 10, "SBNK", "Bank0001"),
@@ -764,6 +820,7 @@ def test_hds_writer_creates_sparse_768m_object_volume_on_second_partition(
     assert sbnk_payload[0x0E2:0x0E4] == bytes([60, 60])
     assert sbnk_payload[0x116] == 100
 
+
 def test_hds_writer_creates_sparse_768m_object_volume_on_third_partition(
     tmp_path: Path,
 ) -> None:
@@ -778,9 +835,7 @@ def test_hds_writer_creates_sparse_768m_object_volume_on_third_partition(
     partition_b.add_volume("New Volume")
     partition_c = builder.add_partition("New Partition")
     volume_c = partition_c.add_volume("New Volume")
-    waveform = volume_c.add_waveform_from_wav(
-        name="Tone0001", path=source_wav, root_key=60
-    )
+    waveform = volume_c.add_waveform_from_wav(name="Tone0001", path=source_wav, root_key=60)
     volume_c.add_sample_bank(
         name="Bank0001",
         waveform=waveform,
@@ -793,8 +848,7 @@ def test_hds_writer_creates_sparse_768m_object_volume_on_third_partition(
     result = builder.write(image_path)
 
     assert [
-        (obj.partition_index, obj.sfs_id, obj.object_type, obj.name)
-        for obj in result.objects
+        (obj.partition_index, obj.sfs_id, obj.object_type, obj.name) for obj in result.objects
     ] == [
         (2, 9, "SMPL", "Tone0001"),
         (2, 10, "SBNK", "Bank0001"),

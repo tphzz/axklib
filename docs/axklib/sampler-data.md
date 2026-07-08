@@ -212,7 +212,9 @@ preserves those raw values and exposes a `resolved_key_range` projection in
 volume graphs. The projection resolves `Orig` to the member root key so export
 formats with only concrete MIDI limits can emit bounded zones. Generated direct
 single-member `SBNK` objects have been hardware-tested with concrete root key
-and key-range values.
+and key-range values. For a single-member bank, an empty right member name means
+there is no active right member; the generated writer treats right-member fields
+as inactive compatibility fields rather than as a second playback region.
 
 | `0x0e8` | u32be | left_wave_start_address_0x0e8 |
 | `0x0ea` | u16be | left_wave_start_low16_0x0ea |

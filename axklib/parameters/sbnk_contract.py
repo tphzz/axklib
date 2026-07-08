@@ -51,15 +51,27 @@ CURRENT_SBNK_LOOP_CACHE_POLICY_PRESERVE_TEMPLATE = "preserve-template"
 CURRENT_SBNK_LOOP_CACHE_POLICY_SINGLE_MEMBER_ONE_SHOT = "single-member-one-shot"
 CURRENT_SBNK_LOOP_CACHE_POLICY_SINGLE_MEMBER_FORWARD = "single-member-forward"
 CURRENT_SBNK_LOOP_CACHE_POLICY_SINGLE_MEMBER_FORWARD_TO_ZERO = "single-member-forward-to-zero"
-CURRENT_SBNK_LOOP_CACHE_POLICY_SINGLE_MEMBER_FORWARD_TO_ZERO_FORWARD = "single-member-forward-to-zero-forward"
+CURRENT_SBNK_LOOP_CACHE_POLICY_SINGLE_MEMBER_FORWARD_TO_ZERO_FORWARD = (
+    "single-member-forward-to-zero-forward"
+)
 CURRENT_SBNK_LOOP_CACHE_POLICY_SINGLE_MEMBER_REVERSE = "single-member-reverse"
 CURRENT_SBNK_LOOP_CACHE_POLICY_SINGLE_MEMBER_ONE_SHOT_REVERSE = "single-member-one-shot-reverse"
 CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_FORWARD = "two-member-forward"
 CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_FORWARD_TO_ZERO = "two-member-forward-to-zero"
-CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_FORWARD_TO_ZERO_FORWARD = "two-member-forward-to-zero-forward"
+CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_FORWARD_TO_ZERO_FORWARD = (
+    "two-member-forward-to-zero-forward"
+)
 CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_REVERSE = "two-member-reverse"
 CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_ONE_SHOT = "two-member-one-shot"
 CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_ONE_SHOT_REVERSE = "two-member-one-shot-reverse"
+CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_PRESERVE_TEMPLATE = "preserve-template"
+CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_GENERATED_MIRROR = "generated-mirror"
+CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_ZERO = "zero"
+CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICIES = {
+    CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_PRESERVE_TEMPLATE,
+    CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_GENERATED_MIRROR,
+    CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_ZERO,
+}
 CURRENT_SBNK_LOOP_CACHE_POLICIES = {
     CURRENT_SBNK_LOOP_CACHE_POLICY_PRESERVE_TEMPLATE,
     CURRENT_SBNK_LOOP_CACHE_POLICY_SINGLE_MEMBER_ONE_SHOT,
@@ -76,10 +88,23 @@ CURRENT_SBNK_LOOP_CACHE_POLICIES = {
     CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_ONE_SHOT_REVERSE,
 }
 CURRENT_SBNK_SAMPLE_PARAMETER_BASE = object_fields.SBNK_SAMPLE_PARAMETER_BASE
+CURRENT_SINGLE_MEMBER_SBNK_SEED_PAYLOAD = bytes.fromhex(
+    "465346534445563353504c5853424e4b0000000000000004000001340000015800000000000000000000000000000000"
+    "100c73696e6520776176652020202020202000b8000af67a015400000000000000000000000000000000000000000000"
+    "000000000000000001443c3073696e580000000001443c3073696e652077617665202020202020200000000000000000"
+    "000000000000000001443c3000000000016b1dbc000000004a04012047050120490b01e0480c01e00000000000000000"
+    "000000000000000000000000000000000200000002004242bb80bb80ecec154215427f00300123280000000000000000"
+    "00000080000000000000000000000000000000800000000000007f04007f0000000000003f00640000007f00007f7f7f"
+    "00001a400a007f7f7f00000000000000007f7f7f000000000000000c7f7f7e087f7f0000000001270001000000017f00"
+    "7f00c1e01e3a20003e20e1c600000080000000804a04012047050120490b01e0480c01e000000000000000000000017f"
+    "007f005a5a000000"
+).ljust(CURRENT_SBNK_CONTRACT_PAYLOAD_SIZE, b"\x00")
 
 
 def sbnk_sample_parameter_offset(sysex_sample_parameter_offset: int) -> int:
     return object_fields.sbnk_sample_parameter_offset(sysex_sample_parameter_offset)
+
+
 SAMPLE_CONTROL_RECORD_COUNT = object_fields.SBNK_SAMPLE_CONTROL_RECORD_COUNT
 SAMPLE_CONTROL_RECORD_BASE = object_fields.SBNK_SAMPLE_CONTROL_RECORD_BASE
 SAMPLE_CONTROL_RECORD_SIZE = object_fields.SBNK_SAMPLE_CONTROL_RECORD_SIZE
@@ -180,6 +205,8 @@ SAMPLE_EQ_TYPE_UI_LABELS = {
 
 def sample_eq_type_ui_label(stored_bits: int) -> str:
     return SAMPLE_EQ_TYPE_UI_LABELS.get(stored_bits, "")
+
+
 # Source: Yamaha A4000/A5000 MIDI data format Note 11; the raw enum for
 # sample-control function bytes. A4000 validation checks from
 # HD00_512_smpctrl-records-01-06.hds confirm raw 2, 3, 6, 10, 25, and 36.
@@ -364,6 +391,7 @@ def estimated_pitch_base_word(root_key: int, sample_rate: int, fine_tune: int) -
 
 def pitch_base_word_status(stored_word: int, clean_word: int | None, *, active: bool = True) -> str:
     return object_fields.pitch_base_word_status(stored_word, clean_word, active=active)
+
 
 def clean_ascii(data: bytes) -> str:
     return "".join(chr(byte) if 0x20 <= byte < 0x7F else " " for byte in data).rstrip()
@@ -576,7 +604,6 @@ class ParsedCurrentSbnkPayload:
     secondary_pitch_base_word_status: str
 
 
-
 def require_unsigned_range(name: str, value: int, max_value: int) -> None:
     if not 0 <= value <= max_value:
         raise ValueError(f"{name} out of range: {value}")
@@ -602,7 +629,9 @@ def put_s8(data: bytearray, offset: int, value: int) -> None:
     data[offset] = value & 0xFF
 
 
-def put_ascii_field(data: bytearray, offset: int, size: int, value: str, *, empty: bool = False) -> None:
+def put_ascii_field(
+    data: bytearray, offset: int, size: int, value: str, *, empty: bool = False
+) -> None:
     if empty:
         data[offset : offset + size] = b"\x00" * size
         return
@@ -633,6 +662,73 @@ def validate_current_sbnk_template(template: bytes, *, require_single_member: bo
         raise ValueError("SBNK template is not a current SBNK object")
     if require_single_member and clean_ascii(template[0x088:0x098]):
         raise ValueError("single-member SBNK template must have an empty right sample-name field")
+
+
+def apply_current_sbnk_single_member_inactive_right_policy(
+    data: bytearray,
+    *,
+    left: CurrentSbnkMemberSpec,
+    policy: str,
+) -> None:
+    if policy not in CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICIES:
+        raise ValueError(f"unknown current SBNK inactive right-slot policy: {policy!r}")
+    if policy == CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_PRESERVE_TEMPLATE:
+        return
+    put_ascii_field(data, 0x088, 16, "", empty=True)
+    put_be32(data, 0x0A4, 0)
+    if policy == CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_GENERATED_MIRROR:
+        data[0x0D7] = left.root_key_0x0d6
+        put_be16(data, 0x0DA, left.sample_rate_0x0d8)
+        put_s8(data, 0x0DD, left.fine_tune_cents_0x0dc)
+        put_be16(data, 0x0E0, clean_pitch_base_word_for_member(left))
+        put_be32(data, 0x0F4, 0)
+        put_be32(data, 0x0FC, 0)
+        put_be32(data, 0x104, 0)
+        return
+    if policy == CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_ZERO:
+        data[0x0D7] = 0
+        put_be16(data, 0x0DA, 0)
+        data[0x0DD] = 0
+        put_be16(data, 0x0E0, 0)
+        put_be32(data, 0x0EC, 0)
+        put_be32(data, 0x0F4, 0)
+        put_be32(data, 0x0FC, 0)
+        put_be32(data, 0x104, 0)
+        return
+    raise AssertionError(f"unhandled current SBNK inactive right-slot policy: {policy!r}")
+
+
+def serialize_current_single_member_sbnk_payload(
+    *,
+    bank_name: str,
+    left: CurrentSbnkMemberSpec,
+    instrument_name: str = "",
+    inactive_right_policy: str = CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_ZERO,
+    loop_cache_policy: str = CURRENT_SBNK_LOOP_CACHE_POLICY_PRESERVE_TEMPLATE,
+    key_range_high_0x0e2: int | None = None,
+    key_range_low_0x0e3: int | None = None,
+    sample_level_0x116: int | None = None,
+) -> bytes:
+    """Serialize one generated current single-member SBNK from explicit model fields."""
+    payload = bytearray(
+        serialize_current_sbnk_contract_payload(
+            bank_name=bank_name,
+            left=left,
+            right=None,
+            instrument_name=instrument_name,
+            template=CURRENT_SINGLE_MEMBER_SBNK_SEED_PAYLOAD,
+            loop_cache_policy=loop_cache_policy,
+            key_range_high_0x0e2=key_range_high_0x0e2,
+            key_range_low_0x0e3=key_range_low_0x0e3,
+            sample_level_0x116=sample_level_0x116,
+        )
+    )
+    apply_current_sbnk_single_member_inactive_right_policy(
+        payload,
+        left=left,
+        policy=inactive_right_policy,
+    )
+    return bytes(payload)
 
 
 def write_current_sbnk_member(
@@ -685,7 +781,10 @@ def apply_current_sbnk_loop_cache_policy(
         )
         put_be16(data, 0x0EA, left.loop_start_frame_0x0f8)
         return
-    if right is not None and loop_cache_policy == CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_FORWARD_TO_ZERO:
+    if (
+        right is not None
+        and loop_cache_policy == CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_FORWARD_TO_ZERO
+    ):
         require_unsigned_range(
             "two-member left wave-start low16 loop-load word",
             left.loop_start_frame_0x0f8,
@@ -694,7 +793,10 @@ def apply_current_sbnk_loop_cache_policy(
         data[0x0E5] = 0x01
         put_be16(data, 0x0EA, left.loop_start_frame_0x0f8)
         return
-    if right is not None and loop_cache_policy == CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_FORWARD_TO_ZERO_FORWARD:
+    if (
+        right is not None
+        and loop_cache_policy == CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_FORWARD_TO_ZERO_FORWARD
+    ):
         require_unsigned_range(
             "two-member left wave-start low16 loop-load word",
             left.loop_start_frame_0x0f8,
@@ -712,7 +814,10 @@ def apply_current_sbnk_loop_cache_policy(
         data[0x0E5] = 0x03
         put_be16(data, 0x0EA, left.loop_start_frame_0x0f8)
         return
-    if right is not None and loop_cache_policy == CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_ONE_SHOT:
+    if (
+        right is not None
+        and loop_cache_policy == CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_ONE_SHOT
+    ):
         require_unsigned_range(
             "two-member left wave-start low16 loop-load word",
             left.loop_start_frame_0x0f8,
@@ -721,7 +826,10 @@ def apply_current_sbnk_loop_cache_policy(
         data[0x0E5] = 0x04
         put_be16(data, 0x0EA, left.loop_start_frame_0x0f8)
         return
-    if right is not None and loop_cache_policy == CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_ONE_SHOT_REVERSE:
+    if (
+        right is not None
+        and loop_cache_policy == CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_ONE_SHOT_REVERSE
+    ):
         require_unsigned_range(
             "two-member left wave-start low16 loop-load word",
             left.loop_start_frame_0x0f8,
@@ -731,7 +839,9 @@ def apply_current_sbnk_loop_cache_policy(
         put_be16(data, 0x0EA, left.loop_start_frame_0x0f8)
         return
     if right is not None:
-        raise ValueError("single-member wave-start low-half policy cannot be used with a two-member SBNK")
+        raise ValueError(
+            "single-member wave-start low-half policy cannot be used with a two-member SBNK"
+        )
     require_unsigned_range(
         "single-member wave-start low16 loop-load word",
         left.loop_start_frame_0x0f8,
@@ -761,7 +871,9 @@ def apply_current_sbnk_loop_cache_policy(
         data[0x0E5] = 0x05
         put_be16(data, 0x0EA, left.loop_start_frame_0x0f8)
         return
-    raise AssertionError(f"unhandled current SBNK wave-start low-half policy: {loop_cache_policy!r}")
+    raise AssertionError(
+        f"unhandled current SBNK wave-start low-half policy: {loop_cache_policy!r}"
+    )
 
 
 def serialize_current_sbnk_contract_payload(
@@ -860,10 +972,17 @@ def serialize_current_sbnk_contract_payload(
     sample_portamento_time_0x184: int | None = None,
 ) -> bytes:
     """Serialize current-SBNK contract fields plus explicitly labeled diagnostic fields."""
-    if stored_pitch_base_word_0x0de is not None or stored_secondary_pitch_base_word_0x0e0 is not None:
-        raise ValueError("stored pitch-base origin fields are diagnostic fields and not write inputs")
+    if (
+        stored_pitch_base_word_0x0de is not None
+        or stored_secondary_pitch_base_word_0x0e0 is not None
+    ):
+        raise ValueError(
+            "stored pitch-base origin fields are diagnostic fields and not write inputs"
+        )
     if right is None and template is None and not allow_zero_inactive_right_slot_without_template:
-        raise ValueError("single-member SBNK serialization requires a template for inactive right-slot bytes")
+        raise ValueError(
+            "single-member SBNK serialization requires a template for inactive right-slot bytes"
+        )
     if template is None:
         data = bytearray(CURRENT_SBNK_CONTRACT_PAYLOAD_SIZE)
     else:
@@ -918,11 +1037,13 @@ def serialize_current_sbnk_contract_payload(
         if key_range_high_0x0e2 < key_range_low_0x0e3:
             raise ValueError(
                 f"generated SBNK key-range high {key_range_high_0x0e2} is below low {key_range_low_0x0e3}"
-        )
+            )
         data[0x0E2] = key_range_high_0x0e2
         data[0x0E3] = key_range_low_0x0e3
     if midi_receive_channel_0x0d2 is not None:
-        require_unsigned_range("generated SBNK MIDI receive channel", midi_receive_channel_0x0d2, 16)
+        require_unsigned_range(
+            "generated SBNK MIDI receive channel", midi_receive_channel_0x0d2, 16
+        )
         data[0x0D2] = midi_receive_channel_0x0d2
     if pitch_bend_type_0x0d3 is not None:
         require_unsigned_range("generated SBNK pitch bend type", pitch_bend_type_0x0d3, 12)
@@ -950,7 +1071,9 @@ def serialize_current_sbnk_contract_payload(
     if (filter_cutoff_key_scaling_break1_0x10c is None) != (
         filter_cutoff_key_scaling_break2_0x10d is None
     ):
-        raise ValueError("generated SBNK cutoff key-scaling breaks require both break 1 and break 2")
+        raise ValueError(
+            "generated SBNK cutoff key-scaling breaks require both break 1 and break 2"
+        )
     if (
         filter_cutoff_key_scaling_break1_0x10c is not None
         and filter_cutoff_key_scaling_break2_0x10d is not None
@@ -1019,8 +1142,12 @@ def serialize_current_sbnk_contract_payload(
     if (level_scaling_break1_0x11c is None) != (level_scaling_break2_0x11d is None):
         raise ValueError("generated SBNK level-scaling breaks require both break 1 and break 2")
     if level_scaling_break1_0x11c is not None and level_scaling_break2_0x11d is not None:
-        require_unsigned_range("generated SBNK level-scaling break 1", level_scaling_break1_0x11c, 0x7F)
-        require_unsigned_range("generated SBNK level-scaling break 2", level_scaling_break2_0x11d, 0x7F)
+        require_unsigned_range(
+            "generated SBNK level-scaling break 1", level_scaling_break1_0x11c, 0x7F
+        )
+        require_unsigned_range(
+            "generated SBNK level-scaling break 2", level_scaling_break2_0x11d, 0x7F
+        )
         if level_scaling_break1_0x11c > level_scaling_break2_0x11d:
             raise ValueError(
                 "generated SBNK level-scaling break 1 "
@@ -1029,10 +1156,14 @@ def serialize_current_sbnk_contract_payload(
         data[0x11C] = level_scaling_break1_0x11c
         data[0x11D] = level_scaling_break2_0x11d
     if level_scaling_level1_0x11e is not None:
-        require_unsigned_range("generated SBNK level-scaling level 1", level_scaling_level1_0x11e, 0x7F)
+        require_unsigned_range(
+            "generated SBNK level-scaling level 1", level_scaling_level1_0x11e, 0x7F
+        )
         data[0x11E] = level_scaling_level1_0x11e
     if level_scaling_level2_0x11f is not None:
-        require_unsigned_range("generated SBNK level-scaling level 2", level_scaling_level2_0x11f, 0x7F)
+        require_unsigned_range(
+            "generated SBNK level-scaling level 2", level_scaling_level2_0x11f, 0x7F
+        )
         data[0x11F] = level_scaling_level2_0x11f
     if sample_level_0x116 is not None:
         require_unsigned_range("generated SBNK sample level", sample_level_0x116, 0x7F)
@@ -1046,13 +1177,17 @@ def serialize_current_sbnk_contract_payload(
         data[sbnk_sample_parameter_offset(0x70)] = velocity_low_limit_0x118
     if velocity_offset_0x119 is not None:
         if not -127 <= velocity_offset_0x119 <= 127:
-            raise ValueError(f"generated SBNK velocity offset out of range: {velocity_offset_0x119}")
+            raise ValueError(
+                f"generated SBNK velocity offset out of range: {velocity_offset_0x119}"
+            )
         put_s8(data, sbnk_sample_parameter_offset(0x71), velocity_offset_0x119)
     if (velocity_range_high_0x11a is None) != (velocity_range_low_0x11b is None):
         raise ValueError("generated SBNK velocity range requires both high and low values")
     if velocity_range_high_0x11a is not None and velocity_range_low_0x11b is not None:
         require_unsigned_range("generated SBNK velocity-range low", velocity_range_low_0x11b, 0x7F)
-        require_unsigned_range("generated SBNK velocity-range high", velocity_range_high_0x11a, 0x7F)
+        require_unsigned_range(
+            "generated SBNK velocity-range high", velocity_range_high_0x11a, 0x7F
+        )
         if velocity_range_high_0x11a < velocity_range_low_0x11b:
             raise ValueError(
                 "generated SBNK velocity-range high "
@@ -1062,15 +1197,21 @@ def serialize_current_sbnk_contract_payload(
         data[0x11B] = velocity_range_low_0x11b
     if velocity_sensitivity_0x120 is not None:
         if not -127 <= velocity_sensitivity_0x120 <= 127:
-            raise ValueError(f"generated SBNK velocity sensitivity out of range: {velocity_sensitivity_0x120}")
+            raise ValueError(
+                f"generated SBNK velocity sensitivity out of range: {velocity_sensitivity_0x120}"
+            )
         put_s8(data, sbnk_sample_parameter_offset(0x78), velocity_sensitivity_0x120)
     if alternate_group_0x121 is not None:
         require_unsigned_range("generated SBNK alternate group", alternate_group_0x121, 16)
         data[sbnk_sample_parameter_offset(0x79)] = alternate_group_0x121
     if sample_eq_frequency_0x122 is not None:
-        require_unsigned_range("generated SBNK sample EQ frequency", sample_eq_frequency_0x122, 0x3A)
+        require_unsigned_range(
+            "generated SBNK sample EQ frequency", sample_eq_frequency_0x122, 0x3A
+        )
         if not 4 <= sample_eq_frequency_0x122 <= 58:
-            raise ValueError(f"generated SBNK sample EQ frequency out of range: {sample_eq_frequency_0x122}")
+            raise ValueError(
+                f"generated SBNK sample EQ frequency out of range: {sample_eq_frequency_0x122}"
+            )
         data[0x122] = sample_eq_frequency_0x122
     if sample_eq_gain_0x123 is not None:
         require_unsigned_range("generated SBNK sample EQ gain", sample_eq_gain_0x123, 0x7F)
@@ -1080,11 +1221,15 @@ def serialize_current_sbnk_contract_payload(
     if sample_eq_width_0x124 is not None:
         require_unsigned_range("generated SBNK sample EQ width", sample_eq_width_0x124, 0x7F)
         if not 10 <= sample_eq_width_0x124 <= 120:
-            raise ValueError(f"generated SBNK sample EQ width out of range: {sample_eq_width_0x124}")
+            raise ValueError(
+                f"generated SBNK sample EQ width out of range: {sample_eq_width_0x124}"
+            )
         data[0x124] = sample_eq_width_0x124
     if filter_cutoff_distance_0x125 is not None:
         if not -63 <= filter_cutoff_distance_0x125 <= 63:
-            raise ValueError(f"generated SBNK cutoff distance out of range: {filter_cutoff_distance_0x125}")
+            raise ValueError(
+                f"generated SBNK cutoff distance out of range: {filter_cutoff_distance_0x125}"
+            )
         put_s8(data, 0x125, filter_cutoff_distance_0x125)
     if feg_attack_rate_0x126 is not None:
         require_unsigned_range("generated SBNK FEG attack rate", feg_attack_rate_0x126, 0x7F)
@@ -1101,19 +1246,27 @@ def serialize_current_sbnk_contract_payload(
         put_s8(data, 0x129, feg_init_level_0x129)
     if feg_attack_level_0x12a is not None:
         if not -127 <= feg_attack_level_0x12a <= 127:
-            raise ValueError(f"generated SBNK FEG attack level out of range: {feg_attack_level_0x12a}")
+            raise ValueError(
+                f"generated SBNK FEG attack level out of range: {feg_attack_level_0x12a}"
+            )
         put_s8(data, 0x12A, feg_attack_level_0x12a)
     if feg_sustain_level_0x12b is not None:
         if not -127 <= feg_sustain_level_0x12b <= 127:
-            raise ValueError(f"generated SBNK FEG sustain level out of range: {feg_sustain_level_0x12b}")
+            raise ValueError(
+                f"generated SBNK FEG sustain level out of range: {feg_sustain_level_0x12b}"
+            )
         put_s8(data, 0x12B, feg_sustain_level_0x12b)
     if feg_release_level_0x12c is not None:
         if not -127 <= feg_release_level_0x12c <= 127:
-            raise ValueError(f"generated SBNK FEG release level out of range: {feg_release_level_0x12c}")
+            raise ValueError(
+                f"generated SBNK FEG release level out of range: {feg_release_level_0x12c}"
+            )
         put_s8(data, 0x12C, feg_release_level_0x12c)
     if feg_rate_key_scaling_0x12d is not None:
         if not -7 <= feg_rate_key_scaling_0x12d <= 7:
-            raise ValueError(f"generated SBNK FEG rate key scaling out of range: {feg_rate_key_scaling_0x12d}")
+            raise ValueError(
+                f"generated SBNK FEG rate key scaling out of range: {feg_rate_key_scaling_0x12d}"
+            )
         put_s8(data, 0x12D, feg_rate_key_scaling_0x12d)
     if feg_rate_velocity_sensitivity_0x12e is not None:
         if not -63 <= feg_rate_velocity_sensitivity_0x12e <= 63:
@@ -1151,19 +1304,27 @@ def serialize_current_sbnk_contract_payload(
         put_s8(data, 0x134, peg_init_level_0x134)
     if peg_attack_level_0x135 is not None:
         if not -127 <= peg_attack_level_0x135 <= 127:
-            raise ValueError(f"generated SBNK PEG attack level out of range: {peg_attack_level_0x135}")
+            raise ValueError(
+                f"generated SBNK PEG attack level out of range: {peg_attack_level_0x135}"
+            )
         put_s8(data, 0x135, peg_attack_level_0x135)
     if peg_sustain_level_0x136 is not None:
         if not -127 <= peg_sustain_level_0x136 <= 127:
-            raise ValueError(f"generated SBNK PEG sustain level out of range: {peg_sustain_level_0x136}")
+            raise ValueError(
+                f"generated SBNK PEG sustain level out of range: {peg_sustain_level_0x136}"
+            )
         put_s8(data, 0x136, peg_sustain_level_0x136)
     if peg_release_level_0x137 is not None:
         if not -127 <= peg_release_level_0x137 <= 127:
-            raise ValueError(f"generated SBNK PEG release level out of range: {peg_release_level_0x137}")
+            raise ValueError(
+                f"generated SBNK PEG release level out of range: {peg_release_level_0x137}"
+            )
         put_s8(data, 0x137, peg_release_level_0x137)
     if peg_rate_key_scaling_0x138 is not None:
         if not -7 <= peg_rate_key_scaling_0x138 <= 7:
-            raise ValueError(f"generated SBNK PEG rate key scaling out of range: {peg_rate_key_scaling_0x138}")
+            raise ValueError(
+                f"generated SBNK PEG rate key scaling out of range: {peg_rate_key_scaling_0x138}"
+            )
         put_s8(data, 0x138, peg_rate_key_scaling_0x138)
     if peg_rate_velocity_sensitivity_0x139 is not None:
         if not -63 <= peg_rate_velocity_sensitivity_0x139 <= 63:
@@ -1200,7 +1361,9 @@ def serialize_current_sbnk_contract_payload(
         data[0x143] = aeg_attack_mode_0x143
     if aeg_rate_key_scaling_0x144 is not None:
         if not -7 <= aeg_rate_key_scaling_0x144 <= 7:
-            raise ValueError(f"generated SBNK AEG rate key scaling out of range: {aeg_rate_key_scaling_0x144}")
+            raise ValueError(
+                f"generated SBNK AEG rate key scaling out of range: {aeg_rate_key_scaling_0x144}"
+            )
         put_s8(data, 0x144, aeg_rate_key_scaling_0x144)
     if aeg_rate_velocity_sensitivity_0x145 is not None:
         if not -63 <= aeg_rate_velocity_sensitivity_0x145 <= 63:
@@ -1222,24 +1385,32 @@ def serialize_current_sbnk_contract_payload(
         require_unsigned_range("generated SBNK LFO flags", lfo_flags_0x149, 0x07)
         data[0x149] = lfo_flags_0x149
     if lfo_cutoff_mod_depth_0x14a is not None:
-        require_unsigned_range("generated SBNK LFO cutoff mod depth", lfo_cutoff_mod_depth_0x14a, 0x7F)
+        require_unsigned_range(
+            "generated SBNK LFO cutoff mod depth", lfo_cutoff_mod_depth_0x14a, 0x7F
+        )
         data[0x14A] = lfo_cutoff_mod_depth_0x14a
     if lfo_pitch_mod_depth_0x14b is not None:
-        require_unsigned_range("generated SBNK LFO pitch mod depth", lfo_pitch_mod_depth_0x14b, 0x7F)
+        require_unsigned_range(
+            "generated SBNK LFO pitch mod depth", lfo_pitch_mod_depth_0x14b, 0x7F
+        )
         data[0x14B] = lfo_pitch_mod_depth_0x14b
     if lfo_amp_mod_depth_0x14c is not None:
         require_unsigned_range("generated SBNK LFO amp mod depth", lfo_amp_mod_depth_0x14c, 0x7F)
         data[0x14C] = lfo_amp_mod_depth_0x14c
     if start_address_velocity_sensitivity_0x108 is not None:
         if not -63 <= start_address_velocity_sensitivity_0x108 <= 63:
-            raise ValueError(f"generated SBNK start address velocity sensitivity out of range: {start_address_velocity_sensitivity_0x108}")
+            raise ValueError(
+                f"generated SBNK start address velocity sensitivity out of range: {start_address_velocity_sensitivity_0x108}"
+            )
         put_s8(data, 0x108, start_address_velocity_sensitivity_0x108)
     if filter_gain_0x151 is not None:
         if not -31 <= filter_gain_0x151 <= 31:
             raise ValueError(f"generated SBNK filter gain out of range: {filter_gain_0x151}")
         put_s8(data, 0x151, filter_gain_0x151)
     if velocity_xfade_high_0x17c is not None:
-        require_unsigned_range("generated SBNK velocity x-fade high", velocity_xfade_high_0x17c, 0x7F)
+        require_unsigned_range(
+            "generated SBNK velocity x-fade high", velocity_xfade_high_0x17c, 0x7F
+        )
         data[sbnk_sample_parameter_offset(0xD4)] = velocity_xfade_high_0x17c
     if velocity_xfade_low_0x17d is not None:
         require_unsigned_range("generated SBNK velocity x-fade low", velocity_xfade_low_0x17d, 0x7F)
@@ -1257,13 +1428,19 @@ def serialize_current_sbnk_contract_payload(
         require_unsigned_range("generated SBNK output2 level", output2_level_0x181, 0x7F)
         data[sbnk_sample_parameter_offset(0xD9)] = output2_level_0x181
     if sample_portamento_type_0x182 is not None:
-        require_unsigned_range("generated SBNK sample portamento type", sample_portamento_type_0x182, 0x05)
+        require_unsigned_range(
+            "generated SBNK sample portamento type", sample_portamento_type_0x182, 0x05
+        )
         data[sbnk_sample_parameter_offset(0xDA)] = sample_portamento_type_0x182
     if sample_portamento_rate_0x183 is not None:
-        require_unsigned_range("generated SBNK sample portamento rate", sample_portamento_rate_0x183, 0x7F)
+        require_unsigned_range(
+            "generated SBNK sample portamento rate", sample_portamento_rate_0x183, 0x7F
+        )
         data[sbnk_sample_parameter_offset(0xDB)] = sample_portamento_rate_0x183
     if sample_portamento_time_0x184 is not None:
-        require_unsigned_range("generated SBNK sample portamento time", sample_portamento_time_0x184, 0x7F)
+        require_unsigned_range(
+            "generated SBNK sample portamento time", sample_portamento_time_0x184, 0x7F
+        )
         data[sbnk_sample_parameter_offset(0xDC)] = sample_portamento_time_0x184
     return bytes(data)
 
@@ -1327,9 +1504,7 @@ def parse_current_sbnk_contract_payload(data: bytes) -> ParsedCurrentSbnkPayload
     right_slot_present = members.right_slot_present
     left = parsed_current_sbnk_member_from_shared(members.left)
     right = (
-        parsed_current_sbnk_member_from_shared(members.right)
-        if members.right is not None
-        else None
+        parsed_current_sbnk_member_from_shared(members.right) if members.right is not None else None
     )
     secondary_word = member_window.secondary_pitch_base_word_0x0e0 or 0
     secondary_clean = right.clean_pitch_base_word_for_write if right is not None else None
@@ -1366,17 +1541,24 @@ def parse_current_sbnk_contract_payload(data: bytes) -> ParsedCurrentSbnkPayload
         left_wave_start_low16_0x0ea=member_window.left_wave_start_low16_0x0ea or 0,
         right_wave_start_address_0x0ec=member_window.right_wave_start_address_0x0ec or 0,
         right_wave_start_low16_0x0ee=member_window.right_wave_start_low16_0x0ee or 0,
-        start_address_velocity_sensitivity_0x108=member_window.start_address_velocity_sensitivity_0x108 or 0,
+        start_address_velocity_sensitivity_0x108=member_window.start_address_velocity_sensitivity_0x108
+        or 0,
         filter_type_0x109=member_window.filter_type_0x109 or 0,
         filter_type_ui_label=filter_type_ui_label(member_window.filter_type_0x109 or 0),
         filter_cutoff_0x10a=member_window.filter_cutoff_0x10a or 0,
         filter_q_width_0x10b=member_window.filter_q_width_0x10b or 0,
-        filter_cutoff_key_scaling_break1_0x10c=member_window.filter_cutoff_key_scaling_break1_0x10c or 0,
-        filter_cutoff_key_scaling_break2_0x10d=member_window.filter_cutoff_key_scaling_break2_0x10d or 0,
-        filter_cutoff_key_scaling_level1_0x10e=member_window.filter_cutoff_key_scaling_level1_0x10e or 0,
-        filter_cutoff_key_scaling_level2_0x10f=member_window.filter_cutoff_key_scaling_level2_0x10f or 0,
-        filter_cutoff_velocity_sensitivity_0x110=member_window.filter_cutoff_velocity_sensitivity_0x110 or 0,
-        filter_q_width_velocity_sensitivity_0x111=member_window.filter_q_width_velocity_sensitivity_0x111 or 0,
+        filter_cutoff_key_scaling_break1_0x10c=member_window.filter_cutoff_key_scaling_break1_0x10c
+        or 0,
+        filter_cutoff_key_scaling_break2_0x10d=member_window.filter_cutoff_key_scaling_break2_0x10d
+        or 0,
+        filter_cutoff_key_scaling_level1_0x10e=member_window.filter_cutoff_key_scaling_level1_0x10e
+        or 0,
+        filter_cutoff_key_scaling_level2_0x10f=member_window.filter_cutoff_key_scaling_level2_0x10f
+        or 0,
+        filter_cutoff_velocity_sensitivity_0x110=member_window.filter_cutoff_velocity_sensitivity_0x110
+        or 0,
+        filter_q_width_velocity_sensitivity_0x111=member_window.filter_q_width_velocity_sensitivity_0x111
+        or 0,
         expand_detune_0x112=member_window.expand_detune_0x112 or 0,
         expand_dephase_0x113=member_window.expand_dephase_0x113 or 0,
         expand_width_0x114=member_window.expand_width_0x114 or 0,
@@ -1390,7 +1572,8 @@ def parse_current_sbnk_contract_payload(data: bytes) -> ParsedCurrentSbnkPayload
         filter_scaling_cutoff1_0x10e=member_window.filter_cutoff_key_scaling_level1_0x10e or 0,
         filter_scaling_cutoff2_0x10f=member_window.filter_cutoff_key_scaling_level2_0x10f or 0,
         filter_velocity_to_cutoff_0x110=member_window.filter_cutoff_velocity_sensitivity_0x110 or 0,
-        filter_velocity_to_q_width_0x111=member_window.filter_q_width_velocity_sensitivity_0x111 or 0,
+        filter_velocity_to_q_width_0x111=member_window.filter_q_width_velocity_sensitivity_0x111
+        or 0,
         sample_level_0x116=member_window.sample_level_0x116 or 0,
         pan_0x117=member_window.pan_0x117 or 0,
         velocity_low_limit_0x118=member_window.velocity_low_limit_0x118 or 0,
@@ -1400,7 +1583,9 @@ def parse_current_sbnk_contract_payload(data: bytes) -> ParsedCurrentSbnkPayload
         velocity_sensitivity_0x120=member_window.velocity_sensitivity_0x120 or 0,
         alternate_group_0x121=member_window.alternate_group_0x121 or 0,
         sample_eq_frequency_0x122=member_window.sample_eq_frequency_0x122 or 0,
-        sample_eq_frequency_ui_label=sample_eq_frequency_ui_label(member_window.sample_eq_frequency_0x122 or 0),
+        sample_eq_frequency_ui_label=sample_eq_frequency_ui_label(
+            member_window.sample_eq_frequency_0x122 or 0
+        ),
         sample_eq_gain_0x123=member_window.sample_eq_gain_0x123 or 0,
         sample_eq_gain_db=sample_eq_gain_db(member_window.sample_eq_gain_0x123 or 0),
         sample_eq_width_0x124=member_window.sample_eq_width_0x124 or 0,
@@ -1415,8 +1600,10 @@ def parse_current_sbnk_contract_payload(data: bytes) -> ParsedCurrentSbnkPayload
         feg_release_level_0x12c=member_window.feg_release_level_0x12c or 0,
         feg_rate_key_scaling_0x12d=member_window.feg_rate_key_scaling_0x12d or 0,
         feg_rate_velocity_sensitivity_0x12e=member_window.feg_rate_velocity_sensitivity_0x12e or 0,
-        feg_attack_level_velocity_sensitivity_0x12f=member_window.feg_attack_level_velocity_sensitivity_0x12f or 0,
-        feg_level_velocity_sensitivity_0x130=member_window.feg_level_velocity_sensitivity_0x130 or 0,
+        feg_attack_level_velocity_sensitivity_0x12f=member_window.feg_attack_level_velocity_sensitivity_0x12f
+        or 0,
+        feg_level_velocity_sensitivity_0x130=member_window.feg_level_velocity_sensitivity_0x130
+        or 0,
         peg_attack_rate_0x131=member_window.peg_attack_rate_0x131 or 0,
         peg_decay_rate_0x132=member_window.peg_decay_rate_0x132 or 0,
         peg_release_rate_0x133=member_window.peg_release_rate_0x133 or 0,
@@ -1426,7 +1613,8 @@ def parse_current_sbnk_contract_payload(data: bytes) -> ParsedCurrentSbnkPayload
         peg_release_level_0x137=member_window.peg_release_level_0x137 or 0,
         peg_rate_key_scaling_0x138=member_window.peg_rate_key_scaling_0x138 or 0,
         peg_rate_velocity_sensitivity_0x139=member_window.peg_rate_velocity_sensitivity_0x139 or 0,
-        peg_level_velocity_sensitivity_0x13a=member_window.peg_level_velocity_sensitivity_0x13a or 0,
+        peg_level_velocity_sensitivity_0x13a=member_window.peg_level_velocity_sensitivity_0x13a
+        or 0,
         peg_range_0x13b=member_window.peg_range_0x13b or 0,
         aeg_attack_rate_0x13c=member_window.aeg_attack_rate_0x13c or 0,
         aeg_decay_rate_0x13d=member_window.aeg_decay_rate_0x13d or 0,
@@ -1449,58 +1637,98 @@ def parse_current_sbnk_contract_payload(data: bytes) -> ParsedCurrentSbnkPayload
         lfo_amp_mod_depth_0x14c=member_window.lfo_amp_mod_depth_0x14c or 0,
         filter_gain_0x151=member_window.filter_gain_0x151 or 0,
         wave_end_address_0x15c=member_window.wave_end_address_0x15c or 0,
-        expected_wave_end_address_from_start_length=u32((member_window.left_wave_start_address_0x0e8 or 0) + left.wave_length_frames),
+        expected_wave_end_address_from_start_length=u32(
+            (member_window.left_wave_start_address_0x0e8 or 0) + left.wave_length_frames
+        ),
         wave_end_address_delta_from_expected=u32_delta(
-            member_window.wave_end_address_0x15c or 0, (member_window.left_wave_start_address_0x0e8 or 0) + left.wave_length_frames
+            member_window.wave_end_address_0x15c or 0,
+            (member_window.left_wave_start_address_0x0e8 or 0) + left.wave_length_frames,
         ),
         loop_end_address_0x160=member_window.loop_end_address_0x160 or 0,
         expected_loop_end_address_from_start_length=u32(
             left.loop_start_frame + left.loop_length_frames
         ),
         loop_end_address_delta_from_expected=u32_delta(
-            member_window.loop_end_address_0x160 or 0, left.loop_start_frame + left.loop_length_frames
+            member_window.loop_end_address_0x160 or 0,
+            left.loop_start_frame + left.loop_length_frames,
         ),
         sample_control1_device_0x164=(member_window.sample_control_records[0].device_u8 or 0),
-        sample_control1_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[0].device_u8 or 0),
+        sample_control1_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[0].device_u8 or 0
+        ),
         sample_control1_function_0x165=(member_window.sample_control_records[0].function_u8 or 0),
-        sample_control1_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[0].function_u8 or 0),
+        sample_control1_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[0].function_u8 or 0
+        ),
         sample_control1_type_0x166=(member_window.sample_control_records[0].type_u8 or 0),
-        sample_control1_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[0].type_u8 or 0),
+        sample_control1_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[0].type_u8 or 0
+        ),
         sample_control1_range_0x167=(member_window.sample_control_records[0].range_s8 or 0),
         sample_control2_device_0x168=(member_window.sample_control_records[1].device_u8 or 0),
-        sample_control2_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[1].device_u8 or 0),
+        sample_control2_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[1].device_u8 or 0
+        ),
         sample_control2_function_0x169=(member_window.sample_control_records[1].function_u8 or 0),
-        sample_control2_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[1].function_u8 or 0),
+        sample_control2_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[1].function_u8 or 0
+        ),
         sample_control2_type_0x16a=(member_window.sample_control_records[1].type_u8 or 0),
-        sample_control2_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[1].type_u8 or 0),
+        sample_control2_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[1].type_u8 or 0
+        ),
         sample_control2_range_0x16b=(member_window.sample_control_records[1].range_s8 or 0),
         sample_control3_device_0x16c=(member_window.sample_control_records[2].device_u8 or 0),
-        sample_control3_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[2].device_u8 or 0),
+        sample_control3_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[2].device_u8 or 0
+        ),
         sample_control3_function_0x16d=(member_window.sample_control_records[2].function_u8 or 0),
-        sample_control3_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[2].function_u8 or 0),
+        sample_control3_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[2].function_u8 or 0
+        ),
         sample_control3_type_0x16e=(member_window.sample_control_records[2].type_u8 or 0),
-        sample_control3_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[2].type_u8 or 0),
+        sample_control3_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[2].type_u8 or 0
+        ),
         sample_control3_range_0x16f=(member_window.sample_control_records[2].range_s8 or 0),
         sample_control4_device_0x170=(member_window.sample_control_records[3].device_u8 or 0),
-        sample_control4_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[3].device_u8 or 0),
+        sample_control4_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[3].device_u8 or 0
+        ),
         sample_control4_function_0x171=(member_window.sample_control_records[3].function_u8 or 0),
-        sample_control4_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[3].function_u8 or 0),
+        sample_control4_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[3].function_u8 or 0
+        ),
         sample_control4_type_0x172=(member_window.sample_control_records[3].type_u8 or 0),
-        sample_control4_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[3].type_u8 or 0),
+        sample_control4_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[3].type_u8 or 0
+        ),
         sample_control4_range_0x173=(member_window.sample_control_records[3].range_s8 or 0),
         sample_control5_device_0x174=(member_window.sample_control_records[4].device_u8 or 0),
-        sample_control5_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[4].device_u8 or 0),
+        sample_control5_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[4].device_u8 or 0
+        ),
         sample_control5_function_0x175=(member_window.sample_control_records[4].function_u8 or 0),
-        sample_control5_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[4].function_u8 or 0),
+        sample_control5_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[4].function_u8 or 0
+        ),
         sample_control5_type_0x176=(member_window.sample_control_records[4].type_u8 or 0),
-        sample_control5_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[4].type_u8 or 0),
+        sample_control5_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[4].type_u8 or 0
+        ),
         sample_control5_range_0x177=(member_window.sample_control_records[4].range_s8 or 0),
         sample_control6_device_0x178=(member_window.sample_control_records[5].device_u8 or 0),
-        sample_control6_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[5].device_u8 or 0),
+        sample_control6_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[5].device_u8 or 0
+        ),
         sample_control6_function_0x179=(member_window.sample_control_records[5].function_u8 or 0),
-        sample_control6_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[5].function_u8 or 0),
+        sample_control6_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[5].function_u8 or 0
+        ),
         sample_control6_type_0x17a=(member_window.sample_control_records[5].type_u8 or 0),
-        sample_control6_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[5].type_u8 or 0),
+        sample_control6_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[5].type_u8 or 0
+        ),
         sample_control6_range_0x17b=(member_window.sample_control_records[5].range_s8 or 0),
         velocity_xfade_high_0x17c=member_window.velocity_xfade_high_0x17c or 0,
         velocity_xfade_low_0x17d=member_window.velocity_xfade_low_0x17d or 0,
@@ -1523,4 +1751,3 @@ def parse_current_sbnk_contract_payload(data: bytes) -> ParsedCurrentSbnkPayload
             secondary_word, secondary_clean, active=right_slot_present
         ),
     )
-

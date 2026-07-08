@@ -101,17 +101,6 @@ SMPL_OBJECT_HANDLE = 0x01443840
 SBNK_OBJECT_HANDLE = 0x01443C30
 SMPL_STORED_TAIL_FRAMES = 4
 DEFAULT_FINE_TUNE_CENTS = 0
-SBNK_SINGLE_MEMBER_DEFAULT_PAYLOAD = bytes.fromhex(
-    "465346534445563353504c5853424e4b0000000000000004000001340000015800000000000000000000000000000000"
-    "100c73696e6520776176652020202020202000b8000af67a015400000000000000000000000000000000000000000000"
-    "000000000000000001443c3073696e580000000001443c3073696e652077617665202020202020200000000000000000"
-    "000000000000000001443c3000000000016b1dbc000000004a04012047050120490b01e0480c01e00000000000000000"
-    "000000000000000000000000000000000200000002004242bb80bb80ecec154215427f00300123280000000000000000"
-    "00000080000000000000000000000000000000800000000000007f04007f0000000000003f00640000007f00007f7f7f"
-    "00001a400a007f7f7f00000000000000007f7f7f000000000000000c7f7f7e087f7f0000000001270001000000017f00"
-    "7f00c1e01e3a20003e20e1c600000080000000804a04012047050120490b01e0480c01e000000000000000000000017f"
-    "007f005a5a000000"
-)
 
 
 def _be16(value: int) -> bytes:
@@ -388,7 +377,20 @@ class PartitionBuilder:
 class HdsImageBuilder:
     """Build a fresh Yamaha SFS hard-disk image from a typed model."""
 
-    def __init__(self, *, size_bytes: int) -> None:
+    def __init__(
+        self,
+        *,
+        size_bytes: int,
+        _sbnk_single_member_inactive_right_policy: str = sbnk_contract.CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_ZERO,
+    ) -> None:
+        if (
+            _sbnk_single_member_inactive_right_policy
+            not in sbnk_contract.CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICIES
+        ):
+            raise ValueError(
+                "unknown SBNK inactive right-slot policy: "
+                f"{_sbnk_single_member_inactive_right_policy!r}"
+            )
         if size_bytes < MIN_IMAGE_SIZE_BYTES:
             raise ValueError(f"image size must be at least {MIN_IMAGE_SIZE_BYTES} bytes")
         if size_bytes > MAX_IMAGE_SIZE_BYTES:
@@ -396,6 +398,7 @@ class HdsImageBuilder:
         if size_bytes % SECTOR_SIZE:
             raise ValueError("image size must be a multiple of 512 bytes")
         self.size_bytes = size_bytes
+        self._sbnk_single_member_inactive_right_policy = _sbnk_single_member_inactive_right_policy
         self._partitions: list[PartitionBuilder] = []
 
     def add_partition(self, name: str) -> PartitionBuilder:
@@ -597,7 +600,11 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
             object_payloads.append(
                 (
                     sbnk_id,
-                    _serialize_sbnk(bank, waveform),
+                    _serialize_sbnk(
+                        bank,
+                        waveform,
+                        inactive_right_policy=plan.builder._image._sbnk_single_member_inactive_right_policy,
+                    ),
                     "object",
                     "SBNK",
                     bank.name,
@@ -747,37 +754,31 @@ def _serialize_smpl(waveform: _LoadedWaveform) -> bytes:
     return bytes(header) + waveform.stored_big_endian
 
 
-def _serialize_sbnk(bank: _SampleBankSpec, waveform: _LoadedWaveform) -> bytes:
-    pitch_base = _pitch_base_word(bank.root_key, waveform.sample_rate)
-    payload = bytearray(SBNK_SINGLE_MEMBER_DEFAULT_PAYLOAD)
-    payload[0 : len(OBJECT_MAGIC)] = OBJECT_MAGIC
-    payload[0x0C:0x10] = b"SBNK"
-    payload[0x32:0x42] = _ascii_field(bank.name, 16)
-    payload[0x50:0x68] = b"\x00" * 24
-    _put_be32(payload, 0x68, SBNK_OBJECT_HANDLE)
-    payload[0x78:0x88] = _ascii_field(waveform.spec.name, 16)
-    payload[0x88:0x98] = b"\x00" * 16
-    _put_be32(payload, 0x98, SBNK_OBJECT_HANDLE)
-    _put_be32(payload, 0xA0, waveform.spec.link_id)
-    _put_be32(payload, 0xA4, 0)
-    payload[0x0D6] = bank.root_key
-    payload[0x0D7] = bank.root_key
-    _put_be16(payload, 0x0D8, waveform.sample_rate)
-    _put_be16(payload, 0x0DA, waveform.sample_rate)
-    payload[0x0DC] = DEFAULT_FINE_TUNE_CENTS & 0xFF
-    payload[0x0DD] = DEFAULT_FINE_TUNE_CENTS & 0xFF
-    _put_be16(payload, 0x0DE, pitch_base)
-    _put_be16(payload, 0x0E0, pitch_base)
-    payload[0x0E2] = bank.key_high
-    payload[0x0E3] = bank.key_low
-    _put_be32(payload, 0x0F0, waveform.frames)
-    _put_be32(payload, 0x0F4, 0)
-    _put_be32(payload, 0x0F8, 0)
-    _put_be32(payload, 0x0FC, 0)
-    _put_be32(payload, 0x100, waveform.frames)
-    _put_be32(payload, 0x104, 0)
-    payload[0x116] = bank.level
-    return bytes(payload[:SBNK_OBJECT_SIZE])
+def _serialize_sbnk(
+    bank: _SampleBankSpec,
+    waveform: _LoadedWaveform,
+    *,
+    inactive_right_policy: str,
+) -> bytes:
+    left = sbnk_contract.CurrentSbnkMemberSpec(
+        sample_name=waveform.spec.name,
+        smpl_link_id_0x078=waveform.spec.link_id,
+        root_key_0x0d6=bank.root_key,
+        sample_rate_0x0d8=waveform.sample_rate,
+        fine_tune_cents_0x0dc=DEFAULT_FINE_TUNE_CENTS,
+        wave_length_frames_0x0f0=waveform.frames,
+        loop_start_frame_0x0f8=0,
+        loop_length_frames_0x100=waveform.frames,
+    )
+    payload = sbnk_contract.serialize_current_single_member_sbnk_payload(
+        bank_name=bank.name,
+        left=left,
+        inactive_right_policy=inactive_right_policy,
+        key_range_high_0x0e2=bank.key_high,
+        key_range_low_0x0e3=bank.key_low,
+        sample_level_0x116=bank.level,
+    )
+    return payload[:SBNK_OBJECT_SIZE]
 
 
 def _superblock_writes(size_bytes: int, plans: list[_PartitionPlan]) -> list[tuple[int, bytes]]:
@@ -879,7 +880,6 @@ def _two_partition_sector_metadata(plans: list[_PartitionPlan], sequence: int) -
 
 def _two_partition_sector_identifier(sequence: int) -> bytes:
     return f"bb73620{sequence}".encode("ascii")
-
 
 
 def _partition_writes(plan: _PartitionPlan) -> list[tuple[int, bytes]]:
@@ -1025,6 +1025,7 @@ def _partition_header_tail_values(plan: _PartitionPlan) -> dict[int, int]:
         0x1A8: plan.index,
     }
     return values
+
 
 def _partition_header_dynamic_word(partition_index: int) -> int:
     return PARTITION_HEADER_DYNAMIC_BASE_WORD + partition_index * PARTITION_HEADER_DYNAMIC_WORD_STEP

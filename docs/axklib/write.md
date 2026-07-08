@@ -9,10 +9,12 @@ images and does not depend on template images.
 
 Generated `SMPL` waveform payloads and `SBNK` sample-bank payloads use the
 current object-header sizes, link fields, and single-member default parameter
-block required for ordinary A-series sample storage. The `SMPL` stored payload
-contains the logical mono WAV frames plus a short compatibility tail; the
-sample-window fields continue to describe the logical frame count.
-
+block required for ordinary A-series sample storage. `SBNK` payloads are
+serialized through the public sample-bank contract model: active member fields,
+key range, and level come from the writer data model, while fields not yet
+exposed by the write API keep conservative current-format defaults. The `SMPL`
+stored payload contains the logical mono WAV frames plus a short compatibility
+tail; the sample-window fields continue to describe the logical frame count.
 The writer exposes tested profiles instead of guessing general disk
 geometry from one image. Partition slots are capped at 1 GiB. The currently
 supported hard-disk profiles are:
