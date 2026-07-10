@@ -175,6 +175,68 @@ def test_hds_writer_rejects_unproven_multi_partition_profile() -> None:
         builder.plan()
 
 
+@pytest.mark.parametrize("partition_count", range(1, 9))
+def test_hds_writer_experimental_geometry_uses_equal_partition_slots(
+    partition_count: int,
+) -> None:
+    size_bytes = partition_count * 256 * 1024 * 1024
+    builder = HdsImageBuilder(size_bytes=size_bytes, _allow_unproven_geometry=True)
+    for index in range(partition_count):
+        builder.add_partition(f"hd{index + 1}")
+
+    plans = builder.plan()
+    slot_span = (size_bytes // 512 - 2) // partition_count
+
+    assert [plan.start_sector for plan in plans] == [
+        3 + index * slot_span for index in range(partition_count)
+    ]
+    assert [plan.sector_count for plan in plans] == [slot_span - 1] * partition_count
+
+
+def test_hds_writer_experimental_geometry_caps_one_partition_below_one_gib() -> None:
+    builder = HdsImageBuilder(
+        size_bytes=MAX_IMAGE_SIZE_BYTES,
+        _allow_unproven_geometry=True,
+    )
+    builder.add_partition("hd1")
+
+    [plan] = builder.plan()
+
+    assert plan.start_sector == 3
+    assert plan.sector_count == 0x1FFFFE
+    assert MAX_IMAGE_SIZE_BYTES // 512 - (plan.start_sector + plan.sector_count) == 0x1FFFFF
+
+
+def test_hds_writer_experimental_geometry_preserves_division_remainder() -> None:
+    size_bytes = 1280 * 1024 * 1024 + 512
+    builder = HdsImageBuilder(size_bytes=size_bytes, _allow_unproven_geometry=True)
+    for index in range(5):
+        builder.add_partition(f"hd{index + 1}")
+
+    plans = builder.plan()
+    total_sectors = size_bytes // 512
+    slot_span = (total_sectors - 2) // 5
+
+    assert [plan.start_sector for plan in plans] == [
+        3 + index * slot_span for index in range(5)
+    ]
+    assert [plan.sector_count for plan in plans] == [slot_span - 1] * 5
+    assert total_sectors - (plans[-1].start_sector + plans[-1].sector_count) == 4
+
+
+def test_hds_writer_experimental_geometry_rejects_too_small_partition_slots() -> None:
+    minimum_total_sectors = 2 + 8 * 2046
+    builder = HdsImageBuilder(
+        size_bytes=(minimum_total_sectors - 1) * 512,
+        _allow_unproven_geometry=True,
+    )
+    for index in range(8):
+        builder.add_partition(f"hd{index + 1}")
+
+    with pytest.raises(ValueError, match="partition slots are too small"):
+        builder.plan()
+
+
 def test_hds_writer_creates_parseable_current_smpl_and_sbnk(tmp_path: Path) -> None:
     source_wav = tmp_path / "tone.wav"
     expected_pcm = _write_mono_wav(source_wav)
@@ -600,13 +662,13 @@ def test_hds_writer_creates_two_partitions_with_independent_volumes(tmp_path: Pa
     assert _be32(image_bytes, 0xB0) == 524_290
     assert _be32(image_bytes, 0xB4) == 524_286
     assert image_bytes[1024:1032] == b"bb736200"
-    assert image_bytes[1024 + 0x09 : 1024 + 0x11] == b"c2b4e600"
+    assert image_bytes[1024 + 0x09 : 1024 + 0x11] == b"\x00" * 8
     assert image_bytes[1024 + 0x12 : 1024 + 0x2C] == b"\x00" * 0x1A
     assert image_bytes[1024 + 0x30 : 1024 + 0x3F] == b"\x00" * 15
     assert image_bytes[1024 + 0x40 : 1024 + 0x5A] == b"\x00" * 0x1A
     pre_partition_b = (524_290 - 1) * 512
     assert image_bytes[pre_partition_b : pre_partition_b + 8] == b"bb736201"
-    assert image_bytes[pre_partition_b + 0x09 : pre_partition_b + 0x11] == b"c2b4e600"
+    assert image_bytes[pre_partition_b + 0x09 : pre_partition_b + 0x11] == b"\x00" * 8
     assert image_bytes[pre_partition_b + 0x12 : pre_partition_b + 0x2C] == b"\x00" * 0x1A
     assert image_bytes[pre_partition_b + 0x30 : pre_partition_b + 0x3F] == b"\x00" * 15
     assert image_bytes[pre_partition_b + 0x40 : pre_partition_b + 0x5A] == b"\x00" * 0x1A
@@ -681,7 +743,7 @@ def test_hds_writer_scales_bitmap_and_index_geometry_for_256_mib(tmp_path: Path)
     )
     assert image_bytes[512 + 0x80 : 512 + 0x9C] == image_bytes[0x80:0x9C]
     assert image_bytes[1024:1032] == b"c2b4e600"
-    assert image_bytes[1033:1041] == b"ab432100"
+    assert image_bytes[1033:1041] == b"\x00" * 8
     assert image_bytes[1042:1068] == b"\x00" * 0x1A
     partition_start = _be32(image_bytes, 0xA8)
     partition_offset = partition_start * 512
@@ -772,6 +834,57 @@ def test_hds_writer_creates_sparse_768m_three_partition_empty_volume_image(tmp_p
             "SEQU",
             "PROG",
         ]
+
+
+def test_hds_writer_experimental_geometry_writes_eight_minimum_sized_partitions(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "HD00_512_experimental_8m_8p.hds"
+    builder = HdsImageBuilder(
+        size_bytes=8 * 1024 * 1024,
+        _allow_unproven_geometry=True,
+    )
+    for _index in range(8):
+        partition = builder.add_partition("New Partition")
+        partition.add_volume("New Volume")
+
+    result = builder.write(image_path)
+
+    assert result.partitions == 8
+    assert result.unused_tail_sectors == 6
+    assert [layout.start_sector for layout in result.partition_layouts] == [
+        3 + index * 2047 for index in range(8)
+    ]
+    assert [layout.sector_count for layout in result.partition_layouts] == [2046] * 8
+    image_bytes = image_path.read_bytes()
+    for index, layout in enumerate(result.partition_layouts):
+        transfer_sector = 2 if index == 0 else layout.start_sector - 1
+        transfer_offset = transfer_sector * 512
+        assert image_bytes[transfer_offset : transfer_offset + 8] == f"ab43210{index}".encode(
+            "ascii"
+        )
+        assert image_bytes[transfer_offset + 8 : transfer_offset + 512] == b"\x00" * 504
+
+        header_offset = layout.start_sector * 512
+        assert image_bytes[header_offset : header_offset + 1024] == image_bytes[
+            header_offset + 1024 : header_offset + 2048
+        ]
+        assert _be32(image_bytes, header_offset + 0x104) == layout.start_sector
+        assert _be32(image_bytes, header_offset + 0x11C) == layout.sector_count
+        assert _be32(image_bytes, header_offset + 0x134) == 0x0152A3FC + index * 0x11
+        assert _be32(image_bytes, header_offset + 0x14C) == 16_384 - 6
+        assert _be32(image_bytes, header_offset + 0x194) == 0
+        expected_name = "New Partition" if index == 0 else f"New Partition  {index}"
+        assert image_bytes[header_offset + 0x40 : header_offset + 0x50] == expected_name.encode(
+            "ascii"
+        ).ljust(16)
+
+        volume_payload = _record_payload_in_partition(
+            image_bytes,
+            index,
+            _index_record_in_partition(image_bytes, index, 3),
+        )
+        assert volume_payload[31] == (index * 0x78) & 0xFF
 
 
 def test_hds_writer_creates_sparse_768m_object_volume_on_first_partition(

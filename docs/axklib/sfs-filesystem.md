@@ -68,12 +68,14 @@ images also populate the observed disk mode metadata area so the duplicate
 superblocks match sampler-authored hard-disk images of the same size class.
 
 A-series hard-disk images also use sector 2, and in multi-partition profiles the
-sectors immediately before later partitions, as auxiliary disk metadata and
-identifier sectors. axklib does not expose those sectors as part of the directory
-or object tree, but generated images intended for hardware loading must
-initialize their proven identifier bytes. For currently supported generated
-profiles, older label-entry marker/name records in those sectors are
-intentionally zero-generated; they are not required for hardware loading.
+sectors immediately before later partitions, as auxiliary formatter-transfer
+sectors. Their leading eight bytes are profile-scoped transfer tokens whose low
+three bits carry the partition sequence; the remaining token bits are preserved
+compatibility values, not disk geometry or persistent disk IDs. Supported
+profiles zero prior-token residue at `+0x09..+0x10`.
+axklib does not expose these sectors as part of the directory or object tree.
+Older label-entry marker/name records in them are intentionally zero-generated;
+they are not required for hardware loading in the supported profiles.
 
 ## Partition Header
 
@@ -334,7 +336,10 @@ The first writer scope is intentionally narrow:
 - WAV input must be mono, 16-bit PCM;
 - generated sampler objects are current `FSFSDEV3SPLX` `SMPL` and `SBNK` records;
 - generated `SBNK` objects link one waveform member by name and link ID;
-- generated disk headers include explicit superblock descriptor words, initialized sector-2 disk metadata, full primary and duplicate partition-header sectors for the supported hard-disk metadata profile, and the early first-bitmap-sector mirror used by A-series hard-disk images;
+- generated disk headers include the bounded superblock compatibility block,
+  initialized sector-2 disk metadata, full primary and duplicate partition-header
+  sectors for the supported hard-disk metadata profile, and the early
+  first-bitmap-sector mirror used by A-series hard-disk images;
 - generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;
 - generated current `SMPL` object payloads use a `0x200` object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;
 - generated current `SBNK` object payloads use the current single-member sample-bank object span, populated default parameter/control block, and header fields for a normal sample bank that references one waveform object;
@@ -381,7 +386,8 @@ The writer constructs the superblock, partition table, sector-2 metadata,
 partition headers, allocation bitmap, directory index, and object payload
 extents from the typed image model. Fields with known formulas, such as
 partition slot placement, partition-header start/count words, partition-index
-words, sector-2 identifiers, and dynamic header words, are generated explicitly.
+words, leading formatter-transfer tokens, and dynamic header words, are
+generated explicitly.
 Partition headers are zero-initialized, and only the retained explicit fields
 are written. Hardware checks on object-bearing 256 MiB / one-partition and
 512 MiB / two-partition images showed that the former fixed nonzero tail bytes
@@ -401,7 +407,9 @@ The supported writer profiles currently use these rules:
 
 | Metadata area | Public contract |
 | --- | --- |
-| Superblock descriptor words at `+0x80..+0x98` | Written as fixed profile constants for the currently supported hard-disk writer profiles. |
+| Superblock formatter-residue block at `+0x80..+0x9b` | Preserved as one fixed compatibility block for the currently supported hard-disk writer profiles. The writer does not interpret its seven words as geometry fields. |
+| Leading formatter-transfer token at sector `+0x00..+0x07` | Rendered as eight lowercase hexadecimal digits from a profile-scoped compatibility base plus a bounded three-bit partition sequence. The base is not derived from disk geometry. |
+| Prior-token residue at sector `+0x09..+0x10` | Zeroed for the supported single-partition and two-partition profiles after object-bearing hardware checks showed it is not required. |
 | Sector-2 two-partition range at `+0x30..+0x3e` | Zeroed for all currently supported writer profiles after hardware validation showed it is not required. |
 | Former partition-header fixed tail bytes | Zeroed after object-bearing 256 MiB and 512 MiB hardware checks showed they are not required. Retained tail words are written explicitly. |
 | Partition-header residue range at `+0x1bc..+0x1e3` | Zeroed for all currently supported writer profiles after hardware validation showed it is not required. |

@@ -21,6 +21,7 @@ from axklib.audio import (
     decode_waveform,
 )
 from axklib.audio.structured import build_export_plan
+from axklib.build_manifest import build_hds_from_manifest, load_hds_build_manifest
 from axklib.containers import expand_inputs, sfs_inventory
 from axklib.content_tree import (
     ContentNode,
@@ -1325,6 +1326,33 @@ def run_coverage(args: argparse.Namespace) -> int:
     return 3 if load_error_rows else 0
 
 
+def run_create_hds(args: argparse.Namespace) -> int:
+    try:
+        manifest = load_hds_build_manifest(Path(args.manifest))
+        result = build_hds_from_manifest(
+            manifest,
+            Path(args.output),
+            overwrite=bool(args.overwrite),
+        )
+    except FileExistsError:
+        raise
+    except (ValueError, json.JSONDecodeError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(
+        f"image={result.path} size_bytes={result.size_bytes} "
+        f"partitions={result.partitions} objects={len(result.objects)} "
+        f"unused_tail_sectors={result.unused_tail_sectors}"
+    )
+    for layout in result.partition_layouts:
+        print(
+            f"partition={layout.index} name={layout.name!r} "
+            f"start_sector={layout.start_sector} sector_count={layout.sector_count} "
+            f"cluster_count={layout.cluster_count}"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="axklib",
@@ -1422,6 +1450,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--overwrite", action="store_true", help="allow writing into a non-empty output directory"
     )
     coverage.set_defaults(func=run_coverage)
+
+    create = subparsers.add_parser("create", help="create a fresh supported container")
+    create_subparsers = create.add_subparsers(dest="create_command", metavar="create-command")
+    create_hds = create_subparsers.add_parser(
+        "hds",
+        help="create a fresh HDS image from a versioned JSON manifest",
+    )
+    create_hds.add_argument("manifest", help="versioned HDS build manifest JSON")
+    create_hds.add_argument("-o", "--output", required=True, help="output HDS image path")
+    create_hds.add_argument("--overwrite", action="store_true", help="replace an existing image")
+    create_hds.set_defaults(func=run_create_hds)
 
     objects_cmd = subparsers.add_parser("objects", help="inspect raw and decoded object summaries")
     objects_cmd.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,113 @@ def test_content_label_map_option_is_not_public() -> None:
         axklibtool.main(["info", "--content-label-map", "labels.json", "fixture.iso"])
 
     assert exc_info.value.code == 2
+
+
+def test_create_hds_builds_manifest_and_reports_layout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "size_bytes": 256 * 1024 * 1024,
+                "partitions": [
+                    {
+                        "name": "hd1",
+                        "volumes": [
+                            {
+                                "name": "New Volume",
+                                "waveforms": [],
+                                "sample_banks": [],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "HD00_512_manifest.hds"
+
+    code = axklibtool.main(["create", "hds", str(manifest_path), "-o", str(output)])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert output.stat().st_size == 256 * 1024 * 1024
+    assert "partitions=1 objects=0 unused_tail_sectors=0" in captured.out
+    assert "partition=0 name='hd1' start_sector=3 sector_count=524285" in captured.out
+
+
+def test_create_hds_uses_standard_overwrite_policy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "size_bytes": 256 * 1024 * 1024,
+                "partitions": [
+                    {
+                        "name": "hd1",
+                        "volumes": [
+                            {
+                                "name": "New Volume",
+                                "waveforms": [],
+                                "sample_banks": [],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "existing.hds"
+    output.write_bytes(b"existing")
+
+    refused = axklibtool.main(["create", "hds", str(manifest_path), "-o", str(output)])
+    replaced = axklibtool.main(
+        ["create", "hds", str(manifest_path), "-o", str(output), "--overwrite"]
+    )
+
+    captured = capsys.readouterr()
+    assert refused == 1
+    assert replaced == 0
+    assert "output already exists" in captured.err
+    assert output.stat().st_size == 256 * 1024 * 1024
+
+
+def test_create_hds_reports_manifest_errors_without_internal_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest_path = tmp_path / "invalid.json"
+    manifest_path.write_text('{"schema_version": "2.0"}', encoding="utf-8")
+
+    code = axklibtool.main(
+        ["create", "hds", str(manifest_path), "-o", str(tmp_path / "bad.hds")]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "missing required fields" in captured.err
+    assert "internal error" not in captured.err
+
+
+def test_create_hds_reports_missing_manifest_without_internal_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "missing.json"
+
+    code = axklibtool.main(
+        ["create", "hds", str(missing), "-o", str(tmp_path / "bad.hds")]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "missing.json" in captured.err
+    assert "internal error" not in captured.err
 
 
 def test_broken_pipe_is_not_reported_as_internal_error(
