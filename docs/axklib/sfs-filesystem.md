@@ -381,13 +381,14 @@ The writer constructs the superblock, partition table, sector-2 metadata,
 partition headers, allocation bitmap, directory index, and object payload
 extents from the typed image model. Fields with known formulas, such as
 partition slot placement, partition-header start/count words, partition-index
-words, sector-2 identifiers, and dynamic header words, are generated explicitly. The
-supported partition-header tail profiles share one fixed compatibility template
-after variable words are removed. The validated non-required residue range at
-`+0x1bc..+0x1e3` is zero-generated for all currently supported writer
-profiles. Sector-2 label-entry records and the current two-partition
-+0x30..+0x3e range are deliberately zero-generated for currently supported
-writer profiles.
+words, sector-2 identifiers, and dynamic header words, are generated explicitly.
+Partition headers are zero-initialized, and only the retained explicit fields
+are written. Hardware checks on object-bearing 256 MiB / one-partition and
+512 MiB / two-partition images showed that the former fixed nonzero tail bytes
+are not required; they remain zero for generated profiles. The validated
+non-required residue range at `+0x1bc..+0x1e3` is also zero-generated. Sector-2
+label-entry records and the current two-partition `+0x30..+0x3e` range are
+deliberately zero-generated for currently supported writer profiles.
 
 
 ### Writer profile metadata
@@ -402,6 +403,7 @@ The supported writer profiles currently use these rules:
 | --- | --- |
 | Superblock descriptor words at `+0x80..+0x98` | Written as fixed profile constants for the currently supported hard-disk writer profiles. |
 | Sector-2 two-partition range at `+0x30..+0x3e` | Zeroed for all currently supported writer profiles after hardware validation showed it is not required. |
+| Former partition-header fixed tail bytes | Zeroed after object-bearing 256 MiB and 512 MiB hardware checks showed they are not required. Retained tail words are written explicitly. |
 | Partition-header residue range at `+0x1bc..+0x1e3` | Zeroed for all currently supported writer profiles after hardware validation showed it is not required. |
 | Sparse partition-header `+0x14c` | Written as image sector count minus one for the supported sparse profile. |
 | Sparse partition-header `+0x194` | Written as zero for the supported sparse profile. |

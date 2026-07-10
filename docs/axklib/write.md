@@ -45,6 +45,12 @@ direct single-member sample banks. The writer is intentionally conservative:
 unsupported object types, multi-member sample-bank groups, untested hard-disk
 metadata profiles, and in-place image mutation are outside the current API.
 
+Partition headers are zero-initialized and populated through explicit field
+writes. Former fixed nonzero tail bytes are deliberately left zero after
+object-bearing 256 MiB / one-partition and 512 MiB / two-partition hardware
+checks showed that volumes, sample banks, parameters, and playback remain
+correct without them.
+
 After creating an image, validate it with the public reader before trying it on
 hardware:
 

@@ -50,41 +50,6 @@ SUPPORTED_TWO_PARTITION_SECTORS = 524_286
 SUPPORTED_TWO_PARTITION_STRIDE_SECTORS = 524_287
 SUPPORTED_SPARSE_768M_IMAGE_BYTES = 768 * 1024 * 1024
 SUPPORTED_SPARSE_768M_PARTITIONS = 3
-PARTITION_HEADER_TAIL_OPAQUE_TEMPLATE = bytes.fromhex(
-    "000000000000000000001388000002000000000200000000000000000000000000000400000320000017ab4a01529f34001aa5400000000000000002000000c8"
-    "0000138800000000000000000000000001529fa000000000000000000000000000000000000000000000000800000400000aa30e01529f780000000000000000"
-    "001aa540000000000000138800000400000000000000000000000000000000000000000200000000000000000000000000000000000a9f760152a22400000000"
-    "00000000000000000000000000000000000000000000000000000000000000000000000001529fb400000002000000c800000400000000000000000000000000"
-)
-PARTITION_HEADER_TAIL_VARIABLE_OFFSETS = (
-    0x104,
-    0x114,
-    0x118,
-    0x11C,
-    0x134,
-    0x144,
-    0x14C,
-    0x154,
-    0x158,
-    0x15C,
-    0x160,
-    0x164,
-    0x178,
-    0x17C,
-    0x184,
-    0x194,
-    0x1A8,
-    0x1BC,
-    0x1C0,
-    0x1C4,
-    0x1C8,
-    0x1CC,
-    0x1D0,
-    0x1D4,
-    0x1D8,
-    0x1DC,
-    0x1E0,
-)
 PARTITION_HEADER_DYNAMIC_BASE_WORD = 0x0152A3FC
 PARTITION_HEADER_DYNAMIC_WORD_STEP = 0x11
 OBJECT_MAGIC = b"FSFSDEV3SPLX"
@@ -942,7 +907,8 @@ def _apply_partition_metadata_profile(header: bytearray, plan: _PartitionPlan) -
     if _is_two_partition_plan(plan):
         header[0xAF] = plan.index
     if _has_partition_header_tail_profile(plan):
-        header[0x100:0x200] = _partition_header_tail_metadata(plan)
+        for offset, value in _partition_header_tail_values(plan).items():
+            _put_be32(header, offset, value)
 
 
 def _has_partition_header_tail_profile(plan: _PartitionPlan) -> bool:
@@ -980,27 +946,6 @@ def _is_sparse_multi_partition_plan(plan: _PartitionPlan) -> bool:
             plan.builder._image.size_bytes, len(plan.builder._image._partitions)
         )
     )
-
-
-def _partition_header_tail_metadata(plan: _PartitionPlan) -> bytes:
-    metadata = _partition_header_tail_template(
-        PARTITION_HEADER_TAIL_OPAQUE_TEMPLATE,
-        dynamic_offsets=PARTITION_HEADER_TAIL_VARIABLE_OFFSETS,
-    )
-    for offset, value in _partition_header_tail_values(plan).items():
-        relative_offset = offset - 0x100
-        metadata[relative_offset : relative_offset + 4] = _be32(value)
-    return bytes(metadata)
-
-
-def _partition_header_tail_template(
-    template: bytes, *, dynamic_offsets: Sequence[int] = ()
-) -> bytearray:
-    metadata = bytearray(template)
-    for offset in dynamic_offsets:
-        relative_offset = offset - 0x100
-        metadata[relative_offset : relative_offset + 4] = b"\x00" * 4
-    return metadata
 
 
 def _partition_header_tail_values(plan: _PartitionPlan) -> dict[int, int]:
