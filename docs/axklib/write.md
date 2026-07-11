@@ -434,6 +434,64 @@ loop window from those current SMPL records. Bank root key, key range, and level
 come from the transaction. Duplicate bank names and unresolved waveform names
 are rejected before output is written.
 
+### Sample-bank rename
+
+Rename one SBNK and its exact SBAC/Program references:
+
+```json
+{
+  "id": "rename-bank",
+  "type": "rename_sbnk",
+  "partition_index": 0,
+  "volume_name": "Keys",
+  "sample_bank_name": "Old Piano",
+  "new_sample_bank_name": "Bright Piano"
+}
+```
+
+Both names must be distinct ASCII strings of at most 16 bytes, and the
+destination must not already exist in the volume. The SBNK directory and
+payload names must agree. Grouped-bank state must match exactly one SBAC member
+reference, while ungrouped state must match none. Direct Program assignments
+must exactly match the SBNK's complete Program-link bitmap. Targeted SBAC slots
+and Program assignments require the hardware-proven zero-handle profile.
+
+The operation also requires raw SBAC/Program references to agree with every
+Known incoming relationship edge. It then updates only the SBNK name, exact
+SBAC slot names, exact direct Program assignment names, and its directory
+entry. Waveform member names/link IDs, stereo topology, Program bitmaps, group
+flags, parameters, SFS IDs, object sizes, extents, allocation, and PCM remain
+unchanged. Later queued operations resolve the new name.
+
+### Sample-bank-group rename
+
+Rename one SBAC and its exact Program assignments:
+
+```json
+{
+  "id": "rename-group",
+  "type": "rename_sbac",
+  "partition_index": 0,
+  "volume_name": "Keys",
+  "sample_bank_group_name": "Old Group",
+  "new_sample_bank_group_name": "Performance Group"
+}
+```
+
+Both names must be distinct ASCII strings of at most 16 bytes, and the
+destination must not already exist. The operation requires matching SBAC
+directory/payload identity and one through three distinct, readable,
+zero-handle member slots. Every member must resolve uniquely to an SBNK with
+its grouped flag set, no member may be shared with another SBAC, and the raw
+member set must match all Known outgoing edges.
+
+Every exact Program assignment to the group must use the hardware-proven
+zero-handle profile and agree with all Known incoming Program edges. The
+operation updates only the SBAC name, exact Program assignment names, and its
+directory entry. Member order, member SBNKs, grouped flags, Program parameters,
+SFS IDs, object sizes, extents, allocation, and PCM remain unchanged. Later
+queued operations resolve the new group name.
+
 ### Program and sample-bank-group operations
 
 Remove a Program before removing an SBAC group that it assigns:
@@ -512,6 +570,35 @@ receive channel 1, then one direct SBNK on receive channel 2. It writes the
 direct SBNK Program-link bit and rejects duplicate numbers, missing targets,
 stale link bits, or targets already assigned by another Program. Broader
 Program assignment shapes are not implied by this profile.
+
+### Waveform rename
+
+Rename one physical waveform and its exact active SBNK member references:
+
+```json
+{
+  "id": "rename-waveform",
+  "type": "rename_waveform",
+  "partition_index": 0,
+  "volume_name": "Drums",
+  "waveform_name": "Snare Wave",
+  "new_waveform_name": "Tight Snare"
+}
+```
+
+Both names must be distinct ASCII strings of at most 16 bytes. The destination
+name must not already exist in the volume. The operation requires one exact
+SMPL directory/payload identity and one unique nonzero SMPL link ID. Every
+active SBNK lane that matches either the old name or link ID must match both;
+any disagreement, duplicate link identity, unreadable bank, or Known incoming
+SBNK edge outside the exact updated set rejects the transaction.
+
+The operation updates the fixed SMPL name field, its directory entry, and the
+fixed left/right member-name fields of exact referencing SBNKs. Inactive right
+lane residue is not treated as a reference. SMPL/SBNK object sizes, SFS IDs,
+link IDs, extents, allocation bitmaps, PCM, loop data, Program bitmaps, group
+flags, and sample parameters are preserved. Later operations in the same
+transaction resolve the new name.
 
 ### Waveform deletion
 

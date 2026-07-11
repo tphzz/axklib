@@ -11,8 +11,12 @@ import soundfile as sf
 from axklib.alteration import alter_hds, parse_alteration_manifest
 from axklib.audio import decode_waveform
 from axklib.audio.importing import import_sampler_audio
-from axklib.containers import load_sfs_objects, sfs_dump, sfs_inventory
-from axklib.parameters.current import decode_current_sbnk_members
+from axklib.containers import load_sfs_objects, sfs_allocation, sfs_dump, sfs_inventory
+from axklib.parameters.current import (
+    decode_current_sbnk_members,
+    iter_prog_assignments,
+    iter_sbac_slots,
+)
 from axklib.relationships import build_relationship_graph
 from axklib.waveform_orphans import (
     WAVEFORM_STATUS_KNOWN_UNREFERENCED,
@@ -882,6 +886,570 @@ def test_delete_waveform_accepts_only_known_orphan_and_leaves_payload_bytes(
         == old_payload
     )
     assert result.operations[0].freed_clusters == 2
+
+
+def test_rename_waveform_updates_all_exact_sbnk_references_without_reallocation(
+    tmp_path: Path,
+) -> None:
+    source = _referenced_bank_source(tmp_path)
+    source_objects = {item.name: item for item in load_sfs_objects(source)}
+    source_waveform = source_objects["Shared Wave"]
+    source_banks = {
+        name: source_objects[name].payload
+        for name in ("Member A", "Member B", "Direct", "Unused")
+    }
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-wave",
+                "type": "rename_waveform",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "waveform_name": "Shared Wave",
+                "new_waveform_name": "Renamed Wave",
+            }
+        )
+    )
+    output = tmp_path / "waveform-renamed.hds"
+
+    result = alter_hds(source, transaction, output_path=output)
+
+    output_objects = {item.name: item for item in load_sfs_objects(output)}
+    assert "Shared Wave" not in output_objects
+    renamed = output_objects["Renamed Wave"]
+    assert renamed.sfs_id == source_waveform.sfs_id
+    assert renamed.payload[:0x32] + renamed.payload[0x42:] == (
+        source_waveform.payload[:0x32] + source_waveform.payload[0x42:]
+    )
+    for name, original_payload in source_banks.items():
+        bank = output_objects[name]
+        decoded = decode_current_sbnk_members(bank.payload)
+        assert decoded.left.sample_name == "Renamed Wave"
+        assert bank.payload[:0x78] + bank.payload[0x88:] == (
+            original_payload[:0x78] + original_payload[0x88:]
+        )
+    relationships = build_relationship_graph(list(output_objects.values())).relationships
+    assert sum(
+        row.quality == "Known"
+        and row.target_key == renamed.object_key
+        and row.relationship_type.endswith("_TO_SMPL")
+        for row in relationships
+    ) == 4
+    source_allocation = sfs_allocation.analyze_image(source).summaries[0]
+    output_allocation = sfs_allocation.analyze_image(output).summaries[0]
+    assert source_allocation.stored_used_cluster_count == (
+        output_allocation.stored_used_cluster_count
+    )
+    assert source_allocation.sampler_visible_free_kib == output_allocation.sampler_visible_free_kib
+    assert result.operations[0].object_name == "Renamed Wave"
+    assert result.operations[0].freed_clusters == 0
+    assert result.operations[0].allocated_clusters == 0
+
+
+def test_rename_waveform_updates_exact_stereo_right_member(tmp_path: Path) -> None:
+    left_path = tmp_path / "left.wav"
+    right_path = tmp_path / "right.wav"
+    _write_wav(left_path, frames=16)
+    _write_wav(right_path, frames=16)
+    builder = HdsImageBuilder(size_bytes=8 * 1024 * 1024)
+    volume = builder.add_partition("hd1").add_volume("Stereo")
+    left = volume.add_waveform_from_wav(name="Stereo L", path=left_path, root_key=60)
+    right = volume.add_waveform_from_wav(name="Stereo R", path=right_path, root_key=60)
+    volume.add_stereo_sample_bank(
+        name="Stereo Bank",
+        left_waveform=left,
+        right_waveform=right,
+        root_key=60,
+        key_low=48,
+        key_high=72,
+        level=96,
+    )
+    source = tmp_path / "stereo.hds"
+    builder.write(source)
+    source_bank = next(item for item in load_sfs_objects(source) if item.name == "Stereo Bank")
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-right",
+                "type": "rename_waveform",
+                "partition_index": 0,
+                "volume_name": "Stereo",
+                "waveform_name": "Stereo R",
+                "new_waveform_name": "Renamed R",
+            }
+        )
+    )
+    output = tmp_path / "stereo-renamed.hds"
+
+    alter_hds(source, transaction, output_path=output)
+
+    output_bank = next(item for item in load_sfs_objects(output) if item.name == "Stereo Bank")
+    decoded = decode_current_sbnk_members(output_bank.payload)
+    assert decoded.left.sample_name == "Stereo L"
+    assert decoded.right is not None
+    assert decoded.right.sample_name == "Renamed R"
+    assert output_bank.payload[:0x88] + output_bank.payload[0x98:] == (
+        source_bank.payload[:0x88] + source_bank.payload[0x98:]
+    )
+
+
+def test_queued_waveform_rename_is_available_to_following_sbnk_insert(tmp_path: Path) -> None:
+    source = _orphan_source(tmp_path)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-orphan",
+                "type": "rename_waveform",
+                "partition_index": 0,
+                "volume_name": "Orphans",
+                "waveform_name": "Orphan Wave",
+                "new_waveform_name": "Available Wave",
+            },
+            {
+                "id": "insert-bank",
+                "type": "insert_sbnk",
+                "partition_index": {"operation_ref": "rename-orphan"},
+                "volume_name": "Orphans",
+                "sample_bank": {
+                    "name": "Available Bank",
+                    "waveform_name": "Available Wave",
+                    "root_key": 62,
+                    "key_low": 62,
+                    "key_high": 62,
+                    "level": 94,
+                },
+            },
+        )
+    )
+    output = tmp_path / "queued-rename.hds"
+
+    alter_hds(source, transaction, output_path=output)
+
+    objects = load_sfs_objects(output)
+    by_name = {item.name: item for item in objects}
+    bank = by_name["Available Bank"]
+    renamed = by_name["Available Wave"]
+    assert any(
+        row.source_key == bank.object_key
+        and row.target_key == renamed.object_key
+        and row.quality == "Known"
+        for row in build_relationship_graph(objects).relationships
+    )
+
+
+def test_rename_waveform_rejects_collision_and_name_link_disagreement(tmp_path: Path) -> None:
+    source = _orphan_source(tmp_path)
+    collision = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-collision",
+                "type": "rename_waveform",
+                "partition_index": 0,
+                "volume_name": "Orphans",
+                "waveform_name": "Orphan Wave",
+                "new_waveform_name": "Used Wave",
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="already contains waveform 'Used Wave'"):
+        alter_hds(source, collision)
+
+    used_bank = next(item for item in load_sfs_objects(source) if item.name == "Used Bank")
+    assert used_bank.payload_offset is not None
+    damaged = tmp_path / "damaged-link.hds"
+    damaged_bytes = bytearray(source.read_bytes())
+    link_offset = used_bank.payload_offset + 0x0A0
+    old_link = int.from_bytes(damaged_bytes[link_offset : link_offset + 4], "big")
+    damaged_bytes[link_offset : link_offset + 4] = (old_link + 1).to_bytes(4, "big")
+    damaged.write_bytes(damaged_bytes)
+    inconsistent = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-inconsistent",
+                "type": "rename_waveform",
+                "partition_index": 0,
+                "volume_name": "Orphans",
+                "waveform_name": "Used Wave",
+                "new_waveform_name": "Renamed Used",
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="disagrees on waveform name/link ID"):
+        alter_hds(damaged, inconsistent)
+
+
+def test_rename_sbnk_updates_group_and_direct_program_references_without_reallocation(
+    tmp_path: Path,
+) -> None:
+    source = _referenced_bank_source(tmp_path)
+    source_objects = {item.name: item for item in load_sfs_objects(source)}
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-grouped",
+                "type": "rename_sbnk",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_name": "Member A",
+                "new_sample_bank_name": "Grouped New",
+            },
+            {
+                "id": "rename-direct",
+                "type": "rename_sbnk",
+                "partition_index": {"operation_ref": "rename-grouped"},
+                "volume_name": "Banks",
+                "sample_bank_name": "Direct",
+                "new_sample_bank_name": "Direct New",
+            },
+        )
+    )
+    output = tmp_path / "banks-renamed.hds"
+
+    result = alter_hds(source, transaction, output_path=output)
+
+    output_objects = {item.name: item for item in load_sfs_objects(output)}
+    assert {"Member A", "Direct"}.isdisjoint(output_objects)
+    grouped = output_objects["Grouped New"]
+    direct = output_objects["Direct New"]
+    assert grouped.sfs_id == source_objects["Member A"].sfs_id
+    assert direct.sfs_id == source_objects["Direct"].sfs_id
+    assert grouped.payload[:0x32] + grouped.payload[0x42:] == (
+        source_objects["Member A"].payload[:0x32]
+        + source_objects["Member A"].payload[0x42:]
+    )
+    assert direct.payload[:0x32] + direct.payload[0x42:] == (
+        source_objects["Direct"].payload[:0x32] + source_objects["Direct"].payload[0x42:]
+    )
+    grouped_decoded = decode_current_sbnk_members(grouped.payload)
+    direct_decoded = decode_current_sbnk_members(direct.payload)
+    assert grouped_decoded.member_parameters.sample_flags_0x0d0 is not None
+    assert grouped_decoded.member_parameters.sample_flags_0x0d0 & 0x01 == 1
+    assert direct_decoded.linked_program_numbers == (1,)
+    group = output_objects["Group"]
+    assert [slot.name for slot in iter_sbac_slots(group.payload)[2]] == [
+        "Grouped New",
+        "Member B",
+    ]
+    group_original = source_objects["Group"].payload
+    assert group.payload[:0x14C] + group.payload[0x15C:] == (
+        group_original[:0x14C] + group_original[0x15C:]
+    )
+    program = output_objects["001"]
+    direct_assignments = [
+        row.name for row in iter_prog_assignments(program.payload) if row.expected_category == "SBNK"
+    ]
+    assert direct_assignments == ["Direct New"]
+    program_original = source_objects["001"].payload
+    direct_name_offset = 0x120 + 0x38
+    assert (
+        program.payload[:direct_name_offset] + program.payload[direct_name_offset + 16 :]
+        == program_original[:direct_name_offset] + program_original[direct_name_offset + 16 :]
+    )
+    assert output_objects["Shared Wave"].payload == source_objects["Shared Wave"].payload
+    graph = build_relationship_graph(list(output_objects.values()))
+    names_by_key = {item.object_key: item.name for item in output_objects.values()}
+    known_pairs = {
+        (names_by_key[row.source_key], names_by_key[row.target_key])
+        for row in graph.relationships
+        if row.quality == "Known"
+        and row.source_key in names_by_key
+        and row.target_key in names_by_key
+    }
+    assert ("Group", "Grouped New") in known_pairs
+    assert ("001", "Direct New") in known_pairs
+    source_allocation = sfs_allocation.analyze_image(source).summaries[0]
+    output_allocation = sfs_allocation.analyze_image(output).summaries[0]
+    assert source_allocation.stored_used_cluster_count == (
+        output_allocation.stored_used_cluster_count
+    )
+    assert source_allocation.sampler_visible_free_kib == output_allocation.sampler_visible_free_kib
+    assert [row.object_name for row in result.operations] == ["Grouped New", "Direct New"]
+
+
+def test_rename_sbnk_preserves_stereo_members_and_parameters(tmp_path: Path) -> None:
+    left_path = tmp_path / "left.wav"
+    right_path = tmp_path / "right.wav"
+    _write_wav(left_path, frames=16)
+    _write_wav(right_path, frames=16)
+    builder = HdsImageBuilder(size_bytes=8 * 1024 * 1024)
+    volume = builder.add_partition("hd1").add_volume("Stereo")
+    left = volume.add_waveform_from_wav(name="Stereo L", path=left_path, root_key=60)
+    right = volume.add_waveform_from_wav(name="Stereo R", path=right_path, root_key=60)
+    volume.add_stereo_sample_bank(
+        name="Stereo Bank",
+        left_waveform=left,
+        right_waveform=right,
+        root_key=60,
+        key_low=48,
+        key_high=72,
+        level=96,
+    )
+    source = tmp_path / "stereo-bank.hds"
+    builder.write(source)
+    original = next(item for item in load_sfs_objects(source) if item.name == "Stereo Bank")
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-stereo",
+                "type": "rename_sbnk",
+                "partition_index": 0,
+                "volume_name": "Stereo",
+                "sample_bank_name": "Stereo Bank",
+                "new_sample_bank_name": "Stereo New",
+            }
+        )
+    )
+    output = tmp_path / "stereo-bank-renamed.hds"
+
+    alter_hds(source, transaction, output_path=output)
+
+    renamed = next(item for item in load_sfs_objects(output) if item.name == "Stereo New")
+    assert renamed.sfs_id == original.sfs_id
+    assert renamed.payload[:0x32] + renamed.payload[0x42:] == (
+        original.payload[:0x32] + original.payload[0x42:]
+    )
+    decoded = decode_current_sbnk_members(renamed.payload)
+    assert decoded.left.sample_name == "Stereo L"
+    assert decoded.right is not None
+    assert decoded.right.sample_name == "Stereo R"
+
+
+def test_queued_sbnk_rename_is_available_to_following_sbac_insert(tmp_path: Path) -> None:
+    source = _referenced_bank_source(tmp_path)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-unused",
+                "type": "rename_sbnk",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_name": "Unused",
+                "new_sample_bank_name": "Queued Bank",
+            },
+            {
+                "id": "insert-group",
+                "type": "insert_sbac",
+                "partition_index": {"operation_ref": "rename-unused"},
+                "volume_name": "Banks",
+                "sample_bank_group": {
+                    "name": "Queued Group",
+                    "member_sample_banks": ["Queued Bank"],
+                },
+            },
+        )
+    )
+    output = tmp_path / "queued-bank-rename.hds"
+
+    alter_hds(source, transaction, output_path=output)
+
+    objects = load_sfs_objects(output)
+    by_name = {item.name: item for item in objects}
+    assert any(
+        row.source_key == by_name["Queued Group"].object_key
+        and row.target_key == by_name["Queued Bank"].object_key
+        and row.quality == "Known"
+        for row in build_relationship_graph(objects).relationships
+    )
+
+
+def test_rename_sbnk_rejects_collision_and_program_bitmap_mismatch(tmp_path: Path) -> None:
+    source = _referenced_bank_source(tmp_path)
+    collision = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-collision",
+                "type": "rename_sbnk",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_name": "Member A",
+                "new_sample_bank_name": "Member B",
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="already contains sample bank 'Member B'"):
+        alter_hds(source, collision)
+
+    direct = next(item for item in load_sfs_objects(source) if item.name == "Direct")
+    assert direct.payload_offset is not None
+    damaged = tmp_path / "damaged-bitmap.hds"
+    damaged_bytes = bytearray(source.read_bytes())
+    bitmap_offset = direct.payload_offset + 0x0C0
+    damaged_bytes[bitmap_offset : bitmap_offset + 4] = b"\x00\x00\x00\x00"
+    damaged.write_bytes(damaged_bytes)
+    inconsistent = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-inconsistent",
+                "type": "rename_sbnk",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_name": "Direct",
+                "new_sample_bank_name": "Direct New",
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="Program bitmap .* does not match direct assignments"):
+        alter_hds(damaged, inconsistent)
+
+
+def test_rename_sbac_updates_program_reference_and_preserves_order_and_members(
+    tmp_path: Path,
+) -> None:
+    source = _referenced_bank_source(tmp_path)
+    source_objects = {item.name: item for item in load_sfs_objects(source)}
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-group",
+                "type": "rename_sbac",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_group_name": "Group",
+                "new_sample_bank_group_name": "Renamed Group",
+            }
+        )
+    )
+    output = tmp_path / "group-renamed.hds"
+
+    result = alter_hds(source, transaction, output_path=output)
+
+    output_objects = {item.name: item for item in load_sfs_objects(output)}
+    assert "Group" not in output_objects
+    group = output_objects["Renamed Group"]
+    assert group.sfs_id == source_objects["Group"].sfs_id
+    assert group.payload[:0x32] + group.payload[0x42:] == (
+        source_objects["Group"].payload[:0x32] + source_objects["Group"].payload[0x42:]
+    )
+    assert [slot.name for slot in iter_sbac_slots(group.payload)[2]] == ["Member A", "Member B"]
+    program = output_objects["001"]
+    assignments = [row for row in iter_prog_assignments(program.payload) if row.name]
+    assert [(row.expected_category, row.name) for row in assignments] == [
+        ("SBAC", "Renamed Group"),
+        ("SBNK", "Direct"),
+    ]
+    source_program = source_objects["001"].payload
+    assert program.payload[:0x120] + program.payload[0x130:] == (
+        source_program[:0x120] + source_program[0x130:]
+    )
+    for name in ("Member A", "Member B", "Direct", "Shared Wave"):
+        assert output_objects[name].payload == source_objects[name].payload
+    graph = build_relationship_graph(list(output_objects.values()))
+    names_by_key = {item.object_key: item.name for item in output_objects.values()}
+    known_pairs = {
+        (names_by_key[row.source_key], names_by_key[row.target_key])
+        for row in graph.relationships
+        if row.quality == "Known"
+        and row.source_key in names_by_key
+        and row.target_key in names_by_key
+    }
+    assert ("001", "Renamed Group") in known_pairs
+    assert ("Renamed Group", "Member A") in known_pairs
+    assert ("Renamed Group", "Member B") in known_pairs
+    source_allocation = sfs_allocation.analyze_image(source).summaries[0]
+    output_allocation = sfs_allocation.analyze_image(output).summaries[0]
+    assert source_allocation.stored_used_cluster_count == (
+        output_allocation.stored_used_cluster_count
+    )
+    assert source_allocation.sampler_visible_free_kib == output_allocation.sampler_visible_free_kib
+    assert result.operations[0].object_name == "Renamed Group"
+
+
+def test_queued_sbac_rename_is_available_to_reinserted_program(tmp_path: Path) -> None:
+    source = _referenced_bank_source(tmp_path)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-program",
+                "type": "delete_program",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "program_number": 1,
+            },
+            {
+                "id": "rename-group",
+                "type": "rename_sbac",
+                "partition_index": {"operation_ref": "delete-program"},
+                "volume_name": "Banks",
+                "sample_bank_group_name": "Group",
+                "new_sample_bank_group_name": "Queued Group",
+            },
+            {
+                "id": "insert-program",
+                "type": "insert_program",
+                "partition_index": {"operation_ref": "rename-group"},
+                "volume_name": "Banks",
+                "program": {
+                    "number": 1,
+                    "assignments": [
+                        {"sample_bank_group": "Queued Group", "receive_channel": 1},
+                        {"sample_bank": "Direct", "receive_channel": 2},
+                    ],
+                },
+            },
+        )
+    )
+    output = tmp_path / "queued-group-rename.hds"
+
+    alter_hds(source, transaction, output_path=output)
+
+    objects = load_sfs_objects(output)
+    by_name = {item.name: item for item in objects}
+    assert any(
+        row.source_key == by_name["001"].object_key
+        and row.target_key == by_name["Queued Group"].object_key
+        and row.quality == "Known"
+        for row in build_relationship_graph(objects).relationships
+    )
+
+
+def test_rename_sbac_rejects_collision_and_nonzero_program_handle(tmp_path: Path) -> None:
+    source = _referenced_bank_source(tmp_path)
+    collision = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "insert-other",
+                "type": "insert_sbac",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_group": {
+                    "name": "Other Group",
+                    "member_sample_banks": ["Unused"],
+                },
+            },
+            {
+                "id": "rename-collision",
+                "type": "rename_sbac",
+                "partition_index": {"operation_ref": "insert-other"},
+                "volume_name": "Banks",
+                "sample_bank_group_name": "Group",
+                "new_sample_bank_group_name": "Other Group",
+            },
+        )
+    )
+    with pytest.raises(ValueError, match="already contains sample bank group 'Other Group'"):
+        alter_hds(source, collision)
+
+    program = next(item for item in load_sfs_objects(source) if item.name == "001")
+    assert program.payload_offset is not None
+    damaged = tmp_path / "damaged-group-handle.hds"
+    damaged_bytes = bytearray(source.read_bytes())
+    handle_offset = program.payload_offset + 0x120 + 0x10
+    damaged_bytes[handle_offset : handle_offset + 4] = (1).to_bytes(4, "big")
+    damaged.write_bytes(damaged_bytes)
+    unsupported = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "rename-group",
+                "type": "rename_sbac",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_group_name": "Group",
+                "new_sample_bank_group_name": "Renamed Group",
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="unsupported nonzero handle"):
+        alter_hds(damaged, unsupported)
 
 
 def test_delete_waveform_rejects_referenced_waveform(tmp_path: Path) -> None:

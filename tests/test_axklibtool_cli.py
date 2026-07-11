@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import wave
 from collections import Counter
 from pathlib import Path
@@ -749,6 +751,289 @@ def test_alter_hds_cli_dry_run_and_atomic_output(
     assert output.exists()
     assert '"applied": false' in captured.out
     assert '"applied": true' in captured.out
+
+
+def test_alter_hds_cli_full_chain_reconstructs_program_hierarchy_and_pcm(
+    tmp_path: Path,
+) -> None:
+    old_pcm = _write_mono_wav(
+        tmp_path / "old.wav", (0, 100, -200, 300, -400, 500, -600, 700)
+    )
+    new_pcm = _write_mono_wav(
+        tmp_path / "new.wav", (0, 701, -602, 503, -404, 305, -206, 107)
+    )
+    retained_pcm = _write_mono_wav(
+        tmp_path / "retained.wav", (0, 2100, -2200, 2300, -2400, 2500, -2600, 2700)
+    )
+    build_manifest = tmp_path / "build.json"
+    build_manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "size_bytes": 8 * 1024 * 1024,
+                "partitions": [
+                    {
+                        "name": "hd1",
+                        "volumes": [
+                            {
+                                "name": "Replace Chain",
+                                "waveforms": [
+                                    {
+                                        "id": "old",
+                                        "name": "Old Wave",
+                                        "path": "old.wav",
+                                        "root_key": 60,
+                                    },
+                                ],
+                                "sample_banks": [
+                                    {
+                                        "name": "Old Member",
+                                        "waveform_id": "old",
+                                        "root_key": 60,
+                                        "key_low": 60,
+                                        "key_high": 60,
+                                        "level": 90,
+                                    },
+                                    {
+                                        "name": "Direct Bank",
+                                        "waveform_id": "old",
+                                        "root_key": 60,
+                                        "key_low": 60,
+                                        "key_high": 60,
+                                        "level": 90,
+                                    },
+                                ],
+                                "sample_bank_groups": [
+                                    {
+                                        "name": "Old Group",
+                                        "member_sample_bank": "Old Member",
+                                    }
+                                ],
+                                "programs": [
+                                    {
+                                        "number": 1,
+                                        "assignments": [
+                                            {
+                                                "sample_bank_group": "Old Group",
+                                                "receive_channel": 1,
+                                            },
+                                            {
+                                                "sample_bank": "Direct Bank",
+                                                "receive_channel": 2,
+                                            },
+                                        ],
+                                    }
+                                ],
+                            },
+                            {
+                                "name": "Retained",
+                                "waveforms": [
+                                    {
+                                        "id": "retained",
+                                        "name": "Retained Wave",
+                                        "path": "retained.wav",
+                                        "root_key": 67,
+                                    }
+                                ],
+                                "sample_banks": [
+                                    {
+                                        "name": "Retained Bank",
+                                        "waveform_id": "retained",
+                                        "root_key": 67,
+                                        "key_low": 67,
+                                        "key_high": 67,
+                                        "level": 100,
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = tmp_path / "source.hds"
+    transaction = tmp_path / "transaction.json"
+    transaction.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "operations": [
+                    {
+                        "id": "delete-program",
+                        "type": "delete_program",
+                        "partition_index": 0,
+                        "volume_name": "Replace Chain",
+                        "program_number": 1,
+                    },
+                    {
+                        "id": "delete-group",
+                        "type": "delete_sbac",
+                        "partition_index": {"operation_ref": "delete-program"},
+                        "volume_name": "Replace Chain",
+                        "sample_bank_group_name": "Old Group",
+                    },
+                    {
+                        "id": "delete-bank",
+                        "type": "delete_sbnk",
+                        "partition_index": {"operation_ref": "delete-group"},
+                        "volume_name": "Replace Chain",
+                        "sample_bank_name": "Old Member",
+                    },
+                    {
+                        "id": "delete-direct-bank",
+                        "type": "delete_sbnk",
+                        "partition_index": {"operation_ref": "delete-bank"},
+                        "volume_name": "Replace Chain",
+                        "sample_bank_name": "Direct Bank",
+                    },
+                    {
+                        "id": "delete-waveform",
+                        "type": "delete_waveform",
+                        "partition_index": {"operation_ref": "delete-direct-bank"},
+                        "volume_name": "Replace Chain",
+                        "waveform_name": "Old Wave",
+                    },
+                    {
+                        "id": "insert-waveform",
+                        "type": "insert_waveform",
+                        "partition_index": {"operation_ref": "delete-waveform"},
+                        "volume_name": "Replace Chain",
+                        "audio": {
+                            "path": "new.wav",
+                            "waveform_names": ["New Wave"],
+                            "root_key": 62,
+                        },
+                    },
+                    {
+                        "id": "insert-bank",
+                        "type": "insert_sbnk",
+                        "partition_index": {"operation_ref": "insert-waveform"},
+                        "volume_name": "Replace Chain",
+                        "sample_bank": {
+                            "name": "New Member",
+                            "waveform_name": "New Wave",
+                            "root_key": 62,
+                            "key_low": 62,
+                            "key_high": 62,
+                            "level": 92,
+                        },
+                    },
+                    {
+                        "id": "insert-direct-bank",
+                        "type": "insert_sbnk",
+                        "partition_index": {"operation_ref": "insert-bank"},
+                        "volume_name": "Replace Chain",
+                        "sample_bank": {
+                            "name": "New Direct",
+                            "waveform_name": "New Wave",
+                            "root_key": 62,
+                            "key_low": 62,
+                            "key_high": 62,
+                            "level": 92,
+                        },
+                    },
+                    {
+                        "id": "insert-group",
+                        "type": "insert_sbac",
+                        "partition_index": {"operation_ref": "insert-direct-bank"},
+                        "volume_name": "Replace Chain",
+                        "sample_bank_group": {
+                            "name": "New Group",
+                            "member_sample_banks": ["New Member"],
+                        },
+                    },
+                    {
+                        "id": "insert-program",
+                        "type": "insert_program",
+                        "partition_index": {"operation_ref": "insert-group"},
+                        "volume_name": "Replace Chain",
+                        "program": {
+                            "number": 1,
+                            "assignments": [
+                                {
+                                    "sample_bank_group": "New Group",
+                                    "receive_channel": 1,
+                                },
+                                {"sample_bank": "New Direct", "receive_channel": 2},
+                            ],
+                        },
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(
+            [sys.executable, "-m", "axklib.cli", *args],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result
+
+    run_cli("create", "hds", str(build_manifest), "-o", str(source))
+    source_objects = {item.name: item.payload for item in load_sfs_objects(source)}
+    output = tmp_path / "altered.hds"
+    altered = run_cli("alter", "hds", str(source), str(transaction), "-o", str(output))
+    operation_rows = json.loads(altered.stdout)["operations"]
+    assert [row["type"] for row in operation_rows] == [
+        "delete_program",
+        "delete_sbac",
+        "delete_sbnk",
+        "delete_sbnk",
+        "delete_waveform",
+        "insert_waveform",
+        "insert_sbnk",
+        "insert_sbnk",
+        "insert_sbac",
+        "insert_program",
+    ]
+
+    output_objects = load_sfs_objects(output)
+    output_by_name = {item.name: item for item in output_objects}
+    assert {"Old Wave", "Old Member", "Direct Bank", "Old Group"}.isdisjoint(output_by_name)
+    assert {"New Wave", "New Member", "New Direct", "New Group", "001"}.issubset(
+        output_by_name
+    )
+    for retained_name in ("Retained Wave", "Retained Bank"):
+        assert output_by_name[retained_name].payload == source_objects[retained_name]
+
+    objects_by_key = {item.object_key: item for item in output_objects}
+    known_relationships = {
+        (objects_by_key[row.source_key].name, objects_by_key[row.target_key].name)
+        for row in build_relationship_graph(output_objects).relationships
+        if row.quality == "Known"
+        and row.source_key in objects_by_key
+        and row.target_key in objects_by_key
+    }
+    assert ("New Member", "New Wave") in known_relationships
+    assert ("New Group", "New Member") in known_relationships
+    assert ("001", "New Group") in known_relationships
+    assert ("001", "New Direct") in known_relationships
+
+    export_dir = tmp_path / "exports"
+    run_cli("extract", "wav", "file", "-o", str(export_dir), str(output))
+    exported_pcm = sorted(_read_mono_wav_pcm(path) for path in export_dir.rglob("*.wav"))
+    assert exported_pcm == sorted(
+        _generated_exact_export_pcm(pcm) for pcm in (new_pcm, retained_pcm)
+    )
+    assert _generated_exact_export_pcm(old_pcm) not in exported_pcm
+
+    validation_dir = tmp_path / "validation"
+    run_cli("validate", "-o", str(validation_dir), str(source), str(output))
+    validation = json.loads((validation_dir / "validation_summary.json").read_text("utf-8"))
+    assert validation["issue_count"] == 0
+    allocation = json.loads((validation_dir / "allocation_summary.json").read_text("utf-8"))
+    assert len(allocation) == 2
+    assert all(row["extent_total_mismatch_count"] == 0 for row in allocation)
+    assert allocation[0]["sampler_visible_free_kib"] == allocation[1][
+        "sampler_visible_free_kib"
+    ]
 
 
 def test_broken_pipe_is_not_reported_as_internal_error(

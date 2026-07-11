@@ -142,10 +142,13 @@ class AlterationOperation:
     volume_name: str | None = None
     volume: HdsManifestVolume | None = None
     sample_bank_name: str | None = None
+    new_sample_bank_name: str | None = None
     sample_bank: InsertSampleBankSpec | None = None
     waveform_name: str | None = None
+    new_waveform_name: str | None = None
     waveform: InsertWaveformSpec | None = None
     sample_bank_group_name: str | None = None
+    new_sample_bank_group_name: str | None = None
     sample_bank_group: InsertSampleBankGroupSpec | None = None
     program_number: int | None = None
     program: InsertProgramSpec | None = None
@@ -266,6 +269,39 @@ def _string(value: object, context: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{context} must be a non-empty string")
     return value
+
+
+def _waveform_name(value: object, context: str) -> str:
+    name = _string(value, context)
+    try:
+        encoded = name.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{context} must contain ASCII text") from exc
+    if len(encoded) > 16:
+        raise ValueError(f"{context} must fit 16 ASCII bytes")
+    return name
+
+
+def _sample_bank_name(value: object, context: str) -> str:
+    name = _string(value, context)
+    try:
+        encoded = name.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{context} must contain ASCII text") from exc
+    if len(encoded) > 16:
+        raise ValueError(f"{context} must fit 16 ASCII bytes")
+    return name
+
+
+def _sample_bank_group_name(value: object, context: str) -> str:
+    name = _string(value, context)
+    try:
+        encoded = name.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{context} must contain ASCII text") from exc
+    if len(encoded) > 16:
+        raise ValueError(f"{context} must fit 16 ASCII bytes")
+    return name
 
 
 def _integer(value: object, context: str) -> int:
@@ -400,6 +436,41 @@ def _parse_insert_sbnk_operation(
     )
 
 
+def _parse_rename_sbnk_operation(
+    operation_id: str,
+    partition_index: int | OperationReference,
+    item: Mapping[str, object],
+    context: str,
+    _base_dir: Path,
+) -> AlterationOperation:
+    expected = {
+        "id",
+        "type",
+        "partition_index",
+        "volume_name",
+        "sample_bank_name",
+        "new_sample_bank_name",
+    }
+    if set(item) != expected:
+        raise ValueError(f"{context} fields must be exactly {', '.join(sorted(expected))}")
+    sample_bank_name = _sample_bank_name(
+        item["sample_bank_name"], f"{context}.sample_bank_name"
+    )
+    new_sample_bank_name = _sample_bank_name(
+        item["new_sample_bank_name"], f"{context}.new_sample_bank_name"
+    )
+    if sample_bank_name == new_sample_bank_name:
+        raise ValueError(f"{context}.new_sample_bank_name must differ from sample_bank_name")
+    return AlterationOperation(
+        id=operation_id,
+        type="rename_sbnk",
+        partition_index=partition_index,
+        volume_name=_string(item["volume_name"], f"{context}.volume_name"),
+        sample_bank_name=sample_bank_name,
+        new_sample_bank_name=new_sample_bank_name,
+    )
+
+
 def _parse_delete_waveform_operation(
     operation_id: str,
     partition_index: int | OperationReference,
@@ -416,6 +487,39 @@ def _parse_delete_waveform_operation(
         partition_index=partition_index,
         volume_name=_string(item["volume_name"], f"{context}.volume_name"),
         waveform_name=_string(item["waveform_name"], f"{context}.waveform_name"),
+    )
+
+
+def _parse_rename_waveform_operation(
+    operation_id: str,
+    partition_index: int | OperationReference,
+    item: Mapping[str, object],
+    context: str,
+    _base_dir: Path,
+) -> AlterationOperation:
+    expected = {
+        "id",
+        "type",
+        "partition_index",
+        "volume_name",
+        "waveform_name",
+        "new_waveform_name",
+    }
+    if set(item) != expected:
+        raise ValueError(f"{context} fields must be exactly {', '.join(sorted(expected))}")
+    waveform_name = _waveform_name(item["waveform_name"], f"{context}.waveform_name")
+    new_waveform_name = _waveform_name(
+        item["new_waveform_name"], f"{context}.new_waveform_name"
+    )
+    if waveform_name == new_waveform_name:
+        raise ValueError(f"{context}.new_waveform_name must differ from waveform_name")
+    return AlterationOperation(
+        id=operation_id,
+        type="rename_waveform",
+        partition_index=partition_index,
+        volume_name=_string(item["volume_name"], f"{context}.volume_name"),
+        waveform_name=waveform_name,
+        new_waveform_name=new_waveform_name,
     )
 
 
@@ -527,6 +631,43 @@ def _parse_delete_sbac_operation(
         sample_bank_group_name=_string(
             item["sample_bank_group_name"], f"{context}.sample_bank_group_name"
         ),
+    )
+
+
+def _parse_rename_sbac_operation(
+    operation_id: str,
+    partition_index: int | OperationReference,
+    item: Mapping[str, object],
+    context: str,
+    _base_dir: Path,
+) -> AlterationOperation:
+    expected = {
+        "id",
+        "type",
+        "partition_index",
+        "volume_name",
+        "sample_bank_group_name",
+        "new_sample_bank_group_name",
+    }
+    if set(item) != expected:
+        raise ValueError(f"{context} fields must be exactly {', '.join(sorted(expected))}")
+    group_name = _sample_bank_group_name(
+        item["sample_bank_group_name"], f"{context}.sample_bank_group_name"
+    )
+    new_group_name = _sample_bank_group_name(
+        item["new_sample_bank_group_name"], f"{context}.new_sample_bank_group_name"
+    )
+    if group_name == new_group_name:
+        raise ValueError(
+            f"{context}.new_sample_bank_group_name must differ from sample_bank_group_name"
+        )
+    return AlterationOperation(
+        id=operation_id,
+        type="rename_sbac",
+        partition_index=partition_index,
+        volume_name=_string(item["volume_name"], f"{context}.volume_name"),
+        sample_bank_group_name=group_name,
+        new_sample_bank_group_name=new_group_name,
     )
 
 
@@ -835,6 +976,16 @@ def _entry_name(chunk: bytearray) -> str:
 
 def _entry_link(chunk: bytearray) -> int:
     return int.from_bytes(chunk[4:8], "big")
+
+
+def _renamed_directory_entry(chunk: bytearray, name: str) -> bytearray:
+    encoded = name.encode("ascii")
+    if len(encoded) > 16:
+        raise ValueError(f"SFS object name must fit 16 ASCII bytes: {name!r}")
+    result = bytearray(chunk)
+    result[2:4] = (17).to_bytes(2, "big")
+    result[8:25] = encoded.ljust(16, b" ") + b"\x00"
+    return result
 
 
 def _set_bitmap(bitmap: bytearray, cluster: int, value: bool) -> None:
@@ -1456,6 +1607,180 @@ def _insert_sbnk(state: _TransactionState, operation: AlterationOperation) -> Op
     )
 
 
+@_register("rename_sbnk", parser=_parse_rename_sbnk_operation)
+def _rename_sbnk(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
+    partition_index = _resolve_partition_index(state, operation.partition_index)
+    partition = state.partitions.get(partition_index)
+    if partition is None:
+        raise ValueError(f"partition index {partition_index} does not exist")
+    assert operation.volume_name is not None
+    assert operation.sample_bank_name is not None
+    assert operation.new_sample_bank_name is not None
+    old_name = operation.sample_bank_name
+    new_name = operation.new_sample_bank_name
+    directory, bank, _entry = _category_object(
+        partition,
+        operation.volume_name,
+        "SBNK",
+        old_name,
+        "SBNK",
+    )
+    if any(
+        _entry_name(chunk) == new_name
+        for chunk in _directory_chunks(directory)
+        if _entry_link(chunk) != bank.sfs_id
+    ):
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} already contains "
+            f"sample bank {new_name!r}"
+        )
+    if len(bank.payload) < 0x42:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank "
+            f"{old_name!r} has a truncated SBNK name field"
+        )
+    payload_name = sfs_inventory.clean_ascii(bank.payload[0x32:0x42])
+    if payload_name != old_name:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank "
+            f"{old_name!r} has mismatched payload name {payload_name!r}"
+        )
+
+    encoded_name = new_name.encode("ascii").ljust(16, b" ")
+    group_reference_ids: set[int] = set()
+    group_updates: list[tuple[_StoredRecord, bytes]] = []
+    for group_chunk, group in _category_objects(
+        partition, operation.volume_name, "SBAC", "SBAC"
+    ):
+        slot_count, max_slots, slots = current_parameters.iter_sbac_slots(group.payload)
+        if slot_count > max_slots:
+            raise ValueError(
+                f"sample bank group {_entry_name(group_chunk)!r} has {slot_count} slots but "
+                f"only {max_slots} fit its payload"
+            )
+        group_offsets: list[int] = []
+        for slot in slots:
+            if slot.name == new_name:
+                raise ValueError(
+                    f"sample bank group {_entry_name(group_chunk)!r} already references "
+                    f"destination name {new_name!r}"
+                )
+            if slot.name != old_name:
+                continue
+            if slot.raw_handle_0x10 != 0:
+                raise ValueError(
+                    f"sample bank group {_entry_name(group_chunk)!r} references {old_name!r} "
+                    "with an unsupported nonzero handle"
+                )
+            group_offsets.append(slot.offset)
+        if group_offsets:
+            group_reference_ids.add(group.sfs_id)
+            group_payload = bytearray(group.payload)
+            for offset in group_offsets:
+                group_payload[offset : offset + 16] = encoded_name
+            group_updates.append((group, bytes(group_payload)))
+
+    grouped = _sbnk_group_flag(bank.payload)
+    if len(group_reference_ids) != (1 if grouped else 0):
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank "
+            f"{old_name!r} grouped flag does not match exact SBAC membership count "
+            f"{len(group_reference_ids)}"
+        )
+
+    direct_program_numbers: set[int] = set()
+    program_reference_ids: set[int] = set()
+    program_updates: list[tuple[_StoredRecord, bytes]] = []
+    for program_chunk, program in _category_objects(
+        partition, operation.volume_name, "PROG", "PROG"
+    ):
+        program_name = _entry_name(program_chunk)
+        try:
+            program_number = int(program_name)
+        except ValueError as exc:
+            raise ValueError(f"Program entry has nonnumeric slot name {program_name!r}") from exc
+        if not 1 <= program_number <= 128 or program_name != f"{program_number:03d}":
+            raise ValueError(f"Program entry has unsupported slot name {program_name!r}")
+        program_offsets: list[int] = []
+        for assignment in current_parameters.iter_prog_assignments(program.payload):
+            if assignment.expected_category != "SBNK":
+                continue
+            if assignment.name == new_name:
+                raise ValueError(
+                    f"Program {program_name} already assigns destination sample bank name "
+                    f"{new_name!r}"
+                )
+            if assignment.name != old_name:
+                continue
+            if assignment.raw_handle_0x10 != 0:
+                raise ValueError(
+                    f"Program {program_name} assigns {old_name!r} with an unsupported "
+                    "nonzero handle"
+                )
+            program_offsets.append(assignment.offset)
+        if program_offsets:
+            direct_program_numbers.add(program_number)
+            program_reference_ids.add(program.sfs_id)
+            program_payload = bytearray(program.payload)
+            for offset in program_offsets:
+                program_payload[offset : offset + 16] = encoded_name
+            program_updates.append((program, bytes(program_payload)))
+
+    bitmap_program_numbers = set(
+        current_parameters.decode_current_sbnk_members(bank.payload).linked_program_numbers
+    )
+    if bitmap_program_numbers != direct_program_numbers:
+        bitmap_text = ", ".join(f"{number:03d}" for number in sorted(bitmap_program_numbers))
+        assignment_text = ", ".join(
+            f"{number:03d}" for number in sorted(direct_program_numbers)
+        )
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank "
+            f"{old_name!r} Program bitmap ({bitmap_text or 'none'}) does not match direct "
+            f"assignments ({assignment_text or 'none'})"
+        )
+
+    expected_incoming_ids = group_reference_ids | program_reference_ids
+    known_incoming_ids = {
+        source_id
+        for edge_partition, source_id, target_id in state.known_object_edges
+        if edge_partition == partition.index
+        and target_id == bank.sfs_id
+        and (source := partition.records.get(source_id)) is not None
+        and _object_type(source) in {"SBAC", "PROG"}
+    }
+    if known_incoming_ids != expected_incoming_ids:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank "
+            f"{old_name!r} raw references do not match Known incoming SBAC/Program edges"
+        )
+
+    for record, update_payload in group_updates + program_updates:
+        _replace_object_payload(partition, record, update_payload)
+    bank_payload = bytearray(bank.payload)
+    bank_payload[0x32:0x42] = encoded_name
+    _replace_object_payload(partition, bank, bytes(bank_payload))
+    chunks = [
+        _renamed_directory_entry(chunk, new_name)
+        if _entry_name(chunk) == old_name and _entry_link(chunk) == bank.sfs_id
+        else chunk
+        for chunk in _directory_chunks(directory)
+    ]
+    if not any(_entry_name(chunk) == new_name for chunk in chunks):
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} could not rename "
+            f"sample bank directory entry {old_name!r}"
+        )
+    _replace_directory_payload(partition, directory, b"".join(chunks))
+    return OperationReport(
+        id=operation.id,
+        type=operation.type,
+        partition_index=partition.index,
+        volume_name=operation.volume_name,
+        object_name=new_name,
+    )
+
+
 @_register("insert_waveform", parser=_parse_insert_waveform_operation)
 def _insert_waveform(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
     partition_index = _resolve_partition_index(state, operation.partition_index)
@@ -1867,6 +2192,168 @@ def _insert_sbac(state: _TransactionState, operation: AlterationOperation) -> Op
     )
 
 
+@_register("rename_sbac", parser=_parse_rename_sbac_operation)
+def _rename_sbac(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
+    partition_index = _resolve_partition_index(state, operation.partition_index)
+    partition = state.partitions.get(partition_index)
+    if partition is None:
+        raise ValueError(f"partition index {partition_index} does not exist")
+    assert operation.volume_name is not None
+    assert operation.sample_bank_group_name is not None
+    assert operation.new_sample_bank_group_name is not None
+    old_name = operation.sample_bank_group_name
+    new_name = operation.new_sample_bank_group_name
+    directory, group, _entry = _category_object(
+        partition,
+        operation.volume_name,
+        "SBAC",
+        old_name,
+        "SBAC",
+    )
+    if any(
+        _entry_name(chunk) == new_name
+        for chunk in _directory_chunks(directory)
+        if _entry_link(chunk) != group.sfs_id
+    ):
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} already contains "
+            f"sample bank group {new_name!r}"
+        )
+    if len(group.payload) < 0x42:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank group "
+            f"{old_name!r} has a truncated SBAC name field"
+        )
+    payload_name = sfs_inventory.clean_ascii(group.payload[0x32:0x42])
+    if payload_name != old_name:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank group "
+            f"{old_name!r} has mismatched payload name {payload_name!r}"
+        )
+
+    slot_count, max_slots, slots = current_parameters.iter_sbac_slots(group.payload)
+    if not 1 <= slot_count <= 3 or slot_count > max_slots or len(slots) != slot_count:
+        raise ValueError(
+            f"sample bank group {old_name!r} requires 1..3 readable member slots; found "
+            f"{len(slots)} of declared {slot_count}"
+        )
+    if len({slot.name for slot in slots}) != len(slots):
+        raise ValueError(f"sample bank group {old_name!r} has duplicate member names")
+    member_ids: set[int] = set()
+    for slot in slots:
+        if slot.raw_handle_0x10 != 0:
+            raise ValueError(
+                f"sample bank group {old_name!r} member {slot.name!r} has an unsupported "
+                "nonzero handle"
+            )
+        _bank_directory, member, _bank_entry = _category_object(
+            partition, operation.volume_name, "SBNK", slot.name, "SBNK"
+        )
+        if not _sbnk_group_flag(member.payload):
+            raise ValueError(
+                f"sample bank group {old_name!r} member {slot.name!r} is missing its "
+                "grouped flag"
+            )
+        member_ids.add(member.sfs_id)
+
+    for other_chunk, other_group in _category_objects(
+        partition, operation.volume_name, "SBAC", "SBAC"
+    ):
+        if other_group.sfs_id == group.sfs_id:
+            continue
+        other_slots = current_parameters.iter_sbac_slots(other_group.payload)[2]
+        shared = {slot.name for slot in slots}.intersection(slot.name for slot in other_slots)
+        if shared:
+            raise ValueError(
+                f"sample bank group {_entry_name(other_chunk)!r} shares member(s) with "
+                f"{old_name!r}: {', '.join(sorted(shared))}"
+            )
+
+    known_member_ids = {
+        target_id
+        for edge_partition, source_id, target_id in state.known_object_edges
+        if edge_partition == partition.index
+        and source_id == group.sfs_id
+        and (target := partition.records.get(target_id)) is not None
+        and _object_type(target) == "SBNK"
+    }
+    if known_member_ids != member_ids:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank group "
+            f"{old_name!r} raw members do not match Known outgoing SBNK edges"
+        )
+
+    encoded_name = new_name.encode("ascii").ljust(16, b" ")
+    program_reference_ids: set[int] = set()
+    program_updates: list[tuple[_StoredRecord, bytes]] = []
+    for program_chunk, program in _category_objects(
+        partition, operation.volume_name, "PROG", "PROG"
+    ):
+        program_name = _entry_name(program_chunk)
+        program_offsets: list[int] = []
+        for assignment in current_parameters.iter_prog_assignments(program.payload):
+            if assignment.expected_category != "SBAC":
+                continue
+            if assignment.name == new_name:
+                raise ValueError(
+                    f"Program {program_name} already assigns destination sample bank group "
+                    f"name {new_name!r}"
+                )
+            if assignment.name != old_name:
+                continue
+            if assignment.raw_handle_0x10 != 0:
+                raise ValueError(
+                    f"Program {program_name} assigns sample bank group {old_name!r} with an "
+                    "unsupported nonzero handle"
+                )
+            program_offsets.append(assignment.offset)
+        if program_offsets:
+            program_reference_ids.add(program.sfs_id)
+            program_payload = bytearray(program.payload)
+            for offset in program_offsets:
+                program_payload[offset : offset + 16] = encoded_name
+            program_updates.append((program, bytes(program_payload)))
+
+    known_program_ids = {
+        source_id
+        for edge_partition, source_id, target_id in state.known_object_edges
+        if edge_partition == partition.index
+        and target_id == group.sfs_id
+        and (source := partition.records.get(source_id)) is not None
+        and _object_type(source) == "PROG"
+    }
+    if known_program_ids != program_reference_ids:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank group "
+            f"{old_name!r} raw Program references do not match Known incoming edges"
+        )
+
+    for program, update_payload in program_updates:
+        _replace_object_payload(partition, program, update_payload)
+    group_payload = bytearray(group.payload)
+    group_payload[0x32:0x42] = encoded_name
+    _replace_object_payload(partition, group, bytes(group_payload))
+    chunks = [
+        _renamed_directory_entry(chunk, new_name)
+        if _entry_name(chunk) == old_name and _entry_link(chunk) == group.sfs_id
+        else chunk
+        for chunk in _directory_chunks(directory)
+    ]
+    if not any(_entry_name(chunk) == new_name for chunk in chunks):
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} could not rename "
+            f"sample bank group directory entry {old_name!r}"
+        )
+    _replace_directory_payload(partition, directory, b"".join(chunks))
+    return OperationReport(
+        id=operation.id,
+        type=operation.type,
+        partition_index=partition.index,
+        volume_name=operation.volume_name,
+        object_name=new_name,
+    )
+
+
 @_register("insert_program", parser=_parse_insert_program_operation)
 def _insert_program(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
     partition_index = _resolve_partition_index(state, operation.partition_index)
@@ -2053,6 +2540,142 @@ def _logical_waveform_orphan_report(state: _TransactionState) -> WaveformOrphanR
         banks=banks,
         partition_uncertainties=uncertainties,
         global_uncertainties=[],
+    )
+
+
+@_register("rename_waveform", parser=_parse_rename_waveform_operation)
+def _rename_waveform(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
+    partition_index = _resolve_partition_index(state, operation.partition_index)
+    partition = state.partitions.get(partition_index)
+    if partition is None:
+        raise ValueError(f"partition index {partition_index} does not exist")
+    assert operation.volume_name is not None
+    assert operation.waveform_name is not None
+    assert operation.new_waveform_name is not None
+    old_name = operation.waveform_name
+    new_name = operation.new_waveform_name
+    directory, waveform, _entry = _category_object(
+        partition,
+        operation.volume_name,
+        "SMPL",
+        old_name,
+        "SMPL",
+    )
+    if any(
+        _entry_name(chunk) == new_name
+        for chunk in _directory_chunks(directory)
+        if _entry_link(chunk) != waveform.sfs_id
+    ):
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} already contains "
+            f"waveform {new_name!r}"
+        )
+    if len(waveform.payload) < 0x42:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} waveform "
+            f"{old_name!r} has a truncated SMPL name field"
+        )
+    payload_name = sfs_inventory.clean_ascii(waveform.payload[0x32:0x42])
+    if payload_name != old_name:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} waveform "
+            f"{old_name!r} has mismatched payload name {payload_name!r}"
+        )
+    metadata = current_objects.decode_current_smpl_metadata(waveform.payload)
+    link_id = metadata.smpl_link_id_0x078
+    if not link_id:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} waveform "
+            f"{old_name!r} has no current SMPL link ID"
+        )
+    duplicate_link_names: list[str] = []
+    for chunk, other in _category_objects(partition, operation.volume_name, "SMPL", "SMPL"):
+        if other.sfs_id == waveform.sfs_id:
+            continue
+        other_metadata = current_objects.decode_current_smpl_metadata(other.payload)
+        if other_metadata.smpl_link_id_0x078 == link_id:
+            duplicate_link_names.append(_entry_name(chunk))
+    if duplicate_link_names:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} waveform "
+            f"{old_name!r} has duplicate SMPL link ID targets: "
+            f"{', '.join(sorted(duplicate_link_names))}"
+        )
+
+    encoded_name = new_name.encode("ascii").ljust(16, b" ")
+    updated_bank_ids: set[int] = set()
+    for bank_chunk, bank in _category_objects(
+        partition, operation.volume_name, "SBNK", "SBNK"
+    ):
+        decoded = current_parameters.decode_current_sbnk_members(bank.payload)
+        members = [decoded.left]
+        if decoded.right is not None:
+            members.append(decoded.right)
+        offsets: list[int] = []
+        for member in members:
+            name_matches = member.sample_name == old_name
+            link_matches = member.smpl_link_id == link_id
+            if name_matches != link_matches:
+                raise ValueError(
+                    f"partition {partition.index} volume {operation.volume_name!r} sample bank "
+                    f"{_entry_name(bank_chunk)!r} {member.lane} member disagrees on waveform "
+                    f"name/link ID for {old_name!r}"
+                )
+            if name_matches:
+                offsets.append(member.sample_name_offset)
+        if offsets:
+            updated_bank_ids.add(bank.sfs_id)
+            bank_payload = bytearray(bank.payload)
+            for offset in offsets:
+                if len(bank_payload) < offset + 16:
+                    raise ValueError(
+                        f"sample bank {_entry_name(bank_chunk)!r} has a truncated {old_name!r} "
+                        "member-name field"
+                    )
+                bank_payload[offset : offset + 16] = encoded_name
+            _replace_object_payload(partition, bank, bytes(bank_payload))
+
+    unexpected_incoming_ids = sorted(
+        source_id
+        for edge_partition, source_id, target_id in state.known_object_edges
+        if edge_partition == partition.index
+        and target_id == waveform.sfs_id
+        and source_id not in updated_bank_ids
+        and (source := partition.records.get(source_id)) is not None
+        and _object_type(source) == "SBNK"
+    )
+    if unexpected_incoming_ids:
+        unexpected_names = [
+            sfs_inventory.clean_ascii(partition.records[sfs_id].payload[0x32:0x42])
+            for sfs_id in unexpected_incoming_ids
+        ]
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} waveform "
+            f"{old_name!r} has Known incoming SBNK reference(s) outside the exact updated "
+            f"set: {', '.join(unexpected_names)}"
+        )
+
+    waveform_payload = bytearray(waveform.payload)
+    waveform_payload[0x32:0x42] = encoded_name
+    _replace_object_payload(partition, waveform, bytes(waveform_payload))
+    chunks = [
+        _renamed_directory_entry(chunk, new_name)
+        if _entry_name(chunk) == old_name and _entry_link(chunk) == waveform.sfs_id
+        else chunk
+        for chunk in _directory_chunks(directory)
+    ]
+    if not any(_entry_name(chunk) == new_name for chunk in chunks):
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} could not rename "
+            f"waveform directory entry {old_name!r}"
+        )
+    _replace_directory_payload(partition, directory, b"".join(chunks))
+    return OperationReport(
+        id=operation.id,
+        type=operation.type,
+        partition_index=partition.index,
+        volume_name=operation.volume_name,
+        object_name=new_name,
     )
 
 
