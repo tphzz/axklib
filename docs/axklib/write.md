@@ -269,6 +269,141 @@ uv run axklib validate .\HD00_512_writer_test.hds -o .\writer-validate
 uv run axklib extract wav file .\HD00_512_writer_test.hds -o .\writer-wavs
 ```
 
+## Altering existing HDS images
+
+`axklib alter hds` executes a versioned, ordered transaction against an
+existing HDS image. The current operation set supports deleting and inserting
+complete volumes and deleting or inserting individual sample banks. Inserted
+volumes use the same volume schema and audio conversion behavior as fresh-image
+build manifests. Sample-bank insertion references physical waveform objects
+that already exist in the selected volume; it does not duplicate their PCM.
+
+Omit `-o` to parse, resolve, allocate, and validate the transaction without
+writing an image:
+
+```powershell
+uv run axklib alter hds .\source.hds .\transaction.json
+```
+
+Supply a new output path to apply the transaction. The source is never changed.
+The command writes a temporary sibling file, validates the resulting filesystem,
+and publishes the output atomically. It refuses an existing destination and
+does not provide an in-place or overwrite mode.
+
+```powershell
+uv run axklib alter hds .\source.hds .\transaction.json -o .\altered.hds
+```
+
+A transaction may contain one or more operations:
+
+```json
+{
+  "schema_version": "1.0",
+  "operations": [
+    {
+      "id": "remove-old",
+      "type": "delete_volume",
+      "partition_index": 0,
+      "volume_name": "Old Volume"
+    },
+    {
+      "id": "insert-new",
+      "type": "insert_volume",
+      "partition_index": {"operation_ref": "remove-old"},
+      "volume": {
+        "name": "New Volume",
+        "waveforms": [
+          {
+            "id": "tone",
+            "name": "Tone",
+            "path": "audio/tone.wav",
+            "root_key": 60
+          }
+        ],
+        "sample_banks": [
+          {
+            "name": "Tone Bank",
+            "waveform_id": "tone",
+            "root_key": 60,
+            "key_low": 0,
+            "key_high": 127,
+            "level": 100
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+Operation IDs must be unique. An `operation_ref` must point backward and uses
+the earlier operation's partition scope; forward references are rejected.
+Operations observe the logical results of every preceding operation, so a
+transaction can delete a volume and insert a replacement with the same name.
+
+Volume deletion requires one exact partition/name match and a completely
+readable directory closure. A missing record, unresolved extent chain, or
+reference into that closure from another directory rejects the whole
+transaction. Unrelated records, including unreferenced records that axklib does
+not decode, are preserved. Deleted index and allocation ownership is cleared,
+while freed payload bytes are left untouched.
+
+Insertion uses the lowest available SFS record IDs and lowest-cluster first-fit
+allocation. Fragmented payloads use direct extents where possible and chained
+continuation-list clusters when necessary. The existing root directory must be
+readable through direct extents, and the updated root must fit its existing
+allocation; this version does not relocate the root directory.
+
+### Sample-bank operations
+
+Delete one sample bank by exact partition, volume, and sampler-visible bank
+name:
+
+```json
+{
+  "id": "delete-unused-bank",
+  "type": "delete_sbnk",
+  "partition_index": 0,
+  "volume_name": "Drums",
+  "sample_bank_name": "Unused Snare"
+}
+```
+
+Deletion is rejected when the bank has a Program-link bitmap, appears in an
+`SBAC` member slot, appears in a Program SBNK assignment, or has another Known
+incoming Program/SBAC relationship. Only the SBNK directory entry, index
+record, and allocation ownership are removed. Its linked physical waveforms
+remain present and may consequently become orphans for later analysis.
+
+Insert a mono bank that references an existing waveform by its exact name in
+the volume's `SMPL` category:
+
+```json
+{
+  "id": "insert-bank",
+  "type": "insert_sbnk",
+  "partition_index": 0,
+  "volume_name": "Drums",
+  "sample_bank": {
+    "name": "New Snare",
+    "waveform_name": "Snare Wave",
+    "root_key": 60,
+    "key_low": 36,
+    "key_high": 84,
+    "level": 100
+  }
+}
+```
+
+For a two-member stereo bank, add `right_waveform_name`. Both physical members
+must exist uniquely in the same volume and have matching sample rate and frame
+count. The new SBNK takes its link IDs, sample rate, frame count, fine tune, and
+loop window from those current SMPL records. Bank root key, key range, and level
+come from the transaction. Duplicate bank names and unresolved waveform names
+are rejected before output is written.
+
 ::: axklib.write
 
 ::: axklib.build_manifest
+
+::: axklib.alteration

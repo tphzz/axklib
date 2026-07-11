@@ -7,7 +7,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from axklib.write import HdsImageBuilder, HdsWriteResult, SampleBankRef, WaveformRef
+from axklib.write import (
+    HdsImageBuilder,
+    HdsWriteResult,
+    SampleBankRef,
+    VolumeBuilder,
+    WaveformRef,
+)
 
 HDS_BUILD_MANIFEST_SCHEMA_VERSION = "1.0"
 
@@ -423,6 +429,84 @@ def load_hds_build_manifest(path: str | Path) -> HdsBuildManifest:
     return parse_hds_build_manifest(value, base_dir=source.parent)
 
 
+def parse_hds_manifest_volume(
+    value: object,
+    *,
+    base_dir: str | Path = ".",
+) -> HdsManifestVolume:
+    """Parse one volume using the public fresh-image volume schema."""
+    return _parse_volume(value, "volume", Path(base_dir))
+
+
+def populate_volume_builder(volume: VolumeBuilder, spec: HdsManifestVolume) -> None:
+    """Populate a writer volume from a validated manifest volume."""
+    waveform_refs: dict[str, WaveformRef] = {}
+    sample_bank_refs: dict[str, SampleBankRef] = {}
+    for waveform_spec in spec.waveforms:
+        waveform_refs[waveform_spec.id] = volume.add_waveform_from_wav(
+            name=waveform_spec.name,
+            path=waveform_spec.path,
+            root_key=waveform_spec.root_key,
+            target_sample_rate=waveform_spec.target_sample_rate,
+        )
+    for bank_spec in spec.sample_banks:
+        if bank_spec.interleaved_audio_path is not None:
+            sample_bank_refs[bank_spec.name] = volume.add_stereo_sample_bank_from_audio(
+                name=bank_spec.name,
+                path=bank_spec.interleaved_audio_path,
+                root_key=bank_spec.root_key,
+                key_low=bank_spec.key_low,
+                key_high=bank_spec.key_high,
+                level=bank_spec.level,
+                left_waveform_name=bank_spec.left_waveform_name,
+                right_waveform_name=bank_spec.right_waveform_name,
+                target_sample_rate=bank_spec.target_sample_rate,
+            )
+        elif bank_spec.right_waveform_id is None:
+            if bank_spec.waveform_id is None:
+                raise ValueError(f"sample bank {bank_spec.name!r} has no waveform source")
+            sample_bank_refs[bank_spec.name] = volume.add_sample_bank(
+                name=bank_spec.name,
+                waveform=waveform_refs[bank_spec.waveform_id],
+                root_key=bank_spec.root_key,
+                key_low=bank_spec.key_low,
+                key_high=bank_spec.key_high,
+                level=bank_spec.level,
+            )
+        else:
+            if bank_spec.waveform_id is None:
+                raise ValueError(f"sample bank {bank_spec.name!r} has no left waveform")
+            sample_bank_refs[bank_spec.name] = volume.add_stereo_sample_bank(
+                name=bank_spec.name,
+                left_waveform=waveform_refs[bank_spec.waveform_id],
+                right_waveform=waveform_refs[bank_spec.right_waveform_id],
+                root_key=bank_spec.root_key,
+                key_low=bank_spec.key_low,
+                key_high=bank_spec.key_high,
+                level=bank_spec.level,
+            )
+    group_refs = {
+        group_spec.name: volume.add_sample_bank_group(
+            name=group_spec.name,
+            members=tuple(sample_bank_refs[name] for name in group_spec.member_sample_banks),
+        )
+        for group_spec in spec.sample_bank_groups
+    }
+    for program_spec in spec.programs:
+        program = volume.add_program(number=program_spec.number)
+        for assignment in program_spec.assignments:
+            if assignment.target_kind == "SBAC":
+                program.assign_sample_bank_group(
+                    group_refs[assignment.target_name],
+                    receive_channel=assignment.receive_channel,
+                )
+            else:
+                program.assign_sample_bank(
+                    sample_bank_refs[assignment.target_name],
+                    receive_channel=assignment.receive_channel,
+                )
+
+
 def build_hds_from_manifest(
     manifest: HdsBuildManifest,
     output_path: str | Path,
@@ -438,75 +522,7 @@ def build_hds_from_manifest(
         partition = builder.add_partition(partition_spec.name)
         for volume_spec in partition_spec.volumes:
             volume = partition.add_volume(volume_spec.name)
-            waveform_refs: dict[str, WaveformRef] = {}
-            sample_bank_refs: dict[str, SampleBankRef] = {}
-            for waveform_spec in volume_spec.waveforms:
-                waveform_refs[waveform_spec.id] = volume.add_waveform_from_wav(
-                    name=waveform_spec.name,
-                    path=waveform_spec.path,
-                    root_key=waveform_spec.root_key,
-                    target_sample_rate=waveform_spec.target_sample_rate,
-                )
-            for bank_spec in volume_spec.sample_banks:
-                if bank_spec.interleaved_audio_path is not None:
-                    sample_bank_refs[bank_spec.name] = (
-                        volume.add_stereo_sample_bank_from_audio(
-                            name=bank_spec.name,
-                            path=bank_spec.interleaved_audio_path,
-                            root_key=bank_spec.root_key,
-                            key_low=bank_spec.key_low,
-                            key_high=bank_spec.key_high,
-                            level=bank_spec.level,
-                            left_waveform_name=bank_spec.left_waveform_name,
-                            right_waveform_name=bank_spec.right_waveform_name,
-                            target_sample_rate=bank_spec.target_sample_rate,
-                        )
-                    )
-                elif bank_spec.right_waveform_id is None:
-                    if bank_spec.waveform_id is None:
-                        raise ValueError(f"sample bank {bank_spec.name!r} has no waveform source")
-                    sample_bank_refs[bank_spec.name] = volume.add_sample_bank(
-                        name=bank_spec.name,
-                        waveform=waveform_refs[bank_spec.waveform_id],
-                        root_key=bank_spec.root_key,
-                        key_low=bank_spec.key_low,
-                        key_high=bank_spec.key_high,
-                        level=bank_spec.level,
-                    )
-                else:
-                    if bank_spec.waveform_id is None:
-                        raise ValueError(f"sample bank {bank_spec.name!r} has no left waveform")
-                    sample_bank_refs[bank_spec.name] = volume.add_stereo_sample_bank(
-                        name=bank_spec.name,
-                        left_waveform=waveform_refs[bank_spec.waveform_id],
-                        right_waveform=waveform_refs[bank_spec.right_waveform_id],
-                        root_key=bank_spec.root_key,
-                        key_low=bank_spec.key_low,
-                        key_high=bank_spec.key_high,
-                        level=bank_spec.level,
-                    )
-            group_refs = {
-                group_spec.name: volume.add_sample_bank_group(
-                    name=group_spec.name,
-                    members=tuple(
-                        sample_bank_refs[name] for name in group_spec.member_sample_banks
-                    ),
-                )
-                for group_spec in volume_spec.sample_bank_groups
-            }
-            for program_spec in volume_spec.programs:
-                program = volume.add_program(number=program_spec.number)
-                for assignment in program_spec.assignments:
-                    if assignment.target_kind == "SBAC":
-                        program.assign_sample_bank_group(
-                            group_refs[assignment.target_name],
-                            receive_channel=assignment.receive_channel,
-                        )
-                    else:
-                        program.assign_sample_bank(
-                            sample_bank_refs[assignment.target_name],
-                            receive_channel=assignment.receive_channel,
-                        )
+            populate_volume_builder(volume, volume_spec)
     return builder.write(output)
 
 
@@ -522,5 +538,7 @@ __all__ = [
     "HdsManifestWaveform",
     "build_hds_from_manifest",
     "load_hds_build_manifest",
+    "parse_hds_manifest_volume",
     "parse_hds_build_manifest",
+    "populate_volume_builder",
 ]

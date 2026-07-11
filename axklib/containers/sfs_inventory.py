@@ -346,7 +346,7 @@ def parse_index_record(
     if len(record) < INDEX_RECORD_SIZE:
         return None
     extent_count = be16(record, 0x00)
-    if extent_count <= 0 or extent_count > 16 or be16(record, 0x02) != 0:
+    if extent_count <= 0 or be16(record, 0x02) != 0:
         return None
     cluster_count = be16(record, 0x04)
     data_size = be32(record, 0x06)
@@ -438,10 +438,17 @@ def classify_index_payload(
             parsed.payload_offset,
         )
 
-    extents = continuation_extents(payload, parsed.extent_count)
-    if not extents:
+    continuation_count = be32(payload, 0) if len(payload) >= 24 else 0
+    max_continuation_count = (
+        sector_size * sectors_per_cluster - sfs_extents.CONTINUATION_HEADER_SIZE
+    ) // sfs_extents.EXTENT_SIZE
+    if (
+        continuation_count <= 0
+        or continuation_count > max_continuation_count
+        or be32(payload, 4) != 0
+    ):
         return "unknown", "", "", None, None, 0, parsed.cluster_offset, None, parsed.payload_offset
-    first_data_cluster = extents[0][0]
+    first_data_cluster = be32(payload, sfs_extents.CONTINUATION_HEADER_SIZE)
     first_data_sector = partition_start_sector + first_data_cluster * sectors_per_cluster
     first_data_offset = first_data_sector * sector_size
     first_payload = reader.read_at(first_data_offset, min(parsed.data_size, 0x200))

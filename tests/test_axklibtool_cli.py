@@ -694,6 +694,63 @@ def test_create_hds_reports_missing_manifest_without_internal_error(
     assert "internal error" not in captured.err
 
 
+def test_alter_hds_cli_dry_run_and_atomic_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    build_manifest = tmp_path / "build.json"
+    build_manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "size_bytes": 8 * 1024 * 1024,
+                "partitions": [
+                    {
+                        "name": "hd1",
+                        "volumes": [
+                            {"name": "Delete Me", "waveforms": [], "sample_banks": []}
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = tmp_path / "source.hds"
+    assert axklibtool.main(["create", "hds", str(build_manifest), "-o", str(source)]) == 0
+    transaction = tmp_path / "transaction.json"
+    transaction.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "operations": [
+                    {
+                        "id": "delete",
+                        "type": "delete_volume",
+                        "partition_index": 0,
+                        "volume_name": "Delete Me",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_before = source.read_bytes()
+
+    dry_run = axklibtool.main(["alter", "hds", str(source), str(transaction)])
+    output = tmp_path / "altered.hds"
+    applied = axklibtool.main(
+        ["alter", "hds", str(source), str(transaction), "-o", str(output)]
+    )
+
+    captured = capsys.readouterr()
+    assert dry_run == 0
+    assert applied == 0
+    assert source.read_bytes() == source_before
+    assert output.exists()
+    assert '"applied": false' in captured.out
+    assert '"applied": true' in captured.out
+
+
 def test_broken_pipe_is_not_reported_as_internal_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

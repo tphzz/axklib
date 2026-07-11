@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import axklib
+from axklib.alteration import alter_hds, load_alteration_manifest
 from axklib.audio import (
     WaveformIssue,
     WaveformPlacement,
@@ -1374,6 +1375,28 @@ def run_create_hds(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_alter_hds(args: argparse.Namespace) -> int:
+    """Plan or apply an ordered HDS alteration transaction."""
+    try:
+        manifest = load_alteration_manifest(args.transaction)
+        result = alter_hds(args.source, manifest, output_path=args.output)
+    except (FileExistsError, OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(
+        json.dumps(
+            {
+                "source_path": str(result.source_path),
+                "output_path": str(result.output_path) if result.output_path else None,
+                "applied": result.applied,
+                "operations": [to_plain(item) for item in result.operations],
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="axklib",
@@ -1482,6 +1505,21 @@ def build_parser() -> argparse.ArgumentParser:
     create_hds.add_argument("-o", "--output", required=True, help="output HDS image path")
     create_hds.add_argument("--overwrite", action="store_true", help="replace an existing image")
     create_hds.set_defaults(func=run_create_hds)
+
+    alter = subparsers.add_parser("alter", help="alter an existing supported container")
+    alter_subparsers = alter.add_subparsers(dest="alter_command", metavar="alter-command")
+    alter_hds_parser = alter_subparsers.add_parser(
+        "hds",
+        help="plan or apply an ordered HDS alteration transaction",
+    )
+    alter_hds_parser.add_argument("source", help="existing source HDS image")
+    alter_hds_parser.add_argument("transaction", help="versioned alteration transaction JSON")
+    alter_hds_parser.add_argument(
+        "-o",
+        "--output",
+        help="new output HDS path; omit to validate and report a dry run",
+    )
+    alter_hds_parser.set_defaults(func=run_alter_hds)
 
     objects_cmd = subparsers.add_parser("objects", help="inspect raw and decoded object summaries")
     objects_cmd.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")
