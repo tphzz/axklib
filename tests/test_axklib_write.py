@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from axklib.audio import decode_waveform
-from axklib.containers import load_sfs_objects
+from axklib.containers import load_sfs_objects, sfs_allocation
 from axklib.model import AxklibObjectType
 from axklib.parameters import sbnk_contract
 from axklib.relationships import build_relationship_graph
@@ -156,31 +156,41 @@ def test_hds_writer_rejects_images_above_a_series_cap() -> None:
         HdsImageBuilder(size_bytes=MAX_IMAGE_SIZE_BYTES + 512)
 
 
-def test_hds_writer_rejects_single_partition_above_one_gib() -> None:
+def test_hds_writer_caps_single_partition_in_two_gib_image() -> None:
     builder = HdsImageBuilder(size_bytes=MAX_IMAGE_SIZE_BYTES)
     builder.add_partition("hd1")
 
-    with pytest.raises(ValueError, match="exceed 1 GiB"):
-        builder.plan()
+    [plan] = builder.plan()
 
-
-def test_hds_writer_rejects_unproven_multi_partition_profile() -> None:
-    builder = HdsImageBuilder(size_bytes=256 * 1024 * 1024)
-    builder.add_partition("hd1")
-    builder.add_partition("hd2")
-
-    with pytest.raises(
-        ValueError, match="512 MiB / two-partition and sparse 768 MiB / three-partition profiles"
-    ):
-        builder.plan()
+    assert plan.start_sector == 3
+    assert plan.sector_count == 0x1FFFFE
+    assert MAX_IMAGE_SIZE_BYTES // 512 - (plan.start_sector + plan.sector_count) == 0x1FFFFF
 
 
 @pytest.mark.parametrize("partition_count", range(1, 9))
-def test_hds_writer_experimental_geometry_uses_equal_partition_slots(
+def test_hds_writer_supports_every_partition_count_at_two_gib_cap(
+    partition_count: int,
+) -> None:
+    builder = HdsImageBuilder(size_bytes=MAX_IMAGE_SIZE_BYTES)
+    for index in range(partition_count):
+        builder.add_partition(f"hd{index + 1}")
+
+    plans = builder.plan()
+    raw_slot_span = (MAX_IMAGE_SIZE_BYTES // 512 - 2) // partition_count
+    slot_span = min(raw_slot_span, 0x1FFFFF)
+
+    assert [plan.start_sector for plan in plans] == [
+        3 + index * slot_span for index in range(partition_count)
+    ]
+    assert [plan.sector_count for plan in plans] == [slot_span - 1] * partition_count
+
+
+@pytest.mark.parametrize("partition_count", range(1, 9))
+def test_hds_writer_uses_equal_partition_slots(
     partition_count: int,
 ) -> None:
     size_bytes = partition_count * 256 * 1024 * 1024
-    builder = HdsImageBuilder(size_bytes=size_bytes, _allow_unproven_geometry=True)
+    builder = HdsImageBuilder(size_bytes=size_bytes)
     for index in range(partition_count):
         builder.add_partition(f"hd{index + 1}")
 
@@ -193,23 +203,9 @@ def test_hds_writer_experimental_geometry_uses_equal_partition_slots(
     assert [plan.sector_count for plan in plans] == [slot_span - 1] * partition_count
 
 
-def test_hds_writer_experimental_geometry_caps_one_partition_below_one_gib() -> None:
-    builder = HdsImageBuilder(
-        size_bytes=MAX_IMAGE_SIZE_BYTES,
-        _allow_unproven_geometry=True,
-    )
-    builder.add_partition("hd1")
-
-    [plan] = builder.plan()
-
-    assert plan.start_sector == 3
-    assert plan.sector_count == 0x1FFFFE
-    assert MAX_IMAGE_SIZE_BYTES // 512 - (plan.start_sector + plan.sector_count) == 0x1FFFFF
-
-
-def test_hds_writer_experimental_geometry_preserves_division_remainder() -> None:
+def test_hds_writer_preserves_division_remainder() -> None:
     size_bytes = 1280 * 1024 * 1024 + 512
-    builder = HdsImageBuilder(size_bytes=size_bytes, _allow_unproven_geometry=True)
+    builder = HdsImageBuilder(size_bytes=size_bytes)
     for index in range(5):
         builder.add_partition(f"hd{index + 1}")
 
@@ -224,16 +220,29 @@ def test_hds_writer_experimental_geometry_preserves_division_remainder() -> None
     assert total_sectors - (plans[-1].start_sector + plans[-1].sector_count) == 4
 
 
-def test_hds_writer_experimental_geometry_rejects_too_small_partition_slots() -> None:
-    minimum_total_sectors = 2 + 8 * 2046
-    builder = HdsImageBuilder(
-        size_bytes=(minimum_total_sectors - 1) * 512,
-        _allow_unproven_geometry=True,
-    )
-    for index in range(8):
+@pytest.mark.parametrize("partition_count", range(1, 9))
+def test_hds_writer_accepts_exact_minimum_size_for_partition_count(
+    partition_count: int,
+) -> None:
+    minimum_total_sectors = 2 + partition_count * 2046
+    builder = HdsImageBuilder(size_bytes=minimum_total_sectors * 512)
+    for index in range(partition_count):
         builder.add_partition(f"hd{index + 1}")
 
-    with pytest.raises(ValueError, match="partition slots are too small"):
+    plans = builder.plan()
+
+    assert [plan.sector_count for plan in plans] == [2045] * partition_count
+
+
+@pytest.mark.parametrize("partition_count", range(1, 9))
+def test_hds_writer_rejects_below_minimum_size_for_partition_count(
+    partition_count: int,
+) -> None:
+    minimum_total_sectors = 2 + partition_count * 2046
+    with pytest.raises(ValueError, match="image size must|partition slots are too small"):
+        builder = HdsImageBuilder(size_bytes=(minimum_total_sectors - 1) * 512)
+        for index in range(partition_count):
+            builder.add_partition(f"hd{index + 1}")
         builder.plan()
 
 
@@ -260,6 +269,17 @@ def test_hds_writer_creates_parseable_current_smpl_and_sbnk(tmp_path: Path) -> N
 
     assert result.path == image_path
     assert result.partitions == 1
+    layout = result.partition_layouts[0]
+    assert layout.first_payload_cluster == 362
+    assert layout.allocated_cluster_count == 50
+    assert layout.free_cluster_count == layout.cluster_count - 362 - 50
+    assert layout.free_bytes == layout.free_cluster_count * 1024
+    assert layout.sampler_visible_free_kib == layout.free_cluster_count
+    allocation_summary = sfs_allocation.analyze_image(image_path).summaries[0]
+    assert allocation_summary.first_payload_cluster == layout.first_payload_cluster
+    assert allocation_summary.stored_used_cluster_count == layout.allocated_cluster_count
+    assert allocation_summary.sampler_free_cluster_count == layout.free_cluster_count
+    assert allocation_summary.sampler_visible_free_kib == layout.sampler_visible_free_kib
     assert [(item.object_type, item.name) for item in result.objects] == [
         ("SMPL", "Tone0001"),
         ("SBNK", "Bank0001"),
@@ -661,13 +681,13 @@ def test_hds_writer_creates_two_partitions_with_independent_volumes(tmp_path: Pa
     assert _be32(image_bytes, 0xAC) == 524_286
     assert _be32(image_bytes, 0xB0) == 524_290
     assert _be32(image_bytes, 0xB4) == 524_286
-    assert image_bytes[1024:1032] == b"bb736200"
+    assert image_bytes[1024:1032] == b"ab432100"
     assert image_bytes[1024 + 0x09 : 1024 + 0x11] == b"\x00" * 8
     assert image_bytes[1024 + 0x12 : 1024 + 0x2C] == b"\x00" * 0x1A
     assert image_bytes[1024 + 0x30 : 1024 + 0x3F] == b"\x00" * 15
     assert image_bytes[1024 + 0x40 : 1024 + 0x5A] == b"\x00" * 0x1A
     pre_partition_b = (524_290 - 1) * 512
-    assert image_bytes[pre_partition_b : pre_partition_b + 8] == b"bb736201"
+    assert image_bytes[pre_partition_b : pre_partition_b + 8] == b"ab432101"
     assert image_bytes[pre_partition_b + 0x09 : pre_partition_b + 0x11] == b"\x00" * 8
     assert image_bytes[pre_partition_b + 0x12 : pre_partition_b + 0x2C] == b"\x00" * 0x1A
     assert image_bytes[pre_partition_b + 0x30 : pre_partition_b + 0x3F] == b"\x00" * 15
@@ -742,7 +762,7 @@ def test_hds_writer_scales_bitmap_and_index_geometry_for_256_mib(tmp_path: Path)
         "a1 e0 01 52 a2 2c 00 00 00 00 00 17 09 10 00 00 00 00 00 17 09 10 00 00 01 00 01 52"
     )
     assert image_bytes[512 + 0x80 : 512 + 0x9C] == image_bytes[0x80:0x9C]
-    assert image_bytes[1024:1032] == b"c2b4e600"
+    assert image_bytes[1024:1032] == b"ab432100"
     assert image_bytes[1033:1041] == b"\x00" * 8
     assert image_bytes[1042:1068] == b"\x00" * 0x1A
     partition_start = _be32(image_bytes, 0xA8)
@@ -770,7 +790,7 @@ def test_hds_writer_scales_bitmap_and_index_geometry_for_256_mib(tmp_path: Path)
     assert _be32(root_record, 0x0A) == 456
 
 
-def test_hds_writer_creates_sparse_768m_three_partition_empty_volume_image(tmp_path: Path) -> None:
+def test_hds_writer_creates_768m_three_partition_empty_volume_image(tmp_path: Path) -> None:
     image_path = tmp_path / "HD00_512_sparse_768m_3p_empty_volumes.hds"
 
     builder = HdsImageBuilder(size_bytes=768 * 1024 * 1024)
@@ -836,14 +856,11 @@ def test_hds_writer_creates_sparse_768m_three_partition_empty_volume_image(tmp_p
         ]
 
 
-def test_hds_writer_experimental_geometry_writes_eight_minimum_sized_partitions(
+def test_hds_writer_writes_eight_small_partitions(
     tmp_path: Path,
 ) -> None:
-    image_path = tmp_path / "HD00_512_experimental_8m_8p.hds"
-    builder = HdsImageBuilder(
-        size_bytes=8 * 1024 * 1024,
-        _allow_unproven_geometry=True,
-    )
+    image_path = tmp_path / "HD00_512_8m_8p.hds"
+    builder = HdsImageBuilder(size_bytes=8 * 1024 * 1024)
     for _index in range(8):
         partition = builder.add_partition("New Partition")
         partition.add_volume("New Volume")
@@ -887,7 +904,7 @@ def test_hds_writer_experimental_geometry_writes_eight_minimum_sized_partitions(
         assert volume_payload[31] == (index * 0x78) & 0xFF
 
 
-def test_hds_writer_creates_sparse_768m_object_volume_on_first_partition(
+def test_hds_writer_creates_768m_object_volume_on_first_partition(
     tmp_path: Path,
 ) -> None:
     source_wav = tmp_path / "tone.wav"
@@ -1002,7 +1019,7 @@ def test_hds_writer_creates_sparse_768m_object_volume_on_first_partition(
         assert _entry_names(sbnk_payload) == [".", ".."]
 
 
-def test_hds_writer_creates_sparse_768m_object_volume_on_second_partition(
+def test_hds_writer_creates_768m_object_volume_on_second_partition(
     tmp_path: Path,
 ) -> None:
     source_wav = tmp_path / "tone.wav"
@@ -1068,7 +1085,7 @@ def test_hds_writer_creates_sparse_768m_object_volume_on_second_partition(
     assert sbnk_payload[0x116] == 100
 
 
-def test_hds_writer_creates_sparse_768m_object_volume_on_third_partition(
+def test_hds_writer_creates_768m_object_volume_on_third_partition(
     tmp_path: Path,
 ) -> None:
     source_wav = tmp_path / "tone.wav"

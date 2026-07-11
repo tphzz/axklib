@@ -17,36 +17,39 @@ single-member parameter block, sample-control block, and reserved Sample
 Parameter defaults required for current direct-bank playback and tone. The `SMPL`
 stored payload contains the logical mono WAV frames plus a short compatibility
 tail; the sample-window fields continue to describe the logical frame count.
-The writer exposes tested profiles instead of guessing general disk
-geometry from one image. Partition slots are capped at 1 GiB. The currently
-supported hard-disk profiles are:
+The writer supports 512-byte-aligned image sizes from 1 MiB through 2 GiB and
+one through eight equal SFS partition slots. For `N` partitions it computes:
 
-- 256 MiB, one SFS partition;
-- 512 MiB, two SFS partitions using the tested two-partition metadata profile;
-- 768 MiB, three SFS partitions using the sparse formatter profile for empty volumes and the current narrow object-bearing profile.
+```text
+total_sectors = size_bytes / 512
+slot_span = min(floor((total_sectors - 2) / N), 0x1fffff)
+partition_start[i] = 3 + i * slot_span
+partition_sector_count = slot_span - 1
+```
 
-These profiles initialize sector 2 or the corresponding pre-partition formatter
-transfer sectors. Leading transfer tokens are profile-scoped compatibility
-bytes; they are not disk geometry or persistent disk IDs. Prior-token residue
-at `+0x09..+0x10` and unneeded sector-2 label-entry record areas remain zeroed.
-The profiles also
-initialize partition metadata, primary/duplicate partition headers, allocation bitmaps,
-directory indexes, and volume directories. Object-record writing is currently
-validated on the 256 MiB and 512 MiB profiles, and a narrow sparse 768 MiB /
-three-partition profile has been validated for one simple object-bearing volume
-on any one partition while the other partitions contain empty loadable volumes.
-Profile support is not just a size and partition-count match: the
-writer also emits the complete metadata profile for that supported layout. Do
-not create unlisted hard-disk layouts by writing only the named superblock and
-partition-header fields. The 256 MiB profile has been hardware-tested with multiple volumes,
-current waveforms, and direct single-member sample banks. The 512 MiB profile
-has been hardware-tested with two generated volumes per partition and two
-generated direct sample banks per volume, plus isolated per-volume growth to
-eight generated direct sample banks in one volume on either partition.
+The two sectors before the first slot hold the disk superblock and sector-2
+formatter-transfer metadata. Each later slot begins with an equivalent transfer
+sector immediately before its partition header. Division remainder and space
+beyond the 1 GiB slot cap remain as unused image-tail sectors. Every slot must
+contain at least 2045 partition sectors, so the exact minimum image size for
+`N` partitions is `(2 + N * 2046) * 512` bytes. Content must also fit after the
+partition's bitmap, directory index, and volume metadata.
+
+The writer initializes sector 2, later pre-partition transfer sectors,
+partition metadata, primary/duplicate partition headers, allocation bitmaps,
+directory indexes, and volume directories. Leading transfer tokens are
+deterministic compatibility bytes (`ab432100` through `ab432107`); they are not
+disk geometry or persistent disk IDs. Prior-token residue at `+0x09..+0x10`
+and unneeded sector-2 label-entry record areas remain zeroed. The equal-slot
+algorithm has been validated across image-size, partition-count, remainder,
+1 GiB slot-cap, and minimum-size boundaries.
+
+Generated images have also been hardware-tested with multiple volumes, current
+waveforms, direct single-member sample banks, and isolated object-count growth.
 Root key, key range, and sample level have been hardware-tested for generated
 direct single-member sample banks. The writer is intentionally conservative:
-unsupported object types, multi-member sample-bank groups, untested hard-disk
-metadata profiles, and in-place image mutation are outside the current API.
+unsupported object types, multi-member sample-bank groups, and in-place image
+mutation are outside the current API.
 
 Partition headers are zero-initialized and populated through explicit field
 writes. Former fixed nonzero tail bytes are deliberately left zero after
@@ -103,15 +106,14 @@ uv run axklib create hds .\image.json -o .\HD00_512_generated.hds
 ```
 
 The command refuses to replace an existing image unless `--overwrite` is
-provided. It reports each partition's start, sector count, cluster count, and
-any unused tail sectors. Manifest parsing is strict: unknown fields, duplicate
+provided. It reports each partition's start, sector count, cluster count,
+sampler-visible free KiB, and any unused image-tail sectors. Each
+`WrittenPartitionLayout` also exposes `first_payload_cluster`,
+`allocated_cluster_count`, `free_cluster_count`, and `free_bytes`. Manifest
+parsing is strict: unknown fields, duplicate
 waveform IDs, unresolved waveform references, invalid MIDI values, and
-unsupported writer profiles are rejected before a usable image is reported.
-
-The manifest does not expand the supported geometry set. It currently accepts
-only the profiles listed above; other image-size and partition-count
-combinations remain unavailable until their complete metadata behavior has
-been validated.
+invalid geometry and content that cannot fit its partition are rejected before
+a usable image is reported.
 
 After creating an image, validate it with the public reader before trying it on
 hardware:

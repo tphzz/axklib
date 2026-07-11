@@ -67,15 +67,16 @@ A partition entry is active when both values are non-zero. Fresh generated
 images also populate the observed disk mode metadata area so the duplicate
 superblocks match sampler-authored hard-disk images of the same size class.
 
-A-series hard-disk images also use sector 2, and in multi-partition profiles the
+A-series hard-disk images also use sector 2, and for multiple partitions the
 sectors immediately before later partitions, as auxiliary formatter-transfer
-sectors. Their leading eight bytes are profile-scoped transfer tokens whose low
-three bits carry the partition sequence; the remaining token bits are preserved
-compatibility values, not disk geometry or persistent disk IDs. Supported
-profiles zero prior-token residue at `+0x09..+0x10`.
+sectors. Their leading eight bytes are deterministic transfer tokens from
+`ab432100` through `ab432107`; the low three bits carry the partition sequence,
+and the remaining token bits are compatibility values rather than disk geometry
+or persistent disk IDs. Generated images zero prior-token residue at
+`+0x09..+0x10`.
 axklib does not expose these sectors as part of the directory or object tree.
 Older label-entry marker/name records in them are intentionally zero-generated;
-they are not required for hardware loading in the supported profiles.
+they are not required for hardware loading.
 
 ## Partition Header
 
@@ -144,6 +145,36 @@ allocation-bitmap sector immediately after the duplicate partition header.
 Generated images write that mirror as well, while the partition header field
 `0x09c` remains the authoritative primary bitmap location for reads and
 validation.
+
+## Free Space
+
+SFS free space excludes both the reserved metadata prefix and clusters marked
+used in the allocation bitmap:
+
+```text
+first_payload_cluster = directory_index_cluster + directory_index_span
+free_clusters = cluster_count - first_payload_cluster - allocated_clusters
+free_bytes = free_clusters * sectors_per_cluster * sector_size
+sampler_visible_free_kib = free_bytes // 1024
+```
+
+Use the top-level public function for the same calculation in applications:
+
+```python
+from axklib import calculate_sfs_free_space
+
+space = calculate_sfs_free_space(
+    cluster_count=1_048_575,
+    first_payload_cluster=616,
+    allocated_cluster_count=65,
+)
+assert space.sampler_visible_free_kib == 1_047_894
+```
+
+`axklib validate` allocation summaries include `first_payload_cluster`,
+`reserved_cluster_count`, `sampler_free_cluster_count`, `sampler_free_bytes`,
+and `sampler_visible_free_kib`. The calculation raises `ValueError` for
+impossible geometry instead of returning negative capacity.
 
 ## Directory And File Index
 
@@ -355,32 +386,24 @@ on generated images before testing them on hardware.
 
 Hardware loading has shown that sector 2, per-partition metadata sectors, and
 full partition-header sectors are part of the loadable generated-image contract.
-Generated hard-disk partitions use 512-byte sectors, two-sector clusters, and
-1 GiB partition slots for the currently supported multi-partition layouts.
-axklib serializes only the currently tested profiles: 256 MiB with one SFS
-partition, 512 MiB with two SFS partitions, and a narrow 768 MiB three-partition
-sparse formatter profile. The 512 MiB profile
-includes a metadata sector immediately before the second partition and a
-distinct second partition-header metadata profile. A fully generated 256 MiB
-single-partition image using the first profile, multiple volumes, multiple
-current `SMPL` objects, and multiple direct single-member `SBNK` objects has
-loaded successfully on hardware. A fully generated 512 MiB two-partition image
-using the second profile, with two generated volumes per partition and two
-direct single-member `SBNK` objects per volume, has also loaded successfully;
-the same profile has also loaded with one volume grown to eight direct
-single-member `SBNK` objects while the other volumes remain smaller; this
-isolated-growth case has been hardware-tested on both partition indices. The
-tested generated SBNK root key, key range, and sample level fields are
-sampler-visible. Copying non-logical allocated-cluster tail bytes was not
-required for those cases. axklib treats those tail bytes as storage padding
-unless a later compatibility case proves otherwise. The 768 MiB sparse profile
-has loaded successfully on hardware with one simple object-bearing volume on
-partition 0 (`hd1`), partition 1 (`hd2`), or partition 2 (`hd3`), while the
-other sparse partitions remain empty loadable volumes. The tested
-object-bearing volume contains one generated current `SMPL` waveform and one
-direct single-member `SBNK` sample bank. Multiple object-bearing sparse
-volumes and larger sparse object counts remain outside the currently validated
-write profile.
+Generated hard-disk partitions use 512-byte sectors and two-sector clusters.
+The writer accepts 512-byte-aligned images from 1 MiB through 2 GiB with one
+through eight equal partition slots. Given `N` partitions, `total_sectors` is
+`size_bytes / 512`, the slot span is
+`min(floor((total_sectors - 2) / N), 0x1fffff)`, partition `i` starts at
+`3 + i * slot_span`, and its stored sector count is `slot_span - 1`. Every slot
+must have at least 2045 partition sectors. Division remainder and capacity past
+the 1 GiB slot-span cap remain unused at the end of the image.
+
+That geometry and metadata algorithm has loaded successfully across one through
+eight partition indexes, smaller and capped slot spans, a division remainder,
+the 1 MiB minimum, and the 2 GiB maximum. Generated images with multiple
+volumes, multiple current `SMPL` objects, direct single-member `SBNK` objects,
+and isolated object-count growth have also loaded successfully. The tested
+generated SBNK root key, key range, and sample level fields are sampler-visible.
+Copying non-logical allocated-cluster tail bytes was not required. axklib treats
+those tail bytes as storage padding unless a later compatibility case proves
+otherwise.
 
 The writer constructs the superblock, partition table, sector-2 metadata,
 partition headers, allocation bitmap, directory index, and object payload
@@ -389,36 +412,31 @@ partition slot placement, partition-header start/count words, partition-index
 words, leading formatter-transfer tokens, and dynamic header words, are
 generated explicitly.
 Partition headers are zero-initialized, and only the retained explicit fields
-are written. Hardware checks on object-bearing 256 MiB / one-partition and
-512 MiB / two-partition images showed that the former fixed nonzero tail bytes
-are not required; they remain zero for generated profiles. The validated
+are written. Hardware checks showed that the former fixed nonzero tail bytes
+are not required; they remain zero for generated images. The validated
 non-required residue range at `+0x1bc..+0x1e3` is also zero-generated. Sector-2
-label-entry records and the current two-partition `+0x30..+0x3e` range are
-deliberately zero-generated for currently supported writer profiles.
+label-entry records and the `+0x30..+0x3e` range are deliberately zero-generated.
 
 
-### Writer profile metadata
+### Writer Compatibility Metadata
 
-The writer keeps profile-dependent compatibility metadata explicit. Values that
-vary by supported image profile are generated from named profile tables or from
-small formulas; they are not embedded inside broad binary templates.
-
-The supported writer profiles currently use these rules:
+The writer keeps compatibility metadata explicit and computes geometry-dependent
+values from small formulas. It does not copy broad binary templates.
 
 | Metadata area | Public contract |
 | --- | --- |
-| Superblock formatter-residue block at `+0x80..+0x9b` | Preserved as one fixed compatibility block for the currently supported hard-disk writer profiles. The writer does not interpret its seven words as geometry fields. |
-| Leading formatter-transfer token at sector `+0x00..+0x07` | Rendered as eight lowercase hexadecimal digits from a profile-scoped compatibility base plus a bounded three-bit partition sequence. The base is not derived from disk geometry. |
-| Prior-token residue at sector `+0x09..+0x10` | Zeroed for the supported single-partition and two-partition profiles after object-bearing hardware checks showed it is not required. |
-| Sector-2 two-partition range at `+0x30..+0x3e` | Zeroed for all currently supported writer profiles after hardware validation showed it is not required. |
-| Former partition-header fixed tail bytes | Zeroed after object-bearing 256 MiB and 512 MiB hardware checks showed they are not required. Retained tail words are written explicitly. |
-| Partition-header residue range at `+0x1bc..+0x1e3` | Zeroed for all currently supported writer profiles after hardware validation showed it is not required. |
-| Sparse partition-header `+0x14c` | Written as image sector count minus one for the supported sparse profile. |
-| Sparse partition-header `+0x194` | Written as zero for the supported sparse profile. |
+| Superblock formatter-residue block at `+0x80..+0x9b` | Preserved as one fixed compatibility block. The writer does not interpret its seven words as geometry fields. |
+| Leading formatter-transfer token at sector `+0x00..+0x07` | Rendered as eight lowercase hexadecimal digits from base `ab432100` plus the bounded three-bit partition sequence. The base is not derived from disk geometry. |
+| Prior-token residue at sector `+0x09..+0x10` | Zeroed after object-bearing hardware checks showed it is not required. |
+| Sector-2 range at `+0x30..+0x3e` | Zeroed after hardware validation showed it is not required. |
+| Former partition-header fixed tail bytes | Zeroed after object-bearing hardware checks showed they are not required. Retained tail words are written explicitly. |
+| Partition-header residue range at `+0x1bc..+0x1e3` | Zeroed after hardware validation showed it is not required. |
+| Partition-header `+0x14c` | Written as total image sectors for one or two partitions; for `N >= 3`, written as total image sectors minus `N - 2`. |
+| Partition-header `+0x194` | Written as zero for layouts with three or more partitions; otherwise uses the count marker required by one- and two-partition layouts. |
 
 These fields are part of the compatibility envelope for generated images. Bytes
 that hardware validation shows are not required are deliberately zeroed.
-Applications should select one of the supported writer profiles rather than
+Applications should use the typed writer or JSON manifest rather than
 constructing these fields manually.
 
 ## Minimal Read Walkthrough

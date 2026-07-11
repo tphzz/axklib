@@ -108,11 +108,19 @@ def test_hds_build_manifest_rejects_unknown_waveform_reference() -> None:
         parse_hds_build_manifest(value)
 
 
-def test_hds_build_manifest_keeps_unproven_geometry_private(tmp_path: Path) -> None:
+def test_hds_build_manifest_builds_general_multi_partition_geometry(tmp_path: Path) -> None:
     value = _manifest()
     value["size_bytes"] = 256 * 1024 * 1024
     partitions = value["partitions"]
     assert isinstance(partitions, list)
+    first_partition = partitions[0]
+    assert isinstance(first_partition, dict)
+    first_volumes = first_partition["volumes"]
+    assert isinstance(first_volumes, list)
+    first_volume = first_volumes[0]
+    assert isinstance(first_volume, dict)
+    first_volume["waveforms"] = []
+    first_volume["sample_banks"] = []
     partitions.append(
         {
             "name": "hd2",
@@ -126,9 +134,13 @@ def test_hds_build_manifest_keeps_unproven_geometry_private(tmp_path: Path) -> N
         }
     )
     manifest = parse_hds_build_manifest(value, base_dir=tmp_path)
+    output = tmp_path / "general.hds"
 
-    with pytest.raises(ValueError, match="multi-partition writing currently supports"):
-        build_hds_from_manifest(manifest, tmp_path / "blocked.hds")
+    result = build_hds_from_manifest(manifest, output)
+
+    assert result.partitions == 2
+    assert [layout.start_sector for layout in result.partition_layouts] == [3, 262_146]
+    assert [layout.sector_count for layout in result.partition_layouts] == [262_142] * 2
 
 
 def test_hds_build_manifest_refuses_overwrite(tmp_path: Path) -> None:

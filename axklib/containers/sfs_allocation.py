@@ -17,6 +17,58 @@ CONTINUATION_HEADER_SIZE = sfs_extents.CONTINUATION_HEADER_SIZE
 MAX_MISMATCH_RANGES_PER_PARTITION = 512
 
 
+@dataclass(frozen=True)
+class SfsFreeSpace:
+    """Calculated SFS capacity available for sampler object payloads."""
+
+    total_cluster_count: int
+    reserved_cluster_count: int
+    allocated_cluster_count: int
+    free_cluster_count: int
+    cluster_size_bytes: int
+    free_bytes: int
+    sampler_visible_free_kib: int
+
+
+def calculate_sfs_free_space(
+    *,
+    cluster_count: int,
+    first_payload_cluster: int,
+    allocated_cluster_count: int,
+    cluster_size_bytes: int = 1024,
+) -> SfsFreeSpace:
+    """Calculate payload free space from SFS geometry and allocation state.
+
+    The clusters before ``first_payload_cluster`` are reserved for partition
+    metadata. ``allocated_cluster_count`` is the number of set allocation-bitmap
+    clusters in the payload area.
+    """
+    if cluster_count < 0:
+        raise ValueError("cluster_count must not be negative")
+    if first_payload_cluster < 0 or first_payload_cluster > cluster_count:
+        raise ValueError("first_payload_cluster must be within the partition cluster range")
+    if allocated_cluster_count < 0:
+        raise ValueError("allocated_cluster_count must not be negative")
+    available_cluster_count = cluster_count - first_payload_cluster
+    if allocated_cluster_count > available_cluster_count:
+        raise ValueError(
+            "allocated_cluster_count exceeds clusters available after the reserved prefix"
+        )
+    if cluster_size_bytes <= 0:
+        raise ValueError("cluster_size_bytes must be positive")
+    free_cluster_count = available_cluster_count - allocated_cluster_count
+    free_bytes = free_cluster_count * cluster_size_bytes
+    return SfsFreeSpace(
+        total_cluster_count=cluster_count,
+        reserved_cluster_count=first_payload_cluster,
+        allocated_cluster_count=allocated_cluster_count,
+        free_cluster_count=free_cluster_count,
+        cluster_size_bytes=cluster_size_bytes,
+        free_bytes=free_bytes,
+        sampler_visible_free_kib=free_bytes // 1024,
+    )
+
+
 @dataclass
 class AllocationExtent:
     source_image: str
@@ -60,6 +112,11 @@ class AllocationPartitionSummary:
     continuation_list_cluster_count: int
     stored_used_cluster_count: int
     reconstructed_used_cluster_count: int
+    first_payload_cluster: int
+    reserved_cluster_count: int | None
+    sampler_free_cluster_count: int | None
+    sampler_free_bytes: int | None
+    sampler_visible_free_kib: int | None
     stored_used_not_reconstructed_count: int
     reconstructed_used_not_stored_count: int
     extent_total_mismatch_count: int
@@ -340,6 +397,21 @@ def analyze_partition(
                 f"{MAX_MISMATCH_RANGES_PER_PARTITION}"
             )
 
+    stored_used_cluster_count = count_bitmap_bits(stored_bitmap, total_clusters)
+    first_payload_cluster = partition_field(
+        partition, "cluster_offset_to_directory_index"
+    ) + partition_field(partition, "unknown_static_0x0a8")
+    free_space: SfsFreeSpace | None = None
+    try:
+        free_space = calculate_sfs_free_space(
+            cluster_count=total_clusters,
+            first_payload_cluster=first_payload_cluster,
+            allocated_cluster_count=stored_used_cluster_count,
+            cluster_size_bytes=sector_size * sectors_per_cluster,
+        )
+    except ValueError as exc:
+        warnings.append(f"partition {partition_index}: free-space calculation failed: {exc}")
+
     summary = AllocationPartitionSummary(
         source_image=str(image),
         partition_index=partition_index,
@@ -356,8 +428,15 @@ def analyze_partition(
         continuation_extent_record_count=continuation_records,
         data_extent_count=data_extent_count,
         continuation_list_cluster_count=list_cluster_count,
-        stored_used_cluster_count=count_bitmap_bits(stored_bitmap, total_clusters),
+        stored_used_cluster_count=stored_used_cluster_count,
         reconstructed_used_cluster_count=count_bitmap_bits(bytes(reconstructed), total_clusters),
+        first_payload_cluster=first_payload_cluster,
+        reserved_cluster_count=(free_space.reserved_cluster_count if free_space else None),
+        sampler_free_cluster_count=(free_space.free_cluster_count if free_space else None),
+        sampler_free_bytes=(free_space.free_bytes if free_space else None),
+        sampler_visible_free_kib=(
+            free_space.sampler_visible_free_kib if free_space else None
+        ),
         stored_used_not_reconstructed_count=range_count(stored_not_reconstructed),
         reconstructed_used_not_stored_count=range_count(reconstructed_not_stored),
         extent_total_mismatch_count=extent_total_mismatch_count,

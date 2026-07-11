@@ -208,16 +208,12 @@ def build_hds_from_manifest(
     output_path: str | Path,
     *,
     overwrite: bool = False,
-    _allow_unproven_geometry: bool = False,
 ) -> HdsWriteResult:
     """Build an HDS image from a validated manifest."""
     output = Path(output_path)
     if output.exists() and not overwrite:
         raise FileExistsError(f"output already exists: {output}")
-    builder = HdsImageBuilder(
-        size_bytes=manifest.size_bytes,
-        _allow_unproven_geometry=_allow_unproven_geometry,
-    )
+    builder = HdsImageBuilder(size_bytes=manifest.size_bytes)
     for partition_spec in manifest.partitions:
         partition = builder.add_partition(partition_spec.name)
         for volume_spec in partition_spec.volumes:

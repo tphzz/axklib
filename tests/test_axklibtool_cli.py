@@ -140,6 +140,43 @@ def test_create_hds_builds_manifest_and_reports_layout(
     assert "partition=0 name='hd1' start_sector=3 sector_count=524285" in captured.out
 
 
+def test_create_hds_supports_general_partition_geometry(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "size_bytes": 6 * 1024 * 1024,
+                "partitions": [
+                    {
+                        "name": f"hd{index + 1}",
+                        "volumes": [
+                            {
+                                "name": f"Volume {index + 1}",
+                                "waveforms": [],
+                                "sample_banks": [],
+                            }
+                        ],
+                    }
+                    for index in range(5)
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "HD00_512_general.hds"
+
+    code = axklibtool.main(["create", "hds", str(manifest_path), "-o", str(output)])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert output.stat().st_size == 6 * 1024 * 1024
+    assert "partitions=5 objects=0 unused_tail_sectors=1" in captured.out
+    assert "partition=4 name='hd5' start_sector=9831 sector_count=2456" in captured.out
+
+
 def test_create_hds_uses_standard_overwrite_policy(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

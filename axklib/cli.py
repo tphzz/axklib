@@ -1348,7 +1348,8 @@ def run_create_hds(args: argparse.Namespace) -> int:
         print(
             f"partition={layout.index} name={layout.name!r} "
             f"start_sector={layout.start_sector} sector_count={layout.sector_count} "
-            f"cluster_count={layout.cluster_count}"
+            f"cluster_count={layout.cluster_count} "
+            f"free_kib={layout.sampler_visible_free_kib}"
         )
     return 0
 
