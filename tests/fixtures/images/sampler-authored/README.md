@@ -15,6 +15,10 @@ fixtures when practical.
 - Retention reason: required by active automated tests; replace with a smaller synthetic/minimal fixture when practical
 - Expected object count: see `MANIFEST.json`
 - Regeneration note: see `MANIFEST.json`
+- Audio limitation: grouped `Sxx` members reference `SMP 252511`, whose exact
+  PCM has near-zero amplitude. Use this fixture for structure and parameter
+  tests, not as an audible grouped-bank control. Standalone `JSxx` rows
+  reference the audible `pulse 1` waveform.
 
 ## HD00_512_single_sbnk_authored.hds
 

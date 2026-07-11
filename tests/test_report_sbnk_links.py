@@ -226,6 +226,50 @@ class ReportSbnkLinksTests(unittest.TestCase):
                 right.fine_tune_cents_0x0dc,
             ),
         )
+
+    def test_generated_two_member_wrapper_writes_template_free_stereo_defaults(self) -> None:
+        left = sbnk_contract.CurrentSbnkMemberSpec(
+            sample_name="Tone-L",
+            smpl_link_id_0x078=0x11111111,
+            root_key_0x0d6=60,
+            sample_rate_0x0d8=44100,
+            fine_tune_cents_0x0dc=0,
+            wave_length_frames_0x0f0=1000,
+            loop_start_frame_0x0f8=0,
+            loop_length_frames_0x100=1000,
+        )
+        right = sbnk_contract.CurrentSbnkMemberSpec(
+            sample_name="Tone-R",
+            smpl_link_id_0x078=0x22222222,
+            root_key_0x0d6=60,
+            sample_rate_0x0d8=44100,
+            fine_tune_cents_0x0dc=0,
+            wave_length_frames_0x0f0=1000,
+            loop_start_frame_0x0f8=0,
+            loop_length_frames_0x100=1000,
+        )
+
+        payload = sbnk_contract.serialize_current_two_member_sbnk_payload(
+            bank_name="Stereo Bank",
+            left=left,
+            right=right,
+            key_range_low_0x0e3=48,
+            key_range_high_0x0e2=72,
+            sample_level_0x116=96,
+        )
+        parsed = sbnk_contract.parse_current_sbnk_contract_payload(payload)
+
+        self.assertEqual(parsed.bank_topology, "two-member")
+        self.assertEqual(parsed.left.sample_name, "Tone-L")
+        self.assertIsNotNone(parsed.right)
+        assert parsed.right is not None
+        self.assertEqual(parsed.right.sample_name, "Tone-R")
+        self.assertEqual(payload[0x0E5], 1)
+        self.assertEqual(payload[0x0EA:0x0EC], b"\x00\x00")
+        self.assertEqual(payload[0x0EE:0x0F0], b"\x00\x00")
+        self.assertEqual(parsed.key_range_low_0x0e3, 48)
+        self.assertEqual(parsed.key_range_high_0x0e2, 72)
+        self.assertEqual(parsed.sample_level_0x116, 96)
         self.assertNotEqual(parsed.left.clean_pitch_base_word_for_write, 0x1601)
         self.assertNotEqual(parsed.right.clean_pitch_base_word_for_write, 0x1601)
 
@@ -2079,5 +2123,4 @@ class ReportSbnkLinksTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 

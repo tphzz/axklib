@@ -1,15 +1,17 @@
 # Image Writer
 
 `axklib.write` contains the generated-image API for creating fresh Yamaha SFS/HDS
-images. The first supported scope is deliberately small: partitions, volumes,
-mono current `SMPL` waveforms, and direct single-member `SBNK` sample banks.
+images. The supported object scope is deliberately small: partitions, volumes,
+mono current `SMPL` waveforms, direct single-member `SBNK` sample banks, and
+equal-format two-member stereo `SBNK` sample banks. A narrow hardware-tested
+profile also writes one-member `SBAC` groups and Program `001` assignments.
 
 The writer serializes the image from its data model. It does not patch existing
 images and does not depend on template images.
 
 Generated `SMPL` waveform payloads and `SBNK` sample-bank payloads use the
-current object-header sizes, link fields, and single-member default parameter
-block required for ordinary A-series sample storage. `SBNK` payloads are
+current object-header sizes, link fields, and default parameter block required
+for ordinary A-series sample storage. `SBNK` payloads are
 serialized through the public sample-bank contract model: active member fields,
 key range, and level come from the writer data model, while fields not yet
 exposed by the write API keep conservative current-format defaults for the
@@ -45,11 +47,55 @@ algorithm has been validated across image-size, partition-count, remainder,
 1 GiB slot-cap, and minimum-size boundaries.
 
 Generated images have also been hardware-tested with multiple volumes, current
-waveforms, direct single-member sample banks, and isolated object-count growth.
+waveforms, direct single-member sample banks, template-free two-member stereo
+sample banks, and isolated object-count growth.
 Root key, key range, and sample level have been hardware-tested for generated
 direct single-member sample banks. The writer is intentionally conservative:
-unsupported object types, multi-member sample-bank groups, and in-place image
-mutation are outside the current API.
+unsupported object types, sample banks with more than two members, and in-place
+image mutation are outside the current API. SBAC/PROG output is restricted to
+the exact profile below; broader Program counts, assignment orders,
+receive channels, grouped stereo banks, multiple configured volumes in one
+partition, and multi-member groups are rejected.
+
+## SBAC and PROG profile
+
+The first template-free SBAC/PROG profile is intentionally exact:
+
+- any supported 512-byte-aligned image size and one through eight partitions;
+- a partition containing SBAC/PROG content has exactly one configured volume;
+- one one-member `SBAC` group whose child is a mono `SBNK`;
+- Program `001` with exactly two assignments;
+- assignment 1 targets the group on receive channel `1`;
+- assignment 2 targets a different direct mono `SBNK` on receive channel `2`;
+- the grouped child and direct control use the same waveform and musical
+  parameters.
+
+The writer emits zero for runtime handle caches. The grouped child receives the
+sample-bank-member flag, while only the direct assignment updates the SBNK
+Program-001 bitmap.
+
+```python
+from axklib.write import HdsImageBuilder
+
+builder = HdsImageBuilder(size_bytes=1024 * 1024)
+volume = builder.add_partition("New Partition").add_volume("New Volume")
+waveform = volume.add_waveform_from_wav(
+    name="pulse 1", path="tone.wav", root_key=66
+)
+member = volume.add_sample_bank(
+    name="JS01", waveform=waveform, root_key=66,
+    key_low=0, key_high=127, level=100,
+)
+control = volume.add_sample_bank(
+    name="JS02 *", waveform=waveform, root_key=66,
+    key_low=0, key_high=127, level=100,
+)
+group = volume.add_sample_bank_group(name="AUDSB", member=member)
+program = volume.add_program(number=1)
+program.assign_sample_bank_group(group, receive_channel=1)
+program.assign_sample_bank(control, receive_channel=2)
+builder.write("HD00_512_generated.hds")
+```
 
 Partition headers are zero-initialized and populated through explicit field
 writes. Former fixed nonzero tail bytes are deliberately left zero after
@@ -63,6 +109,13 @@ correct without them.
 Waveform paths are resolved relative to the manifest file. Waveform IDs are
 local references within one volume; they are not written as sampler object
 names or filesystem IDs.
+
+A stereo bank references two distinct mono waveform entries. `waveform_id` is
+the left member and `right_waveform_id` is the right member. Both inputs must be
+16-bit mono WAVs with matching sample rate and logical frame count. The image
+stores them as two physical mono `SMPL` objects linked by one two-member `SBNK`;
+it does not store an interleaved WAV. Exact extraction retains both physical
+WAVs and can additionally render an interleaved stereo WAV.
 
 ```json
 {
@@ -99,6 +152,30 @@ names or filesystem IDs.
 }
 ```
 
+For a stereo bank, declare both member waveforms and add
+`"right_waveform_id": "right"` to the bank. The typed API provides the same
+contract through `VolumeBuilder.add_stereo_sample_bank()`.
+
+For the SBAC/PROG profile, add these optional volume fields after declaring the
+two matching mono sample banks:
+
+```json
+{
+  "sample_bank_groups": [
+    {"name": "AUDSB", "member_sample_bank": "JS01"}
+  ],
+  "programs": [
+    {
+      "number": 1,
+      "assignments": [
+        {"sample_bank_group": "AUDSB", "receive_channel": 1},
+        {"sample_bank": "JS02 *", "receive_channel": 2}
+      ]
+    }
+  ]
+}
+```
+
 Build the image with:
 
 ```powershell
@@ -113,7 +190,8 @@ sampler-visible free KiB, and any unused image-tail sectors. Each
 parsing is strict: unknown fields, duplicate
 waveform IDs, unresolved waveform references, invalid MIDI values, and
 invalid geometry and content that cannot fit its partition are rejected before
-a usable image is reported.
+a usable image is reported. Group/member and Program-assignment references are
+also validated before the hardware-profile constraints are applied.
 
 After creating an image, validate it with the public reader before trying it on
 hardware:

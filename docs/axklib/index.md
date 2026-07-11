@@ -13,7 +13,9 @@ Use this documentation in two ways:
 - Represent Yamaha `FSFSDEV3SPLX` objects with source, placement, and quality metadata.
 - Build current `PROG` / `SBAC` / `SBNK` / `SMPL` relationship graphs.
 - Decode exact current `SMPL` waveform payloads and export WAVs.
-- Create fresh 1 MiB through 2 GiB HDS images with one through eight partitions.
+- Create fresh 1 MiB through 2 GiB HDS images with one through eight partitions,
+  mono sample banks, equal-format two-member stereo banks, and a narrow
+  hardware-tested one-member SBAC/Program-001 profile.
 - Validate containers, objects, relationships, exports, and sidecars with stable issue codes.
 - Calculate SFS reserved, allocated, and sampler-visible free space.
 

@@ -1,8 +1,9 @@
 """Generated Yamaha SFS/HDS image writer.
 
 The writer starts with a narrow generated-image contract: fresh
-hard-disk image, SFS partitions, volumes, current SMPL waveforms, and direct
-single-member SBNK sample banks. It does not patch existing images.
+hard-disk image, SFS partitions, volumes, current SMPL waveforms, direct
+single-member or equal-format stereo SBNK sample banks, and one hardware-proven
+one-member SBAC/PROG topology. It does not patch existing images.
 """
 
 from __future__ import annotations
@@ -57,6 +58,8 @@ SMPL_COMPACT_HEADER_SIZE = 0xAC
 SMPL_OBJECT_HEADER_SIZE = 0x200
 SBNK_OBJECT_SIZE = 0x188
 SBNK_PAYLOAD_SIZE = sbnk_contract.CURRENT_SBNK_CONTRACT_PAYLOAD_SIZE
+SBAC_PAYLOAD_SIZE = 0x210
+PROG_PAYLOAD_SIZE = 0x390
 ROOT_DIRECTORY_ID = 1
 SFS_ERROR_LOG_ID = 2
 STANDARD_VOLUME_CATEGORY_NAMES = ("SMPL", "SBNK", "SBAC", "SEQU", "PROG")
@@ -190,6 +193,13 @@ class SampleBankRef:
 
 
 @dataclass(frozen=True)
+class SampleBankGroupRef:
+    """Reference returned by :meth:`VolumeBuilder.add_sample_bank_group`."""
+
+    key: str
+
+
+@dataclass(frozen=True)
 class WrittenObjectRef:
     key: str
     object_type: str
@@ -239,10 +249,31 @@ class _SampleBankSpec:
     key: str
     name: str
     waveform_key: str
+    right_waveform_key: str | None
     root_key: int
     key_low: int
     key_high: int
     level: int
+
+
+@dataclass
+class _SampleBankGroupSpec:
+    key: str
+    name: str
+    member_bank_key: str
+
+
+@dataclass(frozen=True)
+class _ProgramAssignmentSpec:
+    target_key: str
+    target_kind: str
+    receive_channel: int
+
+
+@dataclass
+class _ProgramSpec:
+    number: int
+    assignments: list[_ProgramAssignmentSpec] = field(default_factory=list)
 
 
 @dataclass
@@ -290,6 +321,8 @@ class VolumeBuilder:
     _partition: PartitionBuilder
     _waveforms: list[_WaveformSpec] = field(default_factory=list)
     _sample_banks: list[_SampleBankSpec] = field(default_factory=list)
+    _sample_bank_groups: list[_SampleBankGroupSpec] = field(default_factory=list)
+    _programs: list[_ProgramSpec] = field(default_factory=list)
 
     def add_waveform_from_wav(self, *, name: str, path: str | Path, root_key: int) -> WaveformRef:
         _validate_midi_key(root_key, "root_key")
@@ -331,6 +364,7 @@ class VolumeBuilder:
                 key=key,
                 name=name,
                 waveform_key=waveform.key,
+                right_waveform_key=None,
                 root_key=root_key,
                 key_low=key_low,
                 key_high=key_high,
@@ -338,6 +372,121 @@ class VolumeBuilder:
             )
         )
         return SampleBankRef(key)
+
+    def add_stereo_sample_bank(
+        self,
+        *,
+        name: str,
+        left_waveform: WaveformRef,
+        right_waveform: WaveformRef,
+        root_key: int,
+        key_low: int,
+        key_high: int,
+        level: int = 127,
+    ) -> SampleBankRef:
+        """Add a two-member stereo bank from equal-format mono waveforms."""
+        _validate_midi_key(root_key, "root_key")
+        _validate_midi_key(key_low, "key_low")
+        _validate_midi_key(key_high, "key_high")
+        if key_high < key_low:
+            raise ValueError("key_high must be greater than or equal to key_low")
+        if level < 0 or level > 127:
+            raise ValueError("level must be in MIDI range 0..127")
+        known_waveforms = {item.key for item in self._waveforms}
+        if left_waveform.key not in known_waveforms:
+            raise ValueError(f"unknown left waveform reference: {left_waveform.key}")
+        if right_waveform.key not in known_waveforms:
+            raise ValueError(f"unknown right waveform reference: {right_waveform.key}")
+        if left_waveform.key == right_waveform.key:
+            raise ValueError("stereo sample bank requires distinct left and right waveforms")
+        key = _unique_key(name, {item.key for item in self._sample_banks}, "sample bank")
+        self._sample_banks.append(
+            _SampleBankSpec(
+                key=key,
+                name=name,
+                waveform_key=left_waveform.key,
+                right_waveform_key=right_waveform.key,
+                root_key=root_key,
+                key_low=key_low,
+                key_high=key_high,
+                level=level,
+            )
+        )
+        return SampleBankRef(key)
+
+    def add_sample_bank_group(
+        self,
+        *,
+        name: str,
+        member: SampleBankRef,
+    ) -> SampleBankGroupRef:
+        """Add the hardware-proven one-member sample-bank group topology."""
+        known_banks = {item.key for item in self._sample_banks}
+        if member.key not in known_banks:
+            raise ValueError(f"unknown sample bank reference: {member.key}")
+        if any(item.member_bank_key == member.key for item in self._sample_bank_groups):
+            raise ValueError(f"sample bank is already grouped: {member.key!r}")
+        key = _unique_key(
+            name,
+            {item.key for item in self._sample_bank_groups},
+            "sample bank group",
+        )
+        self._sample_bank_groups.append(
+            _SampleBankGroupSpec(key=key, name=name, member_bank_key=member.key)
+        )
+        return SampleBankGroupRef(key)
+
+    def add_program(self, *, number: int = 1) -> ProgramBuilder:
+        """Add Program 001 for the current hardware-proven writer profile."""
+        if number != 1:
+            raise ValueError("current SBAC/PROG writer profile supports only Program 001")
+        if self._programs:
+            raise ValueError("current SBAC/PROG writer profile supports one Program")
+        spec = _ProgramSpec(number=number)
+        self._programs.append(spec)
+        return ProgramBuilder(_volume=self, _spec=spec)
+
+
+@dataclass
+class ProgramBuilder:
+    """Build the two assignments in the hardware-proven Program 001 profile."""
+
+    _volume: VolumeBuilder
+    _spec: _ProgramSpec
+
+    def assign_sample_bank_group(
+        self,
+        target: SampleBankGroupRef,
+        *,
+        receive_channel: int,
+    ) -> None:
+        _validate_receive_channel(receive_channel)
+        if target.key not in {item.key for item in self._volume._sample_bank_groups}:
+            raise ValueError(f"unknown sample bank group reference: {target.key}")
+        self._spec.assignments.append(
+            _ProgramAssignmentSpec(
+                target_key=target.key,
+                target_kind="SBAC",
+                receive_channel=receive_channel,
+            )
+        )
+
+    def assign_sample_bank(
+        self,
+        target: SampleBankRef,
+        *,
+        receive_channel: int,
+    ) -> None:
+        _validate_receive_channel(receive_channel)
+        if target.key not in {item.key for item in self._volume._sample_banks}:
+            raise ValueError(f"unknown sample bank reference: {target.key}")
+        self._spec.assignments.append(
+            _ProgramAssignmentSpec(
+                target_key=target.key,
+                target_kind="SBNK",
+                receive_channel=receive_channel,
+            )
+        )
 
 
 @dataclass
@@ -395,6 +544,7 @@ class HdsImageBuilder:
     def plan(self) -> list[_PartitionPlan]:
         if not self._partitions:
             raise ValueError("image must contain at least one partition")
+        _validate_sbac_prog_profile(self)
         plans = _layout_partitions(self.size_bytes, self._partitions)
         for plan in plans:
             _build_partition_records(plan)
@@ -427,6 +577,73 @@ class HdsImageBuilder:
 def _validate_midi_key(value: int, name: str) -> None:
     if value < 0 or value > 127:
         raise ValueError(f"{name} must be in MIDI range 0..127")
+
+
+def _validate_receive_channel(value: int) -> None:
+    if value < 1 or value > 16:
+        raise ValueError("receive_channel must be in MIDI channel range 1..16")
+
+
+def _validate_sbac_prog_profile(builder: HdsImageBuilder) -> None:
+    for partition in builder._partitions:
+        configured = [
+            volume
+            for volume in partition._volumes
+            if volume._sample_bank_groups or volume._programs
+        ]
+        if not configured:
+            continue
+        if len(partition._volumes) != 1 or len(configured) != 1:
+            raise ValueError(
+                "current SBAC/PROG writer profile supports one configured volume per partition"
+            )
+        _validate_sbac_prog_volume(configured[0])
+
+
+def _validate_sbac_prog_volume(volume: VolumeBuilder) -> None:
+    if len(volume._sample_bank_groups) != 1 or len(volume._programs) != 1:
+        raise ValueError(
+            "current SBAC/PROG writer profile requires one sample bank group and one Program"
+        )
+    group = volume._sample_bank_groups[0]
+    program = volume._programs[0]
+    if program.number != 1:
+        raise ValueError("current SBAC/PROG writer profile requires Program 001")
+    if len(program.assignments) != 2:
+        raise ValueError("current SBAC/PROG writer profile requires exactly two assignments")
+    grouped, direct = program.assignments
+    if (
+        grouped.target_kind != "SBAC"
+        or grouped.target_key != group.key
+        or grouped.receive_channel != 1
+    ):
+        raise ValueError(
+            "first Program assignment must target the sample bank group on receive channel 1"
+        )
+    if direct.target_kind != "SBNK" or direct.receive_channel != 2:
+        raise ValueError(
+            "second Program assignment must target a direct sample bank on receive channel 2"
+        )
+    if direct.target_key == group.member_bank_key:
+        raise ValueError("direct Program control must differ from the grouped member")
+    banks = {bank.key: bank for bank in volume._sample_banks}
+    member = banks[group.member_bank_key]
+    direct_bank = banks.get(direct.target_key)
+    if direct_bank is None:
+        raise ValueError(f"unknown direct sample bank reference: {direct.target_key}")
+    if member.right_waveform_key is not None or direct_bank.right_waveform_key is not None:
+        raise ValueError("current SBAC/PROG writer profile supports mono sample banks only")
+    comparable_fields = (
+        "waveform_key",
+        "root_key",
+        "key_low",
+        "key_high",
+        "level",
+    )
+    if any(getattr(member, name) != getattr(direct_bank, name) for name in comparable_fields):
+        raise ValueError(
+            "grouped member and direct control must use matching waveform and parameters"
+        )
 
 
 def _unique_key(name: str, existing: set[str], label: str) -> str:
@@ -528,7 +745,19 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
         loaded_by_key = {item.spec.key: item for item in loaded}
         smpl_entries: list[tuple[str, int, int | None]] = []
         sbnk_entries: list[tuple[str, int, int | None]] = []
+        sbac_entries: list[tuple[str, int, int | None]] = []
+        prog_entries: list[tuple[str, int, int | None]] = []
         object_payloads: list[tuple[int, bytes, str, str, str]] = []
+        grouped_bank_keys = {
+            group.member_bank_key for group in volume._sample_bank_groups
+        }
+        directly_linked_programs: dict[str, list[int]] = {}
+        for program in volume._programs:
+            for assignment in program.assignments:
+                if assignment.target_kind == "SBNK":
+                    directly_linked_programs.setdefault(assignment.target_key, []).append(
+                        program.number
+                    )
 
         for waveform in loaded:
             smpl_id = next_id
@@ -545,7 +774,23 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
             )
 
         for bank in volume._sample_banks:
-            waveform = loaded_by_key[bank.waveform_key]
+            left_waveform = loaded_by_key[bank.waveform_key]
+            right_waveform = (
+                loaded_by_key[bank.right_waveform_key]
+                if bank.right_waveform_key is not None
+                else None
+            )
+            if right_waveform is not None:
+                if left_waveform.sample_rate != right_waveform.sample_rate:
+                    raise ValueError(
+                        f"stereo sample bank {bank.name!r} requires matching sample rates: "
+                        f"left={left_waveform.sample_rate} right={right_waveform.sample_rate}"
+                    )
+                if left_waveform.frames != right_waveform.frames:
+                    raise ValueError(
+                        f"stereo sample bank {bank.name!r} requires matching logical frame counts: "
+                        f"left={left_waveform.frames} right={right_waveform.frames}"
+                    )
             sbnk_id = next_id
             next_id += 1
             sbnk_entries.append((bank.name, sbnk_id, 16))
@@ -554,12 +799,47 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
                     sbnk_id,
                     _serialize_sbnk(
                         bank,
-                        waveform,
+                        left_waveform,
+                        right_waveform=right_waveform,
                         inactive_right_policy=plan.builder._image._sbnk_single_member_inactive_right_policy,
+                        sample_bank_member=bank.key in grouped_bank_keys,
+                        linked_program_numbers=directly_linked_programs.get(bank.key, []),
                     ),
                     "object",
                     "SBNK",
                     bank.name,
+                )
+            )
+
+        banks_by_key = {bank.key: bank for bank in volume._sample_banks}
+        for group in volume._sample_bank_groups:
+            sbac_id = next_id
+            next_id += 1
+            sbac_entries.append((group.name, sbac_id, 16))
+            object_payloads.append(
+                (
+                    sbac_id,
+                    _serialize_sbac(group, banks_by_key[group.member_bank_key]),
+                    "object",
+                    "SBAC",
+                    group.name,
+                )
+            )
+
+        bank_names = {bank.key: bank.name for bank in volume._sample_banks}
+        group_names = {group.key: group.name for group in volume._sample_bank_groups}
+        for program in volume._programs:
+            prog_id = next_id
+            next_id += 1
+            object_name = f"{program.number:03d}"
+            prog_entries.append((object_name, prog_id, 16))
+            object_payloads.append(
+                (
+                    prog_id,
+                    _serialize_prog(program, bank_names=bank_names, group_names=group_names),
+                    "object",
+                    "PROG",
+                    object_name,
                 )
             )
 
@@ -605,20 +885,45 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
                 directory_tail_value=2,
             )
         )
-        for category_name in ("SBAC", "SEQU", "PROG"):
-            records.append(
-                _RecordPlan(
-                    category_ids[category_name],
-                    _directory_payload(
-                        category_ids[category_name],
-                        volume_id,
-                        [],
-                        dot_partition_marker=directory_dot_marker,
-                    ),
-                    "directory",
-                    directory_tail_value=2,
-                )
+        records.append(
+            _RecordPlan(
+                category_ids["SBAC"],
+                _directory_payload(
+                    category_ids["SBAC"],
+                    volume_id,
+                    sbac_entries,
+                    dot_partition_marker=directory_dot_marker,
+                ),
+                "directory",
+                directory_tail_value=2,
             )
+        )
+        records.append(
+            _RecordPlan(
+                category_ids["SEQU"],
+                _directory_payload(
+                    category_ids["SEQU"],
+                    volume_id,
+                    [],
+                    dot_partition_marker=directory_dot_marker,
+                ),
+                "directory",
+                directory_tail_value=2,
+            )
+        )
+        records.append(
+            _RecordPlan(
+                category_ids["PROG"],
+                _directory_payload(
+                    category_ids["PROG"],
+                    volume_id,
+                    prog_entries,
+                    dot_partition_marker=directory_dot_marker,
+                ),
+                "directory",
+                directory_tail_value=2,
+            )
+        )
         for sfs_id, payload, kind, object_type, object_name in object_payloads:
             records.append(_RecordPlan(sfs_id, payload, kind, object_type, object_name))
 
@@ -710,7 +1015,10 @@ def _serialize_sbnk(
     bank: _SampleBankSpec,
     waveform: _LoadedWaveform,
     *,
+    right_waveform: _LoadedWaveform | None,
     inactive_right_policy: str,
+    sample_bank_member: bool,
+    linked_program_numbers: Sequence[int],
 ) -> bytes:
     left = sbnk_contract.CurrentSbnkMemberSpec(
         sample_name=waveform.spec.name,
@@ -722,15 +1030,115 @@ def _serialize_sbnk(
         loop_start_frame_0x0f8=0,
         loop_length_frames_0x100=waveform.frames,
     )
-    payload = sbnk_contract.serialize_current_single_member_sbnk_payload(
-        bank_name=bank.name,
-        left=left,
-        inactive_right_policy=inactive_right_policy,
-        key_range_high_0x0e2=bank.key_high,
-        key_range_low_0x0e3=bank.key_low,
-        sample_level_0x116=bank.level,
+    if right_waveform is None:
+        payload = sbnk_contract.serialize_current_single_member_sbnk_payload(
+            bank_name=bank.name,
+            left=left,
+            inactive_right_policy=inactive_right_policy,
+            key_range_high_0x0e2=bank.key_high,
+            key_range_low_0x0e3=bank.key_low,
+            sample_level_0x116=bank.level,
+        )
+    else:
+        right = sbnk_contract.CurrentSbnkMemberSpec(
+            sample_name=right_waveform.spec.name,
+            smpl_link_id_0x078=right_waveform.spec.link_id,
+            root_key_0x0d6=bank.root_key,
+            sample_rate_0x0d8=right_waveform.sample_rate,
+            fine_tune_cents_0x0dc=DEFAULT_FINE_TUNE_CENTS,
+            wave_length_frames_0x0f0=right_waveform.frames,
+            loop_start_frame_0x0f8=0,
+            loop_length_frames_0x100=right_waveform.frames,
+        )
+        payload = sbnk_contract.serialize_current_two_member_sbnk_payload(
+            bank_name=bank.name,
+            left=left,
+            right=right,
+            key_range_high_0x0e2=bank.key_high,
+            key_range_low_0x0e3=bank.key_low,
+            sample_level_0x116=bank.level,
+        )
+    data = bytearray(payload[:SBNK_OBJECT_SIZE])
+    if sample_bank_member:
+        data[0x0D0] |= 0x01
+    for program_number in linked_program_numbers:
+        if program_number < 1 or program_number > 128:
+            raise ValueError(f"linked Program number is out of range: {program_number}")
+        word_offset = 0x0C0 + ((program_number - 1) // 32) * 4
+        word = int.from_bytes(data[word_offset : word_offset + 4], "big")
+        word |= 1 << ((program_number - 1) % 32)
+        _put_be32(data, word_offset, word)
+    return bytes(data)
+
+
+def _serialize_sbac(group: _SampleBankGroupSpec, member: _SampleBankSpec) -> bytes:
+    payload = bytearray(SBAC_PAYLOAD_SIZE)
+    payload[0 : len(OBJECT_MAGIC)] = OBJECT_MAGIC
+    payload[0x0C:0x10] = b"SBAC"
+    _put_be32(payload, 0x14, 4)
+    _put_be32(payload, 0x18, 0x1BC)
+    _put_be32(payload, 0x1C, 0x1E0)
+    payload[0x30:0x32] = b"\x11\x0c"
+    payload[0x32:0x42] = _ascii_field(group.name, 16)
+    payload[0x144] = 1
+    payload[0x14C:0x15C] = _ascii_field(member.name, 16)
+    return bytes(payload)
+
+
+def _serialize_prog(
+    program: _ProgramSpec,
+    *,
+    bank_names: dict[str, str],
+    group_names: dict[str, str],
+) -> bytes:
+    payload = bytearray(PROG_PAYLOAD_SIZE)
+    object_name = f"{program.number:03d}"
+    payload[0 : len(OBJECT_MAGIC)] = OBJECT_MAGIC
+    payload[0x0C:0x10] = b"PROG"
+    _put_be32(payload, 0x14, 4)
+    _put_be32(payload, 0x18, 0x2B0)
+    _put_be32(payload, 0x1C, 0x360)
+    payload[0x30:0x32] = b"\x14\x0c"
+    payload[0x32:0x42] = _ascii_field(object_name, 16)
+    payload[0x78:0x80] = _ascii_field(f"Pgm {object_name}", 8)
+    payload[0x80:0x98] = bytes.fromhex(
+        "0005ffff000000014000407f000000fe005a5a2778ff0002"
     )
-    return payload[:SBNK_OBJECT_SIZE]
+    for index, assignment in enumerate(program.assignments):
+        offset = 0x120 + index * 0x38
+        target_name = (
+            group_names[assignment.target_key]
+            if assignment.target_kind == "SBAC"
+            else bank_names[assignment.target_key]
+        )
+        payload[offset : offset + 0x38] = _serialize_prog_assignment(
+            target_name=target_name,
+            target_kind=assignment.target_kind,
+            receive_channel=assignment.receive_channel,
+        )
+    return bytes(payload)
+
+
+def _serialize_prog_assignment(
+    *,
+    target_name: str,
+    target_kind: str,
+    receive_channel: int,
+) -> bytes:
+    row = bytearray(0x38)
+    row[0x00:0x10] = _ascii_field(target_name, 16)
+    row[0x14] = 0x11 if target_kind == "SBAC" else 0x10
+    row[0x15] = receive_channel - 1
+    row[0x1D] = 0xFF
+    row[0x1E] = 0x7F
+    row[0x21] = 0x7F
+    row[0x23] = 0xFF
+    row[0x24] = 0xFF
+    row[0x28] = 0xFF
+    row[0x2D] = 0xFF
+    row[0x30] = 0xFF
+    row[0x33] = 0x01
+    return bytes(row)
 
 
 def _superblock_writes(size_bytes: int, plans: list[_PartitionPlan]) -> list[tuple[int, bytes]]:

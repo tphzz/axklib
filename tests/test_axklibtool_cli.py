@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import wave
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
 from axklib import cli as axklibtool
 from axklib import content_tree as axklib_content_tree
+from axklib.containers import load_sfs_objects
+from axklib.relationships import build_relationship_graph
 
 
 def _put_be16(buf: bytearray, offset: int, value: int) -> None:
@@ -37,6 +41,28 @@ def _write_standalone_smpl(path: Path) -> None:
     _put_be32(payload, 0x9A, 2)
     payload[0x200 : 0x200 + len(pcm_be)] = pcm_be
     path.write_bytes(payload)
+
+
+def _write_mono_wav(path: Path, samples: tuple[int, ...]) -> bytes:
+    pcm = b"".join(sample.to_bytes(2, "little", signed=True) for sample in samples)
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(44_100)
+        wav.writeframes(pcm)
+    return pcm
+
+
+def _read_mono_wav_pcm(path: Path) -> bytes:
+    with wave.open(str(path), "rb") as wav:
+        assert wav.getnchannels() == 1
+        assert wav.getsampwidth() == 2
+        assert wav.getframerate() == 44_100
+        return wav.readframes(wav.getnframes())
+
+
+def _generated_exact_export_pcm(logical_pcm: bytes) -> bytes:
+    return logical_pcm + logical_pcm[: min(len(logical_pcm), 8)]
 
 
 def test_help_output_is_available(capsys: pytest.CaptureFixture[str]) -> None:
@@ -175,6 +201,361 @@ def test_create_hds_supports_general_partition_geometry(
     assert output.stat().st_size == 6 * 1024 * 1024
     assert "partitions=5 objects=0 unused_tail_sectors=1" in captured.out
     assert "partition=4 name='hd5' start_sector=9831 sector_count=2456" in captured.out
+
+
+@pytest.mark.parametrize("partition_count", [1, 3, 8])
+def test_create_and_extract_hds_round_trips_logical_pcm_across_partition_counts(
+    tmp_path: Path,
+    partition_count: int,
+) -> None:
+    expected_pcm: list[bytes] = []
+    partitions: list[dict[str, object]] = []
+    for index in range(partition_count):
+        source_path = tmp_path / f"tone-{index}.wav"
+        samples = tuple((index + 1) * value for value in (0, 101, -203, 307, -409))
+        expected_pcm.append(_write_mono_wav(source_path, samples))
+        root_key = 48 + index
+        partitions.append(
+            {
+                "name": f"hd{index + 1}",
+                "volumes": [
+                    {
+                        "name": f"RoundTrip {index + 1}",
+                        "waveforms": [
+                            {
+                                "id": "tone",
+                                "name": f"Wave{index + 1}",
+                                "path": source_path.name,
+                                "root_key": root_key,
+                            }
+                        ],
+                        "sample_banks": [
+                            {
+                                "name": f"Bank{index + 1}",
+                                "waveform_id": "tone",
+                                "root_key": root_key,
+                                "key_low": root_key,
+                                "key_high": root_key,
+                                "level": 100,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "size_bytes": (2 + partition_count * 2046) * 512,
+                "partitions": partitions,
+            }
+        ),
+        encoding="utf-8",
+    )
+    image_path = tmp_path / "HD00_512_roundtrip.hds"
+    export_dir = tmp_path / "exports"
+
+    create_code = axklibtool.main(
+        ["create", "hds", str(manifest_path), "-o", str(image_path)]
+    )
+    extract_code = axklibtool.main(
+        ["extract", "wav", "file", "-o", str(export_dir), str(image_path)]
+    )
+
+    assert create_code == 0
+    assert extract_code == 0
+    exported_wavs = sorted(export_dir.rglob("*.wav"))
+    assert len(exported_wavs) == partition_count
+    exported_pcm = [_read_mono_wav_pcm(path) for path in exported_wavs]
+    assert sorted(exported_pcm) == sorted(_generated_exact_export_pcm(pcm) for pcm in expected_pcm)
+    assert sorted(pcm[: len(pcm) - 8] for pcm in exported_pcm) == sorted(expected_pcm)
+
+
+def test_create_and_extract_hds_manifest_renders_two_member_stereo_bank(
+    tmp_path: Path,
+) -> None:
+    left_pcm = _write_mono_wav(tmp_path / "tone-left.wav", (0, 1000, -1000, 2000, -2000))
+    right_pcm = _write_mono_wav(tmp_path / "tone-right.wav", (300, -300, 900, -900, 0))
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "size_bytes": 4 * 1024 * 1024,
+                "partitions": [
+                    {
+                        "name": "hd1",
+                        "volumes": [
+                            {
+                                "name": "Stereo Vol",
+                                "waveforms": [
+                                    {
+                                        "id": "left",
+                                        "name": "Stereo-L",
+                                        "path": "tone-left.wav",
+                                        "root_key": 60,
+                                    },
+                                    {
+                                        "id": "right",
+                                        "name": "Stereo-R",
+                                        "path": "tone-right.wav",
+                                        "root_key": 60,
+                                    },
+                                ],
+                                "sample_banks": [
+                                    {
+                                        "name": "Stereo Bank",
+                                        "waveform_id": "left",
+                                        "right_waveform_id": "right",
+                                        "root_key": 60,
+                                        "key_low": 48,
+                                        "key_high": 72,
+                                        "level": 96,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    image_path = tmp_path / "HD00_512_stereo.hds"
+    export_dir = tmp_path / "exports"
+
+    create_code = axklibtool.main(
+        ["create", "hds", str(manifest_path), "-o", str(image_path)]
+    )
+    extract_code = axklibtool.main(
+        ["extract", "wav", "file", "-o", str(export_dir), str(image_path)]
+    )
+
+    assert create_code == 0
+    assert extract_code == 0
+    physical_paths = sorted((export_dir / "_samples" / "physical").glob("*.wav"))
+    rendered_paths = sorted((export_dir / "_samples" / "rendered").glob("*.wav"))
+    assert len(physical_paths) == 2
+    assert len(rendered_paths) == 1
+    physical_pcm = sorted(_read_mono_wav_pcm(path) for path in physical_paths)
+    stored_left = _generated_exact_export_pcm(left_pcm)
+    stored_right = _generated_exact_export_pcm(right_pcm)
+    assert physical_pcm == sorted([stored_left, stored_right])
+    with wave.open(str(rendered_paths[0]), "rb") as rendered:
+        assert rendered.getnchannels() == 2
+        assert rendered.getsampwidth() == 2
+        assert rendered.getframerate() == 44_100
+        rendered_pcm = rendered.readframes(rendered.getnframes())
+    expected_interleaved = b"".join(
+        stored_left[offset : offset + 2] + stored_right[offset : offset + 2]
+        for offset in range(0, len(stored_left), 2)
+    )
+    assert rendered_pcm == expected_interleaved
+
+
+def test_create_hds_manifest_writes_hardware_profile_sbac_and_prog(tmp_path: Path) -> None:
+    _write_mono_wav(tmp_path / "tone.wav", (0, 1000, -1000, 2000, -2000))
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "size_bytes": 1024 * 1024,
+                "partitions": [
+                    {
+                        "name": "New Partition",
+                        "volumes": [
+                            {
+                                "name": "New Volume",
+                                "waveforms": [
+                                    {
+                                        "id": "pulse",
+                                        "name": "pulse 1",
+                                        "path": "tone.wav",
+                                        "root_key": 66,
+                                    }
+                                ],
+                                "sample_banks": [
+                                    {
+                                        "name": "JS01",
+                                        "waveform_id": "pulse",
+                                        "root_key": 66,
+                                        "key_low": 0,
+                                        "key_high": 127,
+                                        "level": 100,
+                                    },
+                                    {
+                                        "name": "JS02 *",
+                                        "waveform_id": "pulse",
+                                        "root_key": 66,
+                                        "key_low": 0,
+                                        "key_high": 127,
+                                        "level": 100,
+                                    },
+                                ],
+                                "sample_bank_groups": [
+                                    {"name": "AUDSB", "member_sample_bank": "JS01"}
+                                ],
+                                "programs": [
+                                    {
+                                        "number": 1,
+                                        "assignments": [
+                                            {
+                                                "sample_bank_group": "AUDSB",
+                                                "receive_channel": 1,
+                                            },
+                                            {
+                                                "sample_bank": "JS02 *",
+                                                "receive_channel": 2,
+                                            },
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    image_path = tmp_path / "HD00_512_sbac_prog.hds"
+
+    code = axklibtool.main(["create", "hds", str(manifest_path), "-o", str(image_path)])
+
+    assert code == 0
+    objects = load_sfs_objects(image_path)
+    assert Counter(str(item.object_type) for item in objects) == Counter(
+        {"SMPL": 1, "SBNK": 2, "SBAC": 1, "PROG": 1}
+    )
+    graph = build_relationship_graph(objects)
+    assert Counter(row.relationship_type for row in graph.relationships) == Counter(
+        {
+            "SBNK_LEFT_MEMBER_TO_SMPL": 2,
+            "SBAC_SLOT_TO_SBNK": 1,
+            "PROG_ASSIGNMENT_TO_SBAC": 1,
+            "PROG_ASSIGNMENT_TO_SBNK": 1,
+            "SBNK_PROGRAM_BITMAP_TO_PROG": 1,
+        }
+    )
+    assert all(row.quality == "Known" for row in graph.relationships)
+
+
+def test_create_and_extract_hds_preserves_uneven_multi_volume_object_topology(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    object_counts_by_partition = ((0,), (1, 3), (2,), (0, 1, 2), (4,))
+    expected_pcm: list[bytes] = []
+    expected_placements: Counter[tuple[int, str, str]] = Counter()
+    partitions: list[dict[str, object]] = []
+    for partition_index, volume_counts in enumerate(object_counts_by_partition):
+        volumes: list[dict[str, object]] = []
+        for volume_index, object_count in enumerate(volume_counts):
+            volume_name = f"P{partition_index + 1}V{volume_index + 1}"
+            waveforms: list[dict[str, object]] = []
+            sample_banks: list[dict[str, object]] = []
+            for object_index in range(object_count):
+                stem = f"p{partition_index}v{volume_index}o{object_index}"
+                source_path = tmp_path / f"{stem}.wav"
+                seed = 1 + partition_index * 20 + volume_index * 5 + object_index
+                expected_pcm.append(
+                    _write_mono_wav(
+                        source_path,
+                        (seed, seed * 101, seed * -103, seed * 107, seed * -109),
+                    )
+                )
+                root_key = 36 + seed
+                waveforms.append(
+                    {
+                        "id": stem,
+                        "name": f"W{partition_index}{volume_index}{object_index}",
+                        "path": source_path.name,
+                        "root_key": root_key,
+                    }
+                )
+                sample_banks.append(
+                    {
+                        "name": f"B{partition_index}{volume_index}{object_index}",
+                        "waveform_id": stem,
+                        "root_key": root_key,
+                        "key_low": root_key,
+                        "key_high": root_key,
+                        "level": 80 + object_index,
+                    }
+                )
+            expected_placements[(partition_index, volume_name, "waveform")] = object_count
+            expected_placements[(partition_index, volume_name, "sample_bank")] = object_count
+            volumes.append(
+                {
+                    "name": volume_name,
+                    "waveforms": waveforms,
+                    "sample_banks": sample_banks,
+                }
+            )
+        partitions.append({"name": f"hd{partition_index + 1}", "volumes": volumes})
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "size_bytes": 12 * 1024 * 1024,
+                "partitions": partitions,
+            }
+        ),
+        encoding="utf-8",
+    )
+    image_path = tmp_path / "HD00_512_topology.hds"
+    export_dir = tmp_path / "exports"
+
+    create_code = axklibtool.main(
+        ["create", "hds", str(manifest_path), "-o", str(image_path)]
+    )
+    extract_code = axklibtool.main(
+        ["extract", "wav", "file", "-o", str(export_dir), str(image_path)]
+    )
+
+    assert create_code == 0
+    assert extract_code == 0
+    exported_pcm = [_read_mono_wav_pcm(path) for path in export_dir.rglob("*.wav")]
+    assert sorted(exported_pcm) == sorted(
+        _generated_exact_export_pcm(pcm) for pcm in expected_pcm
+    )
+    assert sorted(pcm[: len(pcm) - 8] for pcm in exported_pcm) == sorted(expected_pcm)
+    capsys.readouterr()
+    info_code = axklibtool.main(["info", "--format", "json", str(image_path)])
+    info_output = json.loads(capsys.readouterr().out)
+    assert info_code == 0
+    actual_placements: Counter[tuple[int, str, str]] = Counter()
+    for partition_node in info_output["trees"][0]["roots"]:
+        partition_index = int(partition_node["node_id"].split(":")[1])
+        for volume_node in partition_node["children"]:
+            stack = list(volume_node["children"])
+            while stack:
+                node = stack.pop()
+                if node["node_type"] in {"waveform", "sample_bank"}:
+                    actual_placements[
+                        (partition_index, volume_node["display_name"], node["node_type"])
+                    ] += 1
+                stack.extend(node["children"])
+    assert actual_placements == expected_placements
+    objects = load_sfs_objects(image_path)
+    objects_by_key = {item.object_key: item for item in objects}
+    relationships = [
+        row
+        for row in build_relationship_graph(objects).relationships
+        if row.relationship_type == "SBNK_LEFT_MEMBER_TO_SMPL"
+    ]
+    assert len(relationships) == len(expected_pcm)
+    assert all(row.quality == "Known" for row in relationships)
+    assert all(
+        objects_by_key[row.source_key].partition_index
+        == objects_by_key[row.target_key].partition_index
+        and objects_by_key[row.source_key].name[1:] == objects_by_key[row.target_key].name[1:]
+        for row in relationships
+    )
 
 
 def test_create_hds_uses_standard_overwrite_policy(

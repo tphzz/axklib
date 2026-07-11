@@ -356,9 +356,10 @@ sampler object links.
 
 `axklib.write` provides an initial API for creating fresh HDS/SFS images from a
 small typed model. The current writer creates a new hard-disk image, partitions,
-volumes, current-format `SMPL` waveform objects, and direct single-member `SBNK`
-sample-bank objects. It does not modify existing images and does not require a
-template container image.
+volumes, current-format `SMPL` waveform objects, direct single-member `SBNK`
+sample-bank objects, equal-format two-member stereo `SBNK` objects, and one
+explicitly bounded one-member `SBAC` / Program-001 profile. It does not modify
+existing images and does not require a template container image.
 
 The first writer scope is intentionally narrow:
 
@@ -366,7 +367,8 @@ The first writer scope is intentionally narrow:
 - each generated partition is capped at `1_073_741_824` bytes;
 - WAV input must be mono, 16-bit PCM;
 - generated sampler objects are current `FSFSDEV3SPLX` `SMPL` and `SBNK` records;
-- generated `SBNK` objects link one waveform member by name and link ID;
+- generated `SBNK` objects link either one waveform member or a confirmed
+  left/right pair by name and link ID;
 - generated disk headers include the bounded superblock compatibility block,
   initialized sector-2 disk metadata, full primary and duplicate partition-header
   sectors for the supported hard-disk metadata profile, and the early
@@ -374,11 +376,21 @@ The first writer scope is intentionally narrow:
 - generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;
 - generated current `SMPL` object payloads use a `0x200` object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;
 - generated current `SBNK` object payloads use the current single-member sample-bank object span, populated default parameter/control block, and header fields for a normal sample bank that references one waveform object;
+- generated two-member stereo `SBNK` objects reference two physical mono SMPL
+  objects. The members must have matching 16-bit width, sample rate, and logical
+  frame count. Interleaved stereo is rendered only during export;
 - generated direct single-member `SBNK` objects include hardware-tested reserved
   Sample Parameter defaults at `SBNK+0x152..0x15b`. Yamaha labels the
   corresponding decimal Sample Parameter offsets `0170..0179` as reserved, but
   generated images need compatible values there for audible playback and normal
   tone.
+- the initial SBAC/PROG profile uses the general supported image geometry. A
+  partition containing this content has exactly one configured volume with one
+  mono group member and one matching direct mono control. Program `001` assigns
+  the group to receive channel `1` and the direct control to channel `2`.
+  Runtime handles, unused bank state, unused Program effect/controller blocks,
+  and unused Program tail state are zero; only the direct SBNK receives the
+  Program-001 relationship bitmap.
 
 Callers should treat this as a generated-image API, not as an image repair or
 mutation API. Use `axklib info`, `axklib validate`, and `axklib extract wav file`

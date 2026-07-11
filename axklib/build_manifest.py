@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from axklib.write import HdsImageBuilder, HdsWriteResult, WaveformRef
+from axklib.write import HdsImageBuilder, HdsWriteResult, SampleBankRef, WaveformRef
 
 HDS_BUILD_MANIFEST_SCHEMA_VERSION = "1.0"
 
@@ -24,6 +24,7 @@ class HdsManifestWaveform:
 class HdsManifestSampleBank:
     name: str
     waveform_id: str
+    right_waveform_id: str | None
     root_key: int
     key_low: int
     key_high: int
@@ -31,10 +32,31 @@ class HdsManifestSampleBank:
 
 
 @dataclass(frozen=True)
+class HdsManifestSampleBankGroup:
+    name: str
+    member_sample_bank: str
+
+
+@dataclass(frozen=True)
+class HdsManifestProgramAssignment:
+    target_kind: str
+    target_name: str
+    receive_channel: int
+
+
+@dataclass(frozen=True)
+class HdsManifestProgram:
+    number: int
+    assignments: tuple[HdsManifestProgramAssignment, ...]
+
+
+@dataclass(frozen=True)
 class HdsManifestVolume:
     name: str
     waveforms: tuple[HdsManifestWaveform, ...]
     sample_banks: tuple[HdsManifestSampleBank, ...]
+    sample_bank_groups: tuple[HdsManifestSampleBankGroup, ...]
+    programs: tuple[HdsManifestProgram, ...]
 
 
 @dataclass(frozen=True)
@@ -112,11 +134,16 @@ def _parse_sample_bank(value: object, context: str) -> HdsManifestSampleBank:
         row,
         context,
         required={"name", "waveform_id", "root_key", "key_low", "key_high"},
-        optional={"level"},
+        optional={"level", "right_waveform_id"},
     )
     return HdsManifestSampleBank(
         name=_string(row["name"], f"{context}.name"),
         waveform_id=_string(row["waveform_id"], f"{context}.waveform_id"),
+        right_waveform_id=(
+            _string(row["right_waveform_id"], f"{context}.right_waveform_id")
+            if "right_waveform_id" in row
+            else None
+        ),
         root_key=_integer(row["root_key"], f"{context}.root_key"),
         key_low=_integer(row["key_low"], f"{context}.key_low"),
         key_high=_integer(row["key_high"], f"{context}.key_high"),
@@ -124,9 +151,59 @@ def _parse_sample_bank(value: object, context: str) -> HdsManifestSampleBank:
     )
 
 
+def _parse_sample_bank_group(value: object, context: str) -> HdsManifestSampleBankGroup:
+    row = _mapping(value, context)
+    _fields(row, context, required={"name", "member_sample_bank"})
+    return HdsManifestSampleBankGroup(
+        name=_string(row["name"], f"{context}.name"),
+        member_sample_bank=_string(
+            row["member_sample_bank"], f"{context}.member_sample_bank"
+        ),
+    )
+
+
+def _parse_program_assignment(value: object, context: str) -> HdsManifestProgramAssignment:
+    row = _mapping(value, context)
+    _fields(
+        row,
+        context,
+        required={"receive_channel"},
+        optional={"sample_bank", "sample_bank_group"},
+    )
+    targets = [name for name in ("sample_bank", "sample_bank_group") if name in row]
+    if len(targets) != 1:
+        raise ValueError(
+            f"{context} must contain exactly one of sample_bank or sample_bank_group"
+        )
+    target_field = targets[0]
+    return HdsManifestProgramAssignment(
+        target_kind="SBNK" if target_field == "sample_bank" else "SBAC",
+        target_name=_string(row[target_field], f"{context}.{target_field}"),
+        receive_channel=_integer(row["receive_channel"], f"{context}.receive_channel"),
+    )
+
+
+def _parse_program(value: object, context: str) -> HdsManifestProgram:
+    row = _mapping(value, context)
+    _fields(row, context, required={"number", "assignments"})
+    assignments = tuple(
+        _parse_program_assignment(item, f"{context}.assignments[{index}]")
+        for index, item in enumerate(_list(row["assignments"], f"{context}.assignments"))
+    )
+    return HdsManifestProgram(
+        number=_integer(row["number"], f"{context}.number"),
+        assignments=assignments,
+    )
+
+
 def _parse_volume(value: object, context: str, base_dir: Path) -> HdsManifestVolume:
     row = _mapping(value, context)
-    _fields(row, context, required={"name", "waveforms", "sample_banks"})
+    _fields(
+        row,
+        context,
+        required={"name", "waveforms", "sample_banks"},
+        optional={"sample_bank_groups", "programs"},
+    )
     waveforms = tuple(
         _parse_waveform(item, f"{context}.waveforms[{index}]", base_dir)
         for index, item in enumerate(_list(row["waveforms"], f"{context}.waveforms"))
@@ -145,10 +222,57 @@ def _parse_volume(value: object, context: str, base_dir: Path) -> HdsManifestVol
                 f"{context}.sample_banks[{index}].waveform_id references unknown waveform "
                 f"{bank.waveform_id!r}"
             )
+        if bank.right_waveform_id is not None:
+            if bank.right_waveform_id not in known_waveforms:
+                raise ValueError(
+                    f"{context}.sample_banks[{index}].right_waveform_id references "
+                    f"unknown waveform {bank.right_waveform_id!r}"
+                )
+            if bank.right_waveform_id == bank.waveform_id:
+                raise ValueError(
+                    f"{context}.sample_banks[{index}] stereo members must be distinct"
+                )
+    bank_names = [bank.name for bank in sample_banks]
+    if len(bank_names) != len(set(bank_names)):
+        raise ValueError(f"{context}.sample_banks contains duplicate names")
+    sample_bank_groups = tuple(
+        _parse_sample_bank_group(item, f"{context}.sample_bank_groups[{index}]")
+        for index, item in enumerate(
+            _list(row.get("sample_bank_groups", []), f"{context}.sample_bank_groups")
+        )
+    )
+    group_names = [group.name for group in sample_bank_groups]
+    if len(group_names) != len(set(group_names)):
+        raise ValueError(f"{context}.sample_bank_groups contains duplicate names")
+    known_banks = set(bank_names)
+    for index, group in enumerate(sample_bank_groups):
+        if group.member_sample_bank not in known_banks:
+            raise ValueError(
+                f"{context}.sample_bank_groups[{index}].member_sample_bank references "
+                f"unknown sample bank {group.member_sample_bank!r}"
+            )
+    programs = tuple(
+        _parse_program(item, f"{context}.programs[{index}]")
+        for index, item in enumerate(_list(row.get("programs", []), f"{context}.programs"))
+    )
+    if len({program.number for program in programs}) != len(programs):
+        raise ValueError(f"{context}.programs contains duplicate numbers")
+    known_groups = set(group_names)
+    for program_index, program in enumerate(programs):
+        for assignment_index, assignment in enumerate(program.assignments):
+            known_targets = known_banks if assignment.target_kind == "SBNK" else known_groups
+            if assignment.target_name not in known_targets:
+                target_label = "sample bank" if assignment.target_kind == "SBNK" else "group"
+                raise ValueError(
+                    f"{context}.programs[{program_index}].assignments[{assignment_index}] "
+                    f"references unknown {target_label} {assignment.target_name!r}"
+                )
     return HdsManifestVolume(
         name=_string(row["name"], f"{context}.name"),
         waveforms=waveforms,
         sample_banks=sample_banks,
+        sample_bank_groups=sample_bank_groups,
+        programs=programs,
     )
 
 
@@ -219,6 +343,7 @@ def build_hds_from_manifest(
         for volume_spec in partition_spec.volumes:
             volume = partition.add_volume(volume_spec.name)
             waveform_refs: dict[str, WaveformRef] = {}
+            sample_bank_refs: dict[str, SampleBankRef] = {}
             for waveform_spec in volume_spec.waveforms:
                 waveform_refs[waveform_spec.id] = volume.add_waveform_from_wav(
                     name=waveform_spec.name,
@@ -226,14 +351,45 @@ def build_hds_from_manifest(
                     root_key=waveform_spec.root_key,
                 )
             for bank_spec in volume_spec.sample_banks:
-                volume.add_sample_bank(
-                    name=bank_spec.name,
-                    waveform=waveform_refs[bank_spec.waveform_id],
-                    root_key=bank_spec.root_key,
-                    key_low=bank_spec.key_low,
-                    key_high=bank_spec.key_high,
-                    level=bank_spec.level,
+                if bank_spec.right_waveform_id is None:
+                    sample_bank_refs[bank_spec.name] = volume.add_sample_bank(
+                        name=bank_spec.name,
+                        waveform=waveform_refs[bank_spec.waveform_id],
+                        root_key=bank_spec.root_key,
+                        key_low=bank_spec.key_low,
+                        key_high=bank_spec.key_high,
+                        level=bank_spec.level,
+                    )
+                else:
+                    sample_bank_refs[bank_spec.name] = volume.add_stereo_sample_bank(
+                        name=bank_spec.name,
+                        left_waveform=waveform_refs[bank_spec.waveform_id],
+                        right_waveform=waveform_refs[bank_spec.right_waveform_id],
+                        root_key=bank_spec.root_key,
+                        key_low=bank_spec.key_low,
+                        key_high=bank_spec.key_high,
+                        level=bank_spec.level,
+                    )
+            group_refs = {
+                group_spec.name: volume.add_sample_bank_group(
+                    name=group_spec.name,
+                    member=sample_bank_refs[group_spec.member_sample_bank],
                 )
+                for group_spec in volume_spec.sample_bank_groups
+            }
+            for program_spec in volume_spec.programs:
+                program = volume.add_program(number=program_spec.number)
+                for assignment in program_spec.assignments:
+                    if assignment.target_kind == "SBAC":
+                        program.assign_sample_bank_group(
+                            group_refs[assignment.target_name],
+                            receive_channel=assignment.receive_channel,
+                        )
+                    else:
+                        program.assign_sample_bank(
+                            sample_bank_refs[assignment.target_name],
+                            receive_channel=assignment.receive_channel,
+                        )
     return builder.write(output)
 
 
@@ -242,6 +398,9 @@ __all__ = [
     "HdsBuildManifest",
     "HdsManifestPartition",
     "HdsManifestSampleBank",
+    "HdsManifestSampleBankGroup",
+    "HdsManifestProgram",
+    "HdsManifestProgramAssignment",
     "HdsManifestVolume",
     "HdsManifestWaveform",
     "build_hds_from_manifest",

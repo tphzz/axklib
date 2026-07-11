@@ -868,6 +868,51 @@ def serialize_current_single_member_sbnk_payload(
     return bytes(payload)
 
 
+def serialize_current_two_member_sbnk_payload(
+    *,
+    bank_name: str,
+    left: CurrentSbnkMemberSpec,
+    right: CurrentSbnkMemberSpec,
+    instrument_name: str = "",
+    key_range_high_0x0e2: int | None = None,
+    key_range_low_0x0e3: int | None = None,
+    sample_level_0x116: int | None = None,
+) -> bytes:
+    """Serialize a generated current two-member bank with explicit defaults."""
+    payload = bytearray(
+        serialize_current_single_member_sbnk_payload(
+            bank_name=bank_name,
+            left=left,
+            instrument_name=instrument_name,
+            inactive_right_policy=CURRENT_SBNK_SINGLE_MEMBER_INACTIVE_RIGHT_POLICY_ZERO,
+            loop_cache_policy=CURRENT_SBNK_LOOP_CACHE_POLICY_PRESERVE_TEMPLATE,
+            key_range_high_0x0e2=key_range_high_0x0e2,
+            key_range_low_0x0e3=key_range_low_0x0e3,
+            sample_level_0x116=sample_level_0x116,
+        )
+    )
+    write_current_sbnk_member(
+        payload,
+        member=right,
+        sample_name_offset=0x088,
+        link_offset=0x0A4,
+        root_key_offset=0x0D7,
+        sample_rate_offset=0x0DA,
+        fine_tune_offset=0x0DD,
+        pitch_base_offset=0x0E0,
+        wave_length_offset=0x0F4,
+        loop_start_offset=0x0FC,
+        loop_length_offset=0x104,
+    )
+    apply_current_sbnk_loop_cache_policy(
+        payload,
+        left=left,
+        right=right,
+        loop_cache_policy=CURRENT_SBNK_LOOP_CACHE_POLICY_TWO_MEMBER_FORWARD_TO_ZERO,
+    )
+    return bytes(payload)
+
+
 def write_current_sbnk_member(
     data: bytearray,
     *,

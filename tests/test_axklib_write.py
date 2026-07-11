@@ -14,13 +14,15 @@ from axklib.write import MAX_IMAGE_SIZE_BYTES, HdsImageBuilder
 
 
 def _write_mono_wav(
-    path: Path, samples: tuple[int, ...] = (0, 1000, -1000, 32767, -32768)
+    path: Path,
+    samples: tuple[int, ...] = (0, 1000, -1000, 32767, -32768),
+    sample_rate: int = 44_100,
 ) -> bytes:
     pcm = b"".join(sample.to_bytes(2, "little", signed=True) for sample in samples)
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)
-        wav.setframerate(44_100)
+        wav.setframerate(sample_rate)
         wav.writeframes(pcm)
     return pcm
 
@@ -376,6 +378,163 @@ def test_hds_writer_creates_parseable_current_smpl_and_sbnk(tmp_path: Path) -> N
     assert relationships[0].basis == "sbnk-member-link+name"
 
 
+def test_hds_writer_creates_hardware_profile_sbac_and_prog(tmp_path: Path) -> None:
+    source_wav = tmp_path / "tone.wav"
+    _write_mono_wav(source_wav, sample_rate=48_000)
+    image_path = tmp_path / "HD00_512_writer_sbac_prog.hds"
+
+    builder = HdsImageBuilder(size_bytes=1024 * 1024)
+    volume = builder.add_partition("New Partition").add_volume("New Volume")
+    waveform = volume.add_waveform_from_wav(name="pulse 1", path=source_wav, root_key=66)
+    grouped_bank = volume.add_sample_bank(
+        name="JS01",
+        waveform=waveform,
+        root_key=66,
+        key_low=0,
+        key_high=127,
+        level=100,
+    )
+    direct_bank = volume.add_sample_bank(
+        name="JS02 *",
+        waveform=waveform,
+        root_key=66,
+        key_low=0,
+        key_high=127,
+        level=100,
+    )
+    group = volume.add_sample_bank_group(name="AUDSB", member=grouped_bank)
+    program = volume.add_program(number=1)
+    program.assign_sample_bank_group(group, receive_channel=1)
+    program.assign_sample_bank(direct_bank, receive_channel=2)
+
+    result = builder.write(image_path)
+
+    assert [(item.object_type, item.name) for item in result.objects] == [
+        ("SMPL", "pulse 1"),
+        ("SBNK", "JS01"),
+        ("SBNK", "JS02 *"),
+        ("SBAC", "AUDSB"),
+        ("PROG", "001"),
+    ]
+    data = image_path.read_bytes()
+    sbnk_grouped = _record_payload(data, _index_record(data, 10))
+    sbnk_direct = _record_payload(data, _index_record(data, 11))
+    sbac = _record_payload(data, _index_record(data, 12))
+    prog = _record_payload(data, _index_record(data, 13))
+
+    assert sbnk_grouped[0x0D0] == 0x03
+    assert _be32(sbnk_grouped, 0x0C0) == 0
+    assert sbnk_direct[0x0D0] == 0x02
+    assert _be32(sbnk_direct, 0x0C0) == 1
+
+    assert len(sbac) == 0x210
+    assert sbac[0x0C:0x10] == b"SBAC"
+    assert sbac[0x32:0x42] == b"AUDSB           "
+    assert sbac[0x42:0x144] == b"\x00" * (0x144 - 0x42)
+    assert sbac[0x144] == 1
+    assert sbac[0x14C:0x15C] == b"JS01            "
+    assert sbac[0x15C:0x210] == b"\x00" * (0x210 - 0x15C)
+
+    assert len(prog) == 0x390
+    assert prog[0x0C:0x10] == b"PROG"
+    assert prog[0x32:0x42] == b"001             "
+    assert prog[0x42:0x78] == b"\x00" * (0x78 - 0x42)
+    assert prog[0x78:0x80] == b"Pgm 001 "
+    assert prog[0x8B] == 127
+    assert prog[0x8E] == 0
+    assert prog[0x98:0x120] == b"\x00" * (0x120 - 0x98)
+    assert prog[0x120:0x130] == b"AUDSB           "
+    assert _be32(prog, 0x130) == 0
+    assert prog[0x134:0x136] == b"\x11\x00"
+    assert prog[0x158:0x168] == b"JS02 *          "
+    assert _be32(prog, 0x168) == 0
+    assert prog[0x16C:0x16E] == b"\x10\x01"
+    assert prog[0x190:] == b"\x00" * (0x390 - 0x190)
+
+    objects = load_sfs_objects(image_path)
+    graph = build_relationship_graph(objects)
+    relation_types = [row.relationship_type for row in graph.relationships]
+    assert relation_types.count("SBNK_LEFT_MEMBER_TO_SMPL") == 2
+    assert relation_types.count("SBAC_SLOT_TO_SBNK") == 1
+    assert relation_types.count("PROG_ASSIGNMENT_TO_SBAC") == 1
+    assert relation_types.count("PROG_ASSIGNMENT_TO_SBNK") == 1
+    assert relation_types.count("SBNK_PROGRAM_BITMAP_TO_PROG") == 1
+    assert all(row.quality == "Known" for row in graph.relationships)
+    assert not graph.ambiguous()
+
+
+def test_hds_writer_allows_general_geometry_for_proven_sbac_prog_topology(
+    tmp_path: Path,
+) -> None:
+    source_wav = tmp_path / "tone.wav"
+    _write_mono_wav(source_wav)
+    builder = HdsImageBuilder(size_bytes=4 * 1024 * 1024)
+    volume = builder.add_partition("hd1").add_volume("WriterVol")
+    waveform = volume.add_waveform_from_wav(name="Tone", path=source_wav, root_key=60)
+    grouped = volume.add_sample_bank(
+        name="Grouped",
+        waveform=waveform,
+        root_key=60,
+        key_low=0,
+        key_high=127,
+    )
+    direct = volume.add_sample_bank(
+        name="Direct",
+        waveform=waveform,
+        root_key=60,
+        key_low=0,
+        key_high=127,
+    )
+    group = volume.add_sample_bank_group(name="Group", member=grouped)
+    program = volume.add_program()
+    program.assign_sample_bank_group(group, receive_channel=1)
+    program.assign_sample_bank(direct, receive_channel=2)
+
+    result = builder.write(tmp_path / "HD00_512_writer_sbac_prog_4m.hds")
+
+    assert result.size_bytes == 4 * 1024 * 1024
+    assert [(item.object_type, item.name) for item in result.objects][-2:] == [
+        ("SBAC", "Group"),
+        ("PROG", "001"),
+    ]
+
+
+def test_hds_writer_rejects_multiple_sbac_prog_volumes_in_one_partition(
+    tmp_path: Path,
+) -> None:
+    source_wav = tmp_path / "tone.wav"
+    _write_mono_wav(source_wav)
+    builder = HdsImageBuilder(size_bytes=4 * 1024 * 1024)
+    partition = builder.add_partition("hd1")
+
+    for suffix in ("A", "B"):
+        volume = partition.add_volume(f"Writer {suffix}")
+        waveform = volume.add_waveform_from_wav(
+            name=f"Tone {suffix}", path=source_wav, root_key=60
+        )
+        grouped = volume.add_sample_bank(
+            name=f"Grouped {suffix}",
+            waveform=waveform,
+            root_key=60,
+            key_low=0,
+            key_high=127,
+        )
+        direct = volume.add_sample_bank(
+            name=f"Direct {suffix}",
+            waveform=waveform,
+            root_key=60,
+            key_low=0,
+            key_high=127,
+        )
+        group = volume.add_sample_bank_group(name=f"Group {suffix}", member=grouped)
+        program = volume.add_program()
+        program.assign_sample_bank_group(group, receive_channel=1)
+        program.assign_sample_bank(direct, receive_channel=2)
+
+    with pytest.raises(ValueError, match="one configured volume per partition"):
+        builder.plan()
+
+
 def test_hds_writer_can_zero_single_member_inactive_right_lane(tmp_path: Path) -> None:
     source_wav = tmp_path / "tone.wav"
     _write_mono_wav(source_wav)
@@ -557,6 +716,100 @@ def test_hds_writer_creates_two_waveforms_and_banks_with_distinct_links(tmp_path
         ("p0:sfs11", "p0:sfs9", "Known", "sbnk-member-link+name"),
         ("p0:sfs12", "p0:sfs10", "Known", "sbnk-member-link+name"),
     ]
+
+
+def test_hds_writer_creates_two_member_stereo_bank_with_confirmed_links(
+    tmp_path: Path,
+) -> None:
+    source_left = tmp_path / "stereo-left.wav"
+    source_right = tmp_path / "stereo-right.wav"
+    _write_mono_wav(source_left, samples=(0, 1000, -1000, 2000, -2000))
+    _write_mono_wav(source_right, samples=(300, -300, 900, -900, 0))
+    image_path = tmp_path / "HD00_512_writer_stereo.hds"
+    builder = HdsImageBuilder(size_bytes=4 * 1024 * 1024)
+    volume = builder.add_partition("hd1").add_volume("Stereo Vol")
+    left = volume.add_waveform_from_wav(name="Stereo-L", path=source_left, root_key=60)
+    right = volume.add_waveform_from_wav(name="Stereo-R", path=source_right, root_key=60)
+    volume.add_stereo_sample_bank(
+        name="Stereo Bank",
+        left_waveform=left,
+        right_waveform=right,
+        root_key=60,
+        key_low=48,
+        key_high=72,
+        level=96,
+    )
+
+    result = builder.write(image_path)
+
+    assert [(item.object_type, item.name, item.sfs_id) for item in result.objects] == [
+        ("SMPL", "Stereo-L", 9),
+        ("SMPL", "Stereo-R", 10),
+        ("SBNK", "Stereo Bank", 11),
+    ]
+    objects = load_sfs_objects(image_path)
+    sbnk = next(item for item in objects if item.type == "SBNK")
+    parsed = sbnk_contract.parse_current_sbnk_contract_payload(sbnk.payload)
+    assert parsed.bank_topology == "two-member"
+    assert parsed.left.sample_name == "Stereo-L"
+    assert parsed.right is not None
+    assert parsed.right.sample_name == "Stereo-R"
+    assert parsed.left.sample_rate == parsed.right.sample_rate == 44_100
+    assert parsed.left.wave_length_frames == parsed.right.wave_length_frames == 5
+    assert parsed.key_range_low_0x0e3 == 48
+    assert parsed.key_range_high_0x0e2 == 72
+    assert parsed.sample_level_0x116 == 96
+    assert sbnk.payload[0x0E5] == 1
+    assert sbnk.payload[0x0EA:0x0EC] == b"\x00\x00"
+    assert sbnk.payload[0x0EE:0x0F0] == b"\x00\x00"
+    relationships = [
+        row
+        for row in build_relationship_graph(objects).relationships
+        if row.relationship_type
+        in {"SBNK_LEFT_MEMBER_TO_SMPL", "SBNK_RIGHT_MEMBER_TO_SMPL"}
+    ]
+    assert [(row.relationship_type, row.target_key, row.quality) for row in relationships] == [
+        ("SBNK_LEFT_MEMBER_TO_SMPL", "p0:sfs9", "Known"),
+        ("SBNK_RIGHT_MEMBER_TO_SMPL", "p0:sfs10", "Known"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("right_samples", "right_sample_rate", "message"),
+    [
+        ((0, 1, 2, 3), 44_100, "matching logical frame counts"),
+        ((0, 1, 2, 3, 4), 48_000, "matching sample rates"),
+    ],
+)
+def test_hds_writer_rejects_mismatched_stereo_members(
+    tmp_path: Path,
+    right_samples: tuple[int, ...],
+    right_sample_rate: int,
+    message: str,
+) -> None:
+    source_left = tmp_path / "left.wav"
+    source_right = tmp_path / "right.wav"
+    _write_mono_wav(source_left, samples=(0, 1, 2, 3, 4))
+    _write_mono_wav(
+        source_right,
+        samples=right_samples,
+        sample_rate=right_sample_rate,
+    )
+    builder = HdsImageBuilder(size_bytes=4 * 1024 * 1024)
+    volume = builder.add_partition("hd1").add_volume("Stereo Vol")
+    left = volume.add_waveform_from_wav(name="Left", path=source_left, root_key=60)
+    right = volume.add_waveform_from_wav(name="Right", path=source_right, root_key=60)
+    volume.add_stereo_sample_bank(
+        name="Stereo Bank",
+        left_waveform=left,
+        right_waveform=right,
+        root_key=60,
+        key_low=0,
+        key_high=127,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        builder.plan()
 
 
 def test_hds_writer_creates_two_volumes_without_cross_linking(tmp_path: Path) -> None:
