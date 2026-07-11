@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from axklib.audio.importing import import_sampler_audio
 from axklib.build_manifest import (
     HdsManifestVolume,
     parse_hds_manifest_volume,
@@ -32,10 +33,22 @@ from axklib.write import (
     MIN_IMAGE_SIZE_BYTES,
     ROOT_DIRECTORY_ID,
     SECTOR_SIZE,
+    SMPL_LINK_ID_BASE,
     HdsImageBuilder,
     _directory_entry,
     _index_record,
+    _LoadedWaveform,
+    _ProgramAssignmentSpec,
+    _ProgramSpec,
     _RecordPlan,
+    _SampleBankGroupSpec,
+    _SampleBankSpec,
+    _serialize_prog,
+    _serialize_sbac,
+    _serialize_smpl,
+    _stored_smpl_pcm,
+    _swap_16bit_words,
+    _WaveformSpec,
 )
 
 ALTERATION_MANIFEST_SCHEMA_VERSION = "1.0"
@@ -68,6 +81,58 @@ class InsertSampleBankSpec:
 
 
 @dataclass(frozen=True)
+class InsertWaveformSpec:
+    """Audio import and physical waveform names for an existing volume."""
+
+    path: Path
+    waveform_names: tuple[str, ...]
+    root_key: int
+    target_sample_rate: int | None
+
+
+@dataclass(frozen=True)
+class AudioImportSummary:
+    """Conversion summary for one queued audio import."""
+
+    source_path: str
+    source_format: str
+    source_subtype: str
+    source_channels: int
+    source_sample_rate: int
+    output_sample_rate: int
+    output_frames: int
+    resampled: bool
+    quantized: bool
+    split_stereo: bool
+    clipped_samples: int
+
+
+@dataclass(frozen=True)
+class InsertSampleBankGroupSpec:
+    """A new SBAC group referencing existing sample banks."""
+
+    name: str
+    member_sample_banks: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class InsertProgramAssignmentSpec:
+    """One Program assignment to an SBAC group or direct SBNK."""
+
+    target_kind: str
+    target_name: str
+    receive_channel: int
+
+
+@dataclass(frozen=True)
+class InsertProgramSpec:
+    """A new Program number and its ordered assignments."""
+
+    number: int
+    assignments: tuple[InsertProgramAssignmentSpec, ...]
+
+
+@dataclass(frozen=True)
 class AlterationOperation:
     """One validated operation in an alteration transaction."""
 
@@ -79,6 +144,11 @@ class AlterationOperation:
     sample_bank_name: str | None = None
     sample_bank: InsertSampleBankSpec | None = None
     waveform_name: str | None = None
+    waveform: InsertWaveformSpec | None = None
+    sample_bank_group_name: str | None = None
+    sample_bank_group: InsertSampleBankGroupSpec | None = None
+    program_number: int | None = None
+    program: InsertProgramSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +172,7 @@ class OperationReport:
     inserted_sfs_ids: tuple[int, ...] = ()
     freed_clusters: int = 0
     allocated_clusters: int = 0
+    audio_import: AudioImportSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -345,6 +416,208 @@ def _parse_delete_waveform_operation(
         partition_index=partition_index,
         volume_name=_string(item["volume_name"], f"{context}.volume_name"),
         waveform_name=_string(item["waveform_name"], f"{context}.waveform_name"),
+    )
+
+
+def _parse_insert_waveform_operation(
+    operation_id: str,
+    partition_index: int | OperationReference,
+    item: Mapping[str, object],
+    context: str,
+    base_dir: Path,
+) -> AlterationOperation:
+    expected = {"id", "type", "partition_index", "volume_name", "audio"}
+    if set(item) != expected:
+        raise ValueError(f"{context} fields must be exactly {', '.join(sorted(expected))}")
+    audio_context = f"{context}.audio"
+    audio = _mapping(item["audio"], audio_context)
+    required = {"path", "waveform_names", "root_key"}
+    optional = {"target_sample_rate"}
+    missing = required - audio.keys()
+    unknown = audio.keys() - required - optional
+    if missing:
+        raise ValueError(f"{audio_context} is missing required fields: {', '.join(sorted(missing))}")
+    if unknown:
+        raise ValueError(f"{audio_context} has unknown fields: {', '.join(sorted(unknown))}")
+    raw_names = audio["waveform_names"]
+    if not isinstance(raw_names, list) or len(raw_names) not in {1, 2}:
+        raise ValueError(f"{audio_context}.waveform_names must contain one or two names")
+    waveform_names = tuple(
+        _string(name, f"{audio_context}.waveform_names[{index}]")
+        for index, name in enumerate(raw_names)
+    )
+    if len(set(waveform_names)) != len(waveform_names):
+        raise ValueError(f"{audio_context}.waveform_names must be distinct")
+    for name in waveform_names:
+        try:
+            raw_name = name.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise ValueError(f"waveform name must contain ASCII text: {name!r}") from exc
+        if len(raw_name) > 16:
+            raise ValueError(f"waveform name must fit 16 ASCII bytes: {name!r}")
+    source_path = Path(_string(audio["path"], f"{audio_context}.path"))
+    if not source_path.is_absolute():
+        source_path = base_dir / source_path
+    target_sample_rate = (
+        _integer(audio["target_sample_rate"], f"{audio_context}.target_sample_rate")
+        if "target_sample_rate" in audio
+        else None
+    )
+    return AlterationOperation(
+        id=operation_id,
+        type="insert_waveform",
+        partition_index=partition_index,
+        volume_name=_string(item["volume_name"], f"{context}.volume_name"),
+        waveform=InsertWaveformSpec(
+            path=source_path,
+            waveform_names=waveform_names,
+            root_key=_midi_value(audio["root_key"], f"{audio_context}.root_key"),
+            target_sample_rate=target_sample_rate,
+        ),
+    )
+
+
+def _program_number(value: object, context: str) -> int:
+    result = _integer(value, context)
+    if result < 1 or result > 128:
+        raise ValueError(f"{context} must be between 1 and 128")
+    return result
+
+
+def _parse_delete_program_operation(
+    operation_id: str,
+    partition_index: int | OperationReference,
+    item: Mapping[str, object],
+    context: str,
+    _base_dir: Path,
+) -> AlterationOperation:
+    expected = {"id", "type", "partition_index", "volume_name", "program_number"}
+    if set(item) != expected:
+        raise ValueError(f"{context} fields must be exactly {', '.join(sorted(expected))}")
+    return AlterationOperation(
+        id=operation_id,
+        type="delete_program",
+        partition_index=partition_index,
+        volume_name=_string(item["volume_name"], f"{context}.volume_name"),
+        program_number=_program_number(item["program_number"], f"{context}.program_number"),
+    )
+
+
+def _parse_delete_sbac_operation(
+    operation_id: str,
+    partition_index: int | OperationReference,
+    item: Mapping[str, object],
+    context: str,
+    _base_dir: Path,
+) -> AlterationOperation:
+    expected = {
+        "id",
+        "type",
+        "partition_index",
+        "volume_name",
+        "sample_bank_group_name",
+    }
+    if set(item) != expected:
+        raise ValueError(f"{context} fields must be exactly {', '.join(sorted(expected))}")
+    return AlterationOperation(
+        id=operation_id,
+        type="delete_sbac",
+        partition_index=partition_index,
+        volume_name=_string(item["volume_name"], f"{context}.volume_name"),
+        sample_bank_group_name=_string(
+            item["sample_bank_group_name"], f"{context}.sample_bank_group_name"
+        ),
+    )
+
+
+def _parse_insert_sbac_operation(
+    operation_id: str,
+    partition_index: int | OperationReference,
+    item: Mapping[str, object],
+    context: str,
+    _base_dir: Path,
+) -> AlterationOperation:
+    expected = {"id", "type", "partition_index", "volume_name", "sample_bank_group"}
+    if set(item) != expected:
+        raise ValueError(f"{context} fields must be exactly {', '.join(sorted(expected))}")
+    group_context = f"{context}.sample_bank_group"
+    group = _mapping(item["sample_bank_group"], group_context)
+    if set(group) != {"name", "member_sample_banks"}:
+        raise ValueError(f"{group_context} fields must be exactly member_sample_banks, name")
+    raw_members = group["member_sample_banks"]
+    if not isinstance(raw_members, list) or not 1 <= len(raw_members) <= 3:
+        raise ValueError(f"{group_context}.member_sample_banks must contain 1..3 names")
+    members = tuple(
+        _string(value, f"{group_context}.member_sample_banks[{index}]")
+        for index, value in enumerate(raw_members)
+    )
+    if len(set(members)) != len(members):
+        raise ValueError(f"{group_context}.member_sample_banks must be distinct")
+    return AlterationOperation(
+        id=operation_id,
+        type="insert_sbac",
+        partition_index=partition_index,
+        volume_name=_string(item["volume_name"], f"{context}.volume_name"),
+        sample_bank_group=InsertSampleBankGroupSpec(
+            name=_string(group["name"], f"{group_context}.name"),
+            member_sample_banks=members,
+        ),
+    )
+
+
+def _parse_insert_program_operation(
+    operation_id: str,
+    partition_index: int | OperationReference,
+    item: Mapping[str, object],
+    context: str,
+    _base_dir: Path,
+) -> AlterationOperation:
+    expected = {"id", "type", "partition_index", "volume_name", "program"}
+    if set(item) != expected:
+        raise ValueError(f"{context} fields must be exactly {', '.join(sorted(expected))}")
+    program_context = f"{context}.program"
+    program = _mapping(item["program"], program_context)
+    if set(program) != {"number", "assignments"}:
+        raise ValueError(f"{program_context} fields must be exactly assignments, number")
+    raw_assignments = program["assignments"]
+    if not isinstance(raw_assignments, list) or len(raw_assignments) != 2:
+        raise ValueError(f"{program_context}.assignments must contain exactly two rows")
+    assignments: list[InsertProgramAssignmentSpec] = []
+    for index, value in enumerate(raw_assignments):
+        assignment_context = f"{program_context}.assignments[{index}]"
+        assignment = _mapping(value, assignment_context)
+        target_fields = {"sample_bank_group", "sample_bank"}.intersection(assignment)
+        if len(target_fields) != 1 or set(assignment) != target_fields | {"receive_channel"}:
+            raise ValueError(
+                f"{assignment_context} requires receive_channel and exactly one target"
+            )
+        target_field = next(iter(target_fields))
+        channel = _integer(assignment["receive_channel"], f"{assignment_context}.receive_channel")
+        if channel < 1 or channel > 16:
+            raise ValueError(f"{assignment_context}.receive_channel must be between 1 and 16")
+        assignments.append(
+            InsertProgramAssignmentSpec(
+                target_kind="SBAC" if target_field == "sample_bank_group" else "SBNK",
+                target_name=_string(assignment[target_field], f"{assignment_context}.{target_field}"),
+                receive_channel=channel,
+            )
+        )
+    if [(row.target_kind, row.receive_channel) for row in assignments] != [
+        ("SBAC", 1),
+        ("SBNK", 2),
+    ]:
+        raise ValueError(
+            f"{program_context}.assignments must be SBAC/channel 1 then SBNK/channel 2"
+        )
+    return AlterationOperation(
+        id=operation_id,
+        type="insert_program",
+        partition_index=partition_index,
+        volume_name=_string(item["volume_name"], f"{context}.volume_name"),
+        program=InsertProgramSpec(
+            number=_program_number(program["number"], f"{program_context}.number"),
+            assignments=tuple(assignments),
+        ),
     )
 
 
@@ -1183,6 +1456,520 @@ def _insert_sbnk(state: _TransactionState, operation: AlterationOperation) -> Op
     )
 
 
+@_register("insert_waveform", parser=_parse_insert_waveform_operation)
+def _insert_waveform(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
+    partition_index = _resolve_partition_index(state, operation.partition_index)
+    partition = state.partitions.get(partition_index)
+    if partition is None:
+        raise ValueError(f"partition index {partition_index} does not exist")
+    assert operation.volume_name is not None
+    assert operation.waveform is not None
+    spec = operation.waveform
+    directory = _volume_category(partition, operation.volume_name, "SMPL")
+    directory_chunks = _directory_chunks(directory)
+    existing_names = {
+        _entry_name(chunk) for chunk in directory_chunks if _entry_name(chunk) not in {".", ".."}
+    }
+    duplicates = sorted(existing_names.intersection(spec.waveform_names))
+    if duplicates:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} already contains "
+            f"waveform(s): {', '.join(repr(name) for name in duplicates)}"
+        )
+    used_link_ids: set[int] = set()
+    for chunk in directory_chunks:
+        if _entry_name(chunk) in {".", ".."}:
+            continue
+        record = partition.records.get(_entry_link(chunk))
+        if record is None or _object_type(record) != "SMPL" or record.extent_warnings:
+            raise ValueError(
+                f"partition {partition.index} volume {operation.volume_name!r} has an "
+                "unresolved existing SMPL record; link-ID allocation is unsafe"
+            )
+        metadata = current_objects.decode_current_smpl_metadata(record.payload)
+        if not metadata.smpl_link_id_0x078:
+            raise ValueError(
+                f"partition {partition.index} volume {operation.volume_name!r} waveform "
+                f"{_entry_name(chunk)!r} has no current SMPL link ID"
+            )
+        used_link_ids.add(metadata.smpl_link_id_0x078)
+    link_ids: list[int] = []
+    candidate_link_id = SMPL_LINK_ID_BASE
+    while len(link_ids) < len(spec.waveform_names):
+        if candidate_link_id not in used_link_ids:
+            link_ids.append(candidate_link_id)
+            used_link_ids.add(candidate_link_id)
+        candidate_link_id += 0x100
+
+    audio = import_sampler_audio(
+        spec.path,
+        expected_channels=len(spec.waveform_names),
+        target_sample_rate=spec.target_sample_rate,
+    )
+    new_ids = _free_sfs_ids(partition, len(spec.waveform_names))
+    allocated = 0
+    for channel, (name, link_id, new_id) in enumerate(
+        zip(spec.waveform_names, link_ids, new_ids, strict=True)
+    ):
+        pcm = audio.pcm_channels[channel]
+        waveform_spec = _WaveformSpec(
+            key=name,
+            name=name,
+            path=spec.path,
+            root_key=spec.root_key,
+            link_id=link_id,
+            expected_channels=len(spec.waveform_names),
+            source_channel=channel,
+            target_sample_rate=spec.target_sample_rate,
+        )
+        loaded = _LoadedWaveform(
+            spec=waveform_spec,
+            sample_rate=audio.output_sample_rate,
+            frames=audio.output_frames,
+            pcm_little_endian=pcm,
+            stored_big_endian=_stored_smpl_pcm(_swap_16bit_words(pcm)),
+        )
+        _record, record_clusters = _allocate_new_record(
+            partition,
+            _RecordPlan(new_id, _serialize_smpl(loaded), "object", "SMPL", name),
+        )
+        allocated += record_clusters
+        directory_chunks.append(
+            bytearray(_directory_entry(name, new_id, fixed_name_width=16))
+        )
+    _replace_directory_payload(partition, directory, b"".join(directory_chunks))
+    return OperationReport(
+        id=operation.id,
+        type=operation.type,
+        partition_index=partition.index,
+        volume_name=operation.volume_name,
+        object_name=";".join(spec.waveform_names),
+        inserted_sfs_ids=tuple(new_ids),
+        allocated_clusters=allocated,
+        audio_import=AudioImportSummary(
+            source_path=str(audio.source_path),
+            source_format=audio.source_format,
+            source_subtype=audio.source_subtype,
+            source_channels=audio.source_channels,
+            source_sample_rate=audio.source_sample_rate,
+            output_sample_rate=audio.output_sample_rate,
+            output_frames=audio.output_frames,
+            resampled=audio.resampled,
+            quantized=audio.quantized,
+            split_stereo=audio.source_channels == 2,
+            clipped_samples=audio.clipped_samples,
+        ),
+    )
+
+
+def _category_objects(
+    partition: _PartitionState,
+    volume_name: str,
+    category_name: str,
+    object_type: str,
+) -> list[tuple[bytearray, _StoredRecord]]:
+    directory = _volume_category(partition, volume_name, category_name)
+    result: list[tuple[bytearray, _StoredRecord]] = []
+    for chunk in _directory_chunks(directory):
+        if _entry_name(chunk) in {".", ".."}:
+            continue
+        record = partition.records.get(_entry_link(chunk))
+        if record is None or record.extent_warnings or _object_type(record) != object_type:
+            raise ValueError(
+                f"partition {partition.index} volume {volume_name!r} has an unresolved "
+                f"{object_type} entry {_entry_name(chunk)!r}"
+            )
+        result.append((chunk, record))
+    return result
+
+
+def _replace_object_payload(
+    partition: _PartitionState, record: _StoredRecord, payload: bytes
+) -> None:
+    if len(payload) != len(record.payload):
+        raise ValueError("fixed-size object metadata update changed payload size")
+    record.payload = payload
+    partition.changed_ids.add(record.sfs_id)
+
+
+def _sbnk_program_bit(payload: bytes, program_number: int) -> bool:
+    word_offset = 0x0C0 + ((program_number - 1) // 32) * 4
+    if len(payload) < word_offset + 4:
+        raise ValueError("SBNK payload is too short for its Program-link bitmap")
+    word = int.from_bytes(payload[word_offset : word_offset + 4], "big")
+    return bool(word & (1 << ((program_number - 1) % 32)))
+
+
+def _set_sbnk_program_bit(
+    partition: _PartitionState,
+    record: _StoredRecord,
+    program_number: int,
+    enabled: bool,
+) -> None:
+    data = bytearray(record.payload)
+    word_offset = 0x0C0 + ((program_number - 1) // 32) * 4
+    mask = 1 << ((program_number - 1) % 32)
+    word = int.from_bytes(data[word_offset : word_offset + 4], "big")
+    word = word | mask if enabled else word & ~mask
+    data[word_offset : word_offset + 4] = word.to_bytes(4, "big")
+    _replace_object_payload(partition, record, bytes(data))
+
+
+def _set_sbnk_group_flag(
+    partition: _PartitionState, record: _StoredRecord, enabled: bool
+) -> None:
+    data = bytearray(record.payload)
+    if len(data) <= 0x0D0:
+        raise ValueError(f"SBNK SFS ID {record.sfs_id} is too short for its group flag")
+    data[0x0D0] = data[0x0D0] | 0x01 if enabled else data[0x0D0] & ~0x01
+    _replace_object_payload(partition, record, bytes(data))
+
+
+def _sbnk_group_flag(payload: bytes) -> bool:
+    if len(payload) <= 0x0D0:
+        raise ValueError("SBNK payload is too short for its sample-bank-group flag")
+    return bool(payload[0x0D0] & 0x01)
+
+
+@_register("delete_program", parser=_parse_delete_program_operation)
+def _delete_program(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
+    partition_index = _resolve_partition_index(state, operation.partition_index)
+    partition = state.partitions.get(partition_index)
+    if partition is None:
+        raise ValueError(f"partition index {partition_index} does not exist")
+    assert operation.volume_name is not None
+    assert operation.program_number is not None
+    program_name = f"{operation.program_number:03d}"
+    directory, program, _entry = _category_object(
+        partition, operation.volume_name, "PROG", program_name, "PROG"
+    )
+    assignments = [
+        assignment
+        for assignment in current_parameters.iter_prog_assignments(program.payload)
+        if assignment.name
+    ]
+    direct_records: list[_StoredRecord] = []
+    for assignment in assignments:
+        if assignment.expected_category != "SBNK":
+            continue
+        _bank_dir, bank, _bank_entry = _category_object(
+            partition,
+            operation.volume_name,
+            "SBNK",
+            assignment.name,
+            "SBNK",
+        )
+        direct_records.append(bank)
+    bit_records = [
+        record
+        for _chunk, record in _category_objects(
+            partition, operation.volume_name, "SBNK", "SBNK"
+        )
+        if _sbnk_program_bit(record.payload, operation.program_number)
+    ]
+    if {record.sfs_id for record in direct_records} != {record.sfs_id for record in bit_records}:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} Program "
+            f"{program_name} direct assignments do not match SBNK Program-link bitmaps"
+        )
+    for bank in direct_records:
+        _set_sbnk_program_bit(partition, bank, operation.program_number, False)
+    chunks = [
+        chunk
+        for chunk in _directory_chunks(directory)
+        if not (_entry_name(chunk) == program_name and _entry_link(chunk) == program.sfs_id)
+    ]
+    _replace_directory_payload(partition, directory, b"".join(chunks))
+    freed = _release_record(partition, program)
+    state.known_object_edges = [
+        edge
+        for edge in state.known_object_edges
+        if not (edge[0] == partition.index and program.sfs_id in edge[1:])
+    ]
+    return OperationReport(
+        id=operation.id,
+        type=operation.type,
+        partition_index=partition.index,
+        volume_name=operation.volume_name,
+        object_name=program_name,
+        removed_sfs_ids=(program.sfs_id,),
+        freed_clusters=freed,
+    )
+
+
+def _programs_referencing_group(
+    partition: _PartitionState, volume_name: str, group_name: str
+) -> list[str]:
+    references: list[str] = []
+    for chunk, program in _category_objects(partition, volume_name, "PROG", "PROG"):
+        if any(
+            assignment.expected_category == "SBAC" and assignment.name == group_name
+            for assignment in current_parameters.iter_prog_assignments(program.payload)
+        ):
+            references.append(_entry_name(chunk))
+    return references
+
+
+@_register("delete_sbac", parser=_parse_delete_sbac_operation)
+def _delete_sbac(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
+    partition_index = _resolve_partition_index(state, operation.partition_index)
+    partition = state.partitions.get(partition_index)
+    if partition is None:
+        raise ValueError(f"partition index {partition_index} does not exist")
+    assert operation.volume_name is not None
+    assert operation.sample_bank_group_name is not None
+    directory, group, _entry = _category_object(
+        partition,
+        operation.volume_name,
+        "SBAC",
+        operation.sample_bank_group_name,
+        "SBAC",
+    )
+    program_refs = _programs_referencing_group(
+        partition, operation.volume_name, operation.sample_bank_group_name
+    )
+    if program_refs:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank group "
+            f"{operation.sample_bank_group_name!r} is referenced by Program(s) "
+            f"{', '.join(program_refs)}"
+        )
+    _slot_count, _max_slots, slots = current_parameters.iter_sbac_slots(group.payload)
+    members: list[_StoredRecord] = []
+    for slot in slots:
+        _bank_dir, bank, _bank_entry = _category_object(
+            partition, operation.volume_name, "SBNK", slot.name, "SBNK"
+        )
+        members.append(bank)
+    for chunk, other_group in _category_objects(
+        partition, operation.volume_name, "SBAC", "SBAC"
+    ):
+        if other_group.sfs_id == group.sfs_id:
+            continue
+        _count, _maximum, other_slots = current_parameters.iter_sbac_slots(other_group.payload)
+        shared = {slot.name for slot in slots}.intersection(slot.name for slot in other_slots)
+        if shared:
+            raise ValueError(
+                f"partition {partition.index} volume {operation.volume_name!r} group "
+                f"{_entry_name(chunk)!r} shares member(s): {', '.join(sorted(shared))}"
+            )
+    for bank in members:
+        if not _sbnk_group_flag(bank.payload):
+            raise ValueError(
+                f"partition {partition.index} volume {operation.volume_name!r} member SBNK "
+                f"SFS ID {bank.sfs_id} is missing its grouped flag"
+            )
+        _set_sbnk_group_flag(partition, bank, False)
+    chunks = [
+        chunk
+        for chunk in _directory_chunks(directory)
+        if not (
+            _entry_name(chunk) == operation.sample_bank_group_name
+            and _entry_link(chunk) == group.sfs_id
+        )
+    ]
+    _replace_directory_payload(partition, directory, b"".join(chunks))
+    freed = _release_record(partition, group)
+    state.known_object_edges = [
+        edge
+        for edge in state.known_object_edges
+        if not (edge[0] == partition.index and group.sfs_id in edge[1:])
+    ]
+    return OperationReport(
+        id=operation.id,
+        type=operation.type,
+        partition_index=partition.index,
+        volume_name=operation.volume_name,
+        object_name=operation.sample_bank_group_name,
+        removed_sfs_ids=(group.sfs_id,),
+        freed_clusters=freed,
+    )
+
+
+@_register("insert_sbac", parser=_parse_insert_sbac_operation)
+def _insert_sbac(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
+    partition_index = _resolve_partition_index(state, operation.partition_index)
+    partition = state.partitions.get(partition_index)
+    if partition is None:
+        raise ValueError(f"partition index {partition_index} does not exist")
+    assert operation.volume_name is not None
+    assert operation.sample_bank_group is not None
+    spec = operation.sample_bank_group
+    directory = _volume_category(partition, operation.volume_name, "SBAC")
+    if any(_entry_name(chunk) == spec.name for chunk in _directory_chunks(directory)):
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} already contains "
+            f"sample bank group {spec.name!r}"
+        )
+    members: dict[str, _StoredRecord] = {}
+    for name in spec.member_sample_banks:
+        _bank_dir, bank, _bank_entry = _category_object(
+            partition, operation.volume_name, "SBNK", name, "SBNK"
+        )
+        members[name] = bank
+    existing_group_members = {
+        slot.name
+        for _chunk, group in _category_objects(partition, operation.volume_name, "SBAC", "SBAC")
+        for slot in current_parameters.iter_sbac_slots(group.payload)[2]
+    }
+    already_grouped = sorted(existing_group_members.intersection(spec.member_sample_banks))
+    if already_grouped:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} sample bank(s) "
+            f"already belong to a group: {', '.join(already_grouped)}"
+        )
+    for name, bank in members.items():
+        decoded = current_parameters.decode_current_sbnk_members(bank.payload)
+        if decoded.right_slot_present:
+            raise ValueError(
+                f"partition {partition.index} volume {operation.volume_name!r} sample bank "
+                f"{name!r} is a two-member SBNK; this SBAC profile requires mono members"
+            )
+        if _sbnk_group_flag(bank.payload):
+            raise ValueError(
+                f"partition {partition.index} volume {operation.volume_name!r} sample bank "
+                f"{name!r} already has its grouped flag set"
+            )
+    group_spec = _SampleBankGroupSpec(
+        key=spec.name,
+        name=spec.name,
+        member_bank_keys=spec.member_sample_banks,
+    )
+    bank_specs = {
+        name: _SampleBankSpec(name, name, "", None, 0, 0, 127, 127)
+        for name in spec.member_sample_banks
+    }
+    new_id = _free_sfs_ids(partition, 1)[0]
+    group_record, allocated = _allocate_new_record(
+        partition,
+        _RecordPlan(
+            new_id,
+            _serialize_sbac(group_spec, bank_specs),
+            "object",
+            "SBAC",
+            spec.name,
+        ),
+    )
+    for bank in members.values():
+        _set_sbnk_group_flag(partition, bank, True)
+        state.known_object_edges.append((partition.index, group_record.sfs_id, bank.sfs_id))
+    chunks = _directory_chunks(directory)
+    chunks.append(bytearray(_directory_entry(spec.name, new_id, fixed_name_width=16)))
+    _replace_directory_payload(partition, directory, b"".join(chunks))
+    return OperationReport(
+        id=operation.id,
+        type=operation.type,
+        partition_index=partition.index,
+        volume_name=operation.volume_name,
+        object_name=spec.name,
+        inserted_sfs_ids=(new_id,),
+        allocated_clusters=allocated,
+    )
+
+
+@_register("insert_program", parser=_parse_insert_program_operation)
+def _insert_program(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
+    partition_index = _resolve_partition_index(state, operation.partition_index)
+    partition = state.partitions.get(partition_index)
+    if partition is None:
+        raise ValueError(f"partition index {partition_index} does not exist")
+    assert operation.volume_name is not None
+    assert operation.program is not None
+    spec = operation.program
+    program_name = f"{spec.number:03d}"
+    directory = _volume_category(partition, operation.volume_name, "PROG")
+    if any(_entry_name(chunk) == program_name for chunk in _directory_chunks(directory)):
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} already contains "
+            f"Program {program_name}"
+        )
+    group_assignment, direct_assignment = spec.assignments
+    _group_dir, group, _group_entry = _category_object(
+        partition,
+        operation.volume_name,
+        "SBAC",
+        group_assignment.target_name,
+        "SBAC",
+    )
+    _bank_dir, direct_bank, _bank_entry = _category_object(
+        partition,
+        operation.volume_name,
+        "SBNK",
+        direct_assignment.target_name,
+        "SBNK",
+    )
+    for _chunk, existing_program in _category_objects(
+        partition, operation.volume_name, "PROG", "PROG"
+    ):
+        assignments = current_parameters.iter_prog_assignments(existing_program.payload)
+        if any(
+            assignment.expected_category == "SBAC"
+            and assignment.name == group_assignment.target_name
+            for assignment in assignments
+        ):
+            raise ValueError(
+                f"sample bank group {group_assignment.target_name!r} is already assigned"
+            )
+        if any(
+            assignment.expected_category == "SBNK"
+            and assignment.name == direct_assignment.target_name
+            for assignment in assignments
+        ):
+            raise ValueError(
+                f"direct sample bank {direct_assignment.target_name!r} is already assigned"
+            )
+    if _sbnk_program_bit(direct_bank.payload, spec.number):
+        raise ValueError(
+            f"direct sample bank {direct_assignment.target_name!r} already links Program "
+            f"{program_name}"
+        )
+    program_spec = _ProgramSpec(
+        number=spec.number,
+        assignments=[
+            _ProgramAssignmentSpec(
+                target_key=assignment.target_name,
+                target_kind=assignment.target_kind,
+                receive_channel=assignment.receive_channel,
+            )
+            for assignment in spec.assignments
+        ],
+    )
+    new_id = _free_sfs_ids(partition, 1)[0]
+    program_record, allocated = _allocate_new_record(
+        partition,
+        _RecordPlan(
+            new_id,
+            _serialize_prog(
+                program_spec,
+                bank_names={direct_assignment.target_name: direct_assignment.target_name},
+                group_names={group_assignment.target_name: group_assignment.target_name},
+            ),
+            "object",
+            "PROG",
+            program_name,
+        ),
+    )
+    _set_sbnk_program_bit(partition, direct_bank, spec.number, True)
+    chunks = _directory_chunks(directory)
+    chunks.append(bytearray(_directory_entry(program_name, new_id, fixed_name_width=16)))
+    _replace_directory_payload(partition, directory, b"".join(chunks))
+    state.known_object_edges.extend(
+        [
+            (partition.index, program_record.sfs_id, group.sfs_id),
+            (partition.index, program_record.sfs_id, direct_bank.sfs_id),
+        ]
+    )
+    return OperationReport(
+        id=operation.id,
+        type=operation.type,
+        partition_index=partition.index,
+        volume_name=operation.volume_name,
+        object_name=program_name,
+        inserted_sfs_ids=(new_id,),
+        allocated_clusters=allocated,
+    )
+
+
 def _logical_waveform_orphan_report(state: _TransactionState) -> WaveformOrphanReport:
     waveforms: list[_CurrentObjectInput] = []
     banks: list[_CurrentObjectInput] = []
@@ -1440,10 +2227,15 @@ def alter_hds(
 
 __all__ = [
     "ALTERATION_MANIFEST_SCHEMA_VERSION",
+    "AudioImportSummary",
     "AlterationManifest",
     "AlterationOperation",
     "AlterationResult",
+    "InsertProgramAssignmentSpec",
+    "InsertProgramSpec",
     "InsertSampleBankSpec",
+    "InsertSampleBankGroupSpec",
+    "InsertWaveformSpec",
     "OperationReport",
     "OperationReference",
     "alter_hds",

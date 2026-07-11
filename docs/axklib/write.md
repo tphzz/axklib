@@ -273,10 +273,11 @@ uv run axklib extract wav file .\HD00_512_writer_test.hds -o .\writer-wavs
 
 `axklib alter hds` executes a versioned, ordered transaction against an
 existing HDS image. The current operation set supports deleting and inserting
-complete volumes and deleting or inserting individual sample banks. Inserted
-volumes use the same volume schema and audio conversion behavior as fresh-image
-build manifests. Sample-bank insertion references physical waveform objects
-that already exist in the selected volume; it does not duplicate their PCM.
+complete volumes, physical waveforms, sample banks, sample-bank groups, and
+Programs. Inserted volumes use the same volume schema and audio conversion
+behavior as fresh-image build manifests. Sample-bank insertion references
+physical waveform objects that already exist in the selected volume; it does
+not duplicate their PCM.
 
 Omit `-o` to parse, resolve, allocate, and validate the transaction without
 writing an image:
@@ -356,6 +357,37 @@ allocation; this version does not relocate the root directory.
 
 ### Sample-bank operations
 
+Insert one mono or stereo audio source into an existing volume's physical
+waveform category:
+
+```json
+{
+  "id": "insert-audio",
+  "type": "insert_waveform",
+  "partition_index": 0,
+  "volume_name": "Drums",
+  "audio": {
+    "path": "audio/new-snare.flac",
+    "waveform_names": ["New Snare Wave"],
+    "root_key": 60,
+    "target_sample_rate": 44100
+  }
+}
+```
+
+One waveform name requires mono source audio. Two distinct names require stereo
+source audio and create independent left/right SMPL records. WAV, FLAC, AIFF,
+and other formats supported by libsndfile use the same PCM conversion,
+documented-rate preservation, soxr VHQ resampling, deterministic quantization,
+stereo splitting, stored-tail, and SMPL serialization rules as fresh-image
+writing. Relative audio paths resolve from the transaction manifest.
+
+The operation chooses the lowest unused current SMPL link IDs in the volume,
+the lowest free SFS IDs, and first-fit payload extents. Its result includes an
+audio conversion summary. A following `insert_sbnk` operation in the same
+transaction can reference the new `waveform_names`; no intermediate image is
+required.
+
 Delete one sample bank by exact partition, volume, and sampler-visible bank
 name:
 
@@ -401,6 +433,85 @@ count. The new SBNK takes its link IDs, sample rate, frame count, fine tune, and
 loop window from those current SMPL records. Bank root key, key range, and level
 come from the transaction. Duplicate bank names and unresolved waveform names
 are rejected before output is written.
+
+### Program and sample-bank-group operations
+
+Remove a Program before removing an SBAC group that it assigns:
+
+```json
+{
+  "id": "delete-program",
+  "type": "delete_program",
+  "partition_index": 0,
+  "volume_name": "Keys",
+  "program_number": 1
+}
+```
+
+Program deletion requires an exact `PROG` object named from the three-digit
+Program number. Its direct SBNK assignments must exactly match the same
+Program's link bit across every SBNK in the volume. The operation clears those
+direct-bank bits before removing the Program directory entry, index record, and
+allocation. A mismatch is treated as unresolved consistency and rejects the
+transaction.
+
+After all assigning Programs are gone, remove a group by its sampler-visible
+name:
+
+```json
+{
+  "id": "delete-group",
+  "type": "delete_sbac",
+  "partition_index": {"operation_ref": "delete-program"},
+  "volume_name": "Keys",
+  "sample_bank_group_name": "Key Group"
+}
+```
+
+Group deletion rejects raw Program references, missing member banks, shared
+membership with another SBAC, or missing grouped flags. It clears the grouped
+flag on every exact member SBNK before removing the SBAC object. The SBNKs and
+their waveform data remain present, so later queued operations may retain,
+delete, or regroup them.
+
+Reconstruct the group and Program in dependency order:
+
+```json
+{
+  "id": "insert-group",
+  "type": "insert_sbac",
+  "partition_index": 0,
+  "volume_name": "Keys",
+  "sample_bank_group": {
+    "name": "Rebuilt Group",
+    "member_sample_banks": ["Member C3", "Member D3"]
+  }
+}
+```
+
+```json
+{
+  "id": "insert-program",
+  "type": "insert_program",
+  "partition_index": {"operation_ref": "insert-group"},
+  "volume_name": "Keys",
+  "program": {
+    "number": 1,
+    "assignments": [
+      {"sample_bank_group": "Rebuilt Group", "receive_channel": 1},
+      {"sample_bank": "Direct C3", "receive_channel": 2}
+    ]
+  }
+}
+```
+
+SBAC insertion accepts one through three distinct, currently ungrouped mono
+SBNKs and sets their grouped flags. Program insertion currently implements the
+hardware-proven profile of exactly two assignments in this order: one SBAC on
+receive channel 1, then one direct SBNK on receive channel 2. It writes the
+direct SBNK Program-link bit and rejects duplicate numbers, missing targets,
+stale link bits, or targets already assigned by another Program. Broader
+Program assignment shapes are not implied by this profile.
 
 ### Waveform deletion
 

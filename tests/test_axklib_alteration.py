@@ -4,10 +4,15 @@ import hashlib
 import wave
 from pathlib import Path
 
+import numpy as np
 import pytest
+import soundfile as sf
 
 from axklib.alteration import alter_hds, parse_alteration_manifest
+from axklib.audio import decode_waveform
+from axklib.audio.importing import import_sampler_audio
 from axklib.containers import load_sfs_objects, sfs_dump, sfs_inventory
+from axklib.parameters.current import decode_current_sbnk_members
 from axklib.relationships import build_relationship_graph
 from axklib.waveform_orphans import (
     WAVEFORM_STATUS_KNOWN_UNREFERENCED,
@@ -95,6 +100,14 @@ def _orphan_source(tmp_path: Path) -> Path:
         name="Used Bank", waveform=used, root_key=60, key_low=0, key_high=127
     )
     output = tmp_path / "orphans.hds"
+    builder.write(output)
+    return output
+
+
+def _empty_volume_source(tmp_path: Path, name: str = "Imports") -> Path:
+    builder = HdsImageBuilder(size_bytes=8 * 1024 * 1024)
+    builder.add_partition("hd1").add_volume(name)
+    output = tmp_path / f"{name}.hds"
     builder.write(output)
     return output
 
@@ -513,6 +526,23 @@ def test_insert_sbnk_builds_two_member_bank_from_existing_waveforms(tmp_path: Pa
     assert len(member_edges) == 2
     assert all(row.quality == "Known" for row in member_edges)
 
+    group_transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "insert-group",
+                "type": "insert_sbac",
+                "partition_index": 0,
+                "volume_name": "Stereo",
+                "sample_bank_group": {
+                    "name": "Stereo Group",
+                    "member_sample_banks": ["Stereo Bank"],
+                },
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="SBAC profile requires mono members"):
+        alter_hds(output, group_transaction)
+
 
 def test_insert_sbnk_rejects_duplicate_bank_and_missing_waveform(tmp_path: Path) -> None:
     source = _referenced_bank_source(tmp_path)
@@ -540,6 +570,281 @@ def test_insert_sbnk_rejects_duplicate_bank_and_missing_waveform(tmp_path: Path)
     missing = parse_alteration_manifest(_manifest(missing_operation))
     with pytest.raises(ValueError, match="requires exactly one SMPL"):
         alter_hds(source, missing)
+
+
+def test_delete_program_clears_direct_bank_bitmap_and_preserves_group(tmp_path: Path) -> None:
+    source = _referenced_bank_source(tmp_path)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-program",
+                "type": "delete_program",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "program_number": 1,
+            }
+        )
+    )
+    output = tmp_path / "program-deleted.hds"
+
+    result = alter_hds(source, transaction, output_path=output)
+
+    objects = load_sfs_objects(output)
+    names = {item.name for item in objects}
+    assert "001" not in names
+    assert {"Group", "Member A", "Member B", "Direct"}.issubset(names)
+    direct = next(item for item in objects if item.name == "Direct")
+    assert decode_current_sbnk_members(direct.payload).linked_program_numbers == ()
+    assert result.operations[0].object_name == "001"
+
+
+def test_delete_sbac_rejects_program_reference(tmp_path: Path) -> None:
+    source = _referenced_bank_source(tmp_path)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-group",
+                "type": "delete_sbac",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_group_name": "Group",
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match=r"referenced by Program\(s\) 001"):
+        alter_hds(source, transaction)
+
+
+def test_ordered_program_then_sbac_delete_clears_member_flags(tmp_path: Path) -> None:
+    source = _referenced_bank_source(tmp_path)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-program",
+                "type": "delete_program",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "program_number": 1,
+            },
+            {
+                "id": "delete-group",
+                "type": "delete_sbac",
+                "partition_index": {"operation_ref": "delete-program"},
+                "volume_name": "Banks",
+                "sample_bank_group_name": "Group",
+            },
+        )
+    )
+    output = tmp_path / "organization-deleted.hds"
+
+    result = alter_hds(source, transaction, output_path=output)
+
+    objects = load_sfs_objects(output)
+    names = {item.name for item in objects}
+    assert "001" not in names
+    assert "Group" not in names
+    for name in ("Member A", "Member B"):
+        bank = next(item for item in objects if item.name == name)
+        flags = decode_current_sbnk_members(bank.payload).member_parameters.sample_flags_0x0d0
+        assert flags is not None
+        assert flags & 0x01 == 0
+    assert [row.object_name for row in result.operations] == ["001", "Group"]
+
+
+def test_insert_sbac_then_program_reconstructs_relationships_and_flags(
+    tmp_path: Path,
+) -> None:
+    source = _referenced_bank_source(tmp_path)
+    remove = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-program",
+                "type": "delete_program",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "program_number": 1,
+            },
+            {
+                "id": "delete-group",
+                "type": "delete_sbac",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_group_name": "Group",
+            },
+        )
+    )
+    stripped = tmp_path / "organization-stripped.hds"
+    alter_hds(source, remove, output_path=stripped)
+    insert = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "insert-group",
+                "type": "insert_sbac",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_group": {
+                    "name": "Rebuilt Group",
+                    "member_sample_banks": ["Member A", "Member B"],
+                },
+            },
+            {
+                "id": "insert-program",
+                "type": "insert_program",
+                "partition_index": {"operation_ref": "insert-group"},
+                "volume_name": "Banks",
+                "program": {
+                    "number": 1,
+                        "assignments": [
+                            {
+                                "sample_bank_group": "Rebuilt Group",
+                                "receive_channel": 1,
+                            },
+                            {
+                                "sample_bank": "Direct",
+                                "receive_channel": 2,
+                            },
+                    ],
+                },
+            },
+        )
+    )
+    output = tmp_path / "organization-rebuilt.hds"
+
+    result = alter_hds(stripped, insert, output_path=output)
+
+    objects = load_sfs_objects(output)
+    by_name = {item.name: item for item in objects}
+    assert {"001", "Rebuilt Group", "Member A", "Member B", "Direct"}.issubset(by_name)
+    direct = decode_current_sbnk_members(by_name["Direct"].payload)
+    assert direct.linked_program_numbers == (1,)
+    for name in ("Member A", "Member B"):
+        flags = decode_current_sbnk_members(
+            by_name[name].payload
+        ).member_parameters.sample_flags_0x0d0
+        assert flags is not None
+        assert flags & 0x01 == 1
+    graph = build_relationship_graph(objects)
+    names_by_key = {item.object_key: item.name for item in objects}
+    known_targets = {
+        (names_by_key[row.source_key], names_by_key[row.target_key])
+        for row in graph.relationships
+        if row.quality == "Known"
+        and row.source_key in names_by_key
+        and row.target_key in names_by_key
+    }
+    assert ("Rebuilt Group", "Member A") in known_targets
+    assert ("Rebuilt Group", "Member B") in known_targets
+    assert ("001", "Rebuilt Group") in known_targets
+    assert ("001", "Direct") in known_targets
+    assert [row.object_name for row in result.operations] == ["Rebuilt Group", "001"]
+
+
+def test_single_transaction_replaces_program_and_group_organization(tmp_path: Path) -> None:
+    source = _referenced_bank_source(tmp_path)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-program",
+                "type": "delete_program",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "program_number": 1,
+            },
+            {
+                "id": "delete-group",
+                "type": "delete_sbac",
+                "partition_index": {"operation_ref": "delete-program"},
+                "volume_name": "Banks",
+                "sample_bank_group_name": "Group",
+            },
+            {
+                "id": "insert-group",
+                "type": "insert_sbac",
+                "partition_index": {"operation_ref": "delete-group"},
+                "volume_name": "Banks",
+                "sample_bank_group": {
+                    "name": "Replacement",
+                    "member_sample_banks": ["Member A", "Member B"],
+                },
+            },
+            {
+                "id": "insert-program",
+                "type": "insert_program",
+                "partition_index": {"operation_ref": "insert-group"},
+                "volume_name": "Banks",
+                "program": {
+                    "number": 1,
+                    "assignments": [
+                        {"sample_bank_group": "Replacement", "receive_channel": 1},
+                        {"sample_bank": "Direct", "receive_channel": 2},
+                    ],
+                },
+            },
+        )
+    )
+    output = tmp_path / "organization-replaced.hds"
+
+    result = alter_hds(source, transaction, output_path=output)
+
+    objects = load_sfs_objects(output)
+    names = {item.name for item in objects}
+    assert "Group" not in names
+    assert {"001", "Replacement", "Member A", "Member B", "Direct"}.issubset(names)
+    assert [row.type for row in result.operations] == [
+        "delete_program",
+        "delete_sbac",
+        "insert_sbac",
+        "insert_program",
+    ]
+
+
+def test_insert_sbac_rejects_existing_group_member_and_program_requires_group(
+    tmp_path: Path,
+) -> None:
+    source = _referenced_bank_source(tmp_path)
+    duplicate_member = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "insert-group",
+                "type": "insert_sbac",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "sample_bank_group": {
+                    "name": "Other Group",
+                    "member_sample_banks": ["Member A"],
+                },
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="already belong to a group"):
+        alter_hds(source, duplicate_member)
+
+    missing_group = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "insert-program",
+                "type": "insert_program",
+                "partition_index": 0,
+                "volume_name": "Banks",
+                "program": {
+                    "number": 2,
+                        "assignments": [
+                            {
+                                "sample_bank_group": "Missing Group",
+                                "receive_channel": 1,
+                            },
+                            {
+                                "sample_bank": "Unused",
+                                "receive_channel": 2,
+                            },
+                    ],
+                },
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="requires exactly one SBAC named 'Missing Group'"):
+        alter_hds(source, missing_group)
 
 
 def test_delete_waveform_accepts_only_known_orphan_and_leaves_payload_bytes(
@@ -683,3 +988,173 @@ def test_delete_waveform_rejects_ambiguous_partition_identity(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="is ambiguous_or_unresolved"):
         alter_hds(source, transaction)
+
+
+@pytest.mark.parametrize(
+    ("extension", "file_format", "subtype", "source_rate", "target_rate"),
+    [
+        ("wav", "WAV", "PCM_16", 44_100, None),
+        ("flac", "FLAC", "PCM_24", 32_000, None),
+        ("aiff", "AIFF", "PCM_24", 88_200, 44_100),
+    ],
+)
+def test_insert_waveform_imports_wav_flac_and_aiff(
+    tmp_path: Path,
+    extension: str,
+    file_format: str,
+    subtype: str,
+    source_rate: int,
+    target_rate: int | None,
+) -> None:
+    source = _empty_volume_source(tmp_path)
+    audio_path = tmp_path / f"source.{extension}"
+    frames = np.linspace(-0.5, 0.5, 64, dtype=np.float64)
+    sf.write(audio_path, frames, source_rate, format=file_format, subtype=subtype)
+    audio: dict[str, object] = {
+        "path": audio_path.name,
+        "waveform_names": ["Imported Wave"],
+        "root_key": 65,
+    }
+    if target_rate is not None:
+        audio["target_sample_rate"] = target_rate
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "insert-wave",
+                "type": "insert_waveform",
+                "partition_index": 0,
+                "volume_name": "Imports",
+                "audio": audio,
+            }
+        ),
+        base_dir=tmp_path,
+    )
+    output = tmp_path / f"inserted-{extension}.hds"
+
+    result = alter_hds(source, transaction, output_path=output)
+
+    waveform = next(item for item in load_sfs_objects(output) if item.name == "Imported Wave")
+    decoded = decode_waveform(waveform)
+    expected_rate = target_rate or source_rate
+    assert decoded.sample_rate == expected_rate
+    assert decoded.root_key == 65
+    assert result.operations[0].audio_import is not None
+    assert result.operations[0].audio_import.source_format == file_format
+    assert result.operations[0].audio_import.output_sample_rate == expected_rate
+
+
+def test_insert_stereo_waveforms_then_sbnk_uses_updated_logical_state(
+    tmp_path: Path,
+) -> None:
+    source = _empty_volume_source(tmp_path, "Stereo Imports")
+    audio_path = tmp_path / "stereo.flac"
+    time = np.arange(96, dtype=np.float64)
+    stereo = np.column_stack((np.sin(time / 5) * 0.4, np.cos(time / 7) * 0.3))
+    sf.write(audio_path, stereo, 96_000, format="FLAC", subtype="PCM_24")
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "insert-stereo-waveforms",
+                "type": "insert_waveform",
+                "partition_index": 0,
+                "volume_name": "Stereo Imports",
+                "audio": {
+                    "path": audio_path.name,
+                    "waveform_names": ["Inserted L", "Inserted R"],
+                    "root_key": 62,
+                    "target_sample_rate": 44_100,
+                },
+            },
+            {
+                "id": "insert-stereo-bank",
+                "type": "insert_sbnk",
+                "partition_index": {"operation_ref": "insert-stereo-waveforms"},
+                "volume_name": "Stereo Imports",
+                "sample_bank": {
+                    "name": "Inserted Stereo",
+                    "waveform_name": "Inserted L",
+                    "right_waveform_name": "Inserted R",
+                    "root_key": 62,
+                    "key_low": 50,
+                    "key_high": 74,
+                    "level": 93,
+                },
+            },
+        ),
+        base_dir=tmp_path,
+    )
+    output = tmp_path / "stereo-inserted.hds"
+
+    result = alter_hds(source, transaction, output_path=output)
+
+    objects = load_sfs_objects(output)
+    assert {item.name for item in objects} == {
+        "Inserted L",
+        "Inserted R",
+        "Inserted Stereo",
+    }
+    bank = next(item for item in objects if item.name == "Inserted Stereo")
+    edges = [
+        row
+        for row in build_relationship_graph(objects).relationships
+        if row.source_key == bank.object_key and row.relationship_type.endswith("_TO_SMPL")
+    ]
+    assert len(edges) == 2
+    assert all(row.quality == "Known" for row in edges)
+    imported = import_sampler_audio(
+        audio_path, expected_channels=2, target_sample_rate=44_100
+    )
+    for channel, name in enumerate(("Inserted L", "Inserted R")):
+        waveform = next(item for item in objects if item.name == name)
+        decoded = decode_waveform(waveform)
+        assert decoded.pcm.startswith(imported.pcm_channels[channel])
+        assert decoded.sample_rate == 44_100
+    assert result.operations[0].inserted_sfs_ids == (9, 10)
+    assert result.operations[1].inserted_sfs_ids == (11,)
+    assert result.operations[0].audio_import is not None
+    assert result.operations[0].audio_import.split_stereo
+    orphan_report = analyze_hds_waveform_orphans(output)
+    assert orphan_report.summary.referenced_count == 2
+    assert orphan_report.summary.known_unreferenced_count == 0
+
+
+def test_insert_waveform_rejects_existing_name_and_channel_mismatch(tmp_path: Path) -> None:
+    source = _orphan_source(tmp_path)
+    mono_path = tmp_path / "mono.wav"
+    _write_wav(mono_path)
+    duplicate = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "duplicate",
+                "type": "insert_waveform",
+                "partition_index": 0,
+                "volume_name": "Orphans",
+                "audio": {
+                    "path": mono_path.name,
+                    "waveform_names": ["Orphan Wave"],
+                    "root_key": 60,
+                },
+            }
+        ),
+        base_dir=tmp_path,
+    )
+    with pytest.raises(ValueError, match="already contains waveform"):
+        alter_hds(source, duplicate)
+    mismatch = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "mismatch",
+                "type": "insert_waveform",
+                "partition_index": 0,
+                "volume_name": "Orphans",
+                "audio": {
+                    "path": mono_path.name,
+                    "waveform_names": ["New L", "New R"],
+                    "root_key": 60,
+                },
+            }
+        ),
+        base_dir=tmp_path,
+    )
+    with pytest.raises(ValueError, match="this import requires stereo"):
+        alter_hds(source, mismatch)
