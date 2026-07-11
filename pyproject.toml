@@ -17,10 +17,13 @@ classifiers = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "numpy>=2.5.1",
     "pycdlib>=1.14.0",
     "pyfatfs>=1.1.0",
     # pyfatfs imports pkg_resources, which setuptools 81+ no longer provides.
     "setuptools<81",
+    "soundfile>=0.14.0",
+    "soxr>=1.1.0",
 ]
 
 [project.scripts]

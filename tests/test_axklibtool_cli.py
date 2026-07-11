@@ -5,10 +5,13 @@ import wave
 from collections import Counter
 from pathlib import Path
 
+import numpy as np
 import pytest
+import soundfile as sf
 
 from axklib import cli as axklibtool
 from axklib import content_tree as axklib_content_tree
+from axklib.audio.importing import import_sampler_audio
 from axklib.containers import load_sfs_objects
 from axklib.relationships import build_relationship_graph
 
@@ -349,6 +352,80 @@ def test_create_and_extract_hds_manifest_renders_two_member_stereo_bank(
         for offset in range(0, len(stored_left), 2)
     )
     assert rendered_pcm == expected_interleaved
+
+
+def test_create_hds_imports_and_resamples_interleaved_audio_manifest(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_path = tmp_path / "stereo-96k.wav"
+    time = np.arange(960, dtype=np.float64) / 96_000
+    sf.write(
+        source_path,
+        np.column_stack(
+            (
+                0.5 * np.sin(2 * np.pi * 1_000 * time),
+                0.25 * np.sin(2 * np.pi * 2_000 * time),
+            )
+        ),
+        96_000,
+        format="WAV",
+        subtype="FLOAT",
+    )
+    converted = import_sampler_audio(source_path, expected_channels=2)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "size_bytes": 4 * 1024 * 1024,
+                "partitions": [
+                    {
+                        "name": "hd1",
+                        "volumes": [
+                            {
+                                "name": "Imported Stereo",
+                                "waveforms": [],
+                                "sample_banks": [
+                                    {
+                                        "name": "Resampled Bank",
+                                        "interleaved_audio_path": source_path.name,
+                                        "left_waveform_name": "Resampled-L",
+                                        "right_waveform_name": "Resampled-R",
+                                        "root_key": 60,
+                                        "key_low": 48,
+                                        "key_high": 72,
+                                        "level": 96,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    image_path = tmp_path / "HD00_512_imported_stereo.hds"
+    export_dir = tmp_path / "exports"
+
+    create_code = axklibtool.main(["create", "hds", str(manifest_path), "-o", str(image_path)])
+    create_output = capsys.readouterr()
+    extract_code = axklibtool.main(
+        ["extract", "wav", "file", "-o", str(export_dir), str(image_path)]
+    )
+
+    assert create_code == 0
+    assert extract_code == 0
+    assert "actions=split-stereo,resampled,quantized-16bit" in create_output.out
+    assert "rate=96000->44100" in create_output.out
+    assert "waveforms='Resampled-L,Resampled-R'" in create_output.out
+    physical_paths = sorted((export_dir / "_samples" / "physical").glob("*.wav"))
+    assert len(physical_paths) == 2
+    expected_channels = sorted(
+        channel + channel[: min(len(channel), 8)] for channel in converted.pcm_channels
+    )
+    assert sorted(_read_mono_wav_pcm(path) for path in physical_paths) == expected_channels
 
 
 def test_create_hds_manifest_writes_hardware_profile_sbac_and_prog(tmp_path: Path) -> None:

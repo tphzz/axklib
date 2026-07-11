@@ -27,6 +27,26 @@ def _write_mono_wav(
     return pcm
 
 
+def _write_stereo_wav(
+    path: Path,
+    left_samples: tuple[int, ...],
+    right_samples: tuple[int, ...],
+    sample_rate: int = 44_100,
+) -> tuple[bytes, bytes]:
+    left_pcm = b"".join(sample.to_bytes(2, "little", signed=True) for sample in left_samples)
+    right_pcm = b"".join(sample.to_bytes(2, "little", signed=True) for sample in right_samples)
+    interleaved = b"".join(
+        left_pcm[offset : offset + 2] + right_pcm[offset : offset + 2]
+        for offset in range(0, len(left_pcm), 2)
+    )
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(interleaved)
+    return left_pcm, right_pcm
+
+
 def _be32(data: bytes, offset: int) -> int:
     return int.from_bytes(data[offset : offset + 4], "big")
 
@@ -887,6 +907,64 @@ def test_hds_writer_creates_two_member_stereo_bank_with_confirmed_links(
         if row.relationship_type in {"SBNK_LEFT_MEMBER_TO_SMPL", "SBNK_RIGHT_MEMBER_TO_SMPL"}
     ]
     assert [(row.relationship_type, row.target_key, row.quality) for row in relationships] == [
+        ("SBNK_LEFT_MEMBER_TO_SMPL", "p0:sfs9", "Known"),
+        ("SBNK_RIGHT_MEMBER_TO_SMPL", "p0:sfs10", "Known"),
+    ]
+
+
+def test_hds_writer_imports_interleaved_stereo_into_two_mono_smpl_objects(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "interleaved.wav"
+    left_pcm, right_pcm = _write_stereo_wav(
+        source,
+        (0, 1000, -1000, 2000, -2000),
+        (300, -300, 900, -900, 0),
+    )
+    image_path = tmp_path / "HD00_512_interleaved_stereo.hds"
+    builder = HdsImageBuilder(size_bytes=4 * 1024 * 1024)
+    volume = builder.add_partition("hd1").add_volume("Stereo Vol")
+    volume.add_stereo_sample_bank_from_audio(
+        name="Stereo Bank",
+        path=source,
+        root_key=60,
+        key_low=48,
+        key_high=72,
+        level=96,
+    )
+
+    result = builder.write(image_path)
+
+    assert [(item.object_type, item.name) for item in result.objects] == [
+        ("SMPL", "Stereo Bank-L"),
+        ("SMPL", "Stereo Bank-R"),
+        ("SBNK", "Stereo Bank"),
+    ]
+    assert len(result.audio_imports) == 1
+    report = result.audio_imports[0]
+    assert report.waveform_names == ("Stereo Bank-L", "Stereo Bank-R")
+    assert report.split_stereo
+    assert not report.resampled
+    assert not report.quantized
+    assert not result.warnings
+
+    objects = load_sfs_objects(image_path)
+    waveforms = {
+        item.name: decode_waveform(item).pcm
+        for item in objects
+        if item.object_type == AxklibObjectType.SMPL
+    }
+    assert waveforms == {
+        "Stereo Bank-L": left_pcm + left_pcm[:8],
+        "Stereo Bank-R": right_pcm + right_pcm[:8],
+    }
+    graph = build_relationship_graph(objects)
+    stereo_links = [
+        row
+        for row in graph.relationships
+        if row.relationship_type in {"SBNK_LEFT_MEMBER_TO_SMPL", "SBNK_RIGHT_MEMBER_TO_SMPL"}
+    ]
+    assert [(row.relationship_type, row.target_key, row.quality) for row in stereo_links] == [
         ("SBNK_LEFT_MEMBER_TO_SMPL", "p0:sfs9", "Known"),
         ("SBNK_RIGHT_MEMBER_TO_SMPL", "p0:sfs10", "Known"),
     ]

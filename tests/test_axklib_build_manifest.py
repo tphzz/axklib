@@ -108,6 +108,26 @@ def test_hds_build_manifest_rejects_unknown_waveform_reference() -> None:
         parse_hds_build_manifest(value)
 
 
+def test_hds_build_manifest_rejects_conflicting_audio_sources() -> None:
+    value = _manifest()
+    partitions = value["partitions"]
+    assert isinstance(partitions, list)
+    partition = partitions[0]
+    assert isinstance(partition, dict)
+    volumes = partition["volumes"]
+    assert isinstance(volumes, list)
+    volume = volumes[0]
+    assert isinstance(volume, dict)
+    sample_banks = volume["sample_banks"]
+    assert isinstance(sample_banks, list)
+    bank = sample_banks[0]
+    assert isinstance(bank, dict)
+    bank["interleaved_audio_path"] = "stereo.wav"
+
+    with pytest.raises(ValueError, match="exactly one of waveform_id or interleaved_audio_path"):
+        parse_hds_build_manifest(value)
+
+
 def test_hds_build_manifest_builds_plural_sample_bank_group_members(tmp_path: Path) -> None:
     _write_wav(tmp_path / "tone.wav")
     value = _manifest()

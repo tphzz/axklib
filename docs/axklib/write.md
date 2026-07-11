@@ -17,7 +17,7 @@ key range, and level come from the writer data model, while fields not yet
 exposed by the write API keep conservative current-format defaults for the
 single-member parameter block, sample-control block, and reserved Sample
 Parameter defaults required for current direct-bank playback and tone. The `SMPL`
-stored payload contains the logical mono WAV frames plus a short compatibility
+stored payload contains the logical mono audio frames plus a short compatibility
 tail; the sample-window fields continue to describe the logical frame count.
 The writer supports 512-byte-aligned image sizes from 1 MiB through 2 GiB and
 one through eight equal SFS partition slots. For `N` partitions it computes:
@@ -55,6 +55,43 @@ unsupported object types, sample banks with more than two members, and in-place
 image mutation are outside the current API. SBAC/PROG output is restricted to
 the exact per-Program profile below; broader assignment orders, receive
 channels, grouped stereo banks, and groups with more than three members are rejected.
+
+## Audio importing
+
+`VolumeBuilder.add_waveform_from_audio()` accepts a mono source in any container
+and subtype supported by the installed libsndfile build. The existing
+`add_waveform_from_wav()` method uses the same importer. Sources are converted
+to signed 16-bit PCM without normalization. Native PCM16 at a supported rate is
+preserved byte-for-byte; higher precision, floating-point, and resampled audio
+is quantized with deterministic TPDF dither.
+
+The importer preserves `4000`, `5512`, `6000`, `8000`, `11025`, `12000`,
+`16000`, `22050`, `24000`, `32000`, `44100`, and `48000` Hz. Other source rates
+are converted to `44100` Hz with the soxr VHQ profile. Pass
+`target_sample_rate=` to select a different rate from the same set. Sources
+with more than two channels are rejected rather than implicitly downmixed.
+
+Use `add_stereo_sample_bank_from_audio()` to create a two-member stereo SBNK
+directly from one interleaved source. Channel 1 becomes the left physical SMPL
+and channel 2 becomes the right physical SMPL. No intermediate mono files are
+written. By default, waveform names use the first 14 ASCII bytes of the bank
+name plus `-L` and `-R`; explicit names can override them.
+
+```python
+bank = volume.add_stereo_sample_bank_from_audio(
+    name="Stereo Piano",
+    path="stereo-piano.flac",
+    root_key=60,
+    key_low=21,
+    key_high=108,
+    level=100,
+)
+```
+
+`HdsWriteResult.audio_imports` records the source format, subtype, channels,
+source and output rates, output frames, conversion actions, generated waveform
+names, and clipped-sample count. Finite overshoots are clipped and reported;
+NaN and infinite samples are rejected.
 
 ## SBAC and PROG profile
 
@@ -111,12 +148,12 @@ Waveform paths are resolved relative to the manifest file. Waveform IDs are
 local references within one volume; they are not written as sampler object
 names or filesystem IDs.
 
-A stereo bank references two distinct mono waveform entries. `waveform_id` is
-the left member and `right_waveform_id` is the right member. Both inputs must be
-16-bit mono WAVs with matching sample rate and logical frame count. The image
-stores them as two physical mono `SMPL` objects linked by one two-member `SBNK`;
-it does not store an interleaved WAV. Exact extraction retains both physical
-WAVs and can additionally render an interleaved stereo WAV.
+A stereo bank may reference two distinct mono waveform entries. `waveform_id`
+is the left member and `right_waveform_id` is the right member. The importer
+converts each source to sampler-compatible PCM, after which both members must
+have matching sample rate and logical frame count. The image stores two
+physical mono `SMPL` objects linked by one two-member `SBNK`; exact extraction
+retains both and can additionally render an interleaved stereo WAV.
 
 ```json
 {
@@ -156,6 +193,27 @@ WAVs and can additionally render an interleaved stereo WAV.
 For a stereo bank, declare both member waveforms and add
 `"right_waveform_id": "right"` to the bank. The typed API provides the same
 contract through `VolumeBuilder.add_stereo_sample_bank()`.
+
+Alternatively, create both physical members from one interleaved source. This
+form is mutually exclusive with `waveform_id` and `right_waveform_id`:
+
+```json
+{
+  "name": "Stereo Piano",
+  "interleaved_audio_path": "audio/stereo-piano.flac",
+  "left_waveform_name": "Piano-L",
+  "right_waveform_name": "Piano-R",
+  "target_sample_rate": 44100,
+  "root_key": 60,
+  "key_low": 21,
+  "key_high": 108,
+  "level": 100
+}
+```
+
+Mono waveform entries also accept optional `target_sample_rate`. Audio paths
+are resolved relative to the manifest file. The create command reports every
+audio import and whether it was split, resampled, quantized, or passed through.
 
 For the SBAC/PROG profile, add these optional volume fields after declaring the
 mono sample banks. The singular field remains available for one-member groups;

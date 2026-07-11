@@ -153,6 +153,15 @@ def _relationship_source_matches(row: WaveformRelationship, source_image: str) -
 
 
 def note_name(midi_note: int | None) -> str | None:
+    """Return the Yamaha A-series note label, where MIDI 60 is C3."""
+    if midi_note is None:
+        return None
+    names = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+    return f"{names[midi_note % 12]}{midi_note // 12 - 2}"
+
+
+def scientific_note_name(midi_note: int | None) -> str | None:
+    """Return the common scientific/tuner label, where MIDI 60 is C4."""
     if midi_note is None:
         return None
     names = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
@@ -673,6 +682,8 @@ def sidecar_v2(
     playback = {
         "root_key_midi": waveform.root_key,
         "root_key_name": note_name(waveform.root_key),
+        "root_key_name_yamaha": note_name(waveform.root_key),
+        "root_key_name_scientific": scientific_note_name(waveform.root_key),
         "fine_tune_cents": waveform.fine_tune,
         "coarse_tune_semitones": None,
         "loop_mode_raw": waveform.loop_mode,
@@ -1696,6 +1707,8 @@ def _build_volume_graph(
                 "playback": {
                     "root_key_midi": waveform.root_key,
                     "root_key_name": note_name(waveform.root_key),
+                    "root_key_name_yamaha": note_name(waveform.root_key),
+                    "root_key_name_scientific": scientific_note_name(waveform.root_key),
                     "fine_tune_cents": waveform.fine_tune,
                     "loop_mode_raw": waveform.loop_mode,
                     "loop_mode_label": waveform.loop_mode_label,

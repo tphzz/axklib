@@ -18,13 +18,18 @@ class HdsManifestWaveform:
     name: str
     path: Path
     root_key: int
+    target_sample_rate: int | None
 
 
 @dataclass(frozen=True)
 class HdsManifestSampleBank:
     name: str
-    waveform_id: str
+    waveform_id: str | None
     right_waveform_id: str | None
+    interleaved_audio_path: Path | None
+    left_waveform_name: str | None
+    right_waveform_name: str | None
+    target_sample_rate: int | None
     root_key: int
     key_low: int
     key_high: int
@@ -116,7 +121,12 @@ def _fields(
 
 def _parse_waveform(value: object, context: str, base_dir: Path) -> HdsManifestWaveform:
     row = _mapping(value, context)
-    _fields(row, context, required={"id", "name", "path", "root_key"})
+    _fields(
+        row,
+        context,
+        required={"id", "name", "path", "root_key"},
+        optional={"target_sample_rate"},
+    )
     source_path = Path(_string(row["path"], f"{context}.path"))
     if not source_path.is_absolute():
         source_path = base_dir / source_path
@@ -125,23 +135,88 @@ def _parse_waveform(value: object, context: str, base_dir: Path) -> HdsManifestW
         name=_string(row["name"], f"{context}.name"),
         path=source_path,
         root_key=_integer(row["root_key"], f"{context}.root_key"),
+        target_sample_rate=(
+            _integer(row["target_sample_rate"], f"{context}.target_sample_rate")
+            if "target_sample_rate" in row
+            else None
+        ),
     )
 
 
-def _parse_sample_bank(value: object, context: str) -> HdsManifestSampleBank:
+def _parse_sample_bank(
+    value: object,
+    context: str,
+    base_dir: Path,
+) -> HdsManifestSampleBank:
     row = _mapping(value, context)
     _fields(
         row,
         context,
-        required={"name", "waveform_id", "root_key", "key_low", "key_high"},
-        optional={"level", "right_waveform_id"},
+        required={"name", "root_key", "key_low", "key_high"},
+        optional={
+            "level",
+            "waveform_id",
+            "right_waveform_id",
+            "interleaved_audio_path",
+            "left_waveform_name",
+            "right_waveform_name",
+            "target_sample_rate",
+        },
     )
+    source_fields = [
+        field for field in ("waveform_id", "interleaved_audio_path") if field in row
+    ]
+    if len(source_fields) != 1:
+        raise ValueError(
+            f"{context} must contain exactly one of waveform_id or interleaved_audio_path"
+        )
+    interleaved = source_fields[0] == "interleaved_audio_path"
+    interleaved_only = {
+        "left_waveform_name",
+        "right_waveform_name",
+        "target_sample_rate",
+    }
+    if not interleaved and any(field in row for field in interleaved_only):
+        raise ValueError(
+            f"{context} waveform_id form cannot contain interleaved-audio fields"
+        )
+    if interleaved and "right_waveform_id" in row:
+        raise ValueError(
+            f"{context} interleaved_audio_path form cannot contain right_waveform_id"
+        )
+    source_path: Path | None = None
+    if interleaved:
+        source_path = Path(
+            _string(row["interleaved_audio_path"], f"{context}.interleaved_audio_path")
+        )
+        if not source_path.is_absolute():
+            source_path = base_dir / source_path
     return HdsManifestSampleBank(
         name=_string(row["name"], f"{context}.name"),
-        waveform_id=_string(row["waveform_id"], f"{context}.waveform_id"),
+        waveform_id=(
+            _string(row["waveform_id"], f"{context}.waveform_id")
+            if not interleaved
+            else None
+        ),
         right_waveform_id=(
             _string(row["right_waveform_id"], f"{context}.right_waveform_id")
             if "right_waveform_id" in row
+            else None
+        ),
+        interleaved_audio_path=source_path,
+        left_waveform_name=(
+            _string(row["left_waveform_name"], f"{context}.left_waveform_name")
+            if "left_waveform_name" in row
+            else None
+        ),
+        right_waveform_name=(
+            _string(row["right_waveform_name"], f"{context}.right_waveform_name")
+            if "right_waveform_name" in row
+            else None
+        ),
+        target_sample_rate=(
+            _integer(row["target_sample_rate"], f"{context}.target_sample_rate")
+            if "target_sample_rate" in row
             else None
         ),
         root_key=_integer(row["root_key"], f"{context}.root_key"),
@@ -234,12 +309,12 @@ def _parse_volume(value: object, context: str, base_dir: Path) -> HdsManifestVol
     if len(waveform_ids) != len(set(waveform_ids)):
         raise ValueError(f"{context}.waveforms contains duplicate ids")
     sample_banks = tuple(
-        _parse_sample_bank(item, f"{context}.sample_banks[{index}]")
+        _parse_sample_bank(item, f"{context}.sample_banks[{index}]", base_dir)
         for index, item in enumerate(_list(row["sample_banks"], f"{context}.sample_banks"))
     )
     known_waveforms = set(waveform_ids)
     for index, bank in enumerate(sample_banks):
-        if bank.waveform_id not in known_waveforms:
+        if bank.waveform_id is not None and bank.waveform_id not in known_waveforms:
             raise ValueError(
                 f"{context}.sample_banks[{index}].waveform_id references unknown waveform "
                 f"{bank.waveform_id!r}"
@@ -370,9 +445,26 @@ def build_hds_from_manifest(
                     name=waveform_spec.name,
                     path=waveform_spec.path,
                     root_key=waveform_spec.root_key,
+                    target_sample_rate=waveform_spec.target_sample_rate,
                 )
             for bank_spec in volume_spec.sample_banks:
-                if bank_spec.right_waveform_id is None:
+                if bank_spec.interleaved_audio_path is not None:
+                    sample_bank_refs[bank_spec.name] = (
+                        volume.add_stereo_sample_bank_from_audio(
+                            name=bank_spec.name,
+                            path=bank_spec.interleaved_audio_path,
+                            root_key=bank_spec.root_key,
+                            key_low=bank_spec.key_low,
+                            key_high=bank_spec.key_high,
+                            level=bank_spec.level,
+                            left_waveform_name=bank_spec.left_waveform_name,
+                            right_waveform_name=bank_spec.right_waveform_name,
+                            target_sample_rate=bank_spec.target_sample_rate,
+                        )
+                    )
+                elif bank_spec.right_waveform_id is None:
+                    if bank_spec.waveform_id is None:
+                        raise ValueError(f"sample bank {bank_spec.name!r} has no waveform source")
                     sample_bank_refs[bank_spec.name] = volume.add_sample_bank(
                         name=bank_spec.name,
                         waveform=waveform_refs[bank_spec.waveform_id],
@@ -382,6 +474,8 @@ def build_hds_from_manifest(
                         level=bank_spec.level,
                     )
                 else:
+                    if bank_spec.waveform_id is None:
+                        raise ValueError(f"sample bank {bank_spec.name!r} has no left waveform")
                     sample_bank_refs[bank_spec.name] = volume.add_stereo_sample_bank(
                         name=bank_spec.name,
                         left_waveform=waveform_refs[bank_spec.waveform_id],

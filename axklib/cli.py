@@ -1353,6 +1353,24 @@ def run_create_hds(args: argparse.Namespace) -> int:
             f"cluster_count={layout.cluster_count} "
             f"free_kib={layout.sampler_visible_free_kib}"
         )
+    for report in result.audio_imports:
+        actions = ["split-stereo"] if report.split_stereo else []
+        if report.resampled:
+            actions.append("resampled")
+        if report.quantized:
+            actions.append("quantized-16bit")
+        if not actions:
+            actions.append("pcm16-passthrough")
+        print(
+            f"audio_import={report.source_path} partition={report.partition_index} "
+            f"volume={report.volume_name!r} format={report.source_format}/{report.source_subtype} "
+            f"channels={report.source_channels} rate={report.source_sample_rate}->"
+            f"{report.output_sample_rate} frames={report.output_frames} "
+            f"actions={','.join(actions)} waveforms={','.join(report.waveform_names)!r} "
+            f"clipped_samples={report.clipped_samples}"
+        )
+    for warning in result.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     return 0
 
 

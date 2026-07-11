@@ -365,7 +365,10 @@ The first writer scope is intentionally narrow:
 
 - image size is capped at `2_147_483_648` bytes;
 - each generated partition is capped at `1_073_741_824` bytes;
-- WAV input must be mono, 16-bit PCM;
+- audio input may use any libsndfile-supported container and subtype, but must
+  be mono for ordinary waveform import or stereo for one-call stereo-bank
+  import; sources are converted to signed 16-bit PCM and unsupported rates are
+  resampled with the soxr VHQ profile;
 - generated sampler objects are current `FSFSDEV3SPLX` `SMPL` and `SBNK` records;
 - generated `SBNK` objects link either one waveform member or a confirmed
   left/right pair by name and link ID;
@@ -378,7 +381,8 @@ The first writer scope is intentionally narrow:
 - generated current `SBNK` object payloads use the current single-member sample-bank object span, populated default parameter/control block, and header fields for a normal sample bank that references one waveform object;
 - generated two-member stereo `SBNK` objects reference two physical mono SMPL
   objects. The members must have matching 16-bit width, sample rate, and logical
-  frame count. Interleaved stereo is rendered only during export;
+  frame count. One interleaved source can be split into those physical members
+  during import; extraction may render them as interleaved stereo again;
 - generated direct single-member `SBNK` objects include hardware-tested reserved
   Sample Parameter defaults at `SBNK+0x152..0x15b`. Yamaha labels the
   corresponding decimal Sample Parameter offsets `0170..0179` as reserved, but

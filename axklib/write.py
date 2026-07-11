@@ -8,12 +8,12 @@ one-to-three-member SBAC/PROG topology. It does not patch existing images.
 
 from __future__ import annotations
 
-import wave
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
+from axklib.audio.importing import SamplerAudio, import_sampler_audio
 from axklib.containers import sfs_allocation
 from axklib.parameters import sbnk_contract
 
@@ -233,6 +233,25 @@ class HdsWriteResult:
     partition_layouts: tuple[WrittenPartitionLayout, ...] = ()
     unused_tail_sectors: int = 0
     warnings: tuple[str, ...] = ()
+    audio_imports: tuple[AudioImportReport, ...] = ()
+
+
+@dataclass(frozen=True)
+class AudioImportReport:
+    source_path: Path
+    partition_index: int
+    volume_name: str
+    waveform_names: tuple[str, ...]
+    source_format: str
+    source_subtype: str
+    source_channels: int
+    source_sample_rate: int
+    output_sample_rate: int
+    output_frames: int
+    resampled: bool
+    quantized: bool
+    split_stereo: bool
+    clipped_samples: int
 
 
 @dataclass
@@ -242,6 +261,9 @@ class _WaveformSpec:
     path: Path
     root_key: int
     link_id: int
+    expected_channels: int
+    source_channel: int
+    target_sample_rate: int | None
 
 
 @dataclass
@@ -313,6 +335,7 @@ class _PartitionPlan:
     directory_index_cluster: int
     first_payload_cluster: int
     records: list[_RecordPlan]
+    audio_imports: list[AudioImportReport] = field(default_factory=list)
 
 
 @dataclass
@@ -324,9 +347,17 @@ class VolumeBuilder:
     _sample_bank_groups: list[_SampleBankGroupSpec] = field(default_factory=list)
     _programs: list[_ProgramSpec] = field(default_factory=list)
 
-    def add_waveform_from_wav(self, *, name: str, path: str | Path, root_key: int) -> WaveformRef:
-        _validate_midi_key(root_key, "root_key")
-        key = _unique_key(name, {item.key for item in self._waveforms}, "waveform")
+    def _append_waveform(
+        self,
+        *,
+        key: str,
+        name: str,
+        path: str | Path,
+        root_key: int,
+        expected_channels: int,
+        source_channel: int,
+        target_sample_rate: int | None,
+    ) -> WaveformRef:
         link_id = SMPL_LINK_ID_BASE + len(self._waveforms) * 0x100
         self._waveforms.append(
             _WaveformSpec(
@@ -335,9 +366,49 @@ class VolumeBuilder:
                 path=Path(path),
                 root_key=root_key,
                 link_id=link_id,
+                expected_channels=expected_channels,
+                source_channel=source_channel,
+                target_sample_rate=target_sample_rate,
             )
         )
         return WaveformRef(key)
+
+    def add_waveform_from_audio(
+        self,
+        *,
+        name: str,
+        path: str | Path,
+        root_key: int,
+        target_sample_rate: int | None = None,
+    ) -> WaveformRef:
+        """Add one mono waveform from a libsndfile-compatible audio source."""
+        _validate_midi_key(root_key, "root_key")
+        key = _unique_key(name, {item.key for item in self._waveforms}, "waveform")
+        return self._append_waveform(
+            key=key,
+            name=name,
+            path=path,
+            root_key=root_key,
+            expected_channels=1,
+            source_channel=0,
+            target_sample_rate=target_sample_rate,
+        )
+
+    def add_waveform_from_wav(
+        self,
+        *,
+        name: str,
+        path: str | Path,
+        root_key: int,
+        target_sample_rate: int | None = None,
+    ) -> WaveformRef:
+        """Add one mono WAV waveform through the sampler audio importer."""
+        return self.add_waveform_from_audio(
+            name=name,
+            path=path,
+            root_key=root_key,
+            target_sample_rate=target_sample_rate,
+        )
 
     def add_sample_bank(
         self,
@@ -413,6 +484,66 @@ class VolumeBuilder:
             )
         )
         return SampleBankRef(key)
+
+    def add_stereo_sample_bank_from_audio(
+        self,
+        *,
+        name: str,
+        path: str | Path,
+        root_key: int,
+        key_low: int,
+        key_high: int,
+        level: int = 127,
+        left_waveform_name: str | None = None,
+        right_waveform_name: str | None = None,
+        target_sample_rate: int | None = None,
+    ) -> SampleBankRef:
+        """Create a stereo SBNK and two mono SMPL members from one audio source."""
+        _validate_midi_key(root_key, "root_key")
+        _validate_midi_key(key_low, "key_low")
+        _validate_midi_key(key_high, "key_high")
+        if key_high < key_low:
+            raise ValueError("key_high must be greater than or equal to key_low")
+        if level < 0 or level > 127:
+            raise ValueError("level must be in MIDI range 0..127")
+        bank_key = _unique_key(name, {item.key for item in self._sample_banks}, "sample bank")
+        base_name = name.encode("ascii")[:14].decode("ascii")
+        left_name = left_waveform_name or f"{base_name}-L"
+        right_name = right_waveform_name or f"{base_name}-R"
+        existing_waveforms = {item.key for item in self._waveforms}
+        left_key = _unique_key(left_name, existing_waveforms, "waveform")
+        right_key = _unique_key(right_name, existing_waveforms | {left_key}, "waveform")
+        left = self._append_waveform(
+            key=left_key,
+            name=left_name,
+            path=path,
+            root_key=root_key,
+            expected_channels=2,
+            source_channel=0,
+            target_sample_rate=target_sample_rate,
+        )
+        right = self._append_waveform(
+            key=right_key,
+            name=right_name,
+            path=path,
+            root_key=root_key,
+            expected_channels=2,
+            source_channel=1,
+            target_sample_rate=target_sample_rate,
+        )
+        self._sample_banks.append(
+            _SampleBankSpec(
+                key=bank_key,
+                name=name,
+                waveform_key=left.key,
+                right_waveform_key=right.key,
+                root_key=root_key,
+                key_low=key_low,
+                key_high=key_high,
+                level=level,
+            )
+        )
+        return SampleBankRef(bank_key)
 
     def add_sample_bank_group(
         self,
@@ -567,9 +698,11 @@ class HdsImageBuilder:
         writes: list[tuple[int, bytes]] = []
         writes.extend(_superblock_writes(self.size_bytes, plans))
         written_objects: list[WrittenObjectRef] = []
+        audio_imports: list[AudioImportReport] = []
         for plan in plans:
             writes.extend(_partition_writes(plan))
             written_objects.extend(_object_refs(plan))
+            audio_imports.extend(plan.audio_imports)
         with output.open("wb") as handle:
             handle.truncate(self.size_bytes)
             for offset, data in sorted(writes, key=lambda item: item[0]):
@@ -581,6 +714,13 @@ class HdsImageBuilder:
             objects=tuple(written_objects),
             partition_layouts=tuple(_written_partition_layout(plan) for plan in plans),
             unused_tail_sectors=_unused_tail_sectors(self.size_bytes, plans),
+            warnings=tuple(
+                f"audio source {report.source_path} clipped {report.clipped_samples} samples "
+                "during sampler conversion"
+                for report in audio_imports
+                if report.clipped_samples
+            ),
+            audio_imports=tuple(audio_imports),
         )
 
 
@@ -761,7 +901,12 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
         next_id += len(STANDARD_VOLUME_CATEGORY_NAMES)
         root_entries.append((volume.name, volume_id, 16))
 
-        loaded = [_load_waveform(spec) for spec in volume._waveforms]
+        loaded, import_reports = _load_volume_waveforms(
+            volume._waveforms,
+            partition_index=plan.index,
+            volume_name=volume.name,
+        )
+        plan.audio_imports.extend(import_reports)
         loaded_by_key = {item.spec.key: item for item in loaded}
         smpl_entries: list[tuple[str, int, int | None]] = []
         sbnk_entries: list[tuple[str, int, int | None]] = []
@@ -978,28 +1123,56 @@ def _build_partition_records(plan: _PartitionPlan) -> None:
     plan.records = records
 
 
-def _load_waveform(spec: _WaveformSpec) -> _LoadedWaveform:
-    with wave.open(str(spec.path), "rb") as wav:
-        if wav.getnchannels() != 1:
-            raise ValueError("v1 writer supports only mono WAV input")
-        if wav.getsampwidth() != 2:
-            raise ValueError("v1 writer supports only 16-bit PCM WAV input")
-        if wav.getcomptype() != "NONE":
-            raise ValueError("v1 writer supports only uncompressed PCM WAV input")
-        frames = wav.getnframes()
-        sample_rate = wav.getframerate()
-        pcm = wav.readframes(frames)
-    if frames <= 0:
-        raise ValueError("WAV input must contain at least one frame")
-    if sample_rate <= 0 or sample_rate > 0xFFFF:
-        raise ValueError("sample rate is outside the current SMPL field range")
-    return _LoadedWaveform(
-        spec=spec,
-        sample_rate=sample_rate,
-        frames=frames,
-        pcm_little_endian=pcm,
-        stored_big_endian=_stored_smpl_pcm(_swap_16bit_words(pcm)),
-    )
+def _load_volume_waveforms(
+    specs: list[_WaveformSpec],
+    *,
+    partition_index: int,
+    volume_name: str,
+) -> tuple[list[_LoadedWaveform], list[AudioImportReport]]:
+    cache: dict[tuple[Path, int, int | None], SamplerAudio] = {}
+    names_by_source: dict[tuple[Path, int, int | None], list[str]] = {}
+    loaded: list[_LoadedWaveform] = []
+    for spec in specs:
+        source_key = (spec.path, spec.expected_channels, spec.target_sample_rate)
+        audio = cache.get(source_key)
+        if audio is None:
+            audio = import_sampler_audio(
+                spec.path,
+                expected_channels=spec.expected_channels,
+                target_sample_rate=spec.target_sample_rate,
+            )
+            cache[source_key] = audio
+        names_by_source.setdefault(source_key, []).append(spec.name)
+        pcm = audio.pcm_channels[spec.source_channel]
+        loaded.append(
+            _LoadedWaveform(
+                spec=spec,
+                sample_rate=audio.output_sample_rate,
+                frames=audio.output_frames,
+                pcm_little_endian=pcm,
+                stored_big_endian=_stored_smpl_pcm(_swap_16bit_words(pcm)),
+            )
+        )
+    reports = [
+        AudioImportReport(
+            source_path=audio.source_path,
+            partition_index=partition_index,
+            volume_name=volume_name,
+            waveform_names=tuple(names_by_source[source_key]),
+            source_format=audio.source_format,
+            source_subtype=audio.source_subtype,
+            source_channels=audio.source_channels,
+            source_sample_rate=audio.source_sample_rate,
+            output_sample_rate=audio.output_sample_rate,
+            output_frames=audio.output_frames,
+            resampled=audio.resampled,
+            quantized=audio.quantized,
+            split_stereo=audio.source_channels == 2,
+            clipped_samples=audio.clipped_samples,
+        )
+        for source_key, audio in cache.items()
+    ]
+    return loaded, reports
 
 
 def _serialize_smpl(waveform: _LoadedWaveform) -> bytes:
@@ -1422,6 +1595,7 @@ def _write_at(handle: BinaryIO, offset: int, data: bytes) -> None:
 
 
 __all__ = [
+    "AudioImportReport",
     "HdsImageBuilder",
     "HdsWriteResult",
     "MAX_IMAGE_SIZE_BYTES",

@@ -313,6 +313,13 @@ The graph manifest is the authoritative place to connect WAV files back to
 sampler objects. The folder layout is convenient for users; the JSON preserves
 object and relationship detail.
 
+Playback rows use Yamaha A-series octave labels: `root_key_name` and
+`root_key_name_yamaha` report MIDI note 60 as `C3`, matching the sampler UI.
+`root_key_name_scientific` reports the same pitch as `C4`, matching common
+scientific-pitch tuners. `root_key_midi` is the convention-independent
+authoritative value; the two names differ only by octave numbering and do not
+imply transposition.
+
 Physical `SMPL` object rows keep storage-facing names and paths. When a physical
 waveform is referenced by sampler-visible `SBNK` members, the row includes
 `user_facing_aliases` entries with the member display name, object reference,

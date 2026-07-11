@@ -93,7 +93,11 @@ def test_export_waveforms_writes_object_graph_and_wav_only_smpl(tmp_path: Path) 
     graph = _graph(graph_path)
     assert graph["schema"] == "axklib.volume_graph.v1"
     assert graph["objects"]["smpl"][0]["wav_path"] == "SMPL/S01.wav"
-    assert graph["objects"]["smpl"][0]["playback"]["root_key_midi"] == 64
+    playback = graph["objects"]["smpl"][0]["playback"]
+    assert playback["root_key_midi"] == 64
+    assert playback["root_key_name"] == "E3"
+    assert playback["root_key_name_yamaha"] == "E3"
+    assert playback["root_key_name_scientific"] == "E4"
     with wave.open(str(wav_paths[0]), "rb") as wav:
         assert wav.getframerate() == 44100
         assert wav.getsampwidth() == 2
