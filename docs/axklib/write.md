@@ -402,6 +402,32 @@ loop window from those current SMPL records. Bank root key, key range, and level
 come from the transaction. Duplicate bank names and unresolved waveform names
 are rejected before output is written.
 
+### Waveform deletion
+
+Delete one physical waveform by exact partition, volume, and current SMPL name:
+
+```json
+{
+  "id": "delete-orphan-waveform",
+  "type": "delete_waveform",
+  "partition_index": 0,
+  "volume_name": "Drums",
+  "waveform_name": "Unused Snare Wave"
+}
+```
+
+The operation runs the same classifier exposed by `axklib orphans` against the
+transaction's current logical state. It proceeds only when the exact directory
+record is currently `known_unreferenced`. `referenced` and
+`ambiguous_or_unresolved` rows are rejected with their owning bank names or
+blocking notes. This permits an ordered `delete_sbnk` followed by
+`delete_waveform` in one transaction; reversing those operations is rejected.
+
+Deletion removes the SMPL directory entry, clears its index and allocation
+ownership, and leaves freed payload bytes untouched. It does not search by PCM
+hash, infer ownership from similar names, or remove other unreferenced
+waveforms.
+
 ::: axklib.write
 
 ::: axklib.build_manifest

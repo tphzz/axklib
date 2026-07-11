@@ -88,6 +88,7 @@ nav:
           - Audio: axklib/audio.md
           - Graph Helpers: axklib/graph.md
           - Image Writer: axklib/write.md
+          - Waveform Orphans: axklib/waveform-orphans.md
           - Relationships: axklib/relationships.md
           - Validation: axklib/validation.md
           - Reports: axklib/reports.md

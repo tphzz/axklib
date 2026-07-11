@@ -9,6 +9,10 @@ import pytest
 from axklib.alteration import alter_hds, parse_alteration_manifest
 from axklib.containers import load_sfs_objects, sfs_dump, sfs_inventory
 from axklib.relationships import build_relationship_graph
+from axklib.waveform_orphans import (
+    WAVEFORM_STATUS_KNOWN_UNREFERENCED,
+    analyze_hds_waveform_orphans,
+)
 from axklib.write import HdsImageBuilder
 
 
@@ -73,6 +77,24 @@ def _referenced_bank_source(tmp_path: Path) -> Path:
     program.assign_sample_bank_group(group, receive_channel=1)
     program.assign_sample_bank(direct, receive_channel=2)
     output = tmp_path / "referenced.hds"
+    builder.write(output)
+    return output
+
+
+def _orphan_source(tmp_path: Path) -> Path:
+    used_path = tmp_path / "used.wav"
+    orphan_path = tmp_path / "orphan.wav"
+    _write_wav(used_path, frames=16)
+    _write_wav(orphan_path, frames=24)
+    builder = HdsImageBuilder(size_bytes=8 * 1024 * 1024)
+    partition = builder.add_partition("hd1")
+    volume = partition.add_volume("Orphans")
+    used = volume.add_waveform_from_wav(name="Used Wave", path=used_path, root_key=60)
+    volume.add_waveform_from_wav(name="Orphan Wave", path=orphan_path, root_key=62)
+    volume.add_sample_bank(
+        name="Used Bank", waveform=used, root_key=60, key_low=0, key_high=127
+    )
+    output = tmp_path / "orphans.hds"
     builder.write(output)
     return output
 
@@ -518,3 +540,146 @@ def test_insert_sbnk_rejects_duplicate_bank_and_missing_waveform(tmp_path: Path)
     missing = parse_alteration_manifest(_manifest(missing_operation))
     with pytest.raises(ValueError, match="requires exactly one SMPL"):
         alter_hds(source, missing)
+
+
+def test_delete_waveform_accepts_only_known_orphan_and_leaves_payload_bytes(
+    tmp_path: Path,
+) -> None:
+    source = _orphan_source(tmp_path)
+    orphan = next(item for item in load_sfs_objects(source) if item.name == "Orphan Wave")
+    assert orphan.payload_offset is not None
+    source_bytes = source.read_bytes()
+    old_payload = source_bytes[
+        orphan.payload_offset : orphan.payload_offset + orphan.payload_size
+    ]
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-orphan",
+                "type": "delete_waveform",
+                "partition_index": 0,
+                "volume_name": "Orphans",
+                "waveform_name": "Orphan Wave",
+            }
+        )
+    )
+    output = tmp_path / "orphan-deleted.hds"
+
+    result = alter_hds(source, transaction, output_path=output)
+
+    assert "Orphan Wave" not in {item.name for item in load_sfs_objects(output)}
+    assert {"Used Wave", "Used Bank"}.issubset(
+        {item.name for item in load_sfs_objects(output)}
+    )
+    output_bytes = output.read_bytes()
+    assert (
+        output_bytes[orphan.payload_offset : orphan.payload_offset + orphan.payload_size]
+        == old_payload
+    )
+    assert result.operations[0].freed_clusters == 2
+
+
+def test_delete_waveform_rejects_referenced_waveform(tmp_path: Path) -> None:
+    source = _orphan_source(tmp_path)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-used",
+                "type": "delete_waveform",
+                "partition_index": 0,
+                "volume_name": "Orphans",
+                "waveform_name": "Used Wave",
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="is referenced, not known_unreferenced"):
+        alter_hds(source, transaction)
+
+
+def test_delete_sbnk_then_waveform_uses_updated_logical_orphan_state(
+    tmp_path: Path,
+) -> None:
+    source = _orphan_source(tmp_path)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-bank",
+                "type": "delete_sbnk",
+                "partition_index": 0,
+                "volume_name": "Orphans",
+                "sample_bank_name": "Used Bank",
+            },
+            {
+                "id": "delete-wave",
+                "type": "delete_waveform",
+                "partition_index": {"operation_ref": "delete-bank"},
+                "volume_name": "Orphans",
+                "waveform_name": "Used Wave",
+            },
+        )
+    )
+    output = tmp_path / "bank-wave-deleted.hds"
+
+    result = alter_hds(source, transaction, output_path=output)
+
+    assert [report.object_name for report in result.operations] == ["Used Bank", "Used Wave"]
+    assert {item.name for item in load_sfs_objects(output)} == {"Orphan Wave"}
+    orphan_report = analyze_hds_waveform_orphans(output)
+    assert orphan_report.rows[0].status == WAVEFORM_STATUS_KNOWN_UNREFERENCED
+
+
+def test_delete_waveform_before_owning_sbnk_is_rejected(tmp_path: Path) -> None:
+    source = _orphan_source(tmp_path)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-wave",
+                "type": "delete_waveform",
+                "partition_index": 0,
+                "volume_name": "Orphans",
+                "waveform_name": "Used Wave",
+            },
+            {
+                "id": "delete-bank",
+                "type": "delete_sbnk",
+                "partition_index": 0,
+                "volume_name": "Orphans",
+                "sample_bank_name": "Used Bank",
+            },
+        )
+    )
+
+    with pytest.raises(ValueError, match="is referenced, not known_unreferenced"):
+        alter_hds(source, transaction)
+
+
+def test_delete_waveform_rejects_ambiguous_partition_identity(tmp_path: Path) -> None:
+    wav_path = tmp_path / "duplicate.wav"
+    _write_wav(wav_path)
+    builder = HdsImageBuilder(size_bytes=8 * 1024 * 1024)
+    partition = builder.add_partition("hd1")
+    for volume_name in ("First", "Second"):
+        volume = partition.add_volume(volume_name)
+        waveform = volume.add_waveform_from_wav(
+            name="Duplicate Wave", path=wav_path, root_key=60
+        )
+        volume.add_sample_bank(
+            name="Duplicate Bank", waveform=waveform, root_key=60, key_low=0, key_high=127
+        )
+    source = tmp_path / "ambiguous.hds"
+    builder.write(source)
+    transaction = parse_alteration_manifest(
+        _manifest(
+            {
+                "id": "delete-ambiguous",
+                "type": "delete_waveform",
+                "partition_index": 0,
+                "volume_name": "First",
+                "waveform_name": "Duplicate Wave",
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="is ambiguous_or_unresolved"):
+        alter_hds(source, transaction)

@@ -10,6 +10,12 @@ from axklib.alteration import (
 )
 from axklib.containers import OpenOptions, open, open_many
 from axklib.containers.sfs_allocation import SfsFreeSpace, calculate_sfs_free_space
+from axklib.waveform_orphans import (
+    WaveformOrphanReport,
+    WaveformOrphanRow,
+    WaveformOrphanSummary,
+    analyze_hds_waveform_orphans,
+)
 
 __all__ = [
     "OpenOptions",
@@ -17,7 +23,11 @@ __all__ = [
     "AlterationManifest",
     "AlterationResult",
     "InsertSampleBankSpec",
+    "WaveformOrphanReport",
+    "WaveformOrphanRow",
+    "WaveformOrphanSummary",
     "alter_hds",
+    "analyze_hds_waveform_orphans",
     "calculate_sfs_free_space",
     "load_alteration_manifest",
     "open",

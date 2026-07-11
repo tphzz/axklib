@@ -68,6 +68,7 @@ from axklib.validation import (
 )
 from axklib.validation import allocation as allocation_validation
 from axklib.validation import volume as volume_validation
+from axklib.waveform_orphans import analyze_hds_waveform_orphans
 
 VERSION = "0.1.0-plan008"
 
@@ -1397,6 +1398,37 @@ def run_alter_hds(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_waveform_orphans(args: argparse.Namespace) -> int:
+    """Write conservative physical-waveform orphan classifications."""
+    try:
+        reports = [analyze_hds_waveform_orphans(path) for path in _input_paths(args.paths)]
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    output_dir = Path(args.output_dir)
+    _ensure_output_dir(output_dir, overwrite=args.overwrite)
+    rows = [row for report in reports for row in report.rows]
+    summaries = [report.summary for report in reports]
+    write_csv(output_dir / "waveform_orphans.csv", rows)
+    write_json(output_dir / "waveform_orphans.json", rows)
+    write_csv(output_dir / "waveform_orphan_summary.csv", summaries)
+    write_json(output_dir / "waveform_orphan_summary.json", summaries)
+    schemas = [
+        _write_report_schema(output_dir, "waveform_orphans", rows),
+        _write_report_schema(output_dir, "waveform_orphan_summary", summaries),
+    ]
+    write_schema_index(_schema_dir(output_dir), schemas)
+    for summary in summaries:
+        print(
+            f"image={summary.source_path} waveforms={summary.waveform_count} "
+            f"referenced={summary.referenced_count} "
+            f"known_unreferenced={summary.known_unreferenced_count} "
+            f"ambiguous_or_unresolved={summary.ambiguous_or_unresolved_count}"
+        )
+    print(f"reports written to {output_dir}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="axklib",
@@ -1520,6 +1552,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="new output HDS path; omit to validate and report a dry run",
     )
     alter_hds_parser.set_defaults(func=run_alter_hds)
+
+    orphans = subparsers.add_parser(
+        "orphans",
+        help="classify referenced, unreferenced, and unresolved physical waveforms",
+    )
+    orphans.add_argument("paths", nargs="+", help="input HDS image paths")
+    orphans.add_argument(
+        "-o", "--output-dir", required=True, help="directory for CSV/JSON orphan reports"
+    )
+    orphans.add_argument(
+        "--overwrite", action="store_true", help="allow writing into a non-empty output directory"
+    )
+    orphans.set_defaults(func=run_waveform_orphans)
 
     objects_cmd = subparsers.add_parser("objects", help="inspect raw and decoded object summaries")
     objects_cmd.add_argument("paths", nargs="+", help="input files, directories, or glob patterns")

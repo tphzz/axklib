@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import tempfile
+from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +21,12 @@ from axklib.containers import sfs_allocation, sfs_dump, sfs_extents, sfs_invento
 from axklib.objects import current as current_objects
 from axklib.parameters import current as current_parameters
 from axklib.parameters import sbnk_contract
+from axklib.waveform_orphans import (
+    WAVEFORM_STATUS_KNOWN_UNREFERENCED,
+    WaveformOrphanReport,
+    _classify_waveform_inputs,
+    _CurrentObjectInput,
+)
 from axklib.write import (
     CLUSTER_SIZE,
     MIN_IMAGE_SIZE_BYTES,
@@ -71,6 +78,7 @@ class AlterationOperation:
     volume: HdsManifestVolume | None = None
     sample_bank_name: str | None = None
     sample_bank: InsertSampleBankSpec | None = None
+    waveform_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +129,7 @@ class _StoredRecord:
 @dataclass
 class _PartitionState:
     index: int
+    name: str
     source: Path
     start_sector: int
     sectors_per_cluster: int
@@ -320,6 +329,25 @@ def _parse_insert_sbnk_operation(
     )
 
 
+def _parse_delete_waveform_operation(
+    operation_id: str,
+    partition_index: int | OperationReference,
+    item: Mapping[str, object],
+    context: str,
+    _base_dir: Path,
+) -> AlterationOperation:
+    expected = {"id", "type", "partition_index", "volume_name", "waveform_name"}
+    if set(item) != expected:
+        raise ValueError(f"{context} fields must be exactly {', '.join(sorted(expected))}")
+    return AlterationOperation(
+        id=operation_id,
+        type="delete_waveform",
+        partition_index=partition_index,
+        volume_name=_string(item["volume_name"], f"{context}.volume_name"),
+        waveform_name=_string(item["waveform_name"], f"{context}.waveform_name"),
+    )
+
+
 def parse_alteration_manifest(
     value: object, *, base_dir: str | Path = "."
 ) -> AlterationManifest:
@@ -460,6 +488,7 @@ def _load_state(source: Path) -> _TransactionState:
                 )
             partitions[index] = _PartitionState(
                 index=index,
+                name=str(raw_partition.get("name", "")),
                 source=source,
                 start_sector=start_sector,
                 sectors_per_cluster=sectors_per_cluster,
@@ -1151,6 +1180,155 @@ def _insert_sbnk(state: _TransactionState, operation: AlterationOperation) -> Op
         object_name=spec.name,
         inserted_sfs_ids=(new_id,),
         allocated_clusters=allocated,
+    )
+
+
+def _logical_waveform_orphan_report(state: _TransactionState) -> WaveformOrphanReport:
+    waveforms: list[_CurrentObjectInput] = []
+    banks: list[_CurrentObjectInput] = []
+    uncertainties: dict[int, list[str]] = defaultdict(list)
+    for partition in state.partitions.values():
+        placements: dict[int, list[tuple[str, str]]] = defaultdict(list)
+        try:
+            root_chunks = _directory_chunks(partition.root)
+        except ValueError as exc:
+            uncertainties[partition.index].append(str(exc))
+            root_chunks = []
+        for volume_chunk in root_chunks:
+            volume_name = _entry_name(volume_chunk)
+            if volume_name in {".", "..", "sfserrlog", "sfserram"}:
+                continue
+            volume = partition.records.get(_entry_link(volume_chunk))
+            if volume is None or volume.payload_kind != "directory" or volume.extent_warnings:
+                uncertainties[partition.index].append(
+                    f"volume {volume_name!r} has an unresolved directory"
+                )
+                continue
+            for category_chunk in _directory_chunks(volume):
+                category_name = _entry_name(category_chunk)
+                if category_name not in {"SMPL", "SBNK"}:
+                    continue
+                category = partition.records.get(_entry_link(category_chunk))
+                if (
+                    category is None
+                    or category.payload_kind != "directory"
+                    or category.extent_warnings
+                ):
+                    uncertainties[partition.index].append(
+                        f"volume {volume_name!r} {category_name} directory is unresolved"
+                    )
+                    continue
+                for object_chunk in _directory_chunks(category):
+                    if _entry_name(object_chunk) in {".", ".."}:
+                        continue
+                    target_id = _entry_link(object_chunk)
+                    if target_id not in partition.records:
+                        uncertainties[partition.index].append(
+                            f"volume {volume_name!r} {category_name} entry "
+                            f"{_entry_name(object_chunk)!r} has no SFS record"
+                        )
+                        continue
+                    placements[target_id].append((volume_name, category_name))
+
+        for record in partition.records.values():
+            if record.sfs_id and (record.extent_warnings or record.payload_kind == "unknown"):
+                uncertainties[partition.index].append(
+                    f"SFS ID {record.sfs_id} has unresolved payload or extents"
+                )
+            object_type = _object_type(record)
+            if object_type not in {"SMPL", "SBNK"}:
+                continue
+            candidates = placements.get(record.sfs_id, [])
+            expected_category = object_type
+            exact = len(candidates) == 1 and candidates[0][1] == expected_category
+            volume_name = candidates[0][0] if exact else ""
+            item = _CurrentObjectInput(
+                object_key=f"p{partition.index}:sfs{record.sfs_id}",
+                partition_index=partition.index,
+                partition_name=partition.name,
+                volume_name=volume_name,
+                name=sfs_inventory.clean_ascii(record.payload[0x32:0x42]),
+                sfs_id=record.sfs_id,
+                payload=record.payload,
+                has_exact_placement=exact,
+            )
+            if object_type == "SMPL":
+                waveforms.append(item)
+            else:
+                banks.append(item)
+                if not exact:
+                    uncertainties[partition.index].append(
+                        f"sample bank SFS ID {record.sfs_id} has no exact SBNK placement"
+                    )
+    return _classify_waveform_inputs(
+        source_path=str(state.source),
+        waveforms=waveforms,
+        banks=banks,
+        partition_uncertainties=uncertainties,
+        global_uncertainties=[],
+    )
+
+
+@_register("delete_waveform", parser=_parse_delete_waveform_operation)
+def _delete_waveform(state: _TransactionState, operation: AlterationOperation) -> OperationReport:
+    partition_index = _resolve_partition_index(state, operation.partition_index)
+    partition = state.partitions.get(partition_index)
+    if partition is None:
+        raise ValueError(f"partition index {partition_index} does not exist")
+    assert operation.volume_name is not None
+    assert operation.waveform_name is not None
+    directory, waveform, _entry = _category_object(
+        partition,
+        operation.volume_name,
+        "SMPL",
+        operation.waveform_name,
+        "SMPL",
+    )
+    report = _logical_waveform_orphan_report(state)
+    matching_rows = [
+        row
+        for row in report.rows
+        if row.partition_index == partition.index
+        and row.volume_name == operation.volume_name
+        and row.waveform_name == operation.waveform_name
+        and row.sfs_id == waveform.sfs_id
+    ]
+    if len(matching_rows) != 1:
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} waveform "
+            f"{operation.waveform_name!r} has no unique orphan-check row"
+        )
+    row = matching_rows[0]
+    if row.status != WAVEFORM_STATUS_KNOWN_UNREFERENCED:
+        detail = row.referencing_sample_banks or row.notes or row.basis
+        raise ValueError(
+            f"partition {partition.index} volume {operation.volume_name!r} waveform "
+            f"{operation.waveform_name!r} is {row.status}, not "
+            f"{WAVEFORM_STATUS_KNOWN_UNREFERENCED}: {detail}"
+        )
+    chunks = [
+        chunk
+        for chunk in _directory_chunks(directory)
+        if not (
+            _entry_name(chunk) == operation.waveform_name
+            and _entry_link(chunk) == waveform.sfs_id
+        )
+    ]
+    _replace_directory_payload(partition, directory, b"".join(chunks))
+    freed = _release_record(partition, waveform)
+    state.known_object_edges = [
+        edge
+        for edge in state.known_object_edges
+        if not (edge[0] == partition.index and waveform.sfs_id in edge[1:])
+    ]
+    return OperationReport(
+        id=operation.id,
+        type=operation.type,
+        partition_index=partition.index,
+        volume_name=operation.volume_name,
+        object_name=operation.waveform_name,
+        removed_sfs_ids=(waveform.sfs_id,),
+        freed_clusters=freed,
     )
 
 
