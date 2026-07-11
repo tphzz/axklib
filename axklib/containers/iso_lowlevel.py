@@ -506,7 +506,9 @@ def build_hash_rows(
                         decoded_sha = sha256(decoded_pcm)
                         decoded_size = len(decoded_pcm)
                         transform = str(decoded["stored_payload_transform"])
-                        alternating_byte_detected = bool(decoded["alternating_byte_payload_detected"])
+                        alternating_byte_detected = bool(
+                            decoded["alternating_byte_payload_detected"]
+                        )
                     except ValueError:
                         transform = "unsupported-width"
             hashes.append(

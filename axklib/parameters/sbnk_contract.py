@@ -95,12 +95,8 @@ CURRENT_SBNK_OBJECT_HANDLE_DEFAULT = 0x01443C30
 CURRENT_SBNK_MEMBER_PARAMETER_BASE_DEFAULT_0X0A8_0X0B7 = bytes.fromhex(
     "4a04012047050120490b01e0480c01e0"
 )
-CURRENT_SBNK_SINGLE_MEMBER_RESERVED_PLAYBACK_DEFAULT_0X152_0X156 = bytes.fromhex(
-    "c1e01e3a20"
-)
-CURRENT_SBNK_SINGLE_MEMBER_RESERVED_TONE_DEFAULT_0X158_0X15B = bytes.fromhex(
-    "3e20e1c6"
-)
+CURRENT_SBNK_SINGLE_MEMBER_RESERVED_PLAYBACK_DEFAULT_0X152_0X156 = bytes.fromhex("c1e01e3a20")
+CURRENT_SBNK_SINGLE_MEMBER_RESERVED_TONE_DEFAULT_0X158_0X15B = bytes.fromhex("3e20e1c6")
 CURRENT_SINGLE_MEMBER_SBNK_DEFAULT_SAMPLE_CONTROL_RECORDS = (
     (74, 4, 1, 32),
     (71, 5, 1, 32),
@@ -771,9 +767,7 @@ def serialize_current_single_member_sbnk_payload(
             template=None,
             allow_zero_inactive_right_slot_without_template=True,
             loop_cache_policy=loop_cache_policy,
-            key_range_high_0x0e2=(
-                127 if key_range_high_0x0e2 is None else key_range_high_0x0e2
-            ),
+            key_range_high_0x0e2=(127 if key_range_high_0x0e2 is None else key_range_high_0x0e2),
             key_range_low_0x0e3=(0 if key_range_low_0x0e3 is None else key_range_low_0x0e3),
             midi_receive_channel_0x0d2=0,
             pitch_bend_type_0x0d3=0,

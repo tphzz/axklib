@@ -223,7 +223,6 @@ def _key_range(
     return low, high, ""
 
 
-
 def _member_value(
     params: Mapping[str, object],
     waveform: Mapping[str, object],
@@ -526,7 +525,9 @@ def export_sfz(request: SfzExportRequest) -> SfzExportResult:
             for note in notes:
                 warnings.append(f"{volume_rel}: {instrument_name}: {note}")
         if request.write_manifests:
-            written_files.extend(_write_manifest(volume_root, volume_rows, request.overwrite_policy))
+            written_files.extend(
+                _write_manifest(volume_root, volume_rows, request.overwrite_policy)
+            )
         request.progress_callback and request.progress_callback(
             SfzExportProgress("sfz", index, total, volume_rel)
         )

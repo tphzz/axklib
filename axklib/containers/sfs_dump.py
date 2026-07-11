@@ -364,10 +364,10 @@ def parse_directory_entries_guess(payload: bytes) -> list[dict[str, object]]:
     return entries
 
 
-
 def _dict_int(row: dict[str, object], key: str, default: int = 0) -> int:
     value = row.get(key, default)
     return value if isinstance(value, int) else default
+
 
 def parse_image(path: Path, options: ReadOptions | None = None) -> dict[str, object]:
     options = options or ReadOptions()
@@ -389,7 +389,9 @@ def parse_image(path: Path, options: ReadOptions | None = None) -> dict[str, obj
         superblock0 = parse_superblock(first_sector, 0, DEFAULT_SECTOR_SIZE)
         fields = cast(dict[str, dict[str, object]], superblock0["fields"])
         sector_size_value = fields["sector_size_bytes"].get("value", DEFAULT_SECTOR_SIZE)
-        sector_size = sector_size_value if isinstance(sector_size_value, int) else DEFAULT_SECTOR_SIZE
+        sector_size = (
+            sector_size_value if isinstance(sector_size_value, int) else DEFAULT_SECTOR_SIZE
+        )
         if sector_size <= 0 or sector_size > 65536:
             warnings.append(f"invalid sector size {sector_size}; using 512 for recovery")
             sector_size = DEFAULT_SECTOR_SIZE
@@ -419,7 +421,9 @@ def parse_image(path: Path, options: ReadOptions | None = None) -> dict[str, obj
             if reader.size is not None:
                 partition_end = (start_sector + sector_count) * sector_size
                 if partition_end > reader.size:
-                    warnings.append(f"partition {entry.get('index', 0)} extends beyond raw image size")
+                    warnings.append(
+                        f"partition {entry.get('index', 0)} extends beyond raw image size"
+                    )
             partitions.append(
                 parse_partition_header(
                     reader,

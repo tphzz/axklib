@@ -274,7 +274,9 @@ def _iter_iso_objects(path: Path, *, lazy_payloads: bool = False) -> Iterable[Is
                 continue
             prefix_size = min(row.size, max(0x200, iso_lowlevel.SBAC_SLOT_COUNT_OFFSET + 1))
             prefix = iso_lowlevel.read_at(handle, row.data_offset, prefix_size)
-            payload = prefix if lazy_payloads else iso_lowlevel.read_at(handle, row.data_offset, row.size)
+            payload = (
+                prefix if lazy_payloads else iso_lowlevel.read_at(handle, row.data_offset, row.size)
+            )
             quality, notes = iso_lowlevel.classify_iso_recovery(row, payload, row.inventory_status)
             raw_group, raw_volume = _iso_path_group_volume(row.path)
             yield IsoObjectEntry(
@@ -297,8 +299,9 @@ def _iter_iso_objects(path: Path, *, lazy_payloads: bool = False) -> Iterable[Is
             )
 
 
-
-def _read_fat_file_prefix(image: bytes, geometry: fat_container.FatGeometry, item: fat_container.FatFile, size: int) -> bytes:
+def _read_fat_file_prefix(
+    image: bytes, geometry: fat_container.FatGeometry, item: fat_container.FatFile, size: int
+) -> bytes:
     output = bytearray()
     remaining = min(size, item.size)
     for cluster in fat_container.file_clusters(image, geometry, item):
@@ -318,7 +321,10 @@ def _read_fat_payload(path: Path, directory_offset: int) -> bytes:
     for item in fat_container.iter_root_files(image, geometry):
         if item.directory_offset == directory_offset:
             return fat_container.read_file_bytes(image, geometry, item)
-    raise FileNotFoundError(f"FAT object at directory offset {directory_offset} no longer exists in {path}")
+    raise FileNotFoundError(
+        f"FAT object at directory offset {directory_offset} no longer exists in {path}"
+    )
+
 
 def _iter_fat_objects(path: Path, *, lazy_payloads: bool = False) -> Iterable[FatObjectEntry]:
     image = path.read_bytes()
@@ -478,7 +484,9 @@ def load_sfs_objects(path: Path, *, lazy_payloads: bool = False) -> list[AxklibO
                         payload_offset=record.payload_offset,
                         payload_size=record.data_size,
                         object_type=record.object_type,
-                        name=record.object_name if lazy_payloads else objects.clean_ascii(payload[0x32:0x42]),
+                        name=record.object_name
+                        if lazy_payloads
+                        else objects.clean_ascii(payload[0x32:0x42]),
                         payload=None if lazy_payloads else payload,
                         payload_loader=payload_loader,
                         basis="SFS allocated Y-node containing plain FSFSDEV3SPLX object",

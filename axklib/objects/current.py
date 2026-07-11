@@ -37,8 +37,9 @@ CURRENT_SMPL_LOOP_MODE_LABELS = {
 @dataclass(frozen=True)
 class CurrentSmplMetadata:
     """Decoded compact metadata from a current-format SMPL object.
-    
+
     Use this for current waveform extraction sidecars and parameter reports that need sample rate, root key, loop mode, loop window, link ID, and raw compact-record bytes."""
+
     compact_record_offset: int
     compact_record_size: int
     source_wave_name_guess: str
@@ -339,10 +340,10 @@ def current_smpl_field_quality(transform: str) -> dict[str, dict[str, str]]:
     }
 
 
-
 def _row_int(row: dict[str, object], key: str, default: int = 0) -> int:
     value = row.get(key, default)
     return value if isinstance(value, int) else default
+
 
 def write_current_smpl_wav(
     *,
@@ -360,7 +361,9 @@ def write_current_smpl_wav(
     bytes_per_sample = _row_int(row, "bytes_per_sample_guess")
     name = str(row.get("name_guess", "sample"))
     stored_payload_offset_value = row.get("stored_payload_offset", header_size)
-    stored_payload_offset = stored_payload_offset_value if isinstance(stored_payload_offset_value, int) else header_size
+    stored_payload_offset = (
+        stored_payload_offset_value if isinstance(stored_payload_offset_value, int) else header_size
+    )
 
     stored = read_stored_payload(header_size, payload_size)
     decoded = decode_current_smpl_payload_info(stored, bytes_per_sample)
@@ -455,4 +458,3 @@ def write_current_smpl_wav(
         metadata.update(extra_metadata)
     meta_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     return metadata
-

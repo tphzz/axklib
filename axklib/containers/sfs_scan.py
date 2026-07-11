@@ -244,12 +244,15 @@ def print_table(rows: list[dict[str, object]]) -> None:
     widths = [
         max(len(title), *(len(str(row.get(key, ""))) for row in rows)) for key, title in columns
     ]
-    print("  ".join(title.ljust(width) for width, (_key, title) in zip(widths, columns, strict=True)))
+    print(
+        "  ".join(title.ljust(width) for width, (_key, title) in zip(widths, columns, strict=True))
+    )
     print("  ".join("-" * width for width in widths))
     for row in rows:
         print(
             "  ".join(
-                str(row.get(key, "")).ljust(width) for width, (key, _title) in zip(widths, columns, strict=True)
+                str(row.get(key, "")).ljust(width)
+                for width, (key, _title) in zip(widths, columns, strict=True)
             )
         )
 

@@ -33,4 +33,3 @@ def test_docs_cli_sets_material_warning_env_and_delegates(monkeypatch) -> None:
         {"args": ["build", "--strict"], "prog_name": "mkdocs", "standalone_mode": True}
     ]
     assert os.environ["NO_MKDOCS_2_WARNING"] == "true"
-

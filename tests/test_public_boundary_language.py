@@ -66,14 +66,18 @@ LEGACY_PATTERNS = {
 }
 
 DOC_INSTRUCTION_PATTERNS = {
-    "instruction-for-automation": re.compile(_term(r"\b", "ag", "ent", r" instructions?\b"), re.IGNORECASE),
+    "instruction-for-automation": re.compile(
+        _term(r"\b", "ag", "ent", r" instructions?\b"), re.IGNORECASE
+    ),
     "note-to-self": re.compile(r"\bnote\s+to\s+self\b", re.IGNORECASE),
     "task-marker": re.compile(_term(r"\b", "TO", "DO", r"\b")),
     "do-not-expand": re.compile(r"\bdo\s+not\s+expand\b", re.IGNORECASE),
     "must-not-grow": re.compile(r"\bmust\s+not\s+grow\b", re.IGNORECASE),
     "should-stay": re.compile(r"\bshould\s+stay\b", re.IGNORECASE),
     "keep-it-below": re.compile(r"\bkeep\s+it\s+below\b", re.IGNORECASE),
-    "useful-for-analysis-work": re.compile(_term(r"\buseful\s+for\s+", "res", "earch", r"\b"), re.IGNORECASE),
+    "useful-for-analysis-work": re.compile(
+        _term(r"\buseful\s+for\s+", "res", "earch", r"\b"), re.IGNORECASE
+    ),
     "write-side-policy": re.compile(r"\bwrite-side\s+policy\b", re.IGNORECASE),
 }
 

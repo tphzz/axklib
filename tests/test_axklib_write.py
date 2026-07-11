@@ -215,9 +215,7 @@ def test_hds_writer_preserves_division_remainder() -> None:
     total_sectors = size_bytes // 512
     slot_span = (total_sectors - 2) // 5
 
-    assert [plan.start_sector for plan in plans] == [
-        3 + index * slot_span for index in range(5)
-    ]
+    assert [plan.start_sector for plan in plans] == [3 + index * slot_span for index in range(5)]
     assert [plan.sector_count for plan in plans] == [slot_span - 1] * 5
     assert total_sectors - (plans[-1].start_sector + plans[-1].sector_count) == 4
 
@@ -463,6 +461,66 @@ def test_hds_writer_creates_hardware_profile_sbac_and_prog(tmp_path: Path) -> No
     assert not graph.ambiguous()
 
 
+def test_hds_writer_creates_three_member_sbac_and_prog(tmp_path: Path) -> None:
+    source_wav = tmp_path / "tone.wav"
+    _write_mono_wav(source_wav)
+    image_path = tmp_path / "HD00_512_writer_three_member_sbac.hds"
+
+    builder = HdsImageBuilder(size_bytes=1024 * 1024)
+    volume = builder.add_partition("New Partition").add_volume("Key Group Vol")
+    waveform = volume.add_waveform_from_wav(name="Tone", path=source_wav, root_key=60)
+    members = tuple(
+        volume.add_sample_bank(
+            name=f"Member {note}",
+            waveform=waveform,
+            root_key=root_key,
+            key_low=root_key,
+            key_high=root_key,
+            level=100,
+        )
+        for note, root_key in (("C3", 60), ("D3", 62), ("E3", 64))
+    )
+    direct = volume.add_sample_bank(
+        name="Direct G3",
+        waveform=waveform,
+        root_key=67,
+        key_low=67,
+        key_high=67,
+        level=100,
+    )
+    group = volume.add_sample_bank_group(name="Key Group", members=members)
+    program = volume.add_program(number=1)
+    program.assign_sample_bank_group(group, receive_channel=1)
+    program.assign_sample_bank(direct, receive_channel=2)
+
+    builder.write(image_path)
+
+    objects = load_sfs_objects(image_path)
+    sbac = next(item.payload for item in objects if item.object_type == AxklibObjectType.SBAC)
+    assert sbac[0x144] == 3
+    for index, name in enumerate(("Member C3", "Member D3", "Member E3")):
+        row_offset = 0x14C + index * 0x14
+        assert sbac[row_offset : row_offset + 0x10].rstrip(b" ") == name.encode("ascii")
+        assert _be32(sbac, row_offset + 0x10) == 0
+
+    banks = {
+        item.name: item.payload for item in objects if item.object_type == AxklibObjectType.SBNK
+    }
+    assert all(banks[name][0x0D0] == 0x03 for name in ("Member C3", "Member D3", "Member E3"))
+    assert banks["Direct G3"][0x0D0] == 0x02
+    assert _be32(banks["Direct G3"], 0x0C0) == 1
+
+    graph = build_relationship_graph(objects)
+    relation_types = [row.relationship_type for row in graph.relationships]
+    assert relation_types.count("SBNK_LEFT_MEMBER_TO_SMPL") == 4
+    assert relation_types.count("SBAC_SLOT_TO_SBNK") == 3
+    assert relation_types.count("PROG_ASSIGNMENT_TO_SBAC") == 1
+    assert relation_types.count("PROG_ASSIGNMENT_TO_SBNK") == 1
+    assert relation_types.count("SBNK_PROGRAM_BITMAP_TO_PROG") == 1
+    assert all(row.quality == "Known" for row in graph.relationships)
+    assert not graph.ambiguous()
+
+
 def test_hds_writer_allows_general_geometry_for_proven_sbac_prog_topology(
     tmp_path: Path,
 ) -> None:
@@ -499,7 +557,7 @@ def test_hds_writer_allows_general_geometry_for_proven_sbac_prog_topology(
     ]
 
 
-def test_hds_writer_rejects_multiple_sbac_prog_volumes_in_one_partition(
+def test_hds_writer_allows_multiple_sbac_prog_volumes_in_one_partition(
     tmp_path: Path,
 ) -> None:
     source_wav = tmp_path / "tone.wav"
@@ -509,9 +567,7 @@ def test_hds_writer_rejects_multiple_sbac_prog_volumes_in_one_partition(
 
     for suffix in ("A", "B"):
         volume = partition.add_volume(f"Writer {suffix}")
-        waveform = volume.add_waveform_from_wav(
-            name=f"Tone {suffix}", path=source_wav, root_key=60
-        )
+        waveform = volume.add_waveform_from_wav(name=f"Tone {suffix}", path=source_wav, root_key=60)
         grouped = volume.add_sample_bank(
             name=f"Grouped {suffix}",
             waveform=waveform,
@@ -531,8 +587,71 @@ def test_hds_writer_rejects_multiple_sbac_prog_volumes_in_one_partition(
         program.assign_sample_bank_group(group, receive_channel=1)
         program.assign_sample_bank(direct, receive_channel=2)
 
-    with pytest.raises(ValueError, match="one configured volume per partition"):
-        builder.plan()
+    result = builder.write(tmp_path / "HD00_512_writer_sbac_prog_two_volumes.hds")
+
+    assert [(item.object_type, item.name) for item in result.objects].count(("PROG", "001")) == 2
+    objects = load_sfs_objects(result.path)
+    graph = build_relationship_graph(objects)
+    assert (
+        sum(row.relationship_type == "PROG_ASSIGNMENT_TO_SBAC" for row in graph.relationships) == 2
+    )
+    assert (
+        sum(row.relationship_type == "PROG_ASSIGNMENT_TO_SBNK" for row in graph.relationships) == 2
+    )
+    assert all(row.quality == "Known" for row in graph.relationships)
+
+
+def test_hds_writer_allows_multiple_groups_and_program_bitmap_boundaries(
+    tmp_path: Path,
+) -> None:
+    source_wav = tmp_path / "tone.wav"
+    _write_mono_wav(source_wav)
+    builder = HdsImageBuilder(size_bytes=4 * 1024 * 1024)
+    volume = builder.add_partition("hd1").add_volume("Multi Program")
+    waveform = volume.add_waveform_from_wav(name="Tone", path=source_wav, root_key=60)
+
+    expected_words = {
+        1: (1, 0, 0, 0),
+        32: (0x80000000, 0, 0, 0),
+        33: (0, 1, 0, 0),
+        65: (0, 0, 1, 0),
+        97: (0, 0, 0, 1),
+    }
+    for index, number in enumerate(expected_words):
+        root_key = 60 + index
+        grouped = volume.add_sample_bank(
+            name=f"Member {number:03d}",
+            waveform=waveform,
+            root_key=root_key,
+            key_low=root_key,
+            key_high=root_key,
+        )
+        direct = volume.add_sample_bank(
+            name=f"Direct {number:03d}",
+            waveform=waveform,
+            root_key=root_key,
+            key_low=root_key,
+            key_high=root_key,
+        )
+        group = volume.add_sample_bank_group(name=f"Group {number:03d}", member=grouped)
+        program = volume.add_program(number=number)
+        program.assign_sample_bank_group(group, receive_channel=1)
+        program.assign_sample_bank(direct, receive_channel=2)
+
+    result = builder.write(tmp_path / "HD00_512_writer_multi_program.hds")
+    objects = load_sfs_objects(result.path)
+    graph = build_relationship_graph(objects)
+
+    assert sum(item.object_type == AxklibObjectType.PROG for item in objects) == 5
+    assert sum(item.object_type == AxklibObjectType.SBAC for item in objects) == 5
+    assert all(row.quality == "Known" for row in graph.relationships)
+    for number, words in expected_words.items():
+        direct = next(
+            item
+            for item in objects
+            if item.object_type == AxklibObjectType.SBNK and item.name == f"Direct {number:03d}"
+        )
+        assert tuple(_be32(direct.payload, 0x0C0 + index * 4) for index in range(4)) == words
 
 
 def test_hds_writer_can_zero_single_member_inactive_right_lane(tmp_path: Path) -> None:
@@ -765,8 +884,7 @@ def test_hds_writer_creates_two_member_stereo_bank_with_confirmed_links(
     relationships = [
         row
         for row in build_relationship_graph(objects).relationships
-        if row.relationship_type
-        in {"SBNK_LEFT_MEMBER_TO_SMPL", "SBNK_RIGHT_MEMBER_TO_SMPL"}
+        if row.relationship_type in {"SBNK_LEFT_MEMBER_TO_SMPL", "SBNK_RIGHT_MEMBER_TO_SMPL"}
     ]
     assert [(row.relationship_type, row.target_key, row.quality) for row in relationships] == [
         ("SBNK_LEFT_MEMBER_TO_SMPL", "p0:sfs9", "Known"),
@@ -1136,9 +1254,10 @@ def test_hds_writer_writes_eight_small_partitions(
         assert image_bytes[transfer_offset + 8 : transfer_offset + 512] == b"\x00" * 504
 
         header_offset = layout.start_sector * 512
-        assert image_bytes[header_offset : header_offset + 1024] == image_bytes[
-            header_offset + 1024 : header_offset + 2048
-        ]
+        assert (
+            image_bytes[header_offset : header_offset + 1024]
+            == image_bytes[header_offset + 1024 : header_offset + 2048]
+        )
         assert _be32(image_bytes, header_offset + 0x104) == layout.start_sector
         assert _be32(image_bytes, header_offset + 0x11C) == layout.sector_count
         assert _be32(image_bytes, header_offset + 0x134) == 0x0152A3FC + index * 0x11

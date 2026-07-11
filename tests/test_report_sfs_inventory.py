@@ -112,7 +112,26 @@ class ReportSfsInventoryTests(unittest.TestCase):
             image.write_bytes(data)
 
             record = report_sfs_inventory.IndexRecord(
-                0, 777, 0, 0, 2, 2, 64, 10, 10, 1, 32, None, 10 * 1024, 20, "directory", "", "", 777, None, 0
+                0,
+                777,
+                0,
+                0,
+                2,
+                2,
+                64,
+                10,
+                10,
+                1,
+                32,
+                None,
+                10 * 1024,
+                20,
+                "directory",
+                "",
+                "",
+                777,
+                None,
+                0,
             )
             partition = {
                 "index": 0,
@@ -150,19 +169,53 @@ class ReportSfsInventoryTests(unittest.TestCase):
             )
         ]
         directories = [
-            report_sfs_inventory.DirectoryReport("image.hda", 0, 3, 1, "/A4K Disk 1", 0, 0, 1, 1, 0),
-            report_sfs_inventory.DirectoryReport("image.hda", 0, 4, 3, "/A4K Disk 1/SMPL", 0, 0, 1, 0, 1),
+            report_sfs_inventory.DirectoryReport(
+                "image.hda", 0, 3, 1, "/A4K Disk 1", 0, 0, 1, 1, 0
+            ),
+            report_sfs_inventory.DirectoryReport(
+                "image.hda", 0, 4, 3, "/A4K Disk 1/SMPL", 0, 0, 1, 0, 1
+            ),
         ]
         entries = [
             report_sfs_inventory.DirectoryEntry(
-                "image.hda", 0, 3, "/A4K Disk 1", 0, 0x20, 5, 4, "SMPL", "directory", 4, "", None, "", "directory-id"
+                "image.hda",
+                0,
+                3,
+                "/A4K Disk 1",
+                0,
+                0x20,
+                5,
+                4,
+                "SMPL",
+                "directory",
+                4,
+                "",
+                None,
+                "",
+                "directory-id",
             ),
             report_sfs_inventory.DirectoryEntry(
-                "image.hda", 0, 4, "/A4K Disk 1/SMPL", 0, 0x20, 8, 5, "Sample1", "object", None, "SMPL", 0x1000, "Sample1", "name+type"
+                "image.hda",
+                0,
+                4,
+                "/A4K Disk 1/SMPL",
+                0,
+                0x20,
+                8,
+                5,
+                "Sample1",
+                "object",
+                None,
+                "SMPL",
+                0x1000,
+                "Sample1",
+                "name+type",
             ),
         ]
 
-        volumes, categories, objects = report_sfs_inventory.yamaha_volume_reports(partitions, directories, entries)
+        volumes, categories, objects = report_sfs_inventory.yamaha_volume_reports(
+            partitions, directories, entries
+        )
 
         self.assertEqual(volumes[0].volume_name, "A4K Disk 1")
         self.assertEqual(categories[0].category_name, "Samples")
@@ -170,7 +223,26 @@ class ReportSfsInventoryTests(unittest.TestCase):
 
     def test_update_ynode_visibility_marks_hidden_and_referenced_unknown(self) -> None:
         hidden = report_sfs_inventory.YNodeRecord(
-            0, 0, 0, 0, 1, 32, 32768, 424, 424, 32, 32768, None, 0, 0, "unknown", "", "", None, None, 0
+            0,
+            0,
+            0,
+            0,
+            1,
+            32,
+            32768,
+            424,
+            424,
+            32,
+            32768,
+            None,
+            0,
+            0,
+            "unknown",
+            "",
+            "",
+            None,
+            None,
+            0,
         )
         referenced_unknown = report_sfs_inventory.YNodeRecord(
             0, 12, 0, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0, 0, "unknown", "", "", None, None, 0
@@ -187,7 +259,26 @@ class ReportSfsInventoryTests(unittest.TestCase):
 
     def test_choose_object_record_explains_unknown_link_target(self) -> None:
         target = report_sfs_inventory.YNodeRecord(
-            0, 9, 1234, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0, 0, "unknown", "", "", None, None, 0
+            0,
+            9,
+            1234,
+            0,
+            1,
+            1,
+            1024,
+            500,
+            500,
+            1,
+            1024,
+            None,
+            0,
+            0,
+            "unknown",
+            "",
+            "",
+            None,
+            None,
+            0,
         )
 
         record, method, reason, ynode, candidates = report_sfs_inventory.choose_object_record(
@@ -223,7 +314,26 @@ class ReportSfsInventoryTests(unittest.TestCase):
 
     def test_choose_object_record_resolves_exact_legacy_link_target(self) -> None:
         target = report_sfs_inventory.YNodeRecord(
-            0, 9, 1234, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0, 0, "alternating-byte-object", "SMPL", "", None, None, 0
+            0,
+            9,
+            1234,
+            0,
+            1,
+            1,
+            1024,
+            500,
+            500,
+            1,
+            1024,
+            None,
+            0,
+            0,
+            "alternating-byte-object",
+            "SMPL",
+            "",
+            None,
+            None,
+            0,
         )
         record = report_sfs_inventory.ynode_to_index_record(target)
 
@@ -245,7 +355,26 @@ class ReportSfsInventoryTests(unittest.TestCase):
 
     def test_choose_object_record_does_not_name_match_blank_legacy_records(self) -> None:
         target = report_sfs_inventory.YNodeRecord(
-            0, 9, 1234, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0, 0, "alternating-byte-object", "SMPL", "", None, None, 0
+            0,
+            9,
+            1234,
+            0,
+            1,
+            1,
+            1024,
+            500,
+            500,
+            1,
+            1024,
+            None,
+            0,
+            0,
+            "alternating-byte-object",
+            "SMPL",
+            "",
+            None,
+            None,
+            0,
         )
         record = report_sfs_inventory.ynode_to_index_record(target)
 
@@ -254,9 +383,30 @@ class ReportSfsInventoryTests(unittest.TestCase):
             expected_type="SMPL",
             link_id=0,
             records_by_sfs_id={9: record},
-            ynodes_by_sfs_id={0: report_sfs_inventory.YNodeRecord(
-                0, 0, 0, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0, 0, "unknown", "", "", None, None, 0
-            )},
+            ynodes_by_sfs_id={
+                0: report_sfs_inventory.YNodeRecord(
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    1,
+                    1024,
+                    500,
+                    500,
+                    1,
+                    1024,
+                    None,
+                    0,
+                    0,
+                    "unknown",
+                    "",
+                    "",
+                    None,
+                    None,
+                    0,
+                )
+            },
             records=[record],
             used_offsets=set(),
         )
@@ -269,10 +419,48 @@ class ReportSfsInventoryTests(unittest.TestCase):
 
     def test_choose_object_record_preserves_ambiguous_name_candidates_without_target(self) -> None:
         first = report_sfs_inventory.IndexRecord(
-            0, 20, 0x2000, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0x10000, 0, "object", "SMPL", "Kick", None, None, 0
+            0,
+            20,
+            0x2000,
+            0,
+            1,
+            1,
+            1024,
+            500,
+            500,
+            1,
+            1024,
+            None,
+            0x10000,
+            0,
+            "object",
+            "SMPL",
+            "Kick",
+            None,
+            None,
+            0,
         )
         second = report_sfs_inventory.IndexRecord(
-            0, 21, 0x2100, 0, 1, 1, 1024, 501, 501, 1, 1024, None, 0x11000, 0, "object", "SMPL", "Kick", None, None, 0
+            0,
+            21,
+            0x2100,
+            0,
+            1,
+            1,
+            1024,
+            501,
+            501,
+            1,
+            1024,
+            None,
+            0x11000,
+            0,
+            "object",
+            "SMPL",
+            "Kick",
+            None,
+            None,
+            0,
         )
 
         resolved, method, reason, ynode, candidates = report_sfs_inventory.choose_object_record(
@@ -293,7 +481,26 @@ class ReportSfsInventoryTests(unittest.TestCase):
 
     def test_choose_object_record_preserves_single_name_candidate_without_target(self) -> None:
         candidate = report_sfs_inventory.IndexRecord(
-            0, 20, 0x2000, 0, 1, 1, 1024, 500, 500, 1, 1024, None, 0x10000, 0, "object", "SMPL", "Kick", None, None, 0
+            0,
+            20,
+            0x2000,
+            0,
+            1,
+            1,
+            1024,
+            500,
+            500,
+            1,
+            1024,
+            None,
+            0x10000,
+            0,
+            "object",
+            "SMPL",
+            "Kick",
+            None,
+            None,
+            0,
         )
 
         resolved, method, reason, _ynode, candidates = report_sfs_inventory.choose_object_record(
@@ -314,4 +521,3 @@ class ReportSfsInventoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

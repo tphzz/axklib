@@ -68,8 +68,7 @@ def resolve_sbnk_key_range(
         return None
     basis = (
         "sampler-orig-key-limit"
-        if is_orig_key_limit(low_raw, limit="low")
-        or is_orig_key_limit(high_raw, limit="high")
+        if is_orig_key_limit(low_raw, limit="low") or is_orig_key_limit(high_raw, limit="high")
         else "decoded-key-range"
     )
     return {

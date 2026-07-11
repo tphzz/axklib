@@ -36,14 +36,29 @@ def test_sfs_free_space_converts_nondefault_cluster_size_to_kib() -> None:
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
-        ({"cluster_count": -1, "first_payload_cluster": 0, "allocated_cluster_count": 0}, "cluster_count"),
-        ({"cluster_count": 10, "first_payload_cluster": 11, "allocated_cluster_count": 0}, "first_payload_cluster"),
-        ({"cluster_count": 10, "first_payload_cluster": 2, "allocated_cluster_count": 9}, "allocated_cluster_count"),
-        ({"cluster_count": 10, "first_payload_cluster": 2, "allocated_cluster_count": 1, "cluster_size_bytes": 0}, "cluster_size_bytes"),
+        (
+            {"cluster_count": -1, "first_payload_cluster": 0, "allocated_cluster_count": 0},
+            "cluster_count",
+        ),
+        (
+            {"cluster_count": 10, "first_payload_cluster": 11, "allocated_cluster_count": 0},
+            "first_payload_cluster",
+        ),
+        (
+            {"cluster_count": 10, "first_payload_cluster": 2, "allocated_cluster_count": 9},
+            "allocated_cluster_count",
+        ),
+        (
+            {
+                "cluster_count": 10,
+                "first_payload_cluster": 2,
+                "allocated_cluster_count": 1,
+                "cluster_size_bytes": 0,
+            },
+            "cluster_size_bytes",
+        ),
     ],
 )
-def test_sfs_free_space_rejects_invalid_inputs(
-    kwargs: dict[str, int], message: str
-) -> None:
+def test_sfs_free_space_rejects_invalid_inputs(kwargs: dict[str, int], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         calculate_sfs_free_space(**kwargs)

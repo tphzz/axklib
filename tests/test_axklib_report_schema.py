@@ -58,4 +58,3 @@ def test_schema_manifest_records_columns_counts_and_quality_semantics(tmp_path) 
     assert index["reports"][0]["row_count"] == 2
     assert index["reports"][0]["source_command"] == "axklib inventory"
     assert index["reports"][0]["library_version"] == "test-version"
-

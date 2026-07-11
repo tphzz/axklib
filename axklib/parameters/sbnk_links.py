@@ -435,7 +435,9 @@ def parse_sbnk(
         right_match = choose_smpl_ref(sample_name_right, right_link, smpl_by_link, smpl_by_name)
     else:
         right_candidates = smpl_by_link.get(right_link, []) if right_link else []
-        right_match = MatchedSmpl(None, "unused-empty-name", len(right_candidates), right_candidates)
+        right_match = MatchedSmpl(
+            None, "unused-empty-name", len(right_candidates), right_candidates
+        )
     left = left_match.ref
     right = right_match.ref
     left_root_key = member_window.left_root_key_0x0d6 or 0
@@ -465,7 +467,9 @@ def parse_sbnk(
     filter_cutoff_key_scaling_level1 = member_window.filter_cutoff_key_scaling_level1_0x10e or 0
     filter_cutoff_key_scaling_level2 = member_window.filter_cutoff_key_scaling_level2_0x10f or 0
     filter_cutoff_velocity_sensitivity = member_window.filter_cutoff_velocity_sensitivity_0x110 or 0
-    filter_q_width_velocity_sensitivity = member_window.filter_q_width_velocity_sensitivity_0x111 or 0
+    filter_q_width_velocity_sensitivity = (
+        member_window.filter_q_width_velocity_sensitivity_0x111 or 0
+    )
     expand_detune = member_window.expand_detune_0x112 or 0
     expand_dephase = member_window.expand_dephase_0x113 or 0
     expand_width = member_window.expand_width_0x114 or 0
@@ -494,7 +498,9 @@ def parse_sbnk(
     feg_release_level = member_window.feg_release_level_0x12c or 0
     feg_rate_key_scaling = member_window.feg_rate_key_scaling_0x12d or 0
     feg_rate_velocity_sensitivity = member_window.feg_rate_velocity_sensitivity_0x12e or 0
-    feg_attack_level_velocity_sensitivity = member_window.feg_attack_level_velocity_sensitivity_0x12f or 0
+    feg_attack_level_velocity_sensitivity = (
+        member_window.feg_attack_level_velocity_sensitivity_0x12f or 0
+    )
     feg_level_velocity_sensitivity = member_window.feg_level_velocity_sensitivity_0x130 or 0
     peg_attack_rate = member_window.peg_attack_rate_0x131 or 0
     peg_decay_rate = member_window.peg_decay_rate_0x132 or 0
@@ -535,7 +541,9 @@ def parse_sbnk(
     velocity_range_low_candidate = member_window.filter_cutoff_key_scaling_break1_0x10c or 0
     velocity_range_high_candidate = member_window.filter_cutoff_key_scaling_break2_0x10d or 0
     expected_pitch_base = estimated_pitch_base_word(left_root_key, left_sample_rate, left_fine_tune)
-    pitch_base_delta = pitch_base_word - expected_pitch_base if expected_pitch_base is not None else None
+    pitch_base_delta = (
+        pitch_base_word - expected_pitch_base if expected_pitch_base is not None else None
+    )
     pitch_base_matches_formula = pitch_base_delta == 0
     pitch_base_status = pitch_base_word_status(pitch_base_word, expected_pitch_base)
     expected_secondary_pitch_base = estimated_pitch_base_word(
@@ -760,46 +768,82 @@ def parse_sbnk(
         expected_loop_end_address_from_start_length=expected_loop_end_address,
         loop_end_address_delta_from_expected=u32_delta(loop_end_address, expected_loop_end_address),
         sample_control1_device_0x164=(member_window.sample_control_records[0].device_u8 or 0),
-        sample_control1_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[0].device_u8 or 0),
+        sample_control1_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[0].device_u8 or 0
+        ),
         sample_control1_function_0x165=(member_window.sample_control_records[0].function_u8 or 0),
-        sample_control1_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[0].function_u8 or 0),
+        sample_control1_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[0].function_u8 or 0
+        ),
         sample_control1_type_0x166=(member_window.sample_control_records[0].type_u8 or 0),
-        sample_control1_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[0].type_u8 or 0),
+        sample_control1_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[0].type_u8 or 0
+        ),
         sample_control1_range_0x167=(member_window.sample_control_records[0].range_s8 or 0),
         sample_control2_device_0x168=(member_window.sample_control_records[1].device_u8 or 0),
-        sample_control2_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[1].device_u8 or 0),
+        sample_control2_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[1].device_u8 or 0
+        ),
         sample_control2_function_0x169=(member_window.sample_control_records[1].function_u8 or 0),
-        sample_control2_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[1].function_u8 or 0),
+        sample_control2_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[1].function_u8 or 0
+        ),
         sample_control2_type_0x16a=(member_window.sample_control_records[1].type_u8 or 0),
-        sample_control2_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[1].type_u8 or 0),
+        sample_control2_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[1].type_u8 or 0
+        ),
         sample_control2_range_0x16b=(member_window.sample_control_records[1].range_s8 or 0),
         sample_control3_device_0x16c=(member_window.sample_control_records[2].device_u8 or 0),
-        sample_control3_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[2].device_u8 or 0),
+        sample_control3_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[2].device_u8 or 0
+        ),
         sample_control3_function_0x16d=(member_window.sample_control_records[2].function_u8 or 0),
-        sample_control3_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[2].function_u8 or 0),
+        sample_control3_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[2].function_u8 or 0
+        ),
         sample_control3_type_0x16e=(member_window.sample_control_records[2].type_u8 or 0),
-        sample_control3_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[2].type_u8 or 0),
+        sample_control3_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[2].type_u8 or 0
+        ),
         sample_control3_range_0x16f=(member_window.sample_control_records[2].range_s8 or 0),
         sample_control4_device_0x170=(member_window.sample_control_records[3].device_u8 or 0),
-        sample_control4_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[3].device_u8 or 0),
+        sample_control4_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[3].device_u8 or 0
+        ),
         sample_control4_function_0x171=(member_window.sample_control_records[3].function_u8 or 0),
-        sample_control4_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[3].function_u8 or 0),
+        sample_control4_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[3].function_u8 or 0
+        ),
         sample_control4_type_0x172=(member_window.sample_control_records[3].type_u8 or 0),
-        sample_control4_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[3].type_u8 or 0),
+        sample_control4_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[3].type_u8 or 0
+        ),
         sample_control4_range_0x173=(member_window.sample_control_records[3].range_s8 or 0),
         sample_control5_device_0x174=(member_window.sample_control_records[4].device_u8 or 0),
-        sample_control5_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[4].device_u8 or 0),
+        sample_control5_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[4].device_u8 or 0
+        ),
         sample_control5_function_0x175=(member_window.sample_control_records[4].function_u8 or 0),
-        sample_control5_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[4].function_u8 or 0),
+        sample_control5_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[4].function_u8 or 0
+        ),
         sample_control5_type_0x176=(member_window.sample_control_records[4].type_u8 or 0),
-        sample_control5_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[4].type_u8 or 0),
+        sample_control5_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[4].type_u8 or 0
+        ),
         sample_control5_range_0x177=(member_window.sample_control_records[4].range_s8 or 0),
         sample_control6_device_0x178=(member_window.sample_control_records[5].device_u8 or 0),
-        sample_control6_device_ui_label=sample_control_device_ui_label(member_window.sample_control_records[5].device_u8 or 0),
+        sample_control6_device_ui_label=sample_control_device_ui_label(
+            member_window.sample_control_records[5].device_u8 or 0
+        ),
         sample_control6_function_0x179=(member_window.sample_control_records[5].function_u8 or 0),
-        sample_control6_function_ui_label=sample_control_function_ui_label(member_window.sample_control_records[5].function_u8 or 0),
+        sample_control6_function_ui_label=sample_control_function_ui_label(
+            member_window.sample_control_records[5].function_u8 or 0
+        ),
         sample_control6_type_0x17a=(member_window.sample_control_records[5].type_u8 or 0),
-        sample_control6_type_ui_label=sample_control_type_ui_label(member_window.sample_control_records[5].type_u8 or 0),
+        sample_control6_type_ui_label=sample_control_type_ui_label(
+            member_window.sample_control_records[5].type_u8 or 0
+        ),
         sample_control6_range_0x17b=(member_window.sample_control_records[5].range_s8 or 0),
         velocity_xfade_high_0x17c=velocity_xfade_high,
         velocity_xfade_low_0x17d=velocity_xfade_low,
@@ -864,7 +908,9 @@ def parse_sbnk(
         left_smpl_loop_length_frames_0x09a=left.loop_length_frames_0x09a if left else None,
         right_smpl_loop_length_frames_0x09a=right.loop_length_frames_0x09a if right else None,
         left_frames_minus_smpl_0x092=left.frames - left.wave_length_frames_0x092 if left else None,
-        right_frames_minus_smpl_0x092=right.frames - right.wave_length_frames_0x092 if right else None,
+        right_frames_minus_smpl_0x092=right.frames - right.wave_length_frames_0x092
+        if right
+        else None,
         left_root_key_matches_smpl=left_root_matches,
         right_root_key_matches_smpl=right_root_matches,
         left_sample_rate_matches_smpl=left_rate_matches,
@@ -930,13 +976,17 @@ def write_summary(path: Path, rows: list[SbnkLink]) -> None:
             1 for row in rows if row.right_link_role == "unused-nonzero"
         ),
         "known_single_member_count": sum(
-            1 for row in rows if row.bank_topology == "single-member" and row.known_member_count == 1
+            1
+            for row in rows
+            if row.bank_topology == "single-member" and row.known_member_count == 1
         ),
         "known_two_member_count": sum(
             1 for row in rows if row.bank_topology == "two-member" and row.known_member_count == 2
         ),
         "matched_pair_count": sum(
-            1 for row in rows if row.left_smpl_offset is not None and row.right_smpl_offset is not None
+            1
+            for row in rows
+            if row.left_smpl_offset is not None and row.right_smpl_offset is not None
         ),
         "linked_by_ids_count": sum(1 for row in rows if row.link_ids_match_smpl),
         "names_match_count": sum(1 for row in rows if row.names_match_smpl),
@@ -991,9 +1041,7 @@ def write_summary(path: Path, rows: list[SbnkLink]) -> None:
             1 for row in rows if row.clean_pitch_base_word_for_write_0x0de is not None
         ),
         "clean_secondary_pitch_base_word_for_write_available_count": sum(
-            1
-            for row in rows
-            if row.clean_secondary_pitch_base_word_for_write_0x0e0 is not None
+            1 for row in rows if row.clean_secondary_pitch_base_word_for_write_0x0e0 is not None
         ),
         "secondary_pitch_base_word_single_member_noncanonical_count": sum(
             1 for row in rows if not row.right_slot_present
@@ -1034,7 +1082,6 @@ def write_summary(path: Path, rows: list[SbnkLink]) -> None:
     path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
 
-
 def build_sbnk_links(image: Path, mono_dir: Path) -> list[SbnkLink]:
     """Build detailed current SBNK-to-SMPL rows for one SFS image."""
     smpl_by_link, smpl_by_name = load_smpl_refs(mono_dir)
@@ -1058,6 +1105,7 @@ def build_report(image: Path, mono_dir: Path, output_dir: Path) -> list[SbnkLink
     write_report(output_dir, rows)
     return rows
 
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path)
@@ -1077,7 +1125,9 @@ def main() -> int:
     print(f"two-member banks: {sum(1 for row in rows if row.bank_topology == 'two-member')}")
     print(f"linked by SMPL+0x078 IDs: {sum(1 for row in rows if row.link_ids_match_smpl)}")
     print(f"names match linked SMPLs: {sum(1 for row in rows if row.names_match_smpl)}")
-    print(f"SBNK window fields mirror linked SMPLs: {sum(1 for row in rows if row.sbnk_fields_match_smpl)}")
+    print(
+        f"SBNK window fields mirror linked SMPLs: {sum(1 for row in rows if row.sbnk_fields_match_smpl)}"
+    )
     print(
         "member sample-rate fields match linked SMPLs: "
         f"{sum(int(row.left_sample_rate_matches_smpl) + int(row.right_sample_rate_matches_smpl) for row in rows)}"
@@ -1100,6 +1150,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-

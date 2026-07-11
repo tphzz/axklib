@@ -389,9 +389,7 @@ def _load_extract_results(
     strict: bool,
     progress: _ProgressLine,
 ) -> tuple[list[Any], int]:
-    options = axklib.OpenOptions(
-        strict=strict, include_payloads=True, lazy_payloads=True
-    )
+    options = axklib.OpenOptions(strict=strict, include_payloads=True, lazy_payloads=True)
     results: list[Any] = []
     load_errors = 0
     progress.update("loading", 0, len(paths), "opening inputs")
@@ -555,9 +553,7 @@ def _smpl_refs_for_selection(
             source_by_key.setdefault(obj.object_key, set()).add(obj.image)
 
     smpl_refs: set[tuple[str, str]] = {
-        (source, key)
-        for key in by_type["SMPL"]
-        for source in source_by_key.get(key, set())
+        (source, key) for key in by_type["SMPL"] for source in source_by_key.get(key, set())
     }
     changed = True
     while changed:
@@ -570,7 +566,10 @@ def _smpl_refs_for_selection(
                 if row.source_key not in by_type["PROG"] or not _row_is_active_assignment(row):
                     continue
                 for target in _target_keys(row.target_key):
-                    if target_type in {"SBAC", "SBNK", "SMPL"} and target not in by_type[target_type]:
+                    if (
+                        target_type in {"SBAC", "SBNK", "SMPL"}
+                        and target not in by_type[target_type]
+                    ):
                         by_type[target_type].add(target)
                         changed = True
             elif row.relationship_type == "SBAC_SLOT_TO_SBNK":
@@ -703,7 +702,9 @@ def _run_targeted_extract(
         warning_count += len(targeted.warnings)
         skipped_files.extend(targeted.skipped_files)
         if targeted.sfz_result is not None:
-            sfz_count += sum(1 for path in targeted.sfz_result.written_files if path.suffix == ".sfz")
+            sfz_count += sum(
+                1 for path in targeted.sfz_result.written_files if path.suffix == ".sfz"
+            )
     print(
         f"waveforms={len(waveforms)} written_files={len(dict.fromkeys(all_written_files))} "
         f"selection_graphs={len(all_selection_graphs)} sfz_files={sfz_count} "
@@ -913,6 +914,7 @@ def run_inventory(args: argparse.Namespace) -> int:
 def run_extract_sfz(args: argparse.Namespace) -> int:
     paths = _input_paths(args.paths)
     return _run_targeted_extract(args, scope=args.scope, paths=paths, write_sfz_files=True)
+
 
 def run_objects(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir)

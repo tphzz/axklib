@@ -124,10 +124,10 @@ class AllocationPartitionSummary:
     warnings: str
 
 
-
 def int_mapping_value(mapping: dict[str, object], key: str, default: int = 0) -> int:
     value = mapping.get(key, default)
     return value if isinstance(value, int) else default
+
 
 def bitmap_byte_count(cluster_count: int) -> int:
     return (cluster_count + 7) // 8
@@ -148,7 +148,9 @@ def count_bitmap_bits(data: bytes | bytearray, cluster_count: int) -> int:
     return sum(1 for cluster in range(cluster_count) if bitmap_test(data, cluster))
 
 
-def mismatch_ranges(left: bytes | bytearray, right: bytes | bytearray, cluster_count: int) -> list[tuple[int, int]]:
+def mismatch_ranges(
+    left: bytes | bytearray, right: bytes | bytearray, cluster_count: int
+) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
     start: int | None = None
     for cluster in range(cluster_count):
@@ -215,10 +217,12 @@ def continuation_extents(
         list_cluster=list_cluster,
         expected_extent_count=expected_extent_count,
     )
-    return [
-        (extent.cluster_offset, extent.cluster_count, extent.byte_count)
-        for extent in extents
-    ], list_clusters, warnings
+    return (
+        [(extent.cluster_offset, extent.cluster_count, extent.byte_count) for extent in extents],
+        list_clusters,
+        warnings,
+    )
+
 
 def add_extent_to_bitmap(
     bitmap: bytearray,
@@ -299,7 +303,9 @@ def analyze_partition(
                 record_extents = direct_extents(record, parsed_record.extent_count)
                 if len(record_extents) != parsed_record.extent_count:
                     invalid_extent_records += 1
-                    warnings.append(f"partition {partition_index} sfs_id {sfs_id}: invalid direct extents")
+                    warnings.append(
+                        f"partition {partition_index} sfs_id {sfs_id}: invalid direct extents"
+                    )
                     continue
             else:
                 continuation_records += 1
@@ -312,7 +318,10 @@ def analyze_partition(
                     list_cluster=parsed_record.cluster_offset,
                     expected_extent_count=parsed_record.extent_count,
                 )
-                warnings.extend(f"partition {partition_index} sfs_id {sfs_id}: {item}" for item in extent_warnings)
+                warnings.extend(
+                    f"partition {partition_index} sfs_id {sfs_id}: {item}"
+                    for item in extent_warnings
+                )
                 if len(record_extents) != parsed_record.extent_count:
                     invalid_extent_records += 1
 
@@ -346,7 +355,9 @@ def analyze_partition(
                     )
                 )
 
-            for index, (cluster_offset, extent_cluster_count, byte_count) in enumerate(record_extents):
+            for index, (cluster_offset, extent_cluster_count, byte_count) in enumerate(
+                record_extents
+            ):
                 if cluster_offset + extent_cluster_count > total_clusters:
                     warnings.append(
                         f"partition {partition_index} sfs_id {sfs_id}: extent out of range at cluster {cluster_offset}"
@@ -434,9 +445,7 @@ def analyze_partition(
         reserved_cluster_count=(free_space.reserved_cluster_count if free_space else None),
         sampler_free_cluster_count=(free_space.free_cluster_count if free_space else None),
         sampler_free_bytes=(free_space.free_bytes if free_space else None),
-        sampler_visible_free_kib=(
-            free_space.sampler_visible_free_kib if free_space else None
-        ),
+        sampler_visible_free_kib=(free_space.sampler_visible_free_kib if free_space else None),
         stored_used_not_reconstructed_count=range_count(stored_not_reconstructed),
         reconstructed_used_not_stored_count=range_count(reconstructed_not_stored),
         extent_total_mismatch_count=extent_total_mismatch_count,
@@ -444,8 +453,6 @@ def analyze_partition(
         warnings=" | ".join(warnings[:32]),
     )
     return summary, extents_report, mismatch_report
-
-
 
 
 @dataclass(frozen=True)
@@ -471,7 +478,9 @@ def analyze_image(image: Path) -> AllocationReport:
     for partition in partitions:
         if not isinstance(partition, dict):
             continue
-        summary, partition_extents, partition_mismatches = analyze_partition(image, parsed, partition)
+        summary, partition_extents, partition_mismatches = analyze_partition(
+            image, parsed, partition
+        )
         summaries.append(summary)
         extents.extend(partition_extents)
         mismatches.extend(partition_mismatches)

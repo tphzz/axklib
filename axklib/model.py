@@ -62,11 +62,13 @@ class AxklibContainerKind(StrEnum):
     ISO = "iso"
     UNKNOWN = "unknown"
 
+
 @dataclass(frozen=True)
 class AxklibQuality:
     """Compact quality label attached to decoded data.
-    
+
     Use it when a value needs a quality level, source description, and optional notes but does not require byte-level field origin."""
+
     quality: DataQuality
     source: str
     notes: str = ""
@@ -75,8 +77,9 @@ class AxklibQuality:
 @dataclass(frozen=True)
 class AxklibContainerRef:
     """Stable identity for the source container that produced an object.
-    
+
     Use `scope_key` together with `source_image` when combining multiple images so object keys from different sources cannot collide."""
+
     source_image: str
     kind: AxklibContainerKind
     scope_key: str
@@ -85,8 +88,9 @@ class AxklibContainerRef:
 @dataclass(frozen=True)
 class AxklibVolumeRef:
     """Sampler-facing placement metadata for an object inside a partition, volume, and category.
-    
+
     Use this for navigation and export layout; do not treat missing fields as basis that an object is unowned or unused."""
+
     partition_index: int | None = None
     partition_name: str = ""
     volume_name: str = ""
@@ -98,8 +102,9 @@ class AxklibVolumeRef:
 @dataclass(frozen=True)
 class AxklibObjectRef:
     """Stable identity and physical location for one loaded Yamaha object.
-    
+
     The reference preserves both logical keys and container-specific location hints such as SFS ID, FAT filename, payload offset, and payload size."""
+
     object_key: str
     partition_index: int | None
     sfs_id: int | None
@@ -111,8 +116,9 @@ class AxklibObjectRef:
 @dataclass(frozen=True)
 class AxklibObjectHeader:
     """Small normalized summary of an object header.
-    
+
     Use this for generic object diagnostics before handing payload bytes to a type-specific decoder."""
+
     header_size: int | None
     stored_payload_size: int | None
     raw_prefix_hex: str
@@ -121,8 +127,9 @@ class AxklibObjectHeader:
 @dataclass(frozen=True)
 class FieldQuality:
     """Byte-level quality for one decoded field.
-    
+
     Use this when a report or sidecar must explain which raw offset and bytes support a displayed value."""
+
     quality: DataQuality
     basis: str
     notes: str = ""
@@ -134,8 +141,9 @@ class FieldQuality:
 @dataclass(frozen=True)
 class FieldValue[T]:
     """Decoded field value with raw storage and quality metadata.
-    
+
     Use this for parameter decoders that need to keep display value, raw value, offset, size, quality, and basis notes together."""
+
     name: str
     value: T
     raw_value: object
@@ -160,8 +168,9 @@ class FieldValue[T]:
 @dataclass(frozen=True)
 class DecodeIssue:
     """Structured issue emitted while decoding one object or field.
-    
+
     Use this instead of free-form warnings when a malformed field, unsupported layout, or boundary problem should be testable and reportable."""
+
     code: str
     severity: str
     object_key: str
@@ -191,8 +200,9 @@ class AxklibExtensionRecord:
 @dataclass(frozen=True)
 class SfsLocationMetadata(AxklibExtensionRecord):
     """Typed extension metadata for Yamaha SFS hard-disk object placement.
-    
+
     Use it when an object came from SFS and its partition, SFS ID, object offset, or Y-node offset is known."""
+
     partition_index: int | None = None
     sfs_id: int | None = None
     object_offset: int | None = None
@@ -202,8 +212,9 @@ class SfsLocationMetadata(AxklibExtensionRecord):
 @dataclass(frozen=True)
 class FatDirectoryMetadata(AxklibExtensionRecord):
     """Typed extension metadata for Yamaha objects loaded from a FAT floppy image.
-    
+
     Use it to preserve the FAT filename and directory index without pretending those values are SFS locations."""
+
     fat_file: str = ""
     directory_index: int | None = None
 
@@ -211,8 +222,9 @@ class FatDirectoryMetadata(AxklibExtensionRecord):
 @dataclass(frozen=True)
 class IsoRecoveryMetadata(AxklibExtensionRecord):
     """Typed extension metadata for Yamaha objects loaded from ISO9660 media.
-    
+
     Use it to record ISO inventory quality and recovery status so downstream reports can distinguish clean ISO traversal from weaker source quality."""
+
     recovery_quality: str = ""
     inventory_status: str = ""
     notes: str = ""
@@ -221,8 +233,9 @@ class IsoRecoveryMetadata(AxklibExtensionRecord):
 @dataclass(frozen=True)
 class ArtifactClassificationMetadata(AxklibExtensionRecord):
     """Typed extension metadata for suspected conversion-artifact or alternating-byte compatibility classifications.
-    
+
     Use it to keep compatibility/export labels explicit without promoting those objects to normal supported-format quality."""
+
     label: str = ""
     classification_quality: DataQuality = DataQuality.UNKNOWN
     notes: str = ""
@@ -231,8 +244,9 @@ class ArtifactClassificationMetadata(AxklibExtensionRecord):
 @dataclass(frozen=True)
 class SourceMatchMetadata(AxklibExtensionRecord):
     """Typed extension metadata for payload matches to external source objects.
-    
+
     Use it to carry source-recovered metadata or conflict notes separately from decoded on-disk fields."""
+
     source_path: str = ""
     match_quality: str = ""
     conflict_notes: str = ""
@@ -414,4 +428,3 @@ def coerce_container_kind(value: AxklibContainerKind | str) -> AxklibContainerKi
         return AxklibContainerKind(value)
     except ValueError:
         return AxklibContainerKind.UNKNOWN
-

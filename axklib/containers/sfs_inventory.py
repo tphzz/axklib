@@ -515,7 +515,8 @@ def first_object_offset(
     offsets = [
         offset
         for row in object_rows
-        if isinstance((offset := row.get("offset")), int) and row.get("partition") == partition_index
+        if isinstance((offset := row.get("offset")), int)
+        and row.get("partition") == partition_index
     ]
     return min(offsets) if offsets else fallback
 
@@ -690,7 +691,9 @@ def choose_object_record(
             if exact.payload_kind == "alternating-byte-object":
                 return (
                     exact,
-                    "link-id+alternating-byte-type" if expected_type else "link-id+alternating-byte",
+                    "link-id+alternating-byte-type"
+                    if expected_type
+                    else "link-id+alternating-byte",
                     "",
                     target_ynode,
                     [],
@@ -905,9 +908,9 @@ def walk_directories(
     return directory_reports, entry_reports
 
 
-
 def dataclass_asdict(row: object) -> dict[str, Any]:
     return cast(dict[str, Any], asdict(row))  # type: ignore[call-overload]
+
 
 def write_csv(path: Path, rows: Sequence[object]) -> None:
     if not rows:
@@ -922,7 +925,9 @@ def write_csv(path: Path, rows: Sequence[object]) -> None:
 
 
 def write_json(path: Path, rows: Sequence[object]) -> None:
-    path.write_text(json.dumps([dataclass_asdict(row) for row in rows], indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps([dataclass_asdict(row) for row in rows], indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def update_ynode_visibility(
@@ -1163,7 +1168,9 @@ def yamaha_volume_reports(
 def build_inventory(image: Path, output_dir: Path) -> None:
     parsed = dumper.parse_image(image, dumper.ReadOptions(max_nodes=4, include_node_payloads=False))
     sector_size_value = parsed.get("sector_size_bytes", dumper.DEFAULT_SECTOR_SIZE)
-    sector_size = sector_size_value if isinstance(sector_size_value, int) else dumper.DEFAULT_SECTOR_SIZE
+    sector_size = (
+        sector_size_value if isinstance(sector_size_value, int) else dumper.DEFAULT_SECTOR_SIZE
+    )
     scan_object_rows = sfs_scan.scan_image(image, max_nodes=4)
     parsed_partitions = parsed.get("partitions", [])
     if not isinstance(parsed_partitions, list):

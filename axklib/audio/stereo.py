@@ -87,7 +87,12 @@ def pad_to_match(left: bytes, right: bytes, sample_width: int) -> tuple[bytes, b
     target = max(len(left), len(right))
     left_padding = target - len(left)
     right_padding = target - len(right)
-    return left + (b"\x00" * left_padding), right + (b"\x00" * right_padding), left_padding, right_padding
+    return (
+        left + (b"\x00" * left_padding),
+        right + (b"\x00" * right_padding),
+        left_padding,
+        right_padding,
+    )
 
 
 def trim_to_match(left: bytes, right: bytes, sample_width: int) -> tuple[bytes, bytes, int, int]:
@@ -141,7 +146,12 @@ def pair_samples(samples: list[MonoSample], *, mismatch_policy: str) -> list[Ste
         for sample in samples:
             if sample.meta_path in used:
                 continue
-            loose_key = (sample.source_image, sample.pair_base, sample.sample_rate, sample.sample_width)
+            loose_key = (
+                sample.source_image,
+                sample.pair_base,
+                sample.sample_rate,
+                sample.sample_width,
+            )
             loose_groups.setdefault(loose_key, {"L": [], "R": []})[sample.channel].append(sample)
         for channels in loose_groups.values():
             lefts = sorted(channels["L"], key=lambda item: item.object_offset)
@@ -168,7 +178,10 @@ def write_stereo_pair(pair: StereoPair, output_dir: Path) -> dict[str, object]:
     right_padding = 0
     left_trimmed = 0
     right_trimmed = 0
-    if left_params.nframes != right_params.nframes and pair.policy not in {"pad-shorter", "trim-longer"}:
+    if left_params.nframes != right_params.nframes and pair.policy not in {
+        "pad-shorter",
+        "trim-longer",
+    }:
         raise ValueError("frame counts differ")
     if pair.policy == "pad-shorter":
         left_pcm, right_pcm, left_padding, right_padding = pad_to_match(
@@ -190,7 +203,9 @@ def write_stereo_pair(pair: StereoPair, output_dir: Path) -> dict[str, object]:
     metadata_path = output_path.with_suffix(".json")
     suffix = 2
     while output_path.exists():
-        output_path = output_dir / safe_name(f"{Path(left.source_image).stem}_{left.pair_base}_{suffix}.wav")
+        output_path = output_dir / safe_name(
+            f"{Path(left.source_image).stem}_{left.pair_base}_{suffix}.wav"
+        )
         metadata_path = output_path.with_suffix(".json")
         suffix += 1
 
@@ -222,4 +237,3 @@ def write_stereo_pair(pair: StereoPair, output_dir: Path) -> dict[str, object]:
     }
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     return metadata
-

@@ -24,7 +24,6 @@ class ReportSbnkLinksTests(unittest.TestCase):
             wav_path="",
         )
 
-
     def test_load_smpl_refs_accepts_canonical_source_container_sidecars(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -54,6 +53,7 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(by_link[0x12345678][0].name, "S01")
         self.assertEqual(by_link[0x12345678][0].group_id_0x06c, 9)
         self.assertEqual(by_name["S01"][0].sample_rate, 44100)
+
     def test_choose_smpl_ref_uses_name_to_disambiguate_duplicate_link_ids(self) -> None:
         wanted = self.make_ref("K-Off 8'*029  -L", 0x11216800, 0x016B2AF4)
         other = self.make_ref("WiolinSolo 085-R", 0x164D8000, 0x016B2AF4)
@@ -70,7 +70,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(match.candidate_count, 2)
         self.assertEqual(match.candidate_refs, [wanted])
 
-    def test_choose_smpl_ref_preserves_ambiguous_link_name_candidates_without_selection(self) -> None:
+    def test_choose_smpl_ref_preserves_ambiguous_link_name_candidates_without_selection(
+        self,
+    ) -> None:
         first = self.make_ref("Snare", 0x1000, 0x42)
         second = self.make_ref("Snare", 0x2000, 0x42)
 
@@ -121,7 +123,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
     def test_root_key_pitch_word_handles_zero_root_key(self) -> None:
         self.assertEqual(sbnk_contract.root_key_pitch_word(0), 0x03AB)
 
-    def test_pitch_base_word_status_distinguishes_clean_write_value_from_stored_exception(self) -> None:
+    def test_pitch_base_word_status_distinguishes_clean_write_value_from_stored_exception(
+        self,
+    ) -> None:
         self.assertEqual(
             sbnk_contract.pitch_base_word_status(0x1600, 0x1600),
             "matches-pitch-formula",
@@ -549,6 +553,7 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(parsed.left_wave_start_low16_0x0ea, 0x1234)
         self.assertEqual(parsed.right_wave_start_address_0x0ec, 0x00005678)
         self.assertEqual(parsed.right_wave_start_low16_0x0ee, 0x5678)
+
     def test_current_sbnk_contract_parses_sysex_aligned_exp_velocity_fields(self) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="Pad L",
@@ -812,6 +817,7 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(parsed.level_scaling_break2_0x11d, 96)
         self.assertEqual(parsed.level_scaling_level1_0x11e, 44)
         self.assertEqual(parsed.level_scaling_level2_0x11f, 102)
+
     def test_current_sbnk_contract_rejects_out_of_range_batched_fields(self) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="Pad L",
@@ -1256,7 +1262,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
             output1_0x17e=7,
             output2_0x180=0,
         )
-        parsed_lane_sample_check = sbnk_contract.parse_current_sbnk_contract_payload(lane_sample_check)
+        parsed_lane_sample_check = sbnk_contract.parse_current_sbnk_contract_payload(
+            lane_sample_check
+        )
         self.assertEqual(parsed_lane_sample_check.output1_ui_label, "AssnOut3&4")
         self.assertEqual(parsed_lane_sample_check.output2_ui_label, "off")
 
@@ -1621,7 +1629,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
             sbnk_contract.PITCH_BASE_STATUS_INACTIVE,
         )
 
-    def test_minimal_generated_single_member_sbnk_object_fixture_uses_newsample_template(self) -> None:
+    def test_minimal_generated_single_member_sbnk_object_fixture_uses_newsample_template(
+        self,
+    ) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="GEN 000001",
             smpl_link_id_0x078=0x016BCAFE,
@@ -1719,7 +1729,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
                 loop_cache_policy=sbnk_contract.CURRENT_SBNK_LOOP_CACHE_POLICY_SINGLE_MEMBER_ONE_SHOT,
             )
 
-    def test_single_member_forward_loop_cache_policy_updates_only_proven_authority_lane(self) -> None:
+    def test_single_member_forward_loop_cache_policy_updates_only_proven_authority_lane(
+        self,
+    ) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="GEN 000001",
             smpl_link_id_0x078=0x016BCAFE,
@@ -1745,7 +1757,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(payload[0x0F8:0x0FC], (2048).to_bytes(4, "big"))
         self.assertEqual(payload[0x100:0x104], (114428).to_bytes(4, "big"))
 
-    def test_single_member_forward_to_zero_loop_cache_policy_updates_mode_and_authority_lane(self) -> None:
+    def test_single_member_forward_to_zero_loop_cache_policy_updates_mode_and_authority_lane(
+        self,
+    ) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="GEN 000001",
             smpl_link_id_0x078=0x016BCAFE,
@@ -1770,7 +1784,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(payload[0x0EE:0x0F0], template[0x0EE:0x0F0])
         self.assertEqual(payload[0x0F8:0x0FC], (2048).to_bytes(4, "big"))
 
-    def test_single_member_forward_to_zero_forward_loop_cache_policy_updates_mode_and_authority_lane(self) -> None:
+    def test_single_member_forward_to_zero_forward_loop_cache_policy_updates_mode_and_authority_lane(
+        self,
+    ) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="GEN 000001",
             smpl_link_id_0x078=0x016BCAFE,
@@ -1820,7 +1836,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(payload[0x0EE:0x0F0], template[0x0EE:0x0F0])
         self.assertEqual(payload[0x0F8:0x0FC], (2048).to_bytes(4, "big"))
 
-    def test_single_member_one_shot_reverse_loop_cache_policy_updates_mode_and_authority_lane(self) -> None:
+    def test_single_member_one_shot_reverse_loop_cache_policy_updates_mode_and_authority_lane(
+        self,
+    ) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="GEN 000001",
             smpl_link_id_0x078=0x016BCAFE,
@@ -1884,7 +1902,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(payload[0x0F8:0x0FC], (2048).to_bytes(4, "big"))
         self.assertEqual(payload[0x0FC:0x100], b"\x00\x00\x00\x00")
 
-    def test_two_member_forward_to_zero_loop_cache_policy_updates_mode_and_authority_lane(self) -> None:
+    def test_two_member_forward_to_zero_loop_cache_policy_updates_mode_and_authority_lane(
+        self,
+    ) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="GEN 000001",
             smpl_link_id_0x078=0x016BCAFE,
@@ -1923,7 +1943,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(payload[0x0F8:0x0FC], (2048).to_bytes(4, "big"))
         self.assertEqual(payload[0x0FC:0x100], b"\x00\x00\x00\x00")
 
-    def test_two_member_forward_to_zero_forward_loop_cache_policy_updates_mode_and_authority_lane(self) -> None:
+    def test_two_member_forward_to_zero_forward_loop_cache_policy_updates_mode_and_authority_lane(
+        self,
+    ) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="GEN 000001",
             smpl_link_id_0x078=0x016BCAFE,
@@ -2040,7 +2062,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(payload[0x0F8:0x0FC], (2048).to_bytes(4, "big"))
         self.assertEqual(payload[0x0FC:0x100], b"\x00\x00\x00\x00")
 
-    def test_two_member_one_shot_reverse_loop_cache_policy_updates_mode_and_authority_lane(self) -> None:
+    def test_two_member_one_shot_reverse_loop_cache_policy_updates_mode_and_authority_lane(
+        self,
+    ) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="GEN 000001",
             smpl_link_id_0x078=0x016BCAFE,
@@ -2079,7 +2103,9 @@ class ReportSbnkLinksTests(unittest.TestCase):
         self.assertEqual(payload[0x0F8:0x0FC], (2048).to_bytes(4, "big"))
         self.assertEqual(payload[0x0FC:0x100], b"\x00\x00\x00\x00")
 
-    def test_single_member_one_shot_loop_cache_policy_rejects_unproven_wide_start_cache(self) -> None:
+    def test_single_member_one_shot_loop_cache_policy_rejects_unproven_wide_start_cache(
+        self,
+    ) -> None:
         left = sbnk_contract.CurrentSbnkMemberSpec(
             sample_name="GEN 000001",
             smpl_link_id_0x078=0x016BCAFE,
@@ -2123,4 +2149,3 @@ class ReportSbnkLinksTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

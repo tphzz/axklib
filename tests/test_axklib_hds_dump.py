@@ -42,7 +42,9 @@ def write_partition_header(buf: bytearray, sector: int) -> None:
     buf[base + 1024 : base + 2048] = buf[base : base + 1024]
 
 
-def write_node(buf: bytearray, offset: int, node_size: int, cluster_offset: int, data_size: int) -> None:
+def write_node(
+    buf: bytearray, offset: int, node_size: int, cluster_offset: int, data_size: int
+) -> None:
     put_u16(buf, offset + 0x00, 1)
     put_u16(buf, offset + 0x02, 0)
     put_u16(buf, offset + 0x04, 2)
@@ -134,4 +136,3 @@ class AxklibHdsDumpTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

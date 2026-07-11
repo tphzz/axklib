@@ -34,7 +34,7 @@ class HdsManifestSampleBank:
 @dataclass(frozen=True)
 class HdsManifestSampleBankGroup:
     name: str
-    member_sample_bank: str
+    member_sample_banks: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -153,12 +153,36 @@ def _parse_sample_bank(value: object, context: str) -> HdsManifestSampleBank:
 
 def _parse_sample_bank_group(value: object, context: str) -> HdsManifestSampleBankGroup:
     row = _mapping(value, context)
-    _fields(row, context, required={"name", "member_sample_bank"})
+    _fields(
+        row,
+        context,
+        required={"name"},
+        optional={"member_sample_bank", "member_sample_banks"},
+    )
+    member_fields = [
+        field for field in ("member_sample_bank", "member_sample_banks") if field in row
+    ]
+    if len(member_fields) != 1:
+        raise ValueError(
+            f"{context} must contain exactly one of member_sample_bank or member_sample_banks"
+        )
+    members: tuple[str, ...]
+    if member_fields[0] == "member_sample_bank":
+        members = (_string(row["member_sample_bank"], f"{context}.member_sample_bank"),)
+    else:
+        members = tuple(
+            _string(item, f"{context}.member_sample_banks[{index}]")
+            for index, item in enumerate(
+                _list(row["member_sample_banks"], f"{context}.member_sample_banks")
+            )
+        )
+    if not 1 <= len(members) <= 3:
+        raise ValueError(f"{context} must contain 1..3 member sample banks")
+    if len(members) != len(set(members)):
+        raise ValueError(f"{context} contains duplicate member sample banks")
     return HdsManifestSampleBankGroup(
         name=_string(row["name"], f"{context}.name"),
-        member_sample_bank=_string(
-            row["member_sample_bank"], f"{context}.member_sample_bank"
-        ),
+        member_sample_banks=members,
     )
 
 
@@ -172,9 +196,7 @@ def _parse_program_assignment(value: object, context: str) -> HdsManifestProgram
     )
     targets = [name for name in ("sample_bank", "sample_bank_group") if name in row]
     if len(targets) != 1:
-        raise ValueError(
-            f"{context} must contain exactly one of sample_bank or sample_bank_group"
-        )
+        raise ValueError(f"{context} must contain exactly one of sample_bank or sample_bank_group")
     target_field = targets[0]
     return HdsManifestProgramAssignment(
         target_kind="SBNK" if target_field == "sample_bank" else "SBAC",
@@ -229,9 +251,7 @@ def _parse_volume(value: object, context: str, base_dir: Path) -> HdsManifestVol
                     f"unknown waveform {bank.right_waveform_id!r}"
                 )
             if bank.right_waveform_id == bank.waveform_id:
-                raise ValueError(
-                    f"{context}.sample_banks[{index}] stereo members must be distinct"
-                )
+                raise ValueError(f"{context}.sample_banks[{index}] stereo members must be distinct")
     bank_names = [bank.name for bank in sample_banks]
     if len(bank_names) != len(set(bank_names)):
         raise ValueError(f"{context}.sample_banks contains duplicate names")
@@ -246,11 +266,12 @@ def _parse_volume(value: object, context: str, base_dir: Path) -> HdsManifestVol
         raise ValueError(f"{context}.sample_bank_groups contains duplicate names")
     known_banks = set(bank_names)
     for index, group in enumerate(sample_bank_groups):
-        if group.member_sample_bank not in known_banks:
-            raise ValueError(
-                f"{context}.sample_bank_groups[{index}].member_sample_bank references "
-                f"unknown sample bank {group.member_sample_bank!r}"
-            )
+        for member_index, member_name in enumerate(group.member_sample_banks):
+            if member_name not in known_banks:
+                raise ValueError(
+                    f"{context}.sample_bank_groups[{index}].member_sample_banks"
+                    f"[{member_index}] references unknown sample bank {member_name!r}"
+                )
     programs = tuple(
         _parse_program(item, f"{context}.programs[{index}]")
         for index, item in enumerate(_list(row.get("programs", []), f"{context}.programs"))
@@ -373,7 +394,9 @@ def build_hds_from_manifest(
             group_refs = {
                 group_spec.name: volume.add_sample_bank_group(
                     name=group_spec.name,
-                    member=sample_bank_refs[group_spec.member_sample_bank],
+                    members=tuple(
+                        sample_bank_refs[name] for name in group_spec.member_sample_banks
+                    ),
                 )
                 for group_spec in volume_spec.sample_bank_groups
             }

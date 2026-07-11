@@ -38,7 +38,9 @@ def write_text_file(path: Path, text: str, *, overwrite_policy: OverwritePolicy 
     path.write_text(text, encoding="utf-8")
 
 
-def copy_file(source: Path, destination: Path, *, overwrite_policy: OverwritePolicy = "fail") -> None:
+def copy_file(
+    source: Path, destination: Path, *, overwrite_policy: OverwritePolicy = "fail"
+) -> None:
     _ensure_writable(destination, overwrite_policy=overwrite_policy)
     shutil.copy2(source, destination)
 
@@ -252,7 +254,6 @@ def load_object_locations(inventory_dir: Path | None) -> dict[int, ObjectLocatio
     return locations
 
 
-
 def parse_optional_int(value: object) -> int | None:
     text = str(value or "").strip()
     if not text:
@@ -366,7 +367,9 @@ def apply_volume_disambiguated_sbac_locations(
         return False
     key_offsets = load_inventory_key_offsets(inventory_dir)
     changed = False
-    for row in read_csv_rows(sbac_volume_disambiguation_dir / "current_sbac_volume_disambiguation.csv"):
+    for row in read_csv_rows(
+        sbac_volume_disambiguation_dir / "current_sbac_volume_disambiguation.csv"
+    ):
         quality = row.get("volume_match_quality", "")
         selected_key = row.get("volume_selected_sbnk_object_key", "")
         sbac_key = row.get("sbac_object_key", "")
@@ -378,20 +381,23 @@ def apply_volume_disambiguated_sbac_locations(
         source = "current-sbac-volume-disambiguated-relationship"
         if "hidden-candidate+volume-handle-sfs-sequence" in method:
             source = "current-sbac-volume-sequence-relationship"
-        changed = maybe_add_derived_location(
-            locations,
-            derived_rows,
-            target_offset=target_offset,
-            target_type="SBNK",
-            target_name=row.get("slot_sbnk_name", ""),
-            inherited_from_offset=sbac_offset,
-            inherited_from_type="SBAC",
-            inherited_from_name=row.get("sbac_name", ""),
-            inherited_location=locations.get(sbac_offset or -1),
-            relationship_path="SBAC->SBNK",
-            relationship_quality=quality,
-            location_source=source,
-        ) or changed
+        changed = (
+            maybe_add_derived_location(
+                locations,
+                derived_rows,
+                target_offset=target_offset,
+                target_type="SBNK",
+                target_name=row.get("slot_sbnk_name", ""),
+                inherited_from_offset=sbac_offset,
+                inherited_from_type="SBAC",
+                inherited_from_name=row.get("sbac_name", ""),
+                inherited_location=locations.get(sbac_offset or -1),
+                relationship_path="SBAC->SBNK",
+                relationship_quality=quality,
+                location_source=source,
+            )
+            or changed
+        )
     return changed
 
 
@@ -416,45 +422,54 @@ def apply_bank_relationship_locations(
                 continue
             prog_offset = parse_optional_int(row.get("prog_payload_offset"))
             target_offset = parse_optional_int(row.get("matched_target_payload_offset"))
-            changed = maybe_add_derived_location(
-                locations,
-                derived_rows,
-                target_offset=target_offset,
-                target_type=target_type,
-                target_name=row.get("matched_target_name", ""),
-                inherited_from_offset=prog_offset,
-                inherited_from_type="PROG",
-                inherited_from_name=row.get("prog_name", ""),
-                inherited_location=locations.get(prog_offset or -1),
-                relationship_path=f"PROG->{target_type}",
-                relationship_quality=quality,
-                location_source="current-prog-bank-relationship",
-            ) or changed
+            changed = (
+                maybe_add_derived_location(
+                    locations,
+                    derived_rows,
+                    target_offset=target_offset,
+                    target_type=target_type,
+                    target_name=row.get("matched_target_name", ""),
+                    inherited_from_offset=prog_offset,
+                    inherited_from_type="PROG",
+                    inherited_from_name=row.get("prog_name", ""),
+                    inherited_location=locations.get(prog_offset or -1),
+                    relationship_path=f"PROG->{target_type}",
+                    relationship_quality=quality,
+                    location_source="current-prog-bank-relationship",
+                )
+                or changed
+            )
         for row in sbac_rows:
             if row.get("match_quality", "") != "Known":
                 continue
             sbac_offset = parse_optional_int(row.get("sbac_payload_offset"))
             target_offset = parse_optional_int(row.get("matched_sbnk_payload_offset"))
-            changed = maybe_add_derived_location(
+            changed = (
+                maybe_add_derived_location(
+                    locations,
+                    derived_rows,
+                    target_offset=target_offset,
+                    target_type="SBNK",
+                    target_name=row.get("matched_sbnk_name", ""),
+                    inherited_from_offset=sbac_offset,
+                    inherited_from_type="SBAC",
+                    inherited_from_name=row.get("sbac_name", ""),
+                    inherited_location=locations.get(sbac_offset or -1),
+                    relationship_path="SBAC->SBNK",
+                    relationship_quality="Known",
+                    location_source="current-sbac-sbnk-relationship",
+                )
+                or changed
+            )
+        changed = (
+            apply_volume_disambiguated_sbac_locations(
                 locations,
                 derived_rows,
-                target_offset=target_offset,
-                target_type="SBNK",
-                target_name=row.get("matched_sbnk_name", ""),
-                inherited_from_offset=sbac_offset,
-                inherited_from_type="SBAC",
-                inherited_from_name=row.get("sbac_name", ""),
-                inherited_location=locations.get(sbac_offset or -1),
-                relationship_path="SBAC->SBNK",
-                relationship_quality="Known",
-                location_source="current-sbac-sbnk-relationship",
-            ) or changed
-        changed = apply_volume_disambiguated_sbac_locations(
-            locations,
-            derived_rows,
-            sbac_volume_disambiguation_dir=sbac_volume_disambiguation_dir,
-            inventory_dir=inventory_dir,
-        ) or changed
+                sbac_volume_disambiguation_dir=sbac_volume_disambiguation_dir,
+                inventory_dir=inventory_dir,
+            )
+            or changed
+        )
     return derived_rows
 
 
@@ -496,6 +511,7 @@ def apply_sbnk_member_locations(
             location_source="current-sbnk-smpl-relationship",
         )
     return derived_rows
+
 
 def load_sbnk_rows(image: Path, mono_dir: Path) -> list[sbnk_links.SbnkLink]:
     smpl_by_link, smpl_by_name = sbnk_links.load_smpl_refs(mono_dir)
@@ -632,7 +648,9 @@ def export_pairs(
             organization_source=pair_location.location_source if pair_location else "",
             organization_relationship_path=pair_location.relationship_path if pair_location else "",
             organization_relationship_quality=pair_location.match_quality if pair_location else "",
-            organization_owner_object_offset=pair_location.owner_object_offset if pair_location else None,
+            organization_owner_object_offset=pair_location.owner_object_offset
+            if pair_location
+            else None,
             notes=row.notes,
         )
         pair_sidecar_path = pair_output_dir / f"{stem}.json"
@@ -652,11 +670,29 @@ def export_pairs(
         pair_exports.append(pair)
 
     write_csv(output_dir / "sbnk_exact_pairs.csv", pair_exports, overwrite_policy=overwrite_policy)
-    write_json(output_dir / "sbnk_exact_pairs.json", pair_exports, overwrite_policy=overwrite_policy)
-    write_csv(output_dir / "mono_exports.csv", list(mono_exports.values()), overwrite_policy=overwrite_policy)
-    write_json(output_dir / "mono_exports.json", list(mono_exports.values()), overwrite_policy=overwrite_policy)
-    write_csv(output_dir / "derived_object_locations.csv", derived_locations, overwrite_policy=overwrite_policy)
-    write_json(output_dir / "derived_object_locations.json", derived_locations, overwrite_policy=overwrite_policy)
+    write_json(
+        output_dir / "sbnk_exact_pairs.json", pair_exports, overwrite_policy=overwrite_policy
+    )
+    write_csv(
+        output_dir / "mono_exports.csv",
+        list(mono_exports.values()),
+        overwrite_policy=overwrite_policy,
+    )
+    write_json(
+        output_dir / "mono_exports.json",
+        list(mono_exports.values()),
+        overwrite_policy=overwrite_policy,
+    )
+    write_csv(
+        output_dir / "derived_object_locations.csv",
+        derived_locations,
+        overwrite_policy=overwrite_policy,
+    )
+    write_json(
+        output_dir / "derived_object_locations.json",
+        derived_locations,
+        overwrite_policy=overwrite_policy,
+    )
     write_summary(
         output_dir / "summary.json",
         mono_exports,
@@ -665,6 +701,8 @@ def export_pairs(
         overwrite_policy=overwrite_policy,
     )
     return pair_exports
+
+
 def partition_dir_name(location: ObjectLocation) -> str:
     name = safe_name(location.partition_name or f"partition_{location.partition_index:02d}")
     return f"partition_{location.partition_index:02d}_{name}"
@@ -715,7 +753,9 @@ def export_mono(
         updated["organization_relationship_path"] = location.relationship_path
         updated["organization_relationship_quality"] = location.match_quality
         updated["organization_owner_object_offset"] = location.owner_object_offset
-    write_text_file(json_path, json.dumps(updated, indent=2) + "\n", overwrite_policy=overwrite_policy)
+    write_text_file(
+        json_path, json.dumps(updated, indent=2) + "\n", overwrite_policy=overwrite_policy
+    )
 
     return MonoExport(
         object_offset=int(str(item.get("object_offset", 0)), 0),
@@ -829,19 +869,31 @@ def write_summary(
         "mono_wavs_with_volume_category": sum(
             1 for row in mono_exports.values() if row.partition_index is not None
         ),
-        "mono_wavs_unmapped": sum(1 for row in mono_exports.values() if row.partition_index is None),
+        "mono_wavs_unmapped": sum(
+            1 for row in mono_exports.values() if row.partition_index is None
+        ),
         "derived_object_locations": len(derived_locations),
         "sbnk_pair_sidecars": len(pair_exports),
         "sbnk_pair_sidecars_with_volume_category": sum(
             1 for row in pair_exports if row.partition_index is not None
         ),
-        "sbnk_pair_sidecars_unmapped": sum(1 for row in pair_exports if row.partition_index is None),
-        "single_member_banks": sum(1 for row in pair_exports if row.bank_topology == "single-member"),
+        "sbnk_pair_sidecars_unmapped": sum(
+            1 for row in pair_exports if row.partition_index is None
+        ),
+        "single_member_banks": sum(
+            1 for row in pair_exports if row.bank_topology == "single-member"
+        ),
         "two_member_banks": sum(1 for row in pair_exports if row.bank_topology == "two-member"),
-        "exact_stereo_pairs_representable": sum(1 for row in pair_exports if row.exact_stereo_representable),
+        "exact_stereo_pairs_representable": sum(
+            1 for row in pair_exports if row.exact_stereo_representable
+        ),
         "exact_stereo_wavs_exported": sum(1 for row in pair_exports if row.stereo_wav_path),
-        "single_mono_member_banks": sum(1 for row in pair_exports if row.export_policy == "single-mono-member"),
-        "linked_dual_mono_only": sum(1 for row in pair_exports if row.export_policy == "linked-dual-mono"),
+        "single_mono_member_banks": sum(
+            1 for row in pair_exports if row.export_policy == "single-mono-member"
+        ),
+        "linked_dual_mono_only": sum(
+            1 for row in pair_exports if row.export_policy == "linked-dual-mono"
+        ),
         "unmatched_sbnk_pairs": sum(
             1
             for row in pair_exports
@@ -865,4 +917,3 @@ def write_summary(
         ),
     }
     write_text_file(path, json.dumps(summary, indent=2) + "\n", overwrite_policy=overwrite_policy)
-

@@ -102,7 +102,6 @@ class ASeriesObjectsTests(unittest.TestCase):
             with wave.open(metadata["wav_path"], "rb") as wav:
                 self.assertEqual(wav.getframerate(), 44100)
 
-
     def test_current_smpl_alternating_byte_payload_writes_8_bit_useful_lane(self) -> None:
         row = a_series_objects.summarize_object_header(bytes(build_current_smpl_header()))
         payload = b"\x00\x55\x80\xaa\xff\x55\x7f\xaa"
@@ -118,7 +117,9 @@ class ASeriesObjectsTests(unittest.TestCase):
             )
 
             self.assertEqual(metadata["extraction_quality"], "Likely")
-            self.assertEqual(metadata["stored_payload_transform"], "alternating-byte-signed-high-byte")
+            self.assertEqual(
+                metadata["stored_payload_transform"], "alternating-byte-signed-high-byte"
+            )
             self.assertTrue(metadata["alternating_byte_payload_detected"])
             self.assertEqual(metadata["alternating_byte_useful_bytes"], 4)
             self.assertEqual(metadata["stored_payload_size"], 8)
@@ -132,6 +133,7 @@ class ASeriesObjectsTests(unittest.TestCase):
             with wave.open(metadata["wav_path"], "rb") as wav:
                 self.assertEqual(wav.getsampwidth(), 1)
                 self.assertEqual(wav.readframes(wav.getnframes()), b"\x80\x00\x7f\xff")
+
+
 if __name__ == "__main__":
     unittest.main()
-

@@ -119,7 +119,9 @@ def clean_partition_key(row: dict[str, str]) -> tuple[str, int]:
     return row.get("source_image", ""), int_field(row, "partition_index")
 
 
-def load_allocation_issues(allocation_dir: Path | None) -> dict[tuple[str, int], tuple[str, int, str]]:
+def load_allocation_issues(
+    allocation_dir: Path | None,
+) -> dict[tuple[str, int], tuple[str, int, str]]:
     if allocation_dir is None:
         return {}
     path = allocation_dir / "allocation_summary.csv"
@@ -138,7 +140,6 @@ def load_allocation_issues(allocation_dir: Path | None) -> dict[tuple[str, int],
         details = row.get("warnings", "")
         issues[clean_partition_key(row)] = (status, issue_count, details)
     return issues
-
 
 
 def load_volume_object_counts(
@@ -231,7 +232,11 @@ def build_report(
 
     entries_by_category: dict[tuple[str, int, int], list[dict[str, str]]] = {}
     for row in directory_entries:
-        key = (row.get("source_image", ""), int_field(row, "partition_index"), int_field(row, "directory_id"))
+        key = (
+            row.get("source_image", ""),
+            int_field(row, "partition_index"),
+            int_field(row, "directory_id"),
+        )
         if key in category_by_key:
             entries_by_category.setdefault(key, []).append(row)
 
@@ -256,15 +261,26 @@ def build_report(
         quality: list[str] = []
         object_counts = object_counts_by_volume.get(volume_key, {})
         current_object_entries = object_counts.get("current_object_entry_count", 0)
-        compatibility_artifact_entries = object_counts.get("compatibility_artifact_object_entry_count", 0)
-        compatibility_artifact_smpl_entries = object_counts.get("compatibility_artifact_smpl_entry_count", 0)
+        compatibility_artifact_entries = object_counts.get(
+            "compatibility_artifact_object_entry_count", 0
+        )
+        compatibility_artifact_smpl_entries = object_counts.get(
+            "compatibility_artifact_smpl_entry_count", 0
+        )
 
         for category in volume_categories:
             category_key = (source, partition_index, int_field(category, "directory_id"))
-            category_entries = [entry for entry in entries_by_category.get(category_key, []) if is_category_object_entry(entry)]
+            category_entries = [
+                entry
+                for entry in entries_by_category.get(category_key, [])
+                if is_category_object_entry(entry)
+            ]
             matched_object_count = int_field(category, "matched_object_count")
             object_entry_count = int_field(category, "object_entry_count")
-            if len(category_entries) != object_entry_count or matched_object_count != object_entry_count:
+            if (
+                len(category_entries) != object_entry_count
+                or matched_object_count != object_entry_count
+            ):
                 category_count_mismatches += 1
                 fatal_count += 1
                 issue_rows.append(
@@ -391,7 +407,8 @@ def build_report(
                     target_payload_kind="",
                     match_quality="",
                     unmatched_reason="",
-                    details=allocation_details or f"partition allocation issue count {allocation_issue_count}",
+                    details=allocation_details
+                    or f"partition allocation issue count {allocation_issue_count}",
                 )
             )
 
@@ -449,7 +466,9 @@ def build_report(
         fail_count=sum(1 for row in report_rows if row.validation_status == "Fail"),
         fatal_issue_count=sum(row.fatal_issue_count for row in report_rows),
         warning_issue_count=sum(row.warning_issue_count for row in report_rows),
-        malformed_category_entry_count=sum(row.malformed_category_entry_count for row in report_rows),
+        malformed_category_entry_count=sum(
+            row.malformed_category_entry_count for row in report_rows
+        ),
         allocation_issue_count=sum(row.allocation_issue_count for row in report_rows),
     )
 
@@ -489,5 +508,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

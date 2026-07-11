@@ -79,6 +79,7 @@ def test_program_target_filter_keeps_likely_sbac_members() -> None:
 
     assert [target.stable_id for target in targets] == ["target"]
 
+
 def test_targeted_export_selection_graph_is_opt_in(tmp_path: Path) -> None:
     plan = WaveExportPlan(
         output_dir=tmp_path,

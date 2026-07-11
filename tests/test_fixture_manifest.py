@@ -37,5 +37,7 @@ def test_sampler_authored_binary_fixtures_have_complete_manifest() -> None:
         assert entry["sha256"] == hashlib.sha256(data).hexdigest()
         assert entry["purpose"]
         assert entry["origin"]
-        assert entry["expected_object_count"] == sum(entry["expected_object_counts_by_type"].values())
+        assert entry["expected_object_count"] == sum(
+            entry["expected_object_counts_by_type"].values()
+        )
         assert entry["regeneration_note"]

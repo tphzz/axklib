@@ -257,9 +257,7 @@ def test_create_and_extract_hds_round_trips_logical_pcm_across_partition_counts(
     image_path = tmp_path / "HD00_512_roundtrip.hds"
     export_dir = tmp_path / "exports"
 
-    create_code = axklibtool.main(
-        ["create", "hds", str(manifest_path), "-o", str(image_path)]
-    )
+    create_code = axklibtool.main(["create", "hds", str(manifest_path), "-o", str(image_path)])
     extract_code = axklibtool.main(
         ["extract", "wav", "file", "-o", str(export_dir), str(image_path)]
     )
@@ -326,9 +324,7 @@ def test_create_and_extract_hds_manifest_renders_two_member_stereo_bank(
     image_path = tmp_path / "HD00_512_stereo.hds"
     export_dir = tmp_path / "exports"
 
-    create_code = axklibtool.main(
-        ["create", "hds", str(manifest_path), "-o", str(image_path)]
-    )
+    create_code = axklibtool.main(["create", "hds", str(manifest_path), "-o", str(image_path)])
     extract_code = axklibtool.main(
         ["extract", "wav", "file", "-o", str(export_dir), str(image_path)]
     )
@@ -510,9 +506,7 @@ def test_create_and_extract_hds_preserves_uneven_multi_volume_object_topology(
     image_path = tmp_path / "HD00_512_topology.hds"
     export_dir = tmp_path / "exports"
 
-    create_code = axklibtool.main(
-        ["create", "hds", str(manifest_path), "-o", str(image_path)]
-    )
+    create_code = axklibtool.main(["create", "hds", str(manifest_path), "-o", str(image_path)])
     extract_code = axklibtool.main(
         ["extract", "wav", "file", "-o", str(export_dir), str(image_path)]
     )
@@ -520,9 +514,7 @@ def test_create_and_extract_hds_preserves_uneven_multi_volume_object_topology(
     assert create_code == 0
     assert extract_code == 0
     exported_pcm = [_read_mono_wav_pcm(path) for path in export_dir.rglob("*.wav")]
-    assert sorted(exported_pcm) == sorted(
-        _generated_exact_export_pcm(pcm) for pcm in expected_pcm
-    )
+    assert sorted(exported_pcm) == sorted(_generated_exact_export_pcm(pcm) for pcm in expected_pcm)
     assert sorted(pcm[: len(pcm) - 8] for pcm in exported_pcm) == sorted(expected_pcm)
     capsys.readouterr()
     info_code = axklibtool.main(["info", "--format", "json", str(image_path)])
@@ -604,9 +596,7 @@ def test_create_hds_reports_manifest_errors_without_internal_error(
     manifest_path = tmp_path / "invalid.json"
     manifest_path.write_text('{"schema_version": "2.0"}', encoding="utf-8")
 
-    code = axklibtool.main(
-        ["create", "hds", str(manifest_path), "-o", str(tmp_path / "bad.hds")]
-    )
+    code = axklibtool.main(["create", "hds", str(manifest_path), "-o", str(tmp_path / "bad.hds")])
 
     captured = capsys.readouterr()
     assert code == 2
@@ -619,9 +609,7 @@ def test_create_hds_reports_missing_manifest_without_internal_error(
 ) -> None:
     missing = tmp_path / "missing.json"
 
-    code = axklibtool.main(
-        ["create", "hds", str(missing), "-o", str(tmp_path / "bad.hds")]
-    )
+    code = axklibtool.main(["create", "hds", str(missing), "-o", str(tmp_path / "bad.hds")])
 
     captured = capsys.readouterr()
     assert code == 2
@@ -780,7 +768,17 @@ def test_extract_sfz_file_runs_wave_export_without_manifest_lists(tmp_path: Path
     assert len(wav_files) == 1
     assert wav_files[0].startswith("_samples/physical/S01__")
     assert sfz_files == []
-    assert not any(path.name in {"selection.axklib.json", "selection_exports.csv", "selection_exports.json", "sfz_exports.csv", "sfz_exports.json"} for path in output.rglob("*"))
+    assert not any(
+        path.name
+        in {
+            "selection.axklib.json",
+            "selection_exports.csv",
+            "selection_exports.json",
+            "sfz_exports.csv",
+            "sfz_exports.json",
+        }
+        for path in output.rglob("*")
+    )
 
 
 def test_subcommand_help_output_is_available(capsys: pytest.CaptureFixture[str]) -> None:
@@ -820,6 +818,7 @@ def test_extract_sfz_file_fails_on_existing_targets_without_overwrite(tmp_path: 
     assert first == 0
     assert second == 1
 
+
 def test_debug_flag_controls_internal_traceback(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -849,6 +848,7 @@ def test_corpus_audit_writes_input_manifest(tmp_path: Path) -> None:
     assert (output / "input_manifest.csv").exists()
     assert (output / "input_manifest.json").exists()
     assert (output / "_schemas" / "input_manifest.schema.json").exists()
+
 
 def test_validate_fails_if_detail_report_generation_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

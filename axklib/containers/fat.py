@@ -234,10 +234,10 @@ def write_reports(rows: list[dict[str, object]], output_dir: Path) -> None:
         writer.writerows(rows)
 
 
-
 def _int_row_value(row: dict[str, object], key: str, default: int = 0) -> int:
     value = row.get(key, default)
     return value if isinstance(value, int) else default
+
 
 def extract_smpl_rows(rows: list[dict[str, object]], output_dir: Path) -> list[dict[str, object]]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -261,6 +261,7 @@ def extract_smpl_rows(rows: list[dict[str, object]], output_dir: Path) -> list[d
         stem_prefix = (
             f"{image_path.stem}_{objects.safe_name(str(row['fat_file']).replace('.', '_'))}"
         )
+
         def read_stored_payload(rel_offset: int, size: int, payload: bytes = payload) -> bytes:
             return payload[rel_offset : rel_offset + size]
 

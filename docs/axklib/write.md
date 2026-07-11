@@ -4,7 +4,7 @@
 images. The supported object scope is deliberately small: partitions, volumes,
 mono current `SMPL` waveforms, direct single-member `SBNK` sample banks, and
 equal-format two-member stereo `SBNK` sample banks. A narrow hardware-tested
-profile also writes one-member `SBAC` groups and Program `001` assignments.
+profile also writes one-to-three-member `SBAC` groups and Program assignments.
 
 The writer serializes the image from its data model. It does not patch existing
 images and does not depend on template images.
@@ -53,26 +53,27 @@ Root key, key range, and sample level have been hardware-tested for generated
 direct single-member sample banks. The writer is intentionally conservative:
 unsupported object types, sample banks with more than two members, and in-place
 image mutation are outside the current API. SBAC/PROG output is restricted to
-the exact profile below; broader Program counts, assignment orders,
-receive channels, grouped stereo banks, multiple configured volumes in one
-partition, and multi-member groups are rejected.
+the exact per-Program profile below; broader assignment orders, receive
+channels, grouped stereo banks, and groups with more than three members are rejected.
 
 ## SBAC and PROG profile
 
 The first template-free SBAC/PROG profile is intentionally exact:
 
 - any supported 512-byte-aligned image size and one through eight partitions;
-- a partition containing SBAC/PROG content has exactly one configured volume;
-- one one-member `SBAC` group whose child is a mono `SBNK`;
-- Program `001` with exactly two assignments;
-- assignment 1 targets the group on receive channel `1`;
-- assignment 2 targets a different direct mono `SBNK` on receive channel `2`;
-- the grouped child and direct control use the same waveform and musical
-  parameters.
+- any number of independently configured volumes per partition;
+- one or more `SBAC` groups with one through three mono `SBNK` children;
+- one Program in range `001..128` per group, with unique Program numbers;
+- each Program's assignment 1 targets its group on receive channel `1`;
+- each Program's assignment 2 targets a unique direct mono `SBNK` on receive
+  channel `2`;
+- for one-member groups, the grouped child and direct control use the same
+  waveform and musical parameters; multi-member groups may use an independent
+  direct control, and every group is assigned exactly once.
 
-The writer emits zero for runtime handle caches. The grouped child receives the
-sample-bank-member flag, while only the direct assignment updates the SBNK
-Program-001 bitmap.
+The writer emits zero for runtime handle caches. Every grouped child receives
+the sample-bank-member flag, while only the direct assignment updates the SBNK
+Program bitmap.
 
 ```python
 from axklib.write import HdsImageBuilder
@@ -157,7 +158,8 @@ For a stereo bank, declare both member waveforms and add
 contract through `VolumeBuilder.add_stereo_sample_bank()`.
 
 For the SBAC/PROG profile, add these optional volume fields after declaring the
-two matching mono sample banks:
+mono sample banks. The singular field remains available for one-member groups;
+use `member_sample_banks` for two or three children:
 
 ```json
 {
@@ -174,6 +176,13 @@ two matching mono sample banks:
     }
   ]
 }
+```
+
+For a group whose declared sample banks are `Member C3`, `Member D3`, and
+`Member E3`, use:
+
+```json
+{"name": "Key Group", "member_sample_banks": ["Member C3", "Member D3", "Member E3"]}
 ```
 
 Build the image with:

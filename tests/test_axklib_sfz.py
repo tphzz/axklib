@@ -160,16 +160,12 @@ def test_export_sfz_uses_physical_fallback_with_pan(tmp_path: Path) -> None:
 
     result = export_sfz(SfzExportRequest(output_dir=tmp_path, volume_graphs=[graph]))
 
-    bank_text = (tmp_path / "partition_00_hd1" / "Vol 1" / "B Bank.sfz").read_text(
-        encoding="utf-8"
-    )
+    bank_text = (tmp_path / "partition_00_hd1" / "Vol 1" / "B Bank.sfz").read_text(encoding="utf-8")
     assert "sample=SMPL/Left.wav" in bank_text
     assert "sample=SMPL/Right.wav" in bank_text
     assert "pan=-100" in bank_text
     assert "pan=100" in bank_text
     assert sum(1 for path in result.written_files if path.suffix == ".sfz") == 2
-
-
 
 
 def test_export_sfz_resolves_sampler_orig_key_limit_from_graph(tmp_path: Path) -> None:
@@ -260,4 +256,3 @@ def test_export_sfz_fails_existing_target_without_overwrite(tmp_path: Path) -> N
 
     with pytest.raises(FileExistsError):
         export_sfz(SfzExportRequest(output_dir=tmp_path, volume_graphs=[_graph()]))
-

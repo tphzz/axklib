@@ -235,7 +235,12 @@ class ReportSfsVolumeValidationTests(unittest.TestCase):
             self.assertEqual(rows[0].current_object_entry_count, 1)
             self.assertEqual(rows[0].compatibility_artifact_object_entry_count, 2)
             self.assertEqual(rows[0].compatibility_artifact_smpl_entry_count, 1)
-            self.assertTrue(any(issue.issue_type == "visible-alternating-byte-compatibility-artifact-objects" for issue in issues))
+            self.assertTrue(
+                any(
+                    issue.issue_type == "visible-alternating-byte-compatibility-artifact-objects"
+                    for issue in issues
+                )
+            )
 
     def test_allocation_summary_can_fail_volume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -276,10 +281,10 @@ class ReportSfsVolumeValidationTests(unittest.TestCase):
 
             self.assertEqual(summary.fail_count, 1)
             self.assertEqual(rows[0].allocation_status, "Fail")
-            self.assertTrue(any(issue.issue_type == "partition-allocation-consistency" for issue in issues))
+            self.assertTrue(
+                any(issue.issue_type == "partition-allocation-consistency" for issue in issues)
+            )
 
 
 if __name__ == "__main__":
     unittest.main()
-
-

@@ -379,4 +379,3 @@ def result_issue_codes(result: DecodedObjectResult) -> str:
 
 def result_field_names(result: DecodedObjectResult) -> str:
     return ";".join(sorted(result.decoded.fields))
-

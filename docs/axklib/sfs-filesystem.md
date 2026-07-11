@@ -358,7 +358,7 @@ sampler object links.
 small typed model. The current writer creates a new hard-disk image, partitions,
 volumes, current-format `SMPL` waveform objects, direct single-member `SBNK`
 sample-bank objects, equal-format two-member stereo `SBNK` objects, and one
-explicitly bounded one-member `SBAC` / Program-001 profile. It does not modify
+explicitly bounded one-to-three-member `SBAC` / Program profile. It does not modify
 existing images and does not require a template container image.
 
 The first writer scope is intentionally narrow:
@@ -385,12 +385,13 @@ The first writer scope is intentionally narrow:
   generated images need compatible values there for audible playback and normal
   tone.
 - the initial SBAC/PROG profile uses the general supported image geometry. A
-  partition containing this content has exactly one configured volume with one
-  mono group member and one matching direct mono control. Program `001` assigns
-  the group to receive channel `1` and the direct control to channel `2`.
+  partition may contain multiple independently configured volumes. Each volume
+  may contain multiple groups of one through three mono children, with one
+  matching Program and direct mono control per group. Programs `001..128` assign their group to
+  receive channel `1` and their direct control to channel `2`.
   Runtime handles, unused bank state, unused Program effect/controller blocks,
   and unused Program tail state are zero; only the direct SBNK receives the
-  Program-001 relationship bitmap.
+  corresponding Program relationship bitmap.
 
 Callers should treat this as a generated-image API, not as an image repair or
 mutation API. Use `axklib info`, `axklib validate`, and `axklib extract wav file`

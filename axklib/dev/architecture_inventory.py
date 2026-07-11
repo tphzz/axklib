@@ -190,5 +190,3 @@ def write_inventory(inventory: ArchitectureInventory, output_dir: Path) -> None:
         writer.writeheader()
         for sys_path_record in inventory.sys_path_mutations:
             writer.writerow(asdict(sys_path_record))
-
-

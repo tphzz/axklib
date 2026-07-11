@@ -1047,8 +1047,6 @@ def test_object_graph_materializes_likely_sbac_membership(tmp_path: Path) -> Non
     ]
 
 
-
-
 def test_object_graph_resolves_sampler_orig_key_limit(tmp_path: Path) -> None:
     waveform = replace(
         decode_waveform(_sample_object(b"\x00\x01\x00\x02")),
@@ -1301,4 +1299,3 @@ def test_object_graph_keeps_non_interleavable_stereo_as_physical_waveforms(tmp_p
     assert sbnk["rendered_audio"] is None
     assert [row["role"] for row in sbnk["physical_waveforms"]] == ["left", "right"]
     assert graph["stereo_decisions"][0]["reason_code"] == "STEREO_SAMPLE_RATE_MISMATCH"
-

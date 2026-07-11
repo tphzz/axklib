@@ -133,6 +133,8 @@ def u32(value: int) -> int:
 
 def u32_delta(stored: int, expected: int) -> int:
     return u32(stored) - u32(expected)
+
+
 SBNK_SAMPLE_CONTROL_RECORD_COUNT = 6
 SBNK_SAMPLE_CONTROL_RECORD_SIZE = 4
 SBNK_SAMPLE_CONTROL_RECORD_BASE = SBNK_SAMPLE_PARAMETER_BASE + 0xBC
@@ -220,8 +222,9 @@ PROG_CONTROL_TYPE_LABELS = {
 @dataclass(frozen=True)
 class SbacSlot:
     """One decoded active slot inside a current SBAC payload.
-    
+
     Use it to connect sampler-visible grouped sample-bank entries to SBNK name candidates and raw handle fields."""
+
     index: int
     offset: int
     raw_name: str
@@ -232,8 +235,9 @@ class SbacSlot:
 @dataclass(frozen=True)
 class CurrentSbacFields:
     """Decoded current SBAC parameter and slot summary.
-    
+
     Use it when inspecting sample-bank group metadata, enabled sample-parameter masks, active slot counts, and child slot names."""
+
     sample_parameter_block_raw_0x040_0x11f: bytes
     sample_parameter_block_sha1_0x040_0x11f: str
     value_enable_words_0x120_0x12b: tuple[int, int, int]
@@ -248,8 +252,9 @@ class CurrentSbacFields:
 @dataclass(frozen=True)
 class ProgAssignment:
     """One decoded current PROG assignment/Easy Edit row.
-    
+
     Use it to inspect the sampler-visible program assignment name, target selector, and per-assignment offsets such as level, pan, key/velocity limits, pitch, output, and filter offsets."""
+
     index: int
     offset: int
     raw_row: bytes
@@ -295,8 +300,9 @@ class ProgAssignment:
 @dataclass(frozen=True)
 class ProgControlRecord:
     """One current PROG controller mapping record.
-    
+
     Use it to inspect a program-level controller device, function, response type, and signed range value."""
+
     index: int
     offset: int
     raw_record: bytes
@@ -309,8 +315,9 @@ class ProgControlRecord:
 @dataclass(frozen=True)
 class ProgCommonFields:
     """Decoded current PROG common/controller fields outside assignment rows.
-    
+
     Use it for program-level settings such as LFO, portamento, reset controls, controller records, and raw reserved neighborhoods that still need quality."""
+
     raw_values: dict[str, int | None]
     raw_0x068_0x077: bytes
     raw_0x082_0x085: bytes
@@ -328,8 +335,9 @@ class ProgCommonFields:
 @dataclass(frozen=True)
 class ProgEffectCommonBlock:
     """Decoded common header and parameter slots for one current PROG effect block.
-    
+
     Use it to inspect effect active/bypass state, routing/common levels, type byte, width display transform, and raw parameter words."""
+
     effect_number: int
     block_start: int
     block_end: int
@@ -354,8 +362,9 @@ class ProgEffectCommonBlock:
 @dataclass(frozen=True)
 class CurrentSbnkMember:
     """Decoded left, right, or inactive member lane in a current SBNK.
-    
+
     Use it to inspect the linked sample name, SMPL link ID, pitch metadata, waveform length, and loop window for one member lane."""
+
     lane: str
     sample_name_offset: int
     link_offset: int
@@ -373,8 +382,9 @@ class CurrentSbnkMember:
 @dataclass(frozen=True)
 class CurrentSbnkMembers:
     """Decoded current SBNK topology and member summary.
-    
+
     Use it to distinguish single-member and two-member banks, linked program bitmaps, active/inactive right lanes, and member parameter windows."""
+
     bank_name: str
     instrument_name: str
     bank_topology: str
@@ -391,8 +401,9 @@ class CurrentSbnkMembers:
 @dataclass(frozen=True)
 class SbnkSampleControlRecord:
     """One decoded sample-controller record in a current SBNK member parameter window.
-    
+
     Use it to inspect SmpCtrlA/B device, function, response type, and signed range values."""
+
     index: int
     offset: int
     device_u8: int | None
@@ -404,8 +415,9 @@ class SbnkSampleControlRecord:
 @dataclass(frozen=True)
 class SbnkMemberParameterWindow:
     """Decoded current SBNK sample-parameter window.
-    
+
     Use it for sampler-visible sample/member parameters such as map/output flags, pitch, key/velocity ranges, loop caches, levels, pan, filter, envelopes, LFO, EQ, output routing, portamento, and sample controllers."""
+
     sample_parameter_base_0x0a8: int
     sample_flags_0x0d0: int | None
     mapout_flags_0x0d1: int | None

@@ -7,7 +7,9 @@ from axklib.audio import exact_export
 
 
 class ExportSbnkExactAudioTests(unittest.TestCase):
-    def mono(self, *, rate: int = 48000, width: int = 2, frames: int = 100) -> exact_export.MonoExport:
+    def mono(
+        self, *, rate: int = 48000, width: int = 2, frames: int = 100
+    ) -> exact_export.MonoExport:
         return exact_export.MonoExport(
             object_offset=0,
             name="sample",
@@ -39,7 +41,7 @@ class ExportSbnkExactAudioTests(unittest.TestCase):
             volume_name="Orch Full",
             category_code="SMPL",
             category_name="Samples",
-            entry_name="Gong 18\" Med",
+            entry_name='Gong 18" Med',
             match_quality="Known",
         )
 
@@ -98,8 +100,9 @@ class ExportSbnkExactAudioTests(unittest.TestCase):
         self.assertFalse(exact_export.is_known_sbnk_pair(ambiguous))
         self.assertFalse(exact_export.is_known_sbnk_pair(mono))
 
-
-    def test_current_bank_relationships_derive_locations_without_overriding_direct_rows(self) -> None:
+    def test_current_bank_relationships_derive_locations_without_overriding_direct_rows(
+        self,
+    ) -> None:
         with TemporaryDirectory() as tmp:
             relationships_dir = Path(tmp)
             (relationships_dir / "current_prog_bank_links.csv").write_text(
@@ -141,7 +144,6 @@ class ExportSbnkExactAudioTests(unittest.TestCase):
         self.assertEqual(locations[300].volume_name, "Vol")
         self.assertEqual(locations[400].volume_name, "Direct")
         self.assertEqual(sorted(row.object_offset for row in derived), [200, 300])
-
 
     def test_sbac_volume_disambiguation_derives_likely_locations_from_object_keys(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -193,7 +195,9 @@ p0:sfs10,25 Saw1,Saw1 C2        *,p0:sfs30,Likely,active-sbac-slot-name+hidden-c
         self.assertIn(3000, locations)
         self.assertEqual(locations[3000].volume_name, "Megasynth 1")
         self.assertEqual(locations[3000].match_quality, "Likely")
-        self.assertEqual(locations[3000].location_source, "current-sbac-volume-sequence-relationship")
+        self.assertEqual(
+            locations[3000].location_source, "current-sbac-volume-sequence-relationship"
+        )
         self.assertEqual([row.object_offset for row in derived], [3000])
         self.assertEqual(derived[0].relationship_quality, "Likely")
 
@@ -246,8 +250,7 @@ p0:sfs10,25 Saw1,Saw1 C2        *,p0:sfs30,Likely,active-sbac-slot-name+hidden-c
             exact_export.write_json(path, [self.mono()], overwrite_policy="replace")
 
             self.assertIn('"object_offset"', path.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
-
-
-

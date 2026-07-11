@@ -147,7 +147,10 @@ def _selected_relationship_keys(
                         if target not in selected_sbnk_keys:
                             selected_sbnk_keys.add(target)
                             changed = True
-            if row.source_key in selected_sbac_keys and row.relationship_type == "SBAC_SLOT_TO_SBNK":
+            if (
+                row.source_key in selected_sbac_keys
+                and row.relationship_type == "SBAC_SLOT_TO_SBNK"
+            ):
                 for target in _targets(row.target_key):
                     if target not in selected_sbnk_keys and row.quality in {"Known", "Likely"}:
                         selected_sbnk_keys.add(target)

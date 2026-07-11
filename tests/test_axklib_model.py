@@ -239,4 +239,3 @@ def test_decode_issue_can_carry_stable_field_and_object_refs() -> None:
     assert issue.code == "OBJECT_BAD_HEADER_SIZE"
     assert issue.field_name == "payload"
     assert issue.object_ref == ref
-

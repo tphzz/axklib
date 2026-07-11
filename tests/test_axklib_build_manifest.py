@@ -108,6 +108,81 @@ def test_hds_build_manifest_rejects_unknown_waveform_reference() -> None:
         parse_hds_build_manifest(value)
 
 
+def test_hds_build_manifest_builds_plural_sample_bank_group_members(tmp_path: Path) -> None:
+    _write_wav(tmp_path / "tone.wav")
+    value = _manifest()
+    partitions = value["partitions"]
+    assert isinstance(partitions, list)
+    partition = partitions[0]
+    assert isinstance(partition, dict)
+    volumes = partition["volumes"]
+    assert isinstance(volumes, list)
+    volume = volumes[0]
+    assert isinstance(volume, dict)
+    sample_banks = volume["sample_banks"]
+    assert isinstance(sample_banks, list)
+    original = sample_banks[0]
+    assert isinstance(original, dict)
+    sample_banks.extend(
+        [
+            {**original, "name": "Bank0002"},
+            {**original, "name": "Bank0003"},
+            {**original, "name": "Direct"},
+        ]
+    )
+    volume["sample_bank_groups"] = [
+        {
+            "name": "Key Group",
+            "member_sample_banks": ["Bank0001", "Bank0002", "Bank0003"],
+        }
+    ]
+    volume["programs"] = [
+        {
+            "number": 1,
+            "assignments": [
+                {"sample_bank_group": "Key Group", "receive_channel": 1},
+                {"sample_bank": "Direct", "receive_channel": 2},
+            ],
+        }
+    ]
+
+    manifest = parse_hds_build_manifest(value, base_dir=tmp_path)
+    output = tmp_path / "plural-group.hds"
+    build_hds_from_manifest(manifest, output)
+
+    group = manifest.partitions[0].volumes[0].sample_bank_groups[0]
+    assert group.member_sample_banks == ("Bank0001", "Bank0002", "Bank0003")
+    objects = load_sfs_objects(output)
+    sbac = next(item for item in objects if str(item.object_type) == "SBAC")
+    assert sbac.payload[0x144] == 3
+
+
+@pytest.mark.parametrize(
+    "members, message",
+    [
+        ([], "must contain 1..3"),
+        (["Bank0001"] * 2, "duplicate member"),
+        (["Bank0001"] * 4, "must contain 1..3"),
+    ],
+)
+def test_hds_build_manifest_rejects_invalid_plural_group_members(
+    members: list[str], message: str
+) -> None:
+    value = _manifest()
+    partitions = value["partitions"]
+    assert isinstance(partitions, list)
+    partition = partitions[0]
+    assert isinstance(partition, dict)
+    volumes = partition["volumes"]
+    assert isinstance(volumes, list)
+    volume = volumes[0]
+    assert isinstance(volume, dict)
+    volume["sample_bank_groups"] = [{"name": "Key Group", "member_sample_banks": members}]
+
+    with pytest.raises(ValueError, match=message):
+        parse_hds_build_manifest(value)
+
+
 def test_hds_build_manifest_builds_general_multi_partition_geometry(tmp_path: Path) -> None:
     value = _manifest()
     value["size_bytes"] = 256 * 1024 * 1024
