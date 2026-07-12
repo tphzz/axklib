@@ -84,6 +84,10 @@ cmake --build --preset release
 cd build/native/release && cpack
 ```
 
+The presets select axklib's static-dependency vcpkg triplet for the host
+architecture. After changing triplets or updating an existing checkout, use
+`cmake --fresh --preset release` once to discard the previous vcpkg selection.
+
 The native GitHub workflow combines those components into one distribution per
 target. Windows publishes a ZIP, Linux publishes a compressed tar archive, and
 macOS publishes one universal ZIP containing both the self-contained CLI and

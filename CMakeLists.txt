@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/library/cmake/AxkVcpkgDefaults.cmake")
+
 # These options must exist before project() loads the vcpkg toolchain. They
 # select manifest features without making CLI or test dependencies part of a
 # library-only configuration.

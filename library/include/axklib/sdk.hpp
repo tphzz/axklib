@@ -9,6 +9,13 @@
 #include "axklib/sdk/export.hpp"
 #include "axklib/sdk/result.hpp"
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+// Exported PIMPL classes keep unique_ptr construction and destruction out of
+// line. C4251 does not account for this DLL-safe ownership pattern.
+#pragma warning(disable : 4251)
+#endif
+
 namespace axk {
 
 struct progress_event {
@@ -245,3 +252,7 @@ AXK_SDK_API std::string sdk_version();
 AXK_SDK_API std::string render_error(const error &failure);
 
 } // namespace axk
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif

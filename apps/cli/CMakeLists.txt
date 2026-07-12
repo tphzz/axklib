@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 get_filename_component(AXK_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+include("${AXK_REPOSITORY_ROOT}/library/cmake/AxkVcpkgDefaults.cmake")
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   option(BUILD_TESTING "Build native tests" ON)
   option(AXK_WARNINGS_AS_ERRORS "Treat native project warnings as errors" ON)

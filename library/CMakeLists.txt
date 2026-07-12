@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkVcpkgDefaults.cmake")
+
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   get_filename_component(AXK_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
   option(AXK_BUILD_SHARED_SDK "Build the public axklib shared SDK" ON)
@@ -257,6 +259,15 @@ if(BUILD_TESTING)
     string(JSON _axk_fixture_path GET "${_axk_contract_baseline}" fixtures ${index} path)
     string(JSON _axk_fixture_digest GET "${_axk_contract_baseline}" fixtures ${index} sha256)
     file(SHA256 "${AXK_REPOSITORY_ROOT}/${_axk_fixture_path}" _axk_fixture_actual)
+    if(NOT _axk_fixture_actual STREQUAL _axk_fixture_digest AND
+       _axk_fixture_path MATCHES "\\.json$")
+      # Git attributes pin these files to LF, but an existing Windows checkout
+      # can retain CRLF worktree bytes after the attribute is introduced.
+      file(READ "${AXK_REPOSITORY_ROOT}/${_axk_fixture_path}" _axk_fixture_text)
+      string(REPLACE "\r\n" "\n" _axk_fixture_text "${_axk_fixture_text}")
+      string(SHA256 _axk_fixture_actual "${_axk_fixture_text}")
+      unset(_axk_fixture_text)
+    endif()
     if(NOT _axk_fixture_actual STREQUAL _axk_fixture_digest)
       message(FATAL_ERROR
         "native contract fixture digest mismatch for ${_axk_fixture_path}: "
