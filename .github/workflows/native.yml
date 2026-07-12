@@ -1,0 +1,66 @@
+name: Native CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: Build and test the Debug preset instead of Release
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-24.04
+            triplet: x64-linux-axk
+          - name: Windows x64
+            runner: windows-2025
+            triplet: x64-windows-axk
+          - name: macOS arm64
+            runner: macos-15
+            triplet: arm64-osx-axk
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout axklib
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: f87344cac03158cbf1467264565f1fd36b382a24
+          path: .vcpkg
+
+      - name: Bootstrap vcpkg
+        if: runner.os != 'Windows'
+        run: ./.vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Bootstrap vcpkg
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\.vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Configure native build
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+          AXK_PATH_REMAP_FROM: ${{ github.workspace }}
+        run: >-
+          cmake --preset ${{ inputs.debug && 'debug' || 'release' }}
+          -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
+          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/cpp/cmake/triplets
+
+      - name: Build native targets
+        run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }}
+
+      - name: Test native targets
+        run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }}
