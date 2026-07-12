@@ -158,23 +158,17 @@ free_bytes = free_clusters * sectors_per_cluster * sector_size
 sampler_visible_free_kib = free_bytes // 1024
 ```
 
-Use the top-level public function for the same calculation in applications:
+Use the native function for the same calculation in applications:
 
-```python
-from axklib import calculate_sfs_free_space
-
-space = calculate_sfs_free_space(
-    cluster_count=1_048_575,
-    first_payload_cluster=616,
-    allocated_cluster_count=65,
-)
-assert space.sampler_visible_free_kib == 1_047_894
+```cpp
+auto space = axk::calculate_sfs_free_space(1'048'575, 616, 65, 512);
+assert(space && space->sampler_visible_free_kib == 1'047'894);
 ```
 
 `axklib validate` allocation summaries include `first_payload_cluster`,
 `reserved_cluster_count`, `sampler_free_cluster_count`, `sampler_free_bytes`,
-and `sampler_visible_free_kib`. The calculation raises `ValueError` for
-impossible geometry instead of returning negative capacity.
+and `sampler_visible_free_kib`. Impossible geometry returns a typed error
+instead of negative capacity.
 
 ## Directory And File Index
 

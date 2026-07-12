@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "stages": [
+    {"id": 1, "name": "transition-charter", "status": "complete"},
+    {"id": 2, "name": "cpp-build-baseline", "status": "complete"},
+    {"id": 3, "name": "python-oracle-rig", "status": "complete"},
+    {"id": 4, "name": "core-io", "status": "complete"},
+    {"id": 5, "name": "sfs-hds-reader", "status": "complete"},
+    {"id": 6, "name": "object-decoders", "status": "complete"},
+    {"id": 7, "name": "relationships-validation", "status": "complete"},
+    {"id": 8, "name": "read-only-native-bridge", "status": "complete"},
+    {"id": 9, "name": "audio-export", "status": "complete"},
+    {"id": 10, "name": "fresh-writer", "status": "complete"},
+    {"id": 11, "name": "alteration-engine", "status": "complete"},
+    {"id": 12, "name": "fat-iso-readers", "status": "complete"},
+    {"id": 13, "name": "reports-cli11", "status": "complete"},
+    {"id": 14, "name": "c-abi-v1", "status": "complete"},
+    {"id": 15, "name": "axkdeck-integration", "status": "complete"},
+    {"id": 16, "name": "hardening", "status": "active"},
+    {"id": 17, "name": "native-cutover", "status": "blocked"}
+  ]
+}

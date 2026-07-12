@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+project="$root/oracle/python"
+command=${1:-test}
+export PYTHONPATH="$project${PYTHONPATH:+:$PYTHONPATH}"
+
+case "$command" in
+  sync)
+    exec uv sync --project "$project" --locked --all-groups
+    ;;
+  test)
+    uv run --project "$project" ruff check "$project/axklib" "$project/tests" "$root/oracle"
+    (cd "$project" && uv run mypy --explicit-package-bases axklib)
+    exec uv run --project "$project" pytest "$project/tests"
+    ;;
+  baseline)
+    shift
+    exec uv run --project "$project" python "$root/oracle/generate_baseline.py" "$@"
+    ;;
+  *)
+    printf '%s\n' "usage: oracle/run-python-oracle {sync|test|baseline}" >&2
+    exit 2
+    ;;
+esac

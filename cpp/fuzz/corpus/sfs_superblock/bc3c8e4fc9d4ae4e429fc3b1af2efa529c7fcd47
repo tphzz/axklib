@@ -1,0 +1,17 @@
+[
+  {
+    "name": "HD00_512_multi_sbnk_authored.hds",
+    "bytes": 1048576,
+    "sha256": "733b25eb1b9da4b155etic/minimal fixture when practical.",
+    "expected_object_count": 64,
+    "expected_object_counts_by_type": {
+      "SMPL": 2,
+      "SBNK": 20,
+      "SBAC": 10
+    },
+    "regeneration_note": "Regenerate only by creating equivalent visible objects and updating this manifest hash/count reblic tests",
+    "origin": "curated public test fixture",
+    "quality": "Known small test dependency",
+    "retention_reason": "Required by active automated tests; replace with a smaller synthetic/minimal fixturenote": "Regen1rate only b	y creating equivalent visible objects and updating this manifest hash/count record."
+  }
+]

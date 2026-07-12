@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tphzz.github.io/axklib/schemas/oracle-baseline-1.0.json",
+  "title": "axklib Python oracle baseline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "oracle",
+    "commands",
+    "writer_profiles",
+    "fixtures"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "oracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implementation", "git_commit", "python_version", "test_count", "lock_sha256"],
+      "properties": {
+        "implementation": {"const": "python"},
+        "git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "python_version": {"type": "string"},
+        "test_count": {"type": "integer", "minimum": 1},
+        "lock_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "commands": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "writer_profiles": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "size_bytes"],
+        "properties": {
+          "path": {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "size_bytes": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}

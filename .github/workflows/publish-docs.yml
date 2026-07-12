@@ -23,5 +23,5 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --group docs --locked
-      - run: uv run --group docs axklib-docs gh-deploy --force
+      - run: uv sync --project oracle/python --group docs --locked
+      - run: uv run --project oracle/python --group docs mkdocs gh-deploy --force

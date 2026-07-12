@@ -1,0 +1,22 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(nlohmann_json CONFIG)
+
+set(_axklib_needs_audio FALSE)
+if(NOT axklib_FIND_COMPONENTS OR "audio" IN_LIST axklib_FIND_COMPONENTS OR "c" IN_LIST axklib_FIND_COMPONENTS)
+  set(_axklib_needs_audio TRUE)
+endif()
+if(_axklib_needs_audio)
+  find_dependency(SndFile CONFIG)
+  find_dependency(PkgConfig)
+  pkg_check_modules(SOXR REQUIRED IMPORTED_TARGET soxr)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/axklibTargets.cmake")
+
+set(axklib_core_FOUND TRUE)
+set(axklib_audio_FOUND TRUE)
+set(axklib_c_FOUND TRUE)
+
+check_required_components(axklib)

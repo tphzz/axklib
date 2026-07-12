@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: axklib
+Description: Yamaha A-series disk image and sampler object C API
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -laxklib_c
+Cflags: -I${includedir}

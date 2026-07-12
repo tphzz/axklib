@@ -361,8 +361,8 @@ SBAC slot row layout, stride `0x14`:
 
 The current reader uses `active_slot_count_0x144` to decide how many rows to
 read, capped by the payload size. The 32-bit handle is retained as a diagnostic
-field. Target matching is performed through name and placement rules documented
-in [Relationships](relationships.md).
+field. Target matching uses exact name, object type, and local placement before
+it emits a resolved relationship.
 
 ## PROG: Program Object
 
@@ -513,8 +513,7 @@ The shared relationship graph connects decoded objects:
 | `SBNK_LEFT_MEMBER_TO_SMPL` | Left member waveform-storage link. |
 | `SBNK_RIGHT_MEMBER_TO_SMPL` | Right member waveform-storage link. |
 
-Relationship row details and matching rules are documented in
-[Relationships](relationships.md).
+Relationship row fields are documented in [Report Schemas](report-schemas.md).
 
 ## Exact Export Metadata
 

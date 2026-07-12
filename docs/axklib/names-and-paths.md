@@ -258,9 +258,8 @@ storage-facing even when that produces a filesystem-safe numeric suffix from a
 sampler duplicate marker. When a physical waveform is referenced by
 sampler-visible `SBNK` members, the graph records those member names in the
 `user_facing_aliases` field on the `SMPL` object. Display-oriented consumers
-should use [`preferred_smpl_display_name()`](graph.md) to use the first alias
-name when present and fall back to the physical `SMPL` display name only when no
-alias is known.
+should use the first alias when present and fall back to the physical `SMPL`
+display name only when no alias is known.
 
 Rendered stereo names come from sampler-facing sample/member names when a known
 stereo relationship supplies a better musical label. For paired sibling `SBNK`

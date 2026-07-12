@@ -4,45 +4,61 @@ Yamaha A-series disk image and sampler object tooling.
 
 Documentation is published at <https://tphzz.github.io/axklib/>.
 
-## Quickstart
+## Native Build
 
-Install the locked environment from a checkout:
+axklib is a C++23 library, a versioned C SDK, and a CLI11 command-line tool.
+Dependencies are pinned by `vcpkg.json`.
 
-```powershell
-uv sync
+```bash
+export VCPKG_ROOT=/path/to/vcpkg
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
 ```
 
-Show the CLI help:
+The installed CMake targets are `axklib::core` for read-only C++ workflows,
+`axklib::audio` for audio import and image writing, and `axklib::c` for the
+full stable C ABI. Link `axklib::audio` when using the C++ writer or alteration
+APIs; it brings in `axklib::core`. The C header is `axklib/c/axk.h`;
+pkg-config consumers can use the `axklib` module.
 
-```powershell
-uv run axklib --help
+## CLI
+
+Show the native CLI help:
+
+```bash
+build/native/debug/cpp/axklib --help
 ```
 
 Summarize an image, directory, or glob input:
 
-```powershell
-uv run axklib info <image-or-directory>
+```bash
+build/native/debug/cpp/axklib info <image-or-directory>
 ```
 
 Export waveform data:
 
-```powershell
-uv run axklib extract wav file -o build/exports/wav <image-or-directory>
+```bash
+build/native/debug/cpp/axklib extract wav file -o build/exports/wav <image-or-directory>
 ```
 
 Write validation reports:
 
-```powershell
-uv run axklib validate -o build/reports/validation <image-or-directory>
+```bash
+build/native/debug/cpp/axklib validate -o build/reports/validation <image-or-directory>
 ```
 
-Build the local documentation:
+Create installable SDK archives:
 
-```powershell
-uv run --group docs axklib-docs build --strict
+```bash
+cmake --preset release
+cmake --build --preset release
+cd build/native/release && cpack
 ```
+
+The compatibility oracle is maintained separately under `oracle/` and is not
+part of native SDK or application packages.
 
 ## License
 
 This project is licensed under the Mozilla Public License 2.0.
-

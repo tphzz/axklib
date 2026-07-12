@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tphzz.github.io/axklib/oracle/contracts.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "contracts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "verification_class": {"enum": ["verified", "corroborated", "tentative", "unknown"]},
+          "expected_semantic_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+          "id": {"minLength": 1, "type": "string"},
+          "input_path": {"minLength": 1, "type": "string"},
+          "input_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+          "operation": {"minLength": 1, "type": "string"},
+          "regeneration_command": {"minLength": 1, "type": "string"}
+        },
+        "required": [
+          "id",
+          "input_path",
+          "input_sha256",
+          "operation",
+          "expected_semantic_sha256",
+          "verification_class",
+          "regeneration_command"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "oracle_commit": {"pattern": "^[0-9a-f]{40}$", "type": "string"},
+    "schema_version": {"const": "1.0"}
+  },
+  "required": ["schema_version", "oracle_commit", "contracts"],
+  "type": "object"
+}

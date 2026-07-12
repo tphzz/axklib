@@ -1,0 +1,42 @@
+{
+  "contracts": [
+    {
+      "expected_semantic_sha256": "429f2cb0783237916c04943fd62e00cbc184ccc4530800c96673c6b0a93e98d2",
+      "id": "current-object-read-multi-sbnk-authored",
+      "input_path": "tests/fixtures/images/sampler-authored/HD00_512_multi_sbnk_authored.hds",
+      "input_sha256": "733b25eb1b9da4b155ec543f48e0c0f3ab5480dbba587ee80fea5df40dfa0d7d",
+      "operation": "current-object-read",
+      "regeneration_command": "uv run python oracle/python_object_semantic.py tests/fixtures/images/sampler-authored/HD00_512_multi_sbnk_authored.hds",
+      "verification_class": "verified"
+    },
+    {
+      "expected_semantic_sha256": "892a1882ac6216a80031a1878c17362fc594387d980720ab5d039d998dff7c9b",
+      "id": "current-object-read-single-sbnk-authored",
+      "input_path": "tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds",
+      "input_sha256": "9604f208c23360f2b69c78bc7ae94cf9f9c12cf96ffddb3567dfadd8200cc816",
+      "operation": "current-object-read",
+      "regeneration_command": "uv run python oracle/python_object_semantic.py tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds",
+      "verification_class": "verified"
+    },
+    {
+      "verification_class": "verified",
+      "expected_semantic_sha256": "b9bca68caf91a4b9c3e611bd6307f1b3a7c5f90adeb55b26e61c6fd72631d318",
+      "id": "sfs-read-multi-sbnk-authored",
+      "input_path": "tests/fixtures/images/sampler-authored/HD00_512_multi_sbnk_authored.hds",
+      "input_sha256": "733b25eb1b9da4b155ec543f48e0c0f3ab5480dbba587ee80fea5df40dfa0d7d",
+      "operation": "sfs-read",
+      "regeneration_command": "uv run python oracle/python_sfs_semantic.py tests/fixtures/images/sampler-authored/HD00_512_multi_sbnk_authored.hds"
+    },
+    {
+      "verification_class": "verified",
+      "expected_semantic_sha256": "6586f5045eb87f5d2d944734e3435b4332561cf213286183857eb08e038f8cf3",
+      "id": "sfs-read-single-sbnk-authored",
+      "input_path": "tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds",
+      "input_sha256": "9604f208c23360f2b69c78bc7ae94cf9f9c12cf96ffddb3567dfadd8200cc816",
+      "operation": "sfs-read",
+      "regeneration_command": "uv run python oracle/python_sfs_semantic.py tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds"
+    }
+  ],
+  "oracle_commit": "62d6ce2dfe7dd1c85ece5cdf459a25a0a8deb5d3",
+  "schema_version": "1.0"
+}
