@@ -241,6 +241,11 @@ Typical whole-input export layout:
     rendered/
       Grand Stereo__b1c2d3e4f5a6.wav
   file/
+    source-image/
+      partition-or-group/
+        volume/
+          volume.axklib.json
+          Instrument.sfz
 ```
 
 Typical scoped Program export layout:
@@ -264,8 +269,9 @@ Rules:
 | --- | --- |
 | `_samples/physical/` | Contains exact physical mono WAV files. |
 | `_samples/rendered/` | Contains interleaved stereo WAVs when a compatible pair is rendered. |
-| `file/` | Whole-input selection folder. |
+| `file/<source>/.../` | Whole-input selection hierarchy, retaining the source name and decoded volume placement. |
 | `<scope>/<selector>/` | Narrow selected scope folder. |
+| `volume.axklib.json` | Per-volume object and relationship graph written by both WAV and SFZ extraction. |
 
 Physical WAV names come from `SMPL` storage names plus a short content hash so
 several selections can share one pool without collisions. They stay

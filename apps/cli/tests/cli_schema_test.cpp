@@ -60,6 +60,13 @@ TEST(CliSchema, ObjectRelationshipTreeAndExportSummarySchemasStayParseable) {
   ASSERT_TRUE(relationships);
   EXPECT_TRUE(nlohmann::json::parse(*relationships)["relationships"][0]["target_key"].is_null());
 
+  axk::VolumeExport volume;
+  const auto volume_graph =
+      export_schema::serialize_volume_graph(volume, graph, "source.iso", "iso");
+  ASSERT_TRUE(volume_graph);
+  const auto parsed_graph = nlohmann::json::parse(*volume_graph);
+  EXPECT_EQ(parsed_graph["source"]["container_kinds"][0], "iso");
+
   const std::vector summaries{export_schema::VolumeSummaryOutput{
       .path_utf8 = "partition/\xc3\xa4",
       .graph_path_utf8 = "partition/\xc3\xa4/volume.axklib.json",

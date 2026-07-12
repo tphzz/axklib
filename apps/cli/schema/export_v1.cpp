@@ -31,7 +31,8 @@ OrderedJson member_json(const CurrentSbnkMember &member) {
 
 Result<std::string> serialize_volume_graph(const VolumeExport &volume,
                                            const RelationshipGraph &graph,
-                                           const std::filesystem::path &source_path) {
+                                           const std::filesystem::path &source_path,
+                                           std::string_view container_kind) {
   try {
     OrderedJson smpl = OrderedJson::array();
     for (const auto &waveform : volume.waveforms) {
@@ -62,7 +63,7 @@ Result<std::string> serialize_volume_graph(const VolumeExport &volume,
             {"loop_end_frame_a4000_ui", audio.loop_start + audio.loop_length}}},
           {"origin",
            {{"source_container", text::path_to_utf8(source_path)},
-            {"container_kind", "sfs"},
+            {"container_kind", container_kind},
             {"partition_index", audio.partition.value},
             {"quality", audio.alternating_byte_payload_detected ? "Likely" : "Known"},
             {"basis", audio.alternating_byte_payload_detected
@@ -220,7 +221,7 @@ Result<std::string> serialize_volume_graph(const VolumeExport &volume,
         {"schema", volume_graph_schema_version},
         {"source",
          {{"containers", {text::path_to_utf8(source_path)}},
-          {"container_kinds", {"sfs"}},
+          {"container_kinds", {container_kind}},
           {"source_scope", ""}}},
         {"volume",
          {{"path", text::path_to_utf8(volume.relative_root)},

@@ -129,3 +129,34 @@ TEST(AudioExport, PreflightsExistingTargetsBeforeWritingAnyAudio) {
   EXPECT_FALSE(std::filesystem::exists(output / "partition_00_hd1/Volume/SMPL/One.wav"));
   std::filesystem::remove_all(output, error);
 }
+
+TEST(AudioExport, WritesSharedIdenticalTargetOnceAndRejectsDistinctCollisionBeforeOutput) {
+  axk::Waveform waveform;
+  waveform.format = {1, 2, 44100};
+  waveform.frame_count = 1;
+  waveform.pcm = {std::byte{}, std::byte{}};
+  axk::VolumeExport first;
+  first.relative_root = "file/source/volume";
+  first.waveforms = {{"one", "Shared", "../../../_samples/physical/shared.wav", waveform}};
+  auto second = first;
+  second.relative_root = "file/source/other-volume";
+  second.waveforms[0].object_key = "two";
+  axk::ExportPlan plan;
+  plan.volumes = {first, second};
+  const auto output = std::filesystem::temp_directory_path() / "axklib-cpp-shared-target-test";
+  std::error_code error;
+  std::filesystem::remove_all(output, error);
+
+  const auto shared = axk::write_export_audio(plan, output);
+  ASSERT_TRUE(shared);
+  ASSERT_EQ(shared->written_files.size(), 1U);
+  EXPECT_TRUE(std::filesystem::is_regular_file(shared->written_files.front()));
+
+  std::filesystem::remove_all(output, error);
+  plan.volumes[1].waveforms[0].waveform.pcm[0] = std::byte{1};
+  const auto collision = axk::write_export_audio(plan, output);
+  ASSERT_FALSE(collision);
+  EXPECT_NE(collision.error().message.find("distinct audio exports"), std::string::npos);
+  EXPECT_FALSE(std::filesystem::exists(output / "_samples/physical/shared.wav"));
+  std::filesystem::remove_all(output, error);
+}

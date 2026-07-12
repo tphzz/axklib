@@ -24,7 +24,8 @@ struct VolumeSummaryOutput {
 
 Result<std::string> serialize_volume_graph(const VolumeExport &volume,
                                            const RelationshipGraph &graph,
-                                           const std::filesystem::path &source_path);
+                                           const std::filesystem::path &source_path,
+                                           std::string_view container_kind = "sfs");
 Result<std::string> serialize(const std::vector<VolumeSummaryOutput> &volumes, bool pretty);
 
 } // namespace axk::cli::schema::export_v1

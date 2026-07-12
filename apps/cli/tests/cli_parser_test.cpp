@@ -98,6 +98,40 @@ TEST(Cli11Adapter, ExposesMaintainedCommandInventoryAndHidesLegacyAliases) {
   EXPECT_EQ(normalize_newlines(output), normalize_newlines(expected));
 }
 
+TEST(Cli11Adapter, ExtractSfzWritesAudioInstrumentsAndVolumeGraph) {
+  const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images" /
+                       "sampler-authored/HD00_512_multi_sbnk_authored.hds";
+  const auto output =
+      std::filesystem::temp_directory_path() / "axklib-cli-extract-integration-test";
+  std::error_code error;
+  std::filesystem::remove_all(output, error);
+  std::vector<std::string> arguments{"axklib",         "extract", "sfz",          "file",
+                                     fixture.string(), "-o",      output.string()};
+  std::vector<char *> argv;
+  std::ranges::transform(arguments, std::back_inserter(argv),
+                         [](auto &value) { return value.data(); });
+
+  ASSERT_EQ(axk::cli::run(static_cast<int>(argv.size()), argv.data()), 0);
+  std::size_t wav_count{};
+  std::size_t sfz_count{};
+  std::size_t graph_count{};
+  for (const auto &entry : std::filesystem::recursive_directory_iterator{output}) {
+    if (!entry.is_regular_file())
+      continue;
+    if (entry.path().extension() == ".wav")
+      ++wav_count;
+    else if (entry.path().extension() == ".sfz")
+      ++sfz_count;
+    else if (entry.path().filename() == "volume.axklib.json")
+      ++graph_count;
+    EXPECT_FALSE(entry.path().filename().string().ends_with(".tmp"));
+  }
+  EXPECT_EQ(wav_count, 2U);
+  EXPECT_EQ(sfz_count, 20U);
+  EXPECT_EQ(graph_count, 1U);
+  std::filesystem::remove_all(output, error);
+}
+
 TEST(CliArchitecture, KeepsCli11AndJsonAtTheirOwnedBoundaries) {
   const auto root = std::filesystem::path{AXK_SOURCE_ROOT} / "apps/cli";
   const auto read = [](const std::filesystem::path &path) {
