@@ -254,6 +254,7 @@ if(AXK_BUILD_CLI)
   )
   target_link_libraries(
     axk_cli_adapter
+    PUBLIC axklib::core
     PRIVATE axklib::audio CLI11::CLI11 nlohmann_json::nlohmann_json unofficial::hash-library
   )
   axk_set_project_warnings(axk_cli_adapter)
