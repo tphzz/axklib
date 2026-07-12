@@ -15,6 +15,8 @@ __pycache__/
 .uv-cache/
 .venv/
 
+node_modules/
+
 # Local editor/OS noise
 .DS_Store
 Thumbs.db
