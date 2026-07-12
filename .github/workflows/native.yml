@@ -22,12 +22,37 @@ jobs:
           - name: Linux x64
             runner: ubuntu-24.04
             triplet: x64-linux-axk
+            build_testing: "ON"
+            run_tests: true
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+            triplet: arm64-linux-axk
+            build_testing: "ON"
+            run_tests: true
           - name: Windows x64
             runner: windows-2025-vs2026
             triplet: x64-windows-axk
-          - name: macOS arm64
+            build_testing: "ON"
+            run_tests: true
+            msvc_arch: x64
+          - name: Windows ARM64
+            runner: windows-2025-vs2026
+            triplet: arm64-windows-axk
+            build_testing: "OFF"
+            run_tests: false
+            msvc_arch: amd64_arm64
+          - name: macOS x64 slice
+            runner: macos-15-intel
+            triplet: x64-osx-axk
+            build_testing: "ON"
+            run_tests: true
+            macos_slice: x86_64
+          - name: macOS ARM64 slice
             runner: macos-15
             triplet: arm64-osx-axk
+            build_testing: "ON"
+            run_tests: true
+            macos_slice: arm64
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -45,7 +70,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: x64
+          arch: ${{ matrix.msvc_arch }}
           vsversion: 18.0
 
       - name: Verify Visual Studio 2026 compiler
@@ -78,6 +103,7 @@ jobs:
           AXK_PATH_REMAP_FROM: ${{ github.workspace }}
         run: >-
           cmake --preset ${{ inputs.debug && 'debug' || 'release' }}
+          -DBUILD_TESTING=${{ matrix.build_testing }}
           -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
           -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/cpp/cmake/triplets
 
@@ -85,4 +111,87 @@ jobs:
         run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }}
 
       - name: Test native targets
+        if: matrix.run_tests
         run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }}
+
+      - name: Verify Windows ARM64 output
+        if: matrix.triplet == 'arm64-windows-axk'
+        shell: pwsh
+        run: |
+          $headers = dumpbin /headers build/native/${{ inputs.debug && 'debug' || 'release' }}/cpp/axklib.exe
+          if ($headers -notmatch 'AA64 machine \(ARM64\)') {
+            throw 'axklib.exe is not an ARM64 binary'
+          }
+
+      - name: Package macOS slice
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          prefix="build/macos-${{ matrix.macos_slice }}"
+          cmake --install "build/native/${{ inputs.debug && 'debug' || 'release' }}" --prefix "$prefix"
+          tar -czf "build/macos-${{ matrix.macos_slice }}.tar.gz" -C "$prefix" .
+
+      - name: Upload macOS slice
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.macos_slice }}-slice-${{ inputs.debug && 'debug' || 'release' }}
+          path: build/macos-${{ matrix.macos_slice }}.tar.gz
+          if-no-files-found: error
+
+  macos-universal:
+    name: macOS universal
+    needs: native
+    runs-on: macos-15
+    steps:
+      - name: Download x64 slice
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-x86_64-slice-${{ inputs.debug && 'debug' || 'release' }}
+          path: build/slices/x86_64
+
+      - name: Download ARM64 slice
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64-slice-${{ inputs.debug && 'debug' || 'release' }}
+          path: build/slices/arm64
+
+      - name: Assemble and verify universal SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/sdk/x86_64 build/sdk/arm64 build/sdk/universal
+          tar -xzf build/slices/x86_64/macos-x86_64.tar.gz -C build/sdk/x86_64
+          tar -xzf build/slices/arm64/macos-arm64.tar.gz -C build/sdk/arm64
+          cp -R build/sdk/arm64/. build/sdk/universal/
+
+          lipo -create \
+            build/sdk/x86_64/bin/axklib \
+            build/sdk/arm64/bin/axklib \
+            -output build/sdk/universal/bin/axklib
+
+          while IFS= read -r arm64_library; do
+            relative_path="${arm64_library#build/sdk/arm64/}"
+            x64_library="build/sdk/x86_64/$relative_path"
+            universal_library="build/sdk/universal/$relative_path"
+            test -f "$x64_library"
+            lipo -create "$x64_library" "$arm64_library" -output "$universal_library"
+          done < <(find build/sdk/arm64/lib -type f \
+            \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
+
+          lipo -verify_arch x86_64 arm64 build/sdk/universal/bin/axklib
+          while IFS= read -r library; do
+            lipo -verify_arch x86_64 arm64 "$library"
+          done < <(find build/sdk/universal/lib -type f \
+            \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
+
+          build/sdk/universal/bin/axklib --version
+          tar -czf build/axklib-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz \
+            -C build/sdk/universal .
+
+      - name: Upload universal macOS SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: axklib-macos-universal-${{ inputs.debug && 'debug' || 'release' }}
+          path: build/axklib-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz
+          if-no-files-found: error
