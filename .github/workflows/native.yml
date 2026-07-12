@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       debug:
-        description: debug
+        description: "Debug"
         required: false
         default: false
         type: boolean
       notarize_macos:
-        description: Notarize macOS universal distribution
+        description: "macOS: Notarize"
         required: false
         default: false
         type: boolean
