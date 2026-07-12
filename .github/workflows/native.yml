@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       debug:
-        description: Build and test the Debug preset instead of Release
+        description: debug
         required: false
         default: false
         type: boolean
@@ -57,21 +57,36 @@ jobs:
 
     steps:
       - name: Checkout axklib
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout pinned vcpkg
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: microsoft/vcpkg
           ref: f87344cac03158cbf1467264565f1fd36b382a24
           path: .vcpkg
 
+      - name: Locate Visual Studio 2026
+        id: vs2026
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installation = & $vswhere -version '[18.0,19.0)' -products '*' `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath |
+            Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($installation)) {
+            throw 'Visual Studio 18 with the C++ toolchain was not found'
+          }
+          "path=$installation" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Configure Visual Studio 2026
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: TheMrMilchmann/setup-msvc-dev@v4
         with:
           arch: ${{ matrix.msvc_arch }}
-          vsversion: 18.0
+          vs-path: ${{ steps.vs2026.outputs.path }}
 
       - name: Verify Visual Studio 2026 compiler
         if: runner.os == 'Windows'
@@ -225,7 +240,7 @@ jobs:
 
       - name: Upload native dependency failure logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-dependency-logs-${{ matrix.triplet }}
           path: |
@@ -245,7 +260,7 @@ jobs:
 
       - name: Upload macOS slice
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.macos_slice }}-slice-${{ inputs.debug && 'debug' || 'release' }}
           path: build/macos-${{ matrix.macos_slice }}.tar.gz
@@ -257,13 +272,13 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Download x64 slice
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: macos-x86_64-slice-${{ inputs.debug && 'debug' || 'release' }}
           path: build/slices/x86_64
 
       - name: Download ARM64 slice
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: macos-arm64-slice-${{ inputs.debug && 'debug' || 'release' }}
           path: build/slices/arm64
@@ -317,7 +332,7 @@ jobs:
             -C build/sdk/universal .
 
       - name: Upload universal macOS SDK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: axklib-macos-universal-${{ inputs.debug && 'debug' || 'release' }}
           path: build/axklib-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz
