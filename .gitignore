@@ -1,5 +1,5 @@
 # Generated outputs
-build/
+/build
 
 # Python/tool caches
 __pycache__/
