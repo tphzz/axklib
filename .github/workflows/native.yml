@@ -79,6 +79,9 @@ jobs:
           path: .cache/vcpkg/archives
           key: vcpkg-f87344cac031-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}
 
+      - name: Prepare vcpkg binary cache directory
+        run: cmake -E make_directory "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
+
       - name: Locate Visual Studio 2026
         id: vs2026
         if: runner.os == 'Windows'
