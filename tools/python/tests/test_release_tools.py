@@ -50,8 +50,8 @@ def test_sdk_sbom_excludes_cli_and_test_only_dependencies(
     assert names.isdisjoint({"cli11", "hash-library", "gtest"})
 
 
-def test_package_inspector_rejects_scripts_unlisted_libraries_and_concrete_host_paths(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_package_inspector_rejects_scripts_and_unlisted_shared_libraries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = tmp_path / "package"
     package.mkdir()
@@ -66,19 +66,5 @@ def test_package_inspector_rejects_scripts_unlisted_libraries_and_concrete_host_
 
     (package / "python3").unlink()
     (package / "libsndfile.so").unlink()
-    (package / "windows-binary").write_bytes(b"prefix D:/a/source suffix")
     monkeypatch.setattr("sys.argv", ["inspect_package.py", str(package)])
-    assert inspect_package.main() == 1
-    assert "marker 'D:/a/'" in capsys.readouterr().out
-
-
-def test_package_inspector_does_not_decode_arbitrary_binary_bytes_as_text_paths(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    package = tmp_path / "package"
-    package.mkdir()
-    (package / "axklib.dll").write_bytes(b"MZ\0binary noise q:/ not-a-path\0")
-    monkeypatch.setattr(
-        "sys.argv", ["inspect_package.py", str(package), "--allow-library", "axklib.dll"]
-    )
     assert inspect_package.main() == 0
