@@ -31,8 +31,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     DESCRIPTION "Yamaha A-series disk image and sampler object library"
     LANGUAGES CXX
   )
-  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkReproducibleBuild.cmake")
-  axk_enable_reproducible_build_paths()
   include(CTest)
   include(GNUInstallDirs)
 endif()
@@ -186,7 +184,6 @@ if(AXK_BUILD_SHARED_SDK)
   axk_set_project_warnings(axklib_shared)
   axk_enable_sanitizers(axklib_shared)
   axk_enable_coverage(axklib_shared)
-  axk_remove_target_pdb_path(axklib_shared)
 endif()
 
 if(AXK_BUILD_FUZZERS)

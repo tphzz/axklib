@@ -28,9 +28,6 @@ project(
   LANGUAGES CXX
 )
 
-include("${CMAKE_CURRENT_SOURCE_DIR}/library/cmake/AxkReproducibleBuild.cmake")
-axk_enable_reproducible_build_paths()
-
 include(CTest)
 include(GNUInstallDirs)
 

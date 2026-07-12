@@ -39,13 +39,9 @@ engineering summary, not legal advice and not a substitute for the installed
 license texts.
 
 Official release builds use the overlay triplets under
-`library/cmake/triplets`. They select static dependency libraries and remap build
-roots in dependency compiler output. Axklib's CMake projects apply the same
-source-root remapping to project targets and store only the PDB filename in
-Windows PE debug records. Set `AXK_PATH_REMAP_FROM` to the source checkout root
-and pass the matching `*-axk` triplet through `VCPKG_TARGET_TRIPLET`. This
-reproducibility mechanism does not change or waive any dependency license
-obligation.
+`library/cmake/triplets`. They select static, release-only dependency libraries.
+Pass the matching `*-axk` triplet through `VCPKG_TARGET_TRIPLET`. This linkage
+policy does not change or waive any dependency license obligation.
 
 The project linkage boundary is fixed across platforms:
 
