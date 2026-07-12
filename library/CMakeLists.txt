@@ -31,6 +31,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     DESCRIPTION "Yamaha A-series disk image and sampler object library"
     LANGUAGES CXX
   )
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkReproducibleBuild.cmake")
+  axk_enable_reproducible_build_paths()
   include(CTest)
   include(GNUInstallDirs)
 endif()

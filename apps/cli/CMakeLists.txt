@@ -32,6 +32,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     DESCRIPTION "Standalone Yamaha A-series disk image command-line tool"
     LANGUAGES CXX
   )
+  include("${AXK_REPOSITORY_ROOT}/library/cmake/AxkReproducibleBuild.cmake")
+  axk_enable_reproducible_build_paths()
   include(CTest)
   include(GNUInstallDirs)
   add_subdirectory("${AXK_REPOSITORY_ROOT}/library" "${CMAKE_BINARY_DIR}/library")

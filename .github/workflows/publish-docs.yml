@@ -23,5 +23,10 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --project docs --locked
-      - run: uv run --project docs mkdocs gh-deploy --config-file mkdocs.yml --force
+      - name: Install documentation environment
+        run: uv --project docs sync --locked
+
+      - name: Publish documentation
+        run: |
+          mkdir -p build/docs/site
+          uv --project docs run mkdocs gh-deploy --config-file mkdocs.yml --force
