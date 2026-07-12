@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/io.hpp"
+#include "axklib/utf8.hpp"
 
 namespace {
 
@@ -74,11 +75,13 @@ TEST(MemoryReader, ReadsExactlyAndRejectsShortOrOverflowingRanges) {
 
 TEST(FileReader, ReportsMissingFilesWithSourceContext) {
   const auto missing = std::filesystem::temp_directory_path() / "axklib-missing-reader-file";
+  std::error_code ignored;
+  std::filesystem::remove(missing, ignored);
   const auto result = axk::FileReader::open(missing);
   ASSERT_FALSE(result);
   EXPECT_EQ(result.error().code, axk::ErrorCode::io_open_failed);
   ASSERT_TRUE(result.error().context.source_path.has_value());
-  EXPECT_EQ(*result.error().context.source_path, missing.string());
+  EXPECT_EQ(*result.error().context.source_path, axk::text::path_to_utf8(missing));
 }
 
 TEST(FileReader, ReadsBeyondTwoGiBWithoutAllocatingTheWholeFile) {

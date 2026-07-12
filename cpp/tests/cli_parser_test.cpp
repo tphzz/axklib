@@ -14,6 +14,21 @@
 
 namespace detail = axk::cli::detail;
 
+namespace {
+
+std::string normalize_newlines(std::string value) {
+  std::string normalized;
+  normalized.reserve(value.size());
+  for (std::size_t index = 0; index < value.size(); ++index) {
+    if (value[index] == '\r' && index + 1U < value.size() && value[index + 1U] == '\n')
+      continue;
+    normalized.push_back(value[index]);
+  }
+  return normalized;
+}
+
+}  // namespace
+
 TEST(ContentId, MatchesPublishedSha1VectorsAndStablePooledName) {
   const std::vector<std::byte> empty;
   EXPECT_EQ(detail::sha1_content_id(empty).digest_hex,
@@ -81,7 +96,7 @@ TEST(Cli11Adapter, ExposesMaintainedCommandInventoryAndHidesLegacyAliases) {
   std::ifstream stream{fixture, std::ios::binary};
   ASSERT_TRUE(stream);
   const std::string expected{std::istreambuf_iterator<char>{stream}, {}};
-  EXPECT_EQ(output, expected);
+  EXPECT_EQ(normalize_newlines(output), normalize_newlines(expected));
 }
 
 TEST(CliArchitecture, KeepsCli11AndJsonAtTheirOwnedBoundaries) {
