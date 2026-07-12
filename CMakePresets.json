@@ -68,6 +68,16 @@
         "CMAKE_CXX_CLANG_TIDY": "clang-tidy",
         "AXK_WARNINGS_AS_ERRORS": "OFF"
       }
+    },
+    {
+      "name": "fuzz-local",
+      "inherits": "debug",
+      "displayName": "Local libFuzzer smoke",
+      "cacheVariables": {
+        "AXK_BUILD_FUZZERS": "ON",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
     }
   ],
   "buildPresets": [
@@ -94,6 +104,11 @@
     {
       "name": "clang-tidy",
       "configurePreset": "clang-tidy"
+    },
+    {
+      "name": "fuzz-local",
+      "configurePreset": "fuzz-local",
+      "targets": ["fuzz-local"]
     }
   ],
   "testPresets": [

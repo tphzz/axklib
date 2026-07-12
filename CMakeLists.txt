@@ -15,6 +15,7 @@ option(AXK_ENABLE_SANITIZERS "Enable address and undefined-behavior sanitizers" 
 option(AXK_ENABLE_THREAD_SANITIZER "Enable the thread sanitizer" OFF)
 option(AXK_ENABLE_COVERAGE "Enable native source coverage instrumentation" OFF)
 option(AXK_BUILD_FUZZERS "Build libFuzzer parser targets" OFF)
+set(AXK_FUZZ_SMOKE_SECONDS 5 CACHE STRING "Per-target duration for the fuzz-local smoke tier")
 option(AXK_BUILD_BENCHMARKS "Build native workflow benchmark tools" OFF)
 option(AXK_WARNINGS_AS_ERRORS "Treat native project warnings as errors" ON)
 set(AXK_SBOM_FILE "" CACHE FILEPATH "Optional SPDX JSON document to include in SDK packages")

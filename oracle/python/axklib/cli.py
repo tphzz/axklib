@@ -1369,6 +1369,7 @@ def run_create_hds(args: argparse.Namespace) -> int:
             f"channels={report.source_channels} rate={report.source_sample_rate}->"
             f"{report.output_sample_rate} frames={report.output_frames} "
             f"actions={','.join(actions)} waveforms={','.join(report.waveform_names)!r} "
+            f"dither={report.dither_algorithm or '-'} "
             f"clipped_samples={report.clipped_samples}"
         )
     for warning in result.warnings:

@@ -135,6 +135,7 @@ struct AudioImportSummary {
   bool resampled{};
   bool quantized{};
   bool split_stereo{};
+  std::string dither_algorithm;
   std::uint64_t clipped_samples{};
 };
 

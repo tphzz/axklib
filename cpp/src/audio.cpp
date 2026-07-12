@@ -7,6 +7,7 @@
 
 #include "axklib/bytes.hpp"
 #include "axklib/media.hpp"
+#include "axklib/utf8.hpp"
 
 namespace axk {
 namespace {
@@ -201,21 +202,23 @@ Result<void> write_wav_atomic(const std::filesystem::path &path, const Waveform 
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "could not create WAV output directory")};
   }
-  const auto temporary = path.parent_path() / ("." + path.filename().string() + ".tmp");
+  const auto temporary = text::temporary_sibling(path);
+  if (!temporary)
+    return std::unexpected{temporary.error()};
   {
-    std::ofstream output{temporary, std::ios::binary | std::ios::trunc};
+    std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
     if (!output || !output.write(reinterpret_cast<const char *>(bytes->data()),
                                  static_cast<std::streamsize>(bytes->size()))) {
-      std::filesystem::remove(temporary, error);
+      std::filesystem::remove(*temporary, error);
       return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
                                         "could not write temporary WAV")};
     }
   }
   if (overwrite)
     std::filesystem::remove(path, error);
-  std::filesystem::rename(temporary, path, error);
+  std::filesystem::rename(*temporary, path, error);
   if (error) {
-    std::filesystem::remove(temporary, error);
+    std::filesystem::remove(*temporary, error);
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "could not publish WAV atomically")};
   }

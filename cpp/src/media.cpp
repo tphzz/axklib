@@ -13,6 +13,7 @@
 #include <unordered_set>
 
 #include "axklib/bytes.hpp"
+#include "axklib/utf8.hpp"
 
 namespace axk {
 namespace {
@@ -546,7 +547,7 @@ Result<FatImage> FatImage::open(const std::filesystem::path &path,
   auto reader = FileReader::open(path);
   if (!reader)
     return std::unexpected{reader.error()};
-  return open(std::move(*reader), path.string(), cancellation);
+  return open(std::move(*reader), text::path_to_utf8(path), cancellation);
 }
 
 const FatGeometry &FatImage::geometry() const noexcept { return geometry_; }
@@ -770,7 +771,7 @@ Result<IsoImage> IsoImage::open(const std::filesystem::path &path,
   auto reader = FileReader::open(path);
   if (!reader)
     return std::unexpected{reader.error()};
-  return open(std::move(*reader), path.string(), cancellation);
+  return open(std::move(*reader), text::path_to_utf8(path), cancellation);
 }
 
 const std::string &IsoImage::volume_id() const noexcept { return volume_id_; }
@@ -914,7 +915,7 @@ Result<StandaloneObject> StandaloneObject::open(const std::filesystem::path &pat
   auto reader = FileReader::open(path);
   if (!reader)
     return std::unexpected{reader.error()};
-  return open(std::move(*reader), path.string(), maximum_object_bytes);
+  return open(std::move(*reader), text::path_to_utf8(path), maximum_object_bytes);
 }
 
 const MediaObject &StandaloneObject::object() const noexcept { return object_; }
@@ -991,7 +992,7 @@ Result<MediaContainer> open_media(const std::filesystem::path &path,
   if (!prefix)
     return std::unexpected{prefix.error()};
   if (object_prefix(*prefix)) {
-    auto object = StandaloneObject::open(std::move(*reader), path.string());
+    auto object = StandaloneObject::open(std::move(*reader), text::path_to_utf8(path));
     if (!object)
       return std::unexpected{object.error()};
     return MediaContainer{std::move(*object)};
@@ -1000,14 +1001,14 @@ Result<MediaContainer> open_media(const std::filesystem::path &path,
       std::to_integer<std::uint8_t>((*prefix)[iso_pvd_sector * iso_sector_size]) == 1U &&
       clean_ascii(std::span{*prefix}.subspan(iso_pvd_sector * iso_sector_size + 1U, 5)) ==
           "CD001") {
-    auto iso = IsoImage::open(std::move(*reader), path.string(), cancellation);
+    auto iso = IsoImage::open(std::move(*reader), text::path_to_utf8(path), cancellation);
     if (!iso)
       return std::unexpected{iso.error()};
     return MediaContainer{std::move(*iso)};
   }
   if (prefix->size() >= 512U && le16(*prefix, 0x0b) >= 512U &&
       std::to_integer<std::uint8_t>((*prefix)[0x0d]) != 0U) {
-    auto fat = FatImage::open(std::move(*reader), path.string(), cancellation);
+    auto fat = FatImage::open(std::move(*reader), text::path_to_utf8(path), cancellation);
     if (!fat)
       return std::unexpected{fat.error()};
     return MediaContainer{std::move(*fat)};

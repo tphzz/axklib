@@ -1,6 +1,7 @@
 #include "axklib/semantic.hpp"
 
 #include "axklib/media.hpp"
+#include "axklib/utf8.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -440,7 +441,8 @@ ContentTree build_content_tree(const Container &container, const ObjectCatalog &
   for (const auto &partition : container.partitions()) {
     partitions.emplace_back(partition.index, partition.name);
   }
-  return build_content_tree_impl(container.source_path().string(), partitions, catalog, graph,
+  return build_content_tree_impl(text::path_to_utf8(container.source_path()), partitions, catalog,
+                                 graph,
                                  include_default_programs, true);
 }
 
@@ -449,7 +451,7 @@ ContentTree build_content_tree(const MediaContainer &container, const ObjectCata
   if (const auto *sfs = std::get_if<Container>(&container.storage()))
     return build_content_tree(*sfs, catalog, graph, include_default_programs);
 
-  auto result = build_content_tree(container.source_path().generic_string(), catalog, graph,
+  auto result = build_content_tree(text::path_to_utf8(container.source_path()), catalog, graph,
                                    include_default_programs);
   if (!result.roots.empty()) {
     std::set<std::string> unresolved_banks;

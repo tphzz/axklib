@@ -8,6 +8,17 @@ The C ABI is the only shared axklib target. Its C++ engine and audio
 dependencies are linked into it statically, so installing the C SDK does not
 require separate `axk_core` or `axk_audio` runtime libraries.
 
+The canonical export policy is the tracked `cpp/abi/axklib_c.abi` manifest.
+Each sorted entry records an undecorated symbol, its introduction version, and
+whether it is active or deprecated. CMake generates ELF, Mach-O, and PE linker
+controls from that manifest and compares the built shared library against the
+same generated symbol baseline on every platform that runs native tests.
+
+Compatible additions require a manifest entry and a matching declaration in
+`axklib/c/axk.h`, plus a plain-C compile/link/run test. Published symbols are
+not removed or renamed within ABI major version 1. Platform-specific linker
+files are build artifacts and must not be edited or committed.
+
 ```cmake
 find_package(axklib CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE axklib::c)
@@ -16,6 +27,9 @@ target_link_libraries(my_app PRIVATE axklib::c)
 All text arguments are UTF-8 `axk_string_view` values. They need not be
 null-terminated. Returned views belong to the context or result handle named by
 the function and remain valid until that owner is changed or destroyed.
+Malformed UTF-8 returns `AXK_STATUS_INVALID_ARGUMENT`; filesystem path views
+also reject embedded NUL characters. No locale or Windows active-code-page
+conversion is applied.
 
 ## Versioned Structures
 

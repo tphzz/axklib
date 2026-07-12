@@ -11,6 +11,7 @@
 #include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
 #include "axklib/sfs.hpp"
+#include "axklib/utf8.hpp"
 
 namespace {
 
@@ -103,6 +104,10 @@ TEST(CApi, VersionedStructuresRejectTruncationAndUnsupportedMajor) {
   EXPECT_EQ(axk_context_last_error_info(context, &info), AXK_STATUS_UNSUPPORTED_ABI);
   axk_image *image{};
   EXPECT_EQ(axk_image_open(context, {}, &image), AXK_STATUS_INVALID_ARGUMENT);
+  const std::string malformed_utf8{"\xc3\x28", 2U};
+  EXPECT_EQ(axk_image_open(context, view(malformed_utf8), &image), AXK_STATUS_INVALID_ARGUMENT);
+  const std::string embedded_nul{"image\0.hds", 10U};
+  EXPECT_EQ(axk_image_open(context, view(embedded_nul), &image), AXK_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(axk_context_set_progress_callback_v1(context, capture_progress_v1, nullptr),
             AXK_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(axk_context_destroy(&context), AXK_STATUS_OK);
@@ -270,9 +275,10 @@ TEST(CApi, InventoryAndValidationMatchDirectCppCalls) {
 }
 
 TEST(CApi, CreatesFreshImageWithoutExposingWriterInternals) {
-  const auto root = std::filesystem::temp_directory_path() / "axklib-c-api-writer";
-  const auto manifest = root / "manifest.json";
-  const auto output = root / "fresh.hds";
+  const auto root = std::filesystem::temp_directory_path() /
+                    std::filesystem::path{u8"axklib-c-api-Größe-音"};
+  const auto manifest = root / std::filesystem::path{u8"Aufbau-音.json"};
+  const auto output = root / std::filesystem::path{u8"frisches-Abbild-音.hds"};
   std::error_code error;
   std::filesystem::remove_all(root, error);
   std::filesystem::create_directories(root);
@@ -280,13 +286,16 @@ TEST(CApi, CreatesFreshImageWithoutExposingWriterInternals) {
       << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"sample_banks":[]}]}]})";
   axk_context *context{};
   ASSERT_EQ(axk_context_create(&context), AXK_STATUS_OK);
-  const auto manifest_text = manifest.string();
-  const auto output_text = output.string();
+  const auto manifest_text = axk::text::path_to_utf8(manifest);
+  const auto output_text = axk::text::path_to_utf8(output);
   std::uint64_t partitions{};
   ASSERT_EQ(axk_hds_create(context, view(manifest_text), view(output_text), 0, &partitions),
             AXK_STATUS_OK);
   EXPECT_EQ(partitions, 1U);
   EXPECT_EQ(std::filesystem::file_size(output), 1'048'576U);
+  axk_image* image{};
+  EXPECT_EQ(axk_image_open(context, view(output_text), &image), AXK_STATUS_OK);
+  EXPECT_EQ(axk_image_close(&image), AXK_STATUS_OK);
   EXPECT_NE(axk_hds_create(context, view(manifest_text), view(output_text), 0, &partitions),
             AXK_STATUS_OK);
   EXPECT_EQ(axk_context_destroy(&context), AXK_STATUS_OK);

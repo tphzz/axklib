@@ -104,6 +104,7 @@ class AudioImportSummary:
     resampled: bool
     quantized: bool
     split_stereo: bool
+    dither_algorithm: str
     clipped_samples: int
 
 
@@ -1882,6 +1883,7 @@ def _insert_waveform(state: _TransactionState, operation: AlterationOperation) -
             resampled=audio.resampled,
             quantized=audio.quantized,
             split_stereo=audio.source_channels == 2,
+            dither_algorithm=audio.dither_algorithm,
             clipped_samples=audio.clipped_samples,
         ),
     )

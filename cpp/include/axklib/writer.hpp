@@ -88,6 +88,8 @@ struct ImportedAudio {
   std::vector<std::vector<std::byte>> pcm_channels;
   bool resampled{};
   bool quantized{};
+  // Empty for exact PCM16 imports; otherwise identifies the reproducible policy used.
+  std::string dither_algorithm;
   std::uint64_t clipped_samples{};
 };
 

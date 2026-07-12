@@ -61,6 +61,7 @@ nav:
       - Names, Paths, And Exports: axklib/names-and-paths.md
       - SFZ Export: axklib/sfz.md
       - Report Schemas: axklib/report-schemas.md
+      - CLI JSON Schemas: axklib/cli-json-schemas.md
       - Writer And Alteration: axklib/write.md
   - Distribution:
       - Compatibility: axklib/compatibility.md

@@ -4,6 +4,22 @@ axklib keeps technical identifiers and sampler-facing display names separate.
 Technical identifiers make rows stable in CSV/JSON reports. Display names make
 `info` output and export folders match the sampler navigation model.
 
+## Text Encodings
+
+CLI arguments and JSON text are UTF-8 on every platform. Unix rejects malformed
+argument byte sequences before parsing; Windows receives UTF-16 through
+`wmain`, rejects lone surrogates, and converts to UTF-8 without using the active
+code page. C API `axk_string_view` inputs are length-qualified UTF-8. Invalid
+text returns `AXK_STATUS_INVALID_ARGUMENT`; path inputs also reject embedded
+NUL characters.
+
+Native filesystem paths and UTF-8 display/manifest text use explicit conversion
+adapters. axklib does not normalize, case-fold, or transliterate Unicode, so
+canonically equivalent names remain distinct. Path sanitization is a separate
+operation from encoding validation. Yamaha on-disk name fields retain their
+documented ASCII/byte decoding rules and are not interpreted as arbitrary
+UTF-8.
+
 ```mermaid
 flowchart TD
   raw[Raw container identity] --> obj[Object header name]
@@ -260,6 +276,13 @@ sampler-visible `SBNK` members, the graph records those member names in the
 `user_facing_aliases` field on the `SMPL` object. Display-oriented consumers
 should use the first alias when present and fall back to the physical `SMPL`
 display name only when no alias is known.
+
+The suffix is the first 12 lowercase hexadecimal characters of SHA-1 over the
+complete emitted WAV container bytes. This 48-bit suffix is retained as an
+export-layout compatibility rule, not for security or as sampler metadata. A
+single export plan reuses a path only when the full digest and WAV bytes match;
+if distinct contents ever share the same shortened path, export fails clearly
+instead of overwriting or choosing an order-dependent name.
 
 Rendered stereo names come from sampler-facing sample/member names when a known
 stereo relationship supplies a better musical label. For paired sibling `SBNK`

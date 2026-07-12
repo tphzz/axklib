@@ -9,6 +9,8 @@ import soundfile as sf
 
 from axklib.audio.importing import (
     A_SERIES_SAMPLE_RATES,
+    DITHER_ALGORITHM,
+    _quantize_float64,
     choose_sample_rate,
     import_sampler_audio,
 )
@@ -46,6 +48,46 @@ def test_choose_sample_rate_preserves_documented_rates_and_defaults_to_44100() -
         choose_sample_rate(44_100, 96_000)
 
 
+def test_axk_tpdf_pcg32_v1_has_a_fixed_golden_vector() -> None:
+    quantized, clipped = _quantize_float64(np.zeros((32, 1)), dither=True)
+
+    assert quantized[:, 0].tolist() == [
+        0,
+        -1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        -1,
+        0,
+        0,
+        1,
+        0,
+        -1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        -1,
+        0,
+        -1,
+        -1,
+        -1,
+    ]
+    assert clipped == 0
+
+
 def test_import_sampler_audio_splits_native_pcm16_exactly(tmp_path: Path) -> None:
     source = tmp_path / "stereo.wav"
     left_pcm, right_pcm = _write_stereo_pcm16(
@@ -63,6 +105,7 @@ def test_import_sampler_audio_splits_native_pcm16_exactly(tmp_path: Path) -> Non
     assert imported.pcm_channels == (left_pcm, right_pcm)
     assert not imported.resampled
     assert not imported.quantized
+    assert imported.dither_algorithm == ""
     assert imported.clipped_samples == 0
 
 
@@ -86,6 +129,7 @@ def test_import_sampler_audio_resamples_float_deterministically(tmp_path: Path) 
     assert abs(first.output_frames - 441) <= 1
     assert first.resampled
     assert first.quantized
+    assert first.dither_algorithm == DITHER_ALGORITHM
     assert first.pcm_channels == second.pcm_channels
     assert first.pcm_channels[0] != first.pcm_channels[1]
 
@@ -124,6 +168,7 @@ def test_import_sampler_audio_accepts_libsndfile_formats(
     assert imported.output_frames == 5
     assert imported.quantized
     assert not imported.resampled
+    assert imported.dither_algorithm == DITHER_ALGORITHM
 
 
 def test_import_sampler_audio_rejects_channel_mismatch_and_surround(tmp_path: Path) -> None:

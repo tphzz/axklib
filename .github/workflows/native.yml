@@ -114,6 +114,69 @@ jobs:
         if: matrix.run_tests
         run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }}
 
+      - name: Verify Linux runtime dependency closure
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}/cpp"
+          cli_dependencies="$(ldd "$root/axklib")"
+          c_dependencies="$(ldd "$root/libaxklib_c.so")"
+          printf '%s\n' "$cli_dependencies" "$c_dependencies"
+          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$cli_dependencies"; then
+            echo "CLI has a private native runtime dependency" >&2
+            exit 1
+          fi
+          if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$c_dependencies"; then
+            echo "C ABI has a private codec runtime dependency" >&2
+            exit 1
+          fi
+
+      - name: Verify macOS runtime dependency closure
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}/cpp"
+          cli_dependencies="$(otool -L "$root/axklib")"
+          c_dependencies="$(otool -L "$root/libaxklib_c.0.1.0.dylib")"
+          printf '%s\n' "$cli_dependencies" "$c_dependencies"
+          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
+            echo "CLI has a private native runtime dependency" >&2
+            exit 1
+          fi
+          if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$(tail -n +2 <<<"$c_dependencies")"; then
+            echo "C ABI has a private codec runtime dependency" >&2
+            exit 1
+          fi
+
+      - name: Verify Windows runtime dependency closure
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = "build/native/${{ inputs.debug && 'debug' || 'release' }}/cpp"
+          $cli = Get-ChildItem $root -Recurse -Filter axklib.exe | Select-Object -First 1
+          $cAbi = Get-ChildItem $root -Recurse -Filter axklib_c.dll | Select-Object -First 1
+          if ($null -eq $cli -or $null -eq $cAbi) {
+            throw "native runtime artifacts are missing"
+          }
+          $cliDependencies = (dumpbin /dependents $cli.FullName) -join "`n"
+          $cDependencies = (dumpbin /dependents $cAbi.FullName) -join "`n"
+          Write-Host $cliDependencies
+          Write-Host $cDependencies
+          $privateCli = '(?im)^\s+(?:lib)?(?:axk|sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
+          $privateCodec = '(?im)^\s+(?:lib)?(?:sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
+          if ($cliDependencies -match $privateCli) {
+            throw "CLI has a private native runtime dependency: $($Matches[0])"
+          }
+          if ($cDependencies -match $privateCodec) {
+            throw "C ABI has a private codec runtime dependency: $($Matches[0])"
+          }
+
       - name: Verify Windows ARM64 output
         if: matrix.triplet == 'arm64-windows-axk'
         shell: pwsh
@@ -126,6 +189,24 @@ jobs:
             $detected = ($machineHeaders | ForEach-Object { $_.Line.Trim() }) -join '; '
             throw "axklib.exe is not an ARM64 binary; detected headers: $detected"
           }
+
+      - name: Verify Windows ARM64 C ABI exports
+        if: matrix.triplet == 'arm64-windows-axk'
+        shell: pwsh
+        run: |
+          $buildRoot = "build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          $library = Get-ChildItem $buildRoot -Recurse -Filter axklib_c.dll |
+            Select-Object -First 1
+          $baseline = Join-Path $buildRoot 'cpp/generated/abi/axklib_c.symbols'
+          if ($null -eq $library -or -not (Test-Path $baseline)) {
+            throw "Windows ARM64 C ABI artifacts are missing"
+          }
+          cmake `
+            "-DAXK_LIBRARY=$($library.FullName)" `
+            "-DAXK_BASELINE=$baseline" `
+            "-DAXK_DUMPBIN=$((Get-Command dumpbin.exe -ErrorAction Stop).Source)" `
+            "-DAXK_SYSTEM_NAME=Windows" `
+            -P cpp/cmake/CheckExportedSymbols.cmake
 
       - name: Print native dependency failure logs
         if: failure()
@@ -210,13 +291,28 @@ jobs:
           done < <(find build/sdk/arm64/lib -type f \
             \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
 
-          lipo -verify_arch x86_64 arm64 build/sdk/universal/bin/axklib
+          lipo build/sdk/universal/bin/axklib -verify_arch x86_64 arm64
+          lipo -info build/sdk/universal/bin/axklib
           while IFS= read -r library; do
-            lipo -verify_arch x86_64 arm64 "$library"
+            lipo "$library" -verify_arch x86_64 arm64
+            lipo -info "$library"
           done < <(find build/sdk/universal/lib -type f \
             \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
 
           build/sdk/universal/bin/axklib --version
+          cli_dependencies="$(otool -L build/sdk/universal/bin/axklib)"
+          c_dependencies="$(otool -L build/sdk/universal/lib/libaxklib_c.0.1.0.dylib)"
+          printf '%s\n' "$cli_dependencies" "$c_dependencies"
+          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
+            echo "universal CLI has a private native runtime dependency" >&2
+            exit 1
+          fi
+          if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$(tail -n +2 <<<"$c_dependencies")"; then
+            echo "universal C ABI has a private codec runtime dependency" >&2
+            exit 1
+          fi
           tar -czf build/axklib-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz \
             -C build/sdk/universal .
 

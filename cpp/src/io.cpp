@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "axklib/bytes.hpp"
+#include "axklib/utf8.hpp"
 
 namespace axk {
 
@@ -65,14 +66,14 @@ Result<std::shared_ptr<FileReader>> FileReader::open(const std::filesystem::path
   const auto file_size = std::filesystem::file_size(path, error);
   if (error) {
     ErrorContext context;
-    context.source_path = path.string();
+    context.source_path = text::path_to_utf8(path);
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "cannot open input file: " + error.message(),
                                       std::move(context))};
   }
   if (file_size > std::numeric_limits<std::uint64_t>::max()) {
     ErrorContext context;
-    context.source_path = path.string();
+    context.source_path = text::path_to_utf8(path);
     return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
                                       "input file size exceeds the supported 64-bit range",
                                       std::move(context))};
@@ -90,7 +91,7 @@ Result<void> FileReader::read_exact_at(std::uint64_t offset,
   }
   if (*end > size_) {
     ErrorContext context;
-    context.source_path = path_.string();
+    context.source_path = text::path_to_utf8(path_);
     context.raw_offset = offset;
     return std::unexpected{make_error(ErrorCode::io_short_read, ErrorCategory::io,
                                       "file read exceeds available data", std::move(context))};
@@ -108,7 +109,7 @@ Result<void> FileReader::read_exact_at(std::uint64_t offset,
   std::ifstream input{path_, std::ios::binary};
   if (!input) {
     ErrorContext context;
-    context.source_path = path_.string();
+    context.source_path = text::path_to_utf8(path_);
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "cannot open input file for reading", std::move(context))};
   }
@@ -117,7 +118,7 @@ Result<void> FileReader::read_exact_at(std::uint64_t offset,
              static_cast<std::streamsize>(destination.size()));
   if (input.gcount() != static_cast<std::streamsize>(destination.size())) {
     ErrorContext context;
-    context.source_path = path_.string();
+    context.source_path = text::path_to_utf8(path_);
     context.raw_offset = offset;
     return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
                                       "failed to read requested bytes", std::move(context))};

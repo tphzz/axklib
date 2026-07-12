@@ -11,6 +11,7 @@
 #include <span>
 
 #include "writer_internal.hpp"
+#include "axklib/utf8.hpp"
 
 namespace axk {
 namespace {
@@ -769,10 +770,12 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest,
   if (filesystem_error)
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "could not create HDS output directory")};
-  const auto temporary =
-      output_path.parent_path() / ("." + output_path.filename().string() + ".tmp");
-  TemporaryFileCleanup cleanup{temporary};
-  std::fstream output{temporary, std::ios::binary | std::ios::in | std::ios::out | std::ios::trunc};
+  const auto temporary = text::temporary_sibling(output_path);
+  if (!temporary)
+    return std::unexpected{temporary.error()};
+  TemporaryFileCleanup cleanup{*temporary};
+  std::fstream output{*temporary,
+                      std::ios::binary | std::ios::in | std::ios::out | std::ios::trunc};
   if (!output)
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "could not create temporary HDS output")};
@@ -795,7 +798,7 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest,
   }
   if (!write_at(output, 0, superblock) || !write_at(output, 512, superblock)) {
     output.close();
-    std::filesystem::remove(temporary);
+    std::filesystem::remove(*temporary);
     return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
                                       "could not write HDS superblocks")};
   }
@@ -900,7 +903,7 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest,
   output.close();
   if (overwrite)
     std::filesystem::remove(output_path, filesystem_error);
-  std::filesystem::rename(temporary, output_path, filesystem_error);
+  std::filesystem::rename(*temporary, output_path, filesystem_error);
   if (filesystem_error) {
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "could not publish fresh HDS output")};

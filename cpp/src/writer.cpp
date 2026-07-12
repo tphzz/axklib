@@ -1,5 +1,7 @@
 #include "axklib/writer.hpp"
 
+#include "axklib/utf8.hpp"
+
 #include <fstream>
 #include <limits>
 #include <set>
@@ -68,9 +70,11 @@ Result<std::filesystem::path> path(
     const Json& value, std::string_view context, const std::filesystem::path& base) {
   auto parsed = text(value, context);
   if (!parsed) return std::unexpected{parsed.error()};
-  std::filesystem::path result{*parsed};
-  if (result.is_relative()) result = base / result;
-  return result.lexically_normal();
+  auto result = axk::text::path_from_utf8(*parsed);
+  if (!result)
+    return std::unexpected{manifest_error(std::string{context} + " must be a valid UTF-8 path")};
+  if (result->is_relative()) *result = base / *result;
+  return result->lexically_normal();
 }
 
 Result<WaveformSpec> waveform(

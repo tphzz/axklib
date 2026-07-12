@@ -10,8 +10,17 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/utf8.hpp"
+
 namespace axk {
 namespace {
+
+using OrderedJson = nlohmann::ordered_json;
+
+Error serialization_error(const nlohmann::json::exception& error) {
+  return make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                    "report JSON serialization failed: " + std::string{error.what()});
+}
 
 constexpr std::array quality_names{"quality", "extraction_quality", "match_quality",
                                    "organization_relationship_quality"};
@@ -86,7 +95,7 @@ std::string scalar_text(const ReportValue &value) {
   return {};
 }
 
-nlohmann::ordered_json json_value(const ReportValue &value) {
+OrderedJson json_value(const ReportValue &value) {
   if (std::holds_alternative<std::monostate>(value.value))
     return nullptr;
   if (const auto *item = std::get_if<bool>(&value.value))
@@ -100,20 +109,20 @@ nlohmann::ordered_json json_value(const ReportValue &value) {
   if (const auto *item = std::get_if<std::string>(&value.value))
     return *item;
   if (const auto *item = std::get_if<ReportValue::Array>(&value.value)) {
-    auto result = nlohmann::ordered_json::array();
+    auto result = OrderedJson::array();
     for (const auto &child : *item)
       result.push_back(json_value(child));
     return result;
   }
-  auto result = nlohmann::ordered_json::object();
+  auto result = OrderedJson::object();
   for (const auto &[name, child] : std::get<ReportValue::Object>(value.value)) {
     result[name] = json_value(child);
   }
   return result;
 }
 
-nlohmann::ordered_json json_row(const ReportRow &row) {
-  auto result = nlohmann::ordered_json::object();
+OrderedJson json_row(const ReportRow &row) {
+  auto result = OrderedJson::object();
   for (const auto &[name, value] : row)
     result[name] = json_value(value);
   return result;
@@ -138,7 +147,7 @@ Result<void> write_atomic(const std::filesystem::path &path, std::string_view te
   if (!overwrite && std::filesystem::exists(path, error)) {
     return std::unexpected{
         make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                   "refusing to replace existing report: " + path.generic_string())};
+                   "refusing to replace existing report: " + text::path_to_utf8(path))};
   }
   if (!path.parent_path().empty())
     std::filesystem::create_directories(path.parent_path(), error);
@@ -146,21 +155,23 @@ Result<void> write_atomic(const std::filesystem::path &path, std::string_view te
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "could not create report output directory")};
   }
-  const auto temporary = path.parent_path() / ("." + path.filename().string() + ".tmp");
+  const auto temporary = text::temporary_sibling(path);
+  if (!temporary)
+    return std::unexpected{temporary.error()};
   {
-    std::ofstream output{temporary, std::ios::binary | std::ios::trunc};
+    std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
     output.write(text.data(), static_cast<std::streamsize>(text.size()));
     if (!output) {
-      std::filesystem::remove(temporary, error);
+      std::filesystem::remove(*temporary, error);
       return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
                                         "could not write temporary report")};
     }
   }
   if (overwrite)
     std::filesystem::remove(path, error);
-  std::filesystem::rename(temporary, path, error);
+  std::filesystem::rename(*temporary, path, error);
   if (error) {
-    std::filesystem::remove(temporary, error);
+    std::filesystem::remove(*temporary, error);
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "could not publish report atomically")};
   }
@@ -205,16 +216,16 @@ std::vector<std::pair<std::string, std::uint64_t>> pairs(const Map &values) {
   return {values.begin(), values.end()};
 }
 
-nlohmann::ordered_json
+OrderedJson
 counts_json(const std::vector<std::pair<std::string, std::uint64_t>> &values) {
-  auto result = nlohmann::ordered_json::object();
+  auto result = OrderedJson::object();
   for (const auto &[name, count] : values)
     result[name] = count;
   return result;
 }
 
-nlohmann::ordered_json schema_json(const ReportSchemaManifest &manifest) {
-  auto columns = nlohmann::ordered_json::array();
+OrderedJson schema_json(const ReportSchemaManifest &manifest) {
+  auto columns = OrderedJson::array();
   for (const auto &column : manifest.columns) {
     columns.push_back({{"name", column.name},
                        {"type", column.type},
@@ -316,15 +327,23 @@ ReportSchemaManifest make_report_schema(std::string report_name, std::span<const
 
 Result<void> write_report_json(const std::filesystem::path &path, std::span<const ReportRow> rows,
                                bool overwrite) {
-  auto value = nlohmann::ordered_json::array();
-  for (const auto &row : rows)
-    value.push_back(json_row(row));
-  return write_atomic(path, value.dump(2) + "\n", overwrite);
+  try {
+    auto value = OrderedJson::array();
+    for (const auto &row : rows)
+      value.push_back(json_row(row));
+    return write_atomic(path, value.dump(2) + "\n", overwrite);
+  } catch (const nlohmann::json::exception& error) {
+    return std::unexpected{serialization_error(error)};
+  }
 }
 
 Result<void> write_report_object(const std::filesystem::path &path, const ReportRow &row,
                                  bool overwrite) {
-  return write_atomic(path, json_row(row).dump(2) + "\n", overwrite);
+  try {
+    return write_atomic(path, json_row(row).dump(2) + "\n", overwrite);
+  } catch (const nlohmann::json::exception& error) {
+    return std::unexpected{serialization_error(error)};
+  }
 }
 
 Result<void> write_report_csv(const std::filesystem::path &path, std::span<const ReportRow> rows,
@@ -370,30 +389,38 @@ Result<void> write_report_csv(const std::filesystem::path &path, std::span<const
 
 Result<void> write_report_schema(const std::filesystem::path &path,
                                  const ReportSchemaManifest &manifest, bool overwrite) {
-  return write_atomic(path, schema_json(manifest).dump(2) + "\n", overwrite);
+  try {
+    return write_atomic(path, schema_json(manifest).dump(2) + "\n", overwrite);
+  } catch (const nlohmann::json::exception& error) {
+    return std::unexpected{serialization_error(error)};
+  }
 }
 
 Result<void> write_report_schema_index(const std::filesystem::path &path,
                                        std::span<const ReportSchemaManifest> manifests,
                                        bool overwrite) {
-  auto reports = nlohmann::ordered_json::array();
-  for (const auto &manifest : manifests) {
-    reports.push_back({{"report_name", manifest.report_name},
-                       {"row_count", manifest.row_count},
-                       {"column_count", manifest.columns.size()},
-                       {"quality_counts", counts_json(manifest.quality_counts)},
-                       {"issue_code_counts", counts_json(manifest.issue_code_counts)},
-                       {"object_type_counts", counts_json(manifest.object_type_counts)},
-                       {"quality_columns", manifest.quality_columns},
-                       {"issue_code_columns", manifest.issue_code_columns},
-                       {"object_ref_columns", manifest.object_ref_columns},
-                       {"source_command", manifest.source_command},
-                       {"library_version", manifest.library_version}});
+  try {
+    auto reports = OrderedJson::array();
+    for (const auto &manifest : manifests) {
+      reports.push_back({{"report_name", manifest.report_name},
+                         {"row_count", manifest.row_count},
+                         {"column_count", manifest.columns.size()},
+                         {"quality_counts", counts_json(manifest.quality_counts)},
+                         {"issue_code_counts", counts_json(manifest.issue_code_counts)},
+                         {"object_type_counts", counts_json(manifest.object_type_counts)},
+                         {"quality_columns", manifest.quality_columns},
+                         {"issue_code_columns", manifest.issue_code_columns},
+                         {"object_ref_columns", manifest.object_ref_columns},
+                         {"source_command", manifest.source_command},
+                         {"library_version", manifest.library_version}});
+    }
+    const auto value = OrderedJson{{"schema_version", "1.0"},
+                                   {"report_count", manifests.size()},
+                                   {"reports", std::move(reports)}};
+    return write_atomic(path, value.dump(2) + "\n", overwrite);
+  } catch (const nlohmann::json::exception& error) {
+    return std::unexpected{serialization_error(error)};
   }
-  const auto value = nlohmann::ordered_json{{"schema_version", "1.0"},
-                                            {"report_count", manifests.size()},
-                                            {"reports", std::move(reports)}};
-  return write_atomic(path, value.dump(2) + "\n", overwrite);
 }
 
 } // namespace axk

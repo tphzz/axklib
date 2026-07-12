@@ -20,7 +20,7 @@ On Windows PowerShell, use an out-of-tree build directory so the source checkout
 stays clean:
 
 ```powershell
-$env:VCPKG_ROOT = "C:\path\to\vcpkg"
+$env:VCPKG_ROOT = Join-Path $HOME "vcpkg"
 $buildDir = Join-Path $env:TEMP "axklib-build\debug"
 cmake --preset debug -B $buildDir
 cmake --build $buildDir --parallel

@@ -2,6 +2,7 @@
 
 include(CMakeFindDependencyMacro)
 find_dependency(nlohmann_json CONFIG)
+find_dependency(utf8cpp CONFIG)
 
 set(_axklib_needs_audio FALSE)
 if(NOT axklib_FIND_COMPONENTS OR "audio" IN_LIST axklib_FIND_COMPONENTS OR "c" IN_LIST axklib_FIND_COMPONENTS)

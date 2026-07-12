@@ -10,6 +10,7 @@
 #include <unordered_map>
 
 #include "axklib/bytes.hpp"
+#include "axklib/utf8.hpp"
 
 namespace axk {
 namespace {
@@ -891,7 +892,8 @@ Result<Container> open_image(
         "image reader must not be null")};
   }
   if (options.progress) {
-    options.progress->report({ProgressPhase::opening, 0, std::nullopt, source_path.string(), {}});
+    options.progress->report(
+        {ProgressPhase::opening, 0, std::nullopt, text::path_to_utf8(source_path), {}});
   }
   const auto primary_bytes = read_bytes(
       *image, 0, sfs_default_sector_size, options.cancellation);
@@ -901,7 +903,7 @@ Result<Container> open_image(
   const auto primary = parse_superblock(*primary_bytes);
   if (!primary) {
     auto error = primary.error();
-    error.context.source_path = source_path.string();
+    error.context.source_path = text::path_to_utf8(source_path);
     return std::unexpected{std::move(error)};
   }
   if (primary->sector_size_bytes == 0 || primary->sector_size_bytes > 65536U) {
@@ -922,7 +924,7 @@ Result<Container> open_image(
   result.backup_superblock_matches_ = *primary_bytes == *backup_bytes;
   if (!result.backup_superblock_matches_) {
     ErrorContext context;
-    context.source_path = result.source_path_.string();
+    context.source_path = text::path_to_utf8(result.source_path_);
     context.raw_offset = primary->sector_size_bytes;
     result.diagnostics_.push_back(make_error(
         ErrorCode::container_backup_mismatch,
@@ -943,7 +945,7 @@ Result<Container> open_image(
           ErrorCode::container_partition_out_of_range,
           "partition extends beyond the input image",
           entry.index);
-      error.context.source_path = result.source_path_.string();
+      error.context.source_path = text::path_to_utf8(result.source_path_);
       result.diagnostics_.push_back(std::move(error));
       continue;
     }
@@ -951,7 +953,7 @@ Result<Container> open_image(
         *result.reader_, entry, primary->sector_size_bytes, options);
     if (!partition) {
       auto error = partition.error();
-      error.context.source_path = result.source_path_.string();
+      error.context.source_path = text::path_to_utf8(result.source_path_);
       error.context.partition_index = entry.index.value;
       result.diagnostics_.push_back(std::move(error));
       continue;

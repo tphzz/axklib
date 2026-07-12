@@ -21,6 +21,7 @@
 #include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
 #include "axklib/sfs.hpp"
+#include "axklib/utf8.hpp"
 #include "axklib/writer.hpp"
 
 struct axk_context {
@@ -155,11 +156,16 @@ std::string string(axk_string_view value) {
   return value.size == 0U ? std::string{} : std::string{value.data, value.size};
 }
 
+bool valid_utf8(axk_string_view value) {
+  return (value.data != nullptr || value.size == 0U) && axk::text::is_valid_utf8(string(value));
+}
+
+bool valid_utf8_path(axk_string_view value) {
+  return valid_utf8(value) && axk::text::path_from_utf8(string(value)).has_value();
+}
+
 std::filesystem::path path_from_utf8(axk_string_view value) {
-  const auto bytes = string(value);
-  const std::u8string utf8{reinterpret_cast<const char8_t *>(bytes.data()),
-                           reinterpret_cast<const char8_t *>(bytes.data() + bytes.size())};
-  return std::filesystem::path{utf8};
+  return *axk::text::path_from_utf8(string(value));
 }
 
 axk_status fail(axk_context *context, axk_status status, std::string message) {
@@ -419,7 +425,7 @@ axk_status axk_image_open(axk_context *context, axk_string_view utf8_path, axk_i
     return AXK_STATUS_INVALID_HANDLE;
   begin_use(context);
   if (out_image == nullptr || *out_image != nullptr ||
-      (utf8_path.data == nullptr && utf8_path.size != 0U) || utf8_path.size == 0U) {
+      utf8_path.size == 0U || !valid_utf8_path(utf8_path)) {
     return fail(context, AXK_STATUS_INVALID_ARGUMENT, "image path and output handle are required");
   }
   try {
@@ -495,7 +501,7 @@ axk_status axk_image_content_children(axk_context *context, const axk_image *ima
   if (!valid_handle(image, HandleKind::image))
     return fail(context, AXK_STATUS_INVALID_HANDLE, "image handle is stale or invalid");
   if (out_result == nullptr || *out_result != nullptr ||
-      (parent_node_id.data == nullptr && parent_node_id.size != 0U) || limit == 0U) {
+      !valid_utf8(parent_node_id) || limit == 0U) {
     return fail(context, AXK_STATUS_INVALID_ARGUMENT, "valid image, page, and output are required");
   }
   try {
@@ -530,7 +536,7 @@ axk_status axk_snapshot_content_children(axk_context *context, const axk_snapsho
   if (!valid_handle(snapshot, HandleKind::snapshot))
     return fail(context, AXK_STATUS_INVALID_HANDLE, "snapshot handle is stale or invalid");
   if (out_result == nullptr || *out_result != nullptr ||
-      (parent_node_id.data == nullptr && parent_node_id.size != 0U) || limit == 0U) {
+      !valid_utf8(parent_node_id) || limit == 0U) {
     return fail(context, AXK_STATUS_INVALID_ARGUMENT,
                 "valid snapshot, page, and output are required");
   }
@@ -660,7 +666,7 @@ axk_status axk_image_waveform_preview(axk_context *context, const axk_image *ima
     return fail(context, AXK_STATUS_INVALID_HANDLE, "image handle is stale or invalid");
   if (out_result == nullptr || *out_result != nullptr ||
       object_key.data == nullptr || object_key.size == 0U || bin_count == 0U ||
-      bin_count > std::numeric_limits<std::size_t>::max()) {
+      bin_count > std::numeric_limits<std::size_t>::max() || !valid_utf8(object_key)) {
     return fail(context, AXK_STATUS_INVALID_ARGUMENT,
                 "waveform key, bins, and output are required");
   }
@@ -698,7 +704,7 @@ axk_status axk_image_waveform_pcm(axk_context *context, const axk_image *image,
   if (!valid_handle(image, HandleKind::image))
     return fail(context, AXK_STATUS_INVALID_HANDLE, "image handle is stale or invalid");
   if (out_buffer == nullptr || *out_buffer != nullptr ||
-      object_key.data == nullptr || object_key.size == 0U)
+      object_key.data == nullptr || object_key.size == 0U || !valid_utf8(object_key))
     return fail(context, AXK_STATUS_INVALID_ARGUMENT, "waveform key and output are required");
   try {
     const auto key = string(object_key);
@@ -731,7 +737,7 @@ axk_status axk_image_export_audio(axk_context *context, const axk_image *image,
   if (!valid_handle(image, HandleKind::image))
     return fail(context, AXK_STATUS_INVALID_HANDLE, "image handle is stale or invalid");
   if (out_written_file_count == nullptr ||
-      utf8_output_directory.data == nullptr || utf8_output_directory.size == 0U) {
+      utf8_output_directory.size == 0U || !valid_utf8_path(utf8_output_directory)) {
     return fail(context, AXK_STATUS_INVALID_ARGUMENT,
                 "image, output directory, and count are required");
   }
@@ -770,7 +776,7 @@ axk_status axk_hds_build_plan_create(axk_context *context, axk_string_view utf8_
                 "build-plan creation cannot be invoked from a progress callback");
   begin_use(context);
   if (out_plan == nullptr || *out_plan != nullptr ||
-      utf8_manifest_path.data == nullptr || utf8_manifest_path.size == 0U)
+      utf8_manifest_path.size == 0U || !valid_utf8_path(utf8_manifest_path))
     return fail(context, AXK_STATUS_INVALID_ARGUMENT, "manifest path and output are required");
   try {
     auto manifest = axk::load_hds_build_manifest(path_from_utf8(utf8_manifest_path));
@@ -816,8 +822,7 @@ axk_status axk_build_plan_apply(axk_context *context, axk_build_plan *plan,
   begin_use(context);
   if (!valid_handle(plan, HandleKind::build_plan))
     return fail(context, AXK_STATUS_INVALID_HANDLE, "build plan handle is stale or invalid");
-  if (utf8_output_path.data == nullptr ||
-      utf8_output_path.size == 0U)
+  if (utf8_output_path.size == 0U || !valid_utf8_path(utf8_output_path))
     return fail(context, AXK_STATUS_INVALID_ARGUMENT, "build plan and output path are required");
   if (plan->owner != std::this_thread::get_id())
     return fail(context, AXK_STATUS_WRONG_THREAD, "build plan used from a different thread");
@@ -858,9 +863,9 @@ axk_status axk_hds_create(axk_context *context, axk_string_view utf8_manifest_pa
     return fail(context, AXK_STATUS_INVALID_ARGUMENT,
                 "image creation cannot be invoked from its progress callback");
   begin_use(context);
-  if (out_partition_count == nullptr || utf8_manifest_path.data == nullptr ||
-      utf8_manifest_path.size == 0U || utf8_output_path.data == nullptr ||
-      utf8_output_path.size == 0U) {
+  if (out_partition_count == nullptr || utf8_manifest_path.size == 0U ||
+      utf8_output_path.size == 0U || !valid_utf8_path(utf8_manifest_path) ||
+      !valid_utf8_path(utf8_output_path)) {
     return fail(context, AXK_STATUS_INVALID_ARGUMENT,
                 "manifest, output path, and count are required");
   }
@@ -892,8 +897,8 @@ axk_status axk_hds_transaction_create(axk_context *context, axk_string_view utf8
                 "transaction creation cannot be invoked from a progress callback");
   begin_use(context);
   if (out_transaction == nullptr || *out_transaction != nullptr ||
-      utf8_source_path.data == nullptr || utf8_source_path.size == 0U ||
-      utf8_manifest_path.data == nullptr || utf8_manifest_path.size == 0U)
+      utf8_source_path.size == 0U || utf8_manifest_path.size == 0U ||
+      !valid_utf8_path(utf8_source_path) || !valid_utf8_path(utf8_manifest_path))
     return fail(context, AXK_STATUS_INVALID_ARGUMENT,
                 "source, transaction manifest, and output are required");
   try {
@@ -943,8 +948,7 @@ axk_status axk_transaction_apply(axk_context *context, axk_transaction *transact
   begin_use(context);
   if (!valid_handle(transaction, HandleKind::transaction))
     return fail(context, AXK_STATUS_INVALID_HANDLE, "transaction handle is stale or invalid");
-  if (utf8_output_path.data == nullptr ||
-      utf8_output_path.size == 0U)
+  if (utf8_output_path.size == 0U || !valid_utf8_path(utf8_output_path))
     return fail(context, AXK_STATUS_INVALID_ARGUMENT, "transaction and output path are required");
   if (transaction->owner != std::this_thread::get_id())
     return fail(context, AXK_STATUS_WRONG_THREAD, "transaction used from a different thread");
@@ -990,9 +994,9 @@ axk_status axk_hds_alter(axk_context *context, axk_string_view utf8_source_path,
                 "image alteration cannot be invoked from its progress callback");
   begin_use(context);
   if (out_operation_count == nullptr || out_applied == nullptr ||
-      utf8_source_path.data == nullptr || utf8_source_path.size == 0U ||
-      utf8_manifest_path.data == nullptr || utf8_manifest_path.size == 0U ||
-      (utf8_output_path.data == nullptr && utf8_output_path.size != 0U)) {
+      utf8_source_path.size == 0U || utf8_manifest_path.size == 0U ||
+      !valid_utf8_path(utf8_source_path) || !valid_utf8_path(utf8_manifest_path) ||
+      (utf8_output_path.size != 0U && !valid_utf8_path(utf8_output_path))) {
     return fail(context, AXK_STATUS_INVALID_ARGUMENT,
                 "source, manifest, operation count, and applied output are required");
   }

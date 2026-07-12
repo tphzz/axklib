@@ -1,5 +1,7 @@
 #include "axklib/alteration.hpp"
 
+#include "axklib/utf8.hpp"
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -1416,8 +1418,9 @@ Result<OperationReport> insert_waveform(TransactionState &state, const Operation
   report.audio_import = AudioImportSummary{
       audio->source_path,           audio->source_format,      audio->source_subtype,
       audio->source_channels,       audio->source_sample_rate, audio->output_sample_rate,
-      audio->output_frames,         audio->resampled,          audio->quantized,
-      audio->source_channels == 2U, audio->clipped_samples};
+      audio->output_frames,         audio->resampled,
+      audio->quantized,             audio->source_channels == 2U,
+      audio->dither_algorithm,      audio->clipped_samples};
   return report;
 }
 
@@ -2265,11 +2268,13 @@ Result<std::filesystem::path> copy_to_unique_temporary(const std::filesystem::pa
                                                        const std::filesystem::path &output) {
   std::random_device random;
   for (std::size_t attempt = 0; attempt < 32U; ++attempt) {
-    const auto temporary = output.parent_path() / std::format(".{}.alter.{:08x}.tmp",
-                                                              output.filename().string(), random());
+    const auto temporary =
+        text::temporary_sibling(output, std::format(".alter.{:08x}.tmp", random()));
+    if (!temporary)
+      return std::unexpected{temporary.error()};
     std::error_code error;
-    if (std::filesystem::copy_file(source, temporary, error))
-      return temporary;
+    if (std::filesystem::copy_file(source, *temporary, error))
+      return *temporary;
     if (error != std::errc::file_exists)
       return std::unexpected{
           make_error(ErrorCode::io_read_failed, ErrorCategory::io,
@@ -2985,7 +2990,10 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
           return std::unexpected{path.error()};
         if (!root_key)
           return std::unexpected{root_key.error()};
-        spec.path = std::filesystem::path{*path};
+        auto audio_path = axk::text::path_from_utf8(*path);
+        if (!audio_path)
+          return std::unexpected{transaction_error(context + ".audio.path must be valid UTF-8")};
+        spec.path = std::move(*audio_path);
         if (spec.path.is_relative())
           spec.path = base_directory / spec.path;
         spec.root_key = *root_key;
@@ -3097,7 +3105,8 @@ Result<AlterationResult> alter_hds(const std::filesystem::path &source_path,
     if (progress)
       progress->report(
           {ProgressPhase::writing, operation_index + 1U, manifest.operations.size(), operation.type,
-           output_path ? std::optional{output_path->string()} : std::optional<std::string>{}});
+           output_path ? std::optional{text::path_to_utf8(*output_path)}
+                       : std::optional<std::string>{}});
   }
   if (output_path) {
     auto applied = publish(state, *output_path, cancellation);

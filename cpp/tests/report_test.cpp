@@ -63,3 +63,17 @@ TEST(ReportWriter, PreservesJsonOrderAndPythonCsvEscapingWithoutPartialOverwrite
   EXPECT_EQ(conflict.error().code, axk::ErrorCode::io_open_failed);
   std::filesystem::remove_all(root, error);
 }
+
+TEST(ReportWriter, ContainsJsonExceptionsAndPublishesNothingForInvalidUtf8) {
+  const auto root = std::filesystem::temp_directory_path() / "axklib-report-invalid-utf8";
+  const auto output = root / "rows.json";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+  const std::string invalid{"\xc3\x28", 2U};
+  const std::vector<axk::ReportRow> rows{{{"name", invalid}}};
+  const auto written = axk::write_report_json(output, rows);
+  ASSERT_FALSE(written);
+  EXPECT_EQ(written.error().code, axk::ErrorCode::internal_invariant);
+  EXPECT_FALSE(std::filesystem::exists(output));
+  std::filesystem::remove_all(root, error);
+}
