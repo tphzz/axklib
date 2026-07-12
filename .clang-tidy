@@ -8,6 +8,6 @@ Checks: >
   portability-*,
   readability-*
 WarningsAsErrors: ''
-HeaderFilterRegex: 'cpp/(include|src)/.*'
+HeaderFilterRegex: '(library|apps/cli)/(include|src|adapters|commands|schema)/.*'
 CheckOptions:
   readability-identifier-length.IgnoredVariableNames: 'id|it'

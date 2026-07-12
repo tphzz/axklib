@@ -1,7 +1,8 @@
 # axklib
 
-axklib is a C++23 library, stable C ABI, and CLI11 command-line application for
-Yamaha A3000, A4000, and A5000 disk images and sampler objects.
+axklib is a C++17 shared SDK and a separate native command-line application for
+Yamaha A3000, A4000, and A5000 disk images and sampler objects. Its internal
+engine is implemented in C++23.
 
 It reads SFS HDA/HDS images, FAT12 floppy images, ISO9660 sample CD-ROMs, and
 standalone sampler objects. It can inventory object relationships, export exact
@@ -11,7 +12,8 @@ changes to existing images.
 ## Build
 
 ```bash
-export VCPKG_ROOT=/path/to/vcpkg
+git submodule update --init --recursive
+./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
 cmake --preset release
 cmake --build --preset release
 cmake --install build/native/release --prefix ./axklib-sdk
@@ -26,5 +28,5 @@ is installed as `axklib`.
 axklib info HD00_512_example.hds
 ```
 
-See [C++ and CLI usage](axklib/typical-usage.md), the [C++ API](axklib/cpp-api.md),
-or the stable [C API](axklib/c-api.md).
+See [C++ and CLI usage](axklib/typical-usage.md) or the
+[C++ API](axklib/cpp-api.md).

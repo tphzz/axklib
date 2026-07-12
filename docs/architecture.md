@@ -10,15 +10,17 @@ flowchart LR
     Objects --> Catalog[Catalog and relationships]
     Catalog --> Audio[Exact audio and SFZ]
     Catalog --> Writer[Fresh writer and transactions]
-    Catalog --> CABI[Stable C ABI]
+    Catalog --> SDK[C++17 PIMPL facade]
     Catalog --> CLI[CLI11 adapter]
-    CABI --> Host[Desktop and foreign-language hosts]
+    SDK --> Host[Native SDK consumers]
+    Catalog --> Bridge[Static desktop bridge]
 ```
 
-`axk_core` owns format behavior and typed errors. The CLI adapter owns argument
-parsing, exit codes, output layout, and report serialization. The C ABI owns
-opaque handles, result lifetimes, pagination, cancellation, and callback rules.
-Host applications do not need a subprocess or scripting runtime.
+The private C++23 engine owns format behavior and typed errors. The shared SDK
+facade owns PIMPL sessions, results, pagination, cancellation, and progress. The
+CLI adapter owns argument parsing, exit codes, output layout, and report
+serialization. The CLI and desktop bridge link the private engine statically;
+SDK consumers load the shared library.
 
 The CLI follows a one-way dependency path:
 
@@ -26,14 +28,14 @@ The CLI follows a one-way dependency path:
 
 The source modules reflect that boundary:
 
-- `cli/main.cpp` and `cli/command_line.*` convert platform arguments to checked
+- `apps/cli/main.cpp` and `apps/cli/command_line.*` convert platform arguments to checked
   UTF-8 and contain process-level failures.
-- `cli/app.*` registers the root command and dispatches typed requests.
-- `cli/commands/` owns independent analysis, extraction, report, compatibility,
+- `apps/cli/app.*` registers the root command and dispatches typed requests.
+- `apps/cli/commands/` owns independent analysis, extraction, report, compatibility,
   and writer/transaction command families.
-- `cli/schema/` owns versioned machine-output data structures and their private
+- `apps/cli/schema/` owns versioned machine-output data structures and their private
   JSON serialization.
-- `cli/content_id.*` owns pooled-export identifiers and collision handling.
+- `apps/cli/content_id.*` owns pooled-export identifiers and collision handling.
 
 Command modules orchestrate public library services; they do not contain disk
 layout, object decoding, allocation, or audio-conversion rules. Core targets do

@@ -1,8 +1,8 @@
 # Native Fuzzing
 
-Fuzzing is a C++ memory-safety and parser-hardening tool. It is not inherited
-from the Python oracle and does not prove unknown sampler-field semantics.
-`cpp/fuzz/harnesses.json` is the canonical inventory of targets, production
+Fuzzing is a C++ memory-safety and parser-hardening tool. It does not establish
+semantics for unknown sampler fields.
+`library/fuzz/harnesses.json` is the canonical inventory of targets, production
 entry points, synthesized envelopes, input bounds, seed directories, and
 invariants. Normal tests replay every maintained seed through the same envelope.
 
@@ -24,7 +24,7 @@ against a copied working corpus with an explicit duration:
 
 ```bash
 cmake -E make_directory build/native/fuzz-local/artifacts
-build/native/fuzz-local/cpp/axk_sfs_image_fuzz \
+build/native/fuzz-local/library/axk_sfs_image_fuzz \
   build/native/fuzz-local/fuzz-corpus/sfs_image \
   -max_total_time=14400 -timeout=5 -rss_limit_mb=2048 \
   -artifact_prefix=build/native/fuzz-local/artifacts/sfs_image-

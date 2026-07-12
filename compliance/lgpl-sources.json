@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "vcpkg_baseline": "f87344cac03158cbf1467264565f1fd36b382a24",
+  "packages": [
+    {
+      "name": "libsndfile",
+      "version": "1.2.2",
+      "license": "LGPL-2.1-or-later",
+      "sha512": "fb8b4d367240a8ac9d55be6f053cb19419890691c56a8552d1600d666257992b6e8e41a413a444c9f2d6c5d71406013222c92a3bfa67228944a26475444240a1",
+      "port": "external/vcpkg/ports/libsndfile"
+    },
+    {
+      "name": "soxr",
+      "version": "0.1.3",
+      "license": "LGPL-2.1-or-later",
+      "sha512": "f4883ed298d5650399283238aac3dbe78d605b988246bea51fa343d4a8ce5ce97c6e143f6c3f50a3ff81795d9c19e7a07217c586d4020f6ced102aceac46aaa8",
+      "port": "external/vcpkg/ports/soxr"
+    }
+  ]
+}

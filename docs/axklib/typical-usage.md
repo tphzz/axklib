@@ -6,43 +6,31 @@
 cmake_minimum_required(VERSION 3.28)
 project(example LANGUAGES CXX)
 
-find_package(axklib CONFIG REQUIRED COMPONENTS core)
+find_package(axklib CONFIG REQUIRED COMPONENTS axklib)
 add_executable(example main.cpp)
-target_compile_features(example PRIVATE cxx_std_23)
-target_link_libraries(example PRIVATE axklib::core)
+target_compile_features(example PRIVATE cxx_std_17)
+target_link_libraries(example PRIVATE axklib::axklib)
 ```
 
-Read-only inventory, validation, and exact export through `axklib::core` do not
-link libsndfile or libsoxr. Applications that import WAV/AIFF/FLAC audio or use
-the fresh-image and alteration writers link `axklib::audio` instead; that target
-includes the core transitively.
-
-For writer consumers, request the audio component and link its target:
-
-```cmake
-find_package(axklib CONFIG REQUIRED COMPONENTS audio)
-target_link_libraries(example PRIVATE axklib::audio)
-```
+The shared library contains the complete supported facade and embeds its codec,
+resampling, and engine dependencies. Consumers do not find those packages.
 
 ```cpp
 #include <iostream>
 
-#include <axklib/media.hpp>
-#include <axklib/relationship.hpp>
-#include <axklib/semantic.hpp>
+#include <axklib/sdk.hpp>
 
 int main(int argc, char** argv) {
   if (argc != 2) return 2;
-  auto media = axk::open_media(argv[1]);
+  axk::operation_context context;
+  auto media = axk::image::open(argv[1], context);
   if (!media) {
     std::cerr << axk::render_error(media.error()) << '\n';
     return 1;
   }
-  auto catalog = axk::build_object_catalog(*media);
-  if (!catalog) return 1;
-  auto graph = axk::build_relationship_graph(*catalog);
-  auto tree = axk::build_content_tree(*media, *catalog, graph);
-  std::cout << tree.roots.size() << " root scope(s)\n";
+  auto objects = media->objects(0, 256, context);
+  if (!objects) return 1;
+  std::cout << objects->total_count << " object(s)\n";
 }
 ```
 

@@ -1,9 +1,10 @@
 # Generated outputs
 /build
+/vcpkg_installed/
 
 # libFuzzer writes content-addressed discoveries into its first corpus path.
-/cpp/fuzz/corpus/*/*
-!/cpp/fuzz/corpus/*/*.seed
+/library/fuzz/corpus/*/*
+!/library/fuzz/corpus/*/*.seed
 
 # Python/tool caches
 __pycache__/

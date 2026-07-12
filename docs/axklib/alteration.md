@@ -49,10 +49,9 @@ if (!result) {
 }
 ```
 
-Pass a `CancellationToken` and `ProgressSink` to either API for long-running
-jobs. Cancellation before publication removes the temporary output. The C ABI
-provides the same behavior through `axk_hds_alter`, context cancellation, and a
-context progress callback.
+Use an `operation_context` for cancellation and progress during long-running
+jobs. Cancellation before publication removes the temporary output. The SDK's
+owned `transaction` value provides the plan/apply split.
 
 ## Publication guarantees
 

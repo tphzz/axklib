@@ -3,13 +3,19 @@
 The C++ library uses a pinned vcpkg manifest. The manifest baseline and package
 versions are part of the reproducible native build contract.
 
+Clone with `git submodule update --init --recursive`, then bootstrap
+`external/vcpkg` using its platform script. To update vcpkg, review one explicit
+submodule commit, set `builtin-baseline` to that same commit, regenerate SBOMs,
+and run the complete architecture matrix. A manifest-only or submodule-only
+version change is invalid.
+
 | Package | Purpose | Upstream license |
 | --- | --- | --- |
 | CLI11 | Native command-line argument parsing | BSD-3-Clause |
 | hash-library v8 | CLI pooled-export SHA-1 compatibility identifiers | Zlib |
 | nlohmann/json | Versioned JSON manifests and reports | MIT |
-| libsndfile | Optional `axklib::audio` WAV, AIFF, and FLAC decoding | LGPL-2.1-or-later |
-| libsoxr | Optional `axklib::audio` very-high-quality resampling | LGPL-2.1-or-later |
+| libsndfile | WAV, AIFF, and FLAC decoding | LGPL-2.1-or-later |
+| libsoxr | Very-high-quality resampling | LGPL-2.1-or-later |
 | utfcpp 4.1.1 | Internal UTF-8 validation and checked UTF-16 conversion | BSL-1.0 |
 | GoogleTest | Native tests only | BSD-3-Clause |
 
@@ -31,9 +37,11 @@ the applicable license terms. In particular, static distribution must not
 obscure the recipient's rights for LGPL-covered libraries. This table is an
 engineering summary, not legal advice and not a substitute for the installed
 license texts.
+See [Licensing and relinking](licensing-and-relinking.md) for the release
+artifact and replacement-library process.
 
 Official release builds use the overlay triplets under
-`cpp/cmake/triplets`. They select static dependency libraries and remap build
+`library/cmake/triplets`. They select static dependency libraries and remap build
 roots in compiler-provided file names so SDK and desktop artifacts do not expose
 host paths. Set `AXK_PATH_REMAP_FROM` to the source checkout root and pass the
 matching `*-axk` triplet through `VCPKG_TARGET_TRIPLET`. This reproducibility
@@ -41,11 +49,10 @@ mechanism does not change or waive any dependency license obligation.
 
 The project linkage boundary is fixed across platforms:
 
-- `axklib::core` and `axklib::audio` are static archives.
-- The CLI and desktop application embed those archives and their native
-  dependencies.
-- `axklib::c` is the sole shared library and embeds the same static engine.
+- `axklib::axklib` is the installed C++17 shared SDK and embeds the static engine.
+- The CLI and desktop application embed the engine and native dependencies
+  directly; they do not load the shared SDK.
 
 `BUILD_SHARED_LIBS` does not change these target types. This avoids application
 packages that depend on private axklib or codec libraries beside the executable.
-The native library does not link or invoke Python, NumPy, or an oracle runtime.
+The native library does not link or invoke a scripting runtime.

@@ -1,5 +1,5 @@
-/cpp/fuzz/corpus/** binary
-/cpp/fuzz/corpus/README.md text eol=lf
+/library/fuzz/corpus/** binary
+/library/fuzz/corpus/README.md text eol=lf
 *.aiff binary
 *.flac binary
 *.hda binary

@@ -4,9 +4,6 @@
   "version-semver": "0.1.0",
   "builtin-baseline": "f87344cac03158cbf1467264565f1fd36b382a24",
   "dependencies": [
-    "cli11",
-    "gtest",
-    "hash-library",
     {
       "name": "libsndfile",
       "default-features": false,
@@ -17,5 +14,20 @@
     "nlohmann-json",
     "soxr",
     "utfcpp"
-  ]
+  ],
+  "features": {
+    "cli": {
+      "description": "Dependencies used only by the standalone axklib CLI",
+      "dependencies": [
+        "cli11",
+        "hash-library"
+      ]
+    },
+    "tests": {
+      "description": "Dependencies used only by native test targets",
+      "dependencies": [
+        "gtest"
+      ]
+    }
+  }
 }

@@ -21,50 +21,63 @@ jobs:
         include:
           - name: Linux x64
             runner: ubuntu-24.04
+            artifact: linux-x64
             triplet: x64-linux-axk
             build_testing: "ON"
             run_tests: true
           - name: Linux ARM64
             runner: ubuntu-24.04-arm
+            artifact: linux-arm64
             triplet: arm64-linux-axk
             build_testing: "ON"
             run_tests: true
           - name: Windows x64
             runner: windows-2025-vs2026
+            artifact: windows-x64
             triplet: x64-windows-axk
             build_testing: "ON"
             run_tests: true
             msvc_arch: x64
           - name: Windows ARM64
             runner: windows-2025-vs2026
+            artifact: windows-arm64
             triplet: arm64-windows-axk
             build_testing: "OFF"
             run_tests: false
             msvc_arch: amd64_arm64
           - name: macOS x64 slice
             runner: macos-15-intel
+            artifact: macos-x64
             triplet: x64-osx-axk
             build_testing: "ON"
             run_tests: true
             macos_slice: x86_64
           - name: macOS ARM64 slice
             runner: macos-15
+            artifact: macos-arm64
             triplet: arm64-osx-axk
             build_testing: "ON"
             run_tests: true
             macos_slice: arm64
     runs-on: ${{ matrix.runner }}
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
 
     steps:
       - name: Checkout axklib
         uses: actions/checkout@v6
-
-      - name: Checkout pinned vcpkg
-        uses: actions/checkout@v6
         with:
-          repository: microsoft/vcpkg
-          ref: f87344cac03158cbf1467264565f1fd36b382a24
-          path: .vcpkg
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v5
+        with:
+          path: .cache/vcpkg/archives
+          key: vcpkg-f87344cac031-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}
 
       - name: Locate Visual Studio 2026
         id: vs2026
@@ -105,22 +118,23 @@ jobs:
 
       - name: Bootstrap vcpkg
         if: runner.os != 'Windows'
-        run: ./.vcpkg/bootstrap-vcpkg.sh -disableMetrics
+        run: ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
       - name: Bootstrap vcpkg
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\.vcpkg\bootstrap-vcpkg.bat -disableMetrics
+        run: .\external\vcpkg\bootstrap-vcpkg.bat -disableMetrics
 
       - name: Configure native build
         env:
-          VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
           AXK_PATH_REMAP_FROM: ${{ github.workspace }}
         run: >-
           cmake --preset ${{ inputs.debug && 'debug' || 'release' }}
           -DBUILD_TESTING=${{ matrix.build_testing }}
+          -DAXK_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-sdk.spdx.json
+          -DAXK_CLI_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-cli.spdx.json
           -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
-          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/cpp/cmake/triplets
+          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
 
       - name: Build native targets
         run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }}
@@ -129,23 +143,69 @@ jobs:
         if: matrix.run_tests
         run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }}
 
+      - name: Generate component SBOMs
+        shell: bash
+        run: |
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          python tools/python/generate_sbom.py --axklib-root . --profile sdk \
+            --output "$root/axklib-sdk.spdx.json"
+          python tools/python/generate_sbom.py --axklib-root . --profile cli \
+            --output "$root/axklib-cli.spdx.json"
+
+      - name: Build component packages
+        run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }} --target package
+
+      - name: Inspect SDK and CLI package contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          scan="build/package-scan-${{ matrix.artifact }}"
+          rm -rf "$scan"
+          mkdir -p "$scan/sdk" "$scan/cli"
+          sdk=$(find "$root" -maxdepth 1 -name '*-sdk.tar.gz' -print -quit)
+          cli=$(find "$root" -maxdepth 1 -name '*-cli.tar.gz' -print -quit)
+          tar -xzf "$sdk" -C "$scan/sdk"
+          tar -xzf "$cli" -C "$scan/cli"
+          python tools/python/inspect_package.py "$scan/sdk" \
+            --allow-library axklib.dll \
+            --allow-library libaxklib.so \
+            --allow-library libaxklib.so.0 \
+            --allow-library libaxklib.so.0.1.0 \
+            --allow-library libaxklib.0.dylib \
+            --allow-library libaxklib.0.1.0.dylib
+          python tools/python/inspect_package.py "$scan/cli"
+          test -f "$scan/sdk/share/axklib/axklib.spdx.json"
+          test -f "$scan/cli/share/axklib/axklib-cli.spdx.json"
+
+      - name: Write SDK and CLI checksums
+        shell: bash
+        run: |
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          python - "$root" "build/axklib-${{ matrix.artifact }}-SHA256SUMS" <<'PY'
+          import hashlib, pathlib, sys
+          root, output = map(pathlib.Path, sys.argv[1:])
+          archives = sorted([*root.glob("*-sdk.tar.gz"), *root.glob("*-cli.tar.gz")])
+          output.write_text("".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in archives))
+          PY
+
       - name: Verify Linux runtime dependency closure
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          root="build/native/${{ inputs.debug && 'debug' || 'release' }}/cpp"
-          cli_dependencies="$(ldd "$root/axklib")"
-          c_dependencies="$(ldd "$root/libaxklib_c.so")"
-          printf '%s\n' "$cli_dependencies" "$c_dependencies"
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          cli_dependencies="$(ldd "$root/apps/cli/axklib")"
+          sdk_dependencies="$(ldd "$root/library/libaxklib.so")"
+          printf '%s\n' "$cli_dependencies" "$sdk_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$cli_dependencies"; then
             echo "CLI has a private native runtime dependency" >&2
             exit 1
           fi
           if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$c_dependencies"; then
-            echo "C ABI has a private codec runtime dependency" >&2
+              <<<"$sdk_dependencies"; then
+            echo "C++ SDK has a private codec runtime dependency" >&2
             exit 1
           fi
 
@@ -154,18 +214,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          root="build/native/${{ inputs.debug && 'debug' || 'release' }}/cpp"
-          cli_dependencies="$(otool -L "$root/axklib")"
-          c_dependencies="$(otool -L "$root/libaxklib_c.0.1.0.dylib")"
-          printf '%s\n' "$cli_dependencies" "$c_dependencies"
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          cli_dependencies="$(otool -L "$root/apps/cli/axklib")"
+          sdk_dependencies="$(otool -L "$root/library/libaxklib.0.1.0.dylib")"
+          printf '%s\n' "$cli_dependencies" "$sdk_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
             echo "CLI has a private native runtime dependency" >&2
             exit 1
           fi
           if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$(tail -n +2 <<<"$c_dependencies")"; then
-            echo "C ABI has a private codec runtime dependency" >&2
+              <<<"$(tail -n +2 <<<"$sdk_dependencies")"; then
+            echo "C++ SDK has a private codec runtime dependency" >&2
             exit 1
           fi
 
@@ -173,30 +233,30 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $root = "build/native/${{ inputs.debug && 'debug' || 'release' }}/cpp"
+          $root = "build/native/${{ inputs.debug && 'debug' || 'release' }}"
           $cli = Get-ChildItem $root -Recurse -Filter axklib.exe | Select-Object -First 1
-          $cAbi = Get-ChildItem $root -Recurse -Filter axklib_c.dll | Select-Object -First 1
-          if ($null -eq $cli -or $null -eq $cAbi) {
+          $sdk = Get-ChildItem $root -Recurse -Filter axklib.dll | Select-Object -First 1
+          if ($null -eq $cli -or $null -eq $sdk) {
             throw "native runtime artifacts are missing"
           }
           $cliDependencies = (dumpbin /dependents $cli.FullName) -join "`n"
-          $cDependencies = (dumpbin /dependents $cAbi.FullName) -join "`n"
+          $sdkDependencies = (dumpbin /dependents $sdk.FullName) -join "`n"
           Write-Host $cliDependencies
-          Write-Host $cDependencies
+          Write-Host $sdkDependencies
           $privateCli = '(?im)^\s+(?:lib)?(?:axk|sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
           $privateCodec = '(?im)^\s+(?:lib)?(?:sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
           if ($cliDependencies -match $privateCli) {
             throw "CLI has a private native runtime dependency: $($Matches[0])"
           }
-          if ($cDependencies -match $privateCodec) {
-            throw "C ABI has a private codec runtime dependency: $($Matches[0])"
+          if ($sdkDependencies -match $privateCodec) {
+            throw "C++ SDK has a private codec runtime dependency: $($Matches[0])"
           }
 
       - name: Verify Windows ARM64 output
         if: matrix.triplet == 'arm64-windows-axk'
         shell: pwsh
         run: |
-          $headers = dumpbin /headers build/native/${{ inputs.debug && 'debug' || 'release' }}/cpp/axklib.exe
+          $headers = dumpbin /headers build/native/${{ inputs.debug && 'debug' || 'release' }}/apps/cli/axklib.exe
           $machineHeaders = @($headers | Select-String -Pattern '\bmachine \(')
           $machineHeaders | ForEach-Object { Write-Host $_.Line }
           $arm64Headers = @($headers | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$')
@@ -204,30 +264,18 @@ jobs:
             $detected = ($machineHeaders | ForEach-Object { $_.Line.Trim() }) -join '; '
             throw "axklib.exe is not an ARM64 binary; detected headers: $detected"
           }
-
-      - name: Verify Windows ARM64 C ABI exports
-        if: matrix.triplet == 'arm64-windows-axk'
-        shell: pwsh
-        run: |
-          $buildRoot = "build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          $library = Get-ChildItem $buildRoot -Recurse -Filter axklib_c.dll |
-            Select-Object -First 1
-          $baseline = Join-Path $buildRoot 'cpp/generated/abi/axklib_c.symbols'
-          if ($null -eq $library -or -not (Test-Path $baseline)) {
-            throw "Windows ARM64 C ABI artifacts are missing"
+          $sdk = Get-ChildItem "build/native/${{ inputs.debug && 'debug' || 'release' }}" `
+            -Recurse -Filter axklib.dll | Select-Object -First 1
+          $sdkHeaders = dumpbin /headers $sdk.FullName
+          if (@($sdkHeaders | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$').Count -eq 0) {
+            throw 'axklib.dll is not an ARM64 binary'
           }
-          cmake `
-            "-DAXK_LIBRARY=$($library.FullName)" `
-            "-DAXK_BASELINE=$baseline" `
-            "-DAXK_DUMPBIN=$((Get-Command dumpbin.exe -ErrorAction Stop).Source)" `
-            "-DAXK_SYSTEM_NAME=Windows" `
-            -P cpp/cmake/CheckExportedSymbols.cmake
 
       - name: Print native dependency failure logs
         if: failure()
         shell: bash
         run: |
-          for root in .vcpkg/buildtrees build/native; do
+          for root in external/vcpkg/buildtrees build/native; do
             test -d "$root" || continue
             while IFS= read -r log; do
               echo "::group::$log"
@@ -244,8 +292,8 @@ jobs:
         with:
           name: native-dependency-logs-${{ matrix.triplet }}
           path: |
-            .vcpkg/buildtrees/**/*-out.log
-            .vcpkg/buildtrees/**/*-err.log
+            external/vcpkg/buildtrees/**/*-out.log
+            external/vcpkg/buildtrees/**/*-err.log
             build/native/**/vcpkg-manifest-install.log
           if-no-files-found: warn
           retention-days: 7
@@ -254,16 +302,73 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          prefix="build/macos-${{ matrix.macos_slice }}"
-          cmake --install "build/native/${{ inputs.debug && 'debug' || 'release' }}" --prefix "$prefix"
-          tar -czf "build/macos-${{ matrix.macos_slice }}.tar.gz" -C "$prefix" .
+          sdk_prefix="build/macos-${{ matrix.macos_slice }}-sdk"
+          cli_prefix="build/macos-${{ matrix.macos_slice }}-cli"
+          cmake --install "build/native/${{ inputs.debug && 'debug' || 'release' }}" \
+            --prefix "$sdk_prefix" --component sdk
+          cmake --install "build/native/${{ inputs.debug && 'debug' || 'release' }}" \
+            --prefix "$cli_prefix" --component cli
+          tar -czf "build/macos-${{ matrix.macos_slice }}-sdk.tar.gz" -C "$sdk_prefix" .
+          tar -czf "build/macos-${{ matrix.macos_slice }}-cli.tar.gz" -C "$cli_prefix" .
 
       - name: Upload macOS slice
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.macos_slice }}-slice-${{ inputs.debug && 'debug' || 'release' }}
-          path: build/macos-${{ matrix.macos_slice }}.tar.gz
+          path: |
+            build/macos-${{ matrix.macos_slice }}-sdk.tar.gz
+            build/macos-${{ matrix.macos_slice }}-cli.tar.gz
+          if-no-files-found: error
+
+      - name: Upload native SDK and CLI packages
+        if: runner.os != 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: axklib-${{ matrix.artifact }}-${{ inputs.debug && 'debug' || 'release' }}
+          path: |
+            build/native/${{ inputs.debug && 'debug' || 'release' }}/*-sdk.tar.gz
+            build/native/${{ inputs.debug && 'debug' || 'release' }}/*-cli.tar.gz
+            build/axklib-${{ matrix.artifact }}-SHA256SUMS
+          if-no-files-found: error
+
+      - name: Complete LGPL source kit
+        if: matrix.artifact == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          downloads="build/lgpl-downloads"
+          kit="build/compliance-kit"
+          ./external/vcpkg/vcpkg install \
+            --triplet "${{ matrix.triplet }}" \
+            --overlay-triplets "${{ github.workspace }}/library/cmake/triplets" \
+            --downloads-root "$downloads" \
+            --only-downloads
+          python tools/python/collect_lgpl_sources.py \
+            --specification compliance/lgpl-sources.json \
+            --downloads "$downloads" \
+            --output "$kit/share/axklib/source/lgpl"
+          archive=$(find "$root" -maxdepth 1 -name '*-compliance.tar.gz' -print -quit)
+          extract="build/compliance-extract"
+          mkdir -p "$extract"
+          tar -xzf "$archive" -C "$extract"
+          cp -R "$kit"/. "$extract"/
+          tar -czf "$archive" -C "$extract" .
+          python - "$archive" build/axklib-compliance-SHA256SUMS <<'PY'
+          import hashlib, pathlib, sys
+          archive, output = map(pathlib.Path, sys.argv[1:])
+          output.write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n")
+          PY
+
+      - name: Upload source and compliance kit
+        if: matrix.artifact == 'linux-x64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: axklib-compliance-${{ inputs.debug && 'debug' || 'release' }}
+          path: |
+            build/native/${{ inputs.debug && 'debug' || 'release' }}/*-compliance.tar.gz
+            build/axklib-compliance-SHA256SUMS
           if-no-files-found: error
 
   macos-universal:
@@ -287,15 +392,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/sdk/x86_64 build/sdk/arm64 build/sdk/universal
-          tar -xzf build/slices/x86_64/macos-x86_64.tar.gz -C build/sdk/x86_64
-          tar -xzf build/slices/arm64/macos-arm64.tar.gz -C build/sdk/arm64
+          mkdir -p build/sdk/{x86_64,arm64,universal} build/cli/{x86_64,arm64,universal}
+          tar -xzf build/slices/x86_64/macos-x86_64-sdk.tar.gz -C build/sdk/x86_64
+          tar -xzf build/slices/arm64/macos-arm64-sdk.tar.gz -C build/sdk/arm64
+          tar -xzf build/slices/x86_64/macos-x86_64-cli.tar.gz -C build/cli/x86_64
+          tar -xzf build/slices/arm64/macos-arm64-cli.tar.gz -C build/cli/arm64
           cp -R build/sdk/arm64/. build/sdk/universal/
+          cp -R build/cli/arm64/. build/cli/universal/
 
           lipo -create \
-            build/sdk/x86_64/bin/axklib \
-            build/sdk/arm64/bin/axklib \
-            -output build/sdk/universal/bin/axklib
+            build/cli/x86_64/bin/axklib \
+            build/cli/arm64/bin/axklib \
+            -output build/cli/universal/bin/axklib
 
           while IFS= read -r arm64_library; do
             relative_path="${arm64_library#build/sdk/arm64/}"
@@ -306,34 +414,102 @@ jobs:
           done < <(find build/sdk/arm64/lib -type f \
             \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
 
-          lipo build/sdk/universal/bin/axklib -verify_arch x86_64 arm64
-          lipo -info build/sdk/universal/bin/axklib
+          lipo build/cli/universal/bin/axklib -verify_arch x86_64 arm64
+          lipo -info build/cli/universal/bin/axklib
           while IFS= read -r library; do
             lipo "$library" -verify_arch x86_64 arm64
             lipo -info "$library"
           done < <(find build/sdk/universal/lib -type f \
             \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
 
-          build/sdk/universal/bin/axklib --version
-          cli_dependencies="$(otool -L build/sdk/universal/bin/axklib)"
-          c_dependencies="$(otool -L build/sdk/universal/lib/libaxklib_c.0.1.0.dylib)"
-          printf '%s\n' "$cli_dependencies" "$c_dependencies"
+          build/cli/universal/bin/axklib --version
+          cli_dependencies="$(otool -L build/cli/universal/bin/axklib)"
+          sdk_dependencies="$(otool -L build/sdk/universal/lib/libaxklib.0.1.0.dylib)"
+          printf '%s\n' "$cli_dependencies" "$sdk_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
             echo "universal CLI has a private native runtime dependency" >&2
             exit 1
           fi
           if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$(tail -n +2 <<<"$c_dependencies")"; then
-            echo "universal C ABI has a private codec runtime dependency" >&2
+              <<<"$(tail -n +2 <<<"$sdk_dependencies")"; then
+            echo "universal C++ SDK has a private codec runtime dependency" >&2
             exit 1
           fi
-          tar -czf build/axklib-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz \
+          tar -czf build/axklib-sdk-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz \
             -C build/sdk/universal .
+          tar -czf build/axklib-cli-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz \
+            -C build/cli/universal .
+          shasum -a 256 build/axklib-*-macos-universal-*.tar.gz \
+            > build/axklib-macos-universal-SHA256SUMS
 
       - name: Upload universal macOS SDK
         uses: actions/upload-artifact@v7
         with:
           name: axklib-macos-universal-${{ inputs.debug && 'debug' || 'release' }}
-          path: build/axklib-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz
+          path: |
+            build/axklib-sdk-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz
+            build/axklib-cli-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz
+            build/axklib-macos-universal-SHA256SUMS
           if-no-files-found: error
+
+  lgpl-relink:
+    name: LGPL replacement relink
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout axklib
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Download compliance kit
+        uses: actions/download-artifact@v8
+        with:
+          name: axklib-compliance-${{ inputs.debug && 'debug' || 'release' }}
+          path: build/compliance
+      - name: Bootstrap vcpkg
+        run: ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - name: Configure SDK relink build
+        run: >-
+          cmake -S library -B build/relink -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/external/vcpkg/scripts/buildsystems/vcpkg.cmake
+          -DVCPKG_TARGET_TRIPLET=x64-linux-axk
+          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
+      - name: Build replacement libsoxr and relink SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/compliance-extract build/replacement
+          archive=$(find build/compliance -name '*-compliance.tar.gz' -print -quit)
+          tar -xzf "$archive" -C build/compliance-extract
+          source_archive=$(find build/compliance-extract -name 'soxr-0.1.3-Source.tar.xz' -print -quit)
+          test -n "$source_archive"
+          tar -xJf "$source_archive" -C build/replacement
+          source_dir=$(find build/replacement -mindepth 1 -maxdepth 1 -type d -print -quit)
+          printf '\nconst char axk_lgpl_relink_marker[] = "AXK_LGPL_RELINK_TEST_V1";\n' \
+            >> "$source_dir/src/soxr.c"
+          cmake -S "$source_dir" -B build/replacement/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DWITH_OPENMP=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake --build build/replacement/build
+          replacement=$(find build/replacement/build -name 'libsoxr.a' -print -quit)
+          installed=$(find build/relink/vcpkg_installed -path '*/lib/libsoxr.a' -print -quit)
+          test -n "$replacement" -a -n "$installed"
+          cp "$replacement" "$installed"
+          cmake --build build/relink --target axklib_shared --clean-first
+          strings build/relink/libaxklib.so.0.1.0 | grep AXK_LGPL_RELINK_TEST_V1
+      - name: Run installed C++17 consumer against relinked SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --install build/relink --prefix build/relink-install
+          cmake -S library/tests/consumer -B build/relink-consumer -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/build/relink-install \
+            -DAXK_TEST_FIXTURE=${{ github.workspace }}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds
+          cmake --build build/relink-consumer
+          LD_LIBRARY_PATH=${{ github.workspace }}/build/relink-install/lib \
+            build/relink-consumer/axk_consumer

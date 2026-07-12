@@ -9,9 +9,8 @@ Technical identifiers make rows stable in CSV/JSON reports. Display names make
 CLI arguments and JSON text are UTF-8 on every platform. Unix rejects malformed
 argument byte sequences before parsing; Windows receives UTF-16 through
 `wmain`, rejects lone surrogates, and converts to UTF-8 without using the active
-code page. C API `axk_string_view` inputs are length-qualified UTF-8. Invalid
-text returns `AXK_STATUS_INVALID_ARGUMENT`; path inputs also reject embedded
-NUL characters.
+code page. C++ SDK path inputs are UTF-8 `std::string` values. Invalid text and
+embedded NUL path values are rejected before filesystem access.
 
 Native filesystem paths and UTF-8 display/manifest text use explicit conversion
 adapters. axklib does not normalize, case-fold, or transliterate Unicode, so

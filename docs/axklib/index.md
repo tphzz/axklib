@@ -2,9 +2,8 @@
 
 The production distribution has four surfaces:
 
-- `axklib::core`, the C++23 API for native applications.
-- `axklib::audio`, the optional audio-import and image-writing C++ layer.
-- `axklib::c`, the versioned C ABI for foreign-language and plugin hosts.
+- `axklib::axklib`, the C++17 shared SDK for native applications.
+- `axklib`, the separate self-contained command-line application.
 - `axklib`, the CLI11 application for interactive and automated workflows.
 - Versioned JSON and CSV contracts emitted by the CLI.
 

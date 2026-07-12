@@ -50,7 +50,6 @@ nav:
       - CLI Reference: axklib/cli.md
   - SDK:
       - C++ API: axklib/cpp-api.md
-      - C API: axklib/c-api.md
       - Architecture: architecture.md
   - Formats:
       - SFS Filesystem: axklib/sfs-filesystem.md
@@ -67,5 +66,6 @@ nav:
       - Compatibility: axklib/compatibility.md
       - Native Migration: axklib/migration.md
       - Native Dependencies: native-dependencies.md
+      - Licensing And Relinking: licensing-and-relinking.md
       - Security: axklib/security.md
   - Yamaha Glossary: axklib/glossary.md
