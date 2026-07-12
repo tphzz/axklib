@@ -119,8 +119,12 @@ jobs:
         shell: pwsh
         run: |
           $headers = dumpbin /headers build/native/${{ inputs.debug && 'debug' || 'release' }}/cpp/axklib.exe
-          if ($headers -notmatch 'AA64 machine \(ARM64\)') {
-            throw 'axklib.exe is not an ARM64 binary'
+          $machineHeaders = @($headers | Select-String -Pattern '\bmachine \(')
+          $machineHeaders | ForEach-Object { Write-Host $_.Line }
+          $arm64Headers = @($headers | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$')
+          if ($arm64Headers.Count -eq 0) {
+            $detected = ($machineHeaders | ForEach-Object { $_.Line.Trim() }) -join '; '
+            throw "axklib.exe is not an ARM64 binary; detected headers: $detected"
           }
 
       - name: Print native dependency failure logs
