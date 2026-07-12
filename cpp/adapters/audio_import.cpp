@@ -24,29 +24,63 @@ Error audio_import_error(std::string message) {
   return make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio, std::move(message));
 }
 
-__extension__ using uint128 = unsigned __int128;
+struct Uint128 {
+  std::uint64_t high;
+  std::uint64_t low;
 
-constexpr uint128 compose128(std::uint64_t high, std::uint64_t low) {
-  return (static_cast<uint128>(high) << 64U) | low;
+  friend constexpr bool operator==(const Uint128&, const Uint128&) = default;
+};
+
+constexpr Uint128 multiply64(std::uint64_t left, std::uint64_t right) {
+  constexpr auto mask = std::uint64_t{0xffff'ffff};
+  const auto left_low = left & mask;
+  const auto left_high = left >> 32U;
+  const auto right_low = right & mask;
+  const auto right_high = right >> 32U;
+  const auto low_product = left_low * right_low;
+  const auto middle = left_high * right_low + (low_product >> 32U);
+  const auto middle_low = middle & mask;
+  const auto middle_high = middle >> 32U;
+  const auto combined_middle = middle_low + left_low * right_high;
+  return {
+      left_high * right_high + middle_high + (combined_middle >> 32U),
+      (combined_middle << 32U) | (low_product & mask)};
 }
+
+constexpr Uint128 multiply128(Uint128 left, Uint128 right) {
+  const auto low_product = multiply64(left.low, right.low);
+  return {
+      low_product.high + left.low * right.high + left.high * right.low,
+      low_product.low};
+}
+
+constexpr Uint128 add128(Uint128 left, Uint128 right) {
+  const auto low = left.low + right.low;
+  return {left.high + right.high + static_cast<std::uint64_t>(low < left.low), low};
+}
+
+static_assert(add128(
+                  multiply128(
+                      {0xf80e7df0f5677911ULL, 0x3576e00ef62465a1ULL},
+                      {0x2360ed051fc65da4ULL, 0x4385df649fccf645ULL}),
+                  {0xf848e8b8d244377cULL, 0x73d97bf8c3ba49dfULL}) ==
+              Uint128{0x568f2f6f52fa604bULL, 0xb962f28c107e6444ULL});
 
 class NumpyPcg64 {
  public:
   double next_double() {
-    state_ = state_ * multiplier_ + increment_;
-    const auto high = static_cast<std::uint64_t>(state_ >> 64U);
-    const auto low = static_cast<std::uint64_t>(state_);
-    const auto rotation = static_cast<int>(state_ >> 122U);
-    const auto raw = std::rotr(high ^ low, rotation);
+    state_ = add128(multiply128(state_, multiplier_), increment_);
+    const auto rotation = static_cast<int>(state_.high >> 58U);
+    const auto raw = std::rotr(state_.high ^ state_.low, rotation);
     return static_cast<double>(raw >> 11U) * (1.0 / 9'007'199'254'740'992.0);
   }
 
  private:
-  static constexpr uint128 multiplier_ =
-      compose128(0x2360ed051fc65da4ULL, 0x4385df649fccf645ULL);
-  static constexpr uint128 increment_ =
-      compose128(0xf848e8b8d244377cULL, 0x73d97bf8c3ba49dfULL);
-  uint128 state_ = compose128(0xf80e7df0f5677911ULL, 0x3576e00ef62465a1ULL);
+  static constexpr Uint128 multiplier_{
+      0x2360ed051fc65da4ULL, 0x4385df649fccf645ULL};
+  static constexpr Uint128 increment_{
+      0xf848e8b8d244377cULL, 0x73d97bf8c3ba49dfULL};
+  Uint128 state_{0xf80e7df0f5677911ULL, 0x3576e00ef62465a1ULL};
 };
 
 std::string format_name(int format) {

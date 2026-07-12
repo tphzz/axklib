@@ -7,13 +7,13 @@
 #define AXK_ABI_VERSION_MINOR 0U
 #define AXK_ABI_VERSION ((AXK_ABI_VERSION_MAJOR << 16U) | AXK_ABI_VERSION_MINOR)
 
-#if defined(_WIN32) && defined(AXK_SHARED_LIBRARY)
+#if defined(_WIN32) && defined(AXK_C_SHARED_LIBRARY)
 #if defined(AXK_C_EXPORTS)
 #define AXK_C_API __declspec(dllexport)
 #else
 #define AXK_C_API __declspec(dllimport)
 #endif
-#elif defined(__GNUC__) && defined(AXK_SHARED_LIBRARY)
+#elif defined(__GNUC__) && defined(AXK_C_SHARED_LIBRARY)
 #define AXK_C_API __attribute__((visibility("default")))
 #else
 #define AXK_C_API

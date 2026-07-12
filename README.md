@@ -16,6 +16,17 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
+On Windows PowerShell, use an out-of-tree build directory so the source checkout
+stays clean:
+
+```powershell
+$env:VCPKG_ROOT = "C:\path\to\vcpkg"
+$buildDir = Join-Path $env:TEMP "axklib-build\debug"
+cmake --preset debug -B $buildDir
+cmake --build $buildDir --parallel
+ctest --test-dir $buildDir --output-on-failure
+```
+
 The installed CMake targets are `axklib::core` for read-only C++ workflows,
 `axklib::audio` for audio import and image writing, and `axklib::c` for the
 full stable C ABI. Link `axklib::audio` when using the C++ writer or alteration

@@ -1,5 +1,7 @@
 include(CMakePackageConfigHelpers)
 
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 include(cmake/AxkSanitizers.cmake)
 include(cmake/AxkCoverage.cmake)
 include(cmake/AxkWarnings.cmake)
@@ -93,12 +95,11 @@ set_target_properties(
     CXX_VISIBILITY_PRESET hidden
 )
 find_package(SndFile CONFIG REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(SOXR REQUIRED IMPORTED_TARGET soxr)
+find_package(SOXR REQUIRED)
 target_link_libraries(
   axk_audio
   PUBLIC axklib::core
-  PRIVATE SndFile::sndfile PkgConfig::SOXR
+  PRIVATE SndFile::sndfile SOXR::soxr
 )
 axk_set_project_warnings(axk_audio)
 axk_enable_sanitizers(axk_audio)
@@ -107,7 +108,7 @@ axk_enable_coverage(axk_audio)
 add_library(axk_c SHARED src/c_api.cpp)
 add_library(axklib::c ALIAS axk_c)
 target_compile_features(axk_c PRIVATE cxx_std_23)
-target_compile_definitions(axk_c PRIVATE AXK_C_EXPORTS PUBLIC AXK_SHARED_LIBRARY)
+target_compile_definitions(axk_c PRIVATE AXK_C_EXPORTS PUBLIC AXK_C_SHARED_LIBRARY)
 target_include_directories(
   axk_c
   PUBLIC
@@ -246,12 +247,14 @@ if(BUILD_TESTING)
   axk_enable_coverage(axk_core_tests)
   gtest_discover_tests(axk_core_tests)
   add_executable(axk_c_consumer_test tests/c_consumer.c)
+  target_compile_features(axk_c_consumer_test PRIVATE c_std_11)
   set_target_properties(axk_c_consumer_test PROPERTIES LINKER_LANGUAGE CXX)
   target_link_libraries(axk_c_consumer_test PRIVATE axklib::c)
   axk_set_project_warnings(axk_c_consumer_test)
   axk_enable_sanitizers(axk_c_consumer_test)
   foreach(example inventory exact_export create alter)
     add_executable(axk_c_example_${example} examples/c/${example}.c)
+    target_compile_features(axk_c_example_${example} PRIVATE c_std_11)
     target_link_libraries(axk_c_example_${example} PRIVATE axklib::c)
     axk_set_project_warnings(axk_c_example_${example})
     axk_enable_sanitizers(axk_c_example_${example})
@@ -308,6 +311,7 @@ if(BUILD_TESTING)
         "-DAXK_CONSUMER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/consumer"
         "-DAXK_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/consumer-test"
         "-DAXK_BUILD_CONFIG=$<CONFIG>"
+        "-DAXK_GENERATOR=${CMAKE_GENERATOR}"
         "-DAXK_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
         "-DAXK_VCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}"
         "-DAXK_VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}"
@@ -366,6 +370,7 @@ install(
   FILES
     "${CMAKE_CURRENT_BINARY_DIR}/axklibConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/axklibConfigVersion.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindSOXR.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/axklib"
 )
 install(

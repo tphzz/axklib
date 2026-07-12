@@ -429,8 +429,8 @@ Result<void> replace_record_payload(TransactionState &state, MutablePartition &p
   MutablePartition::InsertedRecord *target{};
   if (const auto found = partition.inserted.find(id); found != partition.inserted.end()) {
     target = &found->second;
-  } else if (const auto found = partition.changed.find(id); found != partition.changed.end()) {
-    target = &found->second;
+  } else if (const auto changed = partition.changed.find(id); changed != partition.changed.end()) {
+    target = &changed->second;
   } else {
     const auto *source = record(*partition.source, id);
     if (source == nullptr) {
@@ -1023,10 +1023,10 @@ Result<std::uint64_t> release_record(MutablePartition &partition, SfsId id) {
     extents = found->second.extents;
     continuation = found->second.continuation_clusters;
     partition.inserted.erase(found);
-  } else if (const auto found = partition.changed.find(id); found != partition.changed.end()) {
-    extents = found->second.extents;
-    continuation = found->second.continuation_clusters;
-    partition.changed.erase(found);
+  } else if (const auto changed = partition.changed.find(id); changed != partition.changed.end()) {
+    extents = changed->second.extents;
+    continuation = changed->second.continuation_clusters;
+    partition.changed.erase(changed);
   } else if (const auto *source = record(*partition.source, id);
              source != nullptr && !partition.deleted.contains(id)) {
     extents = source->extents;
@@ -2279,8 +2279,10 @@ Result<std::filesystem::path> copy_to_unique_temporary(const std::filesystem::pa
 
 Result<void> flush_file_to_disk(const std::filesystem::path &path) {
 #if defined(_WIN32)
-  const auto handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  const auto handle =
+      CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                  FILE_ATTRIBUTE_NORMAL, nullptr);
   if (handle == INVALID_HANDLE_VALUE)
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "could not open alteration output for durable flush")};
