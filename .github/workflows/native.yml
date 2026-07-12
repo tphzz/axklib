@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+      notarize_macos:
+        description: Notarize macOS universal distribution
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -142,18 +147,19 @@ jobs:
       - name: Build native targets
         run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }}
 
-      - name: Test native targets
-        if: matrix.run_tests
-        run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }}
-
       - name: Generate component SBOMs
         shell: bash
         run: |
+          set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
           python tools/python/generate_sbom.py --axklib-root . --profile sdk \
             --output "$root/axklib-sdk.spdx.json"
           python tools/python/generate_sbom.py --axklib-root . --profile cli \
             --output "$root/axklib-cli.spdx.json"
+
+      - name: Test native targets
+        if: matrix.run_tests
+        run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }}
 
       - name: Stage and inspect combined distribution
         shell: bash
@@ -378,6 +384,12 @@ jobs:
           key: macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}
           fail-on-cache-miss: true
 
+      - name: Import macOS code signing certificate
+        uses: apple-actions/import-codesign-certs@v7.0.0
+        with:
+          p12-file-base64: ${{ secrets.P12_BASE64 }}
+          p12-password: ${{ secrets.P12_PASSWORD }}
+
       - name: Assemble and verify universal distribution
         shell: bash
         run: |
@@ -426,6 +438,35 @@ jobs:
             echo "universal C++ SDK has a private codec runtime dependency" >&2
             exit 1
           fi
+
+      - name: Sign macOS universal distribution
+        shell: bash
+        env:
+          MACOS_DEV_ID_CERT_NAME: ${{ secrets.MACOS_DEV_ID_CERT_NAME }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$MACOS_DEV_ID_CERT_NAME" ]; then
+            echo "MACOS_DEV_ID_CERT_NAME secret is required for macOS signing." >&2
+            exit 1
+          fi
+
+          xattr -cr build/tmp/universal
+
+          while IFS= read -r library; do
+            codesign --force --timestamp --options runtime \
+              --sign "$MACOS_DEV_ID_CERT_NAME" "$library"
+            codesign --verify --strict --verbose=2 "$library"
+          done < <(find build/tmp/universal/lib -type f -name '*.dylib' -print | sort)
+
+          codesign --force --timestamp --options runtime \
+            --sign "$MACOS_DEV_ID_CERT_NAME" build/tmp/universal/bin/axklib
+          codesign --verify --strict --verbose=2 build/tmp/universal/bin/axklib
+
+      - name: Package signed macOS universal distribution
+        shell: bash
+        run: |
+          set -euo pipefail
           version=$(sed -n 's/^#define AXKLIB_VERSION_STRING "\([^"]*\)"/\1/p' \
             build/tmp/universal/include/axklib/sdk/version.hpp)
           test -n "$version"
@@ -434,6 +475,40 @@ jobs:
             "../../artifacts/$(basename "$archive")" .)
           shasum -a 256 "$archive" \
             > "build/artifacts/axklib-${version}-macos-universal-SHA256SUMS"
+
+      - name: Notarize macOS universal distribution
+        if: inputs.notarize_macos
+        shell: bash
+        env:
+          APPLE_NOTARY_USER: ${{ secrets.APPLE_NOTARY_USER }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for name in APPLE_NOTARY_USER APPLE_NOTARY_APP_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name:-}" ]; then
+              echo "$name secret is required for macOS notarization." >&2
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+          archive=$(find build/artifacts -maxdepth 1 -type f \
+            -name 'axklib-*-macos-universal.zip' -print -quit)
+          if [ -z "$archive" ]; then
+            echo "Expected macOS universal ZIP not found." >&2
+            exit 1
+          fi
+
+          xcrun notarytool submit "$archive" \
+            --apple-id "$APPLE_NOTARY_USER" \
+            --password "$APPLE_NOTARY_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
 
       - name: Upload universal macOS distribution
         uses: actions/upload-artifact@v7
