@@ -83,6 +83,7 @@ target_link_libraries(axklib_cli PRIVATE axk_cli_adapter)
 axk_set_project_warnings(axklib_cli)
 axk_enable_sanitizers(axklib_cli)
 axk_enable_coverage(axklib_cli)
+axk_remove_target_pdb_path(axklib_cli)
 
 if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)

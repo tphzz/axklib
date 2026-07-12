@@ -15,23 +15,42 @@ PATH_PATTERNS = [
 ]
 BINARY_PATH_MARKERS = (b"/home/", b"/Users/", b"/mnt/", b"/Volumes/")
 BINARY_PATH_PATTERNS = (
-    re.compile(rb"[A-Za-z]:\\Users\\"),
-    re.compile(rb"[A-Za-z]:\\a\\"),
-    re.compile(rb"[A-Za-z]:\\runner\\"),
+    re.compile(rb"[A-Za-z]:[\\/](?:Users|a|runner)[\\/]", re.IGNORECASE),
 )
 
 
-def contains_binary_path(path: Path) -> bool:
+def find_binary_path(path: Path) -> str | None:
     overlap = b""
+    offset = 0
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             value = overlap + block
-            if any(marker in value for marker in BINARY_PATH_MARKERS) or any(
-                pattern.search(value) for pattern in BINARY_PATH_PATTERNS
-            ):
-                return True
+            for marker in BINARY_PATH_MARKERS:
+                match_offset = value.find(marker)
+                if match_offset >= 0:
+                    absolute_offset = offset - len(overlap) + match_offset
+                    return f"offset {absolute_offset}, marker {marker.decode()!r}"
+            for pattern in BINARY_PATH_PATTERNS:
+                match = pattern.search(value)
+                if match:
+                    absolute_offset = offset - len(overlap) + match.start()
+                    marker_text = match.group().decode("ascii", errors="replace")
+                    return f"offset {absolute_offset}, marker {marker_text!r}"
             overlap = value[-32:]
-    return False
+            offset += len(block)
+    return None
+
+
+def read_small_text(path: Path) -> str | None:
+    if path.stat().st_size > 2 * 1024 * 1024:
+        return None
+    value = path.read_bytes()
+    if b"\0" in value:
+        return None
+    try:
+        return value.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def main() -> int:
@@ -55,13 +74,26 @@ def main() -> int:
         is_versioned_so = ".so." in path.name.lower()
         if (suffix in SHARED_SUFFIXES or is_versioned_so) and path.name not in allowed:
             issues.append({"path": relative.as_posix(), "reason": "undeclared shared library"})
-        if contains_binary_path(path):
-            issues.append({"path": relative.as_posix(), "reason": "machine-local path"})
+        binary_path = find_binary_path(path)
+        if binary_path:
+            issues.append(
+                {"path": relative.as_posix(), "reason": f"machine-local path ({binary_path})"}
+            )
             continue
-        if path.stat().st_size <= 2 * 1024 * 1024:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            if any(pattern.search(text) for pattern in PATH_PATTERNS):
-                issues.append({"path": relative.as_posix(), "reason": "machine-local path"})
+        file_text = read_small_text(path)
+        if file_text is not None:
+            match = None
+            for pattern in PATH_PATTERNS:
+                match = pattern.search(file_text)
+                if match:
+                    break
+            if match:
+                issues.append(
+                    {
+                        "path": relative.as_posix(),
+                        "reason": f"machine-local path (marker {match.group()!r})",
+                    }
+                )
     report = {"schema_version": "1.0", "root": args.root.name, "valid": not issues, "issues": issues}
     rendered = json.dumps(report, indent=2) + "\n"
     if args.output:
