@@ -180,6 +180,7 @@ jobs:
             --allow-library libaxklib.so \
             --allow-library libaxklib.so.0 \
             --allow-library libaxklib.so.0.1.0 \
+            --allow-library libaxklib.dylib \
             --allow-library libaxklib.0.dylib \
             --allow-library libaxklib.0.1.0.dylib
           python tools/python/inspect_package.py "$scan/cli"
@@ -188,6 +189,7 @@ jobs:
             --allow-library libaxklib.so \
             --allow-library libaxklib.so.0 \
             --allow-library libaxklib.so.0.1.0 \
+            --allow-library libaxklib.dylib \
             --allow-library libaxklib.0.dylib \
             --allow-library libaxklib.0.1.0.dylib
           test -f "$scan/sdk/share/axklib/axklib.spdx.json"
