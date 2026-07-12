@@ -282,6 +282,7 @@ if(BUILD_TESTING)
         "-DAXK_LIBRARY=$<TARGET_FILE:axk_c>"
         "-DAXK_BASELINE=${CMAKE_CURRENT_SOURCE_DIR}/abi/axklib_c.symbols"
         "-DAXK_NM=${CMAKE_NM}"
+        "-DAXK_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckExportedSymbols.cmake"
     )
   endif()

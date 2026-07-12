@@ -11,7 +11,8 @@
 #include "axklib/writer.hpp"
 
 int main() {
-  constexpr std::uint64_t memory_budget_kib = 256U * 1024U;
+  constexpr std::uint64_t kibibyte = 1024U;
+  constexpr std::uint64_t memory_budget_bytes = 256U * 1024U * kibibyte;
   axk::HdsBuildManifest manifest{"1.0", axk::maximum_hds_size, {}};
   for (std::uint8_t index = 0; index < 8U; ++index) {
     axk::VolumeSpec volume;
@@ -41,12 +42,18 @@ int main() {
 
   struct rusage usage{};
   const auto usage_ok = ::getrusage(RUSAGE_SELF, &usage) == 0;
+#if defined(__APPLE__)
+  const auto peak_memory_bytes = static_cast<std::uint64_t>(usage.ru_maxrss);
+#else
+  const auto peak_memory_bytes = static_cast<std::uint64_t>(usage.ru_maxrss) * kibibyte;
+#endif
   std::filesystem::remove(path, error);
-  if (!usage_ok || static_cast<std::uint64_t>(usage.ru_maxrss) > memory_budget_kib) {
-    std::cerr << "large-image peak memory exceeded " << memory_budget_kib
-              << " KiB: " << usage.ru_maxrss << " KiB\n";
+  if (!usage_ok || peak_memory_bytes > memory_budget_bytes) {
+    std::cerr << "large-image peak memory exceeded " << memory_budget_bytes / kibibyte
+              << " KiB: " << peak_memory_bytes / kibibyte << " KiB\n";
     return 4;
   }
-  std::cout << "2 GiB / 8-partition inventory peak: " << usage.ru_maxrss << " KiB\n";
+  std::cout << "2 GiB / 8-partition inventory peak: " << peak_memory_bytes / kibibyte
+            << " KiB\n";
   return 0;
 }
