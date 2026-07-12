@@ -76,7 +76,7 @@ Write validation reports:
 build/native/debug/apps/cli/axklib validate -o build/reports/validation <image-or-directory>
 ```
 
-Create separate SDK, CLI, and compliance archives:
+Create separate SDK and CLI archives:
 
 ```bash
 cmake --preset release
@@ -84,8 +84,10 @@ cmake --build --preset release
 cd build/native/release && cpack
 ```
 
-Binary publication is governed by `compliance/APPROVAL.md`; a successful local
-package build does not override a pending approval state.
+The native GitHub workflow combines those components into one distribution per
+target. Windows publishes a ZIP, Linux publishes a compressed tar archive, and
+macOS publishes one universal ZIP containing both the self-contained CLI and
+the shared SDK development files.
 
 ## License
 

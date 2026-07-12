@@ -15,6 +15,3 @@ uv --project tools/python run pytest tools/python/tests
 The header generators consume versioned JSON tables under `library/data` and
 write deterministic C++ headers. Package inspection, SBOM generation, boundary
 checking, and benchmark comparison are used by release workflows.
-`axk-collect-lgpl-sources` copies only source archives whose SHA-512 digest
-matches the release compliance specification; a missing or substituted archive
-fails the release preparation step.

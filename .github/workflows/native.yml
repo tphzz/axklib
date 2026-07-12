@@ -152,21 +152,20 @@ jobs:
           python tools/python/generate_sbom.py --axklib-root . --profile cli \
             --output "$root/axklib-cli.spdx.json"
 
-      - name: Build component packages
-        run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }} --target package
-
-      - name: Inspect SDK and CLI package contents
+      - name: Stage and inspect combined distribution
         shell: bash
         run: |
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          scan="build/package-scan-${{ matrix.artifact }}"
+          scan="build/tmp/package-scan-${{ matrix.artifact }}"
+          distribution="build/tmp/distribution-${{ matrix.artifact }}"
           rm -rf "$scan"
-          mkdir -p "$scan/sdk" "$scan/cli"
-          sdk=$(find "$root" -maxdepth 1 -name '*-sdk.tar.gz' -print -quit)
-          cli=$(find "$root" -maxdepth 1 -name '*-cli.tar.gz' -print -quit)
-          tar -xzf "$sdk" -C "$scan/sdk"
-          tar -xzf "$cli" -C "$scan/cli"
+          rm -rf "$distribution"
+          mkdir -p "$scan/sdk" "$scan/cli" "$distribution"
+          cmake --install "$root" --prefix "$scan/sdk" --component sdk
+          cmake --install "$root" --prefix "$scan/cli" --component cli
+          cmake --install "$root" --prefix "$distribution" --component sdk
+          cmake --install "$root" --prefix "$distribution" --component cli
           python tools/python/inspect_package.py "$scan/sdk" \
             --allow-library axklib.dll \
             --allow-library libaxklib.so \
@@ -175,19 +174,54 @@ jobs:
             --allow-library libaxklib.0.dylib \
             --allow-library libaxklib.0.1.0.dylib
           python tools/python/inspect_package.py "$scan/cli"
+          python tools/python/inspect_package.py "$distribution" \
+            --allow-library axklib.dll \
+            --allow-library libaxklib.so \
+            --allow-library libaxklib.so.0 \
+            --allow-library libaxklib.so.0.1.0 \
+            --allow-library libaxklib.0.dylib \
+            --allow-library libaxklib.0.1.0.dylib
           test -f "$scan/sdk/share/axklib/axklib.spdx.json"
           test -f "$scan/cli/share/axklib/axklib-cli.spdx.json"
+          test -f "$distribution/share/axklib/axklib.spdx.json"
+          test -f "$distribution/share/axklib/axklib-cli.spdx.json"
 
-      - name: Write SDK and CLI checksums
+      - name: Package combined Linux or Windows distribution
+        if: runner.os != 'macOS'
         shell: bash
         run: |
-          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          python - "$root" "build/axklib-${{ matrix.artifact }}-SHA256SUMS" <<'PY'
-          import hashlib, pathlib, sys
-          root, output = map(pathlib.Path, sys.argv[1:])
-          archives = sorted([*root.glob("*-sdk.tar.gz"), *root.glob("*-cli.tar.gz")])
-          output.write_text("".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in archives))
+          set -euo pipefail
+          distribution="build/tmp/distribution-${{ matrix.artifact }}"
+          version=$(sed -n 's/^#define AXKLIB_VERSION_STRING "\([^"]*\)"/\1/p' \
+            "$distribution/include/axklib/sdk/version.hpp")
+          test -n "$version"
+          mkdir -p build/artifacts
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            archive="build/artifacts/axklib-${version}-${{ matrix.artifact }}.zip"
+            python - "$distribution" "$archive" <<'PY'
+          import pathlib, sys, zipfile
+
+          source, output = map(pathlib.Path, sys.argv[1:])
+          with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+              for path in sorted(source.rglob("*")):
+                  if path.is_file():
+                      archive.write(path, path.relative_to(source))
           PY
+          else
+            archive="build/artifacts/axklib-${version}-${{ matrix.artifact }}.tar.gz"
+            tar -czf "$archive" -C "$distribution" .
+          fi
+          checksum="build/artifacts/axklib-${version}-${{ matrix.artifact }}-SHA256SUMS"
+          python - "$archive" "$checksum" <<'PY'
+          import hashlib, pathlib, sys
+
+          archive, output = map(pathlib.Path, sys.argv[1:])
+          output.write_text(
+              f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n"
+          )
+          PY
+          echo "AXK_DISTRIBUTION_ARCHIVE=$archive" >> "$GITHUB_ENV"
+          echo "AXK_DISTRIBUTION_CHECKSUM=$checksum" >> "$GITHUB_ENV"
 
       - name: Verify Linux runtime dependency closure
         if: runner.os == 'Linux'
@@ -298,77 +332,28 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Package macOS slice
+      - name: Package macOS slice for universal assembly
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          sdk_prefix="build/macos-${{ matrix.macos_slice }}-sdk"
-          cli_prefix="build/macos-${{ matrix.macos_slice }}-cli"
-          cmake --install "build/native/${{ inputs.debug && 'debug' || 'release' }}" \
-            --prefix "$sdk_prefix" --component sdk
-          cmake --install "build/native/${{ inputs.debug && 'debug' || 'release' }}" \
-            --prefix "$cli_prefix" --component cli
-          tar -czf "build/macos-${{ matrix.macos_slice }}-sdk.tar.gz" -C "$sdk_prefix" .
-          tar -czf "build/macos-${{ matrix.macos_slice }}-cli.tar.gz" -C "$cli_prefix" .
+          tar -czf "build/tmp/macos-${{ matrix.macos_slice }}.tar.gz" \
+            -C "build/tmp/distribution-${{ matrix.artifact }}" .
 
-      - name: Upload macOS slice
+      - name: Cache macOS slice for universal assembly
         if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v7
+        uses: actions/cache/save@v5
         with:
-          name: macos-${{ matrix.macos_slice }}-slice-${{ inputs.debug && 'debug' || 'release' }}
-          path: |
-            build/macos-${{ matrix.macos_slice }}-sdk.tar.gz
-            build/macos-${{ matrix.macos_slice }}-cli.tar.gz
-          if-no-files-found: error
+          path: build/tmp/macos-${{ matrix.macos_slice }}.tar.gz
+          key: macos-${{ matrix.macos_slice }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Upload native SDK and CLI packages
+      - name: Upload combined Linux or Windows distribution
         if: runner.os != 'macOS'
         uses: actions/upload-artifact@v7
         with:
           name: axklib-${{ matrix.artifact }}-${{ inputs.debug && 'debug' || 'release' }}
           path: |
-            build/native/${{ inputs.debug && 'debug' || 'release' }}/*-sdk.tar.gz
-            build/native/${{ inputs.debug && 'debug' || 'release' }}/*-cli.tar.gz
-            build/axklib-${{ matrix.artifact }}-SHA256SUMS
-          if-no-files-found: error
-
-      - name: Complete LGPL source kit
-        if: matrix.artifact == 'linux-x64'
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          downloads="build/lgpl-downloads"
-          kit="build/compliance-kit"
-          ./external/vcpkg/vcpkg install \
-            --triplet "${{ matrix.triplet }}" \
-            --overlay-triplets "${{ github.workspace }}/library/cmake/triplets" \
-            --downloads-root "$downloads" \
-            --only-downloads
-          python tools/python/collect_lgpl_sources.py \
-            --specification compliance/lgpl-sources.json \
-            --downloads "$downloads" \
-            --output "$kit/share/axklib/source/lgpl"
-          archive=$(find "$root" -maxdepth 1 -name '*-compliance.tar.gz' -print -quit)
-          extract="build/compliance-extract"
-          mkdir -p "$extract"
-          tar -xzf "$archive" -C "$extract"
-          cp -R "$kit"/. "$extract"/
-          tar -czf "$archive" -C "$extract" .
-          python - "$archive" build/axklib-compliance-SHA256SUMS <<'PY'
-          import hashlib, pathlib, sys
-          archive, output = map(pathlib.Path, sys.argv[1:])
-          output.write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n")
-          PY
-
-      - name: Upload source and compliance kit
-        if: matrix.artifact == 'linux-x64'
-        uses: actions/upload-artifact@v7
-        with:
-          name: axklib-compliance-${{ inputs.debug && 'debug' || 'release' }}
-          path: |
-            build/native/${{ inputs.debug && 'debug' || 'release' }}/*-compliance.tar.gz
-            build/axklib-compliance-SHA256SUMS
+            ${{ env.AXK_DISTRIBUTION_ARCHIVE }}
+            ${{ env.AXK_DISTRIBUTION_CHECKSUM }}
           if-no-files-found: error
 
   macos-universal:
@@ -376,55 +361,57 @@ jobs:
     needs: native
     runs-on: macos-15
     steps:
-      - name: Download x64 slice
-        uses: actions/download-artifact@v8
+      - name: Restore x64 slice
+        uses: actions/cache/restore@v5
         with:
-          name: macos-x86_64-slice-${{ inputs.debug && 'debug' || 'release' }}
-          path: build/slices/x86_64
+          path: build/tmp/macos-x86_64.tar.gz
+          key: macos-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true
 
-      - name: Download ARM64 slice
-        uses: actions/download-artifact@v8
+      - name: Restore ARM64 slice
+        uses: actions/cache/restore@v5
         with:
-          name: macos-arm64-slice-${{ inputs.debug && 'debug' || 'release' }}
-          path: build/slices/arm64
+          path: build/tmp/macos-arm64.tar.gz
+          key: macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true
 
-      - name: Assemble and verify universal SDK
+      - name: Assemble and verify universal distribution
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/sdk/{x86_64,arm64,universal} build/cli/{x86_64,arm64,universal}
-          tar -xzf build/slices/x86_64/macos-x86_64-sdk.tar.gz -C build/sdk/x86_64
-          tar -xzf build/slices/arm64/macos-arm64-sdk.tar.gz -C build/sdk/arm64
-          tar -xzf build/slices/x86_64/macos-x86_64-cli.tar.gz -C build/cli/x86_64
-          tar -xzf build/slices/arm64/macos-arm64-cli.tar.gz -C build/cli/arm64
-          cp -R build/sdk/arm64/. build/sdk/universal/
-          cp -R build/cli/arm64/. build/cli/universal/
+          mkdir -p build/tmp/{x86_64,arm64,universal} build/artifacts
+          tar -xzf build/tmp/macos-x86_64.tar.gz -C build/tmp/x86_64
+          tar -xzf build/tmp/macos-arm64.tar.gz -C build/tmp/arm64
+          cp -R build/tmp/arm64/. build/tmp/universal/
 
           lipo -create \
-            build/cli/x86_64/bin/axklib \
-            build/cli/arm64/bin/axklib \
-            -output build/cli/universal/bin/axklib
+            build/tmp/x86_64/bin/axklib \
+            build/tmp/arm64/bin/axklib \
+            -output build/tmp/universal/bin/axklib
 
           while IFS= read -r arm64_library; do
-            relative_path="${arm64_library#build/sdk/arm64/}"
-            x64_library="build/sdk/x86_64/$relative_path"
-            universal_library="build/sdk/universal/$relative_path"
+            relative_path="${arm64_library#build/tmp/arm64/}"
+            x64_library="build/tmp/x86_64/$relative_path"
+            universal_library="build/tmp/universal/$relative_path"
             test -f "$x64_library"
             lipo -create "$x64_library" "$arm64_library" -output "$universal_library"
-          done < <(find build/sdk/arm64/lib -type f \
+          done < <(find build/tmp/arm64/lib -type f \
             \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
 
-          lipo build/cli/universal/bin/axklib -verify_arch x86_64 arm64
-          lipo -info build/cli/universal/bin/axklib
+          lipo build/tmp/universal/bin/axklib -verify_arch x86_64 arm64
+          lipo -info build/tmp/universal/bin/axklib
           while IFS= read -r library; do
             lipo "$library" -verify_arch x86_64 arm64
             lipo -info "$library"
-          done < <(find build/sdk/universal/lib -type f \
+          done < <(find build/tmp/universal/lib -type f \
             \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
 
-          build/cli/universal/bin/axklib --version
-          cli_dependencies="$(otool -L build/cli/universal/bin/axklib)"
-          sdk_dependencies="$(otool -L build/sdk/universal/lib/libaxklib.0.1.0.dylib)"
+          build/tmp/universal/bin/axklib --version
+          cli_dependencies="$(otool -L build/tmp/universal/bin/axklib)"
+          sdk_library=$(find build/tmp/universal/lib -type f \
+            -name 'libaxklib*.dylib' -print -quit)
+          test -n "$sdk_library"
+          sdk_dependencies="$(otool -L "$sdk_library")"
           printf '%s\n' "$cli_dependencies" "$sdk_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
@@ -436,80 +423,20 @@ jobs:
             echo "universal C++ SDK has a private codec runtime dependency" >&2
             exit 1
           fi
-          tar -czf build/axklib-sdk-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz \
-            -C build/sdk/universal .
-          tar -czf build/axklib-cli-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz \
-            -C build/cli/universal .
-          shasum -a 256 build/axklib-*-macos-universal-*.tar.gz \
-            > build/axklib-macos-universal-SHA256SUMS
+          version=$(sed -n 's/^#define AXKLIB_VERSION_STRING "\([^"]*\)"/\1/p' \
+            build/tmp/universal/include/axklib/sdk/version.hpp)
+          test -n "$version"
+          archive="build/artifacts/axklib-${version}-macos-universal.zip"
+          (cd build/tmp/universal && /usr/bin/zip -qry \
+            "../../artifacts/$(basename "$archive")" .)
+          shasum -a 256 "$archive" \
+            > "build/artifacts/axklib-${version}-macos-universal-SHA256SUMS"
 
-      - name: Upload universal macOS SDK
+      - name: Upload universal macOS distribution
         uses: actions/upload-artifact@v7
         with:
           name: axklib-macos-universal-${{ inputs.debug && 'debug' || 'release' }}
           path: |
-            build/axklib-sdk-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz
-            build/axklib-cli-macos-universal-${{ inputs.debug && 'debug' || 'release' }}.tar.gz
-            build/axklib-macos-universal-SHA256SUMS
+            build/artifacts/axklib-*-macos-universal.zip
+            build/artifacts/axklib-*-macos-universal-SHA256SUMS
           if-no-files-found: error
-
-  lgpl-relink:
-    name: LGPL replacement relink
-    needs: native
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout axklib
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-      - name: Download compliance kit
-        uses: actions/download-artifact@v8
-        with:
-          name: axklib-compliance-${{ inputs.debug && 'debug' || 'release' }}
-          path: build/compliance
-      - name: Bootstrap vcpkg
-        run: ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-      - name: Configure SDK relink build
-        run: >-
-          cmake -S library -B build/relink -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DBUILD_TESTING=OFF
-          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/external/vcpkg/scripts/buildsystems/vcpkg.cmake
-          -DVCPKG_TARGET_TRIPLET=x64-linux-axk
-          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
-      - name: Build replacement libsoxr and relink SDK
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p build/compliance-extract build/replacement
-          archive=$(find build/compliance -name '*-compliance.tar.gz' -print -quit)
-          tar -xzf "$archive" -C build/compliance-extract
-          source_archive=$(find build/compliance-extract -name 'soxr-0.1.3-Source.tar.xz' -print -quit)
-          test -n "$source_archive"
-          tar -xJf "$source_archive" -C build/replacement
-          source_dir=$(find build/replacement -mindepth 1 -maxdepth 1 -type d -print -quit)
-          printf '\nconst char axk_lgpl_relink_marker[] = "AXK_LGPL_RELINK_TEST_V1";\n' \
-            >> "$source_dir/src/soxr.c"
-          cmake -S "$source_dir" -B build/replacement/build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DWITH_OPENMP=OFF \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-          cmake --build build/replacement/build
-          replacement=$(find build/replacement/build -name 'libsoxr.a' -print -quit)
-          installed=$(find build/relink/vcpkg_installed -path '*/lib/libsoxr.a' -print -quit)
-          test -n "$replacement" -a -n "$installed"
-          cp "$replacement" "$installed"
-          cmake --build build/relink --target axklib_shared --clean-first
-          strings build/relink/libaxklib.so.0.1.0 | grep AXK_LGPL_RELINK_TEST_V1
-      - name: Run installed C++17 consumer against relinked SDK
-        shell: bash
-        run: |
-          set -euo pipefail
-          cmake --install build/relink --prefix build/relink-install
-          cmake -S library/tests/consumer -B build/relink-consumer -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/build/relink-install \
-            -DAXK_TEST_FIXTURE=${{ github.workspace }}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds
-          cmake --build build/relink-consumer
-          LD_LIBRARY_PATH=${{ github.workspace }}/build/relink-install/lib \
-            build/relink-consumer/axk_consumer

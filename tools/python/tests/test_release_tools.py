@@ -7,7 +7,6 @@ import pytest
 
 import generate_sbom
 import inspect_package
-from collect_lgpl_sources import collect
 
 
 def test_sbom_includes_base_cli_and_test_dependencies(
@@ -71,26 +70,3 @@ def test_package_inspector_rejects_scripts_and_unlisted_shared_libraries(
     (package / "windows-binary").write_bytes(b"prefix " + runner_prefix + b"source suffix")
     monkeypatch.setattr("sys.argv", ["inspect_package.py", str(package)])
     assert inspect_package.main() == 1
-
-
-def test_lgpl_source_collector_requires_exact_archive_digests(tmp_path: Path) -> None:
-    downloads = tmp_path / "downloads"
-    downloads.mkdir()
-    archive = downloads / "dependency.tar.xz"
-    archive.write_bytes(b"exact source")
-    digest = __import__("hashlib").sha512(archive.read_bytes()).hexdigest()
-    specification = tmp_path / "sources.json"
-    specification.write_text(
-        json.dumps(
-            {
-                "schema_version": "1.0",
-                "packages": [{"name": "dependency", "version": "1", "sha512": digest}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    rows = collect(specification, downloads, tmp_path / "output")
-    assert rows[0]["file"] == archive.name
-    archive.write_bytes(b"different source")
-    with pytest.raises(FileNotFoundError):
-        collect(specification, downloads, tmp_path / "rejected")

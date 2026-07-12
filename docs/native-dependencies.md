@@ -37,8 +37,6 @@ the applicable license terms. In particular, static distribution must not
 obscure the recipient's rights for LGPL-covered libraries. This table is an
 engineering summary, not legal advice and not a substitute for the installed
 license texts.
-See [Licensing and relinking](licensing-and-relinking.md) for the release
-artifact and replacement-library process.
 
 Official release builds use the overlay triplets under
 `library/cmake/triplets`. They select static dependency libraries and remap build

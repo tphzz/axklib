@@ -44,32 +44,6 @@ if(AXK_BUILD_CLI)
   add_subdirectory(apps/cli)
 endif()
 
-install(DIRECTORY compliance/ DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib/compliance"
-        COMPONENT compliance)
-install(FILES vcpkg.json .gitmodules LICENSE DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib/source"
-        COMPONENT compliance)
-install(DIRECTORY external/vcpkg/ports/libsndfile external/vcpkg/ports/soxr
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib/source/vcpkg-ports"
-        COMPONENT compliance)
-
-execute_process(
-  COMMAND git rev-parse HEAD
-  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-  RESULT_VARIABLE _axk_git_result
-  OUTPUT_VARIABLE _axk_git_revision
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-if(NOT _axk_git_result EQUAL 0)
-  set(_axk_git_revision "unknown")
-endif()
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/source-revision.json"
-  "{\n  \"schema_version\": \"1.0\",\n"
-  "  \"repository\": \"https://github.com/tphzz/axklib\",\n"
-  "  \"revision\": \"${_axk_git_revision}\",\n"
-  "  \"vcpkg_revision\": \"f87344cac03158cbf1467264565f1fd36b382a24\"\n}\n")
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/source-revision.json"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib/source" COMPONENT compliance)
-
 set(CPACK_PACKAGE_NAME "axklib")
 set(CPACK_PACKAGE_VENDOR "axklib contributors")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
@@ -78,8 +52,7 @@ set(CPACK_PACKAGE_FILE_NAME
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_GENERATOR "TGZ;ZIP")
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-set(CPACK_COMPONENTS_ALL sdk cli compliance)
+set(CPACK_COMPONENTS_ALL sdk cli)
 set(CPACK_COMPONENT_SDK_DISPLAY_NAME "axklib C++17 shared SDK")
 set(CPACK_COMPONENT_CLI_DISPLAY_NAME "axklib self-contained CLI")
-set(CPACK_COMPONENT_COMPLIANCE_DISPLAY_NAME "axklib source and compliance kit")
 include(CPack)

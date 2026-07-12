@@ -10,7 +10,6 @@ dependencies = []
 [project.scripts]
 axk-check-benchmark = "check_benchmark:main"
 axk-check-production-boundary = "check_production_boundary:main"
-axk-collect-lgpl-sources = "collect_lgpl_sources:main"
 axk-generate-sbom = "generate_sbom:main"
 axk-inspect-package = "inspect_package:main"
 
@@ -25,7 +24,6 @@ dev = [
 py-modules = [
   "check_benchmark",
   "check_production_boundary",
-  "collect_lgpl_sources",
   "generate_current_effects",
   "generate_current_fields",
   "generate_current_lookups",
