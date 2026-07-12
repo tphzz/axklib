@@ -4,6 +4,10 @@ The installed `axklib/c/axk.h` header exposes ABI version 1 for C and foreign
 language hosts. Link the `axklib::c` CMake target or the `axklib` pkg-config
 module. The shared library is named `axklib_c`.
 
+The C ABI is the only shared axklib target. Its C++ engine and audio
+dependencies are linked into it statically, so installing the C SDK does not
+require separate `axk_core` or `axk_audio` runtime libraries.
+
 ```cmake
 find_package(axklib CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE axklib::c)

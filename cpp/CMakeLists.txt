@@ -8,6 +8,7 @@ include(cmake/AxkWarnings.cmake)
 
 add_library(
   axk_core
+  STATIC
   src/audio.cpp
   src/audio_export.cpp
   src/bytes.cpp
@@ -26,10 +27,6 @@ add_library(
 add_library(axklib::core ALIAS axk_core)
 
 target_compile_features(axk_core PUBLIC cxx_std_23)
-target_compile_definitions(axk_core PRIVATE AXK_CORE_EXPORTS)
-if(BUILD_SHARED_LIBS)
-  target_compile_definitions(axk_core PUBLIC AXK_SHARED_LIBRARY)
-endif()
 
 if(AXK_BUILD_BENCHMARKS)
   add_executable(axk_workflow_benchmark benchmarks/workflow_benchmark.cpp)
@@ -60,6 +57,7 @@ target_link_libraries(axk_core PRIVATE nlohmann_json::nlohmann_json)
 
 add_library(
   axk_audio
+  STATIC
   adapters/audio_import.cpp
   src/alteration.cpp
   src/writer.cpp
@@ -67,19 +65,6 @@ add_library(
 )
 add_library(axklib::audio ALIAS axk_audio)
 target_compile_features(axk_audio PUBLIC cxx_std_23)
-target_compile_definitions(axk_audio PRIVATE AXK_AUDIO_EXPORTS)
-
-if(APPLE)
-  set_target_properties(axk_audio PROPERTIES
-    BUILD_RPATH "@loader_path"
-    INSTALL_RPATH "@loader_path"
-  )
-elseif(UNIX)
-  set_target_properties(axk_audio PROPERTIES
-    BUILD_RPATH "$ORIGIN"
-    INSTALL_RPATH "$ORIGIN"
-  )
-endif()
 target_include_directories(
   axk_audio
   PUBLIC
@@ -324,6 +309,17 @@ endif()
 
 configure_file(cmake/axklib.pc.in axklib.pc @ONLY)
 
+set(AXK_CARGO_STATIC_LIBRARIES
+    axk_audio axk_core sndfile vorbisenc vorbis FLAC ogg opus mpg123 mp3lame soxr)
+set(AXK_CARGO_LINK_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/axk-cargo-link.txt")
+file(WRITE "${AXK_CARGO_LINK_MANIFEST}" "")
+foreach(library IN LISTS AXK_CARGO_STATIC_LIBRARIES)
+  file(APPEND "${AXK_CARGO_LINK_MANIFEST}" "static=${library}\n")
+endforeach()
+if(UNIX)
+  file(APPEND "${AXK_CARGO_LINK_MANIFEST}" "system=m\n")
+endif()
+
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/axklibConfigVersion.cmake"
   VERSION "${PROJECT_VERSION}"
@@ -350,6 +346,7 @@ install(DIRECTORY include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(DIRECTORY examples/c/ DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib/examples/c")
 install(DIRECTORY examples/cpp/ DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib/examples/cpp")
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/axklib")
+install(FILES "${AXK_CARGO_LINK_MANIFEST}" DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib")
 foreach(package cli11 nlohmann-json libsndfile soxr libflac libogg libvorbis mp3lame mpg123 opus)
   install(
     FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${package}/copyright"

@@ -33,6 +33,11 @@ full stable C ABI. Link `axklib::audio` when using the C++ writer or alteration
 APIs; it brings in `axklib::core`. The C header is `axklib/c/axk.h`;
 pkg-config consumers can use the `axklib` module.
 
+`axklib::core` and `axklib::audio` are always static libraries, independent of
+`BUILD_SHARED_LIBS`. `axklib::c` is the only shared library produced by the
+project. Official builds use the `*-axk` overlay triplets under
+`cpp/cmake/triplets` so third-party native dependencies are static as well.
+
 ## CLI
 
 Show the native CLI help:
