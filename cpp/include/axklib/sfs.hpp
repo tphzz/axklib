@@ -144,8 +144,8 @@ class AXK_API Container {
   std::vector<Partition> partitions_;
   std::vector<Error> diagnostics_;
 
-  friend Result<Container> open_image(const std::filesystem::path&, const OpenOptions&);
-  friend Result<Container> open_image(
+  friend AXK_API Result<Container> open_image(const std::filesystem::path&, const OpenOptions&);
+  friend AXK_API Result<Container> open_image(
       std::shared_ptr<const RandomAccessReader>, std::filesystem::path, const OpenOptions&);
 };
 

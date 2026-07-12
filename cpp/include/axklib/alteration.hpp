@@ -117,7 +117,7 @@ struct AlterationOperation {
   AlterationOperationData data;
 };
 
-AXK_API std::string_view operation_type_name(const AlterationOperationData &operation) noexcept;
+AXK_AUDIO_API std::string_view operation_type_name(const AlterationOperationData &operation) noexcept;
 
 struct AlterationManifest {
   std::string schema_version;
@@ -163,14 +163,14 @@ struct TransactionPlan {
   std::vector<OperationReport> operations;
 };
 
-AXK_API Result<AlterationManifest>
+AXK_AUDIO_API Result<AlterationManifest>
 parse_alteration_manifest(std::string_view json, const std::filesystem::path &base_directory = {});
-AXK_API Result<AlterationManifest> load_alteration_manifest(const std::filesystem::path &path);
-AXK_API Result<AlterationResult>
+AXK_AUDIO_API Result<AlterationManifest> load_alteration_manifest(const std::filesystem::path &path);
+AXK_AUDIO_API Result<AlterationResult>
 alter_hds(const std::filesystem::path &source_path, const AlterationManifest &manifest,
           const std::optional<std::filesystem::path> &output_path = {},
           const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr);
-AXK_API Result<TransactionPlan> plan_hds_alteration(const std::filesystem::path &source_path,
+AXK_AUDIO_API Result<TransactionPlan> plan_hds_alteration(const std::filesystem::path &source_path,
                                                     const AlterationManifest &manifest,
                                                     const CancellationToken &cancellation = {},
                                                     ProgressSink *progress = nullptr);

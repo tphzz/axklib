@@ -67,6 +67,7 @@ add_library(
 )
 add_library(axklib::audio ALIAS axk_audio)
 target_compile_features(axk_audio PUBLIC cxx_std_23)
+target_compile_definitions(axk_audio PRIVATE AXK_AUDIO_EXPORTS)
 
 if(APPLE)
   set_target_properties(axk_audio PROPERTIES
