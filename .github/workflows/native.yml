@@ -23,7 +23,7 @@ jobs:
             runner: ubuntu-24.04
             triplet: x64-linux-axk
           - name: Windows x64
-            runner: windows-2025
+            runner: windows-2025-vs2026
             triplet: x64-windows-axk
           - name: macOS arm64
             runner: macos-15
@@ -40,6 +40,28 @@ jobs:
           repository: microsoft/vcpkg
           ref: f87344cac03158cbf1467264565f1fd36b382a24
           path: .vcpkg
+
+      - name: Configure Visual Studio 2026
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          vsversion: 18.0
+
+      - name: Verify Visual Studio 2026 compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:VisualStudioVersion -notlike '18.*') {
+            throw "Expected Visual Studio 18, found '$env:VisualStudioVersion'"
+          }
+          $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
+          if ($compiler -notlike '*\Microsoft Visual Studio\18\*') {
+            throw "Expected Visual Studio 18 cl.exe, found '$compiler'"
+          }
+          "CC=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Using $compiler"
 
       - name: Bootstrap vcpkg
         if: runner.os != 'Windows'
