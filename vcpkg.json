@@ -6,7 +6,13 @@
   "dependencies": [
     "cli11",
     "gtest",
-    "libsndfile",
+    {
+      "name": "libsndfile",
+      "default-features": false,
+      "features": [
+        "external-libs"
+      ]
+    },
     "nlohmann-json",
     "soxr"
   ]

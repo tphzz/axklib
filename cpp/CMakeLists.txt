@@ -310,7 +310,7 @@ endif()
 configure_file(cmake/axklib.pc.in axklib.pc @ONLY)
 
 set(AXK_CARGO_STATIC_LIBRARIES
-    axk_audio axk_core sndfile vorbisenc vorbis FLAC ogg opus mpg123 mp3lame soxr)
+    axk_audio axk_core sndfile vorbisenc vorbis FLAC ogg opus soxr)
 set(AXK_CARGO_LINK_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/axk-cargo-link.txt")
 file(WRITE "${AXK_CARGO_LINK_MANIFEST}" "")
 foreach(library IN LISTS AXK_CARGO_STATIC_LIBRARIES)
@@ -347,7 +347,7 @@ install(DIRECTORY examples/c/ DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib/examp
 install(DIRECTORY examples/cpp/ DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib/examples/cpp")
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/axklib")
 install(FILES "${AXK_CARGO_LINK_MANIFEST}" DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib")
-foreach(package cli11 nlohmann-json libsndfile soxr libflac libogg libvorbis mp3lame mpg123 opus)
+foreach(package cli11 nlohmann-json libsndfile soxr libflac libogg libvorbis opus)
   install(
     FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${package}/copyright"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${package}"
