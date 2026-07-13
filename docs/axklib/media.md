@@ -1,4 +1,4 @@
-# FAT12, ISO9660, and standalone objects
+# Supported Media Profiles
 
 The native library exposes read-only container variants through
 `axk::MediaContainer`. `axk::open_media()` detects Yamaha SFS images, FAT12
@@ -7,18 +7,31 @@ The individual `axk::FatImage`, `axk::IsoImage`, and
 `axk::StandaloneObject` types are available when an application already knows
 the container kind.
 
-## Safety boundary
+These readers implement the narrow profiles needed by maintained Yamaha
+A-series media. They are not general-purpose FAT or ISO libraries. An image
+outside that compatibility scope may happen to use the accepted structures,
+but that does not make arbitrary media a supported input contract.
+
+## FAT12 profile
 
 The FAT reader accepts FAT12 only. It checks the BPB geometry, duplicated FATs,
 cluster bounds, chain termination, loops, bad and reserved cluster markers,
 cross-linked files, root and subdirectory records, duplicate names, and declared
-file sizes. FAT16 and FAT32 media are rejected explicitly.
+file sizes. Directory entries use their DOS 8.3 identity; long-filename entries
+are ignored. FAT16, FAT32, exFAT, filesystem repair, and filesystem writing are
+unsupported.
+
+## ISO9660 profile
 
 The ISO reader accepts the primary ISO9660 directory form used by Yamaha media.
 It checks both-endian descriptor fields, logical block geometry, directory
 record boundaries, extents, cycles, duplicate names, and path components.
-Multi-extent files, Joliet, Rock Ridge, and filesystem writing are outside this
-API.
+Multi-extent files are rejected. Joliet names, Rock Ridge system-use extensions,
+alternate descriptor trees, and filesystem writing are not interpreted. A
+hybrid image can still open through a valid primary ISO9660 tree, but names or
+metadata supplied only by those extensions are outside the API contract.
+
+## Yamaha object layer
 
 All object payloads use the same current-object decoders as SFS images. The
 normalized object catalog can therefore be passed to the normal relationship

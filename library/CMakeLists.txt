@@ -64,6 +64,9 @@ add_library(
   src/effects.cpp
   src/io.cpp
   src/media.cpp
+  src/media_fat12.cpp
+  src/media_iso9660.cpp
+  src/media_yamaha.cpp
   src/object.cpp
   src/relationship.cpp
   src/report.cpp
@@ -300,7 +303,9 @@ if(BUILD_TESTING)
     tests/effects_test.cpp
     tests/io_test.cpp
     tests/hardening_test.cpp
-    tests/media_test.cpp
+    tests/media_fat12_test.cpp
+    tests/media_iso9660_test.cpp
+    tests/media_yamaha_test.cpp
     tests/object_test.cpp
     tests/report_test.cpp
     tests/sfs_test.cpp

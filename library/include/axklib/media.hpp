@@ -83,6 +83,8 @@ struct StructuredObjectPath {
   MenuLabel volume_label;
 };
 
+// Read-only FAT12 profile for Yamaha A-series floppy media. This is not a
+// general FAT implementation; FAT16, FAT32, exFAT, and filesystem writes are unsupported.
 class AXK_API FatImage {
 public:
   [[nodiscard]] static Result<FatImage> open(std::shared_ptr<const RandomAccessReader> reader,
@@ -107,6 +109,8 @@ private:
   std::vector<FatFile> files_;
 };
 
+// Read-only primary ISO9660 profile for Yamaha A-series CD-ROM media. Joliet
+// and Rock Ridge metadata are not interpreted, and multi-extent files are unsupported.
 class AXK_API IsoImage {
 public:
   [[nodiscard]] static Result<IsoImage> open(std::shared_ptr<const RandomAccessReader> reader,

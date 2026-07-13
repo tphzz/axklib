@@ -23,6 +23,13 @@ flowchart TD
 The low-level ISO reader expects a Primary Volume Descriptor at sector 16. ISO
 sectors are 2048 bytes.
 
+This is the read-only primary-directory profile used by maintained Yamaha
+A-series CD-ROMs, not a general ISO implementation. Multi-extent files are
+rejected. Joliet names, Rock Ridge system-use extensions, alternate descriptor
+trees, and ISO writing are not interpreted. A hybrid disc can still open through
+its valid primary ISO9660 tree; extension-only names and metadata remain outside
+the supported contract.
+
 | Field | Rule |
 | --- | --- |
 | PVD sector | `16` |
@@ -213,4 +220,3 @@ CD-ROM validation and diagnostics cover:
 8. Decode shared object payloads.
 9. Build relationships and source-load Program assignment rows.
 10. Render user-facing paths with duplicate-label disambiguation.
-

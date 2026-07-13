@@ -52,6 +52,7 @@ nav:
       - C++ API: axklib/cpp-api.md
       - Architecture: architecture.md
   - Formats:
+      - Media Containers: axklib/media.md
       - SFS Filesystem: axklib/sfs-filesystem.md
       - FAT12 Floppy Images: axklib/floppy.md
       - CD-ROM Images: axklib/cdrom.md

@@ -26,6 +26,15 @@ cluster, or zero sectors per FAT.
 A floppy image can contain `FSFSDEV3SPLX` object files without being an SFS
 hard-disk image. Keep those layers separate.
 
+## Compatibility Profile
+
+This reader supports the read-only FAT12 profile used by maintained Yamaha
+A-series floppy media; it is not a general FAT implementation. It follows
+bounded FAT12 cluster chains, requires duplicated FAT copies to agree, and uses
+DOS 8.3 directory identities. Long-filename entries are ignored in favor of
+their 8.3 aliases. FAT16, FAT32, exFAT, filesystem repair, and filesystem
+writing are unsupported.
+
 ## FAT12 Geometry
 
 The current Yamaha floppy images supported by axklib use this geometry:
@@ -190,7 +199,8 @@ FAT12 diagnostics are split into container and sampler-data problems.
 1. Read the first 512 bytes and parse the FAT geometry fields.
 2. Compute FAT, root-directory, and data-area offsets.
 3. Iterate fixed 32-byte root directory entries.
-4. Skip deleted, empty, label, directory, and long-name entries.
+4. Skip deleted, empty, label, and long-name entries; traverse bounded
+   subdirectories.
 5. Decode the DOS 8.3 filename, first cluster, and file size.
 6. Follow the FAT12 cluster chain and reassemble the file bytes.
 7. Select files beginning with `FSFSDEV3SPLX`.

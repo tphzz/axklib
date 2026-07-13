@@ -5,8 +5,9 @@ integration.
 
 ```mermaid
 flowchart LR
-    IO[Random access I/O] --> Media[SFS, FAT12, ISO9660]
-    Media --> Objects[Object decoders]
+    IO[Random access I/O] --> Media[SFS and narrow FAT12 / ISO9660 readers]
+    Media --> Yamaha[Yamaha media enrichment]
+    Yamaha --> Objects[Object decoders]
     Objects --> Catalog[Catalog and relationships]
     Catalog --> Audio[Exact audio and SFZ]
     Catalog --> Writer[Fresh writer and transactions]
@@ -40,6 +41,17 @@ The source modules reflect that boundary:
 Command modules orchestrate public library services; they do not contain disk
 layout, object decoding, allocation, or audio-conversion rules. Core targets do
 not include CLI11 or CLI headers.
+
+The media source modules preserve a separate responsibility boundary:
+
+- `media_fat12.cpp` owns the supported FAT12 container profile.
+- `media_iso9660.cpp` owns the supported primary ISO9660 container profile.
+- `media_yamaha.cpp` owns Yamaha object recognition, CD menu labels, catalog
+  placement, and structured paths.
+- `media.cpp` owns common media dispatch and `MediaContainer` orchestration.
+
+These remain source modules in one core target. They are not separately linked
+SDK components.
 
 Fresh-image and alteration operations use manifests and plans. Applying a plan
 writes a temporary destination, validates the result, and then completes the
