@@ -60,6 +60,27 @@ some helper functions and as fallback display names by user-facing renderers.
 | `PRF3` | Profile/preference-style object. Currently surfaced as an object identity; type-specific fields are not public yet. |
 | other known tags | Recognized by low-level helpers, but not loaded as normal public objects unless a container reader explicitly supports them. |
 
+## Container Filename Versus Payload Identity
+
+Every object file is complete from byte `0x00`; container allocation does not
+replace or remove the shared object header. The container filename locates the
+file, while the four-byte tag at payload offset `0x0c` determines its type and
+the embedded header supplies its sampler object name.
+
+| Container | Placement filename | Type and display-name source |
+| --- | --- | --- |
+| FAT12 floppy | DOS 8.3 name such as `AUTHORED.001` | `FSFSDEV3SPLX<type>` and embedded object name. A numeric extension is not a type code. |
+| CD-ROM ISO | `<group>/Fnnn/<type>/Fnnn`; category `0000` maps display names to files | Embedded type and name remain authoritative. The category name and catalog are independently checked placement metadata. |
+| Standalone file | Host filename chosen by the caller | Entire file begins with the shared magic and type tag. |
+| SFS image | SFS directory record and object ID rather than a host filename | Embedded type and name, with SFS placement retained separately. |
+
+`SMPL` and `SBNK` have variable total file sizes. Consumers must use the
+big-endian length and offset fields in the object rather than inferring payload
+boundaries from a FAT cluster count, ISO extent padding, or an `Fnnn` name.
+`SEQU` and `PRF3` can be inventoried and transferred as complete known-type
+payloads, but their type-specific inner formats are not part of the current
+public decoder contract.
+
 ## AxklibObject Identity
 
 Every loaded object is represented as `AxklibObject`. The public identity has
@@ -494,6 +515,7 @@ that are useful for diagnostics but should not become normal Program children us
 `diagnostic_category` values such as `visible-off-assignment`,
 `program-link-bitmap`, `sbnk-member-link`, or
 `active-assignment-missing-target`.
+
 ## SEQU And PRF3
 
 `SEQU` and `PRF3` are loaded as supported object identities when their payloads
