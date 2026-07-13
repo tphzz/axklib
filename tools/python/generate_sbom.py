@@ -83,7 +83,12 @@ def vcpkg_packages(root: Path, profile: str) -> list[dict[str, object]]:
         if not first_visit and not new_features:
             continue
         known.update(new_features)
-        path = root / "external/vcpkg/ports" / name / "vcpkg.json"
+        overlay_path = root / "library/cmake/ports" / name / "vcpkg.json"
+        path = (
+            overlay_path
+            if overlay_path.is_file()
+            else root / "external/vcpkg/ports" / name / "vcpkg.json"
+        )
         value = json.loads(path.read_text(encoding="utf-8"))
         metadata[name] = value
         dependencies = list(value.get("dependencies", [])) if first_visit else []
@@ -107,7 +112,7 @@ def vcpkg_packages(root: Path, profile: str) -> list[dict[str, object]]:
     rows = []
     for name in sorted(metadata):
         value = metadata[name]
-        license_value = value.get("license", LICENSE_OVERRIDES.get(name, "NOASSERTION"))
+        license_value = value.get("license") or LICENSE_OVERRIDES.get(name, "NOASSERTION")
         homepage = value.get("homepage", "NOASSERTION")
         features = sorted(requested[name])
         rows.append(

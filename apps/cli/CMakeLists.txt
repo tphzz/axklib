@@ -110,7 +110,7 @@ install(TARGETS axklib_cli RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONE
 install(FILES "${AXK_REPOSITORY_ROOT}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/axklib" COMPONENT cli)
 foreach(package cli11 hash-library nlohmann-json libsndfile soxr utfcpp libflac libogg
-                libvorbis opus)
+                libvorbis opus fatfs)
   install(
     FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${package}/copyright"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${package}"

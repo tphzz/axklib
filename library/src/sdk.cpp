@@ -11,6 +11,7 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <variant>
 
 #include "axklib/alteration.hpp"
 #include "axklib/audio.hpp"
@@ -573,7 +574,7 @@ result<page<validation_issue>> snapshot::validation_issues(std::uint64_t offset,
 }
 
 struct build_plan::impl {
-  HdsBuildManifest manifest;
+  std::variant<HdsBuildManifest, MediaBuildManifest> manifest;
   std::vector<PartitionGeometry> geometry;
   std::thread::id owner;
 };
@@ -591,15 +592,20 @@ result<build_plan> build_plan::from_manifest(const std::string &utf8_manifest_pa
     auto path = checked_path(utf8_manifest_path, "build manifest path");
     if (!path)
       return path.error();
-    auto manifest = load_hds_build_manifest(*path);
-    if (!manifest)
-      return public_error(manifest.error());
-    auto geometry = plan_hds_geometry(*manifest);
-    if (!geometry)
-      return public_error(geometry.error());
     build_plan output;
-    output.impl_ = std::make_unique<impl>(
-        impl{std::move(*manifest), std::move(*geometry), std::this_thread::get_id()});
+    if (auto manifest = load_hds_build_manifest(*path); manifest) {
+      auto geometry = plan_hds_geometry(*manifest);
+      if (!geometry)
+        return public_error(geometry.error());
+      output.impl_ = std::make_unique<impl>(
+          impl{std::move(*manifest), std::move(*geometry), std::this_thread::get_id()});
+    } else {
+      auto media_manifest = load_media_build_manifest(*path);
+      if (!media_manifest)
+        return public_error(media_manifest.error());
+      output.impl_ =
+          std::make_unique<impl>(impl{std::move(*media_manifest), {}, std::this_thread::get_id()});
+    }
     return output;
   });
 }
@@ -607,7 +613,10 @@ result<build_plan> build_plan::from_manifest(const std::string &utf8_manifest_pa
 plan_summary build_plan::summary() const noexcept {
   if (!impl_)
     return {};
-  return {impl_->geometry.size(), 0U, impl_->manifest.size_bytes, true};
+  if (const auto *hds = std::get_if<HdsBuildManifest>(&impl_->manifest))
+    return {impl_->geometry.size(), 0U, hds->size_bytes, true};
+  const auto &media = std::get<MediaBuildManifest>(impl_->manifest);
+  return {0U, 0U, media.format == MediaImageFormat::fat12_floppy ? 1'474'560U : 0U, true};
 }
 
 result<void> build_plan::apply(const std::string &utf8_output_path, const write_options &options,
@@ -622,10 +631,17 @@ result<void> build_plan::apply(const std::string &utf8_output_path, const write_
     auto path = checked_path(utf8_output_path, "output image path");
     if (!path)
       return path.error();
-    auto written = write_hds_image(impl_->manifest, *path, options.overwrite,
-                                   context.impl_->cancellation.token());
-    if (!written)
-      return public_error(written.error());
+    if (const auto *hds = std::get_if<HdsBuildManifest>(&impl_->manifest)) {
+      auto written =
+          write_hds_image(*hds, *path, options.overwrite, context.impl_->cancellation.token());
+      if (!written)
+        return public_error(written.error());
+    } else {
+      auto written = write_media_image(std::get<MediaBuildManifest>(impl_->manifest), *path,
+                                       options.overwrite, context.impl_->cancellation.token());
+      if (!written)
+        return public_error(written.error());
+    }
     return {};
   });
 }

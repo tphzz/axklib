@@ -20,6 +20,7 @@ inline constexpr std::string_view object_magic = "FSFSDEV3SPLX";
 struct IsoMenuLabels {
   std::vector<std::pair<std::string, std::string>> groups;
   std::vector<std::pair<std::string, std::string>> volumes;
+  std::vector<MediaValidationIssue> validation_issues;
 };
 
 [[nodiscard]] Error media_error(ErrorCode code, std::string message, std::string_view source = {},

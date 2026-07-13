@@ -107,6 +107,18 @@ std::string fallback_label(const MediaObject &object, std::span<const std::byte>
   }
 }
 
+void add_group_catalog_issue(detail::IsoMenuLabels &result, std::string code,
+                             std::string_view group, std::string message,
+                             std::string recommended_next_check) {
+  result.validation_issues.push_back({
+      std::move(code),
+      std::move(message),
+      std::format("CD-ROM group menu (raw group '{}')", group),
+      "hardware-confirmed Yamaha group 0000 catalog contract",
+      std::move(recommended_next_check),
+  });
+}
+
 } // namespace
 
 namespace detail {
@@ -114,47 +126,102 @@ namespace detail {
 Result<IsoMenuLabels> read_yamaha_iso_menu_labels(const IsoImage &image,
                                                   const CancellationToken &cancellation) {
   IsoMenuLabels result;
-  std::set<std::pair<std::string, std::string>> volumes;
+  std::map<std::string, std::set<std::string>> volumes;
   for (const auto &file : image.files()) {
     const auto parts = path_parts(file.path);
     if (file.is_directory && parts.size() == 2U && f_directory(parts[1]))
-      volumes.emplace(parts[0], parts[1]);
+      volumes[parts[0]].insert(parts[1]);
   }
-  for (const auto &[group, volume] : volumes) {
-    for (const auto &file : image.files()) {
-      const auto parts = path_parts(file.path);
-      if (!file.is_directory && parts.size() == 2U && parts[0] == group && f_directory(parts[1]) &&
-          file.size <= 64U) {
-        auto label = image.read_file(file, cancellation);
-        if (!label)
-          return std::unexpected{label.error()};
-        const auto value = clean_label(*label);
-        if (!value.empty()) {
-          result.groups.emplace_back(group, value);
-          break;
-        }
-      }
-    }
+  for (const auto &[group, group_volumes] : volumes) {
     const auto table =
         std::ranges::find(image.files(), std::format("{}/0000", group), &IsoFile::path);
-    if (table == image.files().end() || table->is_directory)
+    if (table == image.files().end() || table->is_directory) {
+      add_group_catalog_issue(
+          result, "ISO_YAMAHA_GROUP_CATALOG_MISSING", group,
+          std::format("CD-ROM group menu '{}' has no readable group-level 0000 catalog.", group),
+          "Restore the group-level 0000 file before using this image on a Yamaha sampler.");
       continue;
+    }
     auto bytes = image.read_file(*table, cancellation);
     if (!bytes)
       return std::unexpected{bytes.error()};
+    if (bytes->empty() || bytes->size() % 32U != 0U) {
+      add_group_catalog_issue(
+          result, "ISO_YAMAHA_GROUP_CATALOG_SIZE_INVALID", group,
+          std::format("CD-ROM group menu '{}' has a {}-byte 0000 catalog; Yamaha menu rows must be "
+                      "complete 32-byte records.",
+                      group, bytes->size()),
+          "Rebuild the group catalog as complete 32-byte rows while preserving readable object "
+          "files.");
+    }
+    bool disk_name_seen{};
     for (std::size_t offset = 0; offset + 32U <= bytes->size(); offset += 32U) {
       const auto record = std::span{*bytes}.subspan(offset, 32);
-      std::string id;
-      for (std::size_t pos = 0; pos + 4U <= 24U; ++pos) {
-        const auto candidate = clean_ascii(record.subspan(pos, 4));
-        if (f_directory(candidate)) {
-          id = candidate;
-          break;
+      const auto label = clean_label(record.subspan(1, 16));
+      const auto id = clean_ascii(record.subspan(18, 11));
+      if (label == "_DSKNAME") {
+        disk_name_seen = true;
+        const auto expected_id = std::format("F{:03}", group_volumes.size() + 1U);
+        if (offset + 32U != bytes->size()) {
+          add_group_catalog_issue(
+              result, "ISO_YAMAHA_DSKNAME_ROW_NOT_FINAL", group,
+              std::format("CD-ROM group menu '{}' has a _DSKNAME row that is not the final 0000 "
+                          "catalog record.",
+                          group),
+              "Move the _DSKNAME row after every volume row before using this image on a Yamaha "
+              "sampler.");
+          continue;
         }
+        if (id != expected_id) {
+          add_group_catalog_issue(
+              result, "ISO_YAMAHA_DSKNAME_TARGET_INVALID", group,
+              std::format("CD-ROM group menu '{}' references group-label file '{}' from _DSKNAME; "
+                          "the expected file after {} volume(s) is '{}'.",
+                          group, id, group_volumes.size(), expected_id),
+              "Point the final _DSKNAME row to the next Fnnn file after the volume directories.");
+          continue;
+        }
+        const auto label_file =
+            std::ranges::find(image.files(), std::format("{}/{}", group, id), &IsoFile::path);
+        if (label_file == image.files().end() || label_file->is_directory) {
+          add_group_catalog_issue(
+              result, "ISO_YAMAHA_DSKNAME_LABEL_FILE_MISSING", group,
+              std::format("CD-ROM group menu '{}' references missing group-label file '{}'.", group,
+                          id),
+              "Restore the 16-byte group-label file referenced by the final _DSKNAME row.");
+          continue;
+        }
+        if (label_file->size != 16U) {
+          add_group_catalog_issue(
+              result, "ISO_YAMAHA_DSKNAME_LABEL_SIZE_INVALID", group,
+              std::format("CD-ROM group menu '{}' uses a {}-byte group-label file '{}'; the Yamaha "
+                          "catalog contract requires exactly 16 bytes.",
+                          group, label_file->size, id),
+              "Rewrite the referenced group label as one fixed-width 16-byte file.");
+          continue;
+        }
+        auto label_bytes = image.read_file(*label_file, cancellation);
+        if (!label_bytes)
+          return std::unexpected{label_bytes.error()};
+        const auto group_label = clean_label(*label_bytes);
+        if (group_label.empty()) {
+          add_group_catalog_issue(
+              result, "ISO_YAMAHA_DSKNAME_LABEL_EMPTY", group,
+              std::format("CD-ROM group menu '{}' has an empty group-label file '{}'.", group, id),
+              "Write a non-empty sampler-visible group name into the 16-byte label file.");
+          continue;
+        }
+        result.groups.emplace_back(group, group_label);
+        continue;
       }
-      const auto label = clean_label(record.subspan(1, 13));
-      if (!id.empty() && !label.empty() && volumes.contains({group, id}))
+      if (!id.empty() && !label.empty() && group_volumes.contains(id))
         result.volumes.emplace_back(std::format("{}/{}", group, id), label);
+    }
+    if (!disk_name_seen) {
+      add_group_catalog_issue(
+          result, "ISO_YAMAHA_DSKNAME_ROW_MISSING", group,
+          std::format("CD-ROM group menu '{}' does not end with the required _DSKNAME row.", group),
+          "Append a NUL-padded _DSKNAME row that references the next Fnnn group-label file.");
     }
   }
   return result;

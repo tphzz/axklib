@@ -213,7 +213,8 @@ inline std::vector<std::byte> iso_fixture(bool outside_extent = false) {
   append_record(group, offset, iso_record(dot, 19, sector_size, 2));
   append_record(group, offset, iso_record(dotdot, 18, sector_size, 2));
   append_record(group, offset, iso_record("F001", 20, sector_size, 2));
-  append_record(group, offset, iso_record("0000.;1", 22, 32, 0));
+  append_record(group, offset, iso_record("0000.;1", 22, 64, 0));
+  append_record(group, offset, iso_record("F002.;1", 23, 16, 0));
 
   const auto object = smpl_object("CD WAVE");
   auto volume = std::span{bytes}.subspan(20 * sector_size, sector_size);
@@ -225,10 +226,15 @@ inline std::vector<std::byte> iso_fixture(bool outside_extent = false) {
                            static_cast<std::uint32_t>(object.size()), 0));
   if (!outside_extent)
     std::ranges::copy(object, bytes.begin() + 21 * sector_size);
-  auto table = std::span{bytes}.subspan(22 * sector_size, 32);
+  auto table = std::span{bytes}.subspan(22 * sector_size, 64);
   table[0] = std::byte{0xdd};
   ascii(table, 1, "  Mapped Vol");
   ascii(table, 18, "F001");
+  table[32] = std::byte{0xe1};
+  ascii(table, 33, "_DSKNAME");
+  table[49] = std::byte{0x5e};
+  ascii(table, 50, "F002");
+  ascii(bytes, 23 * sector_size, "Mapped Group    ");
   return bytes;
 }
 

@@ -62,6 +62,14 @@ struct MenuLabel {
   std::string basis;
 };
 
+struct MediaValidationIssue {
+  std::string code;
+  std::string message;
+  std::string sampler_path;
+  std::string basis;
+  std::string recommended_next_check;
+};
+
 struct MediaObject {
   std::string key;
   std::string logical_path;
@@ -122,6 +130,7 @@ public:
   [[nodiscard]] const std::string &volume_id() const noexcept;
   [[nodiscard]] const std::string &source_name() const noexcept;
   [[nodiscard]] const std::vector<IsoFile> &files() const noexcept;
+  [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
   [[nodiscard]] Result<std::vector<std::byte>>
   read_file(const IsoFile &file, const CancellationToken &cancellation = {}) const;
   [[nodiscard]] Result<std::vector<MediaObject>>
@@ -135,6 +144,7 @@ private:
   std::vector<IsoFile> files_;
   std::vector<std::pair<std::string, std::string>> group_labels_;
   std::vector<std::pair<std::string, std::string>> volume_labels_;
+  std::vector<MediaValidationIssue> validation_issues_;
 };
 
 class AXK_API StandaloneObject {
@@ -160,6 +170,7 @@ public:
   [[nodiscard]] MediaKind kind() const noexcept;
   [[nodiscard]] std::filesystem::path source_path() const;
   [[nodiscard]] const MediaStorage &storage() const noexcept;
+  [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
   [[nodiscard]] Result<std::vector<MediaObject>>
   objects(std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
           const CancellationToken &cancellation = {}) const;

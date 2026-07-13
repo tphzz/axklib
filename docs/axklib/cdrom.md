@@ -23,12 +23,21 @@ flowchart TD
 The low-level ISO reader expects a Primary Volume Descriptor at sector 16. ISO
 sectors are 2048 bytes.
 
-This is the read-only primary-directory profile used by maintained Yamaha
+This is the primary-directory profile used by maintained Yamaha
 A-series CD-ROMs, not a general ISO implementation. Multi-extent files are
 rejected. Joliet names, Rock Ridge system-use extensions, alternate descriptor
-trees, and ISO writing are not interpreted. A hybrid disc can still open through
+trees are not interpreted. A hybrid disc can still open through
 its valid primary ISO9660 tree; extension-only names and metadata remain outside
 the supported contract.
+
+Fresh ISO creation uses a deterministic narrow writer for the same primary-tree
+profile. A libarchive writer was evaluated, but its release build provides no
+supported way to override the image creation timestamp, so it could not satisfy
+the byte-reproducibility contract. The narrow writer emits path tables, bounded
+single-sector directories, Yamaha group/volume menu records, and single-extent
+object files. It reopens the image with the production reader before publishing
+it. Physical Yamaha sampler acceptance remains unverified and is not implied by
+that check.
 
 | Field | Rule |
 | --- | --- |
@@ -124,8 +133,25 @@ Label sources:
 
 | Label | Typical storage shape | Metadata field |
 | --- | --- | --- |
-| Group label | Small label file directly below a raw group folder. | `iso_group_label` |
+| Group label | Final `_DSKNAME` row in the group `0000` catalog references a 16-byte label file. | `iso_group_label` |
 | Volume label | Row in a group-local compact menu table. | `iso_volume_label` |
+
+Each group-catalog row is 32 bytes. Volume rows map a 16-byte display name to
+an `Fnnn` volume directory. The final `_DSKNAME` row is NUL-padded and maps to
+the next `Fnnn` file after the last volume. A group label is confirmed only when
+that row references an existing 16-byte file. Missing or malformed label
+metadata does not prevent object inventory; axklib retains the raw group
+identifier instead. `axklib validate` reports these sampler-incompatible menu
+contracts as errors without turning them into ISO open failures. This keeps
+recovery and extraction available while preventing a readable image from being
+mistaken for one the sampler will enumerate.
+
+The validated compatibility contract requires each Yamaha group menu to have a
+group-level `0000` file made of complete 32-byte rows. Its final row must be
+`_DSKNAME`, must reference `F(N+1)` after `N` volume directories, and that target
+must be an existing, non-empty, fixed-width 16-byte group-label file. Catalog
+hash validation is not part of this compatibility gate because hardware has not
+isolated hash rejection independently.
 
 Label precedence for display paths:
 

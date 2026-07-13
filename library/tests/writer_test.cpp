@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <array>
 #include <fstream>
+#include <tuple>
 
 #if defined(__unix__)
 #include <csignal>
@@ -10,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/audio.hpp"
+#include "axklib/media.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
 
@@ -201,6 +204,278 @@ TEST(HdsWriter, OverwriteReplacesSymlinkWithoutFollowingItsTarget) {
   EXPECT_EQ(std::filesystem::file_size(target), 8U);
   EXPECT_FALSE(std::filesystem::is_symlink(output));
   EXPECT_EQ(std::filesystem::file_size(output), axk::minimum_hds_size);
+  std::filesystem::remove_all(root, error);
+}
+
+TEST(MediaManifest, ParsesStrictAuthoredAndTransferModes) {
+  constexpr std::string_view authored = R"json({
+    "schema_version":"1.0",
+    "format":"iso9660",
+    "iso":{
+      "volume_id":"AXK_TEST",
+      "raw_group":"GROUP",
+      "group_name":"Test Group",
+      "raw_volume":"F001",
+      "volume_name":"Test Volume"
+    },
+    "authored_volume":{
+      "name":"Test Volume",
+      "waveforms":[{"id":"tone","name":"Tone","path":"tone.wav","root_key":60}],
+      "sample_banks":[{
+        "name":"Tone Bank","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127
+      }]
+    }
+  })json";
+  const auto parsed = axk::parse_media_build_manifest(authored, "/project");
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_EQ(parsed->format, axk::MediaImageFormat::iso9660);
+  ASSERT_TRUE(parsed->authored_volume);
+  EXPECT_EQ(parsed->authored_volume->waveforms.front().path, "/project/tone.wav");
+  EXPECT_EQ(parsed->volume_name, "Test Volume");
+
+  constexpr std::string_view whole_source = R"json({
+    "schema_version":"1.0",
+    "format":"iso9660",
+    "iso":{
+      "volume_id":"AXK_TEST",
+      "raw_group":"00000010",
+      "group_name":"Test Group",
+      "raw_volume":"F001",
+      "volume_name":"Test Volume"
+    },
+    "transfer":{"source_path":"source.ima","selection":"all"}
+  })json";
+  const auto whole = axk::parse_media_build_manifest(whole_source, "/project");
+  ASSERT_TRUE(whole) << whole.error().message;
+  ASSERT_TRUE(whole->transfer);
+  EXPECT_EQ(whole->transfer->source_path, "/project/source.ima");
+  EXPECT_EQ(whole->transfer->selection, axk::SavedObjectSelection::all);
+  EXPECT_TRUE(whole->transfer->root_object_keys.empty());
+
+  auto conflicting_selection = std::string{whole_source};
+  conflicting_selection.replace(conflicting_selection.find("\"selection\":\"all\""), 17,
+                                "\"selection\":\"all\",\"root_object_keys\":[\"x\"]");
+  EXPECT_FALSE(axk::parse_media_build_manifest(conflicting_selection));
+
+  auto invalid = std::string{authored};
+  invalid.insert(invalid.find("\"authored_volume\""),
+                 "\"transfer\":{\"source_path\":\"source.hds\",\"root_object_keys\":[\"x\"]},");
+  EXPECT_FALSE(axk::parse_media_build_manifest(invalid));
+}
+
+TEST(MediaWriter, WritesDeterministicFat12AndIso9660ImagesAndReopensExactPcm) {
+  axk::Waveform source;
+  source.format = {1, 2, 44100};
+  source.frame_count = 3;
+  source.pcm = {std::byte{},     std::byte{},     std::byte{0xe8},
+                std::byte{0x03}, std::byte{0x18}, std::byte{0xfc}};
+  const auto root = std::filesystem::temp_directory_path() / "axklib-media-writer";
+  const auto audio_path = root / "tone.wav";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+  std::filesystem::create_directories(root);
+  ASSERT_TRUE(axk::write_wav_atomic(audio_path, source));
+
+  axk::WaveformSpec waveform{"wave", "Wave", audio_path, 60, {}};
+  axk::SampleBankSpec bank;
+  bank.name = "Bank";
+  bank.waveform_id = "wave";
+  bank.root_key = 60;
+  bank.key_high = 127;
+  axk::VolumeSpec volume;
+  volume.name = "Volume";
+  volume.waveforms.push_back(std::move(waveform));
+  volume.sample_banks.push_back(std::move(bank));
+
+  for (const auto format : {axk::MediaImageFormat::fat12_floppy, axk::MediaImageFormat::iso9660}) {
+    axk::MediaBuildManifest manifest_value;
+    manifest_value.schema_version = "1.0";
+    manifest_value.format = format;
+    manifest_value.authored_volume = volume;
+    manifest_value.iso_volume_id = "AXK_TEST";
+    manifest_value.raw_group = "GROUP";
+    manifest_value.group_name = "Test Group";
+    manifest_value.raw_volume = "F001";
+    manifest_value.volume_name = "Test Volume";
+    const auto extension = format == axk::MediaImageFormat::fat12_floppy ? ".ima" : ".iso";
+    const auto first = root / ("first" + std::string{extension});
+    const auto second = root / ("second" + std::string{extension});
+    const auto written = axk::write_media_image(manifest_value, first);
+    ASSERT_TRUE(written) << written.error().message;
+    EXPECT_EQ(written->object_count, 2U);
+    EXPECT_FALSE(axk::write_media_image(manifest_value, first));
+    ASSERT_TRUE(axk::write_media_image(manifest_value, second));
+
+    std::ifstream first_input{first, std::ios::binary};
+    std::ifstream second_input{second, std::ios::binary};
+    const std::vector<char> first_bytes{std::istreambuf_iterator<char>{first_input}, {}};
+    const std::vector<char> second_bytes{std::istreambuf_iterator<char>{second_input}, {}};
+    EXPECT_EQ(first_bytes, second_bytes);
+
+    if (format == axk::MediaImageFormat::iso9660) {
+      ASSERT_GE(first_bytes.size(), (16U * 2048U) + 40U);
+      const std::string_view system_id{first_bytes.data() + (16U * 2048U) + 8U, 32U};
+      EXPECT_EQ(system_id, "APPLE COMPUTER, INC., TYPE: 0002");
+
+      const auto iso = axk::IsoImage::open(first);
+      ASSERT_TRUE(iso) << iso.error().message;
+      const auto find_file = [&](std::string_view path) {
+        return std::ranges::find(iso->files(), path, &axk::IsoFile::path);
+      };
+      const auto expected_catalog = [](std::string_view name, std::byte name_hash) {
+        std::vector<std::byte> result(32U);
+        std::fill_n(result.begin() + 1, 16U, std::byte{' '});
+        std::ranges::transform(name, result.begin() + 1,
+                               [](char character) { return static_cast<std::byte>(character); });
+        result[0] = name_hash;
+        result[17] = std::byte{0x5d};
+        result[18] = std::byte{'F'};
+        result[19] = std::byte{'0'};
+        result[20] = std::byte{'0'};
+        result[21] = std::byte{'1'};
+        return result;
+      };
+      const auto group_label = find_file("GROUP/F002");
+      ASSERT_NE(group_label, iso->files().end());
+      const auto group_label_bytes = iso->read_file(*group_label);
+      ASSERT_TRUE(group_label_bytes);
+      EXPECT_EQ(
+          *group_label_bytes,
+          (std::vector<std::byte>{std::byte{'T'}, std::byte{'e'}, std::byte{'s'}, std::byte{'t'},
+                                  std::byte{' '}, std::byte{'G'}, std::byte{'r'}, std::byte{'o'},
+                                  std::byte{'u'}, std::byte{'p'}, std::byte{' '}, std::byte{' '},
+                                  std::byte{' '}, std::byte{' '}, std::byte{' '}, std::byte{' '}}));
+
+      const auto volume_catalog = find_file("GROUP/0000");
+      ASSERT_NE(volume_catalog, iso->files().end());
+      const auto volume_catalog_bytes = iso->read_file(*volume_catalog);
+      ASSERT_TRUE(volume_catalog_bytes);
+      auto expected_group_catalog = expected_catalog("Test Volume", std::byte{0xd8});
+      std::vector<std::byte> expected_disk_name(32U);
+      expected_disk_name[0] = std::byte{0xe1};
+      std::ranges::transform(std::string_view{"_DSKNAME"}, expected_disk_name.begin() + 1,
+                             [](char character) { return static_cast<std::byte>(character); });
+      expected_disk_name[17] = std::byte{0x5e};
+      std::ranges::transform(std::string_view{"F002"}, expected_disk_name.begin() + 18,
+                             [](char character) { return static_cast<std::byte>(character); });
+      expected_group_catalog.insert(expected_group_catalog.end(), expected_disk_name.begin(),
+                                    expected_disk_name.end());
+      EXPECT_EQ(*volume_catalog_bytes, expected_group_catalog);
+
+      for (const auto &[path, name, expected_hash] :
+           std::array{std::tuple{"GROUP/F001/SMPL/0000", "Wave", std::byte{0xfa}},
+                      std::tuple{"GROUP/F001/SBNK/0000", "Bank", std::byte{0xc7}}}) {
+        const auto catalog_file = find_file(path);
+        ASSERT_NE(catalog_file, iso->files().end());
+        const auto catalog_bytes = iso->read_file(*catalog_file);
+        ASSERT_TRUE(catalog_bytes);
+        EXPECT_EQ(*catalog_bytes, expected_catalog(name, expected_hash));
+      }
+      EXPECT_NE(find_file("GROUP/F001/SMPL/F001"), iso->files().end());
+      EXPECT_NE(find_file("GROUP/F001/SBNK/F001"), iso->files().end());
+      EXPECT_EQ(find_file("GROUP/F001/SMPL/F000"), iso->files().end());
+    }
+
+    const auto media = axk::open_media(first);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto objects = media->objects();
+    ASSERT_TRUE(objects) << objects.error().message;
+    const auto sample =
+        std::ranges::find(objects->begin(), objects->end(), axk::ObjectType::smpl,
+                          [](const auto &object) { return object.decoded.header.type; });
+    ASSERT_NE(sample, objects->end());
+    const auto decoded = axk::decode_waveform(*sample);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    EXPECT_TRUE(std::ranges::equal(
+        source.pcm, std::span<const std::byte>{decoded->pcm}.first(source.pcm.size())));
+  }
+  std::filesystem::remove_all(root, error);
+}
+
+TEST(MediaWriter, SavedObjectTransferAddsKnownSampleBankDependencies) {
+  axk::Waveform source;
+  source.format = {1, 2, 44100};
+  source.frame_count = 1;
+  source.pcm = {std::byte{0x34}, std::byte{0x12}};
+  const auto root = std::filesystem::temp_directory_path() / "axklib-media-transfer";
+  const auto audio_path = root / "tone.wav";
+  const auto source_path = root / "source.hds";
+  const auto output_path = root / "transfer.ima";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+  std::filesystem::create_directories(root);
+  ASSERT_TRUE(axk::write_wav_atomic(audio_path, source));
+
+  axk::SampleBankSpec bank;
+  bank.name = "Bank";
+  bank.waveform_id = "wave";
+  bank.root_key = 60;
+  bank.key_high = 127;
+  axk::VolumeSpec volume;
+  volume.name = "Volume";
+  volume.waveforms.push_back({"wave", "Wave", audio_path, 60, {}});
+  volume.sample_banks.push_back(std::move(bank));
+  axk::HdsBuildManifest hds{"1.0", 4U * 1024U * 1024U, {{"hd1", {volume}}}};
+  ASSERT_TRUE(axk::write_hds_image(hds, source_path));
+  const auto source_media = axk::open_media(source_path);
+  ASSERT_TRUE(source_media);
+  const auto source_objects = source_media->objects();
+  ASSERT_TRUE(source_objects);
+  const auto bank_object =
+      std::ranges::find(*source_objects, axk::ObjectType::sbnk,
+                        [](const auto &object) { return object.decoded.header.type; });
+  ASSERT_NE(bank_object, source_objects->end());
+
+  axk::MediaBuildManifest transfer;
+  transfer.schema_version = "1.0";
+  transfer.format = axk::MediaImageFormat::fat12_floppy;
+  transfer.transfer = axk::SavedObjectTransferSpec{source_path, {bank_object->key}};
+  const auto written = axk::write_media_image(transfer, output_path);
+  ASSERT_TRUE(written) << written.error().message;
+  EXPECT_EQ(written->object_count, 2U);
+  const auto output = axk::open_media(output_path);
+  ASSERT_TRUE(output);
+  const auto output_objects = output->objects();
+  ASSERT_TRUE(output_objects);
+  EXPECT_EQ(output_objects->size(), 2U);
+  EXPECT_EQ(std::ranges::count(*output_objects, axk::ObjectType::smpl,
+                               [](const auto &object) { return object.decoded.header.type; }),
+            1U);
+
+  axk::MediaBuildManifest whole;
+  whole.schema_version = "1.0";
+  whole.format = axk::MediaImageFormat::iso9660;
+  whole.transfer = axk::SavedObjectTransferSpec{output_path, {}, axk::SavedObjectSelection::all};
+  whole.iso_volume_id = "AXK_TRANSFER";
+  whole.raw_group = "00000010";
+  whole.group_name = "Transfer";
+  whole.raw_volume = "F001";
+  whole.volume_name = "Transfer";
+  const auto whole_path = root / "whole.iso";
+  const auto whole_written = axk::write_media_image(whole, whole_path);
+  ASSERT_TRUE(whole_written) << whole_written.error().message;
+  EXPECT_EQ(whole_written->object_count, output_objects->size());
+  const auto whole_media = axk::open_media(whole_path);
+  ASSERT_TRUE(whole_media);
+  const auto whole_objects = whole_media->objects();
+  ASSERT_TRUE(whole_objects);
+  const auto sorted_payloads = [](const auto &objects) {
+    std::vector<std::vector<std::byte>> payloads;
+    payloads.reserve(objects.size());
+    for (const auto &object : objects)
+      payloads.push_back(object.raw_payload);
+    std::ranges::sort(payloads, [](const auto &left, const auto &right) {
+      return std::lexicographical_compare(
+          left.begin(), left.end(), right.begin(), right.end(), [](std::byte lhs, std::byte rhs) {
+            return std::to_integer<unsigned int>(lhs) < std::to_integer<unsigned int>(rhs);
+          });
+    });
+    return payloads;
+  };
+  EXPECT_EQ(sorted_payloads(*output_objects), sorted_payloads(*whole_objects));
+
+  whole.transfer->source_path = source_path;
+  EXPECT_FALSE(axk::write_media_image(whole, root / "whole-from-hds.iso"));
   std::filesystem::remove_all(root, error);
 }
 

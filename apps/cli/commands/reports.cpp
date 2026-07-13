@@ -1485,6 +1485,11 @@ std::vector<axk::ReportRow> validate_media_details(const CliLoaded &source,
                                                    bool include_object_checks = true) {
   std::vector<axk::ReportRow> issues;
   if (include_object_checks) {
+    for (const auto &issue : source.media.validation_issues()) {
+      issues.push_back(media_validation_issue(source, "error", issue.code, issue.message,
+                                              "container", issue.sampler_path, {}, "Confirmed",
+                                              issue.basis, issue.recommended_next_check));
+    }
     for (const auto &object : source.objects) {
       const auto required = static_cast<std::uint64_t>(object.decoded.header.header_size) +
                             object.decoded.header.payload_bytes_0x1c;

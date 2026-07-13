@@ -207,6 +207,7 @@ Result<IsoImage> IsoImage::open(std::shared_ptr<const RandomAccessReader> reader
     return std::unexpected{labels.error()};
   result.group_labels_ = std::move(labels->groups);
   result.volume_labels_ = std::move(labels->volumes);
+  result.validation_issues_ = std::move(labels->validation_issues);
   return result;
 }
 
@@ -221,6 +222,9 @@ Result<IsoImage> IsoImage::open(const std::filesystem::path &path,
 const std::string &IsoImage::volume_id() const noexcept { return volume_id_; }
 const std::string &IsoImage::source_name() const noexcept { return source_name_; }
 const std::vector<IsoFile> &IsoImage::files() const noexcept { return files_; }
+std::span<const MediaValidationIssue> IsoImage::validation_issues() const noexcept {
+  return validation_issues_;
+}
 
 Result<std::vector<std::byte>> IsoImage::read_file(const IsoFile &file,
                                                    const CancellationToken &cancellation) const {

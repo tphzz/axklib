@@ -7,7 +7,8 @@ engine is implemented in C++23.
 It reads SFS HDA/HDS images, FAT12 floppy images, ISO9660 sample CD-ROMs, and
 standalone sampler objects. It can inventory object relationships, export exact
 waveforms and rendered stereo audio, create fresh HDS images, and apply ordered
-changes to existing images.
+changes to existing images. It can also build narrow FAT12 floppy and primary
+ISO9660 image profiles for file-based testing and transfer workflows.
 
 ## Build
 

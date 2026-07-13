@@ -3,8 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <string>
 #include <vector>
 
+#include "axklib/object.hpp"
 #include "axklib/writer.hpp"
 
 namespace axk::detail {
@@ -27,6 +29,17 @@ struct PreparedWaveformMember {
   std::uint32_t frame_count{};
 };
 
+struct PreparedMediaObject {
+  ObjectType type{ObjectType::unknown};
+  std::string name;
+  std::vector<std::byte> payload;
+};
+
+struct PreparedMediaImage {
+  MediaBuildManifest manifest;
+  std::vector<PreparedMediaObject> objects;
+};
+
 Result<std::vector<std::byte>>
 prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio, std::uint32_t link_id);
 Result<std::vector<std::byte>>
@@ -41,5 +54,14 @@ Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program);
 Result<std::vector<PreparedRecord>>
 prepare_partition_records(const PartitionSpec &partition, const PartitionGeometry &geometry,
                           std::size_t partition_count, const CancellationToken &cancellation);
+
+Result<PreparedMediaImage> prepare_media_image(const MediaBuildManifest &manifest,
+                                               const CancellationToken &cancellation);
+Result<void> write_fat12_image(const PreparedMediaImage &image,
+                               const std::filesystem::path &temporary_path,
+                               const CancellationToken &cancellation);
+Result<void> write_iso9660_image(const PreparedMediaImage &image,
+                                 const std::filesystem::path &temporary_path,
+                                 const CancellationToken &cancellation);
 
 } // namespace axk::detail

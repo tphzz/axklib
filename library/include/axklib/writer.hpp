@@ -72,6 +72,27 @@ struct HdsBuildManifest {
   std::vector<PartitionSpec> partitions;
 };
 
+enum class MediaImageFormat : std::uint8_t { fat12_floppy, iso9660 };
+enum class SavedObjectSelection : std::uint8_t { roots, all };
+
+struct SavedObjectTransferSpec {
+  std::filesystem::path source_path;
+  std::vector<std::string> root_object_keys;
+  SavedObjectSelection selection{SavedObjectSelection::roots};
+};
+
+struct MediaBuildManifest {
+  std::string schema_version;
+  MediaImageFormat format{MediaImageFormat::fat12_floppy};
+  std::optional<SavedObjectTransferSpec> transfer;
+  std::optional<VolumeSpec> authored_volume;
+  std::string iso_volume_id{"AXKLIB"};
+  std::string raw_group{"GROUP"};
+  std::string group_name{"AXKLIB"};
+  std::string raw_volume{"F001"};
+  std::string volume_name{"AXKLIB"};
+};
+
 struct AudioImportOptions {
   std::uint8_t expected_channels{1};
   std::optional<std::uint32_t> target_sample_rate;
@@ -121,9 +142,20 @@ struct WrittenImageLayout {
   std::uint64_t unused_tail_sectors{};
 };
 
+struct WrittenMediaImage {
+  std::filesystem::path path;
+  MediaImageFormat format{MediaImageFormat::fat12_floppy};
+  std::uint64_t size_bytes{};
+  std::size_t object_count{};
+};
+
 AXK_AUDIO_API Result<HdsBuildManifest>
 parse_hds_build_manifest(std::string_view json, const std::filesystem::path &base_directory = {});
 AXK_AUDIO_API Result<HdsBuildManifest> load_hds_build_manifest(const std::filesystem::path &path);
+AXK_AUDIO_API Result<MediaBuildManifest>
+parse_media_build_manifest(std::string_view json, const std::filesystem::path &base_directory = {});
+AXK_AUDIO_API Result<MediaBuildManifest>
+load_media_build_manifest(const std::filesystem::path &path);
 AXK_AUDIO_API Result<std::vector<PartitionGeometry>>
 plan_hds_geometry(const HdsBuildManifest &manifest);
 AXK_AUDIO_API Result<std::uint32_t>
@@ -134,5 +166,8 @@ AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const std::filesystem::
 AXK_AUDIO_API Result<WrittenImageLayout>
 write_hds_image(const HdsBuildManifest &manifest, const std::filesystem::path &output_path,
                 bool overwrite = false, const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenMediaImage>
+write_media_image(const MediaBuildManifest &manifest, const std::filesystem::path &output_path,
+                  bool overwrite = false, const CancellationToken &cancellation = {});
 
 } // namespace axk

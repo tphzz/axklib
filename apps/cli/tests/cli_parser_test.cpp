@@ -98,6 +98,16 @@ TEST(Cli11Adapter, ExposesMaintainedCommandInventoryAndHidesLegacyAliases) {
   EXPECT_EQ(normalize_newlines(output), normalize_newlines(expected));
 }
 
+TEST(Cli11Adapter, ExposesHdsFloppyAndIsoCreationProfiles) {
+  std::array help{const_cast<char *>("axklib"), const_cast<char *>("create"),
+                  const_cast<char *>("--help")};
+  testing::internal::CaptureStdout();
+  EXPECT_EQ(axk::cli::run(static_cast<int>(help.size()), help.data()), 0);
+  const auto output = testing::internal::GetCapturedStdout();
+  for (const auto command : {"hds", "floppy", "iso"})
+    EXPECT_NE(output.find(command), std::string::npos) << command;
+}
+
 TEST(Cli11Adapter, ExtractSfzWritesAudioInstrumentsAndVolumeGraph) {
   const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images" /
                        "sampler-authored/HD00_512_multi_sbnk_authored.hds";

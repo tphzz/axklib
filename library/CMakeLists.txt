@@ -117,6 +117,9 @@ add_library(
   adapters/audio_resample_soxr.cpp
   adapters/pcm16_quantizer.cpp
   src/alteration.cpp
+  src/media_build.cpp
+  src/media_write_fat12.cpp
+  src/media_write_iso9660.cpp
   src/writer.cpp
   src/writer_image.cpp
 )
@@ -140,10 +143,11 @@ set_target_properties(
 )
 find_package(SndFile CONFIG REQUIRED)
 find_package(SOXR REQUIRED)
+find_package(FatFs CONFIG REQUIRED)
 target_link_libraries(
   axk_audio
   PUBLIC axklib::core
-  PRIVATE SndFile::sndfile SOXR::soxr
+  PRIVATE SndFile::sndfile SOXR::soxr FatFs::FatFs
 )
 axk_set_project_warnings(axk_audio)
 axk_enable_sanitizers(axk_audio)
@@ -415,7 +419,7 @@ if(BUILD_TESTING)
 endif()
 
 set(AXK_CARGO_STATIC_LIBRARIES
-    axk_audio axk_core sndfile vorbisenc vorbis FLAC ogg opus soxr)
+    axk_audio axk_core sndfile vorbisenc vorbis FLAC ogg opus soxr FatFs)
 set(AXK_CARGO_LINK_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/axk-cargo-link.txt")
 file(WRITE "${AXK_CARGO_LINK_MANIFEST}" "")
 foreach(library IN LISTS AXK_CARGO_STATIC_LIBRARIES)
@@ -462,7 +466,7 @@ if(AXK_INSTALL_EMBED_ENGINE)
   install(FILES "${AXK_CARGO_LINK_MANIFEST}" DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib"
           COMPONENT embedding)
 endif()
-foreach(package nlohmann-json libsndfile soxr utfcpp libflac libogg libvorbis opus)
+foreach(package nlohmann-json libsndfile soxr utfcpp libflac libogg libvorbis opus fatfs)
   install(
     FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${package}/copyright"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/${package}"

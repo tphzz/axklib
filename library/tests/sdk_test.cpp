@@ -1,6 +1,7 @@
 #include "axklib/sdk.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -16,6 +17,17 @@ namespace {
 std::filesystem::path fixture_path() {
   return std::filesystem::path{AXK_SOURCE_ROOT} / "tests" / "fixtures" / "images" /
          "sampler-authored" / "HD00_512_single_sbnk_authored.hds";
+}
+
+void write_test_wave(const std::filesystem::path &path) {
+  constexpr std::array<unsigned char, 48> wave{
+      'R', 'I', 'F', 'F', 40,  0,   0,   0,   'W',  'A',  'V', 'E', 'f',  'm',  't', ' ',
+      16,  0,   0,   0,   1,   0,   1,   0,   0x44, 0xac, 0,   0,   0x88, 0x58, 1,   0,
+      2,   0,   16,  0,   'd', 'a', 't', 'a', 4,    0,    0,   0,   0,    0,    1,   0,
+  };
+  std::ofstream output{path, std::ios::binary};
+  output.write(reinterpret_cast<const char *>(wave.data()),
+               static_cast<std::streamsize>(wave.size()));
 }
 
 TEST(Sdk, PublicFacadeOwnsVersionResultAndMoveOnlySessions) {
@@ -179,6 +191,28 @@ TEST(Sdk, BuildAndTransactionPlansApplyThroughTheFacade) {
   ASSERT_TRUE(alteration->apply(output.string(), {}, context));
   EXPECT_TRUE(std::filesystem::exists(output));
   EXPECT_GT(progress.calls, 0U);
+
+  std::filesystem::remove_all(root, filesystem_error);
+}
+
+TEST(Sdk, MediaBuildPlanCreatesAFat12Image) {
+  const auto root = std::filesystem::temp_directory_path() / "axklib-sdk-media-plan";
+  const auto manifest = root / "build.json";
+  const auto audio = root / "tone.wav";
+  const auto output = root / "output.ima";
+  std::error_code filesystem_error;
+  std::filesystem::remove_all(root, filesystem_error);
+  std::filesystem::create_directories(root);
+  write_test_wave(audio);
+  std::ofstream{manifest}
+      << R"({"schema_version":"1.0","format":"fat12_floppy","authored_volume":{"name":"Volume","waveforms":[{"id":"tone","name":"Tone","path":"tone.wav","root_key":60}],"sample_banks":[{"name":"Tone Bank","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127}]}})";
+
+  axk::operation_context context;
+  auto plan = axk::build_plan::from_manifest(manifest.string(), context);
+  ASSERT_TRUE(plan) << plan.error().message;
+  EXPECT_EQ(plan->summary().size_bytes, 1'474'560U);
+  ASSERT_TRUE(plan->apply(output.string(), {}, context));
+  EXPECT_EQ(std::filesystem::file_size(output), 1'474'560U);
 
   std::filesystem::remove_all(root, filesystem_error);
 }

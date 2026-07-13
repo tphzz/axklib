@@ -123,6 +123,12 @@ std::filesystem::path MediaContainer::source_path() const {
 
 const MediaStorage &MediaContainer::storage() const noexcept { return storage_; }
 
+std::span<const MediaValidationIssue> MediaContainer::validation_issues() const noexcept {
+  if (const auto *iso = variant_ptr<IsoImage>(storage_))
+    return iso->validation_issues();
+  return {};
+}
+
 Result<std::vector<MediaObject>>
 MediaContainer::objects(std::size_t maximum_object_bytes,
                         const CancellationToken &cancellation) const {

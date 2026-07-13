@@ -28,12 +28,18 @@ hard-disk image. Keep those layers separate.
 
 ## Compatibility Profile
 
-This reader supports the read-only FAT12 profile used by maintained Yamaha
+The reader supports the FAT12 profile used by maintained Yamaha
 A-series floppy media; it is not a general FAT implementation. It follows
 bounded FAT12 cluster chains, requires duplicated FAT copies to agree, and uses
 DOS 8.3 directory identities. Long-filename entries are ignored in favor of
 their 8.3 aliases. FAT16, FAT32, exFAT, filesystem repair, and filesystem
-writing are unsupported.
+alteration are unsupported.
+
+Fresh image creation uses pinned FatFs code behind axklib's target-neutral
+object build plan. It is limited to a deterministic 1.44 MB superfloppy and
+root-directory object files. The generated image is reopened by this reader
+before publication. This profile has not yet been promoted by a physical Yamaha
+sampler test, so parser-valid output is not a hardware-compatibility claim.
 
 ## FAT12 Geometry
 

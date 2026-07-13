@@ -243,6 +243,16 @@ int axk::cli::run(int argc, char **argv) {
   create_hds_nested->add_option("-o,--output", create_output, "output HDS path")->required();
   create_hds_nested->add_flag("--overwrite", create_overwrite, "replace an existing output");
   create_hds_nested->add_flag("--pretty", create_pretty, "indent JSON output");
+  auto *create_floppy = create->add_subcommand("floppy", "create a fresh FAT12 floppy image");
+  create_floppy->add_option("manifest", create_manifest, "media build manifest JSON")->required();
+  create_floppy->add_option("-o,--output", create_output, "output IMA path")->required();
+  create_floppy->add_flag("--overwrite", create_overwrite, "replace an existing output");
+  create_floppy->add_flag("--pretty", create_pretty, "indent JSON output");
+  auto *create_iso = create->add_subcommand("iso", "create a fresh ISO9660 image");
+  create_iso->add_option("manifest", create_manifest, "media build manifest JSON")->required();
+  create_iso->add_option("-o,--output", create_output, "output ISO path")->required();
+  create_iso->add_flag("--overwrite", create_overwrite, "replace an existing output");
+  create_iso->add_flag("--pretty", create_pretty, "indent JSON output");
 
   std::filesystem::path alter_source;
   std::filesystem::path alter_manifest;
@@ -299,6 +309,14 @@ int axk::cli::run(int argc, char **argv) {
     return run_preview(preview_path, preview_object_key, preview_bins, preview_pretty);
   if (*create_hds || *create_hds_nested) {
     return run_create_hds(create_manifest, create_output, create_overwrite, create_pretty);
+  }
+  if (*create_floppy) {
+    return run_create_media(create_manifest, create_output, "fat12_floppy", create_overwrite,
+                            create_pretty);
+  }
+  if (*create_iso) {
+    return run_create_media(create_manifest, create_output, "iso9660", create_overwrite,
+                            create_pretty);
   }
   if (*alter_hds) {
     const auto output =

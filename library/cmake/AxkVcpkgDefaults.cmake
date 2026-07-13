@@ -8,6 +8,12 @@ if(NOT DEFINED VCPKG_OVERLAY_TRIPLETS)
       CACHE STRING "axklib vcpkg overlay triplets")
 endif()
 
+if(NOT DEFINED VCPKG_OVERLAY_PORTS OR VCPKG_OVERLAY_PORTS STREQUAL "")
+  set(VCPKG_OVERLAY_PORTS
+      "${_axk_default_repository_root}/library/cmake/ports"
+      CACHE STRING "axklib vcpkg overlay ports" FORCE)
+endif()
+
 if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   set(_axk_host_processor "${CMAKE_HOST_SYSTEM_PROCESSOR}")
   if(NOT _axk_host_processor)

@@ -428,6 +428,34 @@ int run_create_hds(const std::filesystem::path &manifest_path,
   return 0;
 }
 
+int run_create_media(const std::filesystem::path &manifest_path,
+                     const std::filesystem::path &output_path, std::string_view expected_format,
+                     bool overwrite, bool pretty) {
+  static_cast<void>(pretty);
+  const auto manifest = axk::load_media_build_manifest(manifest_path);
+  if (!manifest) {
+    std::cerr << axk::render_error(manifest.error()) << '\n';
+    return 2;
+  }
+  const auto actual_format = manifest->format == axk::MediaImageFormat::fat12_floppy
+                                 ? std::string_view{"fat12_floppy"}
+                                 : std::string_view{"iso9660"};
+  if (actual_format != expected_format) {
+    std::cerr << "manifest format '" << actual_format << "' does not match create "
+              << (expected_format == "fat12_floppy" ? "floppy" : "iso") << '\n';
+    return 2;
+  }
+  const auto written = axk::write_media_image(*manifest, output_path, overwrite);
+  if (!written) {
+    std::cerr << axk::render_error(written.error()) << '\n';
+    return 2;
+  }
+  std::cout << "image=" << axk::text::path_to_utf8(written->path) << " format=" << actual_format
+            << " size_bytes=" << written->size_bytes << " objects=" << written->object_count
+            << '\n';
+  return 0;
+}
+
 int run_alter_hds(const std::filesystem::path &source_path,
                   const std::filesystem::path &manifest_path,
                   const std::optional<std::filesystem::path> &output_path, bool pretty) {

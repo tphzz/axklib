@@ -46,7 +46,7 @@ def test_sdk_sbom_excludes_cli_and_test_only_dependencies(
     )
     assert generate_sbom.main() == 0
     names = {item["name"] for item in json.loads(output.read_text())["packages"]}
-    assert {"libsndfile", "soxr", "libflac", "libvorbis", "opus"} <= names
+    assert {"fatfs", "libsndfile", "soxr", "libflac", "libvorbis", "opus"} <= names
     assert names.isdisjoint({"cli11", "hash-library", "gtest"})
 
 

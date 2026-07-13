@@ -5,15 +5,85 @@ TEST(Iso9660Reader, LoadsYamahaScopeLabelsObjectsAndStructuredPaths) {
       axk::IsoImage::open(std::make_shared<axk::MemoryReader>(iso_fixture()), "fixture.iso");
   ASSERT_TRUE(image) << image.error().message;
   EXPECT_EQ(image->volume_id(), "TESTVOL");
+  EXPECT_TRUE(image->validation_issues().empty());
   auto objects = image->objects();
   ASSERT_TRUE(objects) << objects.error().message;
   ASSERT_EQ(objects->size(), 1U);
   const auto &object = objects->front();
   EXPECT_EQ(object.logical_path, "GROUP/F001/F000");
+  EXPECT_EQ(object.group_label.value, "Mapped Group");
+  EXPECT_EQ(object.group_label.status, axk::LabelStatus::confirmed);
   EXPECT_EQ(object.volume_label.value, "Mapped Vol");
   EXPECT_EQ(object.volume_label.status, axk::LabelStatus::confirmed);
   const auto path = axk::structured_object_path(object);
-  EXPECT_EQ(path.relative_path.generic_string(), "GROUP/Mapped Vol/SMPL/CD WAVE");
+  EXPECT_EQ(path.relative_path.generic_string(), "Mapped Group/Mapped Vol/SMPL/CD WAVE");
+}
+
+TEST(Iso9660Reader, RequiresCatalogedDsknameForAConfirmedGroupLabelButKeepsInventory) {
+  auto fixture = iso_fixture();
+  std::fill_n(fixture.begin() + 22U * 2048U + 32U, 32, std::byte{});
+  auto image = axk::IsoImage::open(std::make_shared<axk::MemoryReader>(std::move(fixture)),
+                                   "missing-dskname.iso");
+  ASSERT_TRUE(image) << image.error().message;
+  ASSERT_EQ(image->validation_issues().size(), 1U);
+  EXPECT_EQ(image->validation_issues().front().code, "ISO_YAMAHA_DSKNAME_ROW_MISSING");
+  auto objects = image->objects();
+  ASSERT_TRUE(objects) << objects.error().message;
+  ASSERT_EQ(objects->size(), 1U);
+  EXPECT_EQ(objects->front().group_label.value, "GROUP");
+  EXPECT_EQ(objects->front().group_label.status, axk::LabelStatus::raw_identifier);
+  EXPECT_EQ(objects->front().volume_label.value, "Mapped Vol");
+  EXPECT_EQ(objects->front().volume_label.status, axk::LabelStatus::confirmed);
+}
+
+TEST(Iso9660Reader, RequiresDsknameToBeTheFinalCatalogRow) {
+  auto fixture = iso_fixture();
+  const auto catalog = fixture.begin() + 22U * 2048U;
+  std::swap_ranges(catalog, catalog + 32U, catalog + 32U);
+  auto image = axk::IsoImage::open(std::make_shared<axk::MemoryReader>(std::move(fixture)),
+                                   "non-final-dskname.iso");
+  ASSERT_TRUE(image) << image.error().message;
+  ASSERT_EQ(image->validation_issues().size(), 1U);
+  EXPECT_EQ(image->validation_issues().front().code, "ISO_YAMAHA_DSKNAME_ROW_NOT_FINAL");
+  auto objects = image->objects();
+  ASSERT_TRUE(objects) << objects.error().message;
+  ASSERT_EQ(objects->size(), 1U);
+  EXPECT_EQ(objects->front().group_label.value, "GROUP");
+  EXPECT_EQ(objects->front().group_label.status, axk::LabelStatus::raw_identifier);
+  EXPECT_EQ(objects->front().volume_label.value, "Mapped Vol");
+  EXPECT_EQ(objects->front().volume_label.status, axk::LabelStatus::confirmed);
+}
+
+TEST(Iso9660Reader, ReportsWrongDsknameTargetButKeepsInventory) {
+  auto fixture = iso_fixture();
+  ascii(fixture, 22U * 2048U + 50U, "F003");
+  auto image = axk::IsoImage::open(std::make_shared<axk::MemoryReader>(std::move(fixture)),
+                                   "wrong-dskname-target.iso");
+  ASSERT_TRUE(image) << image.error().message;
+  ASSERT_EQ(image->validation_issues().size(), 1U);
+  EXPECT_EQ(image->validation_issues().front().code, "ISO_YAMAHA_DSKNAME_TARGET_INVALID");
+  const axk::MediaContainer media{*image};
+  ASSERT_EQ(media.validation_issues().size(), 1U);
+  EXPECT_EQ(media.validation_issues().front().code, "ISO_YAMAHA_DSKNAME_TARGET_INVALID");
+  auto objects = image->objects();
+  ASSERT_TRUE(objects) << objects.error().message;
+  ASSERT_EQ(objects->size(), 1U);
+  EXPECT_EQ(objects->front().group_label.status, axk::LabelStatus::raw_identifier);
+  EXPECT_EQ(objects->front().volume_label.status, axk::LabelStatus::confirmed);
+}
+
+TEST(Iso9660Reader, RequiresVolumeIdInTheCatalogFilenameField) {
+  auto fixture = iso_fixture();
+  std::fill_n(fixture.begin() + 22U * 2048U + 18U, 11, std::byte{});
+  ascii(fixture, 22U * 2048U + 10U, "F001");
+  auto image = axk::IsoImage::open(std::make_shared<axk::MemoryReader>(std::move(fixture)),
+                                   "misplaced-volume-id.iso");
+  ASSERT_TRUE(image) << image.error().message;
+  auto objects = image->objects();
+  ASSERT_TRUE(objects) << objects.error().message;
+  ASSERT_EQ(objects->size(), 1U);
+  EXPECT_EQ(objects->front().volume_label.value, "CD WAVE");
+  EXPECT_EQ(objects->front().volume_label.status, axk::LabelStatus::navigation_aid);
 }
 
 TEST(Iso9660Reader, RejectsInvalidDescriptorAndOutOfRangeExtent) {

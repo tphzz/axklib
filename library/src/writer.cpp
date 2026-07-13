@@ -387,6 +387,121 @@ Result<HdsBuildManifest> parse(const Json &root, const std::filesystem::path &ba
   return result;
 }
 
+Result<MediaBuildManifest> parse_media(const Json &root, const std::filesystem::path &base) {
+  if (auto valid = fields(root, "manifest", {"schema_version", "format"},
+                          {"transfer", "authored_volume", "iso"});
+      !valid) {
+    return std::unexpected{valid.error()};
+  }
+  auto version = text(root["schema_version"], "manifest.schema_version");
+  auto format = text(root["format"], "manifest.format");
+  if (!version)
+    return std::unexpected{version.error()};
+  if (!format)
+    return std::unexpected{format.error()};
+  if (*version != "1.0")
+    return std::unexpected{manifest_error("manifest.schema_version must be '1.0'")};
+  const bool transfer = root.contains("transfer");
+  const bool authored = root.contains("authored_volume");
+  if (transfer == authored) {
+    return std::unexpected{
+        manifest_error("manifest must contain exactly one of transfer or authored_volume")};
+  }
+  MediaBuildManifest result;
+  result.schema_version = *version;
+  if (*format == "fat12_floppy") {
+    result.format = MediaImageFormat::fat12_floppy;
+  } else if (*format == "iso9660") {
+    result.format = MediaImageFormat::iso9660;
+  } else {
+    return std::unexpected{manifest_error("manifest.format must be 'fat12_floppy' or 'iso9660'")};
+  }
+  if (transfer) {
+    const auto &row = root["transfer"];
+    if (auto valid =
+            fields(row, "manifest.transfer", {"source_path"}, {"selection", "root_object_keys"});
+        !valid) {
+      return std::unexpected{valid.error()};
+    }
+    auto source = path(row["source_path"], "manifest.transfer.source_path", base);
+    if (!source)
+      return std::unexpected{source.error()};
+    SavedObjectSelection selection = SavedObjectSelection::roots;
+    if (row.contains("selection")) {
+      auto value = text(row["selection"], "manifest.transfer.selection");
+      if (!value)
+        return std::unexpected{value.error()};
+      if (*value == "all") {
+        selection = SavedObjectSelection::all;
+      } else if (*value != "roots") {
+        return std::unexpected{
+            manifest_error("manifest.transfer.selection must be 'roots' or 'all'")};
+      }
+    }
+    const bool has_roots = row.contains("root_object_keys");
+    if (selection == SavedObjectSelection::all && has_roots) {
+      return std::unexpected{manifest_error(
+          "manifest.transfer.root_object_keys must be omitted when selection is 'all'")};
+    }
+    if (selection == SavedObjectSelection::roots &&
+        (!has_roots || !row["root_object_keys"].is_array() || row["root_object_keys"].empty())) {
+      return std::unexpected{manifest_error(
+          "manifest.transfer.root_object_keys must be a non-empty array for root selection")};
+    }
+    SavedObjectTransferSpec spec{*source, {}, selection};
+    if (selection == SavedObjectSelection::roots) {
+      std::set<std::string> keys;
+      for (std::size_t index = 0; index < row["root_object_keys"].size(); ++index) {
+        auto key = text(row["root_object_keys"][index],
+                        "manifest.transfer.root_object_keys[" + std::to_string(index) + "]");
+        if (!key)
+          return std::unexpected{key.error()};
+        if (!keys.insert(*key).second)
+          return std::unexpected{
+              manifest_error("manifest.transfer.root_object_keys contains a duplicate")};
+        spec.root_object_keys.push_back(std::move(*key));
+      }
+    }
+    result.transfer = std::move(spec);
+  } else {
+    auto parsed = volume(root["authored_volume"], "manifest.authored_volume", base);
+    if (!parsed)
+      return std::unexpected{parsed.error()};
+    result.authored_volume = std::move(*parsed);
+  }
+  if (root.contains("iso")) {
+    const auto &iso = root["iso"];
+    if (auto valid = fields(iso, "manifest.iso",
+                            {"volume_id", "raw_group", "group_name", "raw_volume", "volume_name"});
+        !valid) {
+      return std::unexpected{valid.error()};
+    }
+    auto volume_id = text(iso["volume_id"], "manifest.iso.volume_id");
+    auto raw_group = text(iso["raw_group"], "manifest.iso.raw_group");
+    auto group_name = text(iso["group_name"], "manifest.iso.group_name");
+    auto raw_volume = text(iso["raw_volume"], "manifest.iso.raw_volume");
+    auto volume_name = text(iso["volume_name"], "manifest.iso.volume_name");
+    if (!volume_id)
+      return std::unexpected{volume_id.error()};
+    if (!raw_group)
+      return std::unexpected{raw_group.error()};
+    if (!group_name)
+      return std::unexpected{group_name.error()};
+    if (!raw_volume)
+      return std::unexpected{raw_volume.error()};
+    if (!volume_name)
+      return std::unexpected{volume_name.error()};
+    result.iso_volume_id = std::move(*volume_id);
+    result.raw_group = std::move(*raw_group);
+    result.group_name = std::move(*group_name);
+    result.raw_volume = std::move(*raw_volume);
+    result.volume_name = std::move(*volume_name);
+  } else if (result.format == MediaImageFormat::iso9660) {
+    return std::unexpected{manifest_error("manifest.iso is required for ISO9660 output")};
+  }
+  return result;
+}
+
 } // namespace
 
 Result<HdsBuildManifest> parse_hds_build_manifest(std::string_view json,
@@ -410,6 +525,29 @@ Result<HdsBuildManifest> load_hds_build_manifest(const std::filesystem::path &pa
     return std::unexpected{
         make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not read HDS manifest")};
   return parse_hds_build_manifest(text.str(), path.parent_path());
+}
+
+Result<MediaBuildManifest> parse_media_build_manifest(std::string_view json,
+                                                      const std::filesystem::path &base_directory) {
+  try {
+    return parse_media(Json::parse(json), base_directory);
+  } catch (const Json::exception &error) {
+    return std::unexpected{
+        manifest_error(std::string{"invalid media manifest JSON: "} + error.what())};
+  }
+}
+
+Result<MediaBuildManifest> load_media_build_manifest(const std::filesystem::path &path) {
+  std::ifstream input{path, std::ios::binary};
+  if (!input)
+    return std::unexpected{
+        make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not open media manifest")};
+  std::ostringstream contents;
+  contents << input.rdbuf();
+  if (!input && !input.eof())
+    return std::unexpected{
+        make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not read media manifest")};
+  return parse_media_build_manifest(contents.str(), path.parent_path());
 }
 
 Result<std::vector<PartitionGeometry>> plan_hds_geometry(const HdsBuildManifest &manifest) {
