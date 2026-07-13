@@ -33,8 +33,20 @@ ScopeIndex index_scope(const std::vector<const ObjectSnapshot *> &scope) {
     index.typed_names[{item->object.header.type, item->object.header.name}].push_back(item);
     index.names[item->object.header.name].push_back(item);
     index.keys.emplace(item->key, item);
-    if (const auto *sample = std::get_if<CurrentSmpl>(&item->object.payload))
+    if (const auto *sample = std::get_if<CurrentSmpl>(&item->object.payload)) {
       index.sample_links[sample->link_id.value].push_back(item);
+    } else if (item->object.header.type == ObjectType::smpl) {
+      const auto *generic = std::get_if<GenericObject>(&item->object.payload);
+      if (generic != nullptr && generic->raw_payload.size() >= 0x7cU) {
+        const auto &raw = generic->raw_payload;
+        const auto link =
+            static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x78U])) << 24U |
+            static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x79U])) << 16U |
+            static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x7aU])) << 8U |
+            static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x7bU]));
+        index.sample_links[link].push_back(item);
+      }
+    }
   }
   return index;
 }
@@ -319,8 +331,6 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
           if (row.name.empty())
             continue;
           const auto type = expected_type(row.kind);
-          if (type == ObjectType::unknown)
-            continue;
           auto match = match_named_target(
               *item, row.name, type, scope_index,
               type == ObjectType::unknown ? "assignment-name-unique"
@@ -329,13 +339,13 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                   ? "assignment-name-ambiguous"
                   : std::format("assignment-kind-0x{:02x}+name-ambiguous", row.kind),
               assignment_state(row) == AssignmentState::active ||
-                  (item->placement && !item->placement->container_directory.empty()));
+                  item->scope_key.starts_with("iso:"));
           if (match.target != nullptr && match.basis.ends_with("+same-folder") &&
               type != ObjectType::unknown) {
             match.quality = RelationshipQuality::known;
           }
           if (match.quality == RelationshipQuality::unknown && type == ObjectType::sbnk &&
-              item->placement && !item->placement->container_directory.empty()) {
+              item->scope_key.starts_with("iso:")) {
             auto source_load_candidates = named(scope_index, ObjectType::unknown, row.name);
             const auto *local = unique_local(*item, source_load_candidates);
             if (local != nullptr) {
@@ -348,17 +358,19 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                        "multiple same-scope non-SBNK objects match the assignment name"};
             }
           }
-          if (match.quality == RelationshipQuality::unknown && row.raw_handle == 0U)
+          const auto decoded_state = assignment_state(row);
+          if (match.quality == RelationshipQuality::unknown &&
+              (row.raw_handle == 0U || decoded_state == AssignmentState::unknown))
             continue;
           const auto rel_type = type == ObjectType::sbac   ? "PROG_ASSIGNMENT_TO_SBAC"
                                 : type == ObjectType::sbnk ? "PROG_ASSIGNMENT_TO_SBNK"
                                                            : "PROG_ASSIGNMENT_TO_OBJECT";
-          auto state = assignment_state(row);
+          auto state = decoded_state;
           auto channel = receive_channel(row);
-          if (match.target != nullptr && item->placement &&
-              !item->placement->container_directory.empty() && state != AssignmentState::active) {
+          if (match.target != nullptr && item->scope_key.starts_with("iso:") &&
+              state != AssignmentState::active) {
             state = AssignmentState::source_load;
-            channel = "=SMP";
+            channel = "unknown";
           }
           result.relationships.push_back(
               edge(*item, rel_type, match, index, row.name, state, std::move(channel)));
@@ -371,10 +383,20 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
               relationship.target_key || relationship.quality != RelationshipQuality::tentative) {
             continue;
           }
+          std::size_t same_volume_candidates{};
+          for (const auto &key : relationship.candidate_keys) {
+            const auto candidate = scope_index.keys.find(key);
+            if (candidate != scope_index.keys.end() && same_volume(*item, *candidate->second))
+              ++same_volume_candidates;
+          }
           if (relationship.basis == "assignment-kind-0x11+name-ambiguous") {
-            relationship.basis = "assignment-visible-off-name-ambiguous-sbac";
+            relationship.basis = same_volume_candidates == 1U
+                                     ? "assignment-visible-off-same-volume-sbac-diagnostic"
+                                     : "assignment-visible-off-name-ambiguous-sbac";
           } else if (relationship.basis == "assignment-kind-0x10+name-ambiguous") {
-            relationship.basis = "assignment-visible-off-name-ambiguous-sbnk";
+            relationship.basis = same_volume_candidates == 1U
+                                     ? "assignment-visible-off-same-volume-sbnk-diagnostic"
+                                     : "assignment-visible-off-name-ambiguous-sbnk";
           } else if (relationship.basis == "assignment-name-ambiguous") {
             bool only_waveforms = !relationship.candidate_keys.empty();
             for (const auto &key : relationship.candidate_keys) {
@@ -427,15 +449,21 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
         for (std::size_t edge_index = first_program_edge; edge_index < last_program_edge;
              ++edge_index) {
           auto &relationship = result.relationships[edge_index];
-          if (relationship.quality != RelationshipQuality::unknown ||
-              relationship.assignment_state != AssignmentState::visible_off)
+          if (relationship.quality != RelationshipQuality::unknown)
             continue;
-          if (relationship.type == "PROG_ASSIGNMENT_TO_SBAC") {
+          if (relationship.assignment_state == AssignmentState::active &&
+              relationship.type == "PROG_ASSIGNMENT_TO_SBNK") {
+            relationship.basis = "assignment-active-missing-local-target";
+          } else if (relationship.assignment_state == AssignmentState::visible_off &&
+                     relationship.type == "PROG_ASSIGNMENT_TO_SBAC") {
             relationship.basis = item->scope_key.starts_with("iso:")
                                      ? "assignment-visible-off-iso-missing-local-sbac"
                                      : "assignment-visible-off-missing-local-sbac";
-          } else if (relationship.type == "PROG_ASSIGNMENT_TO_SBNK") {
+          } else if (relationship.assignment_state == AssignmentState::visible_off &&
+                     relationship.type == "PROG_ASSIGNMENT_TO_SBNK") {
             relationship.basis = "assignment-visible-off-missing-local-sbnk";
+          } else {
+            continue;
           }
           relationship.key = std::format("{}|{}|missing|{}", relationship.source_key,
                                          relationship.type, relationship.basis);
@@ -444,15 +472,17 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
         for (std::size_t edge_index = first_program_edge; edge_index < last_program_edge;
              ++edge_index) {
           auto &relationship = result.relationships[edge_index];
-          if (!relationship.target_key ||
-              (relationship.assignment_state != AssignmentState::source_load &&
-               relationship.assignment_state != AssignmentState::visible_off)) {
+          if (!relationship.target_key)
             continue;
-          }
           const auto identity =
               std::tuple{relationship.type, *relationship.target_key, relationship.assignment_name};
-          if (!active_targets.insert(identity).second)
+          if (relationship.assignment_state == AssignmentState::active) {
+            active_targets.insert(identity);
+          } else if ((relationship.assignment_state == AssignmentState::source_load ||
+                      relationship.assignment_state == AssignmentState::visible_off) &&
+                     !active_targets.insert(identity).second) {
             relationship.assignment_state = AssignmentState::duplicate_not_active;
+          }
         }
       }
     }

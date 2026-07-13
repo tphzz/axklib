@@ -83,6 +83,12 @@ std::string clean_ascii(std::span<const std::byte> bytes) {
   return result;
 }
 
+std::string clean_label(std::span<const std::byte> bytes) {
+  auto result = clean_ascii(bytes);
+  const auto first = result.find_first_not_of(' ');
+  return first == std::string::npos ? std::string{} : result.substr(first);
+}
+
 bool object_prefix(std::span<const std::byte> bytes) {
   if (bytes.size() < object_magic.size())
     return false;
@@ -732,7 +738,7 @@ Result<IsoImage> IsoImage::open(std::shared_ptr<const RandomAccessReader> reader
         auto label = result.read_file(file, cancellation);
         if (!label)
           return std::unexpected{label.error()};
-        const auto value = clean_ascii(*label);
+        const auto value = clean_label(*label);
         if (!value.empty()) {
           result.group_labels_.emplace_back(group, value);
           break;
@@ -756,7 +762,7 @@ Result<IsoImage> IsoImage::open(std::shared_ptr<const RandomAccessReader> reader
           break;
         }
       }
-      const auto label = clean_ascii(record.subspan(1, 13));
+      const auto label = clean_label(record.subspan(1, 13));
       if (!id.empty() && !label.empty() && volumes.contains({group, id}))
         result.volume_labels_.emplace_back(std::format("{}/{}", group, id), label);
     }
@@ -1057,20 +1063,56 @@ Result<ObjectCatalog> build_object_catalog(const MediaContainer &container,
 }
 
 std::string sanitize_path_component(std::string_view value, std::string_view fallback) {
-  std::string result;
-  result.reserve(value.size());
-  for (const auto ch : value) {
-    const auto byte = static_cast<unsigned char>(ch);
-    if (byte < 0x20U || byte == 0x7fU || ch == '/' || ch == '\\' || ch == ':' || ch == '*' ||
-        ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|')
-      result.push_back('_');
-    else
-      result.push_back(ch);
+  auto text = std::string{value};
+  const auto first = text.find_first_not_of(" \t\r\n");
+  const auto last = text.find_last_not_of(" \t\r\n");
+  text = first == std::string::npos ? std::string{fallback} : text.substr(first, last - first + 1U);
+  std::size_t duplicate_count{};
+  while (!text.empty() && text.back() == '*') {
+    ++duplicate_count;
+    text.pop_back();
   }
-  while (!result.empty() && (result.back() == ' ' || result.back() == '.'))
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0)
+    text.pop_back();
+
+  std::string result;
+  result.reserve(text.size());
+  bool previous_space{};
+  bool previous_underscore{};
+  for (const auto ch : text) {
+    if (ch == '<' || ch == '>') {
+      result += ch == '<' ? "_lt_" : "_gt_";
+      previous_space = false;
+      previous_underscore = true;
+      continue;
+    }
+    const auto byte = static_cast<unsigned char>(ch);
+    const auto invalid = byte < 0x20U || byte == 0x7fU || std::string_view{"/:*?\"|"}.contains(ch);
+    if (invalid || ch == '_') {
+      if (!previous_underscore)
+        result.push_back('_');
+      previous_space = false;
+      previous_underscore = true;
+    } else if (std::isspace(byte) != 0) {
+      if (!result.empty() && !previous_space)
+        result.push_back(' ');
+      previous_space = true;
+      previous_underscore = false;
+    } else {
+      result.push_back(ch);
+      previous_space = false;
+      previous_underscore = false;
+    }
+  }
+  while (!result.empty() && (result.back() == ' ' || result.back() == '.' || result.back() == '_'))
     result.pop_back();
+  while (!result.empty() &&
+         (result.front() == ' ' || result.front() == '.' || result.front() == '_'))
+    result.erase(result.begin());
   if (result.empty() || result == "." || result == "..")
     result = std::string{fallback};
+  if (duplicate_count != 0U)
+    result += std::format(" ({})", duplicate_count + 1U);
   return result;
 }
 

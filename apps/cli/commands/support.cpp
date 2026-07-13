@@ -250,6 +250,16 @@ axk::ReportRow inventory_row(const CliLoaded &loaded, const axk::ObjectSnapshot 
                                 ? static_cast<std::uint64_t>(media_object->raw_payload.size())
                                 : static_cast<std::uint64_t>(item.object.header.header_size) +
                                       item.object.header.payload_bytes_0x1c;
+  const axk::FatFile *fat_metadata{};
+  if (fat && media_object != loaded.objects.end()) {
+    const auto *image = std::get_if<axk::FatImage>(&loaded.media.storage());
+    if (image != nullptr) {
+      const auto found =
+          std::ranges::find(image->files(), media_object->logical_path, &axk::FatFile::path);
+      if (found != image->files().end())
+        fat_metadata = &*found;
+    }
+  }
   return {
       {"source_path", axk::text::path_to_utf8(loaded.path)},
       {"container_kind", media_kind_text(loaded.media.kind())},
@@ -299,11 +309,25 @@ axk::ReportRow inventory_row(const CliLoaded &loaded, const axk::ObjectSnapshot 
       {"iso_volume_label", iso && media_object != loaded.objects.end()
                                ? axk::ReportValue{media_object->volume_label.value}
                                : axk::ReportValue{""}},
-      {"iso_group_label_source", ""},
-      {"iso_volume_label_source", ""},
-      {"fat_directory_offset", ""},
-      {"fat_first_cluster", ""},
-      {"fat_cluster_count", ""},
+      {"iso_group_label_source",
+       iso && media_object != loaded.objects.end() &&
+               media_object->group_label.status == axk::LabelStatus::confirmed
+           ? axk::ReportValue{"yamaha-cdrom-menu-label"}
+           : axk::ReportValue{""}},
+      {"iso_volume_label_source",
+       iso && media_object != loaded.objects.end() &&
+               media_object->volume_label.status == axk::LabelStatus::confirmed
+           ? axk::ReportValue{"yamaha-cdrom-menu-label"}
+           : axk::ReportValue{""}},
+      {"fat_directory_offset", fat_metadata != nullptr
+                                   ? axk::ReportValue{fat_metadata->directory_offset}
+                                   : axk::ReportValue{""}},
+      {"fat_first_cluster", fat_metadata != nullptr ? axk::ReportValue{static_cast<std::uint64_t>(
+                                                          fat_metadata->first_cluster)}
+                                                    : axk::ReportValue{""}},
+      {"fat_cluster_count", fat_metadata != nullptr ? axk::ReportValue{static_cast<std::uint64_t>(
+                                                          fat_metadata->clusters.size())}
+                                                    : axk::ReportValue{""}},
       {"fat_file_size", fat && media_object != loaded.objects.end()
                             ? axk::ReportValue{media_object->size}
                             : axk::ReportValue{""}},
@@ -376,8 +400,13 @@ axk::ReportRow relationship_report_row(const CliLoaded &loaded, const axk::Relat
   std::string diagnostic;
   if (row.assignment_state == axk::AssignmentState::visible_off)
     diagnostic = "visible-off-assignment";
+  else if (row.basis == "assignment-active-missing-local-target")
+    diagnostic = "active-assignment-missing-target";
+  else if (row.basis.starts_with("sbnk-program-link-bitmap-"))
+    diagnostic = "program-link-bitmap";
   else if (row.quality == axk::RelationshipQuality::tentative)
-    diagnostic = "ambiguous-target";
+    diagnostic =
+        row.basis.starts_with("sbnk-member-link-id-only") ? "sbnk-member-link" : "ambiguous-target";
   else if (row.quality == axk::RelationshipQuality::unknown)
     diagnostic = "missing-target";
   return {{"key", std::format("{}|{}|{}|{}", source_key, row.type,

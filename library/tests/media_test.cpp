@@ -131,6 +131,23 @@ std::vector<std::byte> nested_fat_fixture() {
   return bytes;
 }
 
+std::vector<std::byte> fat_fixture_with_invalid_then_valid_waveform() {
+  auto bytes = fat_fixture();
+  constexpr std::size_t root = 3U * 512U;
+  constexpr std::size_t data = 4U * 512U;
+  const auto valid = smpl_object("VALID");
+  be32(bytes, data + 0x10U, 0xafU);
+  ascii(bytes, root + 32U, "SMPVALID");
+  ascii(bytes, root + 40U, "004");
+  bytes[root + 32U + 0x0bU] = std::byte{0x20};
+  le16(bytes, root + 32U + 0x1aU, 3);
+  le32(bytes, root + 32U + 0x1cU, static_cast<std::uint32_t>(valid.size()));
+  std::ranges::copy(valid, bytes.begin() + data + 512U);
+  for (const auto fat_offset : {512U, 1024U})
+    set_fat12(std::span{bytes}.subspan(fat_offset, 512), 3, 0xfff);
+  return bytes;
+}
+
 std::vector<std::byte> iso_record(std::span<const std::byte> name, std::uint32_t extent,
                                   std::uint32_t size, std::uint8_t flags) {
   auto length = 33U + name.size();
@@ -208,7 +225,7 @@ std::vector<std::byte> iso_fixture(bool outside_extent = false) {
     std::ranges::copy(object, bytes.begin() + 21 * sector_size);
   auto table = std::span{bytes}.subspan(22 * sector_size, 32);
   table[0] = std::byte{0xdd};
-  ascii(table, 1, "Mapped Volume");
+  ascii(table, 1, "  Mapped Vol");
   ascii(table, 18, "F001");
   return bytes;
 }
@@ -255,6 +272,17 @@ TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
   ASSERT_FALSE(conflict);
   EXPECT_EQ(conflict.error().code, axk::ErrorCode::io_open_failed);
   std::filesystem::remove_all(output, error);
+
+  auto unresolved = graph;
+  axk::Relationship missing_member;
+  missing_member.source_key = catalog->objects.front().key;
+  missing_member.type = "SBNK_LEFT_MEMBER_TO_SMPL";
+  missing_member.quality = axk::RelationshipQuality::unknown;
+  unresolved.relationships.push_back(std::move(missing_member));
+  const auto tree = axk::build_content_tree(media, *catalog, unresolved);
+  ASSERT_EQ(tree.issues.size(), 1U);
+  EXPECT_EQ(tree.issues.front().code, "REL_SBNK_MEMBER_TARGET_MISSING");
+  EXPECT_EQ(tree.issues.front().severity, "warning");
 }
 
 TEST(Fat12Reader, RetainsHeaderInventoryWhenOneObjectPayloadIsMalformed) {
@@ -274,6 +302,25 @@ TEST(Fat12Reader, RetainsHeaderInventoryWhenOneObjectPayloadIsMalformed) {
   EXPECT_EQ(catalog->objects.size(), 1U);
   ASSERT_EQ(catalog->issues.size(), 1U);
   EXPECT_EQ(catalog->issues.front().code, "media_object_decode_failed");
+}
+
+TEST(Fat12Reader, ExportSkipsInvalidWaveformAndRetainsValidWaveforms) {
+  auto image = axk::FatImage::open(
+      std::make_shared<axk::MemoryReader>(fat_fixture_with_invalid_then_valid_waveform()),
+      "mixed.ima");
+  ASSERT_TRUE(image) << image.error().message;
+  const axk::MediaContainer media{*image};
+  const auto catalog = axk::build_object_catalog(media);
+  ASSERT_TRUE(catalog) << catalog.error().message;
+  const auto graph = axk::build_relationship_graph(*catalog);
+  const auto plan = axk::build_export_plan(media, *catalog, graph);
+  ASSERT_TRUE(plan) << plan.error().message;
+  ASSERT_EQ(plan->volumes.size(), 1U);
+  ASSERT_EQ(plan->volumes.front().waveforms.size(), 1U);
+  EXPECT_EQ(plan->volumes.front().waveforms.front().display_name, "VALID");
+  ASSERT_EQ(plan->decode_errors.size(), 1U);
+  EXPECT_NE(plan->decode_errors.front().find("TEST"), std::string::npos);
+  EXPECT_NE(plan->decode_errors.front().find("PCM span"), std::string::npos);
 }
 
 TEST(Fat12Reader, ContentTreeRetainsAnEmptyFatRoot) {
@@ -363,10 +410,10 @@ TEST(Iso9660Reader, LoadsYamahaScopeLabelsObjectsAndStructuredPaths) {
   ASSERT_EQ(objects->size(), 1U);
   const auto &object = objects->front();
   EXPECT_EQ(object.logical_path, "GROUP/F001/F000");
-  EXPECT_EQ(object.volume_label.value, "Mapped Volume");
+  EXPECT_EQ(object.volume_label.value, "Mapped Vol");
   EXPECT_EQ(object.volume_label.status, axk::LabelStatus::confirmed);
   const auto path = axk::structured_object_path(object);
-  EXPECT_EQ(path.relative_path.generic_string(), "GROUP/Mapped Volume/SMPL/CD WAVE");
+  EXPECT_EQ(path.relative_path.generic_string(), "GROUP/Mapped Vol/SMPL/CD WAVE");
 }
 
 TEST(Iso9660Reader, RejectsInvalidDescriptorAndOutOfRangeExtent) {
@@ -505,14 +552,15 @@ TEST(Iso9660Reader, MarksOnlyUnknownActiveSampleBankMembersAsVolumeErrors) {
   auto tree = axk::build_content_tree(container, *catalog, graph);
   ASSERT_EQ(tree.roots.size(), 1U);
   ASSERT_EQ(tree.roots.front().children.size(), 1U);
-  EXPECT_EQ(tree.roots.front().children.front().display_name, "Mapped Volume");
+  EXPECT_EQ(tree.roots.front().children.front().display_name, "Mapped Vol");
   EXPECT_TRUE(tree.issues.empty());
 
   graph.relationships.back().quality = axk::RelationshipQuality::unknown;
+  catalog->objects[1].placement.reset();
   tree = axk::build_content_tree(container, *catalog, graph);
-  EXPECT_EQ(tree.roots.front().children.front().display_name, "Mapped Volume (errors detected)");
-  ASSERT_EQ(tree.issues.size(), 1U);
-  EXPECT_EQ(tree.issues.front().code, "REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING");
+  ASSERT_EQ(tree.issues.size(), 2U);
+  EXPECT_EQ(tree.issues[0].code, "REL_SBNK_MEMBER_TARGET_MISSING");
+  EXPECT_EQ(tree.issues[1].code, "REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING");
 }
 
 TEST(StandaloneObject, UsesSharedDecoderAndRejectsArbitraryFiles) {
@@ -529,9 +577,11 @@ TEST(StandaloneObject, UsesSharedDecoderAndRejectsArbitraryFiles) {
 }
 
 TEST(MediaPaths, SanitizesTraversalAndPlatformReservedCharacters) {
-  EXPECT_EQ(axk::sanitize_path_component("../unsafe/name", "fallback"), ".._unsafe_name");
+  EXPECT_EQ(axk::sanitize_path_component("../unsafe/name", "fallback"), "unsafe_name");
   EXPECT_EQ(axk::sanitize_path_component("..", "fallback"), "fallback");
-  EXPECT_EQ(axk::sanitize_path_component("A:B*C?", "fallback"), "A_B_C_");
+  EXPECT_EQ(axk::sanitize_path_component("A:B*C?", "fallback"), "A_B_C");
+  EXPECT_EQ(axk::sanitize_path_component("  Partition      A  ", "fallback"), "Partition A");
+  EXPECT_EQ(axk::sanitize_path_component("A___B*", "fallback"), "A_B (2)");
 }
 
 TEST(MediaPaths, DisambiguatesDuplicateDisplayedIsoVolumesByRawIdentifier) {

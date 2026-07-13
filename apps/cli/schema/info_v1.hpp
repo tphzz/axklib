@@ -27,11 +27,21 @@ struct NodeOutput {
   std::vector<NodeOutput> children;
 };
 
+struct IssueOutput {
+  std::string code;
+  std::string severity;
+  std::string message;
+  std::string source_path_utf8;
+  std::string sampler_path;
+  std::string object_key;
+};
+
 struct TreeOutput {
   std::string source_path_utf8;
   std::string container_kind;
   std::string detected_format;
   std::vector<NodeOutput> roots;
+  std::vector<IssueOutput> issues;
 };
 
 struct LoadErrorOutput {

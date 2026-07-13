@@ -68,6 +68,8 @@ int run_relationships_request(const axk::cli::RelationshipsRequest &request) {
       selected = sbac_detail_rows(loaded);
     } else if (name == "current_prog_bank_links") {
       selected = program_detail_rows(loaded);
+    } else if (name == "current_prog_ignored_reserved_or_tail") {
+      selected = program_ignored_detail_rows(loaded);
     } else if (name == "current_sbnk_program_bitmap_crosscheck") {
       selected = bitmap_detail_rows(loaded);
     } else {
@@ -211,8 +213,12 @@ std::string sfs_selector_component(const axk::ContentNode &node) {
 std::string first_media_object_directory(const CliLoaded &loaded, const axk::ContentNode &node) {
   if (!node.object_key.empty()) {
     const auto object = std::ranges::find(loaded.objects, node.object_key, &axk::MediaObject::key);
-    if (object != loaded.objects.end())
-      return axk::text::path_to_utf8(std::filesystem::path{object->logical_path}.parent_path());
+    if (object != loaded.objects.end()) {
+      auto directory = std::filesystem::path{object->logical_path}.parent_path();
+      if (loaded.media.kind() == axk::MediaKind::iso9660)
+        directory = directory.parent_path();
+      return axk::text::path_to_utf8(directory);
+    }
   }
   for (const auto &child : node.children) {
     auto directory = first_media_object_directory(loaded, child);
@@ -222,13 +228,32 @@ std::string first_media_object_directory(const CliLoaded &loaded, const axk::Con
   return {};
 }
 
+std::string selector_component(const CliLoaded &loaded, const axk::ContentNode &node) {
+  if (loaded.media.kind() == axk::MediaKind::sfs)
+    return sfs_selector_component(node);
+  if (node.node_type == "partition" || node.node_type == "volume") {
+    auto name = node.display_name;
+    constexpr std::string_view error_suffix{" (errors detected)"};
+    if (node.node_type == "volume" && name.ends_with(error_suffix))
+      name.resize(name.size() - error_suffix.size());
+    return axk::sanitize_path_component(name, node.node_type);
+  }
+  auto component = node.display_name;
+  std::ranges::replace(component, '/', '_');
+  std::ranges::replace(component, '\\', '_');
+  const auto first = component.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos)
+    return node.node_type;
+  const auto last = component.find_last_not_of(" \t\r\n");
+  return component.substr(first, last - first + 1U);
+}
+
 axk::cli::schema::info_v1::NodeOutput compatible_tree_node_output(const CliLoaded &loaded,
                                                                   const axk::ContentNode &node,
                                                                   std::string parent_path = {},
                                                                   std::string parent_id = {},
                                                                   std::string parent_type = {}) {
-  const auto component =
-      loaded.media.kind() == axk::MediaKind::sfs ? sfs_selector_component(node) : node.display_name;
+  const auto component = selector_component(loaded, node);
   const auto selector =
       parent_path.empty() ? component : std::format("{}/{}", parent_path, component);
   std::vector<axk::cli::schema::info_v1::NodeOutput> children;
@@ -347,8 +372,7 @@ void render_tree_text(const axk::ContentNode &node, std::size_t depth, std::stri
 
 void render_tree_paths(const CliLoaded &loaded, const axk::ContentNode &node,
                        std::string parent_path = {}) {
-  const auto component =
-      loaded.media.kind() == axk::MediaKind::sfs ? sfs_selector_component(node) : node.display_name;
+  const auto component = selector_component(loaded, node);
   const auto selector =
       parent_path.empty() ? component : std::format("{}/{}", parent_path, component);
   std::string scope;
@@ -382,9 +406,21 @@ int run_info_request(const axk::cli::InfoRequest &request) {
           .container_kind = media_kind_text(source.media.kind()),
           .detected_format = media_kind_text(source.media.kind()),
           .roots = {},
+          .issues = {},
       };
       for (const auto &root : tree.roots)
         projected.roots.push_back(compatible_tree_node_output(source, root));
+      for (const auto &issue : tree.issues) {
+        projected.issues.push_back({
+            .code = issue.code,
+            .severity = issue.severity,
+            .message = issue.message,
+            .source_path_utf8 = axk::text::path_to_utf8(source.path),
+            .sampler_path = issue.sampler_path,
+            .object_key = issue.object_key.empty() ? std::string{}
+                                                   : public_object_key(source, issue.object_key),
+        });
+      }
       output.trees.push_back(std::move(projected));
     }
     for (const auto &row : loaded.errors) {

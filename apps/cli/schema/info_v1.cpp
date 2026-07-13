@@ -36,12 +36,23 @@ Result<std::string> serialize(const InfoOutput &output) {
       auto roots = OrderedJson::array();
       for (const auto &root : tree.roots)
         roots.push_back(node_json(root));
+      auto issues = OrderedJson::array();
+      for (const auto &issue : tree.issues) {
+        issues.push_back({
+            {"code", issue.code},
+            {"severity", issue.severity},
+            {"message", issue.message},
+            {"source_path", issue.source_path_utf8},
+            {"sampler_path", issue.sampler_path},
+            {"object_key", issue.object_key},
+        });
+      }
       trees.push_back({
           {"source_path", tree.source_path_utf8},
           {"container_kind", tree.container_kind},
           {"detected_format", tree.detected_format},
           {"roots", std::move(roots)},
-          {"issues", OrderedJson::array()},
+          {"issues", std::move(issues)},
       });
     }
     auto errors = OrderedJson::array();

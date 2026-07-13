@@ -92,6 +92,15 @@ bool navigable(const Relationship &row) {
   return row.quality == RelationshipQuality::known && row.target_key.has_value();
 }
 
+std::optional<std::string> assignment_detail(const Relationship &row) {
+  if (row.assignment_state == AssignmentState::source_load)
+    return "Rch Assign: =SMP";
+  if (row.assignment_state != AssignmentState::active || row.receive_channel_display.empty() ||
+      row.receive_channel_display == "off" || row.receive_channel_display == "unknown")
+    return std::nullopt;
+  return std::format("Rch Assign: {}", row.receive_channel_display);
+}
+
 ContentNode bank_node(const ObjectSnapshot &item, const Relationship *row = nullptr) {
   ContentNode result{
       std::format("object:{}", item.key),
@@ -104,12 +113,8 @@ ContentNode bank_node(const ObjectSnapshot &item, const Relationship *row = null
     result.quality = row->quality;
     result.basis = row->basis;
     result.notes = row->notes;
-    if ((row->assignment_state == AssignmentState::active ||
-         row->assignment_state == AssignmentState::source_load) &&
-        !row->receive_channel_display.empty() && row->receive_channel_display != "off" &&
-        row->receive_channel_display != "unknown") {
-      result.details.push_back(std::format("Rch Assign: {}", row->receive_channel_display));
-    }
+    if (const auto detail = assignment_detail(*row))
+      result.details.push_back(*detail);
   } else {
     result.basis = "container object metadata";
   }
@@ -129,12 +134,9 @@ ContentNode group_node(const ObjectSnapshot &item, const ObjectCatalog &catalog,
   result.basis = parent == nullptr ? "current SBAC slot relationships" : parent->basis;
   if (parent != nullptr)
     result.quality = parent->quality;
-  if (parent != nullptr &&
-      (parent->assignment_state == AssignmentState::active ||
-       parent->assignment_state == AssignmentState::source_load) &&
-      !parent->receive_channel_display.empty() && parent->receive_channel_display != "off" &&
-      parent->receive_channel_display != "unknown") {
-    result.details.push_back(std::format("Rch Assign: {}", parent->receive_channel_display));
+  if (parent != nullptr) {
+    if (const auto detail = assignment_detail(*parent))
+      result.details.push_back(*detail);
   }
   if (with_children) {
     for (const auto *row : graph.children(item.key)) {
@@ -176,19 +178,54 @@ std::string join(const std::vector<std::string> &values) {
   return result;
 }
 
+using VolumeSeed = std::tuple<std::uint8_t, std::uint32_t, std::string, std::string>;
+
+std::vector<VolumeSeed> sfs_volume_seeds(const Container &container) {
+  std::vector<VolumeSeed> result;
+  for (const auto &partition : container.partitions()) {
+    std::map<std::uint32_t, const IndexRecord *> directories;
+    for (const auto &record : partition.records) {
+      if (record.directory_id)
+        directories.emplace(record.directory_id->value, &record);
+    }
+    const IndexRecord *root{};
+    for (const auto &[id, directory] : directories) {
+      if (directory->parent_directory_id && directory->parent_directory_id->value == id) {
+        root = directory;
+        break;
+      }
+    }
+    if (root == nullptr || !root->directory_id)
+      continue;
+    for (const auto &entry : root->directory_entries) {
+      const auto found = directories.find(entry.link_id.value);
+      if (entry.name == "." || entry.name == ".." || found == directories.end())
+        continue;
+      const auto *volume = found->second;
+      if (!volume->parent_directory_id ||
+          volume->parent_directory_id->value != root->directory_id->value) {
+        continue;
+      }
+      result.emplace_back(partition.index.value, volume->sfs_id.value, partition.name, entry.name);
+    }
+  }
+  return result;
+}
+
 } // namespace
 
-static ContentTree
-build_content_tree_impl(std::string source_path,
-                        const std::vector<std::pair<PartitionIndex, std::string>> &partitions,
-                        const ObjectCatalog &catalog, const RelationshipGraph &graph,
-                        bool include_default_programs, bool prefix_partition_index) {
+static ContentTree build_content_tree_impl(
+    std::string source_path, const std::vector<std::pair<PartitionIndex, std::string>> &partitions,
+    const ObjectCatalog &catalog, const RelationshipGraph &graph, bool include_default_programs,
+    bool prefix_partition_index, const std::vector<VolumeSeed> &volume_seeds = {}) {
   ContentTree result;
   result.source_path = std::move(source_path);
 
   using VolumeKey = std::tuple<std::uint8_t, std::uint32_t, std::string, std::string>;
   using PartitionKey = std::pair<std::uint8_t, std::string>;
   std::map<VolumeKey, std::vector<const ObjectSnapshot *>> volumes;
+  for (const auto &seed : volume_seeds)
+    volumes[seed] = {};
   for (const auto &item : catalog.objects) {
     if (!item.placement)
       continue;
@@ -256,10 +293,8 @@ build_content_tree_impl(std::string source_path,
                               row->quality,
                               row->basis,
                               row->notes};
-            if (!row->receive_channel_display.empty() && row->receive_channel_display != "off" &&
-                row->receive_channel_display != "unknown") {
-              child.details.push_back(std::format("Rch Assign: {}", row->receive_channel_display));
-            }
+            if (const auto detail = assignment_detail(*row))
+              child.details.push_back(*detail);
             node.children.push_back(std::move(child));
           }
         }
@@ -442,7 +477,8 @@ ContentTree build_content_tree(const Container &container, const ObjectCatalog &
     partitions.emplace_back(partition.index, partition.name);
   }
   return build_content_tree_impl(text::path_to_utf8(container.source_path()), partitions, catalog,
-                                 graph, include_default_programs, true);
+                                 graph, include_default_programs, true,
+                                 sfs_volume_seeds(container));
 }
 
 ContentTree build_content_tree(const MediaContainer &container, const ObjectCatalog &catalog,
@@ -452,55 +488,59 @@ ContentTree build_content_tree(const MediaContainer &container, const ObjectCata
 
   auto result = build_content_tree(text::path_to_utf8(container.source_path()), catalog, graph,
                                    include_default_programs);
-  if (!result.roots.empty()) {
-    std::set<std::string> unresolved_banks;
-    std::map<std::string, std::vector<std::string>> group_banks;
-    for (const auto &row : graph.relationships) {
-      if ((row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
-          row.quality == RelationshipQuality::unknown) {
-        unresolved_banks.insert(row.source_key);
-      } else if (row.type == "SBAC_SLOT_TO_SBNK" && row.target_key &&
-                 (row.quality == RelationshipQuality::known ||
-                  row.quality == RelationshipQuality::likely)) {
-        group_banks[row.source_key].push_back(*row.target_key);
-      }
+  std::set<std::string> unresolved_banks;
+  std::map<std::string, std::vector<std::string>> group_banks;
+  for (const auto &row : graph.relationships) {
+    if ((row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
+        row.quality == RelationshipQuality::unknown) {
+      unresolved_banks.insert(row.source_key);
+    } else if (row.type == "SBAC_SLOT_TO_SBNK" && row.target_key &&
+               (row.quality == RelationshipQuality::known ||
+                row.quality == RelationshipQuality::likely)) {
+      group_banks[row.source_key].push_back(*row.target_key);
     }
-    std::set<std::string> reachable_banks;
-    for (const auto &row : graph.relationships) {
-      if (!row.target_key ||
-          (row.assignment_state != AssignmentState::active &&
-           row.assignment_state != AssignmentState::source_load) ||
-          (row.quality != RelationshipQuality::known &&
-           row.quality != RelationshipQuality::likely)) {
-        continue;
-      }
-      if (row.type == "PROG_ASSIGNMENT_TO_SBNK") {
-        reachable_banks.insert(*row.target_key);
-      } else if (row.type == "PROG_ASSIGNMENT_TO_SBAC") {
-        if (const auto members = group_banks.find(*row.target_key); members != group_banks.end())
-          reachable_banks.insert(members->second.begin(), members->second.end());
-      }
+  }
+  std::set<std::string> reachable_banks;
+  for (const auto &row : graph.relationships) {
+    if (!row.target_key ||
+        (row.assignment_state != AssignmentState::active &&
+         row.assignment_state != AssignmentState::source_load) ||
+        (row.quality != RelationshipQuality::known && row.quality != RelationshipQuality::likely)) {
+      continue;
     }
-    std::set<std::pair<std::string, std::string>> affected_volumes;
-    for (const auto &bank_key : unresolved_banks) {
-      if (!reachable_banks.contains(bank_key))
-        continue;
-      if (const auto *bank = find_object(catalog, bank_key); bank != nullptr && bank->placement) {
+    if (row.type == "PROG_ASSIGNMENT_TO_SBNK") {
+      reachable_banks.insert(*row.target_key);
+    } else if (row.type == "PROG_ASSIGNMENT_TO_SBAC") {
+      if (const auto members = group_banks.find(*row.target_key); members != group_banks.end())
+        reachable_banks.insert(members->second.begin(), members->second.end());
+    }
+  }
+  std::set<std::pair<std::string, std::string>> affected_volumes;
+  for (const auto &bank_key : unresolved_banks) {
+    const auto *bank = find_object(catalog, bank_key);
+    result.issues.push_back({"REL_SBNK_MEMBER_TARGET_MISSING", "warning",
+                             "sample-bank member does not resolve to one waveform",
+                             bank == nullptr ? "" : sampler_path(*bank), bank_key});
+    if (!reachable_banks.contains(bank_key))
+      continue;
+    if (bank != nullptr) {
+      if (bank->placement) {
         affected_volumes.emplace(display_text(bank->placement->partition_name),
                                  display_text(bank->placement->volume_name));
-        result.issues.push_back({"REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING", "error",
-                                 "active Program reaches a sample-bank member without one waveform",
-                                 sampler_path(*bank), bank_key});
       }
+      result.issues.push_back({"REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING", "error",
+                               "active Program reaches a sample-bank member without one waveform",
+                               sampler_path(*bank), bank_key});
     }
-    for (auto &root : result.roots) {
-      for (auto &volume : root.children) {
-        if (affected_volumes.contains({root.display_name, volume.display_name}))
-          volume.display_name += " (errors detected)";
-      }
-    }
-    return result;
   }
+  for (auto &root : result.roots) {
+    for (auto &volume : root.children) {
+      if (affected_volumes.contains({root.display_name, volume.display_name}))
+        volume.display_name += " (errors detected)";
+    }
+  }
+  if (!result.roots.empty())
+    return result;
 
   const auto name = container.kind() == MediaKind::fat12_floppy ? "FAT root" : "Standalone object";
   result.roots.push_back({std::format("scope:{}", name), "volume", name});
@@ -666,7 +706,7 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
     }
     if ((relation.type == "SBNK_LEFT_MEMBER_TO_SMPL" ||
          relation.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
-        relation.quality != RelationshipQuality::known) {
+        relation.quality == RelationshipQuality::unknown) {
       const auto *source = find_object(catalog, relation.source_key);
       result.issues.push_back({
           "REL_SBNK_MEMBER_TARGET_MISSING",

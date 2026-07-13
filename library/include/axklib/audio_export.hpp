@@ -54,6 +54,7 @@ struct SampleBankGroupExport {
   std::string object_key;
   std::string display_name;
   std::vector<std::string> member_bank_keys;
+  std::vector<std::string> relationship_bank_keys;
 };
 
 struct ProgramExport {
@@ -76,6 +77,7 @@ struct VolumeExport {
 struct ExportPlan {
   std::filesystem::path source_path;
   std::vector<VolumeExport> volumes;
+  std::vector<std::string> decode_errors;
 };
 
 struct ExportResult {

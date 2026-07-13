@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -143,6 +144,8 @@ def main() -> int:
     value: Any = json.loads(args.data.read_text(encoding="utf-8"))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(render(value), encoding="utf-8")
+    style = Path(__file__).resolve().parents[2] / ".clang-format"
+    subprocess.run(["clang-format", f"--style=file:{style}", "-i", str(args.output)], check=True)
     return 0
 
 

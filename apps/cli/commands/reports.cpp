@@ -172,6 +172,16 @@ const axk::MediaObject *media_object(const CliLoaded &loaded, std::string_view k
   return found == loaded.objects.end() ? nullptr : &*found;
 }
 
+const axk::FatFile *fat_file_metadata(const CliLoaded &loaded, const axk::MediaObject *object) {
+  if (object == nullptr)
+    return nullptr;
+  const auto *fat = std::get_if<axk::FatImage>(&loaded.media.storage());
+  if (fat == nullptr)
+    return nullptr;
+  const auto found = std::ranges::find(fat->files(), object->logical_path, &axk::FatFile::path);
+  return found == fat->files().end() ? nullptr : &*found;
+}
+
 std::uint64_t sfs_payload_offset(const CliLoaded &loaded, const axk::ObjectSnapshot &item) {
   if (loaded.media.kind() != axk::MediaKind::sfs)
     return 0U;
@@ -259,6 +269,8 @@ std::vector<axk::ReportRow> sbac_detail_rows(const CliLoadResult &loaded) {
       }
       const auto *sbac_media = media_object(source, sbac_item->key);
       const auto *matched_media = matched == nullptr ? nullptr : media_object(source, matched->key);
+      const auto *sbac_fat = fat_file_metadata(source, sbac_media);
+      const auto *matched_fat = fat_file_metadata(source, matched_media);
       const bool sfs = source.media.kind() == axk::MediaKind::sfs;
       const bool iso = source.media.kind() == axk::MediaKind::iso9660;
       const bool fat = source.media.kind() == axk::MediaKind::fat12_floppy;
@@ -320,15 +332,23 @@ std::vector<axk::ReportRow> sbac_detail_rows(const CliLoadResult &loaded) {
           {"sbac_iso_file_size", optional_unsigned(iso && sbac_media != nullptr,
                                                    sbac_media == nullptr ? 0U : sbac_media->size)},
           {"sbac_iso_recovery_quality", iso ? "clean-iso9660-object" : ""},
-          {"sbac_fat_directory_offset", nullptr},
-          {"sbac_fat_first_cluster", nullptr},
-          {"sbac_fat_cluster_count", nullptr},
+          {"sbac_fat_directory_offset",
+           optional_unsigned(sbac_fat != nullptr,
+                             sbac_fat == nullptr ? 0U : sbac_fat->directory_offset)},
+          {"sbac_fat_first_cluster",
+           optional_unsigned(sbac_fat != nullptr,
+                             sbac_fat == nullptr ? 0U : sbac_fat->first_cluster)},
+          {"sbac_fat_cluster_count",
+           optional_unsigned(sbac_fat != nullptr,
+                             sbac_fat == nullptr ? 0U : sbac_fat->clusters.size())},
           {"sbac_fat_file_size", optional_unsigned(fat && sbac_media != nullptr,
                                                    sbac_media == nullptr ? 0U : sbac_media->size)},
           {"sbac_fat_object_offset",
            optional_unsigned(fat && sbac_media != nullptr,
                              sbac_media == nullptr ? 0U : sbac_media->data_offset)},
-          {"sbac_fat_stored_payload_offset", nullptr},
+          {"sbac_fat_stored_payload_offset",
+           optional_unsigned(sbac_fat != nullptr,
+                             sbac_fat == nullptr ? 0U : sbac_fat->first_data_offset)},
           {"matched_sbnk_iso_extent_sector",
            optional_unsigned(iso && matched_media != nullptr,
                              matched_media == nullptr ? 0U : matched_media->data_offset / 2048U)},
@@ -339,16 +359,24 @@ std::vector<axk::ReportRow> sbac_detail_rows(const CliLoadResult &loaded) {
            optional_unsigned(iso && matched_media != nullptr,
                              matched_media == nullptr ? 0U : matched_media->size)},
           {"matched_sbnk_iso_recovery_quality", iso ? "clean-iso9660-object" : ""},
-          {"matched_sbnk_fat_directory_offset", nullptr},
-          {"matched_sbnk_fat_first_cluster", nullptr},
-          {"matched_sbnk_fat_cluster_count", nullptr},
+          {"matched_sbnk_fat_directory_offset",
+           optional_unsigned(matched_fat != nullptr,
+                             matched_fat == nullptr ? 0U : matched_fat->directory_offset)},
+          {"matched_sbnk_fat_first_cluster",
+           optional_unsigned(matched_fat != nullptr,
+                             matched_fat == nullptr ? 0U : matched_fat->first_cluster)},
+          {"matched_sbnk_fat_cluster_count",
+           optional_unsigned(matched_fat != nullptr,
+                             matched_fat == nullptr ? 0U : matched_fat->clusters.size())},
           {"matched_sbnk_fat_file_size",
            optional_unsigned(fat && matched_media != nullptr,
                              matched_media == nullptr ? 0U : matched_media->size)},
           {"matched_sbnk_fat_object_offset",
            optional_unsigned(fat && matched_media != nullptr,
                              matched_media == nullptr ? 0U : matched_media->data_offset)},
-          {"matched_sbnk_fat_stored_payload_offset", nullptr},
+          {"matched_sbnk_fat_stored_payload_offset",
+           optional_unsigned(matched_fat != nullptr,
+                             matched_fat == nullptr ? 0U : matched_fat->first_data_offset)},
       });
     }
   }
@@ -374,9 +402,16 @@ std::vector<axk::ReportRow> bitmap_detail_rows(const CliLoadResult &loaded) {
       const bool sfs = source.media.kind() == axk::MediaKind::sfs;
       const bool fat = source.media.kind() == axk::MediaKind::fat12_floppy;
       std::vector<std::string> direct_details;
+      std::vector<std::string> ambiguous_programs;
+      std::vector<std::string> ambiguous_details;
       for (const auto &relation : source.graph.relationships) {
-        if (relation.type != "PROG_ASSIGNMENT_TO_SBNK" || !relation.target_key ||
-            *relation.target_key != item->key || !relation.assignment_index)
+        if (relation.type != "PROG_ASSIGNMENT_TO_SBNK" || !relation.assignment_index)
+          continue;
+        const auto direct = relation.target_key && *relation.target_key == item->key;
+        const auto ambiguous =
+            relation.quality == axk::RelationshipQuality::tentative &&
+            std::ranges::find(relation.candidate_keys, item->key) != relation.candidate_keys.end();
+        if (!direct && !ambiguous)
           continue;
         const auto *program_item = catalog_object(source, relation.source_key);
         if (program_item == nullptr)
@@ -385,11 +420,25 @@ std::vector<axk::ReportRow> bitmap_detail_rows(const CliLoadResult &loaded) {
         if (program == nullptr || *relation.assignment_index >= program->assignments.size())
           continue;
         const auto &assignment = program->assignments[*relation.assignment_index];
-        direct_details.push_back(
+        const auto detail =
             std::format("{}@slot{}:kind0x{:02x}:flag0x{:02x}", program_item->object.header.name,
-                        *relation.assignment_index, assignment.kind, assignment.flags));
+                        *relation.assignment_index, assignment.kind, assignment.flags);
+        if (direct) {
+          direct_details.push_back(detail);
+        } else {
+          ambiguous_programs.push_back(program_item->object.header.name);
+          ambiguous_details.push_back(detail);
+        }
       }
       std::ranges::sort(direct_details);
+      std::ranges::sort(ambiguous_programs);
+      std::ranges::sort(ambiguous_details);
+      direct_details.erase(std::unique(direct_details.begin(), direct_details.end()),
+                           direct_details.end());
+      ambiguous_programs.erase(std::unique(ambiguous_programs.begin(), ambiguous_programs.end()),
+                               ambiguous_programs.end());
+      ambiguous_details.erase(std::unique(ambiguous_details.begin(), ambiguous_details.end()),
+                              ambiguous_details.end());
       rows.push_back({
           {"image", axk::text::path_to_utf8(source.path)},
           {"container_kind", media_kind_text(source.media.kind())},
@@ -414,8 +463,8 @@ std::vector<axk::ReportRow> bitmap_detail_rows(const CliLoadResult &loaded) {
           {"direct_prog_assignment_programs",
            joined_programs(comparison.direct_assignment_programs)},
           {"direct_prog_assignment_details", joined_strings(direct_details)},
-          {"ambiguous_direct_assignment_programs", ""},
-          {"ambiguous_direct_assignment_details", ""},
+          {"ambiguous_direct_assignment_programs", joined_strings(ambiguous_programs)},
+          {"ambiguous_direct_assignment_details", joined_strings(ambiguous_details)},
           {"sbac_indirect_assignment_programs",
            joined_programs(comparison.indirect_assignment_programs)},
           {"bitmap_without_direct_assignment_programs",
@@ -449,6 +498,8 @@ std::vector<axk::ReportRow> program_detail_rows(const CliLoadResult &loaded) {
           relation.target_key ? catalog_object(source, *relation.target_key) : nullptr;
       const auto *program_media = media_object(source, program_item->key);
       const auto *target_media = target == nullptr ? nullptr : media_object(source, target->key);
+      const auto *program_fat = fat_file_metadata(source, program_media);
+      const auto *target_fat = fat_file_metadata(source, target_media);
       const bool sfs = source.media.kind() == axk::MediaKind::sfs;
       const bool iso = source.media.kind() == axk::MediaKind::iso9660;
       const bool fat = source.media.kind() == axk::MediaKind::fat12_floppy;
@@ -549,16 +600,24 @@ std::vector<axk::ReportRow> program_detail_rows(const CliLoadResult &loaded) {
            optional_unsigned(iso && program_media != nullptr,
                              program_media == nullptr ? 0U : program_media->size)},
           {"prog_iso_recovery_quality", iso ? "clean-iso9660-object" : ""},
-          {"prog_fat_directory_offset", nullptr},
-          {"prog_fat_first_cluster", nullptr},
-          {"prog_fat_cluster_count", nullptr},
+          {"prog_fat_directory_offset",
+           optional_unsigned(program_fat != nullptr,
+                             program_fat == nullptr ? 0U : program_fat->directory_offset)},
+          {"prog_fat_first_cluster",
+           optional_unsigned(program_fat != nullptr,
+                             program_fat == nullptr ? 0U : program_fat->first_cluster)},
+          {"prog_fat_cluster_count",
+           optional_unsigned(program_fat != nullptr,
+                             program_fat == nullptr ? 0U : program_fat->clusters.size())},
           {"prog_fat_file_size",
            optional_unsigned(fat && program_media != nullptr,
                              program_media == nullptr ? 0U : program_media->size)},
           {"prog_fat_object_offset",
            optional_unsigned(fat && program_media != nullptr,
                              program_media == nullptr ? 0U : program_media->data_offset)},
-          {"prog_fat_stored_payload_offset", nullptr},
+          {"prog_fat_stored_payload_offset",
+           optional_unsigned(program_fat != nullptr,
+                             program_fat == nullptr ? 0U : program_fat->first_data_offset)},
           {"matched_target_iso_extent_sector",
            optional_unsigned(iso && target_media != nullptr,
                              target_media == nullptr ? 0U : target_media->data_offset / 2048U)},
@@ -568,18 +627,94 @@ std::vector<axk::ReportRow> program_detail_rows(const CliLoadResult &loaded) {
           {"matched_target_iso_file_size",
            optional_unsigned(iso && target_media != nullptr,
                              target_media == nullptr ? 0U : target_media->size)},
-          {"matched_target_iso_recovery_quality", iso ? "clean-iso9660-object" : ""},
-          {"matched_target_fat_directory_offset", nullptr},
-          {"matched_target_fat_first_cluster", nullptr},
-          {"matched_target_fat_cluster_count", nullptr},
+          {"matched_target_iso_recovery_quality",
+           iso && target_media != nullptr ? "clean-iso9660-object" : ""},
+          {"matched_target_fat_directory_offset",
+           optional_unsigned(target_fat != nullptr,
+                             target_fat == nullptr ? 0U : target_fat->directory_offset)},
+          {"matched_target_fat_first_cluster",
+           optional_unsigned(target_fat != nullptr,
+                             target_fat == nullptr ? 0U : target_fat->first_cluster)},
+          {"matched_target_fat_cluster_count",
+           optional_unsigned(target_fat != nullptr,
+                             target_fat == nullptr ? 0U : target_fat->clusters.size())},
           {"matched_target_fat_file_size",
            optional_unsigned(fat && target_media != nullptr,
                              target_media == nullptr ? 0U : target_media->size)},
           {"matched_target_fat_object_offset",
            optional_unsigned(fat && target_media != nullptr,
                              target_media == nullptr ? 0U : target_media->data_offset)},
-          {"matched_target_fat_stored_payload_offset", nullptr},
+          {"matched_target_fat_stored_payload_offset",
+           optional_unsigned(target_fat != nullptr,
+                             target_fat == nullptr ? 0U : target_fat->first_data_offset)},
       });
+    }
+  }
+  return rows;
+}
+
+std::vector<axk::ReportRow> program_ignored_detail_rows(const CliLoadResult &loaded) {
+  std::vector<axk::ReportRow> rows;
+  for (const auto &source : loaded.loaded) {
+    for (const auto &item : source.catalog.objects) {
+      const auto *program = std::get_if<axk::CurrentProg>(&item.object.payload);
+      if (program == nullptr)
+        continue;
+      std::set<std::size_t> represented;
+      for (const auto &relation : source.graph.relationships) {
+        if (relation.source_key == item.key && relation.type.starts_with("PROG_ASSIGNMENT_TO_") &&
+            relation.assignment_index) {
+          represented.insert(*relation.assignment_index);
+        }
+      }
+      const auto *program_media = media_object(source, item.key);
+      const bool sfs = source.media.kind() == axk::MediaKind::sfs;
+      const bool fat = source.media.kind() == axk::MediaKind::fat12_floppy;
+      for (std::size_t index = 0; index < program->assignments.size(); ++index) {
+        const auto &assignment = program->assignments[index];
+        if (assignment.name.empty() || represented.contains(index))
+          continue;
+        const bool known_kind = assignment.kind == 0x10U || assignment.kind == 0x11U;
+        const bool name_match =
+            std::ranges::any_of(source.catalog.objects, [&](const auto &target) {
+              return target.scope_key == item.scope_key &&
+                     target.object.header.name == assignment.name;
+            });
+        std::string reason;
+        if (!known_kind && !name_match) {
+          reason = "ignored-reserved-or-tail-slot-no-known-kind-and-no-name-match";
+        } else if (assignment.raw_handle == 0U) {
+          reason = "ignored-null-handle-unmatched-assignment";
+        } else {
+          continue;
+        }
+        rows.push_back({
+            {"image", axk::text::path_to_utf8(source.path)},
+            {"container_kind", media_kind_text(source.media.kind())},
+            {"scope_key", public_scope_key(source, item)},
+            {"prog_object_key", public_object_key(source, item.key)},
+            {"prog_partition_index", optional_unsigned(sfs, item.partition.value)},
+            {"prog_sfs_id", optional_unsigned(sfs, item.sfs_id.value)},
+            {"prog_fat_file", fat && program_media != nullptr ? program_media->logical_path : ""},
+            {"prog_payload_offset",
+             optional_unsigned(sfs || program_media != nullptr,
+                               sfs                        ? sfs_payload_offset(source, item)
+                               : program_media == nullptr ? 0U
+                                                          : program_media->data_offset)},
+            {"prog_name", item.object.header.name},
+            {"prog_payload_size",
+             program_media == nullptr
+                 ? std::uint64_t{0}
+                 : static_cast<std::uint64_t>(program_media->raw_payload.size())},
+            {"assignment_index", static_cast<std::uint64_t>(index)},
+            {"assignment_offset", static_cast<std::uint64_t>(0x120U + index * 0x38U)},
+            {"raw_name_guess", assignment.name},
+            {"assignment_raw_handle_0x10", static_cast<std::uint64_t>(assignment.raw_handle)},
+            {"assignment_kind_byte_0x14", static_cast<std::uint64_t>(assignment.kind)},
+            {"assignment_flag_byte_0x15", static_cast<std::uint64_t>(assignment.flags)},
+            {"reason", std::move(reason)},
+        });
+      }
     }
   }
   return rows;
@@ -769,9 +904,38 @@ std::vector<axk::ReportRow> allocation_extent_rows(const std::filesystem::path &
 
 std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &path,
                                                    const axk::Container &container,
-                                                   const axk::ObjectCatalog &catalog) {
+                                                   const axk::ObjectCatalog &catalog,
+                                                   std::vector<axk::ReportRow> &detail_issues,
+                                                   std::vector<axk::ReportRow> &validation_issues) {
   using VolumeKey = std::tuple<std::uint8_t, std::uint32_t, std::string, std::string>;
   std::map<VolumeKey, std::vector<const axk::ObjectSnapshot *>> volumes;
+  for (const auto &partition : container.partitions()) {
+    std::map<std::uint32_t, const axk::IndexRecord *> directories;
+    for (const auto &record : partition.records) {
+      if (record.directory_id)
+        directories.emplace(record.directory_id->value, &record);
+    }
+    const axk::IndexRecord *root{};
+    for (const auto &[id, directory] : directories) {
+      if (directory->parent_directory_id && directory->parent_directory_id->value == id) {
+        root = directory;
+        break;
+      }
+    }
+    if (root == nullptr || !root->directory_id)
+      continue;
+    for (const auto &entry : root->directory_entries) {
+      const auto found = directories.find(entry.link_id.value);
+      if (entry.name == "." || entry.name == ".." || found == directories.end())
+        continue;
+      const auto *volume = found->second;
+      if (!volume->parent_directory_id ||
+          volume->parent_directory_id->value != root->directory_id->value)
+        continue;
+      volumes.try_emplace(
+          VolumeKey{partition.index.value, volume->sfs_id.value, partition.name, entry.name});
+    }
+  }
   for (const auto &item : catalog.objects) {
     if (item.placement) {
       volumes[{item.partition.value, item.placement->volume_directory.value,
@@ -781,27 +945,134 @@ std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &
   }
   std::vector<axk::ReportRow> rows;
   for (const auto &[key, objects] : volumes) {
+    static_cast<void>(objects);
     const auto &[partition_index, directory_id, partition_name, volume_name] = key;
     const auto partition = std::ranges::find(container.partitions(), partition_index,
                                              [](const auto &item) { return item.index.value; });
     const axk::IndexRecord *volume_record{};
     if (partition != container.partitions().end()) {
       const auto found = std::ranges::find_if(partition->records, [&](const auto &record) {
-        return record.directory_id && record.directory_id->value == directory_id;
+        return record.sfs_id.value == directory_id;
       });
       if (found != partition->records.end())
         volume_record = &*found;
     }
-    const auto category_count = volume_record == nullptr
-                                    ? 0U
-                                    : static_cast<unsigned int>(std::ranges::count_if(
-                                          volume_record->directory_entries, [](const auto &entry) {
-                                            return entry.name != "." && entry.name != "..";
-                                          }));
+    std::uint64_t category_count{};
+    std::uint64_t object_entry_count{};
+    std::uint64_t matched_object_count{};
+    std::uint64_t category_directory_count{};
+    std::uint64_t checked_entry_count{};
+    std::uint64_t valid_entry_count{};
+    std::uint64_t current_object_count{};
+    std::map<axk::ObjectType, std::uint64_t> artifact_counts;
+    if (partition != container.partitions().end() && volume_record != nullptr) {
+      const auto category_type = [](std::string_view name) {
+        if (name == "SMPL")
+          return axk::ObjectType::smpl;
+        if (name == "SBNK")
+          return axk::ObjectType::sbnk;
+        if (name == "SBAC")
+          return axk::ObjectType::sbac;
+        if (name == "PROG")
+          return axk::ObjectType::prog;
+        if (name == "SEQU")
+          return axk::ObjectType::sequ;
+        return axk::ObjectType::unknown;
+      };
+      for (const auto &category_entry : volume_record->directory_entries) {
+        if (category_entry.name == "." || category_entry.name == "..")
+          continue;
+        ++category_count;
+        const auto type = category_type(category_entry.name);
+        if (type == axk::ObjectType::unknown)
+          continue;
+        const auto category =
+            std::ranges::find(partition->records, category_entry.link_id.value,
+                              [](const auto &record) { return record.sfs_id.value; });
+        if (category == partition->records.end())
+          continue;
+        ++category_directory_count;
+        for (const auto &entry : category->directory_entries) {
+          if (entry.name == "." || entry.name == "..")
+            continue;
+          ++object_entry_count;
+          ++checked_entry_count;
+          const auto target =
+              std::ranges::find(partition->records, entry.link_id.value,
+                                [](const auto &record) { return record.sfs_id.value; });
+          if (target == partition->records.end() ||
+              (target->payload_kind != axk::PayloadKind::object &&
+               target->payload_kind != axk::PayloadKind::alternating_byte_object))
+            continue;
+          ++matched_object_count;
+          ++valid_entry_count;
+          if (target->payload_kind == axk::PayloadKind::alternating_byte_object)
+            ++artifact_counts[type];
+          else
+            ++current_object_count;
+        }
+      }
+    }
     const auto allocation_issues = partition == container.partitions().end()
                                        ? 1U
                                        : partition->allocation.invalid_extent_record_count +
                                              partition->allocation.extent_total_mismatch_count;
+    std::uint64_t artifact_count{};
+    for (const auto &[type, count] : artifact_counts) {
+      static_cast<void>(type);
+      artifact_count += count;
+    }
+    const auto artifact_smpl_count = artifact_counts[axk::ObjectType::smpl];
+    const auto warning_count = artifact_count == 0U ? 0U : 1U;
+    const auto details = std::format(
+        "visible alternating-byte compatibility artifact object entries: total={}, SMPL={}, "
+        "SBNK={}, SBAC={}, PROG={}; filesystem tree/allocation validation does not prove sampler "
+        "loadability for this physical alternating-byte artifact family",
+        artifact_count, artifact_smpl_count, artifact_counts[axk::ObjectType::sbnk],
+        artifact_counts[axk::ObjectType::sbac], artifact_counts[axk::ObjectType::prog]);
+    if (artifact_count != 0U) {
+      detail_issues.push_back({
+          {"source_image", axk::text::path_to_utf8(path)},
+          {"partition_index", static_cast<std::uint64_t>(partition_index)},
+          {"partition_name", partition_name},
+          {"volume_name", volume_name},
+          {"volume_path", "/" + volume_name},
+          {"severity", "warning"},
+          {"issue_type", "visible-alternating-byte-compatibility-artifact-objects"},
+          {"category_code", ""},
+          {"category_name", ""},
+          {"category_directory_id", ""},
+          {"category_directory_path", ""},
+          {"entry_offset", ""},
+          {"entry_name", ""},
+          {"link_id", ""},
+          {"target_kind", "object"},
+          {"target_sfs_id", ""},
+          {"target_payload_kind", "alternating-byte-compatibility-object"},
+          {"match_quality", "Likely"},
+          {"unmatched_reason", ""},
+          {"details", details},
+      });
+      validation_issues.push_back({
+          {"severity", "warning"},
+          {"code", "SFS_VOLUME_VISIBLE_ALTERNATING_BYTE_ARTIFACT"},
+          {"message", details},
+          {"scope", "volume"},
+          {"source_path", axk::text::path_to_utf8(path)},
+          {"sampler_path", "/" + volume_name},
+          {"object_key", ""},
+          {"quality", "Likely"},
+          {"basis", "axklib.validation.volume"},
+          {"recommended_next_check", ""},
+      });
+    }
+    const auto validation_status = allocation_issues != 0U ? "Fail"
+                                   : warning_count != 0U   ? "Warn"
+                                                           : "Pass";
+    const auto classification = allocation_issues != 0U ? "volume-likely-corrupt"
+                                : warning_count != 0U
+                                    ? "valid-visible-tree-with-warnings"
+                                    : "valid-visible-tree-hidden-unreferenced-not-an-error";
     rows.push_back({
         {"source_image", axk::text::path_to_utf8(path)},
         {"partition_index", static_cast<std::uint64_t>(partition_index)},
@@ -809,24 +1080,25 @@ std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &
         {"volume_name", volume_name},
         {"volume_path", "/" + volume_name},
         {"directory_id", static_cast<std::uint64_t>(directory_id)},
-        {"category_count", static_cast<std::uint64_t>(category_count)},
-        {"object_entry_count", static_cast<std::uint64_t>(objects.size())},
-        {"matched_object_count", static_cast<std::uint64_t>(objects.size())},
-        {"category_directory_count", static_cast<std::uint64_t>(category_count)},
-        {"checked_category_entry_count", static_cast<std::uint64_t>(objects.size())},
-        {"valid_category_entry_count", static_cast<std::uint64_t>(objects.size())},
+        {"category_count", category_count},
+        {"object_entry_count", object_entry_count},
+        {"matched_object_count", matched_object_count},
+        {"category_directory_count", category_directory_count},
+        {"checked_category_entry_count", checked_entry_count},
+        {"valid_category_entry_count", valid_entry_count},
         {"malformed_category_entry_count", std::uint64_t{0}},
         {"category_count_mismatch_count", std::uint64_t{0}},
-        {"current_object_entry_count", static_cast<std::uint64_t>(objects.size())},
-        {"compatibility_artifact_object_entry_count", std::uint64_t{0}},
-        {"compatibility_artifact_smpl_entry_count", std::uint64_t{0}},
+        {"current_object_entry_count", current_object_count},
+        {"compatibility_artifact_object_entry_count", artifact_count},
+        {"compatibility_artifact_smpl_entry_count", artifact_smpl_count},
         {"fatal_issue_count", std::uint64_t{0}},
-        {"warning_issue_count", std::uint64_t{0}},
+        {"warning_issue_count", static_cast<std::uint64_t>(warning_count)},
         {"allocation_status", allocation_issues == 0U ? "Pass" : "Fail"},
         {"allocation_issue_count", static_cast<std::uint64_t>(allocation_issues)},
-        {"validation_status", allocation_issues == 0U ? "Pass" : "Fail"},
-        {"volume_classification", "valid-visible-tree-hidden-unreferenced-not-an-error"},
-        {"quality_summary", allocation_issues == 0U
+        {"validation_status", validation_status},
+        {"volume_classification", classification},
+        {"quality_summary", warning_count != 0U ? details
+                            : allocation_issues == 0U
                                 ? "category directory entries and optional allocation check passed"
                                 : "allocation check failed"},
     });
@@ -1020,6 +1292,324 @@ std::vector<axk::ReportRow> validate_export_directory(const std::filesystem::pat
   return issues;
 }
 
+axk::ReportRow media_validation_issue(const CliLoaded &source, std::string severity,
+                                      std::string code, std::string message, std::string scope,
+                                      std::string sampler_path, std::string object_key,
+                                      std::string quality, std::string basis,
+                                      std::string recommended_next_check = {}) {
+  return {
+      {"severity", std::move(severity)},
+      {"code", std::move(code)},
+      {"message", std::move(message)},
+      {"scope", std::move(scope)},
+      {"source_path", axk::text::path_to_utf8(source.path)},
+      {"sampler_path", std::move(sampler_path)},
+      {"object_key", std::move(object_key)},
+      {"quality", std::move(quality)},
+      {"basis", std::move(basis)},
+      {"recommended_next_check", std::move(recommended_next_check)},
+  };
+}
+
+std::string media_object_report_path(const CliLoaded &source, std::string_view object_key) {
+  if (const auto *item = catalog_object(source, object_key); item != nullptr && item->placement) {
+    const auto &placement = *item->placement;
+    const auto category = [&]() -> std::string_view {
+      if (placement.category_name == "SMPL")
+        return "Samples";
+      if (placement.category_name == "SBNK")
+        return "Sample Banks";
+      if (placement.category_name == "SBAC")
+        return "Sample Bank Accessories";
+      if (placement.category_name == "SEQU")
+        return "Sequences";
+      if (placement.category_name == "PROG")
+        return "Programs";
+      return placement.category_name;
+    }();
+    std::string path = std::format("partition {}", placement.partition.value);
+    for (const auto &component : {std::string_view{placement.volume_name}, category,
+                                  std::string_view{placement.entry_name}}) {
+      if (!component.empty())
+        path += std::format("/{}", component);
+    }
+    return path;
+  }
+  const auto *object = media_object(source, object_key);
+  return object == nullptr ? public_object_key(source, object_key) : object->logical_path;
+}
+
+std::string media_object_group_path(const CliLoaded &source, std::string_view object_key) {
+  auto path = media_object_report_path(source, object_key);
+  std::ranges::replace(path, '\\', '/');
+  const auto filename_separator = path.rfind('/');
+  if (filename_separator == std::string::npos)
+    return path;
+  const auto category_separator = path.rfind('/', filename_separator - 1U);
+  if (category_separator == std::string::npos)
+    return path;
+  const auto category =
+      path.substr(category_separator + 1U, filename_separator - category_separator - 1U);
+  static constexpr std::array object_categories{"PROG", "SBAC", "SBNK", "SMPL", "SEQU", "PRF3"};
+  if (std::ranges::find(object_categories, category) == object_categories.end())
+    return path;
+  return path.substr(0U, category_separator);
+}
+
+std::string active_program_assignment_label(const CliLoaded &source, const axk::Relationship &row) {
+  const auto assignment_name = !row.assignment_name.empty()
+                                   ? row.assignment_name
+                                   : row.target_key.value_or("unnamed assignment");
+  if (!row.assignment_index)
+    return std::format("{}: {}", media_object_report_path(source, row.source_key), assignment_name);
+  return std::format("{}: assignment {} {}", media_object_report_path(source, row.source_key),
+                     *row.assignment_index + 1U, assignment_name);
+}
+
+std::string relationship_issue_path(const CliLoaded &source, const axk::Relationship &row) {
+  if (row.type.starts_with("PROG_ASSIGNMENT_"))
+    return active_program_assignment_label(source, row);
+  return media_object_report_path(source, row.source_key);
+}
+
+std::pair<std::string, std::string> ambiguous_relationship_message(const axk::Relationship &row) {
+  if (row.basis == "assignment-visible-off-same-volume-sbac-diagnostic" ||
+      row.basis == "assignment-visible-off-same-volume-sbnk-diagnostic") {
+    const auto target = row.basis == "assignment-visible-off-same-volume-sbac-diagnostic"
+                            ? "sample-bank group"
+                            : "sample-bank";
+    return {std::format("Visible/off Program assignment row names a {} with one same-volume "
+                        "diagnostic candidate plus other duplicate-name candidates; this is "
+                        "decoded Program inventory, not active Program content loss.",
+                        target),
+            "Use relationships.csv candidate fields when auditing off rows; the same-volume "
+            "candidate is diagnostic only and must not create an active Program child."};
+  }
+  if (row.assignment_state == axk::AssignmentState::visible_off)
+    return {"Visible/off Program assignment row has multiple possible local targets; this is "
+            "decoded Program inventory, not active Program content loss.",
+            "Use relationships.csv candidate fields only when auditing off rows; do not treat "
+            "this warning as a missing active Program child."};
+  if (row.type == "PROG_ASSIGNMENT_TO_SBAC")
+    return {"Program assignment to a sample-bank group has multiple possible targets.",
+            "Verify the sampler-visible Program assignment and group target before promotion."};
+  if (row.type == "PROG_ASSIGNMENT_TO_SBNK")
+    return {"Direct Program assignment has multiple possible sample-bank targets.",
+            "Verify the sampler-visible Program assignment target before promotion."};
+  if (row.type == "SBAC_SLOT_TO_SBNK")
+    return {"Sample-bank group slot has multiple possible sample-bank member targets.",
+            "Inspect duplicate same-name sample-bank candidates before using this group slot as "
+            "authoritative."};
+  if (row.basis == "sbnk-member-link-id-only-iso-cross-folder-name-mismatch")
+    return {"Sample-bank member link ID points to one physical waveform in another ISO object "
+            "folder, but the member name does not confirm it.",
+            "Inspect the waveform candidate before treating this member link as exact."};
+  if (row.basis == "sbnk-member-link-id-only-name-mismatch")
+    return {"Sample-bank member link ID points to one physical waveform, but the member name "
+            "does not confirm it.",
+            "Inspect the waveform candidate before treating this member link as exact."};
+  if (row.type.starts_with("SBNK_") && row.type.ends_with("_TO_SMPL"))
+    return {"Sample-bank member link has multiple possible physical waveform targets.",
+            "Inspect candidate waveform objects before treating this sample-bank member link as "
+            "exact."};
+  if (row.basis.starts_with("sbnk-program-link-bitmap-")) {
+    std::string message;
+    if (row.basis.find("disambiguates-ambiguous-direct-assignment") != std::string::npos)
+      message = "Sample-bank Program-link bitmap points to one Program from an ambiguous "
+                "direct-assignment set.";
+    else if (row.basis.find("known-direct-assignment-missing-bitmap") != std::string::npos)
+      message =
+          "Known direct Program assignment is missing from the sample-bank Program-link bitmap.";
+    else if (row.basis.find("nondefault-flag-direct-assignment-without-bitmap") !=
+             std::string::npos)
+      message = "Nondefault direct Program assignment is missing from the sample-bank Program-link "
+                "bitmap.";
+    else
+      message = "Sample-bank Program-link bitmap differs from resolved direct Program assignments.";
+    return {std::move(message),
+            "Use this as bitmap consistency data only; do not treat it as Program content loss "
+            "unless another public rule proves the bitmap is authoritative."};
+  }
+  if (row.type == "SBNK_PROGRAM_BITMAP_TO_PROG")
+    return {"Sample-bank Program-link bitmap maps to multiple possible Program slots.",
+            "Use this as bitmap consistency data only until the Program target is disambiguated."};
+  return {"Relationship has ambiguous candidate targets.",
+          "Inspect candidate set before using for authoritative placement."};
+}
+
+std::string tentative_relationship_code(const axk::Relationship &row) {
+  if (row.assignment_state == axk::AssignmentState::visible_off)
+    return "REL_VISIBLE_OFF_ASSIGNMENT_DIAGNOSTIC";
+  if (row.basis.starts_with("sbnk-program-link-bitmap-"))
+    return "REL_PROGRAM_LINK_BITMAP_DIAGNOSTIC";
+  if (row.basis.starts_with("sbnk-member-link-id-only"))
+    return "REL_SBNK_MEMBER_LINK_DIAGNOSTIC";
+  return "REL_AMBIGUOUS_TARGET";
+}
+
+std::pair<std::string, std::string> missing_relationship_message(const axk::Relationship &row) {
+  if (row.assignment_state == axk::AssignmentState::active)
+    return {"Active Program assignment references a missing local target.",
+            "Inspect the Program assignment and source object group; user-facing info may show "
+            "an unresolved placeholder instead of a normal Program child."};
+  if (row.assignment_state == axk::AssignmentState::visible_off) {
+    const auto expected =
+        row.type == "PROG_ASSIGNMENT_TO_SBAC" ? "sample-bank group" : "sample-bank";
+    return {std::format("Visible/off Program assignment row names a missing local {} target; "
+                        "this is decoded Program inventory, not active Program content loss.",
+                        expected),
+            "Keep this row as diagnostic/off-row data unless sampler-visible checks prove it "
+            "should become an active assignment."};
+  }
+  if (row.assignment_state == axk::AssignmentState::source_load)
+    return {"Source-load Program assignment row has no resolved local target.",
+            "Keep the selector as diagnostic source data until sampler-loaded placement or "
+            "another public rule proves a target."};
+  if (row.type.starts_with("SBNK_") && row.type.ends_with("_TO_SMPL"))
+    return {"Sample-bank member link does not resolve to a physical waveform target.",
+            "Inspect the object group before treating this sample-bank member as complete."};
+  return {"Relationship target could not be resolved.",
+          "Inspect the relationship row and decoded source object before treating the target as "
+          "present."};
+}
+
+std::string missing_relationship_code(const axk::Relationship &row) {
+  if (row.assignment_state == axk::AssignmentState::visible_off)
+    return "REL_VISIBLE_OFF_ASSIGNMENT_DIAGNOSTIC";
+  if (row.assignment_state == axk::AssignmentState::active)
+    return "REL_ACTIVE_ASSIGNMENT_MISSING_TARGET";
+  return "REL_MISSING_TARGET";
+}
+
+std::vector<axk::ReportRow> validate_media_details(const CliLoaded &source,
+                                                   bool include_object_checks = true) {
+  std::vector<axk::ReportRow> issues;
+  if (include_object_checks) {
+    for (const auto &object : source.objects) {
+      const auto required = static_cast<std::uint64_t>(object.decoded.header.header_size) +
+                            object.decoded.header.payload_bytes_0x1c;
+      if (required <= object.raw_payload.size())
+        continue;
+      issues.push_back(media_validation_issue(
+          source, "error", "OBJECT_PAYLOAD_TRUNCATED",
+          std::format("Object header requires {} bytes but payload has {} bytes.", required,
+                      object.raw_payload.size()),
+          "object", {}, public_object_key(source, object.key), "Known", "validation"));
+    }
+  }
+
+  std::map<std::string, std::vector<std::string>> group_members;
+  for (const auto &row : source.graph.relationships) {
+    if (row.type == "SBAC_SLOT_TO_SBNK" && row.target_key &&
+        (row.quality == axk::RelationshipQuality::known ||
+         row.quality == axk::RelationshipQuality::likely)) {
+      group_members[row.source_key].push_back(*row.target_key);
+    }
+  }
+  std::map<std::string, std::vector<const axk::Relationship *>> reachable;
+  for (const auto &row : source.graph.relationships) {
+    if (!row.target_key ||
+        (row.assignment_state != axk::AssignmentState::active &&
+         row.assignment_state != axk::AssignmentState::source_load) ||
+        (row.quality != axk::RelationshipQuality::known &&
+         row.quality != axk::RelationshipQuality::likely)) {
+      continue;
+    }
+    if (row.type == "PROG_ASSIGNMENT_TO_SBNK") {
+      reachable[*row.target_key].push_back(&row);
+    } else if (row.type == "PROG_ASSIGNMENT_TO_SBAC") {
+      if (const auto members = group_members.find(*row.target_key);
+          members != group_members.end()) {
+        for (const auto &member : members->second)
+          reachable[member].push_back(&row);
+      }
+    }
+  }
+  using MemberGroup = std::pair<std::string, bool>;
+  std::map<MemberGroup, std::vector<const axk::Relationship *>> grouped_members;
+  std::map<MemberGroup, std::set<std::string>> grouped_active_labels;
+  std::set<std::string> covered_relationships;
+  for (const auto &row : source.graph.relationships) {
+    if ((row.type != "SBNK_LEFT_MEMBER_TO_SMPL" && row.type != "SBNK_RIGHT_MEMBER_TO_SMPL") ||
+        row.quality != axk::RelationshipQuality::unknown)
+      continue;
+    const auto active = reachable.find(row.source_key);
+    const MemberGroup group{media_object_group_path(source, row.source_key),
+                            active != reachable.end()};
+    grouped_members[group].push_back(&row);
+    if (active != reachable.end()) {
+      for (const auto *program_row : active->second)
+        grouped_active_labels[group].insert(active_program_assignment_label(source, *program_row));
+    }
+    covered_relationships.insert(row.key);
+  }
+  for (const auto &[group, rows] : grouped_members) {
+    std::set<std::string> source_keys;
+    for (const auto *row : rows)
+      source_keys.insert(public_object_key(source, row->source_key));
+    const auto member_count = rows.size();
+    const auto bank_count = source_keys.size();
+    if (group.second) {
+      std::string active_summary;
+      const auto &labels = grouped_active_labels[group];
+      std::size_t index{};
+      for (const auto &label : labels) {
+        if (index == 4U)
+          break;
+        if (!active_summary.empty())
+          active_summary += "; ";
+        active_summary += label;
+        ++index;
+      }
+      if (labels.size() > 4U)
+        active_summary += std::format("; +{} more", labels.size() - 4U);
+      issues.push_back(media_validation_issue(
+          source, "error", "REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING",
+          std::format("{} sample-bank member link(s) across {} sample bank(s) do not resolve to "
+                      "physical sample objects and are reachable from active Program assignments.",
+                      member_count, bank_count),
+          "relationship", std::format("{} | {}", group.first, active_summary), *source_keys.begin(),
+          "Unknown", "SBNK member target aggregation",
+          "Treat the affected Program/sample-bank path as incomplete until the missing physical "
+          "sample objects are found or the source is confirmed partially loadable."));
+    } else {
+      issues.push_back(media_validation_issue(
+          source, "warning", "REL_SBNK_MEMBER_TARGET_MISSING",
+          std::format("{} sample-bank member link(s) across {} sample bank(s) do not resolve to "
+                      "physical sample objects.",
+                      member_count, bank_count),
+          "relationship", group.first, *source_keys.begin(), "Unknown",
+          "SBNK member target aggregation",
+          "Inspect the sample-bank member links before treating this object group as complete."));
+    }
+  }
+  for (const auto &row : source.graph.relationships) {
+    if (covered_relationships.contains(row.key))
+      continue;
+    if (row.quality == axk::RelationshipQuality::tentative) {
+      auto [message, next_check] = ambiguous_relationship_message(row);
+      issues.push_back(media_validation_issue(
+          source, "warning", tentative_relationship_code(row), std::move(message), "relationship",
+          relationship_issue_path(source, row), public_object_key(source, row.source_key),
+          "Tentative", row.basis, std::move(next_check)));
+    } else if (row.quality == axk::RelationshipQuality::unknown) {
+      auto [message, next_check] = missing_relationship_message(row);
+      issues.push_back(media_validation_issue(
+          source, "warning", missing_relationship_code(row), std::move(message), "relationship",
+          relationship_issue_path(source, row), public_object_key(source, row.source_key),
+          "Unknown", row.basis, std::move(next_check)));
+    }
+  }
+  std::ranges::sort(issues, {}, [](const axk::ReportRow &row) {
+    const auto value = [&](std::string_view key) -> std::string {
+      const auto found = std::ranges::find(row, key, &axk::ReportRow::value_type::first);
+      return found == row.end() ? std::string{} : std::get<std::string>(found->second.value);
+    };
+    return std::tuple{value("code"), value("object_key"), value("message")};
+  });
+  return issues;
+}
+
 int run_validate_request(const axk::cli::ValidateRequest &request) {
   if (!request.exports && request.paths.empty()) {
     std::cerr << "validate requires input paths unless --exports is supplied\n";
@@ -1036,6 +1626,7 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
   std::vector<axk::ReportRow> volume_issues;
   std::map<std::string, std::uint64_t> issue_counts;
   bool failed{};
+  bool has_sfs_input{};
   if (request.exports) {
     issues = validate_export_directory(*request.exports);
     for (const auto &issue : issues) {
@@ -1046,16 +1637,38 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
     }
     failed = !issues.empty();
   }
-  for (const auto &path :
-       request.exports ? std::vector<std::filesystem::path>{} : expand_cli_paths(request.paths)) {
-    auto snapshot = load_semantic_snapshot(path);
-    if (!snapshot) {
-      std::cerr << axk::render_error(snapshot.error()) << '\n';
-      return 2;
+  const auto loaded = request.exports ? CliLoadResult{} : load_cli_paths(request.paths);
+  if (!loaded.errors.empty()) {
+    std::cerr << "one or more validation inputs could not be opened\n";
+    return 2;
+  }
+  for (const auto &source : loaded.loaded) {
+    const auto &path = source.path;
+    if (source.media.kind() != axk::MediaKind::sfs) {
+      auto source_issues = validate_media_details(source);
+      for (auto &issue : source_issues) {
+        const auto code =
+            std::ranges::find(issue, "code", &std::pair<std::string, axk::ReportValue>::first);
+        if (code != issue.end())
+          ++issue_counts[std::get<std::string>(code->second.value)];
+        const auto severity =
+            std::ranges::find(issue, "severity", &std::pair<std::string, axk::ReportValue>::first);
+        if (severity != issue.end()) {
+          const auto &value = std::get<std::string>(severity->second.value);
+          if (value == "error" || value == "fatal" ||
+              (request.policy == "strict" && value == "warning"))
+            failed = true;
+        }
+        issues.push_back(std::move(issue));
+      }
+      continue;
     }
-    const auto report =
-        axk::validate_semantics(snapshot->container, snapshot->catalog, snapshot->graph);
+    has_sfs_input = true;
+    const auto &container = std::get<axk::Container>(source.media.storage());
+    const auto report = axk::validate_semantics(container, source.catalog, source.graph);
     for (const auto &issue : report.issues) {
+      if (issue.code.starts_with("REL_"))
+        continue;
       const auto severity = issue.severity == axk::ValidationSeverity::error     ? "error"
                             : issue.severity == axk::ValidationSeverity::warning ? "warning"
                                                                                  : "info";
@@ -1076,11 +1689,37 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
           {"recommended_next_check", ""},
       });
     }
-    auto source_summaries = allocation_summary_rows(path, snapshot->container);
+    auto relationship_issues = validate_media_details(source, false);
+    for (auto &issue : relationship_issues) {
+      const auto code =
+          std::ranges::find(issue, "code", &std::pair<std::string, axk::ReportValue>::first);
+      if (code != issue.end())
+        ++issue_counts[std::get<std::string>(code->second.value)];
+      const auto severity =
+          std::ranges::find(issue, "severity", &std::pair<std::string, axk::ReportValue>::first);
+      if (severity != issue.end()) {
+        const auto &value = std::get<std::string>(severity->second.value);
+        if (value == "error" || value == "fatal" ||
+            (request.policy == "strict" && value == "warning"))
+          failed = true;
+      }
+      issues.push_back(std::move(issue));
+    }
+    auto source_summaries = allocation_summary_rows(path, container);
     std::ranges::move(source_summaries, std::back_inserter(allocation_summaries));
-    auto source_extents = allocation_extent_rows(path, snapshot->container);
+    auto source_extents = allocation_extent_rows(path, container);
     std::ranges::move(source_extents, std::back_inserter(allocation_extents));
-    auto source_volumes = volume_validation_rows(path, snapshot->container, snapshot->catalog);
+    const auto prior_issue_count = issues.size();
+    auto source_volumes =
+        volume_validation_rows(path, container, source.catalog, volume_issues, issues);
+    for (auto index = prior_issue_count; index < issues.size(); ++index) {
+      const auto code = std::ranges::find(issues[index], "code",
+                                          &std::pair<std::string, axk::ReportValue>::first);
+      if (code != issues[index].end())
+        ++issue_counts[std::get<std::string>(code->second.value)];
+      if (request.policy == "strict")
+        failed = true;
+    }
     std::ranges::move(source_volumes, std::back_inserter(volumes));
   }
   axk::ReportValue::Object summary_counts;
@@ -1092,23 +1731,45 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
                                     {"issue_count", static_cast<std::uint64_t>(issues.size())},
                                     {"summary_counts", std::move(summary_counts)}};
   std::uint64_t pass_count{};
+  std::uint64_t warn_count{};
+  std::uint64_t fail_count{};
+  std::uint64_t fatal_issue_count{};
+  std::uint64_t warning_issue_count{};
+  std::uint64_t malformed_category_entry_count{};
+  std::uint64_t allocation_issue_count{};
   for (const auto &row : volumes) {
-    const auto status = std::ranges::find(row, "validation_status",
-                                          &std::pair<std::string, axk::ReportValue>::first);
-    if (status != row.end() && std::get<std::string>(status->second.value) == "Pass")
+    const auto text = [&](std::string_view key) -> std::string {
+      const auto found =
+          std::ranges::find(row, key, &std::pair<std::string, axk::ReportValue>::first);
+      return found == row.end() ? std::string{} : std::get<std::string>(found->second.value);
+    };
+    const auto number = [&](std::string_view key) -> std::uint64_t {
+      const auto found =
+          std::ranges::find(row, key, &std::pair<std::string, axk::ReportValue>::first);
+      return found == row.end() ? 0U : std::get<std::uint64_t>(found->second.value);
+    };
+    if (text("validation_status") == "Pass")
       ++pass_count;
+    else if (text("validation_status") == "Warn")
+      ++warn_count;
+    else
+      ++fail_count;
+    fatal_issue_count += number("fatal_issue_count");
+    warning_issue_count += number("warning_issue_count");
+    malformed_category_entry_count += number("malformed_category_entry_count");
+    allocation_issue_count += number("allocation_issue_count");
   }
   axk::ReportRow volume_summary{
       {"source_image",
        request.paths.size() == 1U ? axk::text::path_to_utf8(request.paths.front()) : ""},
       {"volume_count", static_cast<std::uint64_t>(volumes.size())},
       {"pass_count", pass_count},
-      {"warn_count", std::uint64_t{0}},
-      {"fail_count", static_cast<std::uint64_t>(volumes.size()) - pass_count},
-      {"fatal_issue_count", std::uint64_t{0}},
-      {"warning_issue_count", std::uint64_t{0}},
-      {"malformed_category_entry_count", std::uint64_t{0}},
-      {"allocation_issue_count", std::uint64_t{0}},
+      {"warn_count", warn_count},
+      {"fail_count", fail_count},
+      {"fatal_issue_count", fatal_issue_count},
+      {"warning_issue_count", warning_issue_count},
+      {"malformed_category_entry_count", malformed_category_entry_count},
+      {"allocation_issue_count", allocation_issue_count},
   };
   std::vector<axk::ReportSchemaManifest> schemas;
   const auto report = [&](std::string name, const std::vector<axk::ReportRow> &rows) -> bool {
@@ -1136,7 +1797,7 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
       !written)
     return report_failure(written.error());
   schemas.push_back(validation_summary_schema);
-  if (!request.exports) {
+  if (!request.exports && has_sfs_input) {
     if (!report("allocation_summary", allocation_summaries) ||
         !report("allocation_extents", allocation_extents) ||
         !report("allocation_mismatches", allocation_mismatches) ||

@@ -16,6 +16,7 @@
 
 #include "content_id.hpp"
 #include "handlers.hpp"
+#include "reports.hpp"
 #include "requests.hpp"
 #include "schema/export_v1.hpp"
 #include "schema/operations_v1.hpp"
@@ -269,6 +270,8 @@ void filter_export_plan(axk::ExportPlan &plan, const CliLoaded &source, std::str
                   [&](const auto &group) { return !groups.contains(group.object_key); });
     for (auto &group : volume.sample_bank_groups) {
       std::erase_if(group.member_bank_keys, [&](const auto &key) { return !banks.contains(key); });
+      std::erase_if(group.relationship_bank_keys,
+                    [&](const auto &key) { return !banks.contains(key); });
     }
     std::erase_if(volume.programs,
                   [&](const auto &program) { return !programs.contains(program.object_key); });
@@ -329,6 +332,7 @@ int run_extract_request(const axk::cli::ExtractRequest &request) {
           !retargeted) {
         return report_failure(retargeted.error());
       }
+      std::ranges::move(plan->decode_errors, std::back_inserter(combined.decode_errors));
       for (const auto &volume : plan->volumes) {
         auto graph = axk::cli::schema::export_v1::serialize_volume_graph(
             volume, source.graph, source.path, media_kind_text(source.media.kind()));
@@ -376,12 +380,15 @@ int run_extract_request(const axk::cli::ExtractRequest &request) {
       return report_failure(written.error());
   }
   written_files += volume_graphs.size();
+  for (const auto &decode_error : combined.decode_errors)
+    std::cerr << "warning: skipped waveform " << decode_error << '\n';
   const auto waveform_count = std::accumulate(
       combined.volumes.begin(), combined.volumes.end(), std::size_t{},
       [](std::size_t count, const auto &volume) { return count + volume.waveforms.size(); });
   std::cout << "waveforms=" << waveform_count << " written_files=" << written_files
             << " selection_graphs=" << volume_graphs.size() << " sfz_files=" << sfz_count
-            << " decode_errors=0 load_errors=" << loaded.errors.size() << '\n';
+            << " decode_errors=" << combined.decode_errors.size()
+            << " load_errors=" << loaded.errors.size() << '\n';
   return loaded.errors.empty() ? 0 : 1;
 }
 
@@ -403,6 +410,7 @@ axk::ReportRow coverage_summary(const CliLoadResult &loaded,
     }
     bitmaps += source.graph.bitmap_comparisons.size();
   }
+  const auto ignored = static_cast<std::uint64_t>(program_ignored_detail_rows(loaded).size());
   const auto joined = [](const auto &counts) {
     std::string result;
     for (const auto &[name, count] : counts) {
@@ -422,7 +430,7 @@ axk::ReportRow coverage_summary(const CliLoadResult &loaded,
           {"ambiguous_relationship_count", qualities["Tentative"]},
           {"sbac_sbnk_row_count", sbac},
           {"prog_assignment_row_count", program},
-          {"prog_ignored_row_count", std::uint64_t{0}},
+          {"prog_ignored_row_count", ignored},
           {"sbnk_bitmap_row_count", bitmaps},
           {"relationship_type_counts", joined(types)},
           {"quality_counts", joined(qualities)},

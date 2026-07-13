@@ -60,7 +60,10 @@ Result<std::string> serialize_volume_graph(const VolumeExport &volume,
             {"loop_mode_label", audio.loop_mode_label},
             {"loop_start_frame", audio.loop_start},
             {"loop_length_frames", audio.loop_length},
-            {"loop_end_frame_a4000_ui", audio.loop_start + audio.loop_length}}},
+            {"loop_end_frame_a4000_ui",
+             audio.loop_length == 0U
+                 ? OrderedJson(nullptr)
+                 : OrderedJson(static_cast<std::uint64_t>(audio.loop_start) + audio.loop_length)}}},
           {"origin",
            {{"source_container", text::path_to_utf8(source_path)},
             {"container_kind", container_kind},
@@ -166,6 +169,7 @@ Result<std::string> serialize_volume_graph(const VolumeExport &volume,
           {"object_key", group.object_key},
           {"display_name", group.display_name},
           {"members", std::move(members)},
+          {"relationship_bank_keys", group.relationship_bank_keys},
       });
     }
     OrderedJson prog = OrderedJson::array();
@@ -179,18 +183,37 @@ Result<std::string> serialize_volume_graph(const VolumeExport &volume,
     }
     OrderedJson relationships = OrderedJson::array();
     std::set<std::string> volume_keys;
+    std::set<std::pair<std::string, std::string>> volume_edges;
+    std::set<std::pair<std::string, std::string>> relationship_edges;
     for (const auto &row : volume.waveforms)
       volume_keys.insert(row.object_key);
-    for (const auto &row : volume.sample_banks)
+    for (const auto &row : volume.sample_banks) {
       volume_keys.insert(row.object_key);
-    for (const auto &row : volume.sample_bank_groups)
+      for (const auto &member : row.members)
+        volume_edges.emplace(row.object_key, member.waveform_key);
+    }
+    for (const auto &row : volume.sample_bank_groups) {
       volume_keys.insert(row.object_key);
-    for (const auto &row : volume.programs)
+      for (const auto &member : row.member_bank_keys)
+        volume_edges.emplace(row.object_key, member);
+      for (const auto &target : row.relationship_bank_keys)
+        relationship_edges.emplace(row.object_key, target);
+    }
+    for (const auto &row : volume.programs) {
       volume_keys.insert(row.object_key);
+      for (const auto &target : row.assignment_target_keys)
+        volume_edges.emplace(row.object_key, target);
+    }
     for (const auto &row : graph.relationships) {
       if (!volume_keys.contains(row.source_key))
         continue;
-      if (row.type == "SBNK_PROGRAM_BITMAP_TO_PROG" || row.type == "PROG_ASSIGNMENT_TO_SBAC") {
+      if (!row.target_key)
+        continue;
+      const auto retained_relationship =
+          relationship_edges.contains({row.source_key, *row.target_key});
+      if (!retained_relationship && !volume_edges.contains({row.source_key, *row.target_key}))
+        continue;
+      if (row.type == "SBNK_PROGRAM_BITMAP_TO_PROG") {
         continue;
       }
       relationships.push_back({

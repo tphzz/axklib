@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <limits>
 #include <string>
 
@@ -61,11 +62,45 @@ TEST(CliSchema, ObjectRelationshipTreeAndExportSummarySchemasStayParseable) {
   EXPECT_TRUE(nlohmann::json::parse(*relationships)["relationships"][0]["target_key"].is_null());
 
   axk::VolumeExport volume;
+  axk::Waveform non_looping;
+  non_looping.loop_start = 66U;
+  non_looping.loop_length = 0U;
+  volume.waveforms.push_back({"waveform", "Waveform", "SMPL/Waveform.wav", non_looping});
+  auto wide_loop = non_looping;
+  wide_loop.loop_start = 23'423U;
+  wide_loop.loop_length = 4'294'967'293U;
+  volume.waveforms.push_back({"wide", "Wide", "SMPL/Wide.wav", wide_loop});
+  volume.sample_bank_groups.push_back(
+      {"group", "Group", {"known-bank"}, {"known-bank", "likely-bank"}});
+  volume.programs.push_back({"source", "001", {"target"}});
+  graph.relationships.push_back({
+      .key = "program-edge",
+      .source_key = "source",
+      .target_key = "target",
+      .candidate_keys = {},
+      .type = "PROG_ASSIGNMENT_TO_SBAC",
+      .quality = axk::RelationshipQuality::known,
+      .basis = "assignment-kind-0x11+name",
+      .notes = "",
+      .scope_key = "scope",
+      .assignment_index = 0U,
+      .assignment_name = "Bank",
+      .assignment_state = axk::AssignmentState::source_load,
+      .receive_channel_display = "unknown",
+  });
   const auto volume_graph =
       export_schema::serialize_volume_graph(volume, graph, "source.iso", "iso");
   ASSERT_TRUE(volume_graph);
   const auto parsed_graph = nlohmann::json::parse(*volume_graph);
   EXPECT_EQ(parsed_graph["source"]["container_kinds"][0], "iso");
+  EXPECT_TRUE(parsed_graph["objects"]["smpl"][0]["playback"]["loop_end_frame_a4000_ui"].is_null());
+  EXPECT_EQ(parsed_graph["objects"]["smpl"][1]["playback"]["loop_end_frame_a4000_ui"],
+            4'294'990'716ULL);
+  EXPECT_TRUE(std::ranges::any_of(parsed_graph["relationships"], [](const auto &row) {
+    return row["relationship_type"] == "PROG_ASSIGNMENT_TO_SBAC";
+  }));
+  EXPECT_EQ(parsed_graph["objects"]["sbac"][0]["members"].size(), 1U);
+  EXPECT_EQ(parsed_graph["objects"]["sbac"][0]["relationship_bank_keys"].size(), 2U);
 
   const std::vector summaries{export_schema::VolumeSummaryOutput{
       .path_utf8 = "partition/\xc3\xa4",
@@ -99,6 +134,12 @@ TEST(CliSchema, InfoV1KeepsRecursiveOrderNullCountsAndUtf8Paths) {
       .container_kind = "sfs",
       .detected_format = "sfs",
       .roots = {std::move(root)},
+      .issues = {{.code = "TEST",
+                  .severity = "warning",
+                  .message = "message",
+                  .source_path_utf8 = "audio/\xc3\xa4.hds",
+                  .sampler_path = "Volume/Bank",
+                  .object_key = "p0:sfs1"}},
   });
   output.load_errors.push_back({
       .path_utf8 = "bad.hds",
@@ -111,7 +152,8 @@ TEST(CliSchema, InfoV1KeepsRecursiveOrderNullCountsAndUtf8Paths) {
   ASSERT_TRUE(serialized);
   const auto parsed = nlohmann::json::parse(*serialized);
   EXPECT_TRUE(parsed["trees"][0]["roots"][0]["count"].is_null());
-  EXPECT_EQ(parsed["trees"][0]["issues"], nlohmann::json::array());
+  EXPECT_EQ(parsed["trees"][0]["issues"][0]["code"], "TEST");
+  EXPECT_EQ(parsed["trees"][0]["issues"][0]["object_key"], "p0:sfs1");
   EXPECT_EQ(parsed["load_errors"][0]["error_code"], 100U);
 }
 
