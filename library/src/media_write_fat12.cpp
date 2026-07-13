@@ -7,6 +7,7 @@
 #include <fstream>
 #include <mutex>
 #include <set>
+#include <span>
 
 // clang-format off
 #include <ff.h>
@@ -17,6 +18,20 @@ namespace {
 
 constexpr std::size_t sector_size = 512;
 constexpr std::size_t sector_count = 2880;
+constexpr std::size_t sectors_per_fat = 9;
+constexpr std::size_t first_fat_offset = sector_size;
+constexpr std::size_t second_fat_offset = first_fat_offset + sectors_per_fat * sector_size;
+constexpr std::byte floppy_media_descriptor{0xf0};
+constexpr std::size_t boot_jump_offset = 0x00;
+constexpr std::size_t oem_name_offset = 0x03;
+constexpr std::size_t media_descriptor_offset = 0x15;
+constexpr std::size_t sectors_per_track_offset = 0x18;
+constexpr std::size_t head_count_offset = 0x1a;
+constexpr std::size_t drive_number_offset = 0x24;
+constexpr std::size_t reserved_boot_offset = 0x25;
+constexpr std::size_t extended_boot_signature_offset = 0x26;
+constexpr std::size_t volume_label_offset = 0x2b;
+constexpr std::size_t filesystem_name_offset = 0x36;
 
 struct FatDisk {
   std::vector<std::byte> bytes;
@@ -41,6 +56,29 @@ axk::Error fatfs_error(std::string message, FRESULT result) {
   return axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
                          std::move(message) + " (FatFs result " +
                              std::to_string(static_cast<unsigned int>(result)) + ")");
+}
+
+void apply_yamaha_floppy_profile(std::span<std::byte> bytes) {
+  constexpr std::array<std::byte, 3> jump{std::byte{0xeb}, std::byte{0x58}, std::byte{0x90}};
+  constexpr std::string_view oem_name{"WINIMAGE"};
+  constexpr std::string_view filesystem_name{"FAT12   "};
+
+  std::ranges::copy(jump, bytes.begin() + boot_jump_offset);
+  std::ranges::transform(oem_name, bytes.begin() + oem_name_offset,
+                         [](char character) { return static_cast<std::byte>(character); });
+  bytes[media_descriptor_offset] = floppy_media_descriptor;
+  bytes[sectors_per_track_offset] = std::byte{18};
+  bytes[sectors_per_track_offset + 1U] = std::byte{0};
+  bytes[head_count_offset] = std::byte{2};
+  bytes[head_count_offset + 1U] = std::byte{0};
+  bytes[drive_number_offset] = std::byte{0};
+  bytes[reserved_boot_offset] = std::byte{0};
+  bytes[extended_boot_signature_offset] = std::byte{0x29};
+  std::fill_n(bytes.begin() + volume_label_offset, 11, std::byte{' '});
+  std::ranges::transform(filesystem_name, bytes.begin() + filesystem_name_offset,
+                         [](char character) { return static_cast<std::byte>(character); });
+  bytes[first_fat_offset] = floppy_media_descriptor;
+  bytes[second_fat_offset] = floppy_media_descriptor;
 }
 
 } // namespace
@@ -116,6 +154,7 @@ Result<void> write_fat12_image(const PreparedMediaImage &image,
     reset_disk();
     return std::unexpected{fatfs_error("could not format FAT12 image", status)};
   }
+  apply_yamaha_floppy_profile(disk.bytes);
   FATFS filesystem{};
   status = f_mount(&filesystem, "", 1);
   if (status != FR_OK) {

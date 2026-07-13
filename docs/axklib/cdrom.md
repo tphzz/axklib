@@ -38,8 +38,12 @@ single-sector directories, Yamaha group/volume menu records, and single-extent
 object files. It reopens the image with the production reader before publishing
 it. Physical Yamaha hardware has enumerated, loaded, and played the minimal
 generated profile containing one mono `SMPL` and one direct single-member
-`SBNK`. That proof is intentionally narrower than every tree or object topology
-the reader can parse.
+`SBNK`. A second generated profile has also loaded and played one complete
+`PROG` containing both a `PROG -> SBAC -> SBNK -> SMPL` assignment and a direct
+`PROG -> SBNK -> SMPL` assignment that share the same waveform. Byte-preserving
+whole-floppy Yamaha-object transfer has likewise loaded and played its
+transferred Program and Sample Banks from a generated CD-ROM. These proofs are
+intentionally narrower than every tree or object topology the reader can parse.
 
 | Field | Rule |
 | --- | --- |
@@ -274,7 +278,7 @@ Label sources:
 | Group label | Final `_DSKNAME` row in the group `0000` catalog references a 16-byte label file. | `iso_group_label` |
 | Volume label | Row in a group-local compact menu table. | `iso_volume_label` |
 
-Each catalog row is exactly 32 bytes:
+Group catalog rows and one observed category-catalog form are 32 bytes:
 
 | Row offset | Size | Contents |
 | --- | ---: | --- |
@@ -294,11 +298,30 @@ for byte in field[0:16]:
     hash = ((hash XOR table[hash AND 3]) + byte) modulo 256
 ```
 
+Some Yamaha CD-ROM category catalogs use a shifted-first-row variant. The first
+logical 32-byte row has its initial four bytes (the name hash and first three
+display-name bytes) elided, so the retained 28 bytes start with the remaining
+13 display-name bytes and place the filename at file offset `0x0e`. Subsequent
+rows are ordinary 32-byte rows starting at file offset `0x1c`, and four zero
+bytes pad the tail. The reader selects the layout that yields coherent `Fnnn`
+targets; the generated writer uses ordinary 32-byte category rows.
+
 An ordinary group row maps a 16-byte volume display name to an `Fnnn` volume
 directory. An ordinary category row maps an object display name to an `Fnnn`
 object file. The special final group row differs from ordinary padding: bytes
 `0x01..0x08` are `_DSKNAME`, bytes `0x09..0x10` are NUL, and its filename points
 to the group-label file.
+
+For populated recognized categories, validation checks that `0000` exists,
+that the supported row layout yields distinct `Fnnn` targets, that every target
+file exists, and that every `Fnnn` object file has a catalog row. Empty category
+directories do not require a catalog. Payload decoding remains in the object
+inventory and validation pass; opening the ISO does not read every waveform
+payload merely to validate menu structure. Display labels may be truncated or
+space-normalized relative to embedded names and are not required to match.
+These are diagnostics: the ISO tree and independently readable objects remain
+available even when the Yamaha menu catalog is inconsistent. Catalog hash bytes
+are not currently a validation gate.
 
 For `N` consecutively numbered volume directories starting at `F001`, the final
 `_DSKNAME` row points to `F(N+1)`. That file is exactly 16 bytes containing the

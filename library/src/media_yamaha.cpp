@@ -119,6 +119,66 @@ void add_group_catalog_issue(detail::IsoMenuLabels &result, std::string code,
   });
 }
 
+bool yamaha_object_category(std::string_view value) {
+  return value == "SMPL" || value == "SBNK" || value == "SBAC" || value == "PROG" ||
+         value == "SEQU" || value == "PRF3";
+}
+
+void add_category_catalog_issue(detail::IsoMenuLabels &result, std::string code,
+                                std::string_view group, std::string_view volume,
+                                std::string_view category, std::string message,
+                                std::string recommended_next_check) {
+  result.validation_issues.push_back({
+      std::move(code),
+      std::move(message),
+      std::format("CD-ROM group '{}', volume '{}', {} objects", group, volume, category),
+      "Yamaha category 0000 catalog and object placement contract",
+      std::move(recommended_next_check),
+  });
+}
+
+struct CategoryCatalogRecord {
+  std::string label;
+  std::string target;
+};
+
+std::vector<CategoryCatalogRecord> category_catalog_records(std::span<const std::byte> bytes,
+                                                            std::size_t stride,
+                                                            std::size_t name_width,
+                                                            std::size_t target_offset) {
+  std::vector<CategoryCatalogRecord> result;
+  for (std::size_t offset = 0; offset + stride <= bytes.size(); offset += stride) {
+    const auto record = bytes.subspan(offset, stride);
+    if (std::ranges::all_of(record, [](std::byte value) { return value == std::byte{}; }))
+      continue;
+    result.push_back({clean_label(record.subspan(1, name_width)),
+                      detail::clean_ascii(record.subspan(target_offset, 11))});
+  }
+  return result;
+}
+
+std::vector<CategoryCatalogRecord>
+shifted_category_catalog_records(std::span<const std::byte> bytes) {
+  std::vector<CategoryCatalogRecord> result;
+  if (bytes.size() < 28U)
+    return result;
+  result.push_back({clean_label(bytes.first(13U)), detail::clean_ascii(bytes.subspan(14U, 11U))});
+  for (std::size_t offset = 28U; offset + 32U <= bytes.size(); offset += 32U) {
+    const auto record = bytes.subspan(offset, 32U);
+    if (std::ranges::all_of(record, [](std::byte value) { return value == std::byte{}; }))
+      continue;
+    result.push_back(
+        {clean_label(record.subspan(1U, 16U)), detail::clean_ascii(record.subspan(18U, 11U))});
+  }
+  return result;
+}
+
+std::size_t category_catalog_target_count(std::span<const CategoryCatalogRecord> records) {
+  return static_cast<std::size_t>(std::ranges::count_if(records, [](const auto &record) {
+    return f_directory(record.target) && record.target != "F000";
+  }));
+}
+
 } // namespace
 
 namespace detail {
@@ -222,6 +282,101 @@ Result<IsoMenuLabels> read_yamaha_iso_menu_labels(const IsoImage &image,
           result, "ISO_YAMAHA_DSKNAME_ROW_MISSING", group,
           std::format("CD-ROM group menu '{}' does not end with the required _DSKNAME row.", group),
           "Append a NUL-padded _DSKNAME row that references the next Fnnn group-label file.");
+    }
+  }
+
+  for (const auto &directory : image.files()) {
+    const auto parts = path_parts(directory.path);
+    if (!directory.is_directory || parts.size() != 3U || !f_directory(parts[1]) ||
+        !yamaha_object_category(parts[2])) {
+      continue;
+    }
+    const auto &group = parts[0];
+    const auto &volume = parts[1];
+    const auto &category = parts[2];
+    std::set<std::string> object_files;
+    for (const auto &file : image.files()) {
+      const auto child_parts = path_parts(file.path);
+      if (!file.is_directory && child_parts.size() == 4U && child_parts[0] == group &&
+          child_parts[1] == volume && child_parts[2] == category && f_directory(child_parts[3]) &&
+          child_parts[3] != "F000") {
+        object_files.insert(child_parts[3]);
+      }
+    }
+    if (object_files.empty())
+      continue;
+
+    const auto catalog_path = std::format("{}/0000", directory.path);
+    const auto catalog = std::ranges::find(image.files(), catalog_path, &IsoFile::path);
+    if (catalog == image.files().end() || catalog->is_directory) {
+      add_category_catalog_issue(
+          result, "ISO_YAMAHA_CATEGORY_CATALOG_MISSING", group, volume, category,
+          std::format("{} objects in CD-ROM volume '{}' have no readable 0000 catalog.", category,
+                      volume),
+          "Restore the category 0000 catalog while preserving the readable object files.");
+      continue;
+    }
+    auto catalog_bytes = image.read_file(*catalog, cancellation);
+    if (!catalog_bytes) {
+      add_category_catalog_issue(
+          result, "ISO_YAMAHA_CATEGORY_CATALOG_UNREADABLE", group, volume, category,
+          std::format("{} objects in CD-ROM volume '{}' have a 0000 catalog whose declared span "
+                      "cannot be read: {}",
+                      category, volume, catalog_bytes.error().message),
+          "Repair the catalog extent while preserving independently readable object files.");
+      continue;
+    }
+    const auto records32 = category_catalog_records(*catalog_bytes, 32U, 16U, 18U);
+    const auto shifted_records = shifted_category_catalog_records(*catalog_bytes);
+    const auto score32 = category_catalog_target_count(records32);
+    const auto shifted_score = category_catalog_target_count(shifted_records);
+    const auto &records = shifted_score > score32 ? shifted_records : records32;
+    if (std::max(shifted_score, score32) == 0U) {
+      add_category_catalog_issue(
+          result, "ISO_YAMAHA_CATEGORY_CATALOG_ROWS_INVALID", group, volume, category,
+          std::format("{} objects in CD-ROM volume '{}' have a 0000 catalog with no recognizable "
+                      "standard or shifted 32-byte Fnnn target rows.",
+                      category, volume),
+          "Restore a Yamaha category catalog matching the object-file targets.");
+    }
+
+    std::set<std::string> catalog_targets;
+    for (const auto &record : records) {
+      const auto &label = record.label;
+      const auto &id = record.target;
+      if (!f_directory(id) || id == "F000")
+        continue;
+      if (!catalog_targets.insert(id).second) {
+        add_category_catalog_issue(
+            result, "ISO_YAMAHA_CATEGORY_CATALOG_TARGET_DUPLICATE", group, volume, category,
+            std::format("{} catalog in CD-ROM volume '{}' references object file '{}' more than "
+                        "once.",
+                        category, volume, id),
+            "Give each catalog row one distinct object file target.");
+        continue;
+      }
+      const auto target_path = std::format("{}/{}", directory.path, id);
+      const auto target = std::ranges::find(image.files(), target_path, &IsoFile::path);
+      if (target == image.files().end() || target->is_directory) {
+        add_category_catalog_issue(
+            result, "ISO_YAMAHA_CATEGORY_OBJECT_MISSING", group, volume, category,
+            std::format("{} catalog entry '{}' in CD-ROM volume '{}' references missing object "
+                        "file '{}'.",
+                        category, label, volume, id),
+            "Restore the referenced object file or remove the stale catalog row.");
+      }
+    }
+
+    for (const auto &filename : object_files) {
+      if (catalog_targets.contains(filename))
+        continue;
+      add_category_catalog_issue(
+          result, "ISO_YAMAHA_CATEGORY_OBJECT_UNCATALOGED", group, volume, category,
+          std::format("{} object file '{}' in CD-ROM volume '{}' has no 0000 catalog row and will "
+                      "not be menu-addressable by name.",
+                      category, filename, volume),
+          "Add a catalog row for the readable object file before using this image on a Yamaha "
+          "sampler.");
     }
   }
   return result;

@@ -125,6 +125,13 @@ one `F001` volume, one mono `SMPL`, and one direct single-member `SBNK`. It does
 not establish arbitrary group-ID generation, multiple-volume output, every
 object topology, or every sampler model and firmware.
 
+An adjacent fresh profile is also hardware-verified with one Program containing
+both assignment forms supported by the writer: one `SBAC` parent with one
+`SBNK` child, plus one direct `SBNK` assignment. Both Sample Banks reference one
+shared mono `SMPL`; the Program resolved both channel-specific assignments, and
+both paths loaded and played. This promotes that exact complete hierarchy, not
+arbitrary group sizes, Program counts, or graph shapes.
+
 `46DEF120` is an accepted observed-form raw group identifier, not a derived
 content ID. Its generation rule is unknown. The writer accepts one to eight
 uppercase letters, digits, or underscores, but the hardware-verified profile
@@ -236,10 +243,12 @@ Non-object files such as `YAMAHA.SYM` or model-specific system metadata are
 therefore outside whole-source transfer. This is deliberately described as a
 byte-preserving Yamaha-object transfer, not a sector-level floppy clone.
 
-Physical Yamaha hardware has enumerated the generated group and volume for this
-transfer profile. Loading and auditioning the transferred Program and its
-samples remain a separate unverified step; menu visibility alone does not prove
-that every transferred object type is usable from CD-ROM.
+Physical Yamaha hardware has enumerated the generated group and volume, loaded
+the transferred Program and Sample Banks, resolved their transferred waveform
+relationships, and produced audible playback. The transferred Sequence was
+also visible. This promotes the exact whole-floppy Yamaha-object transfer
+profile through loading and audition, while retaining the boundary above:
+non-object files and FAT filesystem metadata are not transferred.
 
 ## Transfer Selected Saved Objects
 

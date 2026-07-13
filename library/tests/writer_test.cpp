@@ -13,6 +13,7 @@
 
 #include "axklib/audio.hpp"
 #include "axklib/media.hpp"
+#include "axklib/relationship.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
 
@@ -30,6 +31,31 @@ constexpr std::string_view manifest = R"json({
     }]
   }]
 })json";
+
+axk::VolumeSpec graph_volume(const std::filesystem::path &audio_path) {
+  axk::VolumeSpec volume;
+  volume.name = "Graph Volume";
+  volume.waveforms.push_back({"wave", "Graph Wave", audio_path, 60U, {}});
+
+  axk::SampleBankSpec grouped;
+  grouped.name = "Grouped Bank";
+  grouped.waveform_id = "wave";
+  grouped.root_key = 60U;
+  grouped.key_low = 0U;
+  grouped.key_high = 127U;
+  volume.sample_banks.push_back(std::move(grouped));
+
+  axk::SampleBankSpec direct;
+  direct.name = "Direct Bank";
+  direct.waveform_id = "wave";
+  direct.root_key = 60U;
+  direct.key_low = 0U;
+  direct.key_high = 127U;
+  volume.sample_banks.push_back(std::move(direct));
+  volume.sample_bank_groups.push_back({"Graph Group", {"Grouped Bank"}});
+  volume.programs.push_back({1U, {{"SBAC", "Graph Group", 1U}, {"SBNK", "Direct Bank", 2U}}});
+  return volume;
+}
 
 } // namespace
 
@@ -312,13 +338,26 @@ TEST(MediaWriter, WritesDeterministicFat12AndIso9660ImagesAndReopensExactPcm) {
     const std::vector<char> second_bytes{std::istreambuf_iterator<char>{second_input}, {}};
     EXPECT_EQ(first_bytes, second_bytes);
 
-    if (format == axk::MediaImageFormat::iso9660) {
+    if (format == axk::MediaImageFormat::fat12_floppy) {
+      ASSERT_EQ(first_bytes.size(), 1'474'560U);
+      EXPECT_EQ((std::string_view{first_bytes.data(), 3U}), (std::string_view{"\xeb\x58\x90", 3U}));
+      EXPECT_EQ((std::string_view{first_bytes.data() + 3U, 8U}), "WINIMAGE");
+      EXPECT_EQ(static_cast<unsigned char>(first_bytes[21]), 0xf0U);
+      EXPECT_EQ(static_cast<unsigned char>(first_bytes[24]), 18U);
+      EXPECT_EQ(static_cast<unsigned char>(first_bytes[26]), 2U);
+      EXPECT_EQ(static_cast<unsigned char>(first_bytes[36]), 0U);
+      EXPECT_EQ((std::string_view{first_bytes.data() + 43U, 11U}), "           ");
+      EXPECT_EQ((std::string_view{first_bytes.data() + 54U, 8U}), "FAT12   ");
+      EXPECT_EQ(static_cast<unsigned char>(first_bytes[512]), 0xf0U);
+      EXPECT_EQ(static_cast<unsigned char>(first_bytes[512U + 9U * 512U]), 0xf0U);
+    } else {
       ASSERT_GE(first_bytes.size(), (16U * 2048U) + 40U);
       const std::string_view system_id{first_bytes.data() + (16U * 2048U) + 8U, 32U};
       EXPECT_EQ(system_id, "APPLE COMPUTER, INC., TYPE: 0002");
 
       const auto iso = axk::IsoImage::open(first);
       ASSERT_TRUE(iso) << iso.error().message;
+      EXPECT_TRUE(iso->validation_issues().empty());
       const auto find_file = [&](std::string_view path) {
         return std::ranges::find(iso->files(), path, &axk::IsoFile::path);
       };
@@ -374,6 +413,60 @@ TEST(MediaWriter, WritesDeterministicFat12AndIso9660ImagesAndReopensExactPcm) {
       EXPECT_NE(find_file("GROUP/F001/SMPL/F001"), iso->files().end());
       EXPECT_NE(find_file("GROUP/F001/SBNK/F001"), iso->files().end());
       EXPECT_EQ(find_file("GROUP/F001/SMPL/F000"), iso->files().end());
+
+      auto damaged_bytes = first_bytes;
+      const auto sample_catalog = find_file("GROUP/F001/SMPL/0000");
+      ASSERT_NE(sample_catalog, iso->files().end());
+      const auto catalog_offset = static_cast<std::size_t>(sample_catalog->extent_sector) * 2048U;
+
+      const auto sample_object = find_file("GROUP/F001/SMPL/F001");
+      ASSERT_NE(sample_object, iso->files().end());
+      auto missing_tail_bytes = first_bytes;
+      missing_tail_bytes.resize(static_cast<std::size_t>(sample_object->extent_sector) * 2048U);
+      const auto missing_tail_path = root / "missing-object-tail.iso";
+      std::ofstream missing_tail_output{missing_tail_path, std::ios::binary | std::ios::trunc};
+      missing_tail_output.write(missing_tail_bytes.data(),
+                                static_cast<std::streamsize>(missing_tail_bytes.size()));
+      missing_tail_output.close();
+      const auto missing_tail = axk::IsoImage::open(missing_tail_path);
+      ASSERT_TRUE(missing_tail) << missing_tail.error().message;
+      EXPECT_TRUE(missing_tail->validation_issues().empty());
+
+      auto shifted_bytes = first_bytes;
+      std::array<char, 28U> shifted_record{};
+      std::ranges::copy_n(shifted_bytes.begin() + static_cast<std::ptrdiff_t>(catalog_offset + 4U),
+                          shifted_record.size(), shifted_record.begin());
+      std::ranges::copy(shifted_record,
+                        shifted_bytes.begin() + static_cast<std::ptrdiff_t>(catalog_offset));
+      std::ranges::fill_n(shifted_bytes.begin() + static_cast<std::ptrdiff_t>(catalog_offset + 28U),
+                          4U, '\0');
+      const auto shifted_path = root / "shifted-category.iso";
+      std::ofstream shifted_output{shifted_path, std::ios::binary | std::ios::trunc};
+      shifted_output.write(shifted_bytes.data(),
+                           static_cast<std::streamsize>(shifted_bytes.size()));
+      shifted_output.close();
+      const auto shifted = axk::IsoImage::open(shifted_path);
+      ASSERT_TRUE(shifted) << shifted.error().message;
+      EXPECT_TRUE(shifted->validation_issues().empty());
+      const auto shifted_objects = shifted->objects();
+      ASSERT_TRUE(shifted_objects) << shifted_objects.error().message;
+      EXPECT_EQ(shifted_objects->size(), 2U);
+
+      std::ranges::copy(std::string_view{"F099"}, damaged_bytes.data() + catalog_offset + 18U);
+      const auto damaged_path = root / "damaged-category.iso";
+      std::ofstream damaged_output{damaged_path, std::ios::binary | std::ios::trunc};
+      damaged_output.write(damaged_bytes.data(),
+                           static_cast<std::streamsize>(damaged_bytes.size()));
+      damaged_output.close();
+      const auto damaged = axk::IsoImage::open(damaged_path);
+      ASSERT_TRUE(damaged) << damaged.error().message;
+      EXPECT_NE(std::ranges::find(damaged->validation_issues(),
+                                  std::string{"ISO_YAMAHA_CATEGORY_OBJECT_MISSING"},
+                                  &axk::MediaValidationIssue::code),
+                damaged->validation_issues().end());
+      const auto damaged_objects = damaged->objects();
+      ASSERT_TRUE(damaged_objects) << damaged_objects.error().message;
+      EXPECT_EQ(damaged_objects->size(), 2U);
     }
 
     const auto media = axk::open_media(first);
@@ -392,6 +485,54 @@ TEST(MediaWriter, WritesDeterministicFat12AndIso9660ImagesAndReopensExactPcm) {
   std::filesystem::remove_all(root, error);
 }
 
+TEST(MediaWriter, AuthoredIsoReopensCompleteProgramHierarchy) {
+  axk::Waveform source;
+  source.format = {1, 2, 44100};
+  source.frame_count = 4U;
+  source.pcm = {std::byte{},     std::byte{},     std::byte{0x34}, std::byte{0x12},
+                std::byte{0xcc}, std::byte{0xed}, std::byte{},     std::byte{}};
+  const auto root = std::filesystem::temp_directory_path() / "axklib-media-graph";
+  const auto audio_path = root / "graph.wav";
+  const auto image_path = root / "graph.iso";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+  std::filesystem::create_directories(root);
+  ASSERT_TRUE(axk::write_wav_atomic(audio_path, source));
+
+  axk::MediaBuildManifest value;
+  value.schema_version = "1.0";
+  value.format = axk::MediaImageFormat::iso9660;
+  value.authored_volume = graph_volume(audio_path);
+  value.iso_volume_id = "AXK_GRAPH";
+  value.raw_group = "00000010";
+  value.group_name = "Authored Graph";
+  value.raw_volume = "F001";
+  value.volume_name = "Graph Volume";
+  const auto written = axk::write_media_image(value, image_path);
+  ASSERT_TRUE(written) << written.error().message;
+  EXPECT_EQ(written->object_count, 5U);
+
+  const auto media = axk::open_media(image_path);
+  ASSERT_TRUE(media) << media.error().message;
+  EXPECT_TRUE(media->validation_issues().empty());
+  const auto catalog = axk::build_object_catalog(*media);
+  ASSERT_TRUE(catalog) << catalog.error().message;
+  const auto type = [](const axk::ObjectSnapshot &item) { return item.object.header.type; };
+  EXPECT_EQ(std::ranges::count(catalog->objects, axk::ObjectType::smpl, type), 1U);
+  EXPECT_EQ(std::ranges::count(catalog->objects, axk::ObjectType::sbnk, type), 2U);
+  EXPECT_EQ(std::ranges::count(catalog->objects, axk::ObjectType::sbac, type), 1U);
+  EXPECT_EQ(std::ranges::count(catalog->objects, axk::ObjectType::prog, type), 1U);
+  const auto graph = axk::build_relationship_graph(*catalog);
+  const auto relationship_count = [&](std::string_view relationship_type) {
+    return std::ranges::count(graph.relationships, relationship_type, &axk::Relationship::type);
+  };
+  EXPECT_EQ(relationship_count("SBNK_LEFT_MEMBER_TO_SMPL"), 2U);
+  EXPECT_EQ(relationship_count("SBAC_SLOT_TO_SBNK"), 1U);
+  EXPECT_EQ(relationship_count("PROG_ASSIGNMENT_TO_SBAC"), 1U);
+  EXPECT_EQ(relationship_count("PROG_ASSIGNMENT_TO_SBNK"), 1U);
+  std::filesystem::remove_all(root, error);
+}
+
 TEST(MediaWriter, SavedObjectTransferAddsKnownSampleBankDependencies) {
   axk::Waveform source;
   source.format = {1, 2, 44100};
@@ -406,15 +547,7 @@ TEST(MediaWriter, SavedObjectTransferAddsKnownSampleBankDependencies) {
   std::filesystem::create_directories(root);
   ASSERT_TRUE(axk::write_wav_atomic(audio_path, source));
 
-  axk::SampleBankSpec bank;
-  bank.name = "Bank";
-  bank.waveform_id = "wave";
-  bank.root_key = 60;
-  bank.key_high = 127;
-  axk::VolumeSpec volume;
-  volume.name = "Volume";
-  volume.waveforms.push_back({"wave", "Wave", audio_path, 60, {}});
-  volume.sample_banks.push_back(std::move(bank));
+  auto volume = graph_volume(audio_path);
   axk::HdsBuildManifest hds{"1.0", 4U * 1024U * 1024U, {{"hd1", {volume}}}};
   ASSERT_TRUE(axk::write_hds_image(hds, source_path));
   const auto source_media = axk::open_media(source_path);
@@ -442,10 +575,25 @@ TEST(MediaWriter, SavedObjectTransferAddsKnownSampleBankDependencies) {
                                [](const auto &object) { return object.decoded.header.type; }),
             1U);
 
+  const auto program_object =
+      std::ranges::find(*source_objects, axk::ObjectType::prog,
+                        [](const auto &object) { return object.decoded.header.type; });
+  ASSERT_NE(program_object, source_objects->end());
+  const auto program_path = root / "program.ima";
+  transfer.transfer = axk::SavedObjectTransferSpec{source_path, {program_object->key}};
+  const auto program_written = axk::write_media_image(transfer, program_path);
+  ASSERT_TRUE(program_written) << program_written.error().message;
+  EXPECT_EQ(program_written->object_count, 5U);
+  const auto program_media = axk::open_media(program_path);
+  ASSERT_TRUE(program_media);
+  const auto program_objects = program_media->objects();
+  ASSERT_TRUE(program_objects);
+  EXPECT_EQ(program_objects->size(), 5U);
+
   axk::MediaBuildManifest whole;
   whole.schema_version = "1.0";
   whole.format = axk::MediaImageFormat::iso9660;
-  whole.transfer = axk::SavedObjectTransferSpec{output_path, {}, axk::SavedObjectSelection::all};
+  whole.transfer = axk::SavedObjectTransferSpec{program_path, {}, axk::SavedObjectSelection::all};
   whole.iso_volume_id = "AXK_TRANSFER";
   whole.raw_group = "00000010";
   whole.group_name = "Transfer";
@@ -454,7 +602,7 @@ TEST(MediaWriter, SavedObjectTransferAddsKnownSampleBankDependencies) {
   const auto whole_path = root / "whole.iso";
   const auto whole_written = axk::write_media_image(whole, whole_path);
   ASSERT_TRUE(whole_written) << whole_written.error().message;
-  EXPECT_EQ(whole_written->object_count, output_objects->size());
+  EXPECT_EQ(whole_written->object_count, program_objects->size());
   const auto whole_media = axk::open_media(whole_path);
   ASSERT_TRUE(whole_media);
   const auto whole_objects = whole_media->objects();
@@ -472,7 +620,7 @@ TEST(MediaWriter, SavedObjectTransferAddsKnownSampleBankDependencies) {
     });
     return payloads;
   };
-  EXPECT_EQ(sorted_payloads(*output_objects), sorted_payloads(*whole_objects));
+  EXPECT_EQ(sorted_payloads(*program_objects), sorted_payloads(*whole_objects));
 
   whole.transfer->source_path = source_path;
   EXPECT_FALSE(axk::write_media_image(whole, root / "whole-from-hds.iso"));
