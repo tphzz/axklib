@@ -1,5 +1,6 @@
 # Generated outputs
 /build
+/node_modules/
 /vcpkg_installed/
 
 # libFuzzer writes content-addressed discoveries into its first corpus path.

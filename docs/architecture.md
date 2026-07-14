@@ -4,7 +4,9 @@ The native implementation separates storage, sampler semantics, and host
 integration.
 
 ```mermaid
-flowchart LR
+flowchart TD
+    accTitle: axklib architecture dependency flow
+    accDescr: Random access input flows through media readers, Yamaha enrichment, object decoders, and the catalog. The catalog provides audio export, writing, the shared SDK facade, and the CLI adapter. Native consumers use the SDK.
     IO[Random access I/O] --> Media[SFS and narrow FAT12 / ISO9660 readers]
     Media --> Yamaha[Yamaha media enrichment]
     Yamaha --> Objects[Object decoders]

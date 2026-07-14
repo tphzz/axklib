@@ -9,6 +9,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "mkdocs" },
     { name = "mkdocs-material" },
+    { name = "mkdocs-mermaid-to-svg" },
     { name = "pymdown-extensions" },
 ]
 
@@ -16,6 +17,7 @@ dependencies = [
 requires-dist = [
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.0" },
+    { name = "mkdocs-mermaid-to-svg", specifier = ">=1.3.0" },
     { name = "pymdown-extensions", specifier = ">=11.0.1" },
 ]
 
@@ -289,6 +291,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/79/9b/9b4c96d6593b2a541e1cb8b34899a6d021d208bb357042823d4d2cabdbe7/mkdocs_material_extensions-1.3.1.tar.gz", hash = "sha256:10c9511cea88f568257f960358a467d12b970e1f7b2c0e5fb2bb48cab1928443", size = 11847, upload-time = "2023-11-22T19:09:45.208Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5b/54/662a4743aa81d9582ee9339d4ffa3c8fd40a4965e033d77b9da9774d3960/mkdocs_material_extensions-1.3.1-py3-none-any.whl", hash = "sha256:adff8b62700b25cb77b53358dad940f3ef973dd6db797907c49e3c2ef3ab4e31", size = 8728, upload-time = "2023-11-22T19:09:43.465Z" },
+]
+
+[[package]]
+name = "mkdocs-mermaid-to-svg"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mkdocs" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ae/27/802263888deb5f738b128e98d137c493a9a997589e0d172089d7eabf0651/mkdocs_mermaid_to_svg-1.3.0.tar.gz", hash = "sha256:c4e9d22db99d89aa52862a1ec1d1500aa08a8b79c951fe966c8e2dcefcca21df", size = 395978, upload-time = "2026-03-10T12:36:17.036Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/09/f13ed72bc39511ec88951c9188ba454786f59804a340a08e11301fe074de/mkdocs_mermaid_to_svg-1.3.0-py3-none-any.whl", hash = "sha256:c69e026ebbe9d992cd128071ca6b7049a309d5620612a26dc3e0e6956a47a0f9", size = 45749, upload-time = "2026-03-10T12:36:16.105Z" },
 ]
 
 [[package]]

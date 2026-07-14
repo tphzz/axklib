@@ -36,6 +36,35 @@ markdown_extensions:
 
 plugins:
   - search
+  - mermaid-to-svg:
+      renderer: mmdc
+      mmdc_path: mmdc -b transparent
+      theme: dark
+      error_on_fail: true
+      mermaid_config:
+        htmlLabels: false
+        fontFamily: Inter, system-ui, sans-serif
+        themeVariables:
+          background: transparent
+          primaryColor: "#2b303b"
+          primaryTextColor: "#e8edf5"
+          primaryBorderColor: "#7c83ff"
+          mainBkg: "#2b303b"
+          nodeBorder: "#7c83ff"
+          secondaryColor: "#263849"
+          secondaryTextColor: "#e8edf5"
+          secondaryBorderColor: "#45b8c5"
+          tertiaryColor: "#20242d"
+          tertiaryTextColor: "#e8edf5"
+          tertiaryBorderColor: "#697386"
+          lineColor: "#a8b1c2"
+          textColor: "#e8edf5"
+          edgeLabelBackground: "#20242d"
+          clusterBkg: "#252a34"
+          clusterBorder: "#697386"
+          fontSize: 14px
+        flowchart:
+          htmlLabels: false
 
 validation:
   omitted_files: ignore
@@ -67,5 +96,4 @@ nav:
   - Distribution:
       - Compatibility: axklib/compatibility.md
       - Native Dependencies: native-dependencies.md
-      - Security: axklib/security.md
   - Yamaha Glossary: axklib/glossary.md

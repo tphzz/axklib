@@ -81,6 +81,17 @@
   line-height: 1.45;
 }
 
+.md-typeset img[alt="Mermaid Diagram"] {
+  display: block;
+  height: auto;
+  margin: 1rem auto;
+  max-height: 28rem;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: center;
+  width: min(100%, 38rem);
+}
+
 @media screen and (min-width: 76.25em) {
   .md-main__inner {
     max-width: 72rem;

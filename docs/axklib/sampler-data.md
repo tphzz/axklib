@@ -237,6 +237,8 @@ and key-range values. For a single-member bank, an empty right member name means
 there is no active right member; the generated writer treats right-member fields
 as inactive compatibility fields rather than as a second playback region.
 
+| Offset | Type | Field |
+| --- | --- | --- |
 | `0x0e8` | u32be | left_wave_start_address_0x0e8 |
 | `0x0ea` | u16be | left_wave_start_low16_0x0ea |
 | `0x0ec` | u32be | right_wave_start_address_0x0ec |
@@ -276,6 +278,8 @@ map to `SBNK+0x152..0x15b`. Hardware-tested generated direct single-member
 gates audible playback, and `0x158..0x15b` restores the normal unfiltered tone
 for this writer scope.
 
+| Offset | Type | Field |
+| --- | --- | --- |
 | `0x117` | u8 | pan_0x117 |
 | `0x118` | u8 | velocity_low_limit_0x118 |
 | `0x119` | u8 | velocity_offset_0x119 |
@@ -328,8 +332,8 @@ for this writer scope.
 | `0x14b` | u8 | lfo_pitch_mod_depth_0x14b |
 | `0x14c` | u8 | lfo_amp_mod_depth_0x14c |
 | `0x151` | s8 | filter_gain_0x151 |
-| `0x152..0x156` | 5 | bytes | single_member_reserved_playback_default_0x152_0x156 |
-| `0x158..0x15b` | 4 | bytes | single_member_reserved_tone_default_0x158_0x15b |
+| `0x152..0x156` | 5 bytes | single_member_reserved_playback_default_0x152_0x156 |
+| `0x158..0x15b` | 4 bytes | single_member_reserved_tone_default_0x158_0x15b |
 | `0x15c` | u32be | wave_end_address_0x15c |
 | `0x160` | u32be | loop_end_address_0x160 |
 | `0x17c` | u8 | velocity_xfade_high_0x17c |
@@ -478,6 +482,8 @@ hardware-proven zero form while preserving the assignment ordinal, target name,
 kind, channel, and remaining row bytes. Empty rows and other assignment kinds
 are not covered by this relocation profile.
 
+| Row offset | Size | Type | Field |
+| --- | ---: | --- | --- |
 | `+0x2b` | 1 | u8 | filter_q_width_offset |
 | `+0x2c` | 1 | u8 | cutoff_distance_offset |
 | `+0x2d..0x2e` | 2 | bytes | reserved_0045_0046 |
