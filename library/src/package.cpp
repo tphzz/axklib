@@ -282,6 +282,11 @@ bool closure_relationship(std::string_view role) {
          role == "PROG_ASSIGNMENT_TO_SBNK";
 }
 
+bool portable_program_assignment(AssignmentState state) {
+  return state == AssignmentState::active || state == AssignmentState::source_load ||
+         state == AssignmentState::visible_off;
+}
+
 Result<std::vector<const Relationship *>> required_relationships(const ObjectSnapshot &object,
                                                                  const RelationshipGraph &graph) {
   std::vector<const Relationship *> candidates;
@@ -289,8 +294,7 @@ Result<std::vector<const Relationship *>> required_relationships(const ObjectSna
     if (!closure_relationship(relationship->type))
       continue;
     if (relationship->type.starts_with("PROG_ASSIGNMENT_TO_") &&
-        relationship->assignment_state != AssignmentState::active &&
-        relationship->assignment_state != AssignmentState::source_load) {
+        !portable_program_assignment(relationship->assignment_state)) {
       continue;
     }
     candidates.push_back(relationship);
@@ -369,12 +373,13 @@ Result<std::vector<const Relationship *>> required_relationships(const ObjectSna
       result.push_back(*row);
     }
     for (const auto *row : candidates) {
-      if (row->assignment_state != AssignmentState::source_load)
+      if (row->assignment_state != AssignmentState::source_load &&
+          row->assignment_state != AssignmentState::visible_off)
         continue;
       if (row->quality != RelationshipQuality::known || !row->target_key)
         return std::unexpected{
             make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
-                       "package closure requires known Program source-load relationships")};
+                       "package closure requires known relocatable Program relationships")};
       if (std::ranges::find(result, row) == result.end())
         result.push_back(row);
     }

@@ -276,6 +276,12 @@ kind-`0x10` direct-SBNK and kind-`0x11` SBAC assignment rows. Empty rows, other
 assignment kinds, reserved bytes, and undeclared tail words remain
 identity-significant.
 
+Program closure retains Known target rows classified as active, source-load,
+or visible-off. The visible-off case is required because an imported zero
+destination handle re-parses in that state even though the sampler can still
+load the named assignment. Duplicate inactive rows, unresolved targets, and
+ambiguous targets remain outside the portable closure.
+
 ## SDK Surface
 
 Include `axklib/sdk.hpp`. `portable_package::export_from` exports and atomically

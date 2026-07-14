@@ -2289,6 +2289,21 @@ TEST(PackageImportApply, ImportsACompleteProgramGroupBankAndWaveformGraph) {
     EXPECT_EQ(package_children, static_cast<std::size_t>(expected_children))
         << object.object_type << ' ' << object.destination_name;
   }
+
+  const std::vector imported_program_root{
+      root(axk::PackageRootKind::prog, "Imported Graph", "001")};
+  const auto reexported = axk::build_portable_package(*reopened, imported_program_root);
+  ASSERT_TRUE(reexported) << reexported.error().message;
+  EXPECT_EQ(reexported->package.nodes.size(), built->package.nodes.size());
+  EXPECT_EQ(reexported->package.relationships, built->package.relationships);
+  const auto reexported_program = std::ranges::find(reexported->package.nodes, std::string{"PROG"},
+                                                    &axk::PackageNode::object_type);
+  ASSERT_NE(reexported_program, reexported->package.nodes.end());
+  ASSERT_EQ(reexported_program->relocations.size(), program_node->relocations.size());
+  for (const auto &relocation : reexported_program->relocations) {
+    EXPECT_EQ(relocation.role, "PROG_ASSIGNMENT_HANDLE");
+    EXPECT_EQ(relocation.edge_ids.size(), 1U);
+  }
   std::filesystem::remove_all(output_root, error);
 }
 
