@@ -42,7 +42,7 @@ generated profile containing one mono `SMPL` and one direct single-member
 `PROG` containing both a `PROG -> SBAC -> SBNK -> SMPL` assignment and a direct
 `PROG -> SBNK -> SMPL` assignment that share the same waveform. Byte-preserving
 whole-floppy Yamaha-object transfer has likewise loaded and played its
-transferred Program and Sample Banks from a generated CD-ROM. These proofs are
+transferred Program and Sample Banks from a generated CD-ROM. These checks are
 intentionally narrower than every tree or object topology the reader can parse.
 
 | Field | Rule |

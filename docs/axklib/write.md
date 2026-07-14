@@ -123,7 +123,7 @@ hardware through group and volume enumeration, Sample Bank loading, audible
 waveform playback, and pitch-correct audition. That result covers one group,
 one `F001` volume, one mono `SMPL`, and one direct single-member `SBNK`. It does
 not establish arbitrary group-ID generation, multiple-volume output, every
-object topology, or every sampler model and firmware.
+object topology, or every sampler model and system version.
 
 An adjacent fresh profile is also hardware-verified with one Program containing
 both assignment forms supported by the writer: one `SBAC` parent with one
