@@ -1,4 +1,5 @@
 BasedOnStyle: LLVM
-ColumnLimit: 100
-IndentWidth: 2
-SortIncludes: CaseSensitive
+Standard: Latest
+
+IndentWidth: 4
+BreakBeforeBraces: Attach

@@ -9,29 +9,38 @@
 namespace axk::generated {
 
 struct LookupEntry {
-  std::int32_t key;
-  std::string_view label;
+    std::int32_t key;
+    std::string_view label;
 };
 
 inline constexpr std::array sample_eq_frequency_ui_labels{
-    LookupEntry{0, "32Hz"},     LookupEntry{1, "36Hz"},     LookupEntry{2, "40Hz"},
-    LookupEntry{3, "45Hz"},     LookupEntry{4, "50Hz"},     LookupEntry{5, "56Hz"},
-    LookupEntry{6, "63Hz"},     LookupEntry{7, "70Hz"},     LookupEntry{8, "80Hz"},
-    LookupEntry{9, "90Hz"},     LookupEntry{10, "100Hz"},   LookupEntry{11, "110Hz"},
-    LookupEntry{12, "125Hz"},   LookupEntry{13, "140Hz"},   LookupEntry{14, "160Hz"},
-    LookupEntry{15, "180Hz"},   LookupEntry{16, "200Hz"},   LookupEntry{17, "225Hz"},
-    LookupEntry{18, "250Hz"},   LookupEntry{19, "280Hz"},   LookupEntry{20, "315Hz"},
-    LookupEntry{21, "355Hz"},   LookupEntry{22, "400Hz"},   LookupEntry{23, "450Hz"},
-    LookupEntry{24, "500Hz"},   LookupEntry{25, "560Hz"},   LookupEntry{26, "630Hz"},
-    LookupEntry{27, "700Hz"},   LookupEntry{28, "800Hz"},   LookupEntry{29, "900Hz"},
-    LookupEntry{30, "1.0kHz"},  LookupEntry{31, "1.1kHz"},  LookupEntry{32, "1.2kHz"},
-    LookupEntry{33, "1.4kHz"},  LookupEntry{34, "1.6kHz"},  LookupEntry{35, "1.8kHz"},
-    LookupEntry{36, "2.0kHz"},  LookupEntry{37, "2.2kHz"},  LookupEntry{38, "2.5kHz"},
-    LookupEntry{39, "2.8kHz"},  LookupEntry{40, "3.2kHz"},  LookupEntry{41, "3.6kHz"},
-    LookupEntry{42, "4.0kHz"},  LookupEntry{43, "4.5kHz"},  LookupEntry{44, "5.0kHz"},
-    LookupEntry{45, "5.6kHz"},  LookupEntry{46, "6.3kHz"},  LookupEntry{47, "7.0kHz"},
-    LookupEntry{48, "8.0kHz"},  LookupEntry{49, "9.0kHz"},  LookupEntry{50, "10.0kHz"},
-    LookupEntry{51, "11.0kHz"}, LookupEntry{52, "12.0kHz"}, LookupEntry{53, "14.0kHz"},
+    LookupEntry{0, "32Hz"},     LookupEntry{1, "36Hz"},
+    LookupEntry{2, "40Hz"},     LookupEntry{3, "45Hz"},
+    LookupEntry{4, "50Hz"},     LookupEntry{5, "56Hz"},
+    LookupEntry{6, "63Hz"},     LookupEntry{7, "70Hz"},
+    LookupEntry{8, "80Hz"},     LookupEntry{9, "90Hz"},
+    LookupEntry{10, "100Hz"},   LookupEntry{11, "110Hz"},
+    LookupEntry{12, "125Hz"},   LookupEntry{13, "140Hz"},
+    LookupEntry{14, "160Hz"},   LookupEntry{15, "180Hz"},
+    LookupEntry{16, "200Hz"},   LookupEntry{17, "225Hz"},
+    LookupEntry{18, "250Hz"},   LookupEntry{19, "280Hz"},
+    LookupEntry{20, "315Hz"},   LookupEntry{21, "355Hz"},
+    LookupEntry{22, "400Hz"},   LookupEntry{23, "450Hz"},
+    LookupEntry{24, "500Hz"},   LookupEntry{25, "560Hz"},
+    LookupEntry{26, "630Hz"},   LookupEntry{27, "700Hz"},
+    LookupEntry{28, "800Hz"},   LookupEntry{29, "900Hz"},
+    LookupEntry{30, "1.0kHz"},  LookupEntry{31, "1.1kHz"},
+    LookupEntry{32, "1.2kHz"},  LookupEntry{33, "1.4kHz"},
+    LookupEntry{34, "1.6kHz"},  LookupEntry{35, "1.8kHz"},
+    LookupEntry{36, "2.0kHz"},  LookupEntry{37, "2.2kHz"},
+    LookupEntry{38, "2.5kHz"},  LookupEntry{39, "2.8kHz"},
+    LookupEntry{40, "3.2kHz"},  LookupEntry{41, "3.6kHz"},
+    LookupEntry{42, "4.0kHz"},  LookupEntry{43, "4.5kHz"},
+    LookupEntry{44, "5.0kHz"},  LookupEntry{45, "5.6kHz"},
+    LookupEntry{46, "6.3kHz"},  LookupEntry{47, "7.0kHz"},
+    LookupEntry{48, "8.0kHz"},  LookupEntry{49, "9.0kHz"},
+    LookupEntry{50, "10.0kHz"}, LookupEntry{51, "11.0kHz"},
+    LookupEntry{52, "12.0kHz"}, LookupEntry{53, "14.0kHz"},
     LookupEntry{54, "16.0kHz"},
 };
 
@@ -89,8 +98,9 @@ inline constexpr std::array sample_control_type_ui_labels{
 };
 
 inline constexpr std::array sample_control_device_ui_labels{
-    LookupEntry{1, "001/ModWhel"},  LookupEntry{7, "007/Volume"}, LookupEntry{10, "010/Pan"},
-    LookupEntry{64, "064/Sustain"}, LookupEntry{65, "---"},       LookupEntry{66, "066/Sostenuto"},
+    LookupEntry{1, "001/ModWhel"}, LookupEntry{7, "007/Volume"},
+    LookupEntry{10, "010/Pan"},    LookupEntry{64, "064/Sustain"},
+    LookupEntry{65, "---"},        LookupEntry{66, "066/Sostenuto"},
 };
 
 inline constexpr std::array filter_type_ui_labels{
@@ -98,18 +108,22 @@ inline constexpr std::array filter_type_ui_labels{
 };
 
 inline constexpr std::array output1_destination_ui_labels{
-    LookupEntry{0, "off"},        LookupEntry{1, "StereoOut"},  LookupEntry{2, "E1-Through"},
-    LookupEntry{3, "E2-Through"}, LookupEntry{4, "E3-Through"}, LookupEntry{5, "AssnOutL&R"},
-    LookupEntry{6, "AssnOut1&2"}, LookupEntry{7, "AssnOut3&4"}, LookupEntry{8, "AssnOut5&6"},
-    LookupEntry{9, "DIG&OPT"},    LookupEntry{10, "StereoOut"}, LookupEntry{11, "StereoOut"},
+    LookupEntry{0, "off"},        LookupEntry{1, "StereoOut"},
+    LookupEntry{2, "E1-Through"}, LookupEntry{3, "E2-Through"},
+    LookupEntry{4, "E3-Through"}, LookupEntry{5, "AssnOutL&R"},
+    LookupEntry{6, "AssnOut1&2"}, LookupEntry{7, "AssnOut3&4"},
+    LookupEntry{8, "AssnOut5&6"}, LookupEntry{9, "DIG&OPT"},
+    LookupEntry{10, "StereoOut"}, LookupEntry{11, "StereoOut"},
     LookupEntry{12, "StereoOut"},
 };
 
 inline constexpr std::array output2_destination_ui_labels{
-    LookupEntry{0, "off"},        LookupEntry{1, "AssnOutL&R"}, LookupEntry{2, "AssnOut1&2"},
-    LookupEntry{3, "AssnOut3&4"}, LookupEntry{4, "AssnOut5&6"}, LookupEntry{5, "DIG&OPT"},
-    LookupEntry{6, "StereoOut"},  LookupEntry{7, "E1-Through"}, LookupEntry{8, "E2-Through"},
-    LookupEntry{9, "E3-Through"}, LookupEntry{10, "StereoOut"}, LookupEntry{11, "StereoOut"},
+    LookupEntry{0, "off"},        LookupEntry{1, "AssnOutL&R"},
+    LookupEntry{2, "AssnOut1&2"}, LookupEntry{3, "AssnOut3&4"},
+    LookupEntry{4, "AssnOut5&6"}, LookupEntry{5, "DIG&OPT"},
+    LookupEntry{6, "StereoOut"},  LookupEntry{7, "E1-Through"},
+    LookupEntry{8, "E2-Through"}, LookupEntry{9, "E3-Through"},
+    LookupEntry{10, "StereoOut"}, LookupEntry{11, "StereoOut"},
     LookupEntry{12, "StereoOut"},
 };
 
@@ -123,10 +137,12 @@ inline constexpr std::array sample_portamento_type_ui_labels{
 };
 
 inline constexpr std::array pitch_bend_type_ui_labels{
-    LookupEntry{0, "Normal"},    LookupEntry{1, "Slow"},     LookupEntry{2, "Slow&Rev"},
-    LookupEntry{3, "Stop"},      LookupEntry{4, "Stop&Rev"}, LookupEntry{5, "Up2Dwn3"},
-    LookupEntry{6, "Up2Dwn4"},   LookupEntry{7, "Up2Dwn5"},  LookupEntry{8, "Up2Dwn12"},
-    LookupEntry{9, "Up3Dwn2"},   LookupEntry{10, "Up3Dwn4"}, LookupEntry{11, "Up3Dwn5"},
+    LookupEntry{0, "Normal"},    LookupEntry{1, "Slow"},
+    LookupEntry{2, "Slow&Rev"},  LookupEntry{3, "Stop"},
+    LookupEntry{4, "Stop&Rev"},  LookupEntry{5, "Up2Dwn3"},
+    LookupEntry{6, "Up2Dwn4"},   LookupEntry{7, "Up2Dwn5"},
+    LookupEntry{8, "Up2Dwn12"},  LookupEntry{9, "Up3Dwn2"},
+    LookupEntry{10, "Up3Dwn4"},  LookupEntry{11, "Up3Dwn5"},
     LookupEntry{12, "Up3Dwn12"},
 };
 
@@ -180,75 +196,76 @@ inline constexpr std::array current_smpl_loop_mode_labels{
 };
 
 enum class LookupId : std::uint8_t {
-  sample_eq_frequency_ui_labels,
-  sample_eq_type_ui_labels,
-  sample_control_function_ui_labels,
-  sample_control_type_ui_labels,
-  sample_control_device_ui_labels,
-  filter_type_ui_labels,
-  output1_destination_ui_labels,
-  output2_destination_ui_labels,
-  sample_portamento_type_ui_labels,
-  pitch_bend_type_ui_labels,
-  prog_lfo_cycle_labels,
-  prog_lfo_wave_labels,
-  prog_lfo_initial_phase_labels,
-  prog_lfo_reset_channel_labels,
-  prog_portamento_type_labels,
-  prog_control_type_labels,
-  prog_slot_kind_target_category,
-  current_smpl_loop_mode_labels,
+    sample_eq_frequency_ui_labels,
+    sample_eq_type_ui_labels,
+    sample_control_function_ui_labels,
+    sample_control_type_ui_labels,
+    sample_control_device_ui_labels,
+    filter_type_ui_labels,
+    output1_destination_ui_labels,
+    output2_destination_ui_labels,
+    sample_portamento_type_ui_labels,
+    pitch_bend_type_ui_labels,
+    prog_lfo_cycle_labels,
+    prog_lfo_wave_labels,
+    prog_lfo_initial_phase_labels,
+    prog_lfo_reset_channel_labels,
+    prog_portamento_type_labels,
+    prog_control_type_labels,
+    prog_slot_kind_target_category,
+    current_smpl_loop_mode_labels,
 };
 
 template <std::size_t Size>
-constexpr std::string_view find_label(const std::array<LookupEntry, Size> &table,
-                                      std::int32_t key) noexcept {
-  for (const auto &row : table)
-    if (row.key == key)
-      return row.label;
-  return {};
+constexpr std::string_view
+find_label(const std::array<LookupEntry, Size> &table,
+           std::int32_t key) noexcept {
+    for (const auto &row : table)
+        if (row.key == key)
+            return row.label;
+    return {};
 }
 
 constexpr std::string_view lookup(LookupId table, std::int32_t key) noexcept {
-  switch (table) {
-  case LookupId::sample_eq_frequency_ui_labels:
-    return find_label(sample_eq_frequency_ui_labels, key);
-  case LookupId::sample_eq_type_ui_labels:
-    return find_label(sample_eq_type_ui_labels, key);
-  case LookupId::sample_control_function_ui_labels:
-    return find_label(sample_control_function_ui_labels, key);
-  case LookupId::sample_control_type_ui_labels:
-    return find_label(sample_control_type_ui_labels, key);
-  case LookupId::sample_control_device_ui_labels:
-    return find_label(sample_control_device_ui_labels, key);
-  case LookupId::filter_type_ui_labels:
-    return find_label(filter_type_ui_labels, key);
-  case LookupId::output1_destination_ui_labels:
-    return find_label(output1_destination_ui_labels, key);
-  case LookupId::output2_destination_ui_labels:
-    return find_label(output2_destination_ui_labels, key);
-  case LookupId::sample_portamento_type_ui_labels:
-    return find_label(sample_portamento_type_ui_labels, key);
-  case LookupId::pitch_bend_type_ui_labels:
-    return find_label(pitch_bend_type_ui_labels, key);
-  case LookupId::prog_lfo_cycle_labels:
-    return find_label(prog_lfo_cycle_labels, key);
-  case LookupId::prog_lfo_wave_labels:
-    return find_label(prog_lfo_wave_labels, key);
-  case LookupId::prog_lfo_initial_phase_labels:
-    return find_label(prog_lfo_initial_phase_labels, key);
-  case LookupId::prog_lfo_reset_channel_labels:
-    return find_label(prog_lfo_reset_channel_labels, key);
-  case LookupId::prog_portamento_type_labels:
-    return find_label(prog_portamento_type_labels, key);
-  case LookupId::prog_control_type_labels:
-    return find_label(prog_control_type_labels, key);
-  case LookupId::prog_slot_kind_target_category:
-    return find_label(prog_slot_kind_target_category, key);
-  case LookupId::current_smpl_loop_mode_labels:
-    return find_label(current_smpl_loop_mode_labels, key);
-  }
-  return {};
+    switch (table) {
+    case LookupId::sample_eq_frequency_ui_labels:
+        return find_label(sample_eq_frequency_ui_labels, key);
+    case LookupId::sample_eq_type_ui_labels:
+        return find_label(sample_eq_type_ui_labels, key);
+    case LookupId::sample_control_function_ui_labels:
+        return find_label(sample_control_function_ui_labels, key);
+    case LookupId::sample_control_type_ui_labels:
+        return find_label(sample_control_type_ui_labels, key);
+    case LookupId::sample_control_device_ui_labels:
+        return find_label(sample_control_device_ui_labels, key);
+    case LookupId::filter_type_ui_labels:
+        return find_label(filter_type_ui_labels, key);
+    case LookupId::output1_destination_ui_labels:
+        return find_label(output1_destination_ui_labels, key);
+    case LookupId::output2_destination_ui_labels:
+        return find_label(output2_destination_ui_labels, key);
+    case LookupId::sample_portamento_type_ui_labels:
+        return find_label(sample_portamento_type_ui_labels, key);
+    case LookupId::pitch_bend_type_ui_labels:
+        return find_label(pitch_bend_type_ui_labels, key);
+    case LookupId::prog_lfo_cycle_labels:
+        return find_label(prog_lfo_cycle_labels, key);
+    case LookupId::prog_lfo_wave_labels:
+        return find_label(prog_lfo_wave_labels, key);
+    case LookupId::prog_lfo_initial_phase_labels:
+        return find_label(prog_lfo_initial_phase_labels, key);
+    case LookupId::prog_lfo_reset_channel_labels:
+        return find_label(prog_lfo_reset_channel_labels, key);
+    case LookupId::prog_portamento_type_labels:
+        return find_label(prog_portamento_type_labels, key);
+    case LookupId::prog_control_type_labels:
+        return find_label(prog_control_type_labels, key);
+    case LookupId::prog_slot_kind_target_category:
+        return find_label(prog_slot_kind_target_category, key);
+    case LookupId::current_smpl_loop_mode_labels:
+        return find_label(current_smpl_loop_mode_labels, key);
+    }
+    return {};
 }
 
 } // namespace axk::generated

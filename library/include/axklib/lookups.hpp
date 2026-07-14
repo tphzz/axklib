@@ -9,8 +9,9 @@ namespace axk {
 
 using CurrentLookup = generated::LookupId;
 
-constexpr std::string_view current_label(CurrentLookup table, std::int32_t key) noexcept {
-  return generated::lookup(table, key);
+constexpr std::string_view current_label(CurrentLookup table,
+                                         std::int32_t key) noexcept {
+    return generated::lookup(table, key);
 }
 
 } // namespace axk

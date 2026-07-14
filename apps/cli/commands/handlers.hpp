@@ -22,15 +22,20 @@ int run_package_import(const PackageImportRequest &request);
 int run_orphans_request(const OrphansRequest &request);
 int run_validate_request(const ValidateRequest &request);
 int run_create_hds(const std::filesystem::path &manifest_path,
-                   const std::filesystem::path &output_path, bool overwrite, bool pretty);
+                   const std::filesystem::path &output_path, bool overwrite,
+                   bool pretty);
 int run_create_media(const std::filesystem::path &manifest_path,
-                     const std::filesystem::path &output_path, std::string_view expected_format,
-                     bool overwrite, bool pretty);
-int run_create_manifest(std::string_view kind, const std::filesystem::path &output_path,
+                     const std::filesystem::path &output_path,
+                     std::string_view expected_format, bool overwrite,
+                     bool pretty);
+int run_create_manifest(std::string_view kind,
+                        const std::filesystem::path &output_path,
                         bool overwrite);
-int run_alter_manifest(const std::filesystem::path &output_path, bool overwrite);
+int run_alter_manifest(const std::filesystem::path &output_path,
+                       bool overwrite);
 int run_alter_hds(const std::filesystem::path &source_path,
                   const std::filesystem::path &manifest_path,
-                  const std::optional<std::filesystem::path> &output_path, bool pretty);
+                  const std::optional<std::filesystem::path> &output_path,
+                  bool pretty);
 
 } // namespace axk::cli::commands

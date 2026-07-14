@@ -12,11 +12,13 @@
 
 namespace axk::cli::schema::export_v1 {
 
-inline constexpr std::string_view volume_graph_schema_version{"axklib.volume_graph.v1"};
+inline constexpr std::string_view volume_graph_schema_version{
+    "axklib.volume_graph.v1"};
 
-Result<std::string> serialize_volume_graph(const VolumeExport &volume,
-                                           const RelationshipGraph &graph,
-                                           const std::filesystem::path &source_path,
-                                           std::string_view container_kind = "sfs");
+Result<std::string>
+serialize_volume_graph(const VolumeExport &volume,
+                       const RelationshipGraph &graph,
+                       const std::filesystem::path &source_path,
+                       std::string_view container_kind = "sfs");
 
 } // namespace axk::cli::schema::export_v1
