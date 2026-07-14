@@ -43,9 +43,11 @@ axklib relationships source.hds --output-dir reports/relationships
 axklib validate source.hds --output-dir reports/validation
 axklib extract wav file source.hds --output-dir exports/wav
 axklib extract sfz file source.hds --output-dir exports/sfz
+axklib create manifest hds --output image.json
 axklib create hds image.json --output HD00_512_generated.hds
 axklib alter hds source.hds transaction.json --output altered.hds
 ```
 
 Use `axklib <command> --help` for the exact selectors and overwrite options of
-each command.
+each command. See [Writer And Alteration](write.md#generate-a-starter-manifest)
+for the generated HDS schema and the floppy and ISO starter variants.

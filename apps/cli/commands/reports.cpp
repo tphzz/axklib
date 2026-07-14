@@ -902,6 +902,33 @@ std::vector<axk::ReportRow> allocation_extent_rows(const std::filesystem::path &
   return rows;
 }
 
+std::vector<axk::ReportRow> allocation_mismatch_rows(const std::filesystem::path &path,
+                                                     std::span<const axk::Partition> partitions) {
+  std::vector<axk::ReportRow> rows;
+  const auto append = [&](const axk::Partition &partition, std::string direction,
+                          std::span<const axk::AllocationMismatchRange> ranges) {
+    for (const auto &range : ranges) {
+      rows.push_back({
+          {"source_image", axk::text::path_to_utf8(path)},
+          {"partition_index", static_cast<std::uint64_t>(partition.index.value)},
+          {"partition_name", partition.name},
+          {"direction", direction},
+          {"start_cluster", static_cast<std::uint64_t>(range.start_cluster)},
+          {"end_cluster", static_cast<std::uint64_t>(range.end_cluster)},
+          {"cluster_count",
+           static_cast<std::uint64_t>(range.end_cluster) - range.start_cluster + 1U},
+      });
+    }
+  };
+  for (const auto &partition : partitions) {
+    append(partition, "stored-used-without-index-extent",
+           partition.allocation.stored_not_reconstructed);
+    append(partition, "index-extent-references-free-cluster",
+           partition.allocation.reconstructed_not_stored);
+  }
+  return rows;
+}
+
 std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &path,
                                                    const axk::Container &container,
                                                    const axk::ObjectCatalog &catalog,
@@ -1714,6 +1741,8 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
     std::ranges::move(source_summaries, std::back_inserter(allocation_summaries));
     auto source_extents = allocation_extent_rows(path, container);
     std::ranges::move(source_extents, std::back_inserter(allocation_extents));
+    auto source_mismatches = allocation_mismatch_rows(path, container.partitions());
+    std::ranges::move(source_mismatches, std::back_inserter(allocation_mismatches));
     const auto prior_issue_count = issues.size();
     auto source_volumes =
         volume_validation_rows(path, container, source.catalog, volume_issues, issues);

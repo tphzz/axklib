@@ -140,6 +140,15 @@ then compares it with the stored bitmap:
 Mismatch reports use inclusive cluster ranges so large gaps can be reviewed
 without listing every cluster.
 
+An index record can remain structurally parseable even when it is no longer
+reachable from the root directory. Destructive sampler save operations may
+leave such records behind while clearing some of their extent bits in the
+allocation bitmap. axklib still reports
+`index-extent-references-free-cluster` as an allocation error: directory
+unreachability explains why the sampler can ignore the remnant, but it does not
+make the record and bitmap agree. The validator does not silently discard or
+repair these records.
+
 A-series 256 MiB images also carry an early mirror of the first
 allocation-bitmap sector immediately after the duplicate partition header.
 Generated images write that mirror as well, while the partition header field

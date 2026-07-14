@@ -320,6 +320,18 @@ int axk::cli::run(int argc, char **argv) {
   create_iso->add_option("-o,--output", create_output, "output ISO path")->required();
   create_iso->add_flag("--overwrite", create_overwrite, "replace an existing output");
   create_iso->add_flag("--pretty", create_pretty, "indent JSON output");
+  std::string create_manifest_kind;
+  std::filesystem::path create_manifest_output;
+  bool create_manifest_overwrite = false;
+  auto *create_manifest_command =
+      create->add_subcommand("manifest", "write a starter build manifest");
+  create_manifest_command->add_option("kind", create_manifest_kind, "hds, floppy, or iso")
+      ->required()
+      ->check(CLI::IsMember({"hds", "floppy", "iso"}));
+  create_manifest_command->add_option("-o,--output", create_manifest_output, "output JSON path")
+      ->required();
+  create_manifest_command->add_flag("--overwrite", create_manifest_overwrite,
+                                    "replace an existing manifest");
 
   std::filesystem::path alter_source;
   std::filesystem::path alter_manifest;
@@ -395,6 +407,9 @@ int axk::cli::run(int argc, char **argv) {
     return run_create_media(create_manifest, create_output, "iso9660", create_overwrite,
                             create_pretty);
   }
+  if (*create_manifest_command)
+    return run_create_manifest(create_manifest_kind, create_manifest_output,
+                               create_manifest_overwrite);
   if (*alter_hds) {
     const auto output =
         !alter_output.empty() ? std::optional<std::filesystem::path>{alter_output} : std::nullopt;

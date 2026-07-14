@@ -20,6 +20,7 @@
     "create floppy",
     "create hds",
     "create iso",
+    "create manifest",
     "extract sfz file",
     "extract wav file",
     "info",

@@ -234,7 +234,7 @@ detail::prepare_media_image(const MediaBuildManifest &manifest,
                                    : prepare_authored(*manifest.authored_volume, cancellation);
   if (!objects)
     return std::unexpected{objects.error()};
-  if (objects->empty()) {
+  if (objects->empty() && manifest.format != MediaImageFormat::iso9660) {
     return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                       "media image must contain at least one Yamaha object")};
   }

@@ -456,6 +456,28 @@ int run_create_media(const std::filesystem::path &manifest_path,
   return 0;
 }
 
+int run_create_manifest(std::string_view kind, const std::filesystem::path &output_path,
+                        bool overwrite) {
+  std::optional<axk::BuildManifestKind> manifest_kind;
+  if (kind == "hds")
+    manifest_kind = axk::BuildManifestKind::hds;
+  else if (kind == "floppy")
+    manifest_kind = axk::BuildManifestKind::fat12_floppy;
+  else if (kind == "iso")
+    manifest_kind = axk::BuildManifestKind::iso9660;
+  if (!manifest_kind) {
+    std::cerr << "manifest kind must be hds, floppy, or iso\n";
+    return 2;
+  }
+  const auto written = axk::write_build_manifest_template(*manifest_kind, output_path, overwrite);
+  if (!written) {
+    std::cerr << axk::render_error(written.error()) << '\n';
+    return 2;
+  }
+  std::cout << "manifest=" << axk::text::path_to_utf8(output_path) << " kind=" << kind << '\n';
+  return 0;
+}
+
 int run_alter_hds(const std::filesystem::path &source_path,
                   const std::filesystem::path &manifest_path,
                   const std::optional<std::filesystem::path> &output_path, bool pretty) {

@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <limits>
 #include <tuple>
 
 #if defined(__unix__)
@@ -83,6 +84,56 @@ TEST(HdsManifest, RejectsUnknownFieldsReferencesAndInvalidGeometry) {
   auto size = std::string{manifest};
   size.replace(size.find("536870912"), 9, "1048577");
   EXPECT_FALSE(axk::parse_hds_build_manifest(size));
+}
+
+TEST(BuildManifestTemplate, EmitsParseableHdsFloppyAndIsoStarters) {
+  const auto hds = axk::serialize_build_manifest_template(axk::BuildManifestKind::hds);
+  ASSERT_TRUE(hds) << hds.error().message;
+  const auto parsed_hds = axk::parse_hds_build_manifest(*hds);
+  ASSERT_TRUE(parsed_hds) << parsed_hds.error().message;
+  ASSERT_EQ(parsed_hds->partitions.size(), 1U);
+  ASSERT_EQ(parsed_hds->partitions.front().volumes.size(), 1U);
+  EXPECT_EQ(parsed_hds->size_bytes, 536'870'912U);
+  EXPECT_TRUE(parsed_hds->partitions.front().volumes.front().waveforms.empty());
+  EXPECT_TRUE(parsed_hds->partitions.front().volumes.front().sample_banks.empty());
+
+  const auto floppy = axk::serialize_build_manifest_template(axk::BuildManifestKind::fat12_floppy);
+  ASSERT_TRUE(floppy) << floppy.error().message;
+  const auto parsed_floppy = axk::parse_media_build_manifest(*floppy, "manifest-root");
+  ASSERT_TRUE(parsed_floppy) << parsed_floppy.error().message;
+  ASSERT_TRUE(parsed_floppy->authored_volume);
+  EXPECT_EQ(parsed_floppy->format, axk::MediaImageFormat::fat12_floppy);
+  ASSERT_EQ(parsed_floppy->authored_volume->waveforms.size(), 1U);
+  EXPECT_EQ(parsed_floppy->authored_volume->waveforms.front().path.filename(), "tone.wav");
+
+  const auto iso = axk::serialize_build_manifest_template(axk::BuildManifestKind::iso9660);
+  ASSERT_TRUE(iso) << iso.error().message;
+  const auto parsed_iso = axk::parse_media_build_manifest(*iso);
+  ASSERT_TRUE(parsed_iso) << parsed_iso.error().message;
+  ASSERT_TRUE(parsed_iso->authored_volume);
+  EXPECT_EQ(parsed_iso->format, axk::MediaImageFormat::iso9660);
+  EXPECT_TRUE(parsed_iso->authored_volume->waveforms.empty());
+  EXPECT_TRUE(parsed_iso->authored_volume->sample_banks.empty());
+
+  EXPECT_FALSE(axk::serialize_build_manifest_template(
+      static_cast<axk::BuildManifestKind>(std::numeric_limits<std::uint8_t>::max())));
+}
+
+TEST(BuildManifestTemplate, PublishesAtomicallyAndRequiresExplicitOverwrite) {
+  const auto root = std::filesystem::temp_directory_path() / "axklib-build-manifest-template-test";
+  const auto path = root / "nested" / "image.json";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+
+  ASSERT_TRUE(axk::write_build_manifest_template(axk::BuildManifestKind::hds, path));
+  ASSERT_TRUE(std::filesystem::is_regular_file(path));
+  EXPECT_FALSE(axk::write_build_manifest_template(axk::BuildManifestKind::iso9660, path));
+  ASSERT_TRUE(axk::write_build_manifest_template(axk::BuildManifestKind::iso9660, path, true));
+  const auto parsed = axk::load_media_build_manifest(path);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  EXPECT_EQ(parsed->format, axk::MediaImageFormat::iso9660);
+
+  std::filesystem::remove_all(root, error);
 }
 
 TEST(HdsGeometry, CoversEveryPartitionCountAtOneAndTwoGiBBoundaries) {
@@ -530,6 +581,42 @@ TEST(MediaWriter, AuthoredIsoReopensCompleteProgramHierarchy) {
   EXPECT_EQ(relationship_count("SBAC_SLOT_TO_SBNK"), 1U);
   EXPECT_EQ(relationship_count("PROG_ASSIGNMENT_TO_SBAC"), 1U);
   EXPECT_EQ(relationship_count("PROG_ASSIGNMENT_TO_SBNK"), 1U);
+  std::filesystem::remove_all(root, error);
+}
+
+TEST(MediaWriter, AllowsObjectEmptyIsoPackageStagingTargetOnly) {
+  const auto root = std::filesystem::temp_directory_path() / "axklib-empty-media-staging";
+  const auto iso_path = root / "empty.iso";
+  const auto floppy_path = root / "empty.ima";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+  std::filesystem::create_directories(root);
+
+  axk::VolumeSpec volume;
+  volume.name = "Import Target";
+  axk::MediaBuildManifest manifest;
+  manifest.schema_version = "1.0";
+  manifest.format = axk::MediaImageFormat::iso9660;
+  manifest.authored_volume = volume;
+  manifest.iso_volume_id = "AXK_STAGING";
+  manifest.raw_group = "46DEF120";
+  manifest.group_name = "Package Import";
+  manifest.raw_volume = "F001";
+  manifest.volume_name = volume.name;
+
+  const auto written = axk::write_media_image(manifest, iso_path);
+  ASSERT_TRUE(written) << written.error().message;
+  EXPECT_EQ(written->object_count, 0U);
+  const auto media = axk::open_media(iso_path);
+  ASSERT_TRUE(media) << media.error().message;
+  const auto objects = media->objects();
+  ASSERT_TRUE(objects) << objects.error().message;
+  EXPECT_TRUE(objects->empty());
+
+  manifest.format = axk::MediaImageFormat::fat12_floppy;
+  const auto floppy = axk::write_media_image(manifest, floppy_path);
+  ASSERT_FALSE(floppy);
+  EXPECT_NE(floppy.error().message.find("at least one Yamaha object"), std::string::npos);
   std::filesystem::remove_all(root, error);
 }
 

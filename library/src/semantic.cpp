@@ -57,6 +57,13 @@ const ObjectSnapshot *find_object(const ObjectCatalog &catalog, std::string_view
   return found == catalog.objects.end() ? nullptr : &*found;
 }
 
+std::uint64_t mismatch_cluster_count(std::span<const AllocationMismatchRange> ranges) {
+  std::uint64_t result{};
+  for (const auto &range : ranges)
+    result += static_cast<std::uint64_t>(range.end_cluster) - range.start_cluster + 1U;
+  return result;
+}
+
 std::optional<unsigned int> program_slot(const ObjectSnapshot &item) {
   if (item.object.header.type != ObjectType::prog)
     return std::nullopt;
@@ -745,14 +752,25 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
     });
   }
   for (const auto &partition : container.partitions()) {
+    const auto stored_without_record =
+        mismatch_cluster_count(partition.allocation.stored_not_reconstructed);
+    const auto record_marked_free =
+        mismatch_cluster_count(partition.allocation.reconstructed_not_stored);
     if (partition.allocation.invalid_extent_record_count != 0U ||
-        partition.allocation.extent_total_mismatch_count != 0U ||
-        !partition.allocation.stored_not_reconstructed.empty() ||
-        !partition.allocation.reconstructed_not_stored.empty()) {
+        partition.allocation.extent_total_mismatch_count != 0U || stored_without_record != 0U ||
+        record_marked_free != 0U) {
+      auto message = std::format(
+          "partition allocation metadata disagrees with index extents: {} cluster(s) are marked "
+          "used without an index-record extent, {} cluster(s) are referenced by index records but "
+          "marked free, {} record(s) contain invalid extents, and {} record(s) have extent totals "
+          "that disagree with their headers",
+          stored_without_record, record_marked_free,
+          partition.allocation.invalid_extent_record_count,
+          partition.allocation.extent_total_mismatch_count);
       result.issues.push_back({
           "SFS_ALLOCATION_MISMATCH",
           ValidationSeverity::error,
-          "partition allocation metadata does not match reconstructed record allocation",
+          std::move(message),
           std::format("partition {}: {}", partition.index.value, partition.name),
           {},
       });

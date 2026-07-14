@@ -74,6 +74,7 @@ struct HdsBuildManifest {
 
 enum class MediaImageFormat : std::uint8_t { fat12_floppy, iso9660 };
 enum class SavedObjectSelection : std::uint8_t { roots, all };
+enum class BuildManifestKind : std::uint8_t { hds, fat12_floppy, iso9660 };
 
 struct SavedObjectTransferSpec {
   std::filesystem::path source_path;
@@ -156,6 +157,10 @@ AXK_AUDIO_API Result<MediaBuildManifest>
 parse_media_build_manifest(std::string_view json, const std::filesystem::path &base_directory = {});
 AXK_AUDIO_API Result<MediaBuildManifest>
 load_media_build_manifest(const std::filesystem::path &path);
+AXK_AUDIO_API Result<std::string> serialize_build_manifest_template(BuildManifestKind kind);
+AXK_AUDIO_API Result<void> write_build_manifest_template(BuildManifestKind kind,
+                                                         const std::filesystem::path &output_path,
+                                                         bool overwrite = false);
 AXK_AUDIO_API Result<std::vector<PartitionGeometry>>
 plan_hds_geometry(const HdsBuildManifest &manifest);
 AXK_AUDIO_API Result<std::uint32_t>

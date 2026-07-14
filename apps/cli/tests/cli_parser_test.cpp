@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "app.hpp"
+#include "commands/reports.hpp"
 #include "content_id.hpp"
 
 #ifdef AXK_TEST_SHARED_SDK
@@ -122,6 +123,32 @@ TEST(Cli11Adapter, ExposesCompletePortablePackageCommandFamily) {
   const auto output = testing::internal::GetCapturedStdout();
   for (const auto command : {"export", "inspect", "verify", "plan-import", "import"})
     EXPECT_NE(output.find(command), std::string::npos) << command;
+}
+
+TEST(Cli11Adapter, WritesStarterBuildManifestsWithoutSilentReplacement) {
+  const auto root = std::filesystem::temp_directory_path() / "axklib-cli-manifest-template";
+  const auto output = root / "nested" / "image.json";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+
+  testing::internal::CaptureStdout();
+  ASSERT_EQ(run_cli({"axklib", "create", "manifest", "hds", "-o", output.string()}), 0);
+  EXPECT_NE(testing::internal::GetCapturedStdout().find("kind=hds"), std::string::npos);
+  ASSERT_TRUE(std::filesystem::is_regular_file(output));
+  const auto parsed = nlohmann::json::parse(read_bytes(output));
+  EXPECT_EQ(parsed.at("schema_version"), "1.0");
+  EXPECT_EQ(parsed.at("size_bytes"), 536'870'912U);
+  EXPECT_TRUE(parsed.at("partitions").at(0).at("volumes").at(0).at("waveforms").empty());
+
+  testing::internal::CaptureStderr();
+  EXPECT_EQ(run_cli({"axklib", "create", "manifest", "iso", "-o", output.string()}), 2);
+  EXPECT_NE(testing::internal::GetCapturedStderr().find("refusing to replace"), std::string::npos);
+
+  EXPECT_EQ(run_cli({"axklib", "create", "manifest", "iso", "-o", output.string(), "--overwrite"}),
+            0);
+  const auto replaced = nlohmann::json::parse(read_bytes(output));
+  EXPECT_EQ(replaced.at("format"), "iso9660");
+  std::filesystem::remove_all(root, error);
 }
 
 TEST(Cli11Adapter, PortablePackageRoundTripPlansAndImportsAtomically) {
@@ -285,6 +312,22 @@ TEST(Cli11Adapter, ExposesHdsFloppyAndIsoCreationProfiles) {
   const auto output = testing::internal::GetCapturedStdout();
   for (const auto command : {"hds", "floppy", "iso"})
     EXPECT_NE(output.find(command), std::string::npos) << command;
+}
+
+TEST(CliReports, EmitsBothAllocationMismatchDirections) {
+  axk::Partition partition;
+  partition.index = axk::PartitionIndex{2U};
+  partition.name = "Sampler Save";
+  partition.allocation.stored_not_reconstructed.push_back({11U, 13U});
+  partition.allocation.reconstructed_not_stored.push_back({21U, 24U});
+
+  const auto rows = axk::cli::commands::allocation_mismatch_rows(
+      "returned.hds", std::span<const axk::Partition>{&partition, 1U});
+  ASSERT_EQ(rows.size(), 2U);
+  EXPECT_EQ(std::get<std::string>(rows[0][3].second.value), "stored-used-without-index-extent");
+  EXPECT_EQ(std::get<std::uint64_t>(rows[0][6].second.value), 3U);
+  EXPECT_EQ(std::get<std::string>(rows[1][3].second.value), "index-extent-references-free-cluster");
+  EXPECT_EQ(std::get<std::uint64_t>(rows[1][6].second.value), 4U);
 }
 
 TEST(Cli11Adapter, ExtractSfzWritesAudioInstrumentsAndVolumeGraph) {

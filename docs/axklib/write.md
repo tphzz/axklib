@@ -9,6 +9,7 @@ transaction manifest.
 axklib create hds image.json --output HD00_512_generated.hds
 axklib create floppy floppy.json --output generated.ima
 axklib create iso cdrom.json --output generated.iso
+axklib create manifest hds --output image.json
 axklib alter hds source.hds transaction.json --output altered.hds
 ```
 
@@ -16,11 +17,67 @@ Manifest-relative input paths are resolved relative to the manifest file, not
 the current working directory. Output publication is atomic. Existing output
 files are refused unless `--overwrite` is supplied.
 
+## Generate A Starter Manifest
+
+Generate a canonical starter instead of writing the schema from memory:
+
+```bash
+axklib create manifest hds --output image.json
+axklib create manifest floppy --output floppy.json
+axklib create manifest iso --output cdrom.json
+```
+
+The command writes formatted JSON and refuses to replace an existing manifest
+unless `--overwrite` is supplied. The generated documents have deliberately
+different starting content:
+
+- `hds` is an immediately buildable 512 MiB image definition with one empty
+  partition and one empty volume. It is suitable as a target for
+  `axklib package import` or as the start of a hand-authored manifest.
+- `floppy` contains one waveform and Sample Bank skeleton referring to
+  `tone.wav`. Replace that path and the sampler-facing names as needed. A
+  Yamaha FAT12 image with no Yamaha objects is not a valid writer target, so
+  the floppy starter cannot be object-empty.
+- `iso` is an object-empty one-group, one-volume staging definition. It can be
+  populated with `axklib package import`. Object-empty ISO output is not a
+  hardware-promoted standalone disc profile; for direct audio authoring, use
+  the complete example below.
+
+The generated HDS document is:
+
+```json
+{
+  "schema_version": "1.0",
+  "size_bytes": 536870912,
+  "partitions": [
+    {
+      "name": "New Partition",
+      "volumes": [
+        {
+          "name": "New Volume",
+          "waveforms": [],
+          "sample_banks": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+Create the empty image, inspect it, and then use it as an import target:
+
+```bash
+axklib create hds image.json --output HD00_512_generated.hds
+axklib info HD00_512_generated.hds
+axklib validate HD00_512_generated.hds --output-dir validation/hds
+```
+
 ## Common Authored Content
 
-Fresh HDS, floppy, and ISO images share the `authored_volume` schema. The
-smallest useful topology is one physical waveform (`SMPL`) and one Sample Bank
-(`SBNK`) that references it:
+Fresh HDS, floppy, and ISO images share the same authored volume fields. HDS
+places those fields inside each `partitions[].volumes[]` entry; removable-media
+manifests place them in `authored_volume`. The smallest useful topology is one
+physical waveform (`SMPL`) and one Sample Bank (`SBNK`) that references it:
 
 ```json
 "authored_volume": {
@@ -282,6 +339,26 @@ a transfer closure.
 
 ## Authored Manifest Field Reference
 
+Top-level HDS fields:
+
+| Field | Rule |
+| --- | --- |
+| `schema_version` | Required; currently exactly `"1.0"`. |
+| `size_bytes` | Required integer from 1 MiB through 2 GiB, divisible by 512. The starter uses 512 MiB. |
+| `partitions` | Required array containing `1..8` partition objects. |
+
+HDS partition and volume fields:
+
+| Field | Rule |
+| --- | --- |
+| partition `name` | Required non-empty sampler-facing partition name. |
+| partition `volumes` | Required non-empty array of volume objects. |
+| volume `name` | Required non-empty sampler-facing volume name. |
+| volume `waveforms` | Required array; it may be empty. |
+| volume `sample_banks` | Required array; it may be empty. |
+| volume `sample_bank_groups` | Optional array using the common authored-content schema below. |
+| volume `programs` | Optional array using the common authored-content schema below. |
+
 Top-level removable-media fields:
 
 | Field | Rule |
@@ -296,7 +373,7 @@ Top-level removable-media fields:
 | Field | Rule |
 | --- | --- |
 | `name` | Required non-empty string. Match `iso.volume_name` for clear ISO manifests. |
-| `waveforms` | Required array. The completed authored image must contain at least one generated object. |
+| `waveforms` | Required array. Completed FAT12 images must contain at least one generated object. An object-empty ISO volume is accepted only as a package-import staging target; it is not a hardware-promoted standalone profile. |
 | `sample_banks` | Required array. |
 | `sample_bank_groups` | Optional array; current groups contain 1..3 distinct Sample Bank names. |
 | `programs` | Optional array; Program numbers are `1..128`. |

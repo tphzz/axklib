@@ -67,6 +67,7 @@ TEST(NativeContracts, PinsTheBuildContractAndRetainedMediaCommands) {
   EXPECT_TRUE(command_set.contains("create hds"));
   EXPECT_TRUE(command_set.contains("create floppy"));
   EXPECT_TRUE(command_set.contains("create iso"));
+  EXPECT_TRUE(command_set.contains("create manifest"));
 }
 
 TEST(NativeContracts, UsesOnlyRelativeFixturePathsAndSha256Digests) {

@@ -11,7 +11,10 @@
 #include <gtest/gtest.h>
 
 #include "axklib/bytes.hpp"
+#include "axklib/catalog.hpp"
 #include "axklib/io.hpp"
+#include "axklib/relationship.hpp"
+#include "axklib/semantic.hpp"
 #include "axklib/sfs.hpp"
 
 namespace {
@@ -408,6 +411,12 @@ TEST(SfsReader, ReportsContinuationCycleAndBitmapMismatchWithoutRepair) {
   ASSERT_EQ(ranges.size(), 1U);
   EXPECT_EQ(ranges[0].start_cluster, 54U);
   EXPECT_EQ(ranges[0].end_cluster, 54U);
+  const auto validation = axk::validate_semantics(*mismatch, {}, {});
+  const auto issue =
+      std::ranges::find(validation.issues, "SFS_ALLOCATION_MISMATCH", &axk::ValidationIssue::code);
+  ASSERT_NE(issue, validation.issues.end());
+  EXPECT_NE(issue->message.find("1 cluster(s) are referenced by index records but marked free"),
+            std::string::npos);
 }
 
 TEST(SfsReader, ReportsMissingDirectoryTargetsAndChildCycles) {
