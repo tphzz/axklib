@@ -30,7 +30,7 @@ TEST(CurrentLookups, ExposesCanonicalParameterAndProgramLabels) {
   EXPECT_TRUE(axk::current_label(axk::CurrentLookup::prog_slot_kind_target_category, 0x7f).empty());
 }
 
-TEST(CurrentSmpl, MatchesPythonOracleOnSamplerAuthoredObject) {
+TEST(CurrentSmpl, MatchesMaintainedSemanticContract) {
   const auto path = std::filesystem::path{AXK_SOURCE_ROOT} /
                     "tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds";
   const auto container = axk::open_image(path);
@@ -83,7 +83,7 @@ TEST(CurrentSmpl, RetainsMetadataOutsideDeclaredPcmAndPreservesWideDerivedLoopEn
   EXPECT_EQ(sample.loop_end_frame_exclusive, 4'294'967'297ULL);
 }
 
-TEST(CurrentSbnk, MatchesPythonOracleAndPreservesInactiveRightLane) {
+TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
   const auto path = std::filesystem::path{AXK_SOURCE_ROOT} /
                     "tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds";
   const auto container = axk::open_image(path);
@@ -128,7 +128,7 @@ TEST(CurrentSbnk, MatchesPythonOracleAndPreservesInactiveRightLane) {
   EXPECT_EQ(bank.find_numeric_field("sample_portamento_time_0x184")->value, 90);
 }
 
-TEST(CurrentSbac, MatchesPythonOracleSlotsAndBitmapBoundaries) {
+TEST(CurrentSbac, MatchesMaintainedSlotAndBitmapContracts) {
   const auto path = std::filesystem::path{AXK_SOURCE_ROOT} /
                     "tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds";
   const auto container = axk::open_image(path);

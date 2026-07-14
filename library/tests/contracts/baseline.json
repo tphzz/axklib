@@ -15,6 +15,7 @@
   },
   "commands": [
     "alter hds",
+    "alter manifest",
     "corpus audit",
     "coverage",
     "create floppy",
@@ -27,6 +28,11 @@
     "inventory",
     "objects",
     "orphans",
+    "package export",
+    "package import",
+    "package inspect",
+    "package plan-import",
+    "package verify",
     "relationships",
     "validate"
   ],

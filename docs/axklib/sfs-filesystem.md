@@ -9,6 +9,23 @@ hard-disk images. It is not FAT12 and it is not ISO9660. FAT12 floppies and
 CD-ROM images can carry the same sampler object payloads, but their container
 layers are different.
 
+## Specification Scope
+
+This page documents the SFS structures that the current axklib reader validates
+and the narrower profile emitted by the writer. It is not a claim that every
+reserved byte has a known meaning.
+
+| Area | Reader contract | Writer contract |
+| --- | --- | --- |
+| Disk geometry | Reads the bounded sector and cluster values stored in the image. | Emits 512-byte sectors, two sectors per cluster, and one to eight partition slots. |
+| Index and allocation | Reads direct and continuation extents, reconstructs allocation, and reports inconsistencies. | Computes the bitmap, index span, extents, and compatibility metadata from the requested image model. |
+| Directory tree | Reads reachable and structurally valid directory records while retaining diagnostics for malformed or unreachable records. | Emits partition, volume, category, and object entries for the supported authored object profile. |
+| Sampler objects | Passes supported payloads to the object decoders; see [Sampler Data Structures](sampler-data.md). | Emits only the object types and topologies listed under [Generated Image Writing](#generated-image-writing). |
+| Uninterpreted bytes | Retains or reports relevant raw values without assigning semantics. | Writes only the documented compatibility values and deliberately zeroes unsupported residue. |
+
+Applications should use the parser and writer APIs instead of treating this
+page as permission to synthesize fields whose meaning is still unspecified.
+
 ```mermaid
 flowchart TD
   image[Disk image] --> super[Disk superblock]
@@ -63,9 +80,10 @@ Partition entry layout:
 | `+0x00` | 4 | u32be | Partition start sector. |
 | `+0x04` | 4 | u32be | Partition sector count. |
 
-A partition entry is active when both values are non-zero. Fresh generated
-images also populate the observed disk mode metadata area so the duplicate
-superblocks match sampler-authored hard-disk images of the same size class.
+A valid active partition entry has both values non-zero. The reader treats an
+entry with either value non-zero as occupied so a half-populated entry is
+reported as invalid geometry instead of being silently ignored. Fresh generated
+images populate both values and the disk mode metadata area.
 
 A-series hard-disk images also use sector 2, and for multiple partitions the
 sectors immediately before later partitions, as auxiliary formatter-transfer
@@ -96,7 +114,7 @@ is 1024 bytes and is followed by a duplicate copy.
 | `0x09c` | 4 | u32be | Cluster offset to the allocation bitmap. |
 | `0x0a0` | 4 | u32be | Reserved value; currently not interpreted by public APIs. |
 | `0x0a4` | 4 | u32be | Cluster offset to the directory/file index. |
-| `0x0a8` | 4 | u32be | Reserved value; currently not interpreted by public APIs. |
+| `0x0a8` | 4 | u32be | Directory/file index span in clusters. |
 
 For generated images, the full primary and duplicate 1024-byte partition-header
 sectors are part of the write contract. The named fields above are sufficient
@@ -222,7 +240,7 @@ reads is:
 | `0x0a` | 4 | u32be | First data cluster for direct records, or continuation-list cluster for multi-extent records. |
 | `0x0e` | 4 | u32be | First direct extent cluster count for direct records. |
 | `0x12` | 4 | u32be | First direct extent byte count for direct records. |
-| `0x42` | bytes | flags | Diagnostic record type/flag area; current public data reads do not require this field. |
+| `0x42` | 6 | bytes | Record metadata and flags. The reader does not require these bytes to resolve payload extents. |
 
 The data-size field is the number of logical bytes to return to the object or
 directory decoder. Allocated storage can be larger because cluster allocation is
@@ -357,8 +375,8 @@ sampler object links.
 
 ## Generated Image Writing
 
-`axklib.write` provides an initial API for creating fresh HDS/SFS images from a
-small typed model. The current writer creates a new hard-disk image, partitions,
+The writer APIs create fresh HDS/SFS images from a small typed model. The
+current writer creates a new hard-disk image, partitions,
 volumes, current-format `SMPL` waveform objects, direct single-member `SBNK`
 sample-bank objects, equal-format two-member stereo `SBNK` objects, and one
 explicitly bounded one-to-three-member `SBAC` / Program profile. It does not modify

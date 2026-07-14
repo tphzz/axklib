@@ -478,6 +478,16 @@ int run_create_manifest(std::string_view kind, const std::filesystem::path &outp
   return 0;
 }
 
+int run_alter_manifest(const std::filesystem::path &output_path, bool overwrite) {
+  const auto written = axk::write_alteration_manifest_template(output_path, overwrite);
+  if (!written) {
+    std::cerr << axk::render_error(written.error()) << '\n';
+    return 2;
+  }
+  std::cout << "manifest=" << axk::text::path_to_utf8(output_path) << " kind=alteration\n";
+  return 0;
+}
+
 int run_alter_hds(const std::filesystem::path &source_path,
                   const std::filesystem::path &manifest_path,
                   const std::optional<std::filesystem::path> &output_path, bool pretty) {

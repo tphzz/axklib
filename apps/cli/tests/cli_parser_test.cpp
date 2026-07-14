@@ -14,6 +14,8 @@
 #include "commands/reports.hpp"
 #include "content_id.hpp"
 
+#include "axklib/alteration.hpp"
+
 #ifdef AXK_TEST_SHARED_SDK
 #include "axklib/sdk.hpp"
 #endif
@@ -148,6 +150,23 @@ TEST(Cli11Adapter, WritesStarterBuildManifestsWithoutSilentReplacement) {
             0);
   const auto replaced = nlohmann::json::parse(read_bytes(output));
   EXPECT_EQ(replaced.at("format"), "iso9660");
+  std::filesystem::remove_all(root, error);
+}
+
+TEST(Cli11Adapter, WritesStarterAlterationManifestWithoutSilentReplacement) {
+  const auto root = std::filesystem::temp_directory_path() / "axklib-cli-alter-manifest-template";
+  const auto output = root / "transaction.json";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+
+  ASSERT_EQ(run_cli({"axklib", "alter", "manifest", "-o", output.string()}), 0);
+  ASSERT_TRUE(std::filesystem::is_regular_file(output));
+  const auto parsed = axk::load_alteration_manifest(output);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+
+  EXPECT_EQ(run_cli({"axklib", "alter", "manifest", "-o", output.string()}), 2);
+  EXPECT_EQ(run_cli({"axklib", "alter", "manifest", "-o", output.string(), "--overwrite"}), 0);
+
   std::filesystem::remove_all(root, error);
 }
 

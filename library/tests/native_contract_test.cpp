@@ -33,7 +33,6 @@ TEST(NativeContracts, HasCanonicalInventoryAndUniqueEntries) {
   const auto baseline = read_contract("baseline.json");
 
   EXPECT_EQ(baseline.at("schema_version"), "2.0");
-  EXPECT_FALSE(baseline.contains("oracle"));
 
   const auto commands = baseline.at("commands").get<std::vector<std::string>>();
   const auto command_set = std::set<std::string>{commands.begin(), commands.end()};
@@ -68,6 +67,10 @@ TEST(NativeContracts, PinsTheBuildContractAndRetainedMediaCommands) {
   EXPECT_TRUE(command_set.contains("create floppy"));
   EXPECT_TRUE(command_set.contains("create iso"));
   EXPECT_TRUE(command_set.contains("create manifest"));
+  EXPECT_TRUE(command_set.contains("alter manifest"));
+  EXPECT_TRUE(command_set.contains("package export"));
+  EXPECT_TRUE(command_set.contains("package plan-import"));
+  EXPECT_TRUE(command_set.contains("package import"));
 }
 
 TEST(NativeContracts, UsesOnlyRelativeFixturePathsAndSha256Digests) {
@@ -82,10 +85,9 @@ TEST(NativeContracts, UsesOnlyRelativeFixturePathsAndSha256Digests) {
   }
 }
 
-TEST(NativeContracts, SemanticContractsAreUniqueAndContainNoPrivateRegenerationData) {
+TEST(NativeContracts, SemanticContractsAreUniqueAndContainNoRegenerationData) {
   const auto document = read_contract("semantic-contracts.json");
   EXPECT_EQ(document.at("schema_version"), "2.0");
-  EXPECT_FALSE(document.contains("oracle_commit"));
   std::set<std::string> identifiers;
   for (const auto &contract : document.at("contracts")) {
     EXPECT_TRUE(identifiers.insert(contract.at("id").get<std::string>()).second);

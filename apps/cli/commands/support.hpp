@@ -15,8 +15,6 @@
 
 namespace axk::cli::commands {
 
-inline constexpr std::string_view oracle_report_library_version{"0.1.0-plan008"};
-
 struct CliLoaded {
   std::filesystem::path path;
   MediaContainer media;

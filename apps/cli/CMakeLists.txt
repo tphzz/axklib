@@ -59,6 +59,7 @@ add_library(
   schema/operations_v1.cpp
   schema/package_v1.cpp
   schema/semantic_v1.cpp
+  writer_commands.cpp
 )
 target_compile_features(axk_cli_adapter PUBLIC cxx_std_23)
 target_include_directories(

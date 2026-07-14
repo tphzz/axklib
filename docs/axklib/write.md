@@ -10,6 +10,7 @@ axklib create hds image.json --output HD00_512_generated.hds
 axklib create floppy floppy.json --output generated.ima
 axklib create iso cdrom.json --output generated.iso
 axklib create manifest hds --output image.json
+axklib alter manifest --output transaction.json
 axklib alter hds source.hds transaction.json --output altered.hds
 ```
 
@@ -71,6 +72,16 @@ axklib create hds image.json --output HD00_512_generated.hds
 axklib info HD00_512_generated.hds
 axklib validate HD00_512_generated.hds --output-dir validation/hds
 ```
+
+Generate an alteration starter separately:
+
+```bash
+axklib alter manifest --output transaction.json
+```
+
+Creation and alteration use different schemas. A creation manifest describes a
+complete new container; an alteration manifest is an ordered transaction
+against an existing HDS image.
 
 ## Common Authored Content
 
@@ -423,6 +434,92 @@ ISO-only fields:
 | `group_name` | Sampler-facing ASCII label, `1..16` bytes. |
 | `raw_volume` | Effective writer range is `F001..F998`; the next `Fnnn` name is reserved for the group-label file. Use `F001` for the hardware-verified profile. |
 | `volume_name` | Sampler-facing ASCII label, `1..16` bytes. |
+
+## Alteration Manifest
+
+`alter hds` accepts a strict versioned JSON document with one or more ordered
+operations. Generate the starter instead of guessing field names:
+
+```bash
+axklib alter manifest -o transaction.json
+```
+
+The starter contains one valid rename operation with placeholder names:
+
+```json
+{
+  "schema_version": "1.0",
+  "operations": [
+    {
+      "id": "rename-waveform",
+      "type": "rename_waveform",
+      "partition_index": 0,
+      "volume_name": "Volume",
+      "waveform_name": "Old Wave",
+      "new_waveform_name": "New Wave"
+    }
+  ]
+}
+```
+
+Every operation has a unique `id`, a `type`, and a `partition_index`. A numeric
+partition index is `0..7`. An operation may instead use the partition selected
+by an earlier operation:
+
+```json
+"partition_index": {"operation_ref": "earlier-operation-id"}
+```
+
+References are backward-only. The complete transaction is planned in order, so
+later operations see the evolving result of earlier operations.
+
+Supported operation types:
+
+| Type | Required operation-specific fields |
+| --- | --- |
+| `delete_volume` | `volume_name` |
+| `insert_volume` | `volume` using the common authored-volume schema |
+| `delete_waveform` | `volume_name`, `waveform_name` |
+| `insert_waveform` | `volume_name`, `audio` |
+| `rename_waveform` | `volume_name`, `waveform_name`, `new_waveform_name` |
+| `delete_sbnk` | `volume_name`, `sample_bank_name` |
+| `insert_sbnk` | `volume_name`, `sample_bank` |
+| `rename_sbnk` | `volume_name`, `sample_bank_name`, `new_sample_bank_name` |
+| `delete_sbac` | `volume_name`, `sample_bank_group_name` |
+| `insert_sbac` | `volume_name`, `sample_bank_group` |
+| `rename_sbac` | `volume_name`, `sample_bank_group_name`, `new_sample_bank_group_name` |
+| `delete_program` | `volume_name`, `program_number` |
+| `insert_program` | `volume_name`, `program` |
+
+An `insert_waveform` audio object contains `path`, one or two distinct
+`waveform_names`, and `root_key`; `target_sample_rate` is optional. Relative
+audio paths resolve from the alteration manifest directory.
+
+An `insert_sbnk` object contains `name`, `waveform_name`, `root_key`, `key_low`,
+and `key_high`. Optional fields are `right_waveform_name` and `level`. The named
+waveforms must already exist at that point in the ordered transaction.
+
+An `insert_sbac` object contains `name` and `member_sample_banks`, an array of
+one to three distinct existing Sample Bank names. An `insert_program` object
+contains a Program `number` and exactly two assignments: a
+`sample_bank_group` on receive channel 1 followed by a direct `sample_bank` on
+receive channel 2. These limits match the currently supported authored profile.
+
+Plan without writing an image:
+
+```bash
+axklib alter hds source.hds transaction.json --pretty
+```
+
+Apply to a different output path only after reviewing that plan:
+
+```bash
+axklib alter hds source.hds transaction.json -o altered.hds --pretty
+```
+
+Deletion checks live relationships. Delete a Program or group before deleting
+objects it owns, and delete a Sample Bank before deleting its waveform. The
+engine rejects an operation that would leave a known dangling relationship.
 
 ## Publication And Validation Guarantees
 

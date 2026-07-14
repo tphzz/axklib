@@ -1,10 +1,10 @@
 # Overview
 
-The production distribution has four surfaces:
+The production distribution has three surfaces:
 
 - `axklib::axklib`, the C++17 shared SDK for native applications.
-- `axklib`, the separate self-contained command-line application.
-- `axklib`, the CLI11 application for interactive and automated workflows.
+- `axklib`, a separate self-contained command-line application for interactive
+  and automated workflows.
 - Versioned JSON and CSV contracts emitted by the CLI.
 
 Read operations cover object inventory, relationships, content trees,
@@ -13,6 +13,5 @@ operations cover fresh images and ordered alteration transactions. A write is
 planned and validated before the destination is replaced.
 
 The SDK supports Linux, macOS, and Windows on x64 and arm64. Platform packages
-contain headers, libraries, the CLI, C examples, CMake metadata, pkg-config
-metadata where applicable, license texts, and an SPDX software bill of
-materials.
+contain headers, the shared library, the CLI, CMake package metadata, dependency
+license texts, and SPDX software bills of materials.

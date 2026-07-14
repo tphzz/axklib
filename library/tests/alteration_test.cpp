@@ -198,6 +198,28 @@ TEST(AlterationManifest, RequiresStrictOrderedBackwardReferences) {
     ]})"));
 }
 
+TEST(AlterationManifestTemplate, EmitsParseableStarterAndPublishesAtomically) {
+  const auto serialized = axk::serialize_alteration_manifest_template();
+  ASSERT_TRUE(serialized) << serialized.error().message;
+  const auto parsed = axk::parse_alteration_manifest(*serialized);
+  ASSERT_TRUE(parsed) << parsed.error().message;
+  ASSERT_EQ(parsed->operations.size(), 1U);
+  EXPECT_EQ(axk::operation_type_name(parsed->operations.front().data), "rename_waveform");
+
+  const auto root =
+      std::filesystem::temp_directory_path() / "axklib-alteration-manifest-template-test";
+  const auto path = root / "nested" / "transaction.json";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+
+  ASSERT_TRUE(axk::write_alteration_manifest_template(path));
+  EXPECT_FALSE(axk::write_alteration_manifest_template(path));
+  ASSERT_TRUE(axk::write_alteration_manifest_template(path, true));
+  ASSERT_TRUE(axk::load_alteration_manifest(path));
+
+  std::filesystem::remove_all(root, error);
+}
+
 TEST(AlterationManifest, ParsesStrictSampleBankOperations) {
   const auto parsed = axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[

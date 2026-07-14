@@ -134,7 +134,7 @@ int run_inventory_request(const axk::cli::InventoryRequest &request) {
     return report_failure(written.error());
   axk::ReportSchemaOptions summary_options;
   summary_options.source_command = "axklib";
-  summary_options.library_version = std::string{oracle_report_library_version};
+  summary_options.library_version = std::string{axk::version()};
   auto summary_schema =
       axk::make_report_schema("inventory_summary", std::span{&summary, 1U}, summary_options);
   if (auto written = axk::write_report_schema(request.output_directory / "_schemas" /
@@ -1822,7 +1822,7 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
     return report_failure(written.error());
   axk::ReportSchemaOptions schema_options;
   schema_options.source_command = "axklib";
-  schema_options.library_version = std::string{oracle_report_library_version};
+  schema_options.library_version = std::string{axk::version()};
   auto validation_summary_schema = axk::make_report_schema(
       "validation_summary", std::span{&validation_summary, 1U}, schema_options);
   if (auto written = axk::write_report_schema(request.output_directory / "_schemas" /
@@ -1859,7 +1859,7 @@ axk::Result<axk::ReportSchemaManifest> write_csv_schema(const std::filesystem::p
     return std::unexpected{written.error()};
   axk::ReportSchemaOptions options;
   options.source_command = "axklib";
-  options.library_version = std::string{oracle_report_library_version};
+  options.library_version = std::string{axk::version()};
   auto schema = axk::make_report_schema(name, rows, options);
   if (auto written = axk::write_report_schema(output / "_schemas" / (name + ".schema.json"), schema,
                                               overwrite);
@@ -1985,7 +1985,7 @@ int run_corpus_audit_request(const axk::cli::CorpusAuditRequest &request) {
   std::vector<axk::ReportSchemaManifest> schemas;
   axk::ReportSchemaOptions base_schema_options;
   base_schema_options.source_command = "axklib";
-  base_schema_options.library_version = std::string{oracle_report_library_version};
+  base_schema_options.library_version = std::string{axk::version()};
   const std::array summary_rows{summary};
   auto summary_schema =
       axk::make_report_schema("corpus_audit_summary", summary_rows, base_schema_options);
@@ -2005,7 +2005,7 @@ int run_corpus_audit_request(const axk::cli::CorpusAuditRequest &request) {
         return std::unexpected{written.error()};
       axk::ReportSchemaOptions options;
       options.source_command = "axklib";
-      options.library_version = std::string{oracle_report_library_version};
+      options.library_version = std::string{axk::version()};
       auto schema = axk::make_report_schema(name, report_rows, options);
       if (auto written = axk::write_report_schema(request.output_directory / "_schemas" /
                                                       (name + ".schema.json"),

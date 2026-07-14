@@ -37,6 +37,7 @@ int run_create_media(const std::filesystem::path &manifest_path,
                      bool overwrite, bool pretty);
 int run_create_manifest(std::string_view kind, const std::filesystem::path &output_path,
                         bool overwrite);
+int run_alter_manifest(const std::filesystem::path &output_path, bool overwrite);
 int run_alter_hds(const std::filesystem::path &source_path,
                   const std::filesystem::path &manifest_path,
                   const std::optional<std::filesystem::path> &output_path, bool pretty);

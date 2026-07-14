@@ -98,7 +98,7 @@ int run_relationships_request(const axk::cli::RelationshipsRequest &request) {
     return report_failure(written.error());
   axk::ReportSchemaOptions summary_options;
   summary_options.source_command = "axklib";
-  summary_options.library_version = std::string{oracle_report_library_version};
+  summary_options.library_version = std::string{axk::version()};
   auto summary_schema =
       axk::make_report_schema("relationship_summary", std::span{&summary, 1U}, summary_options);
   schemas.push_back(summary_schema);
@@ -143,7 +143,7 @@ int run_coverage_request(const axk::cli::CoverageRequest &request) {
     return report_failure(written.error());
   axk::ReportSchemaOptions summary_options;
   summary_options.source_command = "axklib";
-  summary_options.library_version = std::string{oracle_report_library_version};
+  summary_options.library_version = std::string{axk::version()};
   auto summary_schema =
       axk::make_report_schema("coverage_summary", summary_rows, std::move(summary_options));
   if (auto written = axk::write_report_schema(request.output_directory / "_schemas" /

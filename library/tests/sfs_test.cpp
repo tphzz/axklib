@@ -239,7 +239,7 @@ std::shared_ptr<SparseReader> sparse_geometry_fixture(std::uint64_t total_sector
   return sparse;
 }
 
-TEST(SfsReader, MatchesPythonOracleOnSamplerAuthoredFixtures) {
+TEST(SfsReader, MatchesMaintainedSemanticContractsOnFixtures) {
   struct Expected {
     std::string_view filename;
     std::uint32_t allocated;

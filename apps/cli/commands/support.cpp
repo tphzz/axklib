@@ -155,7 +155,7 @@ write_cli_report(const std::filesystem::path &output, std::string name,
   axk::ReportSchemaOptions options;
   static_cast<void>(source_command);
   options.source_command = "axklib";
-  options.library_version = std::string{oracle_report_library_version};
+  options.library_version = std::string{axk::version()};
   if (name == "inventory_objects")
     options.semantic_notes =
         "Decoded object inventory rows produced through axklib.objects.decoded.";

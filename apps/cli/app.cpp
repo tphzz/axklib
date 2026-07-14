@@ -9,6 +9,7 @@
 
 #include "commands/handlers.hpp"
 #include "requests.hpp"
+#include "writer_commands.hpp"
 
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
@@ -294,55 +295,8 @@ int axk::cli::run(int argc, char **argv) {
   preview->add_option("--bins", preview_bins, "requested envelope bin count");
   preview->add_flag("--pretty", preview_pretty, "indent JSON output");
 
-  std::filesystem::path create_manifest;
-  std::filesystem::path create_output;
-  bool create_overwrite = false;
-  bool create_pretty = false;
-  auto *create_hds = app.add_subcommand("create-hds", "create a fresh HDS image from a manifest");
-  create_hds->group("");
-  create_hds->add_option("--manifest", create_manifest, "HDS build manifest JSON")->required();
-  create_hds->add_option("--output", create_output, "output HDS path")->required();
-  create_hds->add_flag("--overwrite", create_overwrite, "replace an existing output");
-  create_hds->add_flag("--pretty", create_pretty, "indent JSON output");
-  auto *create = app.add_subcommand("create", "create a fresh sampler container");
-  auto *create_hds_nested = create->add_subcommand("hds", "create a fresh HDS image");
-  create_hds_nested->add_option("manifest", create_manifest, "HDS build manifest JSON")->required();
-  create_hds_nested->add_option("-o,--output", create_output, "output HDS path")->required();
-  create_hds_nested->add_flag("--overwrite", create_overwrite, "replace an existing output");
-  create_hds_nested->add_flag("--pretty", create_pretty, "indent JSON output");
-  auto *create_floppy = create->add_subcommand("floppy", "create a fresh FAT12 floppy image");
-  create_floppy->add_option("manifest", create_manifest, "media build manifest JSON")->required();
-  create_floppy->add_option("-o,--output", create_output, "output IMA path")->required();
-  create_floppy->add_flag("--overwrite", create_overwrite, "replace an existing output");
-  create_floppy->add_flag("--pretty", create_pretty, "indent JSON output");
-  auto *create_iso = create->add_subcommand("iso", "create a fresh ISO9660 image");
-  create_iso->add_option("manifest", create_manifest, "media build manifest JSON")->required();
-  create_iso->add_option("-o,--output", create_output, "output ISO path")->required();
-  create_iso->add_flag("--overwrite", create_overwrite, "replace an existing output");
-  create_iso->add_flag("--pretty", create_pretty, "indent JSON output");
-  std::string create_manifest_kind;
-  std::filesystem::path create_manifest_output;
-  bool create_manifest_overwrite = false;
-  auto *create_manifest_command =
-      create->add_subcommand("manifest", "write a starter build manifest");
-  create_manifest_command->add_option("kind", create_manifest_kind, "hds, floppy, or iso")
-      ->required()
-      ->check(CLI::IsMember({"hds", "floppy", "iso"}));
-  create_manifest_command->add_option("-o,--output", create_manifest_output, "output JSON path")
-      ->required();
-  create_manifest_command->add_flag("--overwrite", create_manifest_overwrite,
-                                    "replace an existing manifest");
-
-  std::filesystem::path alter_source;
-  std::filesystem::path alter_manifest;
-  std::filesystem::path alter_output;
-  bool alter_pretty = false;
-  auto *alter = app.add_subcommand("alter", "alter an existing sampler container");
-  auto *alter_hds = alter->add_subcommand("hds", "plan or apply an HDS transaction");
-  alter_hds->add_option("source", alter_source, "source HDS image")->required();
-  alter_hds->add_option("manifest", alter_manifest, "alteration manifest JSON")->required();
-  alter_hds->add_option("-o,--output", alter_output, "new output HDS path");
-  alter_hds->add_flag("--pretty", alter_pretty, "indent JSON output");
+  WriterCommandState writer_commands;
+  register_writer_commands(app, writer_commands);
 
   try {
     app.parse(argc, argv);
@@ -396,24 +350,33 @@ int axk::cli::run(int argc, char **argv) {
   }
   if (*preview)
     return run_preview(preview_path, preview_object_key, preview_bins, preview_pretty);
-  if (*create_hds || *create_hds_nested) {
-    return run_create_hds(create_manifest, create_output, create_overwrite, create_pretty);
+  if (*writer_commands.create_hds_legacy || *writer_commands.create_hds) {
+    return run_create_hds(writer_commands.create_manifest, writer_commands.create_output,
+                          writer_commands.create_overwrite, writer_commands.create_pretty);
   }
-  if (*create_floppy) {
-    return run_create_media(create_manifest, create_output, "fat12_floppy", create_overwrite,
-                            create_pretty);
+  if (*writer_commands.create_floppy) {
+    return run_create_media(writer_commands.create_manifest, writer_commands.create_output,
+                            "fat12_floppy", writer_commands.create_overwrite,
+                            writer_commands.create_pretty);
   }
-  if (*create_iso) {
-    return run_create_media(create_manifest, create_output, "iso9660", create_overwrite,
-                            create_pretty);
+  if (*writer_commands.create_iso) {
+    return run_create_media(writer_commands.create_manifest, writer_commands.create_output,
+                            "iso9660", writer_commands.create_overwrite,
+                            writer_commands.create_pretty);
   }
-  if (*create_manifest_command)
-    return run_create_manifest(create_manifest_kind, create_manifest_output,
-                               create_manifest_overwrite);
-  if (*alter_hds) {
-    const auto output =
-        !alter_output.empty() ? std::optional<std::filesystem::path>{alter_output} : std::nullopt;
-    return run_alter_hds(alter_source, alter_manifest, output, alter_pretty);
+  if (*writer_commands.create_manifest_command)
+    return run_create_manifest(writer_commands.create_manifest_kind,
+                               writer_commands.create_manifest_output,
+                               writer_commands.create_manifest_overwrite);
+  if (*writer_commands.alter_manifest_command)
+    return run_alter_manifest(writer_commands.alter_manifest_output,
+                              writer_commands.alter_manifest_overwrite);
+  if (*writer_commands.alter_hds) {
+    const auto output = !writer_commands.alter_output.empty()
+                            ? std::optional<std::filesystem::path>{writer_commands.alter_output}
+                            : std::nullopt;
+    return run_alter_hds(writer_commands.alter_source, writer_commands.alter_manifest, output,
+                         writer_commands.alter_pretty);
   }
   std::cout << app.help();
   return 0;

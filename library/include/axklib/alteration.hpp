@@ -125,6 +125,11 @@ struct AlterationManifest {
   std::vector<AlterationOperation> operations;
 };
 
+AXK_AUDIO_API Result<std::string> serialize_alteration_manifest_template();
+AXK_AUDIO_API Result<void>
+write_alteration_manifest_template(const std::filesystem::path &output_path,
+                                   bool overwrite = false);
+
 struct AudioImportSummary {
   std::filesystem::path source_path;
   std::string source_format;
