@@ -581,17 +581,17 @@ TEST(MediaWriter, AllowsObjectEmptyIsoPackageStagingTargetOnly) {
 
     axk::VolumeSpec volume;
     volume.name = "Import Target";
-    axk::MediaBuildManifest manifest;
-    manifest.schema_version = "1.0";
-    manifest.format = axk::MediaImageFormat::iso9660;
-    manifest.authored_volume = volume;
-    manifest.iso_volume_id = "AXK_STAGING";
-    manifest.raw_group = "46DEF120";
-    manifest.group_name = "Package Import";
-    manifest.raw_volume = "F001";
-    manifest.volume_name = volume.name;
+    axk::MediaBuildManifest media_manifest;
+    media_manifest.schema_version = "1.0";
+    media_manifest.format = axk::MediaImageFormat::iso9660;
+    media_manifest.authored_volume = volume;
+    media_manifest.iso_volume_id = "AXK_STAGING";
+    media_manifest.raw_group = "46DEF120";
+    media_manifest.group_name = "Package Import";
+    media_manifest.raw_volume = "F001";
+    media_manifest.volume_name = volume.name;
 
-    const auto written = axk::write_media_image(manifest, iso_path);
+    const auto written = axk::write_media_image(media_manifest, iso_path);
     ASSERT_TRUE(written) << written.error().message;
     EXPECT_EQ(written->object_count, 0U);
     const auto media = axk::open_media(iso_path);
@@ -600,8 +600,8 @@ TEST(MediaWriter, AllowsObjectEmptyIsoPackageStagingTargetOnly) {
     ASSERT_TRUE(objects) << objects.error().message;
     EXPECT_TRUE(objects->empty());
 
-    manifest.format = axk::MediaImageFormat::fat12_floppy;
-    const auto floppy = axk::write_media_image(manifest, floppy_path);
+    media_manifest.format = axk::MediaImageFormat::fat12_floppy;
+    const auto floppy = axk::write_media_image(media_manifest, floppy_path);
     ASSERT_FALSE(floppy);
     EXPECT_NE(floppy.error().message.find("at least one Yamaha object"), std::string::npos);
     std::filesystem::remove_all(root, error);
