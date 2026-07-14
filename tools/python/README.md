@@ -18,4 +18,6 @@ checking, and benchmark comparison are used by release workflows.
 
 `axk-release-metadata` validates generated Git source metadata, resolves the
 source-derived archive name for a platform and build configuration, and checks
-that a staged native CLI reports the expected commit and ref.
+that a staged native CLI reports the expected commit and ref. It also resolves
+branch-preview and version-tag draft release targets and verifies the complete
+release asset set against its SHA-256 checksum files.

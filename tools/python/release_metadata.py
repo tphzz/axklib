@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -19,11 +20,28 @@ PLATFORMS = (
     "macos-universal",
 )
 
+RELEASE_ASSET_EXTENSIONS = {
+    "linux-x64": ".tar.gz",
+    "linux-arm64": ".tar.gz",
+    "windows-x64": ".zip",
+    "windows-arm64": ".zip",
+    "macos-universal": ".zip",
+}
+
 
 @dataclass(frozen=True)
 class ArtifactMetadata:
     package_basename: str
     artifact_stem: str
+
+
+@dataclass(frozen=True)
+class DraftReleaseTarget:
+    tag_name: str
+    title: str
+    cleanup_tag: bool
+    verify_tag: bool
+    prerelease: bool
 
 
 @dataclass(frozen=True)
@@ -78,6 +96,46 @@ def artifact_metadata(
     return ArtifactMetadata(package_basename, f"{artifact_base}-{platform}{debug_suffix}")
 
 
+def draft_release_target(ref_type: str, ref_name: str) -> DraftReleaseTarget:
+    if not ref_name or "\n" in ref_name or "\r" in ref_name:
+        raise ValueError("GitHub ref name must be a non-empty single line")
+    if ref_type == "branch":
+        tag_name = f"{ref_name}-preview"
+        return DraftReleaseTarget(tag_name, tag_name, True, False, True)
+    if ref_type == "tag":
+        return DraftReleaseTarget(ref_name, ref_name, False, True, False)
+    raise ValueError(f"unsupported GitHub ref type: {ref_type or '<empty>'}")
+
+
+def verify_release_assets(directory: Path) -> list[Path]:
+    if not directory.is_dir():
+        raise ValueError(f"release asset directory does not exist: {directory}")
+
+    files = sorted(path for path in directory.iterdir() if path.is_file())
+    expected: set[Path] = set()
+    for platform, extension in RELEASE_ASSET_EXTENSIONS.items():
+        archives = [path for path in files if path.name.endswith(f"-{platform}{extension}")]
+        checksums = [path for path in files if path.name.endswith(f"-{platform}-SHA256SUMS")]
+        if len(archives) != 1:
+            raise ValueError(f"expected one {platform} release archive, found {len(archives)}")
+        if len(checksums) != 1:
+            raise ValueError(f"expected one {platform} checksum file, found {len(checksums)}")
+
+        archive = archives[0]
+        checksum = checksums[0]
+        with archive.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        expected_checksum = f"{digest}  {archive.name}\n"
+        if checksum.read_text(encoding="utf-8") != expected_checksum:
+            raise ValueError(f"checksum does not match release archive: {archive.name}")
+        expected.update((archive, checksum))
+
+    unexpected = sorted(path.name for path in files if path not in expected)
+    if unexpected:
+        raise ValueError(f"unexpected release assets: {unexpected}")
+    return sorted(expected)
+
+
 def parse_version_report(text: str) -> VersionReport:
     lines = text.rstrip("\r\n").splitlines()
     if len(lines) != 6 or not lines[0].startswith("axklib "):
@@ -128,6 +186,15 @@ def write_github_outputs(path: Path, metadata: ArtifactMetadata) -> None:
         output.write(f"artifact_stem={metadata.artifact_stem}\n")
 
 
+def write_release_github_outputs(path: Path, target: DraftReleaseTarget) -> None:
+    with path.open("a", encoding="utf-8", newline="\n") as output:
+        output.write(f"tag_name={target.tag_name}\n")
+        output.write(f"title={target.title}\n")
+        output.write(f"cleanup_tag={str(target.cleanup_tag).lower()}\n")
+        output.write(f"verify_tag={str(target.verify_tag).lower()}\n")
+        output.write(f"prerelease={str(target.prerelease).lower()}\n")
+
+
 def resolve_command(args: argparse.Namespace) -> int:
     metadata = artifact_metadata(
         read_package_basename(args.package_basename_file),
@@ -140,6 +207,20 @@ def resolve_command(args: argparse.Namespace) -> int:
     if args.github_output:
         write_github_outputs(args.github_output, metadata)
     print(json.dumps(asdict(metadata), sort_keys=True))
+    return 0
+
+
+def release_target_command(args: argparse.Namespace) -> int:
+    target = draft_release_target(args.ref_type, args.ref_name)
+    if args.github_output:
+        write_release_github_outputs(args.github_output, target)
+    print(json.dumps(asdict(target), sort_keys=True))
+    return 0
+
+
+def verify_release_assets_command(args: argparse.Namespace) -> int:
+    assets = verify_release_assets(args.directory)
+    print(json.dumps([path.name for path in assets]))
     return 0
 
 
@@ -182,6 +263,16 @@ def main() -> int:
     resolve.add_argument("--configuration", required=True, choices=("Debug", "Release"))
     resolve.add_argument("--github-output", type=Path)
     resolve.set_defaults(handler=resolve_command)
+
+    release_target = subparsers.add_parser("release-target")
+    release_target.add_argument("--ref-type", required=True)
+    release_target.add_argument("--ref-name", required=True)
+    release_target.add_argument("--github-output", type=Path)
+    release_target.set_defaults(handler=release_target_command)
+
+    verify_release_assets_parser = subparsers.add_parser("verify-release-assets")
+    verify_release_assets_parser.add_argument("--directory", required=True, type=Path)
+    verify_release_assets_parser.set_defaults(handler=verify_release_assets_command)
 
     verify = subparsers.add_parser("verify-cli")
     verify.add_argument("--axklib-root", type=Path, default=Path.cwd())

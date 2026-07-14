@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -152,6 +153,63 @@ def test_release_metadata_shortens_only_exact_project_tag() -> None:
             "linux-arm64",
             "Release",
         )
+
+
+def test_release_target_uses_preview_for_branches_and_preserves_tags() -> None:
+    branch = release_metadata.draft_release_target("branch", "features/packages")
+    assert branch == release_metadata.DraftReleaseTarget(
+        tag_name="features/packages-preview",
+        title="features/packages-preview",
+        cleanup_tag=True,
+        verify_tag=False,
+        prerelease=True,
+    )
+    tag = release_metadata.draft_release_target("tag", "v0.1.0")
+    assert tag == release_metadata.DraftReleaseTarget(
+        tag_name="v0.1.0",
+        title="v0.1.0",
+        cleanup_tag=False,
+        verify_tag=True,
+        prerelease=False,
+    )
+    with pytest.raises(ValueError, match="single line"):
+        release_metadata.draft_release_target("branch", "")
+    with pytest.raises(ValueError, match="unsupported"):
+        release_metadata.draft_release_target("pull_request", "123")
+
+
+def test_release_assets_require_every_distribution_and_exact_checksums(tmp_path: Path) -> None:
+    assets: list[Path] = []
+    for platform, extension in release_metadata.RELEASE_ASSET_EXTENSIONS.items():
+        archive = tmp_path / f"axklib-main-a1b2c3d-{platform}{extension}"
+        archive.write_bytes(platform.encode())
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        checksum = tmp_path / f"axklib-main-a1b2c3d-{platform}-SHA256SUMS"
+        checksum.write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
+        assets.extend((archive, checksum))
+
+    assert release_metadata.verify_release_assets(tmp_path) == sorted(assets)
+    assets[1].write_text("0" * 64 + f"  {assets[0].name}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="checksum does not match"):
+        release_metadata.verify_release_assets(tmp_path)
+    assets[1].write_text(
+        f"{hashlib.sha256(assets[0].read_bytes()).hexdigest()}  {assets[0].name}\n",
+        encoding="utf-8",
+    )
+    unexpected = tmp_path / "unexpected.txt"
+    unexpected.write_text("unexpected", encoding="utf-8")
+    with pytest.raises(ValueError, match="unexpected release assets"):
+        release_metadata.verify_release_assets(tmp_path)
+
+
+def test_native_workflow_creates_only_release_drafts() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    assert "draft-release:" in workflow
+    assert "if: ${{ !inputs.debug }}" in workflow
+    assert "uses: actions/download-artifact@v8" in workflow
+    assert "gh release create" in workflow
+    assert "--draft" in workflow
 
 
 @pytest.mark.parametrize(

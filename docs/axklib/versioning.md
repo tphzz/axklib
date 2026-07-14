@@ -85,6 +85,16 @@ A workflow tag must be exactly `v<semantic-version>`. The shorter tagged
 artifact name does not remove source traceability from the executable or shared
 library: their embedded identity still contains the tag and commit.
 
+After every successful Release-configuration Native CI run, the workflow
+collects the Linux x64, Linux ARM64, Windows x64, Windows ARM64, and universal
+macOS distributions into an unpublished GitHub draft release. Branch
+`features/packages` targets the prerelease draft and generated tag
+`features/packages-preview`; a tag build targets an unpublished release with
+the exact version tag. A matching draft is replaced by the next successful
+run. A matching published release is never deleted automatically and
+causes the workflow to fail. Debug builds remain available only as workflow
+artifacts.
+
 Direct CPack filenames use the source identity captured at CMake configure
 time. Reconfigure before running CPack after switching branches, tags, or
 commits. Native CI reads the refreshed metadata after compilation and verifies
