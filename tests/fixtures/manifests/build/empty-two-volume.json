@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "size_bytes": 1048576,
+  "partitions": [
+    {
+      "name": "hd1",
+      "volumes": [
+        {"name": "Keep Volume", "waveforms": [], "sample_banks": []},
+        {"name": "Delete Volume", "waveforms": [], "sample_banks": []}
+      ]
+    }
+  ]
+}

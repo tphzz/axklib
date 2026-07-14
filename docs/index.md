@@ -1,99 +1,33 @@
-# axklib Documentation
+# axklib
 
-axklib is Yamaha A3000/A4000/A5000 disk image and sampler object tooling. It provides a Python API and the `axklib` command-line interface for inspecting supported Yamaha containers, decoding sampler objects, validating relationships, and exporting waveform data.
+axklib is a C++17 shared SDK and a separate native command-line application for
+Yamaha A3000, A4000, and A5000 disk images and sampler objects. Its internal
+engine is implemented in C++23.
 
-## Setup
+It reads SFS HDA/HDS images, FAT12 floppy images, ISO9660 sample CD-ROMs, and
+standalone sampler objects. It can inventory object relationships, export exact
+waveforms and rendered stereo audio, create fresh HDS images, and apply ordered
+changes to existing images. It can also build the documented Yamaha-supported
+FAT12 floppy and primary ISO9660 image profiles.
 
-Install the locked development environment from the repository root:
+## Build
 
-```powershell
-uv sync
+```bash
+git submodule update --init --recursive
+./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+cmake --preset release
+cmake --build --preset release
+cmake --install build/native/release --prefix ./axklib-sdk
 ```
 
-Show the command-line help:
+Installed consumers use `find_package(axklib CONFIG REQUIRED)`. The native CLI
+is installed as `axklib`.
 
-```powershell
-uv run axklib --help
+## First Command
+
+```bash
+axklib info HD00_512_example.hds
 ```
 
-## CLI Quickstart
-
-Summarize supported inputs:
-
-```powershell
-uv run axklib info <image-or-directory>
-```
-
-The tree view omits empty default program slots by default. Use `--show-default-programs` when you need the full 128-slot Program list.
-
-Write an inventory report:
-
-```powershell
-uv run axklib inventory -o build/reports/inventory <image-or-directory>
-```
-
-Decode object rows:
-
-```powershell
-uv run axklib objects -o build/reports/objects <image-or-directory>
-```
-
-Build relationship reports:
-
-```powershell
-uv run axklib relationships -o build/reports/relationships <image-or-directory>
-```
-
-Summarize relationship coverage:
-
-```powershell
-uv run axklib coverage -o build/reports/coverage <image-or-directory>
-```
-
-Validate containers and decoded objects:
-
-```powershell
-uv run axklib validate -o build/reports/validation <image-or-directory>
-```
-
-Export waveform data:
-
-```powershell
-uv run axklib extract waves --exact --stereo auto -o build/exports/waves <image-or-directory>
-```
-
-The extraction command reports progress while writing physical `SMPL` WAVs,
-rendered stereo WAVs, and per-volume `volume.axklib.json` graphs.
-
-Build the local documentation:
-
-```powershell
-uv run --group docs axklib-docs build --strict
-```
-
-## Documentation Sections
-
-- [Typical Usage](axklib/typical-usage.md) shows Python API examples.
-- [Format Guides](axklib/sfs-filesystem.md) describe SFS hard-disk images, FAT12 floppy images, CD-ROM images, and shared sampler data structures.
-- [Names, Paths, And Exports](axklib/names-and-paths.md) documents sampler-facing labels, tree rendering, and exact export layout.
-- [Report Schemas](axklib/report-schemas.md) documents CSV/JSON outputs and validation issue fields.
-- [Public API](axklib/model.md) documents the main model and service modules.
-- [Architecture](architecture.md) explains the package boundaries and data flow.
-
-Generated HTML is written to `build/docs/site/` and is not versioned.
-
-## Local Documentation Commands
-
-Serve the documentation:
-
-```powershell
-uv run --group docs axklib-docs serve
-```
-
-Build the documentation strictly:
-
-```powershell
-uv run --group docs axklib-docs build --strict
-```
-
-
+See [C++ and CLI usage](axklib/typical-usage.md) or the
+[C++ API](axklib/cpp-api.md).

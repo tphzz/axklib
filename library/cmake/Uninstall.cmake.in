@@ -1,0 +1,11 @@
+if(NOT EXISTS "@CMAKE_BINARY_DIR@/install_manifest.txt")
+  message(FATAL_ERROR "install_manifest.txt is unavailable")
+endif()
+
+file(STRINGS "@CMAKE_BINARY_DIR@/install_manifest.txt" installed_files)
+list(REVERSE installed_files)
+foreach(path IN LISTS installed_files)
+  if(EXISTS "${path}" OR IS_SYMLINK "${path}")
+    file(REMOVE "${path}")
+  endif()
+endforeach()

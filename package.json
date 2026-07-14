@@ -1,0 +1,10 @@
+{
+  "name": "axklib-documentation-renderers",
+  "private": true,
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "11.16.0"
+  },
+  "allowScripts": {
+    "puppeteer@25.3.0": true
+  }
+}

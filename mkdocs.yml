@@ -1,5 +1,5 @@
 site_name: axklib
-site_description: Yamaha A-series disk image and sampler object tooling.
+site_description: Native Yamaha A-series disk image and sampler object tooling.
 site_url: https://tphzz.github.io/axklib/
 repo_url: https://github.com/tphzz/axklib
 repo_name: tphzz/axklib
@@ -32,34 +32,39 @@ theme:
     - toc.follow
 
 markdown_extensions:
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.superfences
 
 plugins:
   - search
-  - mkdocstrings:
-      handlers:
-        python:
-          paths:
-            - .
-          options:
-            docstring_style: google
-            members_order: source
-            filters:
-              - "!^_[^_]"
-              - "!^__.*__$"
-            group_by_category: true
-            show_category_heading: true
-            show_if_no_docstring: true
-            show_signature_annotations: true
-            separate_signature: true
-            show_bases: false
-            show_source: false
-            show_symbol_type_heading: true
-            show_symbol_type_toc: true
+  - mermaid-to-svg:
+      renderer: mmdc
+      mmdc_path: mmdc -b transparent
+      theme: dark
+      error_on_fail: true
+      mermaid_config:
+        htmlLabels: false
+        fontFamily: Inter, system-ui, sans-serif
+        themeVariables:
+          background: transparent
+          primaryColor: "#2b303b"
+          primaryTextColor: "#e8edf5"
+          primaryBorderColor: "#7c83ff"
+          mainBkg: "#2b303b"
+          nodeBorder: "#7c83ff"
+          secondaryColor: "#263849"
+          secondaryTextColor: "#e8edf5"
+          secondaryBorderColor: "#45b8c5"
+          tertiaryColor: "#20242d"
+          tertiaryTextColor: "#e8edf5"
+          tertiaryBorderColor: "#697386"
+          lineColor: "#a8b1c2"
+          textColor: "#e8edf5"
+          edgeLabelBackground: "#20242d"
+          clusterBkg: "#252a34"
+          clusterBorder: "#697386"
+          fontSize: 14px
+        flowchart:
+          htmlLabels: false
 
 validation:
   omitted_files: ignore
@@ -68,26 +73,27 @@ validation:
 
 nav:
   - Home: index.md
-  - axklib:
+  - Getting Started:
       - Overview: axklib/index.md
-      - Typical Usage: axklib/typical-usage.md
-      - Formats:
-          - SFS Filesystem: axklib/sfs-filesystem.md
-          - FAT12 Floppy Images: axklib/floppy.md
-          - CD-ROM Images: axklib/cdrom.md
-          - Sampler Data Structures: axklib/sampler-data.md
-      - Output Contracts:
-          - Names, Paths, And Exports: axklib/names-and-paths.md
-          - Report Schemas: axklib/report-schemas.md
-      - Yamaha Glossary: axklib/glossary.md
-      - Public API:
-          - Data Model: axklib/model.md
-          - Containers: axklib/containers.md
-          - Objects: axklib/objects.md
-          - Audio: axklib/audio.md
-          - Graph Helpers: axklib/graph.md
-          - Relationships: axklib/relationships.md
-          - Validation: axklib/validation.md
-          - Reports: axklib/reports.md
-      - Library Architecture: architecture.md
-
+      - C++ And CLI Usage: axklib/typical-usage.md
+      - CLI Reference: axklib/cli.md
+  - SDK:
+      - C++ API: axklib/cpp-api.md
+      - Portable Object Packages: axklib/portable-packages.md
+      - Architecture: architecture.md
+  - Formats:
+      - Media Containers: axklib/media.md
+      - SFS Filesystem: axklib/sfs-filesystem.md
+      - FAT12 Floppy Images: axklib/floppy.md
+      - CD-ROM Images: axklib/cdrom.md
+      - Sampler Data Structures: axklib/sampler-data.md
+  - Output Contracts:
+      - Names, Paths, And Exports: axklib/names-and-paths.md
+      - SFZ Export: axklib/sfz.md
+      - Report Schemas: axklib/report-schemas.md
+      - CLI JSON Schemas: axklib/cli-json-schemas.md
+      - Writer And Alteration: axklib/write.md
+  - Distribution:
+      - Compatibility: axklib/compatibility.md
+      - Native Dependencies: native-dependencies.md
+  - Yamaha Glossary: axklib/glossary.md

@@ -1,0 +1,15 @@
+#pragma once
+
+#define AXKLIB_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define AXKLIB_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define AXKLIB_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define AXKLIB_VERSION_STRING "@PROJECT_VERSION@"
+
+namespace axk {
+
+inline constexpr int version_major = AXKLIB_VERSION_MAJOR;
+inline constexpr int version_minor = AXKLIB_VERSION_MINOR;
+inline constexpr int version_patch = AXKLIB_VERSION_PATCH;
+inline constexpr const char *version_string = AXKLIB_VERSION_STRING;
+
+} // namespace axk

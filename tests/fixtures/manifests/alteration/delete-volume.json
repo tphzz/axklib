@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "operations": [
+    {
+      "id": "delete-volume",
+      "type": "delete_volume",
+      "partition_index": 0,
+      "volume_name": "Delete Volume"
+    }
+  ]
+}

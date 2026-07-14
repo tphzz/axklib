@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tphzz.github.io/axklib/schemas/native-baseline-2.0.json",
+  "title": "axklib native compatibility baseline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "commands", "writer_profiles", "fixtures"],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "commands": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "writer_profiles": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "size_bytes"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "size_bytes": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}

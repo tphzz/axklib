@@ -1,61 +1,64 @@
-# axklib Architecture
+# Architecture
 
-## Overview
-
-`axklib` provides a Python API and command-line interface for reading Yamaha A-series disk images and sampler objects. The package focuses on structured container loading, object decoding, relationship graphs, validation reports, and WAV export.
-
-Applications can use the Python modules directly, while the `axklib` CLI exposes the same services for command-line workflows.
-
-## Package Map
-
-- `axklib.model`: shared object references, container references, quality records, and typed metadata.
-- `axklib.containers`: input detection and loading for SFS hard-disk images, FAT floppy images, ISO/CD-ROM images, standalone objects, and directory inputs.
-- `axklib.objects`: Yamaha object header and current object metadata decoding.
-- `axklib.parameters`: byte-level parameter decoders used by object summaries and reports.
-- `axklib.relationships`: relationship graph construction for programs, sample-bank groups, sample banks, and waveform objects.
-- `axklib.content_tree`: human-readable hierarchy construction for `info` output.
-- `axklib.coverage`: relationship and object coverage summaries.
-- `axklib.validation`: validation reports with stable issue codes and policy-aware pass/fail results.
-- `axklib.audio`: waveform decoding plus WAV and per-volume object-graph export.
-- `axklib.reports`: CSV/JSON serialization and machine-readable schema manifests.
-
-## Data Flow
-
-axklib separates container mechanics from sampler-object semantics:
-
-1. **Input loading** opens paths and identifies the container family.
-2. **Container enumeration** discovers partitions, directories, file entries, or embedded object candidates.
-3. **Object extraction** records Yamaha object type, name, payload bytes, source identity, offsets, and quality metadata.
-4. **Object decoding** adds sampler-facing fields, waveform metadata, program assignments, sample-bank members, and relationship graphs.
-5. **Output services** write reports, validation findings, WAV files, and structured export graphs.
-
-This separation lets callers use high-level reports and exports without depending on container-specific layout details.
+The native implementation separates storage, sampler semantics, and host
+integration.
 
 ```mermaid
-flowchart LR
-    Paths[Input paths] --> Loading[Container loading]
-    Loading --> Objects[Yamaha objects]
-    Objects --> Decoding[Object and waveform decoding]
-    Decoding --> Relationships[Relationship graph]
-    Relationships --> Reports[CSV and JSON reports]
-    Relationships --> Validation[Validation reports]
-    Decoding --> Export[Structured WAV export]
-    Export --> Graph[volume.axklib.json]
-    Export --> WavFiles[SMPL and RENDERED WAV files]
+flowchart TD
+    accTitle: axklib architecture dependency flow
+    accDescr: Random access input flows through media readers, Yamaha enrichment, object decoders, and the catalog. The catalog provides audio export, writing, the shared SDK facade, and the CLI adapter. Native consumers use the SDK.
+    IO[Random access I/O] --> Media[SFS and narrow FAT12 / ISO9660 readers]
+    Media --> Yamaha[Yamaha media enrichment]
+    Yamaha --> Objects[Object decoders]
+    Objects --> Catalog[Catalog and relationships]
+    Catalog --> Audio[Exact audio and SFZ]
+    Catalog --> Writer[Fresh writer and transactions]
+    Catalog --> SDK[C++17 PIMPL facade]
+    Catalog --> CLI[CLI11 adapter]
+    SDK --> Host[Native SDK consumers]
 ```
 
-## Reports And Schemas
+The private C++23 engine owns format behavior and typed errors. The shared SDK
+facade owns PIMPL sessions, results, pagination, cancellation, and progress. The
+CLI adapter owns argument parsing, exit codes, output layout, and report
+serialization. The CLI links the private engine statically; SDK consumers load
+the shared library.
 
-CSV and JSON reports are views over the shared model objects. Report directories include schema manifests under `_schemas/` so callers can inspect columns, row counts, quality labels, issue-code counts, and schema notes.
+The CLI follows a one-way dependency path:
 
-Structured waveform export writes one `volume.axklib.json` graph per volume. The graph links object identity, physical `SMPL` waveform refs, `SBNK` sample/member refs, `SBAC` bank-group refs, `PROG` assignment refs, rendered audio refs, decoded relationships, parameters, quality labels, and unresolved warnings. The sibling `SMPL\` and `RENDERED\` directories contain WAV files referenced by the graph.
+`platform entry -> CLI11 registration -> typed request -> command family -> axklib service`
 
-## Export Behavior
+The source modules reflect that boundary:
 
-Waveform decoding is pure: decoded audio is represented in memory before files are written. Exporters use atomic writes, reject accidental overwrites unless replacement is requested, and keep physical `SMPL` WAVs separate from rendered stereo WAVs.
+- `apps/cli/main.cpp` and `apps/cli/command_line.*` convert platform arguments to checked
+  UTF-8 and contain process-level failures.
+- `apps/cli/app.*` registers the root command and dispatches typed requests.
+- `apps/cli/commands/` owns independent analysis, extraction, report, package,
+  and writer/transaction command families.
+- `apps/cli/schema/` owns versioned machine-output data structures and their private
+  JSON serialization.
+- `apps/cli/content_id.*` owns pooled-export identifiers and collision handling.
 
-The structured export graph is the public contract for interpreting an export. Callers should read the graph instead of inferring object relationships by crawling output directories.
+Command modules orchestrate public library services; they do not contain disk
+layout, object decoding, allocation, or audio-conversion rules. Core targets do
+not include CLI11 or CLI headers.
 
-## Generated Images And Repair
+The media source modules preserve a separate responsibility boundary:
 
-Generated image writing, repair, free-space mutation, and object insertion are not part of the current stable public workflow. Quality labels in reports and graphs help callers distinguish stable decoded values from values that are currently informational.
+- `media_fat12.cpp` owns the supported FAT12 container profile.
+- `media_iso9660.cpp` owns the supported primary ISO9660 container profile.
+- `media_build.cpp` prepares authored or raw-preserving object sets independently
+  of their destination container.
+- `media_write_fat12.cpp` adapts pinned FatFs to an in-memory 1.44 MB image.
+- `media_write_iso9660.cpp` owns the deterministic narrow ISO9660 layout writer.
+- `media_yamaha.cpp` owns Yamaha object recognition, CD menu labels, catalog
+  placement, and structured paths.
+- `media.cpp` owns common media dispatch and `MediaContainer` orchestration.
+
+These remain source modules in one core target. They are not separately linked
+SDK components.
+
+Fresh-image and alteration operations use manifests and plans. Applying a plan
+writes a temporary destination, validates the result, and then completes the
+replacement. The output path must differ from the source image. Existing source
+images therefore remain unchanged.

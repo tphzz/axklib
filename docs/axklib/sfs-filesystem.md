@@ -9,6 +9,23 @@ hard-disk images. It is not FAT12 and it is not ISO9660. FAT12 floppies and
 CD-ROM images can carry the same sampler object payloads, but their container
 layers are different.
 
+## Specification Scope
+
+This page documents the SFS structures that the current axklib reader validates
+and the narrower profile emitted by the writer. It is not a claim that every
+reserved byte has a known meaning.
+
+| Area | Reader contract | Writer contract |
+| --- | --- | --- |
+| Disk geometry | Reads the bounded sector and cluster values stored in the image. | Emits 512-byte sectors, two sectors per cluster, and one to eight partition slots. |
+| Index and allocation | Reads direct and continuation extents, reconstructs allocation, and reports inconsistencies. | Computes the bitmap, index span, extents, and compatibility metadata from the requested image model. |
+| Directory tree | Reads reachable and structurally valid directory records while retaining diagnostics for malformed or unreachable records. | Emits partition, volume, category, and object entries for the supported authored object profile. |
+| Sampler objects | Passes supported payloads to the object decoders; see [Sampler Data Structures](sampler-data.md). | Emits only the object types and topologies listed under [Generated Image Writing](#generated-image-writing). |
+| Uninterpreted bytes | Retains or reports relevant raw values without assigning semantics. | Writes only the documented compatibility values and deliberately zeroes unsupported residue. |
+
+Applications should use the parser and writer APIs instead of treating this
+page as permission to synthesize fields whose meaning is still unspecified.
+
 ```mermaid
 flowchart TD
   image[Disk image] --> super[Disk superblock]
@@ -63,7 +80,21 @@ Partition entry layout:
 | `+0x00` | 4 | u32be | Partition start sector. |
 | `+0x04` | 4 | u32be | Partition sector count. |
 
-A partition entry is active when both values are non-zero.
+A valid active partition entry has both values non-zero. The reader treats an
+entry with either value non-zero as occupied so a half-populated entry is
+reported as invalid geometry instead of being silently ignored. Fresh generated
+images populate both values and the disk mode metadata area.
+
+A-series hard-disk images also use sector 2, and for multiple partitions the
+sectors immediately before later partitions, as auxiliary formatter-transfer
+sectors. Their leading eight bytes are deterministic transfer tokens from
+`ab432100` through `ab432107`; the low three bits carry the partition sequence,
+and the remaining token bits are compatibility values rather than disk geometry
+or persistent disk IDs. Generated images zero prior-token residue at
+`+0x09..+0x10`.
+axklib does not expose these sectors as part of the directory or object tree.
+Older label-entry marker/name records in them are intentionally zero-generated;
+they are not required for hardware loading.
 
 ## Partition Header
 
@@ -83,7 +114,13 @@ is 1024 bytes and is followed by a duplicate copy.
 | `0x09c` | 4 | u32be | Cluster offset to the allocation bitmap. |
 | `0x0a0` | 4 | u32be | Reserved value; currently not interpreted by public APIs. |
 | `0x0a4` | 4 | u32be | Cluster offset to the directory/file index. |
-| `0x0a8` | 4 | u32be | Reserved value; currently not interpreted by public APIs. |
+| `0x0a8` | 4 | u32be | Directory/file index span in clusters. |
+
+For generated images, the full primary and duplicate 1024-byte partition-header
+sectors are part of the write contract. The named fields above are sufficient
+for ordinary parsing, but hardware loading also depends on initialized metadata
+bytes in the otherwise uninterpreted header area. Do not synthesize those header
+sectors by writing only the named fields and leaving the remaining bytes zero.
 
 Cluster offsets are partition-relative. Convert a cluster offset to an absolute
 byte offset with:
@@ -120,6 +157,45 @@ then compares it with the stored bitmap:
 
 Mismatch reports use inclusive cluster ranges so large gaps can be reviewed
 without listing every cluster.
+
+An index record can remain structurally parseable even when it is no longer
+reachable from the root directory. Destructive sampler save operations may
+leave such records behind while clearing some of their extent bits in the
+allocation bitmap. axklib still reports
+`index-extent-references-free-cluster` as an allocation error: directory
+unreachability explains why the sampler can ignore the remnant, but it does not
+make the record and bitmap agree. The validator does not silently discard or
+repair these records.
+
+A-series 256 MiB images also carry an early mirror of the first
+allocation-bitmap sector immediately after the duplicate partition header.
+Generated images write that mirror as well, while the partition header field
+`0x09c` remains the authoritative primary bitmap location for reads and
+validation.
+
+## Free Space
+
+SFS free space excludes both the reserved metadata prefix and clusters marked
+used in the allocation bitmap:
+
+```text
+first_payload_cluster = directory_index_cluster + directory_index_span
+free_clusters = cluster_count - first_payload_cluster - allocated_clusters
+free_bytes = free_clusters * sectors_per_cluster * sector_size
+sampler_visible_free_kib = free_bytes // 1024
+```
+
+Use the native function for the same calculation in applications:
+
+```cpp
+auto space = axk::calculate_sfs_free_space(1'048'575, 616, 65, 512);
+assert(space && space->sampler_visible_free_kib == 1'047'894);
+```
+
+`axklib validate` allocation summaries include `first_payload_cluster`,
+`reserved_cluster_count`, `sampler_free_cluster_count`, `sampler_free_bytes`,
+and `sampler_visible_free_kib`. Impossible geometry returns a typed error
+instead of negative capacity.
 
 ## Directory And File Index
 
@@ -164,7 +240,7 @@ reads is:
 | `0x0a` | 4 | u32be | First data cluster for direct records, or continuation-list cluster for multi-extent records. |
 | `0x0e` | 4 | u32be | First direct extent cluster count for direct records. |
 | `0x12` | 4 | u32be | First direct extent byte count for direct records. |
-| `0x42` | bytes | flags | Diagnostic record type/flag area; current public data reads do not require this field. |
+| `0x42` | 6 | bytes | Record metadata and flags. The reader does not require these bytes to resolve payload extents. |
 
 The data-size field is the number of logical bytes to return to the object or
 directory decoder. Allocated storage can be larger because cluster allocation is
@@ -296,6 +372,110 @@ Container checks include:
 Relationship and sampler-data validation is reported separately so a caller can
 distinguish a broken filesystem from a readable filesystem that contains broken
 sampler object links.
+
+## Generated Image Writing
+
+The writer APIs create fresh HDS/SFS images from a small typed model. The
+current writer creates a new hard-disk image, partitions,
+volumes, current-format `SMPL` waveform objects, direct single-member `SBNK`
+sample-bank objects, equal-format two-member stereo `SBNK` objects, and one
+explicitly bounded one-to-three-member `SBAC` / Program profile. It does not modify
+existing images and does not require a template container image.
+
+The first writer scope is intentionally narrow:
+
+- image size is capped at `2_147_483_648` bytes;
+- each generated partition is capped at `1_073_741_824` bytes;
+- audio input may use any libsndfile-supported container and subtype, but must
+  be mono for ordinary waveform import or stereo for one-call stereo-bank
+  import; sources are converted to signed 16-bit PCM and unsupported rates are
+  resampled with the soxr VHQ profile;
+- generated sampler objects are current `FSFSDEV3SPLX` `SMPL` and `SBNK` records;
+- generated `SBNK` objects link either one waveform member or a confirmed
+  left/right pair by name and link ID;
+- generated disk headers include the bounded superblock compatibility block,
+  initialized sector-2 disk metadata, full primary and duplicate partition-header
+  sectors for the supported hard-disk metadata profile, and the early
+  first-bitmap-sector mirror used by A-series hard-disk images;
+- generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;
+- generated current `SMPL` object payloads use a `0x200` object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;
+- generated current `SBNK` object payloads use the current single-member sample-bank object span, populated default parameter/control block, and header fields for a normal sample bank that references one waveform object;
+- generated two-member stereo `SBNK` objects reference two physical mono SMPL
+  objects. The members must have matching 16-bit width, sample rate, and logical
+  frame count. One interleaved source can be split into those physical members
+  during import; extraction may render them as interleaved stereo again;
+- generated direct single-member `SBNK` objects include hardware-tested reserved
+  Sample Parameter defaults at `SBNK+0x152..0x15b`. Yamaha labels the
+  corresponding decimal Sample Parameter offsets `0170..0179` as reserved, but
+  generated images need compatible values there for audible playback and normal
+  tone.
+- the initial SBAC/PROG profile uses the general supported image geometry. A
+  partition may contain multiple independently configured volumes. Each volume
+  may contain multiple groups of one through three mono children, with one
+  matching Program and direct mono control per group. Programs `001..128` assign their group to
+  receive channel `1` and their direct control to channel `2`.
+  Runtime handles, unused bank state, unused Program effect/controller blocks,
+  and unused Program tail state are zero; only the direct SBNK receives the
+  corresponding Program relationship bitmap.
+
+Callers should treat this as a generated-image API, not as an image repair or
+mutation API. Use `axklib info`, `axklib validate`, and `axklib extract wav file`
+on generated images before testing them on hardware.
+
+Hardware loading has shown that sector 2, per-partition metadata sectors, and
+full partition-header sectors are part of the loadable generated-image contract.
+Generated hard-disk partitions use 512-byte sectors and two-sector clusters.
+The writer accepts 512-byte-aligned images from 1 MiB through 2 GiB with one
+through eight equal partition slots. Given `N` partitions, `total_sectors` is
+`size_bytes / 512`, the slot span is
+`min(floor((total_sectors - 2) / N), 0x1fffff)`, partition `i` starts at
+`3 + i * slot_span`, and its stored sector count is `slot_span - 1`. Every slot
+must have at least 2045 partition sectors. Division remainder and capacity past
+the 1 GiB slot-span cap remain unused at the end of the image.
+
+That geometry and metadata algorithm has loaded successfully across one through
+eight partition indexes, smaller and capped slot spans, a division remainder,
+the 1 MiB minimum, and the 2 GiB maximum. Generated images with multiple
+volumes, multiple current `SMPL` objects, direct single-member `SBNK` objects,
+and isolated object-count growth have also loaded successfully. The tested
+generated SBNK root key, key range, and sample level fields are sampler-visible.
+Copying non-logical allocated-cluster tail bytes was not required. axklib treats
+those tail bytes as storage padding unless a later compatibility case proves
+otherwise.
+
+The writer constructs the superblock, partition table, sector-2 metadata,
+partition headers, allocation bitmap, directory index, and object payload
+extents from the typed image model. Fields with known formulas, such as
+partition slot placement, partition-header start/count words, partition-index
+words, leading formatter-transfer tokens, and dynamic header words, are
+generated explicitly.
+Partition headers are zero-initialized, and only the retained explicit fields
+are written. Hardware checks showed that the former fixed nonzero tail bytes
+are not required; they remain zero for generated images. The validated
+non-required residue range at `+0x1bc..+0x1e3` is also zero-generated. Sector-2
+label-entry records and the `+0x30..+0x3e` range are deliberately zero-generated.
+
+
+### Writer Compatibility Metadata
+
+The writer keeps compatibility metadata explicit and computes geometry-dependent
+values from small formulas. It does not copy broad binary templates.
+
+| Metadata area | Public contract |
+| --- | --- |
+| Superblock formatter-residue block at `+0x80..+0x9b` | Preserved as one fixed compatibility block. The writer does not interpret its seven words as geometry fields. |
+| Leading formatter-transfer token at sector `+0x00..+0x07` | Rendered as eight lowercase hexadecimal digits from base `ab432100` plus the bounded three-bit partition sequence. The base is not derived from disk geometry. |
+| Prior-token residue at sector `+0x09..+0x10` | Zeroed after object-bearing hardware checks showed it is not required. |
+| Sector-2 range at `+0x30..+0x3e` | Zeroed after hardware validation showed it is not required. |
+| Former partition-header fixed tail bytes | Zeroed after object-bearing hardware checks showed they are not required. Retained tail words are written explicitly. |
+| Partition-header residue range at `+0x1bc..+0x1e3` | Zeroed after hardware validation showed it is not required. |
+| Partition-header `+0x14c` | Written as total image sectors for one or two partitions; for `N >= 3`, written as total image sectors minus `N - 2`. |
+| Partition-header `+0x194` | Written as zero for layouts with three or more partitions; otherwise uses the count marker required by one- and two-partition layouts. |
+
+These fields are part of the compatibility envelope for generated images. Bytes
+that hardware validation shows are not required are deliberately zeroed.
+Applications should use the typed writer or JSON manifest rather than
+constructing these fields manually.
 
 ## Minimal Read Walkthrough
 

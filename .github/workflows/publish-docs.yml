@@ -13,15 +13,29 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
-      - run: uv sync --group docs --locked
-      - run: uv run --group docs axklib-docs gh-deploy --force
+      - name: Install documentation environment
+        run: |
+          uv --project docs sync --locked
+          npm ci
+
+      - name: Publish documentation
+        run: |
+          mkdir -p build/docs/site
+          PATH="$PWD/node_modules/.bin:$PATH" \
+            uv --project docs run mkdocs gh-deploy --config-file mkdocs.yml --force

@@ -21,4 +21,4 @@ axklib uses Yamaha object type strings for on-disk objects and sampler-facing na
 
 - **Physical WAV**: Exact mono WAV written from one `SMPL` payload.
 - **Rendered WAV**: Derived audio such as interleaved stereo assembled from known linked left/right `SMPL` objects.
-- **Structured export graph**: The per-volume `volume.axklib.json` file that links programs, sample-bank groups, sample banks, physical waveforms, and rendered audio.
+- **Structured export graph**: The graph record used by export APIs, optional selection graph JSON, or older `volume.axklib.json` files to link programs, sample-bank groups, sample banks, physical waveforms, and rendered audio.

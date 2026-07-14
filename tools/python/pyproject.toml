@@ -1,0 +1,53 @@
+[project]
+name = "axklib-development-tools"
+version = "0.1.0"
+description = "Independent development and release tools for native axklib artifacts."
+readme = "README.md"
+license = "MPL-2.0"
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+axk-check-benchmark = "check_benchmark:main"
+axk-check-production-boundary = "check_production_boundary:main"
+axk-generate-sbom = "generate_sbom:main"
+axk-inspect-package = "inspect_package:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=2.1.0",
+  "pytest>=9.0.2",
+  "ruff>=0.15.20",
+]
+
+[tool.setuptools]
+py-modules = [
+  "check_benchmark",
+  "check_production_boundary",
+  "generate_current_effects",
+  "generate_current_fields",
+  "generate_current_lookups",
+  "generate_sbom",
+  "inspect_package",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_configs = true
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "axklib",
+  "version-semver": "0.1.0",
+  "builtin-baseline": "f87344cac03158cbf1467264565f1fd36b382a24",
+  "dependencies": [
+    "fatfs",
+    {
+      "name": "libsndfile",
+      "default-features": false,
+      "features": [
+        "external-libs"
+      ]
+    },
+    "nlohmann-json",
+    "soxr",
+    "utfcpp"
+  ],
+  "features": {
+    "cli": {
+      "description": "Dependencies used only by the standalone axklib CLI",
+      "dependencies": [
+        "cli11",
+        "hash-library"
+      ]
+    },
+    "tests": {
+      "description": "Dependencies used only by native test targets",
+      "dependencies": [
+        "gtest"
+      ]
+    }
+  }
+}

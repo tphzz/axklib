@@ -4,6 +4,21 @@ axklib keeps technical identifiers and sampler-facing display names separate.
 Technical identifiers make rows stable in CSV/JSON reports. Display names make
 `info` output and export folders match the sampler navigation model.
 
+## Text Encodings
+
+CLI arguments and JSON text are UTF-8 on every platform. Unix rejects malformed
+argument byte sequences before parsing; Windows receives UTF-16 through
+`wmain`, rejects lone surrogates, and converts to UTF-8 without using the active
+code page. C++ SDK path inputs are UTF-8 `std::string` values. Invalid text and
+embedded NUL path values are rejected before filesystem access.
+
+Native filesystem paths and UTF-8 display/manifest text use explicit conversion
+adapters. axklib does not normalize, case-fold, or transliterate Unicode, so
+canonically equivalent names remain distinct. Path sanitization is a separate
+operation from encoding validation. Yamaha on-disk name fields retain their
+documented ASCII/byte decoding rules and are not interpreted as arbitrary
+UTF-8.
+
 ```mermaid
 flowchart TD
   raw[Raw container identity] --> obj[Object header name]
@@ -211,38 +226,68 @@ Rules:
 
 ## Exact Export Layout
 
-Exact export plans paths from placement and relationships.
+Scoped extraction writes one shared sample pool plus folders for the selected
+scope. Use `extract wav file` or `extract sfz file` for whole-input
+exports. Use narrower scopes with `--path` values copied from
+`info --format paths`.
 
-Typical SFS export layout:
+Typical whole-input export layout:
 
 ```text
 <output>/
-  partition_00_Main/
-    Piano Volume/
-      SMPL/
-        Grand C4.wav
-      RENDERED/
-        Grand Stereo.wav
-      volume.axklib.json
+  _samples/
+    physical/
+      Grand C4__a1b2c3d4e5f6.wav
+    rendered/
+      Grand Stereo__b1c2d3e4f5a6.wav
+  file/
+    source-image/
+      partition-or-group/
+        volume/
+          volume.axklib.json
+          Instrument.sfz
+```
+
+Typical scoped Program export layout:
+
+```text
+<output>/
+  _samples/
+    physical/
+    rendered/
+  program/
+    partition_00_Main/
+      Piano Volume/
+        Programs/
+          001_ Grand/
+            Grand.sfz
 ```
 
 Rules:
 
 | Output | Rule |
 | --- | --- |
-| `SMPL/` | Contains exact physical mono WAV files. |
-| `RENDERED/` | Contains interleaved stereo WAVs when a compatible pair is rendered. |
-| `volume.axklib.json` | Contains object graph metadata for the volume. |
-| `_unplaced/` | Used when a waveform has no known placement. |
-| source scope prefix | Added when multiple input sources are exported together. |
+| `_samples/physical/` | Contains exact physical mono WAV files. |
+| `_samples/rendered/` | Contains interleaved stereo WAVs when a compatible pair is rendered. |
+| `file/<source>/.../` | Whole-input selection hierarchy, retaining the source name and decoded volume placement. |
+| `<scope>/<selector>/` | Narrow selected scope folder. |
+| `volume.axklib.json` | Per-volume object and relationship graph written by both WAV and SFZ extraction. |
 
-Physical WAV names come from `SMPL` storage names. They stay storage-facing even
-when that produces a filesystem-safe numeric suffix from a sampler duplicate
-marker. When a physical waveform is referenced by sampler-visible `SBNK` members,
-`volume.axklib.json` records those member names in the `user_facing_aliases`
-field on the `SMPL` object. Display-oriented consumers should use [`preferred_smpl_display_name()`](graph.md) to use the first alias
-name when present and fall back to the physical `SMPL` display name only when no
-alias is known.
+Physical WAV names come from `SMPL` storage names plus a short content hash so
+several selections can share one pool without collisions. They stay
+storage-facing even when that produces a filesystem-safe numeric suffix from a
+sampler duplicate marker. When a physical waveform is referenced by
+sampler-visible `SBNK` members, the graph records those member names in the
+`user_facing_aliases` field on the `SMPL` object. Display-oriented consumers
+should use the first alias when present and fall back to the physical `SMPL`
+display name only when no alias is known.
+
+The suffix is the first 12 lowercase hexadecimal characters of SHA-1 over the
+complete emitted WAV container bytes. This 48-bit suffix is retained as an
+export-layout compatibility rule, not for security or as sampler metadata. A
+single export plan reuses a path only when the full digest and WAV bytes match;
+if distinct contents ever share the same shortened path, export fails clearly
+instead of overwriting or choosing an order-dependent name.
 
 Rendered stereo names come from sampler-facing sample/member names when a known
 stereo relationship supplies a better musical label. For paired sibling `SBNK`
@@ -252,7 +297,6 @@ remain present. If the paired member name is only distinguished by a sampler
 duplicate marker, the rendered stem uses the owning `B ...` sample-bank or group
 label when available, for example `Harpsi 2.1N - Harpsich031.wav` instead of a
 numeric duplicate suffix.
-
 ## Technical Fields That Stay In Reports
 
 Normal CLI text leads with sampler-facing names. These fields remain available in
@@ -265,4 +309,3 @@ CSV/JSON reports for traceability:
 | ISO placement | `iso_raw_group`, `iso_raw_volume`, `iso_extent_sector`, `iso_data_offset`. |
 | Relationship diagnostics | `basis`, `raw_fields`, candidate object keys, assignment row bytes. |
 | Quality labels | `quality`, `match_quality`, `placement_quality`. |
-

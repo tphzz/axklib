@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "profile": "release-linux-x64-small-fixture",
+  "maximum_peak_memory_bytes": 67108864,
+  "metrics": [
+    {"name": "cold_open", "wall_ms": 1.0},
+    {"name": "inventory", "wall_ms": 1.0},
+    {"name": "relationships", "wall_ms": 0.1},
+    {"name": "preview", "wall_ms": 0.05},
+    {"name": "exact_export", "wall_ms": 2.0},
+    {"name": "fresh_write", "wall_ms": 0.2},
+    {"name": "alteration_plan", "wall_ms": 1.0},
+    {"name": "alteration_apply", "wall_ms": 6.0}
+  ]
+}
