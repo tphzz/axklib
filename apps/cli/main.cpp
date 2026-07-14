@@ -6,8 +6,7 @@
 #include <vector>
 
 int wmain(int argc, wchar_t **argv) {
-    auto utf8 = axk::cli::platform::normalize_windows_command_line(
-        {argv, static_cast<std::size_t>(argc)});
+    auto utf8 = axk::cli::platform::normalize_windows_command_line({argv, static_cast<std::size_t>(argc)});
     if (!utf8) {
         std::cerr << "error: " << utf8.error().message << '\n';
         return 2;

@@ -151,37 +151,27 @@ struct WrittenMediaImage {
     std::size_t object_count{};
 };
 
-AXK_AUDIO_API Result<HdsBuildManifest>
-parse_hds_build_manifest(std::string_view json,
-                         const std::filesystem::path &base_directory = {});
-AXK_AUDIO_API Result<HdsBuildManifest>
-load_hds_build_manifest(const std::filesystem::path &path);
-AXK_AUDIO_API Result<MediaBuildManifest>
-parse_media_build_manifest(std::string_view json,
-                           const std::filesystem::path &base_directory = {});
-AXK_AUDIO_API Result<MediaBuildManifest>
-load_media_build_manifest(const std::filesystem::path &path);
-AXK_AUDIO_API Result<std::string>
-serialize_build_manifest_template(BuildManifestKind kind);
+AXK_AUDIO_API Result<HdsBuildManifest> parse_hds_build_manifest(std::string_view json,
+                                                                const std::filesystem::path &base_directory = {});
+AXK_AUDIO_API Result<HdsBuildManifest> load_hds_build_manifest(const std::filesystem::path &path);
+AXK_AUDIO_API Result<MediaBuildManifest> parse_media_build_manifest(std::string_view json,
+                                                                    const std::filesystem::path &base_directory = {});
+AXK_AUDIO_API Result<MediaBuildManifest> load_media_build_manifest(const std::filesystem::path &path);
+AXK_AUDIO_API Result<std::string> serialize_build_manifest_template(BuildManifestKind kind);
 AXK_AUDIO_API Result<void>
-write_build_manifest_template(BuildManifestKind kind,
-                              const std::filesystem::path &output_path,
-                              bool overwrite = false);
-AXK_AUDIO_API Result<std::vector<PartitionGeometry>>
-plan_hds_geometry(const HdsBuildManifest &manifest);
-AXK_AUDIO_API Result<std::uint32_t> choose_sampler_sample_rate(
-    std::uint32_t source_rate,
-    std::optional<std::uint32_t> target_sample_rate = {});
-AXK_AUDIO_API Result<ImportedAudio>
-import_sampler_audio(const std::filesystem::path &path,
-                     const AudioImportOptions &options);
-AXK_AUDIO_API Result<WrittenImageLayout> write_hds_image(
-    const HdsBuildManifest &manifest, const std::filesystem::path &output_path,
-    bool overwrite = false, const CancellationToken &cancellation = {});
-AXK_AUDIO_API Result<WrittenMediaImage>
-write_media_image(const MediaBuildManifest &manifest,
-                  const std::filesystem::path &output_path,
-                  bool overwrite = false,
-                  const CancellationToken &cancellation = {});
+write_build_manifest_template(BuildManifestKind kind, const std::filesystem::path &output_path, bool overwrite = false);
+AXK_AUDIO_API Result<std::vector<PartitionGeometry>> plan_hds_geometry(const HdsBuildManifest &manifest);
+AXK_AUDIO_API Result<std::uint32_t> choose_sampler_sample_rate(std::uint32_t source_rate,
+                                                               std::optional<std::uint32_t> target_sample_rate = {});
+AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path,
+                                                         const AudioImportOptions &options);
+AXK_AUDIO_API Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest,
+                                                         const std::filesystem::path &output_path,
+                                                         bool overwrite = false,
+                                                         const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
+                                                          const std::filesystem::path &output_path,
+                                                          bool overwrite = false,
+                                                          const CancellationToken &cancellation = {});
 
 } // namespace axk

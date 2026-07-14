@@ -1,8 +1,7 @@
 #include "media_test_fixtures.hpp"
 
 TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
-    auto image = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(fat_fixture()), "fixture.ima");
+    auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "fixture.ima");
     ASSERT_TRUE(image) << image.error().message;
     EXPECT_EQ(image->geometry().data_cluster_count, 96U);
     ASSERT_EQ(image->files().size(), 1U);
@@ -16,8 +15,7 @@ TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
     ASSERT_TRUE(waveform);
     EXPECT_EQ(waveform->format.sample_rate, 32000U);
     EXPECT_EQ(waveform->pcm,
-              (std::vector<std::byte>{std::byte{0x34}, std::byte{0x12},
-                                      std::byte{0x78}, std::byte{0x56}}));
+              (std::vector<std::byte>{std::byte{0x34}, std::byte{0x12}, std::byte{0x78}, std::byte{0x56}}));
 
     axk::MediaContainer media{std::move(*image)};
     auto catalog = axk::build_object_catalog(media);
@@ -29,11 +27,9 @@ TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
     auto plan = axk::build_export_plan(media, *catalog, graph);
     ASSERT_TRUE(plan);
     ASSERT_EQ(plan->volumes.size(), 1U);
-    EXPECT_EQ(plan->volumes[0].relative_root.generic_string(),
-              "objects/FAT root");
+    EXPECT_EQ(plan->volumes[0].relative_root.generic_string(), "objects/FAT root");
     ASSERT_EQ(plan->volumes[0].waveforms.size(), 1U);
-    const auto output =
-        std::filesystem::temp_directory_path() / "axklib-media-export-test";
+    const auto output = std::filesystem::temp_directory_path() / "axklib-media-export-test";
     std::error_code error;
     std::filesystem::remove_all(output, error);
     auto written = axk::write_export_audio(*plan, output);
@@ -77,10 +73,8 @@ TEST(Fat12Reader, RetainsHeaderInventoryWhenOneObjectPayloadIsMalformed) {
 }
 
 TEST(Fat12Reader, ExportSkipsInvalidWaveformAndRetainsValidWaveforms) {
-    auto image =
-        axk::FatImage::open(std::make_shared<axk::MemoryReader>(
-                                fat_fixture_with_invalid_then_valid_waveform()),
-                            "mixed.ima");
+    auto image = axk::FatImage::open(
+        std::make_shared<axk::MemoryReader>(fat_fixture_with_invalid_then_valid_waveform()), "mixed.ima");
     ASSERT_TRUE(image) << image.error().message;
     const axk::MediaContainer media{*image};
     const auto catalog = axk::build_object_catalog(media);
@@ -99,8 +93,7 @@ TEST(Fat12Reader, ExportSkipsInvalidWaveformAndRetainsValidWaveforms) {
 TEST(Fat12Reader, ContentTreeRetainsAnEmptyFatRoot) {
     auto image = fat_fixture();
     image[3U * 512U] = std::byte{0};
-    const auto fat = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(std::move(image)), "empty.ima");
+    const auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(image)), "empty.ima");
     ASSERT_TRUE(fat) << fat.error().message;
     const axk::MediaContainer container{*fat};
     const auto catalog = axk::build_object_catalog(container);
@@ -114,9 +107,7 @@ TEST(Fat12Reader, ContentTreeRetainsAnEmptyFatRoot) {
 }
 
 TEST(Fat12Reader, ReadsSubdirectoriesAndRejectsCrossLinkedFiles) {
-    auto image = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(nested_fat_fixture()),
-        "nested.ima");
+    auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(nested_fat_fixture()), "nested.ima");
     ASSERT_TRUE(image) << image.error().message;
     ASSERT_EQ(image->files().size(), 1U);
     EXPECT_EQ(image->files()[0].path, "OBJECTS/SMPTEST.004");
@@ -125,59 +116,46 @@ TEST(Fat12Reader, ReadsSubdirectoriesAndRejectsCrossLinkedFiles) {
 
     auto cross_link = fat_fixture();
     constexpr std::size_t second = 3U * 512U + 32U;
-    std::ranges::copy_n(cross_link.begin() + 3U * 512U, 32,
-                        cross_link.begin() + second);
+    std::ranges::copy_n(cross_link.begin() + 3U * 512U, 32, cross_link.begin() + second);
     ascii(cross_link, second, "OTHER   ");
-    auto invalid = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(std::move(cross_link)),
-        "cross-link.ima");
+    auto invalid = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(cross_link)), "cross-link.ima");
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, axk::ErrorCode::allocation_invalid_extent);
 }
 
 TEST(Fat12Reader, RejectsLoopsBadClustersTruncationDuplicatesAndNonFat12) {
     auto loop = fat_fixture(2);
-    auto result = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(std::move(loop)), "loop.ima");
+    auto result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(loop)), "loop.ima");
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, axk::ErrorCode::allocation_cycle);
 
     auto bad = fat_fixture(0xff7);
-    result = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(std::move(bad)), "bad.ima");
+    result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(bad)), "bad.ima");
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, axk::ErrorCode::allocation_invalid_extent);
 
     auto truncated = fat_fixture();
     le32(truncated, 3U * 512U + 0x1cU, 600);
-    result = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(std::move(truncated)),
-        "truncated.ima");
+    result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(truncated)), "truncated.ima");
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, axk::ErrorCode::container_truncated);
 
     auto duplicate = fat_fixture();
-    std::ranges::copy_n(duplicate.begin() + 3 * 512, 32,
-                        duplicate.begin() + 3 * 512 + 32);
-    result = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(std::move(duplicate)),
-        "duplicate.ima");
+    std::ranges::copy_n(duplicate.begin() + 3 * 512, 32, duplicate.begin() + 3 * 512 + 32);
+    result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(duplicate)), "duplicate.ima");
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, axk::ErrorCode::container_invalid_geometry);
 
     auto fat16 = fat_fixture();
     le16(fat16, 0x13, 5000);
     fat16.resize(5000U * 512U);
-    result = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(std::move(fat16)), "fat16.img");
+    result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(fat16)), "fat16.img");
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, axk::ErrorCode::unsupported_profile);
 
     auto traversal = fat_fixture();
     traversal[3U * 512U + 2U] = std::byte{'/'};
-    result = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(std::move(traversal)),
-        "traversal.ima");
+    result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(traversal)), "traversal.ima");
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, axk::ErrorCode::container_invalid_geometry);
 }
@@ -185,23 +163,19 @@ TEST(Fat12Reader, RejectsLoopsBadClustersTruncationDuplicatesAndNonFat12) {
 TEST(Fat12Reader, IgnoresLongNamesAndRequiresMatchingFatCopies) {
     auto long_name = fat_fixture();
     constexpr std::size_t root = 3U * 512U;
-    std::ranges::copy_n(long_name.begin() + root, 32,
-                        long_name.begin() + root + 32U);
+    std::ranges::copy_n(long_name.begin() + root, 32, long_name.begin() + root + 32U);
     std::fill_n(long_name.begin() + root, 32, std::byte{});
     long_name[root] = std::byte{0x41};
     long_name[root + 0x0bU] = std::byte{0x0f};
-    const auto image = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(std::move(long_name)),
-        "long-name.ima");
+    const auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(long_name)), "long-name.ima");
     ASSERT_TRUE(image) << image.error().message;
     ASSERT_EQ(image->files().size(), 1U);
     EXPECT_EQ(image->files().front().path, "SMPTEST.004");
 
     auto mismatched = fat_fixture();
     mismatched[2U * 512U + 3U] ^= std::byte{0x01};
-    const auto invalid = axk::FatImage::open(
-        std::make_shared<axk::MemoryReader>(std::move(mismatched)),
-        "fat-mismatch.ima");
+    const auto invalid =
+        axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(mismatched)), "fat-mismatch.ima");
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, axk::ErrorCode::container_backup_mismatch);
 }

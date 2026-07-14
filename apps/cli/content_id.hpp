@@ -26,9 +26,8 @@ class PooledPathAllocator final {
   public:
     explicit PooledPathAllocator(ContentIdProvider provider = sha1_content_id);
 
-    Result<std::filesystem::path>
-    allocate(const std::filesystem::path &selection_root, std::string_view kind,
-             std::string_view safe_stem, std::span<const std::byte> bytes);
+    Result<std::filesystem::path> allocate(const std::filesystem::path &selection_root, std::string_view kind,
+                                           std::string_view safe_stem, std::span<const std::byte> bytes);
 
   private:
     struct Entry {

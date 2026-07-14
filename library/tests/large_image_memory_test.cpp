@@ -21,13 +21,11 @@ int main() {
     for (std::uint8_t index = 0; index < 8U; ++index) {
         axk::VolumeSpec volume;
         volume.name = "Volume " + std::to_string(index + 1U);
-        manifest.partitions.push_back(
-            {"hd" + std::to_string(index + 1U), {std::move(volume)}});
+        manifest.partitions.push_back({"hd" + std::to_string(index + 1U), {std::move(volume)}});
     }
 
     const auto path =
-        std::filesystem::temp_directory_path() /
-        ("axklib-large-memory-" + std::to_string(::getpid()) + ".hds");
+        std::filesystem::temp_directory_path() / ("axklib-large-memory-" + std::to_string(::getpid()) + ".hds");
     std::error_code error;
     std::filesystem::remove(path, error);
     const auto written = axk::write_hds_image(manifest, path);
@@ -52,25 +50,20 @@ int main() {
     // allocation.
     task_vm_info_data_t vm_info{};
     mach_msg_type_number_t vm_info_count = TASK_VM_INFO_COUNT;
-    const auto usage_ok = ::task_info(::mach_task_self(), TASK_VM_INFO,
-                                      reinterpret_cast<task_info_t>(&vm_info),
+    const auto usage_ok = ::task_info(::mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&vm_info),
                                       &vm_info_count) == KERN_SUCCESS;
-    const auto measured_memory_bytes =
-        static_cast<std::uint64_t>(vm_info.phys_footprint);
+    const auto measured_memory_bytes = static_cast<std::uint64_t>(vm_info.phys_footprint);
 #else
     struct rusage usage{};
     const auto usage_ok = ::getrusage(RUSAGE_SELF, &usage) == 0;
-    const auto measured_memory_bytes =
-        static_cast<std::uint64_t>(usage.ru_maxrss) * kibibyte;
+    const auto measured_memory_bytes = static_cast<std::uint64_t>(usage.ru_maxrss) * kibibyte;
 #endif
     std::filesystem::remove(path, error);
     if (!usage_ok || measured_memory_bytes > memory_budget_bytes) {
-        std::cerr << "large-image memory exceeded "
-                  << memory_budget_bytes / kibibyte
+        std::cerr << "large-image memory exceeded " << memory_budget_bytes / kibibyte
                   << " KiB: " << measured_memory_bytes / kibibyte << " KiB\n";
         return 4;
     }
-    std::cout << "2 GiB / 8-partition inventory memory: "
-              << measured_memory_bytes / kibibyte << " KiB\n";
+    std::cout << "2 GiB / 8-partition inventory memory: " << measured_memory_bytes / kibibyte << " KiB\n";
     return 0;
 }

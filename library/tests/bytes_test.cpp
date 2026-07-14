@@ -15,13 +15,11 @@ TEST(CheckedArithmetic, AddsAndAlignsWithoutOverflow) {
     EXPECT_EQ(axk::checked_subtract(20, 10), 10U);
     EXPECT_EQ(axk::checked_multiply(20, 10), 200U);
 
-    const auto overflow =
-        axk::checked_add(std::numeric_limits<std::uint64_t>::max(), 1);
+    const auto overflow = axk::checked_add(std::numeric_limits<std::uint64_t>::max(), 1);
     ASSERT_FALSE(overflow);
     EXPECT_EQ(overflow.error().code, axk::ErrorCode::integer_overflow);
     EXPECT_FALSE(axk::checked_subtract(0, 1));
-    EXPECT_FALSE(
-        axk::checked_multiply(std::numeric_limits<std::uint64_t>::max(), 2));
+    EXPECT_FALSE(axk::checked_multiply(std::numeric_limits<std::uint64_t>::max(), 2));
 
     const auto invalid_alignment = axk::align_up(10, 0);
     ASSERT_FALSE(invalid_alignment);
@@ -29,8 +27,7 @@ TEST(CheckedArithmetic, AddsAndAlignsWithoutOverflow) {
 }
 
 TEST(ByteReader, ReadsEndianAndSignedValues) {
-    const std::array bytes{std::byte{0x80}, std::byte{0x12}, std::byte{0x34},
-                           std::byte{0x56}, std::byte{0x78}};
+    const std::array bytes{std::byte{0x80}, std::byte{0x12}, std::byte{0x34}, std::byte{0x56}, std::byte{0x78}};
     const axk::ByteReader reader{bytes};
 
     EXPECT_EQ(reader.u8(0), 0x80U);
@@ -53,16 +50,12 @@ TEST(Error, RendersSamplerContextBeforeOptionalTechnicalTrace) {
     context.object_name = "Stereo Pad";
     context.source_path = "disk.hds";
     context.raw_offset = 4096;
-    const auto error = axk::make_error(axk::ErrorCode::object_malformed,
-                                       axk::ErrorCategory::object,
+    const auto error = axk::make_error(axk::ErrorCode::object_malformed, axk::ErrorCategory::object,
                                        "sample bank is malformed", context);
 
-    EXPECT_EQ(
-        axk::render_error(error, false),
-        "object[400]: sample bank is malformed [partition=3, volume=Strings, "
-        "object_type=SBNK, object=Stereo Pad]");
-    EXPECT_NE(axk::render_error(error).find("source=disk.hds"),
-              std::string::npos);
+    EXPECT_EQ(axk::render_error(error, false), "object[400]: sample bank is malformed [partition=3, volume=Strings, "
+                                               "object_type=SBNK, object=Stereo Pad]");
+    EXPECT_NE(axk::render_error(error).find("source=disk.hds"), std::string::npos);
     EXPECT_NE(axk::render_error(error).find("offset=4096"), std::string::npos);
 }
 
@@ -70,8 +63,7 @@ TEST(ByteReader, RejectsEveryTruncatedReadWithOffsetContext) {
     const std::array bytes{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
     const axk::ByteReader reader{bytes};
 
-    const std::array<std::size_t, 3> invalid_offsets{
-        3U, 4U, std::numeric_limits<std::size_t>::max()};
+    const std::array<std::size_t, 3> invalid_offsets{3U, 4U, std::numeric_limits<std::size_t>::max()};
     for (const auto offset : invalid_offsets) {
         const auto result = reader.slice(offset, 1);
         ASSERT_FALSE(result);
@@ -83,9 +75,8 @@ TEST(ByteReader, RejectsEveryTruncatedReadWithOffsetContext) {
 }
 
 TEST(ByteReader, CleansAsciiAndCanRejectInvalidBytes) {
-    const std::array bytes{std::byte{'N'},  std::byte{'a'}, std::byte{'m'},
-                           std::byte{'e'},  std::byte{' '}, std::byte{' '},
-                           std::byte{0x00}, std::byte{0xff}};
+    const std::array bytes{std::byte{'N'}, std::byte{'a'}, std::byte{'m'},  std::byte{'e'},
+                           std::byte{' '}, std::byte{' '}, std::byte{0x00}, std::byte{0xff}};
     const axk::ByteReader reader{bytes};
 
     EXPECT_EQ(reader.ascii_field(0, 8), std::string{"Name"});

@@ -14,29 +14,24 @@ using OrderedJson = nlohmann::ordered_json;
 
 Error serialization_error(const nlohmann::json::exception &error) {
     return make_error(ErrorCode::invalid_argument, ErrorCategory::internal,
-                      std::string{"could not serialize package CLI JSON: "} +
-                          error.what());
+                      std::string{"could not serialize package CLI JSON: "} + error.what());
 }
 
 OrderedJson optional_string(const std::optional<std::string> &value) {
     return value ? OrderedJson(*value) : OrderedJson(nullptr);
 }
 
-template <typename T>
-OrderedJson optional_number(const std::optional<T> &value) {
+template <typename T> OrderedJson optional_number(const std::optional<T> &value) {
     return value ? OrderedJson(*value) : OrderedJson(nullptr);
 }
 
 OrderedJson issue_json(const IssueOutput &issue) {
-    return {{"code", issue.code},
-            {"message", issue.message},
-            {"fatal", issue.fatal}};
+    return {{"code", issue.code}, {"message", issue.message}, {"fatal", issue.fatal}};
 }
 
 } // namespace
 
-PackageOutput project_package(const std::filesystem::path &path,
-                              const PortablePackage &package) {
+PackageOutput project_package(const std::filesystem::path &path, const PortablePackage &package) {
     PackageOutput result;
     result.path_utf8 = text::path_to_utf8(path);
     result.package_id = package.package_id;
@@ -48,48 +43,38 @@ PackageOutput project_package(const std::filesystem::path &path,
     result.relationship_count = package.relationships.size();
     result.roots.reserve(package.roots.size());
     for (const auto &root : package.roots) {
-        result.roots.push_back({std::string{package_root_kind_name(root.kind)},
-                                root.display_name, root.node_ids});
+        result.roots.push_back({std::string{package_root_kind_name(root.kind)}, root.display_name, root.node_ids});
     }
     result.objects.reserve(package.nodes.size());
     for (const auto &node : package.nodes) {
-        result.objects.push_back({node.node_id, node.object_type, node.name,
-                                  node.payload_sha256, node.normalized_sha256,
-                                  node.semantic_sha256, node.audio_sha256});
+        result.objects.push_back({node.node_id, node.object_type, node.name, node.payload_sha256,
+                                  node.normalized_sha256, node.semantic_sha256, node.audio_sha256});
     }
     result.issues.reserve(package.issues.size());
-    std::ranges::transform(package.issues, std::back_inserter(result.issues),
-                           [](const PackageIssue &issue) {
-                               return IssueOutput{issue.code, issue.message,
-                                                  issue.fatal};
-                           });
+    std::ranges::transform(package.issues, std::back_inserter(result.issues), [](const PackageIssue &issue) {
+        return IssueOutput{issue.code, issue.message, issue.fatal};
+    });
     return result;
 }
 
-PlanOutput project_plan(const std::filesystem::path &target,
-                        const std::vector<std::filesystem::path> &package_paths,
-                        const PackageImportPlan &plan,
-                        const std::optional<PackageImportReport> &report) {
+PlanOutput project_plan(const std::filesystem::path &target, const std::vector<std::filesystem::path> &package_paths,
+                        const PackageImportPlan &plan, const std::optional<PackageImportReport> &report) {
     PlanOutput result;
     result.target_path_utf8 = text::path_to_utf8(target);
     result.plan_id = plan.plan_id;
-    result.target_kind =
-        plan.target_kind == MediaKind::sfs            ? "sfs"
-        : plan.target_kind == MediaKind::fat12_floppy ? "fat12-floppy"
-        : plan.target_kind == MediaKind::iso9660      ? "iso9660"
-                                                      : "standalone-object";
+    result.target_kind = plan.target_kind == MediaKind::sfs            ? "sfs"
+                         : plan.target_kind == MediaKind::fat12_floppy ? "fat12-floppy"
+                         : plan.target_kind == MediaKind::iso9660      ? "iso9660"
+                                                                       : "standalone-object";
     result.target_snapshot_id = plan.target_snapshot_id;
     result.valid = plan.valid();
     result.package_paths_utf8.reserve(package_paths.size());
-    std::ranges::transform(
-        package_paths, std::back_inserter(result.package_paths_utf8),
-        [](const auto &path) { return text::path_to_utf8(path); });
+    std::ranges::transform(package_paths, std::back_inserter(result.package_paths_utf8),
+                           [](const auto &path) { return text::path_to_utf8(path); });
     result.warnings.reserve(plan.warnings.size());
-    std::ranges::transform(plan.warnings, std::back_inserter(result.warnings),
-                           [](const PackageIssue &issue) {
-                               return IssueOutput{issue.code, issue.message,
-                                                  issue.fatal};
-                           });
+    std::ranges::transform(plan.warnings, std::back_inserter(result.warnings), [](const PackageIssue &issue) {
+        return IssueOutput{issue.code, issue.message, issue.fatal};
+    });
     result.conflicts.reserve(plan.conflicts.size());
     for (const auto &conflict : plan.conflicts) {
         result.conflicts.push_back({
@@ -128,9 +113,7 @@ PlanOutput project_plan(const std::filesystem::path &target,
         projected.actions.reserve(object.actions.size());
         std::ranges::transform(
             object.actions, std::back_inserter(projected.actions),
-            [](PackageImportObjectAction action) {
-                return std::string{package_import_action_name(action)};
-            });
+            [](PackageImportObjectAction action) { return std::string{package_import_action_name(action)}; });
         result.objects.push_back(std::move(projected));
     }
     result.allocation.reserve(plan.allocation.size());
@@ -168,9 +151,7 @@ Result<std::string> serialize(const PackageOutput &output, bool pretty) {
     try {
         auto roots = OrderedJson::array();
         for (const auto &root : output.roots)
-            roots.push_back({{"kind", root.kind},
-                             {"display_name", root.display_name},
-                             {"node_ids", root.node_ids}});
+            roots.push_back({{"kind", root.kind}, {"display_name", root.display_name}, {"node_ids", root.node_ids}});
         auto objects = OrderedJson::array();
         for (const auto &object : output.objects) {
             objects.push_back({
@@ -244,8 +225,7 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
                 {"raw_group", object.raw_group},
                 {"raw_volume", object.raw_volume},
                 {"actions", object.actions},
-                {"canonical_action_id",
-                 optional_string(object.canonical_action_id)},
+                {"canonical_action_id", optional_string(object.canonical_action_id)},
                 {"target_sfs_id", optional_number(object.target_sfs_id)},
                 {"target_link_id", optional_number(object.target_link_id)},
             });
@@ -270,15 +250,11 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
                 {"projected_image_size_bytes", item.projected_image_size_bytes},
             });
         }
-        const auto result =
-            output.result
-                ? OrderedJson{{"output_path", output.result->output_path_utf8},
-                              {"source_snapshot_id",
-                               output.result->source_snapshot_id},
-                              {"output_snapshot_id",
-                               output.result->output_snapshot_id},
-                              {"applied", output.result->applied}}
-                : OrderedJson(nullptr);
+        const auto result = output.result ? OrderedJson{{"output_path", output.result->output_path_utf8},
+                                                        {"source_snapshot_id", output.result->source_snapshot_id},
+                                                        {"output_snapshot_id", output.result->output_snapshot_id},
+                                                        {"applied", output.result->applied}}
+                                          : OrderedJson(nullptr);
         return OrderedJson{
             {"schema_version", schema_version},
             {"target_path", output.target_path_utf8},

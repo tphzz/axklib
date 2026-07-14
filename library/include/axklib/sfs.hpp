@@ -32,9 +32,7 @@ struct PartitionEntry {
     std::uint32_t start_sector{};
     std::uint32_t sector_count{};
 
-    [[nodiscard]] bool active() const noexcept {
-        return start_sector != 0 || sector_count != 0;
-    }
+    [[nodiscard]] bool active() const noexcept { return start_sector != 0 || sector_count != 0; }
 };
 
 struct Superblock {
@@ -130,10 +128,9 @@ class AXK_API Container {
     [[nodiscard]] bool backup_superblock_matches() const noexcept;
     [[nodiscard]] const std::vector<Partition> &partitions() const noexcept;
     [[nodiscard]] const std::vector<Error> &diagnostics() const noexcept;
-    [[nodiscard]] Result<std::vector<std::byte>>
-    read_record_data(PartitionIndex partition, SfsId record,
-                     std::size_t maximum_bytes,
-                     const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<std::byte>> read_record_data(PartitionIndex partition, SfsId record,
+                                                                  std::size_t maximum_bytes,
+                                                                  const CancellationToken &cancellation = {}) const;
 
   private:
     std::filesystem::path source_path_;
@@ -143,23 +140,17 @@ class AXK_API Container {
     std::vector<Partition> partitions_;
     std::vector<Error> diagnostics_;
 
-    friend AXK_API Result<Container> open_image(const std::filesystem::path &,
+    friend AXK_API Result<Container> open_image(const std::filesystem::path &, const OpenOptions &);
+    friend AXK_API Result<Container> open_image(std::shared_ptr<const RandomAccessReader>, std::filesystem::path,
                                                 const OpenOptions &);
-    friend AXK_API Result<Container>
-    open_image(std::shared_ptr<const RandomAccessReader>, std::filesystem::path,
-               const OpenOptions &);
 };
 
-AXK_API Result<SfsFreeSpace>
-calculate_sfs_free_space(std::uint32_t cluster_count,
-                         std::uint32_t first_payload_cluster,
-                         std::uint32_t allocated_cluster_count,
-                         std::uint32_t cluster_size_bytes = 1024);
+AXK_API Result<SfsFreeSpace> calculate_sfs_free_space(std::uint32_t cluster_count, std::uint32_t first_payload_cluster,
+                                                      std::uint32_t allocated_cluster_count,
+                                                      std::uint32_t cluster_size_bytes = 1024);
 
-AXK_API Result<Container> open_image(const std::filesystem::path &path,
-                                     const OpenOptions &options = {});
-AXK_API Result<Container>
-open_image(std::shared_ptr<const RandomAccessReader> reader,
-           std::filesystem::path source_path, const OpenOptions &options = {});
+AXK_API Result<Container> open_image(const std::filesystem::path &path, const OpenOptions &options = {});
+AXK_API Result<Container> open_image(std::shared_ptr<const RandomAccessReader> reader,
+                                     std::filesystem::path source_path, const OpenOptions &options = {});
 
 } // namespace axk

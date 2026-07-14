@@ -18,8 +18,7 @@ TEST(Effects, ExposesProfilesTypesParametersAndModelRequirements) {
     ASSERT_TRUE(parameter);
     EXPECT_EQ(parameter->parameter_label, "LPF Frequency");
     EXPECT_EQ(axk::effect_slot_requirement(4).requirement, "a5000_only");
-    EXPECT_EQ(axk::effect_output_destination_requirement(10).requirement,
-              "a5000_only");
+    EXPECT_EQ(axk::effect_output_destination_requirement(10).requirement, "a5000_only");
 }
 
 TEST(Effects, MatchesValidatedEnumNumericAndBoundaryDisplays) {
@@ -34,8 +33,7 @@ TEST(Effects, MatchesValidatedEnumNumericAndBoundaryDisplays) {
 
     const auto signed_value = axk::format_effect_parameter(2, 10, 80);
     EXPECT_EQ(signed_value.value, "+16");
-    const auto unsupported =
-        axk::format_effect_parameter(83, 1, 36, axk::EffectProfile::a3000);
+    const auto unsupported = axk::format_effect_parameter(83, 1, 36, axk::EffectProfile::a3000);
     EXPECT_TRUE(unsupported.value.empty());
     EXPECT_EQ(unsupported.quality, "Unknown");
     const auto missing = axk::format_effect_parameter(std::nullopt, 1, 0);

@@ -6,8 +6,7 @@
 #include "axklib/io.hpp"
 #include "axklib/sfs.hpp"
 
-extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data,
-                                      std::size_t size) {
+extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size) {
     constexpr std::size_t maximum_input = 4U * 1024U * 1024U;
     if (data == nullptr || size > maximum_input)
         return 0;

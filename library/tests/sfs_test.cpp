@@ -23,26 +23,19 @@ constexpr std::size_t sector_size = 512;
 
 void write_magic(std::span<std::byte> bytes, std::size_t offset) {
     const std::string value{"YAMAHA_dev3"};
-    std::transform(
-        value.begin(), value.end(),
-        bytes.begin() + static_cast<std::ptrdiff_t>(offset),
-        [](char character) { return static_cast<std::byte>(character); });
+    std::transform(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                   [](char character) { return static_cast<std::byte>(character); });
 }
 
-void write_ascii(std::span<std::byte> bytes, std::size_t offset,
-                 std::string_view value) {
-    std::transform(
-        value.begin(), value.end(),
-        bytes.begin() + static_cast<std::ptrdiff_t>(offset),
-        [](char character) { return static_cast<std::byte>(character); });
+void write_ascii(std::span<std::byte> bytes, std::size_t offset, std::string_view value) {
+    std::transform(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                   [](char character) { return static_cast<std::byte>(character); });
 }
 
-void write_directory_entry(axk::ByteWriter &writer, std::span<std::byte> bytes,
-                           std::size_t offset, std::string_view name,
-                           std::uint32_t link) {
+void write_directory_entry(axk::ByteWriter &writer, std::span<std::byte> bytes, std::size_t offset,
+                           std::string_view name, std::uint32_t link) {
     ASSERT_TRUE(writer.write_be16(offset, 0x20));
-    ASSERT_TRUE(writer.write_be16(
-        offset + 2, static_cast<std::uint16_t>(name.size() + 1U)));
+    ASSERT_TRUE(writer.write_be16(offset + 2, static_cast<std::uint16_t>(name.size() + 1U)));
     ASSERT_TRUE(writer.write_be32(offset + 4, link));
     write_ascii(bytes, offset + 8, name);
 }
@@ -97,16 +90,13 @@ std::vector<std::byte> large_object_fixture() {
     EXPECT_TRUE(writer.write_be32(index + 0x0e, 200));
     EXPECT_TRUE(writer.write_be32(index + 0x12, 200000));
     const auto payload = 15U * sector_size;
-    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(payload), 512,
-                std::byte{});
+    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(payload), 512, std::byte{});
     write_ascii(bytes, payload, "FSFSDEV3SPLXSMPL");
     write_ascii(bytes, payload + 0x32, "Large waveform");
     const auto bitmap = 9U * sector_size;
-    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(bitmap), 128,
-                std::byte{});
+    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(bitmap), 128, std::byte{});
     for (std::uint32_t cluster = 6; cluster < 206; ++cluster) {
-        bytes[bitmap + cluster / 8U] |=
-            static_cast<std::byte>(0x80U >> (cluster & 7U));
+        bytes[bitmap + cluster / 8U] |= static_cast<std::byte>(0x80U >> (cluster & 7U));
     }
     return bytes;
 }
@@ -122,11 +112,9 @@ std::vector<std::byte> continuation_fixture(bool cycle) {
     EXPECT_TRUE(writer.write_be32(index + 0x0a, 6));
 
     const auto old_payload = 15U * sector_size;
-    const std::vector<std::byte> logical(
-        bytes.begin() + static_cast<std::ptrdiff_t>(old_payload),
-        bytes.begin() + static_cast<std::ptrdiff_t>(old_payload + 96U));
-    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(old_payload), 1024,
-                std::byte{});
+    const std::vector<std::byte> logical(bytes.begin() + static_cast<std::ptrdiff_t>(old_payload),
+                                         bytes.begin() + static_cast<std::ptrdiff_t>(old_payload + 96U));
+    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(old_payload), 1024, std::byte{});
     EXPECT_TRUE(writer.write_be32(old_payload, cycle ? 1U : extent_count));
     EXPECT_TRUE(writer.write_be32(old_payload + 8, cycle ? 6U : 0U));
     const auto written_extents = cycle ? 1U : extent_count;
@@ -136,16 +124,14 @@ std::vector<std::byte> continuation_fixture(bool cycle) {
         EXPECT_TRUE(writer.write_be32(item + 4, 1));
         EXPECT_TRUE(writer.write_be32(item + 8, 2));
         const auto target = (3U + (7U + extent) * 2U) * sector_size;
-        std::copy_n(logical.begin() + static_cast<std::ptrdiff_t>(extent * 2U),
-                    2, bytes.begin() + static_cast<std::ptrdiff_t>(target));
+        std::copy_n(logical.begin() + static_cast<std::ptrdiff_t>(extent * 2U), 2,
+                    bytes.begin() + static_cast<std::ptrdiff_t>(target));
     }
     const auto bitmap = 9U * sector_size;
-    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(bitmap), 128,
-                std::byte{});
+    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(bitmap), 128, std::byte{});
     const auto last_cluster = cycle ? 7U : 54U;
     for (std::uint32_t cluster = 6; cluster <= last_cluster; ++cluster) {
-        bytes[bitmap + cluster / 8U] |=
-            static_cast<std::byte>(0x80U >> (cluster & 7U));
+        bytes[bitmap + cluster / 8U] |= static_cast<std::byte>(0x80U >> (cluster & 7U));
     }
     return bytes;
 }
@@ -153,9 +139,8 @@ std::vector<std::byte> continuation_fixture(bool cycle) {
 std::vector<std::byte> alternating_object_fixture() {
     auto bytes = large_object_fixture();
     constexpr std::array prefix{
-        std::byte{'F'}, std::byte{0x55}, std::byte{'F'}, std::byte{0xaa},
-        std::byte{'D'}, std::byte{0x55}, std::byte{'V'}, std::byte{0xaa},
-        std::byte{'S'}, std::byte{0x55}, std::byte{'L'}, std::byte{0xaa},
+        std::byte{'F'}, std::byte{0x55}, std::byte{'F'}, std::byte{0xaa}, std::byte{'D'}, std::byte{0x55},
+        std::byte{'V'}, std::byte{0xaa}, std::byte{'S'}, std::byte{0x55}, std::byte{'L'}, std::byte{0xaa},
         std::byte{'S'}, std::byte{0x55}, std::byte{'P'}, std::byte{0xaa},
     };
     std::copy(prefix.begin(), prefix.end(), bytes.begin() + 15U * sector_size);
@@ -164,16 +149,12 @@ std::vector<std::byte> alternating_object_fixture() {
 
 class TrackingReader final : public axk::RandomAccessReader {
   public:
-    explicit TrackingReader(std::vector<std::byte> bytes)
-        : memory_{std::move(bytes)} {}
+    explicit TrackingReader(std::vector<std::byte> bytes) : memory_{std::move(bytes)} {}
 
-    [[nodiscard]] std::uint64_t size() const noexcept override {
-        return memory_.size();
-    }
+    [[nodiscard]] std::uint64_t size() const noexcept override { return memory_.size(); }
 
-    [[nodiscard]] axk::Result<void>
-    read_exact_at(std::uint64_t offset,
-                  std::span<std::byte> destination) const override {
+    [[nodiscard]] axk::Result<void> read_exact_at(std::uint64_t offset,
+                                                  std::span<std::byte> destination) const override {
         reads.emplace_back(offset, destination.size());
         return memory_.read_exact_at(offset, destination);
     }
@@ -188,20 +169,16 @@ class SparseReader final : public axk::RandomAccessReader {
   public:
     explicit SparseReader(std::uint64_t size) : size_{size} {}
 
-    void add(std::uint64_t offset, std::vector<std::byte> bytes) {
-        patches_.emplace_back(offset, std::move(bytes));
-    }
+    void add(std::uint64_t offset, std::vector<std::byte> bytes) { patches_.emplace_back(offset, std::move(bytes)); }
 
     [[nodiscard]] std::uint64_t size() const noexcept override { return size_; }
 
-    [[nodiscard]] axk::Result<void>
-    read_exact_at(std::uint64_t offset,
-                  std::span<std::byte> destination) const override {
+    [[nodiscard]] axk::Result<void> read_exact_at(std::uint64_t offset,
+                                                  std::span<std::byte> destination) const override {
         const auto end = axk::checked_add(offset, destination.size());
         if (!end || *end > size_) {
-            return std::unexpected{axk::make_error(
-                axk::ErrorCode::io_short_read, axk::ErrorCategory::io,
-                "sparse fixture short read")};
+            return std::unexpected{
+                axk::make_error(axk::ErrorCode::io_short_read, axk::ErrorCategory::io, "sparse fixture short read")};
         }
         std::fill(destination.begin(), destination.end(), std::byte{});
         for (const auto &[patch_offset, patch] : patches_) {
@@ -211,12 +188,9 @@ class SparseReader final : public axk::RandomAccessReader {
             if (overlap_start >= overlap_end) {
                 continue;
             }
-            std::copy(patch.begin() + static_cast<std::ptrdiff_t>(
-                                          overlap_start - patch_offset),
-                      patch.begin() + static_cast<std::ptrdiff_t>(overlap_end -
-                                                                  patch_offset),
-                      destination.begin() +
-                          static_cast<std::ptrdiff_t>(overlap_start - offset));
+            std::copy(patch.begin() + static_cast<std::ptrdiff_t>(overlap_start - patch_offset),
+                      patch.begin() + static_cast<std::ptrdiff_t>(overlap_end - patch_offset),
+                      destination.begin() + static_cast<std::ptrdiff_t>(overlap_start - offset));
         }
         return {};
     }
@@ -226,31 +200,24 @@ class SparseReader final : public axk::RandomAccessReader {
     std::vector<std::pair<std::uint64_t, std::vector<std::byte>>> patches_;
 };
 
-std::shared_ptr<SparseReader>
-sparse_geometry_fixture(std::uint64_t total_sectors,
-                        std::uint8_t partition_count) {
+std::shared_ptr<SparseReader> sparse_geometry_fixture(std::uint64_t total_sectors, std::uint8_t partition_count) {
     auto sparse = std::make_shared<SparseReader>(total_sectors * sector_size);
     std::vector<std::byte> superblock(sector_size);
     axk::ByteWriter superblock_writer{superblock};
     write_magic(superblock, 0);
     EXPECT_TRUE(superblock_writer.write_be32(0x9c, sector_size));
-    EXPECT_TRUE(superblock_writer.write_be32(
-        0xa0, static_cast<std::uint32_t>(total_sectors)));
-    const auto slot_span = std::min<std::uint64_t>(
-        (total_sectors - 2U) / partition_count, 2'097'151U);
+    EXPECT_TRUE(superblock_writer.write_be32(0xa0, static_cast<std::uint32_t>(total_sectors)));
+    const auto slot_span = std::min<std::uint64_t>((total_sectors - 2U) / partition_count, 2'097'151U);
     for (std::uint8_t index = 0; index < partition_count; ++index) {
         const auto start = 3U + static_cast<std::uint64_t>(index) * slot_span;
         const auto count = slot_span - 1U;
-        EXPECT_TRUE(superblock_writer.write_be32(
-            0xa8U + index * 8U, static_cast<std::uint32_t>(start)));
-        EXPECT_TRUE(superblock_writer.write_be32(
-            0xacU + index * 8U, static_cast<std::uint32_t>(count)));
+        EXPECT_TRUE(superblock_writer.write_be32(0xa8U + index * 8U, static_cast<std::uint32_t>(start)));
+        EXPECT_TRUE(superblock_writer.write_be32(0xacU + index * 8U, static_cast<std::uint32_t>(count)));
         std::vector<std::byte> header(1024);
         axk::ByteWriter header_writer{header};
         write_magic(header, 0);
         write_ascii(header, 0x40, "Partition " + std::to_string(index));
-        EXPECT_TRUE(header_writer.write_be32(
-            0x90, static_cast<std::uint32_t>(count / 2U)));
+        EXPECT_TRUE(header_writer.write_be32(0x90, static_cast<std::uint32_t>(count / 2U)));
         EXPECT_TRUE(header_writer.write_be32(0x94, 2));
         EXPECT_TRUE(header_writer.write_be32(0x9c, 3));
         EXPECT_TRUE(header_writer.write_be32(0xa4, 4));
@@ -274,13 +241,10 @@ TEST(SfsReader, MatchesMaintainedSemanticContractsOnFixtures) {
         std::string_view last_known_name;
     };
     constexpr std::array cases{
-        Expected{"HD00_512_single_sbnk_authored.hds", 447, 213, 25, "SBNK",
-                 "_NewSample"},
-        Expected{"HD00_512_multi_sbnk_authored.hds", 477, 183, 40, "SBNK",
-                 "JS03   *********"},
+        Expected{"HD00_512_single_sbnk_authored.hds", 447, 213, 25, "SBNK", "_NewSample"},
+        Expected{"HD00_512_multi_sbnk_authored.hds", 477, 183, 40, "SBNK", "JS03   *********"},
     };
-    const auto root = std::filesystem::path{AXK_SOURCE_ROOT} /
-                      "tests/fixtures/images/sampler-authored";
+    const auto root = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored";
 
     for (const auto &expected : cases) {
         const auto result = axk::open_image(root / expected.filename);
@@ -289,13 +253,10 @@ TEST(SfsReader, MatchesMaintainedSemanticContractsOnFixtures) {
         const auto &partition = result->partitions()[0];
         EXPECT_EQ(partition.cluster_count, 1022U);
         EXPECT_EQ(partition.directory_index_span_clusters, 358U);
-        EXPECT_EQ(partition.allocation.stored_used_cluster_count,
-                  expected.allocated);
-        EXPECT_EQ(partition.allocation.reconstructed_used_cluster_count,
-                  expected.allocated);
+        EXPECT_EQ(partition.allocation.stored_used_cluster_count, expected.allocated);
+        EXPECT_EQ(partition.allocation.reconstructed_used_cluster_count, expected.allocated);
         ASSERT_TRUE(partition.allocation.free_space);
-        EXPECT_EQ(partition.allocation.free_space->sampler_visible_free_kib,
-                  expected.free_kib);
+        EXPECT_EQ(partition.allocation.free_space->sampler_visible_free_kib, expected.free_kib);
         ASSERT_GE(partition.records.size(), expected.known_record_count);
         const auto &last = partition.records[expected.known_record_count - 1U];
         EXPECT_EQ(last.object_type, expected.last_known_type);
@@ -346,8 +307,7 @@ TEST(SfsReader, KeepsBackupDisagreementAsDiagnostic) {
     ASSERT_TRUE(result);
     EXPECT_FALSE(result->backup_superblock_matches());
     ASSERT_FALSE(result->diagnostics().empty());
-    EXPECT_EQ(result->diagnostics()[0].code,
-              axk::ErrorCode::container_backup_mismatch);
+    EXPECT_EQ(result->diagnostics()[0].code, axk::ErrorCode::container_backup_mismatch);
 }
 
 TEST(SfsReader, InventoryReadsOnlyAnObjectPrefixNotWaveformPayload) {
@@ -370,8 +330,7 @@ TEST(SfsReader, InventoryReadsOnlyAnObjectPrefixNotWaveformPayload) {
 }
 
 TEST(SfsReader, ClassifiesEstablishedAlternatingByteObjectType) {
-    auto reader =
-        std::make_shared<axk::MemoryReader>(alternating_object_fixture());
+    auto reader = std::make_shared<axk::MemoryReader>(alternating_object_fixture());
     const auto result = axk::open_image(reader, "alternating-object.hds");
     ASSERT_TRUE(result);
     ASSERT_EQ(result->partitions().size(), 1U);
@@ -383,8 +342,7 @@ TEST(SfsReader, ClassifiesEstablishedAlternatingByteObjectType) {
 }
 
 TEST(SfsReader, EnumeratesEverySupportedPartitionCountAtMinimumAndTwoGiB) {
-    constexpr std::uint64_t two_gib_sectors =
-        (std::uint64_t{2} * 1024U * 1024U * 1024U) / sector_size;
+    constexpr std::uint64_t two_gib_sectors = (std::uint64_t{2} * 1024U * 1024U * 1024U) / sector_size;
     for (std::uint8_t count = 1; count <= 8; ++count) {
         for (const auto total_sectors : {
                  2U + static_cast<std::uint64_t>(count) * 2046U,
@@ -392,22 +350,18 @@ TEST(SfsReader, EnumeratesEverySupportedPartitionCountAtMinimumAndTwoGiB) {
              }) {
             const auto reader = sparse_geometry_fixture(total_sectors, count);
             const auto result = axk::open_image(reader, "sparse-geometry.hds");
-            ASSERT_TRUE(result)
-                << "partitions=" << static_cast<unsigned int>(count)
-                << " sectors=" << total_sectors;
+            ASSERT_TRUE(result) << "partitions=" << static_cast<unsigned int>(count) << " sectors=" << total_sectors;
             ASSERT_EQ(result->partitions().size(), count);
             for (std::uint8_t index = 0; index < count; ++index) {
                 EXPECT_EQ(result->partitions()[index].index.value, index);
-                EXPECT_EQ(result->partitions()[index].name,
-                          "Partition " + std::to_string(index));
+                EXPECT_EQ(result->partitions()[index].name, "Partition " + std::to_string(index));
             }
         }
     }
 }
 
 TEST(SfsReader, ResolvesFragmentedFortyEightExtentDirectoryAndListAllocation) {
-    auto reader =
-        std::make_shared<axk::MemoryReader>(continuation_fixture(false));
+    auto reader = std::make_shared<axk::MemoryReader>(continuation_fixture(false));
     const auto result = axk::open_image(reader, "fragmented.hds");
     ASSERT_TRUE(result);
     ASSERT_EQ(result->partitions().size(), 1U);
@@ -426,41 +380,29 @@ TEST(SfsReader, ResolvesFragmentedFortyEightExtentDirectoryAndListAllocation) {
 }
 
 TEST(SfsReader, ReportsContinuationCycleAndBitmapMismatchWithoutRepair) {
-    auto cycle_reader =
-        std::make_shared<axk::MemoryReader>(continuation_fixture(true));
+    auto cycle_reader = std::make_shared<axk::MemoryReader>(continuation_fixture(true));
     const auto cycle = axk::open_image(cycle_reader, "cycle.hds");
     ASSERT_TRUE(cycle);
     ASSERT_EQ(cycle->partitions().size(), 1U);
     const auto &cycle_partition = cycle->partitions()[0];
     EXPECT_EQ(cycle_partition.allocation.invalid_extent_record_count, 1U);
-    EXPECT_TRUE(std::any_of(
-        cycle_partition.diagnostics.begin(), cycle_partition.diagnostics.end(),
-        [](const axk::Error &error) {
-            return error.code == axk::ErrorCode::allocation_cycle;
-        }));
+    EXPECT_TRUE(std::any_of(cycle_partition.diagnostics.begin(), cycle_partition.diagnostics.end(),
+                            [](const axk::Error &error) { return error.code == axk::ErrorCode::allocation_cycle; }));
 
     auto mismatch_bytes = continuation_fixture(false);
     const auto bitmap = 9U * sector_size;
-    mismatch_bytes[bitmap + 54U / 8U] &=
-        static_cast<std::byte>(0xffU ^ (0x80U >> (54U & 7U)));
-    auto mismatch_reader =
-        std::make_shared<axk::MemoryReader>(std::move(mismatch_bytes));
+    mismatch_bytes[bitmap + 54U / 8U] &= static_cast<std::byte>(0xffU ^ (0x80U >> (54U & 7U)));
+    auto mismatch_reader = std::make_shared<axk::MemoryReader>(std::move(mismatch_bytes));
     const auto mismatch = axk::open_image(mismatch_reader, "mismatch.hds");
     ASSERT_TRUE(mismatch);
-    const auto &ranges =
-        mismatch->partitions()[0].allocation.reconstructed_not_stored;
+    const auto &ranges = mismatch->partitions()[0].allocation.reconstructed_not_stored;
     ASSERT_EQ(ranges.size(), 1U);
     EXPECT_EQ(ranges[0].start_cluster, 54U);
     EXPECT_EQ(ranges[0].end_cluster, 54U);
     const auto validation = axk::validate_semantics(*mismatch, {}, {});
-    const auto issue =
-        std::ranges::find(validation.issues, "SFS_ALLOCATION_MISMATCH",
-                          &axk::ValidationIssue::code);
+    const auto issue = std::ranges::find(validation.issues, "SFS_ALLOCATION_MISMATCH", &axk::ValidationIssue::code);
     ASSERT_NE(issue, validation.issues.end());
-    EXPECT_NE(
-        issue->message.find(
-            "1 cluster(s) are referenced by index records but marked free"),
-        std::string::npos);
+    EXPECT_NE(issue->message.find("1 cluster(s) are referenced by index records but marked free"), std::string::npos);
 }
 
 TEST(SfsReader, ReportsMissingDirectoryTargetsAndChildCycles) {
@@ -468,28 +410,21 @@ TEST(SfsReader, ReportsMissingDirectoryTargetsAndChildCycles) {
     const auto missing = axk::open_image(missing_reader, "missing-link.hds");
     ASSERT_TRUE(missing);
     const auto &missing_diagnostics = missing->partitions()[0].diagnostics;
-    EXPECT_TRUE(std::any_of(
-        missing_diagnostics.begin(), missing_diagnostics.end(),
-        [](const axk::Error &error) {
-            return error.code == axk::ErrorCode::relationship_unresolved &&
-                   error.context.object_name == "Samples";
-        }));
+    EXPECT_TRUE(std::any_of(missing_diagnostics.begin(), missing_diagnostics.end(), [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::relationship_unresolved && error.context.object_name == "Samples";
+    }));
 
     auto cycle_bytes = image_fixture();
     axk::ByteWriter writer{cycle_bytes};
     const auto directory = 15U * sector_size;
     ASSERT_TRUE(writer.write_be32(directory + 64U + 4U, 0));
-    auto cycle_reader =
-        std::make_shared<axk::MemoryReader>(std::move(cycle_bytes));
+    auto cycle_reader = std::make_shared<axk::MemoryReader>(std::move(cycle_bytes));
     const auto cycle = axk::open_image(cycle_reader, "directory-cycle.hds");
     ASSERT_TRUE(cycle);
     const auto &cycle_diagnostics = cycle->partitions()[0].diagnostics;
-    EXPECT_TRUE(std::any_of(cycle_diagnostics.begin(), cycle_diagnostics.end(),
-                            [](const axk::Error &error) {
-                                return error.code ==
-                                           axk::ErrorCode::relationship_cycle &&
-                                       error.context.object_name == "Samples";
-                            }));
+    EXPECT_TRUE(std::any_of(cycle_diagnostics.begin(), cycle_diagnostics.end(), [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::relationship_cycle && error.context.object_name == "Samples";
+    }));
 }
 
 TEST(SfsReader, RejectsNonSfsAndCancellationWithoutPartialContainer) {

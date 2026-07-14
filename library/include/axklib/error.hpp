@@ -71,8 +71,7 @@ struct ErrorContext {
     std::optional<std::string> object_name;
     std::optional<std::uint64_t> raw_offset;
 
-    friend bool operator==(const ErrorContext &,
-                           const ErrorContext &) = default;
+    friend bool operator==(const ErrorContext &, const ErrorContext &) = default;
 };
 
 struct Error {
@@ -86,8 +85,7 @@ struct Error {
 
 template <typename T> using Result = std::expected<T, Error>;
 
-inline Error make_error(ErrorCode code, ErrorCategory category,
-                        std::string message, ErrorContext context = {}) {
+inline Error make_error(ErrorCode code, ErrorCategory category, std::string message, ErrorContext context = {}) {
     return Error{code, category, std::move(message), std::move(context)};
 }
 

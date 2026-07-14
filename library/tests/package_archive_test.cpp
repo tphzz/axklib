@@ -19,29 +19,22 @@ std::vector<std::byte> bytes(std::string_view value) {
 }
 
 std::vector<axk::package_internal::ArchiveEntry> entries() {
-    return {{"payloads/sha256/abc.bin", bytes("payload")},
-            {"manifest.json", bytes("{\"schema_version\":\"1.0\"}\n")}};
+    return {{"payloads/sha256/abc.bin", bytes("payload")}, {"manifest.json", bytes("{\"schema_version\":\"1.0\"}\n")}};
 }
 
 class CountingReader final : public axk::RandomAccessReader {
   public:
-    explicit CountingReader(std::vector<std::byte> source)
-        : source_{std::move(source)} {}
+    explicit CountingReader(std::vector<std::byte> source) : source_{std::move(source)} {}
 
-    [[nodiscard]] std::uint64_t size() const noexcept override {
-        return source_.size();
-    }
+    [[nodiscard]] std::uint64_t size() const noexcept override { return source_.size(); }
 
-    [[nodiscard]] axk::Result<void>
-    read_exact_at(std::uint64_t offset,
-                  std::span<std::byte> destination) const override {
+    [[nodiscard]] axk::Result<void> read_exact_at(std::uint64_t offset,
+                                                  std::span<std::byte> destination) const override {
         bytes_read_ += destination.size();
         return source_.read_exact_at(offset, destination);
     }
 
-    [[nodiscard]] std::uint64_t bytes_read() const noexcept {
-        return bytes_read_;
-    }
+    [[nodiscard]] std::uint64_t bytes_read() const noexcept { return bytes_read_; }
 
   private:
     axk::MemoryReader source_;
@@ -51,19 +44,14 @@ class CountingReader final : public axk::RandomAccessReader {
 } // namespace
 
 TEST(PackageDigest, MatchesPublishedSha256AndCrc32Vectors) {
-    EXPECT_EQ(
-        axk::package_internal::hex_digest(
-            axk::package_internal::sha256(bytes(""))),
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    EXPECT_EQ(
-        axk::package_internal::hex_digest(
-            axk::package_internal::sha256(bytes("abc"))),
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    EXPECT_EQ(axk::package_internal::hex_digest(axk::package_internal::sha256(bytes(""))),
+              "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    EXPECT_EQ(axk::package_internal::hex_digest(axk::package_internal::sha256(bytes("abc"))),
+              "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     EXPECT_EQ(axk::package_internal::crc32(bytes("123456789")), 0xcbf43926U);
 }
 
-TEST(PackageDigest,
-     StreamsReadersWithoutChangingTheDigestAndHonorsCancellation) {
+TEST(PackageDigest, StreamsReadersWithoutChangingTheDigestAndHonorsCancellation) {
     std::vector<std::byte> payload(2U * 1024U * 1024U + 37U);
     for (std::size_t index = 0; index < payload.size(); ++index)
         payload[index] = static_cast<std::byte>((index * 131U + 17U) & 0xffU);
@@ -74,8 +62,7 @@ TEST(PackageDigest,
 
     axk::CancellationSource cancellation;
     cancellation.cancel();
-    const auto cancelled =
-        axk::package_internal::sha256_reader(reader, cancellation.token());
+    const auto cancelled = axk::package_internal::sha256_reader(reader, cancellation.token());
     ASSERT_FALSE(cancelled);
     EXPECT_EQ(cancelled.error().code, axk::ErrorCode::operation_cancelled);
 }
@@ -85,8 +72,7 @@ TEST(PackageArchive, IsDeterministicCanonicalAndRoundTrips) {
     ASSERT_TRUE(first) << first.error().message;
     auto reversed = entries();
     std::ranges::reverse(reversed);
-    const auto second =
-        axk::package_internal::write_archive(std::move(reversed));
+    const auto second = axk::package_internal::write_archive(std::move(reversed));
     ASSERT_TRUE(second) << second.error().message;
     EXPECT_EQ(*first, *second);
 
@@ -123,8 +109,7 @@ TEST(PackageArchive, RejectsCorruptionTrailingDataAndNonProfileMetadata) {
     ASSERT_TRUE(valid) << valid.error().message;
 
     auto corrupt = *valid;
-    constexpr std::size_t manifest_data_offset =
-        30U + std::string_view{"manifest.json"}.size();
+    constexpr std::size_t manifest_data_offset = 30U + std::string_view{"manifest.json"}.size();
     corrupt[manifest_data_offset] ^= std::byte{0x01};
     const auto bad_crc = axk::package_internal::read_archive(corrupt);
     ASSERT_FALSE(bad_crc);
@@ -160,8 +145,7 @@ TEST(PackageArchive, AppliesReadLimitsBeforeMaterializingEntries) {
 TEST(PackageArchive, InspectionReadsOnlyBoundedMetadataAndManifest) {
     auto source_entries = entries();
     source_entries[0].bytes.resize(4U * 1024U * 1024U, std::byte{0x5a});
-    const auto valid =
-        axk::package_internal::write_archive(std::move(source_entries));
+    const auto valid = axk::package_internal::write_archive(std::move(source_entries));
     ASSERT_TRUE(valid) << valid.error().message;
 
     CountingReader reader{*valid};
@@ -169,8 +153,7 @@ TEST(PackageArchive, InspectionReadsOnlyBoundedMetadataAndManifest) {
     ASSERT_TRUE(inspected) << inspected.error().message;
     ASSERT_EQ(inspected->entries.size(), 2U);
     EXPECT_EQ(inspected->manifest.path, "manifest.json");
-    EXPECT_EQ(inspected->manifest.bytes,
-              bytes("{\"schema_version\":\"1.0\"}\n"));
+    EXPECT_EQ(inspected->manifest.bytes, bytes("{\"schema_version\":\"1.0\"}\n"));
     EXPECT_EQ(inspected->archive_size, valid->size());
     EXPECT_LT(reader.bytes_read(), 4096U);
     EXPECT_LT(reader.bytes_read(), inspected->entries[1].size);
@@ -183,20 +166,17 @@ TEST(PackageArchive, InspectionReadsOnlyBoundedMetadataAndManifest) {
     EXPECT_FALSE(axk::package_internal::read_archive(corrupt));
 }
 
-TEST(PackageArchive,
-     InspectionAppliesDirectoryAndManifestLimitsBeforeAllocation) {
+TEST(PackageArchive, InspectionAppliesDirectoryAndManifestLimitsBeforeAllocation) {
     const auto valid = axk::package_internal::write_archive(entries());
     ASSERT_TRUE(valid) << valid.error().message;
 
     auto limits = axk::package_internal::ArchiveLimits{};
     limits.maximum_directory_bytes = 1U;
     CountingReader directory_limited{*valid};
-    EXPECT_FALSE(
-        axk::package_internal::inspect_archive(directory_limited, {}, limits));
+    EXPECT_FALSE(axk::package_internal::inspect_archive(directory_limited, {}, limits));
 
     limits = {};
     limits.maximum_manifest_bytes = 1U;
     CountingReader manifest_limited{*valid};
-    EXPECT_FALSE(
-        axk::package_internal::inspect_archive(manifest_limited, {}, limits));
+    EXPECT_FALSE(axk::package_internal::inspect_archive(manifest_limited, {}, limits));
 }

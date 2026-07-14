@@ -29,17 +29,13 @@ struct ContentNode {
     std::vector<ContentNode> children;
 
     ContentNode() = default;
-    ContentNode(std::string id, std::string type, std::string display,
-                std::string key = {}, std::string stored_object_type = {},
-                RelationshipQuality stored_quality = RelationshipQuality::known,
+    ContentNode(std::string id, std::string type, std::string display, std::string key = {},
+                std::string stored_object_type = {}, RelationshipQuality stored_quality = RelationshipQuality::known,
                 std::string stored_basis = {}, std::string stored_notes = {},
-                std::vector<std::string> stored_details = {},
-                std::vector<ContentNode> stored_children = {})
-        : node_id(std::move(id)), node_type(std::move(type)),
-          display_name(std::move(display)), object_key(std::move(key)),
-          object_type(std::move(stored_object_type)), quality(stored_quality),
-          basis(std::move(stored_basis)), notes(std::move(stored_notes)),
-          details(std::move(stored_details)),
+                std::vector<std::string> stored_details = {}, std::vector<ContentNode> stored_children = {})
+        : node_id(std::move(id)), node_type(std::move(type)), display_name(std::move(display)),
+          object_key(std::move(key)), object_type(std::move(stored_object_type)), quality(stored_quality),
+          basis(std::move(stored_basis)), notes(std::move(stored_notes)), details(std::move(stored_details)),
           children(std::move(stored_children)) {}
 };
 
@@ -112,23 +108,15 @@ struct ValidationReport {
     [[nodiscard]] AXK_API bool valid() const noexcept;
 };
 
-AXK_API ContentTree build_content_tree(const Container &container,
-                                       const ObjectCatalog &catalog,
-                                       const RelationshipGraph &graph,
-                                       bool include_default_programs = false);
-AXK_API ContentTree build_content_tree(const MediaContainer &container,
-                                       const ObjectCatalog &catalog,
-                                       const RelationshipGraph &graph,
-                                       bool include_default_programs = false);
-AXK_API ContentTree build_content_tree(std::string source_path,
-                                       const ObjectCatalog &catalog,
-                                       const RelationshipGraph &graph,
-                                       bool include_default_programs = false);
-AXK_API WaveformOrphanReport analyze_waveform_orphans(
-    const Container &container, const ObjectCatalog &catalog,
-    const RelationshipGraph &graph);
-AXK_API ValidationReport validate_semantics(const Container &container,
-                                            const ObjectCatalog &catalog,
+AXK_API ContentTree build_content_tree(const Container &container, const ObjectCatalog &catalog,
+                                       const RelationshipGraph &graph, bool include_default_programs = false);
+AXK_API ContentTree build_content_tree(const MediaContainer &container, const ObjectCatalog &catalog,
+                                       const RelationshipGraph &graph, bool include_default_programs = false);
+AXK_API ContentTree build_content_tree(std::string source_path, const ObjectCatalog &catalog,
+                                       const RelationshipGraph &graph, bool include_default_programs = false);
+AXK_API WaveformOrphanReport analyze_waveform_orphans(const Container &container, const ObjectCatalog &catalog,
+                                                      const RelationshipGraph &graph);
+AXK_API ValidationReport validate_semantics(const Container &container, const ObjectCatalog &catalog,
                                             const RelationshipGraph &graph);
 AXK_API std::string_view waveform_status_name(WaveformStatus status) noexcept;
 

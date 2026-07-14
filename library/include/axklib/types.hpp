@@ -9,8 +9,7 @@ namespace axk {
 
 struct PartitionIndex {
     std::uint8_t value{};
-    friend auto operator<=>(const PartitionIndex &,
-                            const PartitionIndex &) = default;
+    friend auto operator<=>(const PartitionIndex &, const PartitionIndex &) = default;
 };
 
 struct SfsId {

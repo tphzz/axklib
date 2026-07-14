@@ -106,21 +106,17 @@ struct InsertProgramOperation {
 };
 
 using AlterationOperationData =
-    std::variant<DeleteVolumeOperation, InsertVolumeOperation,
-                 DeleteSampleBankOperation, InsertSampleBankOperation,
-                 InsertWaveformOperation, DeleteWaveformOperation,
-                 RenameWaveformOperation, RenameSampleBankOperation,
-                 DeleteSampleBankGroupOperation, InsertSampleBankGroupOperation,
-                 RenameSampleBankGroupOperation, DeleteProgramOperation,
-                 InsertProgramOperation>;
+    std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleBankOperation, InsertSampleBankOperation,
+                 InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleBankOperation,
+                 DeleteSampleBankGroupOperation, InsertSampleBankGroupOperation, RenameSampleBankGroupOperation,
+                 DeleteProgramOperation, InsertProgramOperation>;
 
 struct AlterationOperation {
     std::string id;
     AlterationOperationData data;
 };
 
-AXK_AUDIO_API std::string_view
-operation_type_name(const AlterationOperationData &operation) noexcept;
+AXK_AUDIO_API std::string_view operation_type_name(const AlterationOperationData &operation) noexcept;
 
 struct AlterationManifest {
     std::string schema_version;
@@ -128,9 +124,8 @@ struct AlterationManifest {
 };
 
 AXK_AUDIO_API Result<std::string> serialize_alteration_manifest_template();
-AXK_AUDIO_API Result<void>
-write_alteration_manifest_template(const std::filesystem::path &output_path,
-                                   bool overwrite = false);
+AXK_AUDIO_API Result<void> write_alteration_manifest_template(const std::filesystem::path &output_path,
+                                                              bool overwrite = false);
 
 struct AudioImportSummary {
     std::filesystem::path source_path;
@@ -172,21 +167,17 @@ struct TransactionPlan {
     std::vector<OperationReport> operations;
 };
 
-AXK_AUDIO_API Result<AlterationManifest>
-parse_alteration_manifest(std::string_view json,
-                          const std::filesystem::path &base_directory = {});
-AXK_AUDIO_API Result<AlterationManifest>
-load_alteration_manifest(const std::filesystem::path &path);
-AXK_AUDIO_API Result<AlterationResult>
-alter_hds(const std::filesystem::path &source_path,
-          const AlterationManifest &manifest,
-          const std::optional<std::filesystem::path> &output_path = {},
-          const CancellationToken &cancellation = {},
-          ProgressSink *progress = nullptr, bool overwrite = false);
-AXK_AUDIO_API Result<TransactionPlan>
-plan_hds_alteration(const std::filesystem::path &source_path,
-                    const AlterationManifest &manifest,
-                    const CancellationToken &cancellation = {},
-                    ProgressSink *progress = nullptr);
+AXK_AUDIO_API Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
+                                                                   const std::filesystem::path &base_directory = {});
+AXK_AUDIO_API Result<AlterationManifest> load_alteration_manifest(const std::filesystem::path &path);
+AXK_AUDIO_API Result<AlterationResult> alter_hds(const std::filesystem::path &source_path,
+                                                 const AlterationManifest &manifest,
+                                                 const std::optional<std::filesystem::path> &output_path = {},
+                                                 const CancellationToken &cancellation = {},
+                                                 ProgressSink *progress = nullptr, bool overwrite = false);
+AXK_AUDIO_API Result<TransactionPlan> plan_hds_alteration(const std::filesystem::path &source_path,
+                                                          const AlterationManifest &manifest,
+                                                          const CancellationToken &cancellation = {},
+                                                          ProgressSink *progress = nullptr);
 
 } // namespace axk

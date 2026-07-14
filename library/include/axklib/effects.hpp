@@ -50,23 +50,16 @@ struct ModelRequirement {
     std::string_view note;
 };
 
-AXK_API std::optional<EffectProfile>
-parse_effect_profile(std::string_view value) noexcept;
-AXK_API bool
-effect_type_supported(std::uint16_t raw_type,
-                      EffectProfile profile = EffectProfile::a4000) noexcept;
-AXK_API std::optional<EffectTypeInfo>
-effect_type_info(std::uint16_t raw_type,
-                 EffectProfile profile = EffectProfile::a4000) noexcept;
-AXK_API std::optional<EffectParameterInfo>
-effect_parameter_info(std::uint16_t raw_type, std::uint8_t parameter_number,
-                      EffectProfile profile = EffectProfile::a4000) noexcept;
-AXK_API EffectDisplayValue format_effect_parameter(
-    std::optional<std::uint16_t> raw_type, std::uint8_t parameter_number,
-    std::optional<std::uint8_t> raw_value,
-    EffectProfile profile = EffectProfile::a4000);
+AXK_API std::optional<EffectProfile> parse_effect_profile(std::string_view value) noexcept;
+AXK_API bool effect_type_supported(std::uint16_t raw_type, EffectProfile profile = EffectProfile::a4000) noexcept;
+AXK_API std::optional<EffectTypeInfo> effect_type_info(std::uint16_t raw_type,
+                                                       EffectProfile profile = EffectProfile::a4000) noexcept;
+AXK_API std::optional<EffectParameterInfo> effect_parameter_info(std::uint16_t raw_type, std::uint8_t parameter_number,
+                                                                 EffectProfile profile = EffectProfile::a4000) noexcept;
+AXK_API EffectDisplayValue format_effect_parameter(std::optional<std::uint16_t> raw_type, std::uint8_t parameter_number,
+                                                   std::optional<std::uint8_t> raw_value,
+                                                   EffectProfile profile = EffectProfile::a4000);
 AXK_API ModelRequirement effect_slot_requirement(std::uint8_t effect_number);
-AXK_API ModelRequirement
-effect_output_destination_requirement(std::optional<std::uint8_t> raw_value);
+AXK_API ModelRequirement effect_output_destination_requirement(std::optional<std::uint8_t> raw_value);
 
 } // namespace axk

@@ -62,19 +62,14 @@ struct StereoRenderDecision {
     std::uint64_t right_padding_frames{};
 };
 
-AXK_API Result<Waveform>
-decode_waveform(const Container &container, const ObjectSnapshot &snapshot,
-                const CancellationToken &cancellation = {});
+AXK_API Result<Waveform> decode_waveform(const Container &container, const ObjectSnapshot &snapshot,
+                                         const CancellationToken &cancellation = {});
 AXK_API Result<Waveform> decode_waveform(const MediaObject &object);
 AXK_API Result<std::vector<std::byte>> wav_bytes(const Waveform &waveform);
-AXK_API Result<void> write_wav_atomic(const std::filesystem::path &path,
-                                      const Waveform &waveform,
+AXK_API Result<void> write_wav_atomic(const std::filesystem::path &path, const Waveform &waveform,
                                       bool overwrite = false);
-AXK_API Result<PreviewEnvelope> build_preview_envelope(const Waveform &waveform,
-                                                       std::size_t bin_count);
-AXK_API StereoRenderDecision stereo_render_decision(const Waveform &left,
-                                                    const Waveform &right);
-AXK_API Result<Waveform> render_stereo(const Waveform &left,
-                                       const Waveform &right);
+AXK_API Result<PreviewEnvelope> build_preview_envelope(const Waveform &waveform, std::size_t bin_count);
+AXK_API StereoRenderDecision stereo_render_decision(const Waveform &left, const Waveform &right);
+AXK_API Result<Waveform> render_stereo(const Waveform &left, const Waveform &right);
 
 } // namespace axk

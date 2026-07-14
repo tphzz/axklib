@@ -11,19 +11,8 @@
 
 namespace axk {
 
-enum class RelationshipQuality : std::uint8_t {
-    known,
-    likely,
-    tentative,
-    unknown
-};
-enum class AssignmentState : std::uint8_t {
-    active,
-    source_load,
-    visible_off,
-    duplicate_not_active,
-    unknown
-};
+enum class RelationshipQuality : std::uint8_t { known, likely, tentative, unknown };
+enum class AssignmentState : std::uint8_t { active, source_load, visible_off, duplicate_not_active, unknown };
 
 struct Relationship {
     std::string key;
@@ -56,16 +45,12 @@ struct RelationshipGraph {
     std::vector<Relationship> relationships;
     std::vector<BitmapComparison> bitmap_comparisons;
 
-    [[nodiscard]] std::vector<const Relationship *>
-    children(std::string_view key) const;
-    [[nodiscard]] std::vector<const Relationship *>
-    parents(std::string_view key) const;
+    [[nodiscard]] std::vector<const Relationship *> children(std::string_view key) const;
+    [[nodiscard]] std::vector<const Relationship *> parents(std::string_view key) const;
 };
 
-AXK_API RelationshipGraph
-build_relationship_graph(const ObjectCatalog &catalog);
-AXK_API std::string_view
-relationship_quality_name(RelationshipQuality quality) noexcept;
+AXK_API RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog);
+AXK_API std::string_view relationship_quality_name(RelationshipQuality quality) noexcept;
 AXK_API std::string_view assignment_state_name(AssignmentState state) noexcept;
 
 } // namespace axk

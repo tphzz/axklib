@@ -29,9 +29,8 @@ OrderedJson member_json(const CurrentSbnkMember &member) {
 
 } // namespace
 
-Result<std::string> serialize_volume_graph(
-    const VolumeExport &volume, const RelationshipGraph &graph,
-    const std::filesystem::path &source_path, std::string_view container_kind) {
+Result<std::string> serialize_volume_graph(const VolumeExport &volume, const RelationshipGraph &graph,
+                                           const std::filesystem::path &source_path, std::string_view container_kind) {
     try {
         OrderedJson smpl = OrderedJson::array();
         for (const auto &waveform : volume.waveforms) {
@@ -40,8 +39,7 @@ Result<std::string> serialize_volume_graph(
                 {"id", waveform.object_key},
                 {"object_key", waveform.object_key},
                 {"display_name", waveform.display_name},
-                {"wav_path",
-                 axk::text::path_to_utf8(waveform.relative_wav_path)},
+                {"wav_path", axk::text::path_to_utf8(waveform.relative_wav_path)},
                 {"audio",
                  {{"channels", audio.format.channels},
                   {"sample_rate", audio.format.sample_rate},
@@ -50,10 +48,8 @@ Result<std::string> serialize_volume_graph(
                   {"stored_payload_size", audio.stored_payload_size},
                   {"decoded_pcm_size", audio.pcm.size()},
                   {"stored_payload_transform", audio.stored_payload_transform},
-                  {"exactness_status",
-                   audio.alternating_byte_payload_detected
-                       ? "alternating-byte-compatibility-export"
-                       : "exact-current-mono"}}},
+                  {"exactness_status", audio.alternating_byte_payload_detected ? "alternating-byte-compatibility-export"
+                                                                               : "exact-current-mono"}}},
                 {"playback",
                  {{"root_key_midi", audio.root_key},
                   {"fine_tune_cents", audio.fine_tune_cents},
@@ -64,23 +60,17 @@ Result<std::string> serialize_volume_graph(
                   {"loop_end_frame_a4000_ui",
                    audio.loop_length == 0U
                        ? OrderedJson(nullptr)
-                       : OrderedJson(
-                             static_cast<std::uint64_t>(audio.loop_start) +
-                             audio.loop_length)}}},
+                       : OrderedJson(static_cast<std::uint64_t>(audio.loop_start) + audio.loop_length)}}},
                 {"origin",
                  {{"source_container", text::path_to_utf8(source_path)},
                   {"container_kind", container_kind},
                   {"partition_index", audio.partition.value},
-                  {"quality", audio.alternating_byte_payload_detected
-                                  ? "Likely"
-                                  : "Known"},
-                  {"basis",
-                   audio.alternating_byte_payload_detected
-                       ? "direct object header plus alternating-byte payload "
-                         "detection"
-                       : "direct object header and stored payload bytes"},
-                  {"alternating_byte_payload_detected",
-                   audio.alternating_byte_payload_detected}}},
+                  {"quality", audio.alternating_byte_payload_detected ? "Likely" : "Known"},
+                  {"basis", audio.alternating_byte_payload_detected
+                                ? "direct object header plus alternating-byte payload "
+                                  "detection"
+                                : "direct object header and stored payload bytes"},
+                  {"alternating_byte_payload_detected", audio.alternating_byte_payload_detected}}},
             });
         }
         OrderedJson sbnk = OrderedJson::array();
@@ -90,30 +80,19 @@ Result<std::string> serialize_volume_graph(
                 members.push_back({
                     {"role", member.role},
                     {"smpl_id", member.waveform_key},
-                    {"wav_path",
-                     axk::text::path_to_utf8(member.relative_wav_path)},
-                    {"relationship_quality",
-                     axk::relationship_quality_name(member.quality)},
+                    {"wav_path", axk::text::path_to_utf8(member.relative_wav_path)},
+                    {"relationship_quality", axk::relationship_quality_name(member.quality)},
                 });
             }
             OrderedJson rendered = nullptr;
             if (bank.rendered_wav_path) {
                 rendered = {
-                    {"wav_path",
-                     axk::text::path_to_utf8(*bank.rendered_wav_path)},
+                    {"wav_path", axk::text::path_to_utf8(*bank.rendered_wav_path)},
                     {"channels", 2},
-                    {"frames", bank.stereo_decision
-                                   ? bank.stereo_decision->output_frame_count
-                                   : 0},
+                    {"frames", bank.stereo_decision ? bank.stereo_decision->output_frame_count : 0},
                     {"padding",
-                     {{"left_frames",
-                       bank.stereo_decision
-                           ? bank.stereo_decision->left_padding_frames
-                           : 0},
-                      {"right_frames",
-                       bank.stereo_decision
-                           ? bank.stereo_decision->right_padding_frames
-                           : 0}}},
+                     {{"left_frames", bank.stereo_decision ? bank.stereo_decision->left_padding_frames : 0},
+                      {"right_frames", bank.stereo_decision ? bank.stereo_decision->right_padding_frames : 0}}},
                 };
             }
             OrderedJson parameter_contexts = OrderedJson::array();
@@ -125,10 +104,8 @@ Result<std::string> serialize_volume_graph(
                         numeric_fields[field.name] = *field.value;
                 }
                 OrderedJson controls = OrderedJson::array();
-                for (std::size_t index = 0;
-                     index < context.decoded.control_records.size(); ++index) {
-                    const auto &control =
-                        context.decoded.control_records[index];
+                for (std::size_t index = 0; index < context.decoded.control_records.size(); ++index) {
+                    const auto &control = context.decoded.control_records[index];
                     controls.push_back({
                         {"index", index + 1U},
                         {"offset", 0x164U + index * 4U},
@@ -145,38 +122,25 @@ Result<std::string> serialize_volume_graph(
                     {"relationship_type", context.relationship_type},
                     {"member_parameters", std::move(numeric_fields)},
                     {"left_member", member_json(context.decoded.left)},
-                    {"right_member", context.decoded.right
-                                         ? member_json(*context.decoded.right)
-                                         : OrderedJson(nullptr)},
+                    {"right_member",
+                     context.decoded.right ? member_json(*context.decoded.right) : OrderedJson(nullptr)},
                     {"selected_member", member_json(context.decoded.left)},
-                    {"bank_topology",
-                     context.decoded.right ? "two-member" : "single-member"},
-                    {"linked_program_numbers",
-                     context.decoded.linked_program_numbers},
+                    {"bank_topology", context.decoded.right ? "two-member" : "single-member"},
+                    {"linked_program_numbers", context.decoded.linked_program_numbers},
                 });
             }
             const auto &range_bank =
-                bank.parameter_contexts.empty()
-                    ? bank.decoded
-                    : bank.parameter_contexts.front().decoded;
+                bank.parameter_contexts.empty() ? bank.decoded : bank.parameter_contexts.front().decoded;
             const auto range_low = range_bank.key_range_low;
             const auto range_high = range_bank.key_range_high;
             OrderedJson resolved_range = {
-                {"low_midi", range_low == 255U
-                                 ? OrderedJson(range_bank.left.root_key)
-                                 : OrderedJson(range_low)},
-                {"high_midi", range_high == 128U
-                                  ? OrderedJson(range_bank.left.root_key)
-                                  : OrderedJson(range_high)},
+                {"low_midi", range_low == 255U ? OrderedJson(range_bank.left.root_key) : OrderedJson(range_low)},
+                {"high_midi", range_high == 128U ? OrderedJson(range_bank.left.root_key) : OrderedJson(range_high)},
                 {"low_raw", range_low},
                 {"high_raw", range_high},
-                {"low_display", range_low == 255U ? OrderedJson("Orig")
-                                                  : OrderedJson(range_low)},
-                {"high_display", range_high == 128U ? OrderedJson("Orig")
-                                                    : OrderedJson(range_high)},
-                {"basis", range_low == 255U || range_high == 128U
-                              ? "sampler-orig-key-limit"
-                              : "decoded-key-range"},
+                {"low_display", range_low == 255U ? OrderedJson("Orig") : OrderedJson(range_low)},
+                {"high_display", range_high == 128U ? OrderedJson("Orig") : OrderedJson(range_high)},
+                {"basis", range_low == 255U || range_high == 128U ? "sampler-orig-key-limit" : "decoded-key-range"},
             };
             sbnk.push_back({
                 {"id", bank.object_key},
@@ -185,8 +149,7 @@ Result<std::string> serialize_volume_graph(
                 {"physical_waveforms", std::move(members)},
                 {"rendered_audio", std::move(rendered)},
                 {"parameters",
-                 {{"decoded_current_sbnk_member_parameters",
-                   std::move(parameter_contexts)},
+                 {{"decoded_current_sbnk_member_parameters", std::move(parameter_contexts)},
                   {"resolved_key_range", std::move(resolved_range)}}},
             });
         }
@@ -240,10 +203,8 @@ Result<std::string> serialize_volume_graph(
                 continue;
             if (!row.target_key)
                 continue;
-            const auto retained_relationship =
-                relationship_edges.contains({row.source_key, *row.target_key});
-            if (!retained_relationship &&
-                !volume_edges.contains({row.source_key, *row.target_key}))
+            const auto retained_relationship = relationship_edges.contains({row.source_key, *row.target_key});
+            if (!retained_relationship && !volume_edges.contains({row.source_key, *row.target_key}))
                 continue;
             if (row.type == "SBNK_PROGRAM_BITMAP_TO_PROG") {
                 continue;
@@ -254,8 +215,7 @@ Result<std::string> serialize_volume_graph(
                 {"target_key", row.target_key ? *row.target_key : ""},
                 {"quality", axk::relationship_quality_name(row.quality)},
                 {"basis", row.basis},
-                {"active_assignment_state",
-                 axk::assignment_state_name(row.assignment_state)},
+                {"active_assignment_state", axk::assignment_state_name(row.assignment_state)},
             });
         }
         OrderedJson decisions = OrderedJson::array();
@@ -265,16 +225,11 @@ Result<std::string> serialize_volume_graph(
             decisions.push_back({
                 {"sbnk_object_key", bank.object_key},
                 {"sample_name", bank.display_name},
-                {"decision", bank.stereo_decision->renderable
-                                 ? "interleaved_stereo_written"
-                                 : "physical_members_only"},
+                {"decision", bank.stereo_decision->renderable ? "interleaved_stereo_written" : "physical_members_only"},
                 {"reason_code", bank.stereo_decision->reason_code},
-                {"output_frame_count",
-                 bank.stereo_decision->output_frame_count},
-                {"left_padding_frames",
-                 bank.stereo_decision->left_padding_frames},
-                {"right_padding_frames",
-                 bank.stereo_decision->right_padding_frames},
+                {"output_frame_count", bank.stereo_decision->output_frame_count},
+                {"left_padding_frames", bank.stereo_decision->left_padding_frames},
+                {"right_padding_frames", bank.stereo_decision->right_padding_frames},
             });
         }
         return OrderedJson{
@@ -300,10 +255,8 @@ Result<std::string> serialize_volume_graph(
         }
             .dump(2);
     } catch (const nlohmann::json::exception &error) {
-        return std::unexpected{
-            make_error(ErrorCode::invalid_argument, ErrorCategory::internal,
-                       std::string{"could not serialize volume graph JSON: "} +
-                           error.what())};
+        return std::unexpected{make_error(ErrorCode::invalid_argument, ErrorCategory::internal,
+                                          std::string{"could not serialize volume graph JSON: "} + error.what())};
     }
 }
 

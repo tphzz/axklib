@@ -15,23 +15,8 @@
 
 namespace axk {
 
-enum class PackageRootKind : std::uint8_t {
-    volume,
-    prog,
-    sbac,
-    sbnk,
-    smpl,
-    sequ
-};
-enum class PackageKind : std::uint8_t {
-    volume,
-    program,
-    sbac,
-    sbnk,
-    smpl,
-    sequence,
-    bundle
-};
+enum class PackageRootKind : std::uint8_t { volume, prog, sbac, sbnk, smpl, sequ };
+enum class PackageKind : std::uint8_t { volume, program, sbac, sbnk, smpl, sequence, bundle };
 
 struct PackageRootSelector {
     PackageRootKind kind{PackageRootKind::volume};
@@ -50,8 +35,7 @@ struct PackageRelocation {
     std::string expected_hex;
     std::vector<std::string> edge_ids;
 
-    friend bool operator==(const PackageRelocation &,
-                           const PackageRelocation &) = default;
+    friend bool operator==(const PackageRelocation &, const PackageRelocation &) = default;
 };
 
 struct PackagePlacementHint {
@@ -60,8 +44,7 @@ struct PackagePlacementHint {
     std::string category_name;
     std::string entry_name;
 
-    friend bool operator==(const PackagePlacementHint &,
-                           const PackagePlacementHint &) = default;
+    friend bool operator==(const PackagePlacementHint &, const PackagePlacementHint &) = default;
 };
 
 struct PackageNode {
@@ -88,8 +71,7 @@ struct PackageRelationship {
     std::string role;
     std::uint32_t ordinal{};
 
-    friend bool operator==(const PackageRelationship &,
-                           const PackageRelationship &) = default;
+    friend bool operator==(const PackageRelationship &, const PackageRelationship &) = default;
 };
 
 struct PackageRoot {
@@ -105,8 +87,7 @@ struct PackageIssue {
     std::string message;
     bool fatal{};
 
-    friend bool operator==(const PackageIssue &,
-                           const PackageIssue &) = default;
+    friend bool operator==(const PackageIssue &, const PackageIssue &) = default;
 };
 
 struct PortablePackage {
@@ -152,8 +133,7 @@ struct PackageRootDestination {
     std::string raw_volume;
     bool create_destination{};
 
-    friend bool operator==(const PackageRootDestination &,
-                           const PackageRootDestination &) = default;
+    friend bool operator==(const PackageRootDestination &, const PackageRootDestination &) = default;
 };
 
 struct PackageNodeRename {
@@ -161,23 +141,20 @@ struct PackageNodeRename {
     std::string node_id;
     std::string destination_name;
 
-    friend bool operator==(const PackageNodeRename &,
-                           const PackageNodeRename &) = default;
+    friend bool operator==(const PackageNodeRename &, const PackageNodeRename &) = default;
 };
 
 struct PackageImportPolicy {
     std::vector<PackageNodeRename> renames;
 
-    friend bool operator==(const PackageImportPolicy &,
-                           const PackageImportPolicy &) = default;
+    friend bool operator==(const PackageImportPolicy &, const PackageImportPolicy &) = default;
 };
 
 struct PackageImportRequest {
     std::vector<PackageRootDestination> root_destinations;
     PackageImportPolicy policy;
 
-    friend bool operator==(const PackageImportRequest &,
-                           const PackageImportRequest &) = default;
+    friend bool operator==(const PackageImportRequest &, const PackageImportRequest &) = default;
 };
 
 struct PackageImportConflict {
@@ -193,8 +170,7 @@ struct PackageImportConflict {
     std::string raw_group;
     std::string raw_volume;
 
-    friend bool operator==(const PackageImportConflict &,
-                           const PackageImportConflict &) = default;
+    friend bool operator==(const PackageImportConflict &, const PackageImportConflict &) = default;
 };
 
 struct PlannedPackageObject {
@@ -223,8 +199,7 @@ struct PlannedPackageObject {
     std::uint64_t payload_sectors{};
     std::uint64_t continuation_clusters{};
 
-    friend bool operator==(const PlannedPackageObject &,
-                           const PlannedPackageObject &) = default;
+    friend bool operator==(const PlannedPackageObject &, const PlannedPackageObject &) = default;
 };
 
 struct PackageAllocationDelta {
@@ -244,8 +219,7 @@ struct PackageAllocationDelta {
     std::uint64_t projected_image_sectors{};
     std::uint64_t projected_image_size_bytes{};
 
-    friend bool operator==(const PackageAllocationDelta &,
-                           const PackageAllocationDelta &) = default;
+    friend bool operator==(const PackageAllocationDelta &, const PackageAllocationDelta &) = default;
 };
 
 struct PlannedPackageDestination {
@@ -259,8 +233,7 @@ struct PlannedPackageDestination {
     std::uint64_t infrastructure_clusters{};
     std::uint64_t root_directory_growth_bytes{};
 
-    friend bool operator==(const PlannedPackageDestination &,
-                           const PlannedPackageDestination &) = default;
+    friend bool operator==(const PlannedPackageDestination &, const PlannedPackageDestination &) = default;
 };
 
 struct PackageImportPlan {
@@ -293,49 +266,43 @@ struct PackageImportReport {
 AXK_API std::string_view package_root_kind_name(PackageRootKind kind) noexcept;
 AXK_API std::string_view package_kind_name(PackageKind kind) noexcept;
 AXK_API std::string_view required_package_extension(PackageKind kind) noexcept;
-AXK_API std::string_view
-package_import_action_name(PackageImportObjectAction action) noexcept;
+AXK_API std::string_view package_import_action_name(PackageImportObjectAction action) noexcept;
 
 AXK_API Result<void> verify_portable_package(const PortablePackage &package);
 AXK_API Result<void> verify_package_import_plan(const PackageImportPlan &plan);
 
-AXK_API Result<PackageBuild>
-build_portable_package(const MediaContainer &source,
-                       std::span<const PackageRootSelector> roots,
-                       const CancellationToken &cancellation = {});
+AXK_API Result<PackageBuild> build_portable_package(const MediaContainer &source,
+                                                    std::span<const PackageRootSelector> roots,
+                                                    const CancellationToken &cancellation = {});
 
-AXK_API Result<PackagePublication> publish_portable_package(
-    const PackageBuild &build, const std::filesystem::path &output_path,
-    bool overwrite = false, const CancellationToken &cancellation = {});
+AXK_API Result<PackagePublication> publish_portable_package(const PackageBuild &build,
+                                                            const std::filesystem::path &output_path,
+                                                            bool overwrite = false,
+                                                            const CancellationToken &cancellation = {});
 
-AXK_API Result<PackagePublication> export_portable_package(
-    const MediaContainer &source, std::span<const PackageRootSelector> roots,
-    const std::filesystem::path &output_path, bool overwrite = false,
-    const CancellationToken &cancellation = {});
+AXK_API Result<PackagePublication> export_portable_package(const MediaContainer &source,
+                                                           std::span<const PackageRootSelector> roots,
+                                                           const std::filesystem::path &output_path,
+                                                           bool overwrite = false,
+                                                           const CancellationToken &cancellation = {});
 
-AXK_API Result<PortablePackage>
-open_portable_package(std::span<const std::byte> archive,
-                      std::string_view filename = {});
+AXK_API Result<PortablePackage> open_portable_package(std::span<const std::byte> archive,
+                                                      std::string_view filename = {});
 
-AXK_API Result<PortablePackage>
-open_portable_package(const std::filesystem::path &path,
-                      const CancellationToken &cancellation = {});
+AXK_API Result<PortablePackage> open_portable_package(const std::filesystem::path &path,
+                                                      const CancellationToken &cancellation = {});
 
-AXK_API Result<PortablePackage>
-inspect_portable_package(const std::filesystem::path &path,
-                         const CancellationToken &cancellation = {});
+AXK_API Result<PortablePackage> inspect_portable_package(const std::filesystem::path &path,
+                                                         const CancellationToken &cancellation = {});
 
-AXK_API Result<PackageImportPlan>
-plan_package_import(const std::filesystem::path &target_path,
-                    std::span<const PortablePackage> packages,
-                    const PackageImportRequest &request,
-                    const CancellationToken &cancellation = {});
+AXK_API Result<PackageImportPlan> plan_package_import(const std::filesystem::path &target_path,
+                                                      std::span<const PortablePackage> packages,
+                                                      const PackageImportRequest &request,
+                                                      const CancellationToken &cancellation = {});
 
-AXK_AUDIO_API Result<PackageImportReport> apply_package_import(
-    const std::filesystem::path &target_path,
-    std::span<const PortablePackage> packages, const PackageImportPlan &plan,
-    const std::filesystem::path &output_path, bool overwrite = false,
-    const CancellationToken &cancellation = {},
-    ProgressSink *progress = nullptr);
+AXK_AUDIO_API Result<PackageImportReport>
+apply_package_import(const std::filesystem::path &target_path, std::span<const PortablePackage> packages,
+                     const PackageImportPlan &plan, const std::filesystem::path &output_path, bool overwrite = false,
+                     const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr);
 
 } // namespace axk

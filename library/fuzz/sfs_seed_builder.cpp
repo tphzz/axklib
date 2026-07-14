@@ -15,8 +15,7 @@ int main(int argc, char **argv) {
     volume.name = "Fuzz Volume";
     axk::HdsBuildManifest manifest{"1.0", axk::minimum_hds_size, {}};
     manifest.partitions.push_back({"hd1", {std::move(volume)}});
-    const auto written =
-        axk::write_hds_image(manifest, std::filesystem::path{argv[1]}, true);
+    const auto written = axk::write_hds_image(manifest, std::filesystem::path{argv[1]}, true);
     if (!written) {
         std::cerr << axk::render_error(written.error()) << '\n';
         return 1;

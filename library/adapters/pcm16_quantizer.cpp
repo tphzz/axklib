@@ -17,8 +17,7 @@ constexpr double uint32_range = 4'294'967'296.0;
 
 class Pcg32 final {
   public:
-    constexpr Pcg32(std::uint64_t seed, std::uint64_t stream)
-        : increment_{(stream << 1U) | 1U} {
+    constexpr Pcg32(std::uint64_t seed, std::uint64_t stream) : increment_{(stream << 1U) | 1U} {
         static_cast<void>(next());
         state_ += seed;
         static_cast<void>(next());
@@ -27,16 +26,12 @@ class Pcg32 final {
     constexpr std::uint32_t next() {
         const auto previous = state_;
         state_ = previous * pcg32_multiplier + increment_;
-        const auto shifted =
-            static_cast<std::uint32_t>(((previous >> 18U) ^ previous) >> 27U);
+        const auto shifted = static_cast<std::uint32_t>(((previous >> 18U) ^ previous) >> 27U);
         const auto rotation = static_cast<std::uint32_t>(previous >> 59U);
-        return static_cast<std::uint32_t>((shifted >> rotation) |
-                                          (shifted << ((0U - rotation) & 31U)));
+        return static_cast<std::uint32_t>((shifted >> rotation) | (shifted << ((0U - rotation) & 31U)));
     }
 
-    constexpr double unit_double() {
-        return static_cast<double>(next()) / uint32_range;
-    }
+    constexpr double unit_double() { return static_cast<double>(next()) / uint32_range; }
 
   private:
     std::uint64_t state_{};
@@ -50,13 +45,10 @@ static_assert([] {
 
 } // namespace
 
-Result<QuantizedPcm16> quantize_pcm16(std::span<const double> samples,
-                                      bool dither) {
-    if (!std::ranges::all_of(
-            samples, [](double value) { return std::isfinite(value); })) {
-        return std::unexpected{make_error(
-            ErrorCode::audio_unsupported_format, ErrorCategory::audio,
-            "source audio contains NaN or infinite samples")};
+Result<QuantizedPcm16> quantize_pcm16(std::span<const double> samples, bool dither) {
+    if (!std::ranges::all_of(samples, [](double value) { return std::isfinite(value); })) {
+        return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
+                                          "source audio contains NaN or infinite samples")};
     }
 
     Pcg32 first{dither_seed, dither_first_stream};

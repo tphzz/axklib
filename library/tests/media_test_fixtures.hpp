@@ -19,34 +19,28 @@
 
 namespace {
 
-inline void le16(std::span<std::byte> bytes, std::size_t offset,
-                 std::uint16_t value) {
+inline void le16(std::span<std::byte> bytes, std::size_t offset, std::uint16_t value) {
     bytes[offset] = static_cast<std::byte>(value & 0xffU);
     bytes[offset + 1] = static_cast<std::byte>(value >> 8U);
 }
 
-inline void le32(std::span<std::byte> bytes, std::size_t offset,
-                 std::uint32_t value) {
+inline void le32(std::span<std::byte> bytes, std::size_t offset, std::uint32_t value) {
     le16(bytes, offset, static_cast<std::uint16_t>(value));
     le16(bytes, offset + 2, static_cast<std::uint16_t>(value >> 16U));
 }
 
-inline void be16(std::span<std::byte> bytes, std::size_t offset,
-                 std::uint16_t value) {
+inline void be16(std::span<std::byte> bytes, std::size_t offset, std::uint16_t value) {
     bytes[offset] = static_cast<std::byte>(value >> 8U);
     bytes[offset + 1] = static_cast<std::byte>(value & 0xffU);
 }
 
-inline void be32(std::span<std::byte> bytes, std::size_t offset,
-                 std::uint32_t value) {
+inline void be32(std::span<std::byte> bytes, std::size_t offset, std::uint32_t value) {
     be16(bytes, offset, static_cast<std::uint16_t>(value >> 16U));
     be16(bytes, offset + 2, static_cast<std::uint16_t>(value));
 }
 
-inline void ascii(std::span<std::byte> bytes, std::size_t offset,
-                  std::string_view value) {
-    std::ranges::transform(value,
-                           bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+inline void ascii(std::span<std::byte> bytes, std::size_t offset, std::string_view value) {
+    std::ranges::transform(value, bytes.begin() + static_cast<std::ptrdiff_t>(offset),
                            [](char ch) { return static_cast<std::byte>(ch); });
 }
 
@@ -70,14 +64,10 @@ inline std::vector<std::byte> smpl_object(std::string_view name = "TEST") {
     return bytes;
 }
 
-inline void set_fat12(std::span<std::byte> fat, std::uint16_t cluster,
-                      std::uint16_t value) {
+inline void set_fat12(std::span<std::byte> fat, std::uint16_t cluster, std::uint16_t value) {
     const auto offset = static_cast<std::size_t>(cluster) + cluster / 2U;
-    auto pair =
-        static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(fat[offset])) |
-        static_cast<std::uint16_t>(
-            std::to_integer<std::uint8_t>(fat[offset + 1]))
-            << 8U;
+    auto pair = static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(fat[offset])) |
+                static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(fat[offset + 1])) << 8U;
     auto wide_pair = static_cast<std::uint32_t>(pair);
     const auto wide_value = static_cast<std::uint32_t>(value);
     if ((cluster & 1U) != 0U)
@@ -107,8 +97,7 @@ inline std::vector<std::byte> fat_fixture(std::uint16_t chain_end = 0xfffU) {
         bytes[fat_offset] = std::byte{0xf0};
         bytes[fat_offset + 1] = std::byte{0xff};
         bytes[fat_offset + 2] = std::byte{0xff};
-        set_fat12(std::span{bytes}.subspan(fat_offset, sector_size), 2,
-                  chain_end);
+        set_fat12(std::span{bytes}.subspan(fat_offset, sector_size), 2, chain_end);
     }
     ascii(bytes, root_offset, "SMPTEST ");
     ascii(bytes, root_offset + 8, "004");
@@ -161,9 +150,7 @@ inline std::vector<std::byte> fat_fixture_with_invalid_then_valid_waveform() {
     return bytes;
 }
 
-inline std::vector<std::byte> iso_record(std::span<const std::byte> name,
-                                         std::uint32_t extent,
-                                         std::uint32_t size,
+inline std::vector<std::byte> iso_record(std::span<const std::byte> name, std::uint32_t extent, std::uint32_t size,
                                          std::uint8_t flags) {
     auto length = 33U + name.size();
     if ((length & 1U) != 0U)
@@ -182,9 +169,7 @@ inline std::vector<std::byte> iso_record(std::span<const std::byte> name,
     return record;
 }
 
-inline std::vector<std::byte> iso_record(std::string_view name,
-                                         std::uint32_t extent,
-                                         std::uint32_t size,
+inline std::vector<std::byte> iso_record(std::string_view name, std::uint32_t extent, std::uint32_t size,
                                          std::uint8_t flags) {
     std::vector<std::byte> bytes;
     bytes.reserve(name.size());
@@ -193,10 +178,8 @@ inline std::vector<std::byte> iso_record(std::string_view name,
     return iso_record(bytes, extent, size, flags);
 }
 
-inline void append_record(std::span<std::byte> sector, std::size_t &offset,
-                          const std::vector<std::byte> &record) {
-    std::ranges::copy(record,
-                      sector.begin() + static_cast<std::ptrdiff_t>(offset));
+inline void append_record(std::span<std::byte> sector, std::size_t &offset, const std::vector<std::byte> &record) {
+    std::ranges::copy(record, sector.begin() + static_cast<std::ptrdiff_t>(offset));
     offset += record.size();
 }
 
@@ -238,8 +221,7 @@ inline std::vector<std::byte> iso_fixture(bool outside_extent = false) {
     append_record(volume, offset, iso_record(dot, 20, sector_size, 2));
     append_record(volume, offset, iso_record(dotdot, 19, sector_size, 2));
     append_record(volume, offset,
-                  iso_record("F000.;1", outside_extent ? 99 : 21,
-                             static_cast<std::uint32_t>(object.size()), 0));
+                  iso_record("F000.;1", outside_extent ? 99 : 21, static_cast<std::uint32_t>(object.size()), 0));
     if (!outside_extent)
         std::ranges::copy(object, bytes.begin() + 21 * sector_size);
     auto table = std::span{bytes}.subspan(22 * sector_size, 64);

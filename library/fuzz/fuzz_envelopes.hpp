@@ -9,34 +9,27 @@
 
 namespace axk::fuzz {
 
-inline void le16(std::vector<std::byte> &bytes, std::size_t offset,
-                 std::uint16_t value) {
+inline void le16(std::vector<std::byte> &bytes, std::size_t offset, std::uint16_t value) {
     bytes[offset] = static_cast<std::byte>(value & 0xffU);
     bytes[offset + 1U] = static_cast<std::byte>(value >> 8U);
 }
 
-inline void le32(std::vector<std::byte> &bytes, std::size_t offset,
-                 std::uint32_t value) {
+inline void le32(std::vector<std::byte> &bytes, std::size_t offset, std::uint32_t value) {
     for (std::size_t index = 0; index < 4U; ++index)
-        bytes[offset + index] =
-            static_cast<std::byte>((value >> (index * 8U)) & 0xffU);
+        bytes[offset + index] = static_cast<std::byte>((value >> (index * 8U)) & 0xffU);
 }
 
-inline void be16(std::vector<std::byte> &bytes, std::size_t offset,
-                 std::uint16_t value) {
+inline void be16(std::vector<std::byte> &bytes, std::size_t offset, std::uint16_t value) {
     bytes[offset] = static_cast<std::byte>(value >> 8U);
     bytes[offset + 1U] = static_cast<std::byte>(value & 0xffU);
 }
 
-inline void be32(std::vector<std::byte> &bytes, std::size_t offset,
-                 std::uint32_t value) {
+inline void be32(std::vector<std::byte> &bytes, std::size_t offset, std::uint32_t value) {
     for (std::size_t index = 0; index < 4U; ++index)
-        bytes[offset + index] =
-            static_cast<std::byte>((value >> ((3U - index) * 8U)) & 0xffU);
+        bytes[offset + index] = static_cast<std::byte>((value >> ((3U - index) * 8U)) & 0xffU);
 }
 
-inline std::vector<std::byte>
-fat_record_envelope(std::span<const std::byte> input) {
+inline std::vector<std::byte> fat_record_envelope(std::span<const std::byte> input) {
     constexpr std::size_t image_size = 1'474'560U;
     constexpr std::size_t root_offset = 19U * 512U;
     std::vector<std::byte> bytes(image_size);
@@ -58,14 +51,12 @@ fat_record_envelope(std::span<const std::byte> input) {
         bytes[fat_offset + 1U] = std::byte{0xff};
         bytes[fat_offset + 2U] = std::byte{0xff};
     }
-    std::ranges::copy(
-        input.first(std::min(input.size(), bytes.size() - root_offset)),
-        bytes.begin() + static_cast<std::ptrdiff_t>(root_offset));
+    std::ranges::copy(input.first(std::min(input.size(), bytes.size() - root_offset)),
+                      bytes.begin() + static_cast<std::ptrdiff_t>(root_offset));
     return bytes;
 }
 
-inline std::vector<std::byte>
-iso_record_envelope(std::span<const std::byte> input) {
+inline std::vector<std::byte> iso_record_envelope(std::span<const std::byte> input) {
     constexpr std::size_t sector_size = 2048U;
     constexpr std::size_t sector_count = 20U;
     std::vector<std::byte> bytes(sector_size * sector_count);
@@ -92,25 +83,18 @@ iso_record_envelope(std::span<const std::byte> input) {
         bytes[terminator + 1U + index] = static_cast<std::byte>("CD001"[index]);
     bytes[terminator + 6U] = std::byte{1};
     const auto directory = 18U * sector_size;
-    std::ranges::copy(
-        input.first(std::min(input.size(), bytes.size() - directory)),
-        bytes.begin() + static_cast<std::ptrdiff_t>(directory));
+    std::ranges::copy(input.first(std::min(input.size(), bytes.size() - directory)),
+                      bytes.begin() + static_cast<std::ptrdiff_t>(directory));
     return bytes;
 }
 
-inline std::vector<std::byte>
-typed_object_envelope(std::span<const std::byte> input,
-                      std::string_view object_type) {
+inline std::vector<std::byte> typed_object_envelope(std::span<const std::byte> input, std::string_view object_type) {
     constexpr std::string_view magic{"FSFSDEV3SPLX"};
-    std::vector<std::byte> payload(
-        std::max<std::size_t>(0x400U, 0x40U + input.size()));
+    std::vector<std::byte> payload(std::max<std::size_t>(0x400U, 0x40U + input.size()));
     std::ranges::copy(input, payload.begin() + 0x40);
-    std::ranges::transform(magic, payload.begin(), [](char value) {
-        return static_cast<std::byte>(value);
-    });
-    std::ranges::transform(object_type, payload.begin() + 0x0c, [](char value) {
-        return static_cast<std::byte>(value);
-    });
+    std::ranges::transform(magic, payload.begin(), [](char value) { return static_cast<std::byte>(value); });
+    std::ranges::transform(object_type, payload.begin() + 0x0c,
+                           [](char value) { return static_cast<std::byte>(value); });
     return payload;
 }
 

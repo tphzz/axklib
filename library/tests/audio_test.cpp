@@ -7,15 +7,13 @@
 #include "axklib/audio.hpp"
 
 TEST(Audio, DecodesExactCurrentPcmAndWritesDeterministicWave) {
-    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} /
-                      "tests/fixtures/images/sampler-authored/"
-                      "HD00_512_single_sbnk_authored.hds";
+    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
+                                                               "HD00_512_single_sbnk_authored.hds";
     const auto container = axk::open_image(path);
     ASSERT_TRUE(container);
     const auto catalog = axk::build_object_catalog(*container);
     ASSERT_TRUE(catalog);
-    const auto sample = std::ranges::find(
-        catalog->objects, std::string{"p0:sfs9"}, &axk::ObjectSnapshot::key);
+    const auto sample = std::ranges::find(catalog->objects, std::string{"p0:sfs9"}, &axk::ObjectSnapshot::key);
     ASSERT_NE(sample, catalog->objects.end());
     const auto waveform = axk::decode_waveform(*container, *sample);
     ASSERT_TRUE(waveform);
@@ -27,8 +25,7 @@ TEST(Audio, DecodesExactCurrentPcmAndWritesDeterministicWave) {
     ASSERT_TRUE(wav);
     EXPECT_EQ(wav->size(), 44U + waveform->pcm.size());
     EXPECT_EQ((*wav)[0], std::byte{'R'});
-    EXPECT_TRUE(std::ranges::equal(std::span{*wav}.subspan(44),
-                                   std::span<const std::byte>{waveform->pcm}));
+    EXPECT_TRUE(std::ranges::equal(std::span{*wav}.subspan(44), std::span<const std::byte>{waveform->pcm}));
     const auto preview = axk::build_preview_envelope(*waveform, 16);
     ASSERT_TRUE(preview);
     EXPECT_EQ(preview->bins.size(), 16U);

@@ -19,29 +19,22 @@ using OrderedJson = nlohmann::ordered_json;
 
 Error serialization_error(const nlohmann::json::exception &error) {
     return make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
-                      "report JSON serialization failed: " +
-                          std::string{error.what()});
+                      "report JSON serialization failed: " + std::string{error.what()});
 }
 
-constexpr std::array quality_names{"quality", "extraction_quality",
-                                   "match_quality",
+constexpr std::array quality_names{"quality", "extraction_quality", "match_quality",
                                    "organization_relationship_quality"};
 constexpr std::array issue_names{"code", "issue_code", "decode_issue_codes"};
 constexpr std::array object_ref_names{
-    "object_key",      "source_key",       "target_key",
-    "partition_index", "sfs_id",           "payload_offset",
-    "raw_offset",      "object_offset",    "object_offset_hex",
-    "source_path",     "source_container", "image"};
+    "object_key", "source_key",    "target_key",        "partition_index", "sfs_id",           "payload_offset",
+    "raw_offset", "object_offset", "object_offset_hex", "source_path",     "source_container", "image"};
 
-template <std::size_t Size>
-bool contains(const std::array<const char *, Size> &values,
-              std::string_view value) {
+template <std::size_t Size> bool contains(const std::array<const char *, Size> &values, std::string_view value) {
     return std::ranges::find(values, value) != values.end();
 }
 
 std::string type_name(const ReportValue &value) {
-    if (const auto *item = std::get_if<std::string>(&value.value);
-        item != nullptr && item->empty())
+    if (const auto *item = std::get_if<std::string>(&value.value); item != nullptr && item->empty())
         return "null";
     switch (value.value.index()) {
     case 0:
@@ -77,8 +70,7 @@ std::string combined_type(const std::set<std::string> &values) {
 }
 
 const ReportValue *find(const ReportRow &row, std::string_view name) {
-    const auto found = std::ranges::find(
-        row, name, &std::pair<std::string, ReportValue>::first);
+    const auto found = std::ranges::find(row, name, &std::pair<std::string, ReportValue>::first);
     return found == row.end() ? nullptr : &found->second;
 }
 
@@ -93,10 +85,8 @@ std::string scalar_text(const ReportValue &value) {
         return std::to_string(*item);
     if (const auto *item = std::get_if<double>(&value.value)) {
         std::array<char, 64> buffer{};
-        const auto result =
-            std::to_chars(buffer.data(), buffer.data() + buffer.size(), *item);
-        return result.ec == std::errc{} ? std::string{buffer.data(), result.ptr}
-                                        : std::string{};
+        const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), *item);
+        return result.ec == std::errc{} ? std::string{buffer.data(), result.ptr} : std::string{};
     }
     if (const auto *item = std::get_if<std::string>(&value.value))
         return *item;
@@ -123,8 +113,7 @@ OrderedJson json_value(const ReportValue &value) {
         return result;
     }
     auto result = OrderedJson::object();
-    for (const auto &[name, child] :
-         std::get<ReportValue::Object>(value.value)) {
+    for (const auto &[name, child] : std::get<ReportValue::Object>(value.value)) {
         result[name] = json_value(child);
     }
     return result;
@@ -150,21 +139,17 @@ std::string csv_field(std::string value) {
     return escaped;
 }
 
-Result<void> write_atomic(const std::filesystem::path &path,
-                          std::string_view text, bool overwrite) {
+Result<void> write_atomic(const std::filesystem::path &path, std::string_view text, bool overwrite) {
     std::error_code error;
     if (!overwrite && std::filesystem::exists(path, error)) {
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                       "refusing to replace existing report: " +
-                           text::path_to_utf8(path))};
+        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                                          "refusing to replace existing report: " + text::path_to_utf8(path))};
     }
     if (!path.parent_path().empty())
         std::filesystem::create_directories(path.parent_path(), error);
     if (error) {
         return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                       "could not create report output directory")};
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create report output directory")};
     }
     const auto temporary = text::temporary_sibling(path);
     if (!temporary)
@@ -175,8 +160,7 @@ Result<void> write_atomic(const std::filesystem::path &path,
         if (!output) {
             std::filesystem::remove(*temporary, error);
             return std::unexpected{
-                make_error(ErrorCode::io_read_failed, ErrorCategory::io,
-                           "could not write temporary report")};
+                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary report")};
         }
     }
     if (overwrite)
@@ -185,8 +169,7 @@ Result<void> write_atomic(const std::filesystem::path &path,
     if (error) {
         std::filesystem::remove(*temporary, error);
         return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                       "could not publish report atomically")};
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not publish report atomically")};
     }
     return {};
 }
@@ -220,12 +203,10 @@ std::string semantic_notes(std::string_view name) {
         return "Conservative visible Rch Assign family: off, =SMP, 01 through "
                "16, BasicRch, B01 "
                "through B16, or unknown.";
-    if (name == "basis" || name == "extraction_basis" || name == "notes" ||
-        name == "match_notes")
+    if (name == "basis" || name == "extraction_basis" || name == "notes" || name == "match_notes")
         return "Quality/basis origin field. Do not treat as decoded raw "
                "storage by itself.";
-    if (name.starts_with("raw_") || name.ends_with("_offset") ||
-        name.ends_with("_offset_hex"))
+    if (name.starts_with("raw_") || name.ends_with("_offset") || name.ends_with("_offset_hex"))
         return "Raw image/object reference for auditability.";
     if (name == "source_path" || name == "source_container" || name == "image")
         return "Input source path used to produce this row.";
@@ -234,13 +215,11 @@ std::string semantic_notes(std::string_view name) {
     return {};
 }
 
-template <typename Map>
-std::vector<std::pair<std::string, std::uint64_t>> pairs(const Map &values) {
+template <typename Map> std::vector<std::pair<std::string, std::uint64_t>> pairs(const Map &values) {
     return {values.begin(), values.end()};
 }
 
-OrderedJson
-counts_json(const std::vector<std::pair<std::string, std::uint64_t>> &values) {
+OrderedJson counts_json(const std::vector<std::pair<std::string, std::uint64_t>> &values) {
     auto result = OrderedJson::object();
     for (const auto &[name, count] : values)
         result[name] = count;
@@ -285,8 +264,7 @@ ReportValue::ReportValue(const char *item) : value{std::string{item}} {}
 ReportValue::ReportValue(Array item) noexcept : value{std::move(item)} {}
 ReportValue::ReportValue(Object item) noexcept : value{std::move(item)} {}
 
-ReportSchemaManifest make_report_schema(std::string report_name,
-                                        std::span<const ReportRow> rows,
+ReportSchemaManifest make_report_schema(std::string report_name, std::span<const ReportRow> rows,
                                         ReportSchemaOptions options) {
     ReportSchemaManifest result;
     result.report_name = std::move(report_name);
@@ -314,13 +292,12 @@ ReportSchemaManifest make_report_schema(std::string report_name,
                 types.insert(type_name(*value));
             }
         }
-        result.columns.push_back(
-            {name,
-             combined_type(types),
-             !rows.empty() && present == rows.size(),
-             types.contains("null") || present < rows.size(),
-             semantic_notes(name),
-             {}});
+        result.columns.push_back({name,
+                                  combined_type(types),
+                                  !rows.empty() && present == rows.size(),
+                                  types.contains("null") || present < rows.size(),
+                                  semantic_notes(name),
+                                  {}});
         if (contains(quality_names, name))
             result.quality_columns.push_back(name);
         if (contains(issue_names, name))
@@ -330,19 +307,15 @@ ReportSchemaManifest make_report_schema(std::string report_name,
     }
     for (const auto &row : rows) {
         for (const auto name : quality_names) {
-            if (const auto *value = find(row, name);
-                value != nullptr && !scalar_text(*value).empty())
+            if (const auto *value = find(row, name); value != nullptr && !scalar_text(*value).empty())
                 ++quality_counts[scalar_text(*value)];
         }
         for (const auto name : std::array{"code", "issue_code"}) {
-            if (const auto *value = find(row, name);
-                value != nullptr && !scalar_text(*value).empty())
+            if (const auto *value = find(row, name); value != nullptr && !scalar_text(*value).empty())
                 ++issue_counts[scalar_text(*value)];
         }
-        for (const auto name :
-             std::array{"object_type", "type", "matched_target_type"}) {
-            if (const auto *value = find(row, name);
-                value != nullptr && !scalar_text(*value).empty()) {
+        for (const auto name : std::array{"object_type", "type", "matched_target_type"}) {
+            if (const auto *value = find(row, name); value != nullptr && !scalar_text(*value).empty()) {
                 ++type_counts[scalar_text(*value)];
                 break;
             }
@@ -354,9 +327,7 @@ ReportSchemaManifest make_report_schema(std::string report_name,
     return result;
 }
 
-Result<void> write_report_json(const std::filesystem::path &path,
-                               std::span<const ReportRow> rows,
-                               bool overwrite) {
+Result<void> write_report_json(const std::filesystem::path &path, std::span<const ReportRow> rows, bool overwrite) {
     try {
         auto value = OrderedJson::array();
         for (const auto &row : rows)
@@ -367,8 +338,7 @@ Result<void> write_report_json(const std::filesystem::path &path,
     }
 }
 
-Result<void> write_report_object(const std::filesystem::path &path,
-                                 const ReportRow &row, bool overwrite) {
+Result<void> write_report_object(const std::filesystem::path &path, const ReportRow &row, bool overwrite) {
     try {
         return write_atomic(path, json_row(row).dump(2) + "\n", overwrite);
     } catch (const nlohmann::json::exception &error) {
@@ -376,10 +346,8 @@ Result<void> write_report_object(const std::filesystem::path &path,
     }
 }
 
-Result<void> write_report_csv(const std::filesystem::path &path,
-                              std::span<const ReportRow> rows,
-                              std::span<const std::string> empty_columns,
-                              bool overwrite) {
+Result<void> write_report_csv(const std::filesystem::path &path, std::span<const ReportRow> rows,
+                              std::span<const std::string> empty_columns, bool overwrite) {
     std::vector<std::string> columns;
     if (!rows.empty()) {
         for (const auto &[name, value] : rows.front()) {
@@ -419,41 +387,34 @@ Result<void> write_report_csv(const std::filesystem::path &path,
     return write_atomic(path, output.str(), overwrite);
 }
 
-Result<void> write_report_schema(const std::filesystem::path &path,
-                                 const ReportSchemaManifest &manifest,
+Result<void> write_report_schema(const std::filesystem::path &path, const ReportSchemaManifest &manifest,
                                  bool overwrite) {
     try {
-        return write_atomic(path, schema_json(manifest).dump(2) + "\n",
-                            overwrite);
+        return write_atomic(path, schema_json(manifest).dump(2) + "\n", overwrite);
     } catch (const nlohmann::json::exception &error) {
         return std::unexpected{serialization_error(error)};
     }
 }
 
-Result<void>
-write_report_schema_index(const std::filesystem::path &path,
-                          std::span<const ReportSchemaManifest> manifests,
-                          bool overwrite) {
+Result<void> write_report_schema_index(const std::filesystem::path &path,
+                                       std::span<const ReportSchemaManifest> manifests, bool overwrite) {
     try {
         auto reports = OrderedJson::array();
         for (const auto &manifest : manifests) {
-            reports.push_back(
-                {{"report_name", manifest.report_name},
-                 {"row_count", manifest.row_count},
-                 {"column_count", manifest.columns.size()},
-                 {"quality_counts", counts_json(manifest.quality_counts)},
-                 {"issue_code_counts", counts_json(manifest.issue_code_counts)},
-                 {"object_type_counts",
-                  counts_json(manifest.object_type_counts)},
-                 {"quality_columns", manifest.quality_columns},
-                 {"issue_code_columns", manifest.issue_code_columns},
-                 {"object_ref_columns", manifest.object_ref_columns},
-                 {"source_command", manifest.source_command},
-                 {"library_version", manifest.library_version}});
+            reports.push_back({{"report_name", manifest.report_name},
+                               {"row_count", manifest.row_count},
+                               {"column_count", manifest.columns.size()},
+                               {"quality_counts", counts_json(manifest.quality_counts)},
+                               {"issue_code_counts", counts_json(manifest.issue_code_counts)},
+                               {"object_type_counts", counts_json(manifest.object_type_counts)},
+                               {"quality_columns", manifest.quality_columns},
+                               {"issue_code_columns", manifest.issue_code_columns},
+                               {"object_ref_columns", manifest.object_ref_columns},
+                               {"source_command", manifest.source_command},
+                               {"library_version", manifest.library_version}});
         }
-        const auto value = OrderedJson{{"schema_version", "1.0"},
-                                       {"report_count", manifests.size()},
-                                       {"reports", std::move(reports)}};
+        const auto value =
+            OrderedJson{{"schema_version", "1.0"}, {"report_count", manifests.size()}, {"reports", std::move(reports)}};
         return write_atomic(path, value.dump(2) + "\n", overwrite);
     } catch (const nlohmann::json::exception &error) {
         return std::unexpected{serialization_error(error)};

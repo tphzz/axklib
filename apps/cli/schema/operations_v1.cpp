@@ -13,8 +13,7 @@ using OrderedJson = nlohmann::ordered_json;
 
 Error serialization_error(const nlohmann::json::exception &error) {
     return make_error(ErrorCode::invalid_argument, ErrorCategory::internal,
-                      std::string{"could not serialize CLI JSON: "} +
-                          error.what());
+                      std::string{"could not serialize CLI JSON: "} + error.what());
 }
 
 OrderedJson audio_json(const AudioImportOutput &audio) {
@@ -40,9 +39,7 @@ AlterationOutput project_alteration(const AlterationResult &altered) {
     AlterationOutput result{
         .source_path_utf8 = text::path_to_utf8(altered.source_path),
         .output_path_utf8 =
-            altered.output_path
-                ? std::optional{text::path_to_utf8(*altered.output_path)}
-                : std::nullopt,
+            altered.output_path ? std::optional{text::path_to_utf8(*altered.output_path)} : std::nullopt,
         .applied = altered.applied,
         .operations = {},
     };
@@ -60,11 +57,9 @@ AlterationOutput project_alteration(const AlterationResult &altered) {
             .allocated_clusters = operation.allocated_clusters,
             .audio_import = std::nullopt,
         };
-        std::ranges::transform(operation.removed_sfs_ids,
-                               std::back_inserter(projected.removed_sfs_ids),
+        std::ranges::transform(operation.removed_sfs_ids, std::back_inserter(projected.removed_sfs_ids),
                                [](SfsId id) { return id.value; });
-        std::ranges::transform(operation.inserted_sfs_ids,
-                               std::back_inserter(projected.inserted_sfs_ids),
+        std::ranges::transform(operation.inserted_sfs_ids, std::back_inserter(projected.inserted_sfs_ids),
                                [](SfsId id) { return id.value; });
         if (operation.audio_import) {
             const auto &audio = *operation.audio_import;
@@ -102,16 +97,12 @@ Result<std::string> serialize(const AlterationOutput &output, bool pretty) {
                 {"inserted_sfs_ids", operation.inserted_sfs_ids},
                 {"freed_clusters", operation.freed_clusters},
                 {"allocated_clusters", operation.allocated_clusters},
-                {"audio_import", operation.audio_import
-                                     ? audio_json(*operation.audio_import)
-                                     : OrderedJson(nullptr)},
+                {"audio_import", operation.audio_import ? audio_json(*operation.audio_import) : OrderedJson(nullptr)},
             });
         }
         return OrderedJson{
             {"source_path", output.source_path_utf8},
-            {"output_path", output.output_path_utf8
-                                ? OrderedJson(*output.output_path_utf8)
-                                : OrderedJson(nullptr)},
+            {"output_path", output.output_path_utf8 ? OrderedJson(*output.output_path_utf8) : OrderedJson(nullptr)},
             {"applied", output.applied},
             {"operations", std::move(operations)},
         }

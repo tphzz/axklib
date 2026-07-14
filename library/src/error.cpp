@@ -33,8 +33,7 @@ std::string_view category_name(ErrorCategory category) {
     return "internal";
 }
 
-void append_label(std::string &target, std::string_view label,
-                  std::string_view value) {
+void append_label(std::string &target, std::string_view label, std::string_view value) {
     target += target.ends_with('[') ? "" : ", ";
     target += label;
     target += '=';
@@ -45,22 +44,18 @@ void append_label(std::string &target, std::string_view label,
 
 std::string render_error(const Error &error, bool include_trace) {
     std::string result{category_name(error.category)};
-    result +=
-        '[' + std::to_string(static_cast<std::uint32_t>(error.code)) + "]: ";
+    result += '[' + std::to_string(static_cast<std::uint32_t>(error.code)) + "]: ";
     result += error.message;
 
     const auto &context = error.context;
-    const bool has_context =
-        context.partition_index || context.volume_name || context.object_type ||
-        context.object_name ||
-        (include_trace && (context.source_path || context.raw_offset));
+    const bool has_context = context.partition_index || context.volume_name || context.object_type ||
+                             context.object_name || (include_trace && (context.source_path || context.raw_offset));
     if (!has_context) {
         return result;
     }
     result += " [";
     if (context.partition_index) {
-        append_label(result, "partition",
-                     std::to_string(*context.partition_index));
+        append_label(result, "partition", std::to_string(*context.partition_index));
     }
     if (context.volume_name) {
         append_label(result, "volume", *context.volume_name);

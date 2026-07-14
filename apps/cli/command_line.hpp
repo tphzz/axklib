@@ -10,8 +10,7 @@
 
 namespace axk::cli::platform {
 
-Result<std::vector<std::string>>
-normalize_windows_command_line(std::span<wchar_t *const> arguments);
+Result<std::vector<std::string>> normalize_windows_command_line(std::span<wchar_t *const> arguments);
 
 } // namespace axk::cli::platform
 

@@ -26,12 +26,7 @@ enum class ObjectType : std::uint8_t {
 };
 
 enum class ObjectFormat : std::uint8_t { current, alternating_byte, unknown };
-enum class Verification : std::uint8_t {
-    verified,
-    corroborated,
-    tentative,
-    unknown
-};
+enum class Verification : std::uint8_t { verified, corroborated, tentative, unknown };
 
 struct FieldSource {
     std::uint32_t offset{};
@@ -129,8 +124,7 @@ struct CurrentSbnk {
     std::vector<NumericField> numeric_fields;
     std::vector<std::byte> raw_parameter_window;
 
-    [[nodiscard]] const NumericField *
-    find_numeric_field(std::string_view name) const noexcept;
+    [[nodiscard]] const NumericField *find_numeric_field(std::string_view name) const noexcept;
 };
 
 struct SbacSlot {
@@ -183,8 +177,7 @@ struct CurrentProfile {
 };
 
 using DecodedPayload =
-    std::variant<GenericObject, CurrentSmpl, CurrentSbnk, CurrentSbac,
-                 CurrentProg, CurrentSequence, CurrentProfile>;
+    std::variant<GenericObject, CurrentSmpl, CurrentSbnk, CurrentSbac, CurrentProg, CurrentSequence, CurrentProfile>;
 
 struct DecodedObject {
     ObjectHeader header;
@@ -192,8 +185,7 @@ struct DecodedObject {
     DecodedPayload payload;
 };
 
-AXK_API Result<ObjectHeader>
-decode_object_header(std::span<const std::byte> payload);
+AXK_API Result<ObjectHeader> decode_object_header(std::span<const std::byte> payload);
 AXK_API Result<DecodedObject> decode_object(std::span<const std::byte> payload);
 
 } // namespace axk

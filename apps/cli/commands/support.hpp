@@ -36,29 +36,20 @@ struct CliLoadResult {
 
 std::string object_type_text(ObjectType type);
 std::string media_kind_text(MediaKind kind);
-std::vector<std::filesystem::path>
-expand_cli_paths(const std::vector<std::filesystem::path> &inputs);
+std::vector<std::filesystem::path> expand_cli_paths(const std::vector<std::filesystem::path> &inputs);
 CliLoadResult load_cli_paths(const std::vector<std::filesystem::path> &inputs);
-Result<SemanticSnapshot>
-load_semantic_snapshot(const std::filesystem::path &path);
-Result<void> prepare_report_directory(const std::filesystem::path &path,
-                                      bool overwrite);
-Result<ReportSchemaManifest>
-write_cli_report(const std::filesystem::path &output, std::string name,
-                 std::span<const ReportRow> rows, std::string source_command,
-                 bool overwrite);
-std::string public_object_key(const CliLoaded &loaded,
-                              std::string_view native_key);
-std::string public_scope_key(const CliLoaded &loaded,
-                             const ObjectSnapshot &item);
+Result<SemanticSnapshot> load_semantic_snapshot(const std::filesystem::path &path);
+Result<void> prepare_report_directory(const std::filesystem::path &path, bool overwrite);
+Result<ReportSchemaManifest> write_cli_report(const std::filesystem::path &output, std::string name,
+                                              std::span<const ReportRow> rows, std::string source_command,
+                                              bool overwrite);
+std::string public_object_key(const CliLoaded &loaded, std::string_view native_key);
+std::string public_scope_key(const CliLoaded &loaded, const ObjectSnapshot &item);
 ReportRow inventory_row(const CliLoaded &loaded, const ObjectSnapshot &item);
-ReportRow relationship_report_row(const CliLoaded &loaded,
-                                  const Relationship &row);
-ReportRow coverage_summary(const CliLoadResult &loaded,
-                           std::span<const ReportRow> relationships);
+ReportRow relationship_report_row(const CliLoaded &loaded, const Relationship &row);
+ReportRow coverage_summary(const CliLoadResult &loaded, std::span<const ReportRow> relationships);
 int report_failure(const Error &error);
-ContentTree cli_content_tree(const CliLoaded &loaded,
-                             bool include_default_programs);
+ContentTree cli_content_tree(const CliLoaded &loaded, bool include_default_programs);
 std::string sfs_selector_component(const ContentNode &node);
 
 } // namespace axk::cli::commands

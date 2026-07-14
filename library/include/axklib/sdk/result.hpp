@@ -71,8 +71,7 @@ struct error {
 
 class bad_result_access final : public std::logic_error {
   public:
-    bad_result_access()
-        : std::logic_error("axk::result holds the other alternative") {}
+    bad_result_access() : std::logic_error("axk::result holds the other alternative") {}
 };
 
 template <typename T> class result {
@@ -82,12 +81,8 @@ template <typename T> class result {
     result(const axk::error &failure) : storage_(failure) {}
     result(axk::error &&failure) : storage_(std::move(failure)) {}
 
-    [[nodiscard]] bool has_value() const noexcept {
-        return std::holds_alternative<T>(storage_);
-    }
-    [[nodiscard]] explicit operator bool() const noexcept {
-        return has_value();
-    }
+    [[nodiscard]] bool has_value() const noexcept { return std::holds_alternative<T>(storage_); }
+    [[nodiscard]] explicit operator bool() const noexcept { return has_value(); }
 
     T &value() & {
         if (!has_value())
@@ -129,12 +124,8 @@ template <> class result<void> {
     result(const axk::error &failure) : failure_(failure) {}
     result(axk::error &&failure) : failure_(std::move(failure)) {}
 
-    [[nodiscard]] bool has_value() const noexcept {
-        return !failure_.has_value();
-    }
-    [[nodiscard]] explicit operator bool() const noexcept {
-        return has_value();
-    }
+    [[nodiscard]] bool has_value() const noexcept { return !failure_.has_value(); }
+    [[nodiscard]] explicit operator bool() const noexcept { return has_value(); }
     void value() const {
         if (!has_value())
             throw bad_result_access{};

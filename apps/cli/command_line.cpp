@@ -6,16 +6,14 @@
 
 namespace axk::cli::platform {
 
-Result<std::vector<std::string>>
-normalize_windows_command_line(std::span<wchar_t *const> arguments) {
+Result<std::vector<std::string>> normalize_windows_command_line(std::span<wchar_t *const> arguments) {
     static_assert(sizeof(wchar_t) == sizeof(char16_t));
     std::vector<std::string> result;
     result.reserve(arguments.size());
     for (const auto *argument : arguments) {
         if (argument == nullptr) {
-            return std::unexpected{make_error(ErrorCode::invalid_argument,
-                                              ErrorCategory::internal,
-                                              "command-line argument is null")};
+            return std::unexpected{
+                make_error(ErrorCode::invalid_argument, ErrorCategory::internal, "command-line argument is null")};
         }
         std::u16string utf16;
         for (const auto *cursor = argument; *cursor != L'\0'; ++cursor)

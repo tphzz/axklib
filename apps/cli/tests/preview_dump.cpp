@@ -16,10 +16,8 @@ int main(int argc, char **argv) {
         return 2;
     std::size_t bin_count{};
     const std::string_view bins{argv[3]};
-    const auto parsed =
-        std::from_chars(bins.data(), bins.data() + bins.size(), bin_count);
-    if (parsed.ec != std::errc{} || parsed.ptr != bins.data() + bins.size() ||
-        bin_count == 0U)
+    const auto parsed = std::from_chars(bins.data(), bins.data() + bins.size(), bin_count);
+    if (parsed.ec != std::errc{} || parsed.ptr != bins.data() + bins.size() || bin_count == 0U)
         return 2;
     const auto container = axk::open_image(std::filesystem::path{argv[1]});
     if (!container) {
@@ -32,8 +30,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     const std::string_view object_key{argv[2]};
-    const auto object = std::ranges::find(catalog->objects, object_key,
-                                          &axk::ObjectSnapshot::key);
+    const auto object = std::ranges::find(catalog->objects, object_key, &axk::ObjectSnapshot::key);
     if (object == catalog->objects.end())
         return 1;
     const auto waveform = axk::decode_waveform(*container, *object);

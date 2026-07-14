@@ -10,8 +10,7 @@ Error bounds_error(std::size_t offset, std::size_t count, std::size_t size) {
     ErrorContext context;
     context.raw_offset = offset;
     return make_error(ErrorCode::out_of_bounds, ErrorCategory::container,
-                      "byte range at offset " + std::to_string(offset) +
-                          " with length " + std::to_string(count) +
+                      "byte range at offset " + std::to_string(offset) + " with length " + std::to_string(count) +
                           " exceeds buffer size " + std::to_string(size),
                       std::move(context));
 }
@@ -20,46 +19,38 @@ Error bounds_error(std::size_t offset, std::size_t count, std::size_t size) {
 
 Result<std::uint64_t> checked_add(std::uint64_t left, std::uint64_t right) {
     if (right > std::numeric_limits<std::uint64_t>::max() - left) {
-        return std::unexpected{make_error(ErrorCode::integer_overflow,
-                                          ErrorCategory::container,
-                                          "unsigned 64-bit addition overflow")};
+        return std::unexpected{
+            make_error(ErrorCode::integer_overflow, ErrorCategory::container, "unsigned 64-bit addition overflow")};
     }
     return left + right;
 }
 
-Result<std::uint64_t> checked_subtract(std::uint64_t left,
-                                       std::uint64_t right) {
+Result<std::uint64_t> checked_subtract(std::uint64_t left, std::uint64_t right) {
     if (right > left) {
         return std::unexpected{
-            make_error(ErrorCode::integer_overflow, ErrorCategory::container,
-                       "unsigned 64-bit subtraction underflow")};
+            make_error(ErrorCode::integer_overflow, ErrorCategory::container, "unsigned 64-bit subtraction underflow")};
     }
     return left - right;
 }
 
-Result<std::uint64_t> checked_multiply(std::uint64_t left,
-                                       std::uint64_t right) {
+Result<std::uint64_t> checked_multiply(std::uint64_t left, std::uint64_t right) {
     if (left != 0 && right > std::numeric_limits<std::uint64_t>::max() / left) {
-        return std::unexpected{
-            make_error(ErrorCode::integer_overflow, ErrorCategory::container,
-                       "unsigned 64-bit multiplication overflow")};
+        return std::unexpected{make_error(ErrorCode::integer_overflow, ErrorCategory::container,
+                                          "unsigned 64-bit multiplication overflow")};
     }
     return left * right;
 }
 
 Result<std::uint64_t> align_up(std::uint64_t value, std::uint64_t alignment) {
     if (alignment == 0) {
-        return std::unexpected{make_error(ErrorCode::invalid_argument,
-                                          ErrorCategory::container,
-                                          "alignment must be nonzero")};
+        return std::unexpected{
+            make_error(ErrorCode::invalid_argument, ErrorCategory::container, "alignment must be nonzero")};
     }
     const auto remainder = value % alignment;
-    return remainder == 0 ? Result<std::uint64_t>{value}
-                          : checked_add(value, alignment - remainder);
+    return remainder == 0 ? Result<std::uint64_t>{value} : checked_add(value, alignment - remainder);
 }
 
-Result<std::span<const std::byte>> ByteReader::slice(std::size_t offset,
-                                                     std::size_t count) const {
+Result<std::span<const std::byte>> ByteReader::slice(std::size_t offset, std::size_t count) const {
     if (offset > bytes_.size() || count > bytes_.size() - offset) {
         return std::unexpected{bounds_error(offset, count, bytes_.size())};
     }
@@ -87,8 +78,7 @@ Result<std::uint16_t> ByteReader::be16(std::size_t offset) const {
     if (!data) {
         return std::unexpected{data.error()};
     }
-    return static_cast<std::uint16_t>(std::to_integer<std::uint8_t>((*data)[0])
-                                      << 8U) |
+    return static_cast<std::uint16_t>(std::to_integer<std::uint8_t>((*data)[0]) << 8U) |
            std::to_integer<std::uint8_t>((*data)[1]);
 }
 
@@ -97,29 +87,20 @@ Result<std::uint32_t> ByteReader::be32(std::size_t offset) const {
     if (!data) {
         return std::unexpected{data.error()};
     }
-    return (static_cast<std::uint32_t>(
-                std::to_integer<std::uint8_t>((*data)[0]))
-            << 24U) |
-           (static_cast<std::uint32_t>(
-                std::to_integer<std::uint8_t>((*data)[1]))
-            << 16U) |
-           (static_cast<std::uint32_t>(
-                std::to_integer<std::uint8_t>((*data)[2]))
-            << 8U) |
-           static_cast<std::uint32_t>(
-               std::to_integer<std::uint8_t>((*data)[3]));
+    return (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>((*data)[0])) << 24U) |
+           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>((*data)[1])) << 16U) |
+           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>((*data)[2])) << 8U) |
+           static_cast<std::uint32_t>(std::to_integer<std::uint8_t>((*data)[3]));
 }
 
 Result<std::int16_t> ByteReader::sbe16(std::size_t offset) const {
     const auto value = be16(offset);
-    return value ? Result<std::int16_t>{static_cast<std::int16_t>(*value)}
-                 : std::unexpected{value.error()};
+    return value ? Result<std::int16_t>{static_cast<std::int16_t>(*value)} : std::unexpected{value.error()};
 }
 
 Result<std::int32_t> ByteReader::sbe32(std::size_t offset) const {
     const auto value = be32(offset);
-    return value ? Result<std::int32_t>{static_cast<std::int32_t>(*value)}
-                 : std::unexpected{value.error()};
+    return value ? Result<std::int32_t>{static_cast<std::int32_t>(*value)} : std::unexpected{value.error()};
 }
 
 Result<std::uint16_t> ByteReader::le16(std::size_t offset) const {
@@ -127,10 +108,8 @@ Result<std::uint16_t> ByteReader::le16(std::size_t offset) const {
     if (!data) {
         return std::unexpected{data.error()};
     }
-    return static_cast<std::uint16_t>(
-               std::to_integer<std::uint8_t>((*data)[0])) |
-           static_cast<std::uint16_t>(std::to_integer<std::uint8_t>((*data)[1])
-                                      << 8U);
+    return static_cast<std::uint16_t>(std::to_integer<std::uint8_t>((*data)[0])) |
+           static_cast<std::uint16_t>(std::to_integer<std::uint8_t>((*data)[1]) << 8U);
 }
 
 Result<std::uint32_t> ByteReader::le32(std::size_t offset) const {
@@ -138,34 +117,23 @@ Result<std::uint32_t> ByteReader::le32(std::size_t offset) const {
     if (!data) {
         return std::unexpected{data.error()};
     }
-    return static_cast<std::uint32_t>(
-               std::to_integer<std::uint8_t>((*data)[0])) |
-           (static_cast<std::uint32_t>(
-                std::to_integer<std::uint8_t>((*data)[1]))
-            << 8U) |
-           (static_cast<std::uint32_t>(
-                std::to_integer<std::uint8_t>((*data)[2]))
-            << 16U) |
-           (static_cast<std::uint32_t>(
-                std::to_integer<std::uint8_t>((*data)[3]))
-            << 24U);
+    return static_cast<std::uint32_t>(std::to_integer<std::uint8_t>((*data)[0])) |
+           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>((*data)[1])) << 8U) |
+           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>((*data)[2])) << 16U) |
+           (static_cast<std::uint32_t>(std::to_integer<std::uint8_t>((*data)[3])) << 24U);
 }
 
 Result<std::int16_t> ByteReader::sle16(std::size_t offset) const {
     const auto value = le16(offset);
-    return value ? Result<std::int16_t>{static_cast<std::int16_t>(*value)}
-                 : std::unexpected{value.error()};
+    return value ? Result<std::int16_t>{static_cast<std::int16_t>(*value)} : std::unexpected{value.error()};
 }
 
 Result<std::int32_t> ByteReader::sle32(std::size_t offset) const {
     const auto value = le32(offset);
-    return value ? Result<std::int32_t>{static_cast<std::int32_t>(*value)}
-                 : std::unexpected{value.error()};
+    return value ? Result<std::int32_t>{static_cast<std::int32_t>(*value)} : std::unexpected{value.error()};
 }
 
-Result<std::string> ByteReader::ascii_field(std::size_t offset,
-                                            std::size_t count,
-                                            bool replace_invalid) const {
+Result<std::string> ByteReader::ascii_field(std::size_t offset, std::size_t count, bool replace_invalid) const {
     const auto data = slice(offset, count);
     if (!data) {
         return std::unexpected{data.error()};
@@ -181,9 +149,8 @@ Result<std::string> ByteReader::ascii_field(std::size_t offset,
             if (!replace_invalid) {
                 ErrorContext context;
                 context.raw_offset = offset + result.size();
-                return std::unexpected{make_error(
-                    ErrorCode::invalid_ascii, ErrorCategory::object,
-                    "fixed field contains non-ASCII byte", std::move(context))};
+                return std::unexpected{make_error(ErrorCode::invalid_ascii, ErrorCategory::object,
+                                                  "fixed field contains non-ASCII byte", std::move(context))};
             }
             result.push_back('?');
         } else {
@@ -196,8 +163,7 @@ Result<std::string> ByteReader::ascii_field(std::size_t offset,
     return result;
 }
 
-Result<std::string> ByteReader::printable_ascii_field(std::size_t offset,
-                                                      std::size_t count) const {
+Result<std::string> ByteReader::printable_ascii_field(std::size_t offset, std::size_t count) const {
     const auto data = slice(offset, count);
     if (!data) {
         return std::unexpected{data.error()};
@@ -214,15 +180,12 @@ Result<std::string> ByteReader::printable_ascii_field(std::size_t offset,
     result.reserve(end);
     for (const auto value : data->first(end)) {
         const auto character = std::to_integer<std::uint8_t>(value);
-        result.push_back(character >= 0x20U && character < 0x7fU
-                             ? static_cast<char>(character)
-                             : '?');
+        result.push_back(character >= 0x20U && character < 0x7fU ? static_cast<char>(character) : '?');
     }
     return result;
 }
 
-Result<std::string> ByteReader::decoded_ascii_field(std::size_t offset,
-                                                    std::size_t count) const {
+Result<std::string> ByteReader::decoded_ascii_field(std::size_t offset, std::size_t count) const {
     const auto data = slice(offset, count);
     if (!data)
         return std::unexpected{data.error()};
@@ -245,8 +208,7 @@ Result<std::string> ByteReader::decoded_ascii_field(std::size_t offset,
     return result;
 }
 
-Result<std::span<std::byte>> ByteWriter::slice(std::size_t offset,
-                                               std::size_t count) {
+Result<std::span<std::byte>> ByteWriter::slice(std::size_t offset, std::size_t count) {
     if (offset > bytes_.size() || count > bytes_.size() - offset) {
         return std::unexpected{bounds_error(offset, count, bytes_.size())};
     }
@@ -306,21 +268,15 @@ Result<void> ByteWriter::write_le32(std::size_t offset, std::uint32_t value) {
     return {};
 }
 
-Result<void> ByteWriter::write_ascii_field(std::size_t offset,
-                                           std::size_t count,
-                                           std::string_view value,
+Result<void> ByteWriter::write_ascii_field(std::size_t offset, std::size_t count, std::string_view value,
                                            std::byte pad) {
     if (value.size() > count) {
         return std::unexpected{
-            make_error(ErrorCode::invalid_argument, ErrorCategory::object,
-                       "ASCII value does not fit fixed field")};
+            make_error(ErrorCode::invalid_argument, ErrorCategory::object, "ASCII value does not fit fixed field")};
     }
-    if (std::any_of(value.begin(), value.end(), [](unsigned char character) {
-            return character > 0x7fU;
-        })) {
+    if (std::any_of(value.begin(), value.end(), [](unsigned char character) { return character > 0x7fU; })) {
         return std::unexpected{
-            make_error(ErrorCode::invalid_ascii, ErrorCategory::object,
-                       "fixed field value must contain ASCII text")};
+            make_error(ErrorCode::invalid_ascii, ErrorCategory::object, "fixed field value must contain ASCII text")};
     }
     const auto data = slice(offset, count);
     if (!data) {
@@ -328,10 +284,7 @@ Result<void> ByteWriter::write_ascii_field(std::size_t offset,
     }
     std::fill(data->begin(), data->end(), pad);
     std::transform(value.begin(), value.end(), data->begin(),
-                   [](char character) {
-                       return static_cast<std::byte>(
-                           static_cast<unsigned char>(character));
-                   });
+                   [](char character) { return static_cast<std::byte>(static_cast<unsigned char>(character)); });
     return {};
 }
 

@@ -9,42 +9,34 @@
 namespace axk {
 namespace {
 
-constexpr std::array<std::uint32_t, 12> rates{4'000,  5'512,  6'000,  8'000,
-                                              11'025, 12'000, 16'000, 22'050,
-                                              24'000, 32'000, 44'100, 48'000};
+constexpr std::array<std::uint32_t, 12> rates{4'000,  5'512,  6'000,  8'000,  11'025, 12'000,
+                                              16'000, 22'050, 24'000, 32'000, 44'100, 48'000};
 
 Error audio_import_error(std::string message) {
-    return make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
-                      std::move(message));
+    return make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio, std::move(message));
 }
 
 } // namespace
 
-Result<std::uint32_t>
-choose_sampler_sample_rate(std::uint32_t source_rate,
-                           std::optional<std::uint32_t> target_sample_rate) {
+Result<std::uint32_t> choose_sampler_sample_rate(std::uint32_t source_rate,
+                                                 std::optional<std::uint32_t> target_sample_rate) {
     if (target_sample_rate) {
         if (!std::ranges::contains(rates, *target_sample_rate)) {
-            return std::unexpected{audio_import_error(
-                "target sample rate is not supported by A-series hardware")};
+            return std::unexpected{audio_import_error("target sample rate is not supported by A-series hardware")};
         }
         return *target_sample_rate;
     }
     return std::ranges::contains(rates, source_rate) ? source_rate : 44'100U;
 }
 
-Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path,
-                                           const AudioImportOptions &options) {
+Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path, const AudioImportOptions &options) {
     if (options.expected_channels != 1U && options.expected_channels != 2U) {
-        return std::unexpected{
-            audio_import_error("expected channel count must be one or two")};
+        return std::unexpected{audio_import_error("expected channel count must be one or two")};
     }
-    const auto source =
-        audio_import_detail::inspect_sndfile(path, options.expected_channels);
+    const auto source = audio_import_detail::inspect_sndfile(path, options.expected_channels);
     if (!source)
         return std::unexpected{source.error()};
-    const auto output_rate = choose_sampler_sample_rate(
-        source->sample_rate, options.target_sample_rate);
+    const auto output_rate = choose_sampler_sample_rate(source->sample_rate, options.target_sample_rate);
     if (!output_rate)
         return std::unexpected{output_rate.error()};
     const bool resampled = *output_rate != source->sample_rate;
@@ -58,14 +50,13 @@ Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path,
             return std::unexpected{decoded.error()};
         quantized = std::move(*decoded);
     } else {
-        auto decoded =
-            audio_import_detail::decode_sndfile_float64(path, *source);
+        auto decoded = audio_import_detail::decode_sndfile_float64(path, *source);
         if (!decoded)
             return std::unexpected{decoded.error()};
         auto floating = std::move(*decoded);
         if (resampled) {
-            auto converted = audio_import_detail::resample_vhq(
-                floating, source->channels, source->sample_rate, *output_rate);
+            auto converted =
+                audio_import_detail::resample_vhq(floating, source->channels, source->sample_rate, *output_rate);
             if (!converted)
                 return std::unexpected{converted.error()};
             floating = std::move(*converted);
@@ -84,13 +75,11 @@ Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path,
     result.source_sample_rate = source->sample_rate;
     result.output_sample_rate = *output_rate;
     result.output_frames = quantized.size() / source->channels;
-    result.pcm_channels =
-        audio_import_detail::split_pcm16(quantized, source->channels);
+    result.pcm_channels = audio_import_detail::split_pcm16(quantized, source->channels);
     result.resampled = resampled;
     result.quantized = !native_pcm16;
     if (dither)
-        result.dither_algorithm =
-            std::string{audio_import_detail::dither_algorithm};
+        result.dither_algorithm = std::string{audio_import_detail::dither_algorithm};
     result.clipped_samples = clipped;
     return result;
 }

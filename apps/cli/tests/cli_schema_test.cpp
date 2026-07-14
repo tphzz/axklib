@@ -18,8 +18,7 @@ namespace package_schema = axk::cli::schema::package_v1;
 TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
     EXPECT_EQ(info_schema::schema_version, "compat-v1");
     EXPECT_EQ(schema::alteration_schema_version, "compat-v1");
-    EXPECT_EQ(export_schema::volume_graph_schema_version,
-              "axklib.volume_graph.v1");
+    EXPECT_EQ(export_schema::volume_graph_schema_version, "axklib.volume_graph.v1");
 
     axk::RelationshipGraph graph;
     graph.relationships.push_back({
@@ -41,14 +40,12 @@ TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
     axk::Waveform non_looping;
     non_looping.loop_start = 66U;
     non_looping.loop_length = 0U;
-    volume.waveforms.push_back(
-        {"waveform", "Waveform", "SMPL/Waveform.wav", non_looping});
+    volume.waveforms.push_back({"waveform", "Waveform", "SMPL/Waveform.wav", non_looping});
     auto wide_loop = non_looping;
     wide_loop.loop_start = 23'423U;
     wide_loop.loop_length = 4'294'967'293U;
     volume.waveforms.push_back({"wide", "Wide", "SMPL/Wide.wav", wide_loop});
-    volume.sample_bank_groups.push_back(
-        {"group", "Group", {"known-bank"}, {"known-bank", "likely-bank"}});
+    volume.sample_bank_groups.push_back({"group", "Group", {"known-bank"}, {"known-bank", "likely-bank"}});
     volume.programs.push_back({"source", "001", {"target"}});
     graph.relationships.push_back({
         .key = "program-edge",
@@ -65,25 +62,17 @@ TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
         .assignment_state = axk::AssignmentState::source_load,
         .receive_channel_display = "unknown",
     });
-    const auto volume_graph = export_schema::serialize_volume_graph(
-        volume, graph, "source.iso", "iso");
+    const auto volume_graph = export_schema::serialize_volume_graph(volume, graph, "source.iso", "iso");
     ASSERT_TRUE(volume_graph);
     const auto parsed_graph = nlohmann::json::parse(*volume_graph);
     EXPECT_EQ(parsed_graph["source"]["container_kinds"][0], "iso");
-    EXPECT_TRUE(parsed_graph["objects"]["smpl"][0]["playback"]
-                            ["loop_end_frame_a4000_ui"]
-                                .is_null());
-    EXPECT_EQ(parsed_graph["objects"]["smpl"][1]["playback"]
-                          ["loop_end_frame_a4000_ui"],
-              4'294'990'716ULL);
-    EXPECT_TRUE(
-        std::ranges::any_of(parsed_graph["relationships"], [](const auto &row) {
-            return row["relationship_type"] == "PROG_ASSIGNMENT_TO_SBAC";
-        }));
+    EXPECT_TRUE(parsed_graph["objects"]["smpl"][0]["playback"]["loop_end_frame_a4000_ui"].is_null());
+    EXPECT_EQ(parsed_graph["objects"]["smpl"][1]["playback"]["loop_end_frame_a4000_ui"], 4'294'990'716ULL);
+    EXPECT_TRUE(std::ranges::any_of(parsed_graph["relationships"], [](const auto &row) {
+        return row["relationship_type"] == "PROG_ASSIGNMENT_TO_SBAC";
+    }));
     EXPECT_EQ(parsed_graph["objects"]["sbac"][0]["members"].size(), 1U);
-    EXPECT_EQ(
-        parsed_graph["objects"]["sbac"][0]["relationship_bank_keys"].size(),
-        2U);
+    EXPECT_EQ(parsed_graph["objects"]["sbac"][0]["relationship_bank_keys"].size(), 2U);
 }
 
 TEST(CliSchema, InfoV1KeepsRecursiveOrderNullCountsAndUtf8Paths) {
@@ -157,8 +146,7 @@ TEST(CliSchema, AlterationV1DistinguishesNullEmptyAndPresentValues) {
     EXPECT_EQ(parsed["operations"][0]["volume_name"], "");
     EXPECT_TRUE(parsed["operations"][0]["removed_sfs_ids"].empty());
     EXPECT_TRUE(parsed["operations"][0]["audio_import"].is_null());
-    EXPECT_EQ(parsed["operations"][0]["freed_clusters"],
-              std::numeric_limits<std::uint64_t>::max());
+    EXPECT_EQ(parsed["operations"][0]["freed_clusters"], std::numeric_limits<std::uint64_t>::max());
 }
 
 TEST(CliSchema, SerializationRejectsInvalidInternalUtf8) {
@@ -184,8 +172,7 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
         .payloads_verified = false,
         .relationship_count = std::numeric_limits<std::uint64_t>::max(),
         .roots = {{"sbnk", "Bank", {"node"}}},
-        .objects = {{"node", "SBNK", "Bank", "payload", "normalized",
-                     std::nullopt, std::nullopt}},
+        .objects = {{"node", "SBNK", "Bank", "payload", "normalized", std::nullopt, std::nullopt}},
         .issues = {},
     };
     const auto serialized_package = package_schema::serialize(package, false);
@@ -196,8 +183,7 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
     EXPECT_FALSE(package_json["payloads_verified"]);
     EXPECT_TRUE(package_json["objects"][0]["semantic_sha256"].is_null());
     EXPECT_TRUE(package_json["objects"][0]["audio_sha256"].is_null());
-    EXPECT_EQ(package_json["relationship_count"],
-              std::numeric_limits<std::uint64_t>::max());
+    EXPECT_EQ(package_json["relationship_count"], std::numeric_limits<std::uint64_t>::max());
 
     package_schema::PlanOutput plan{
         .target_path_utf8 = "target.hds",
@@ -207,8 +193,8 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
         .target_snapshot_id = "snapshot",
         .valid = true,
         .warnings = {},
-        .conflicts = {{"TEST", "conflict", std::nullopt, std::nullopt, "digest",
-                       "node", std::nullopt, "", "Volume", "", ""}},
+        .conflicts = {{"TEST", "conflict", std::nullopt, std::nullopt, "digest", "node", std::nullopt, "", "Volume", "",
+                       ""}},
         .objects = {{"action",
                      0U,
                      0U,

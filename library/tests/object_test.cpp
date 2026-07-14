@@ -23,29 +23,19 @@ TEST(ObjectHeader, RejectsTruncationAndInvalidMagic) {
 }
 
 TEST(CurrentLookups, ExposesCanonicalParameterAndProgramLabels) {
-    EXPECT_EQ(axk::current_label(
-                  axk::CurrentLookup::sample_eq_frequency_ui_labels, 26),
-              "630Hz");
-    EXPECT_EQ(axk::current_label(
-                  axk::CurrentLookup::sample_control_function_ui_labels, 4),
-              "Cutoff Bias");
-    EXPECT_EQ(axk::current_label(
-                  axk::CurrentLookup::prog_slot_kind_target_category, 0x11),
-              "SBAC");
-    EXPECT_TRUE(axk::current_label(
-                    axk::CurrentLookup::prog_slot_kind_target_category, 0x7f)
-                    .empty());
+    EXPECT_EQ(axk::current_label(axk::CurrentLookup::sample_eq_frequency_ui_labels, 26), "630Hz");
+    EXPECT_EQ(axk::current_label(axk::CurrentLookup::sample_control_function_ui_labels, 4), "Cutoff Bias");
+    EXPECT_EQ(axk::current_label(axk::CurrentLookup::prog_slot_kind_target_category, 0x11), "SBAC");
+    EXPECT_TRUE(axk::current_label(axk::CurrentLookup::prog_slot_kind_target_category, 0x7f).empty());
 }
 
 TEST(CurrentSmpl, MatchesMaintainedSemanticContract) {
-    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} /
-                      "tests/fixtures/images/sampler-authored/"
-                      "HD00_512_single_sbnk_authored.hds";
+    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
+                                                               "HD00_512_single_sbnk_authored.hds";
     const auto container = axk::open_image(path);
     ASSERT_TRUE(container);
     const auto payload =
-        container->read_record_data(axk::PartitionIndex{0}, axk::SfsId{9},
-                                    std::numeric_limits<std::size_t>::max());
+        container->read_record_data(axk::PartitionIndex{0}, axk::SfsId{9}, std::numeric_limits<std::size_t>::max());
     ASSERT_TRUE(payload);
     const auto decoded = axk::decode_object(*payload);
     ASSERT_TRUE(decoded);
@@ -69,12 +59,10 @@ TEST(CurrentSmpl, MatchesMaintainedSemanticContract) {
     EXPECT_EQ(sample.stored_pcm_offset, decoded->header.header_size);
     EXPECT_EQ(sample.stored_pcm_bytes, decoded->header.payload_bytes_0x1c);
     EXPECT_EQ(sample.sample_rate.source.offset, 0x28U);
-    EXPECT_EQ(sample.sample_rate.source.verification,
-              axk::Verification::corroborated);
+    EXPECT_EQ(sample.sample_rate.source.verification, axk::Verification::corroborated);
 }
 
-TEST(CurrentSmpl,
-     RetainsMetadataOutsideDeclaredPcmAndPreservesWideDerivedLoopEnd) {
+TEST(CurrentSmpl, RetainsMetadataOutsideDeclaredPcmAndPreservesWideDerivedLoopEnd) {
     std::vector<std::byte> payload(0xac);
     axk::ByteWriter writer{payload};
     ASSERT_TRUE(writer.write_ascii_field(0, 12, "FSFSDEV3SPLX", std::byte{}));
@@ -83,8 +71,7 @@ TEST(CurrentSmpl,
     ASSERT_TRUE(writer.write_be32(0x1c, 1));
     ASSERT_TRUE(writer.write_be32(0x20, 1));
     ASSERT_TRUE(writer.write_ascii_field(0x32, 16, "bad", std::byte{}));
-    ASSERT_TRUE(
-        writer.write_be32(0x96, std::numeric_limits<std::uint32_t>::max()));
+    ASSERT_TRUE(writer.write_be32(0x96, std::numeric_limits<std::uint32_t>::max()));
     ASSERT_TRUE(writer.write_be32(0x9a, 2));
     const auto outside = axk::decode_object(payload);
     ASSERT_TRUE(outside);
@@ -96,14 +83,12 @@ TEST(CurrentSmpl,
 }
 
 TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
-    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} /
-                      "tests/fixtures/images/sampler-authored/"
-                      "HD00_512_single_sbnk_authored.hds";
+    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
+                                                               "HD00_512_single_sbnk_authored.hds";
     const auto container = axk::open_image(path);
     ASSERT_TRUE(container);
     const auto payload =
-        container->read_record_data(axk::PartitionIndex{0}, axk::SfsId{10},
-                                    std::numeric_limits<std::size_t>::max());
+        container->read_record_data(axk::PartitionIndex{0}, axk::SfsId{10}, std::numeric_limits<std::size_t>::max());
     ASSERT_TRUE(payload);
     const auto decoded = axk::decode_object(*payload);
     ASSERT_TRUE(decoded);
@@ -139,19 +124,16 @@ TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
     ASSERT_NE(bank.find_numeric_field("sample_eq_gain_0x123"), nullptr);
     EXPECT_EQ(bank.find_numeric_field("sample_eq_gain_0x123")->value, 64);
     ASSERT_NE(bank.find_numeric_field("sample_portamento_time_0x184"), nullptr);
-    EXPECT_EQ(bank.find_numeric_field("sample_portamento_time_0x184")->value,
-              90);
+    EXPECT_EQ(bank.find_numeric_field("sample_portamento_time_0x184")->value, 90);
 }
 
 TEST(CurrentSbac, MatchesMaintainedSlotAndBitmapContracts) {
-    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} /
-                      "tests/fixtures/images/sampler-authored/"
-                      "HD00_512_single_sbnk_authored.hds";
+    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
+                                                               "HD00_512_single_sbnk_authored.hds";
     const auto container = axk::open_image(path);
     ASSERT_TRUE(container);
     const auto payload =
-        container->read_record_data(axk::PartitionIndex{0}, axk::SfsId{23},
-                                    std::numeric_limits<std::size_t>::max());
+        container->read_record_data(axk::PartitionIndex{0}, axk::SfsId{23}, std::numeric_limits<std::size_t>::max());
     ASSERT_TRUE(payload);
     const auto decoded = axk::decode_object(*payload);
     ASSERT_TRUE(decoded);
@@ -165,8 +147,7 @@ TEST(CurrentSbac, MatchesMaintainedSlotAndBitmapContracts) {
     EXPECT_EQ(group.value_enable_words[0], 2130756064U);
     EXPECT_EQ(group.enabled_parameter_numbers.front(), 5U);
     EXPECT_EQ(group.enabled_parameter_numbers.back(), 85U);
-    EXPECT_EQ(group.enabled_numbers_outside_table,
-              (std::vector<std::uint8_t>{89, 90, 91, 92, 93}));
+    EXPECT_EQ(group.enabled_numbers_outside_table, (std::vector<std::uint8_t>{89, 90, 91, 92, 93}));
 }
 
 TEST(CurrentProg, PreservesEmptyVisibleAndUnsupportedAssignmentRows) {
@@ -175,8 +156,7 @@ TEST(CurrentProg, PreservesEmptyVisibleAndUnsupportedAssignmentRows) {
     ASSERT_TRUE(writer.write_ascii_field(0, 12, "FSFSDEV3SPLX", std::byte{}));
     ASSERT_TRUE(writer.write_ascii_field(0x0c, 4, "PROG", std::byte{}));
     ASSERT_TRUE(writer.write_ascii_field(0x32, 16, "001", std::byte{}));
-    ASSERT_TRUE(
-        writer.write_ascii_field(0x120, 16, "Bank Group", std::byte{' '}));
+    ASSERT_TRUE(writer.write_ascii_field(0x120, 16, "Bank Group", std::byte{' '}));
     ASSERT_TRUE(writer.write_be32(0x130, 0x12345678));
     ASSERT_TRUE(writer.write_u8(0x134, 2));
     ASSERT_TRUE(writer.write_u8(0x135, 1));
@@ -213,21 +193,16 @@ TEST(CurrentSummary, RetainsSequenceAndProfilePayloads) {
          }) {
         std::vector<std::byte> payload(0x80);
         axk::ByteWriter writer{payload};
-        ASSERT_TRUE(
-            writer.write_ascii_field(0, 12, "FSFSDEV3SPLX", std::byte{}));
+        ASSERT_TRUE(writer.write_ascii_field(0, 12, "FSFSDEV3SPLX", std::byte{}));
         ASSERT_TRUE(writer.write_ascii_field(0x0c, 4, type, std::byte{}));
         ASSERT_TRUE(writer.write_ascii_field(0x32, 16, "summary", std::byte{}));
         const auto decoded = axk::decode_object(payload);
         ASSERT_TRUE(decoded);
         EXPECT_EQ(decoded->header.type, expected);
         if (expected == axk::ObjectType::sequ) {
-            EXPECT_EQ(
-                std::get<axk::CurrentSequence>(decoded->payload).raw_payload,
-                payload);
+            EXPECT_EQ(std::get<axk::CurrentSequence>(decoded->payload).raw_payload, payload);
         } else {
-            EXPECT_EQ(
-                std::get<axk::CurrentProfile>(decoded->payload).raw_payload,
-                payload);
+            EXPECT_EQ(std::get<axk::CurrentProfile>(decoded->payload).raw_payload, payload);
         }
     }
 }

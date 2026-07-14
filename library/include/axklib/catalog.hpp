@@ -45,9 +45,8 @@ struct ObjectCatalog {
     std::vector<CatalogIssue> issues;
 };
 
-AXK_API Result<ObjectCatalog>
-build_object_catalog(const Container &container,
-                     std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
-                     const CancellationToken &cancellation = {});
+AXK_API Result<ObjectCatalog> build_object_catalog(const Container &container,
+                                                   std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
+                                                   const CancellationToken &cancellation = {});
 
 } // namespace axk

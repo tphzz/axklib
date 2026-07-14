@@ -18,12 +18,10 @@ int main() {
     auto relationships = image->relationships(0U, 64U, context);
     auto objects = image->objects(0U, 64U, context);
     if (!validation || !relationships || validation->object_count == 0U ||
-        relationships->total_count != validation->relationship_count ||
-        !objects)
+        relationships->total_count != validation->relationship_count || !objects)
         return 3;
 
-    const auto root =
-        std::filesystem::temp_directory_path() / "axklib-installed-consumer";
+    const auto root = std::filesystem::temp_directory_path() / "axklib-installed-consumer";
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root, error);
@@ -31,9 +29,8 @@ int main() {
     const auto output = root / "output.hds";
     const auto imported = root / "imported.hds";
     const auto package_stem = root / "waveform";
-    const auto waveform = std::find_if(
-        objects->items.begin(), objects->items.end(),
-        [](const axk::object_info &item) { return item.type == "SMPL"; });
+    const auto waveform = std::find_if(objects->items.begin(), objects->items.end(),
+                                       [](const axk::object_info &item) { return item.type == "SMPL"; });
     if (waveform == objects->items.end())
         return 4;
 
@@ -44,8 +41,8 @@ int main() {
     selector.volume_name = waveform->volume_name;
     selector.object_name = waveform->name;
     selector.object_key = waveform->key;
-    auto exported = axk::portable_package::export_from(
-        AXK_TEST_FIXTURE, {selector}, package_stem.string(), {}, context);
+    auto exported =
+        axk::portable_package::export_from(AXK_TEST_FIXTURE, {selector}, package_stem.string(), {}, context);
     if (!exported || exported->package_kind != "smpl" ||
         std::filesystem::path{exported->output_path}.extension() != ".axksmpl")
         return 5;
@@ -53,16 +50,13 @@ int main() {
     if (!package || !package->verify(context))
         return 6;
     auto package_summary = package->summary();
-    if (!package_summary ||
-        package_summary->package_id != exported->package_id ||
-        package_summary->object_count != 1U)
+    if (!package_summary || package_summary->package_id != exported->package_id || package_summary->object_count != 1U)
         return 7;
 
     std::ofstream{manifest}
         << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"sample_banks":[]}]}]})";
     auto plan = axk::build_plan::from_manifest(manifest.string(), context);
-    if (!plan || !plan->apply(output.string(), {}, context) ||
-        !std::filesystem::exists(output))
+    if (!plan || !plan->apply(output.string(), {}, context) || !std::filesystem::exists(output))
         return 8;
 
     axk::package_import_request import_request;
@@ -72,14 +66,14 @@ int main() {
     destination.partition_index = 0U;
     destination.volume_name = "Volume";
     import_request.root_destinations.push_back(std::move(destination));
-    auto import_plan = axk::package_import_plan::create(
-        output.string(), {exported->output_path}, import_request, context);
+    auto import_plan =
+        axk::package_import_plan::create(output.string(), {exported->output_path}, import_request, context);
     if (!import_plan)
         return 9;
     auto import_summary = import_plan->summary();
     auto actions = import_plan->actions();
-    if (!import_summary || !import_summary->valid ||
-        import_summary->object_count != 1U || !actions || actions->size() != 1U)
+    if (!import_summary || !import_summary->valid || import_summary->object_count != 1U || !actions ||
+        actions->size() != 1U)
         return 10;
     auto applied = import_plan->apply(imported.string(), {}, context);
     if (!applied || !applied->applied || !std::filesystem::exists(imported))
@@ -89,13 +83,9 @@ int main() {
         return 12;
     auto imported_objects = reopened->objects(0U, 64U, context);
     if (!imported_objects ||
-        std::none_of(imported_objects->items.begin(),
-                     imported_objects->items.end(),
-                     [&](const axk::object_info &item) {
-                         return item.type == "SMPL" &&
-                                item.name == waveform->name &&
-                                item.volume_name == "Volume";
-                     }))
+        std::none_of(imported_objects->items.begin(), imported_objects->items.end(), [&](const axk::object_info &item) {
+            return item.type == "SMPL" && item.name == waveform->name && item.volume_name == "Volume";
+        }))
         return 13;
 
     std::filesystem::remove_all(root, error);

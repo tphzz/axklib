@@ -123,13 +123,9 @@ struct PlanOutput {
     std::optional<ImportResultOutput> result;
 };
 
-PackageOutput project_package(const std::filesystem::path &path,
-                              const PortablePackage &package);
-PlanOutput
-project_plan(const std::filesystem::path &target,
-             const std::vector<std::filesystem::path> &package_paths,
-             const PackageImportPlan &plan,
-             const std::optional<PackageImportReport> &report = std::nullopt);
+PackageOutput project_package(const std::filesystem::path &path, const PortablePackage &package);
+PlanOutput project_plan(const std::filesystem::path &target, const std::vector<std::filesystem::path> &package_paths,
+                        const PackageImportPlan &plan, const std::optional<PackageImportReport> &report = std::nullopt);
 Result<std::string> serialize(const PackageOutput &output, bool pretty);
 Result<std::string> serialize(const PlanOutput &output, bool pretty);
 

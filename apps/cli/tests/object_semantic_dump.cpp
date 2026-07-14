@@ -69,8 +69,7 @@ int dump_file_media(const axk::MediaContainer &media) {
             .volume_label_basis = object.volume_label.basis,
             .data_offset = object.data_offset,
             .size = object.size,
-            .structured_path_utf8 =
-                axk::text::path_to_utf8(structured.relative_path),
+            .structured_path_utf8 = axk::text::path_to_utf8(structured.relative_path),
             .header = object.decoded.header,
             .decoded = object.decoded,
         });
@@ -99,8 +98,7 @@ int dump_sfs(const std::filesystem::path &path) {
         for (const auto &record : partition.records) {
             if (record.payload_kind != axk::PayloadKind::object)
                 continue;
-            const auto payload = container->read_record_data(
-                partition.index, record.sfs_id, 64U * 1024U * 1024U);
+            const auto payload = container->read_record_data(partition.index, record.sfs_id, 64U * 1024U * 1024U);
             if (!payload) {
                 std::cerr << axk::render_error(payload.error()) << '\n';
                 return 1;
@@ -152,6 +150,5 @@ int main(int argc, char **argv) {
         std::cerr << axk::render_error(media.error()) << '\n';
         return 1;
     }
-    return media->kind() == axk::MediaKind::sfs ? dump_sfs(path)
-                                                : dump_file_media(*media);
+    return media->kind() == axk::MediaKind::sfs ? dump_sfs(path) : dump_file_media(*media);
 }

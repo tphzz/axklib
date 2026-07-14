@@ -90,19 +90,15 @@ struct SfzExportResult {
     std::vector<std::string> warnings;
 };
 
-AXK_API Result<ExportPlan>
-build_export_plan(const Container &container, const ObjectCatalog &catalog,
-                  const RelationshipGraph &graph,
-                  const CancellationToken &cancellation = {});
-AXK_API Result<ExportPlan>
-build_export_plan(const MediaContainer &container, const ObjectCatalog &catalog,
-                  const RelationshipGraph &graph,
-                  const CancellationToken &cancellation = {});
-AXK_API Result<ExportResult> write_export_audio(
-    const ExportPlan &plan, const std::filesystem::path &output_directory,
-    bool overwrite = false, const CancellationToken &cancellation = {});
-AXK_API Result<SfzExportResult>
-write_sfz(const ExportPlan &plan, const std::filesystem::path &output_directory,
-          bool overwrite = false);
+AXK_API Result<ExportPlan> build_export_plan(const Container &container, const ObjectCatalog &catalog,
+                                             const RelationshipGraph &graph,
+                                             const CancellationToken &cancellation = {});
+AXK_API Result<ExportPlan> build_export_plan(const MediaContainer &container, const ObjectCatalog &catalog,
+                                             const RelationshipGraph &graph,
+                                             const CancellationToken &cancellation = {});
+AXK_API Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::filesystem::path &output_directory,
+                                                bool overwrite = false, const CancellationToken &cancellation = {});
+AXK_API Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem::path &output_directory,
+                                          bool overwrite = false);
 
 } // namespace axk

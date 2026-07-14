@@ -11,8 +11,7 @@ int main() {
             if (!axk::effect_parameter_info(raw_type, parameter))
                 continue;
             for (std::uint8_t raw_value = 0;; ++raw_value) {
-                const auto display = axk::format_effect_parameter(
-                    raw_type, parameter, raw_value);
+                const auto display = axk::format_effect_parameter(raw_type, parameter, raw_value);
                 std::cout << nlohmann::ordered_json{
                          {"raw_type", raw_type},
                          {"parameter_number", parameter},

@@ -19,7 +19,6 @@ int main(int argc, char **argv) {
         return 1;
     }
     const auto graph = axk::build_relationship_graph(*catalog);
-    std::cout << "objects=" << catalog->objects.size()
-              << " relationships=" << graph.relationships.size() << '\n';
+    std::cout << "objects=" << catalog->objects.size() << " relationships=" << graph.relationships.size() << '\n';
     return 0;
 }

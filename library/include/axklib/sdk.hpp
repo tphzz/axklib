@@ -150,13 +150,7 @@ struct plan_summary {
     bool applies_changes{};
 };
 
-enum class package_root_kind : std::uint8_t {
-    volume,
-    program,
-    bank_group,
-    sample_bank,
-    sample
-};
+enum class package_root_kind : std::uint8_t { volume, program, bank_group, sample_bank, sample };
 
 struct package_root_selector {
     package_root_kind kind{package_root_kind::volume};
@@ -303,31 +297,21 @@ class AXK_SDK_API image final {
     image(const image &) = delete;
     image &operator=(const image &) = delete;
 
-    static result<image> open(const std::string &utf8_path,
-                              operation_context &context);
+    static result<image> open(const std::string &utf8_path, operation_context &context);
     result<snapshot> make_snapshot() const;
-    result<page<content_node>>
-    content_children(const std::string &parent_id, std::uint64_t offset,
-                     std::uint64_t limit, operation_context &context) const;
-    result<page<object_info>> objects(std::uint64_t offset, std::uint64_t limit,
-                                      operation_context &context) const;
-    result<page<relationship_info>>
-    relationships(std::uint64_t offset, std::uint64_t limit,
-                  operation_context &context) const;
+    result<page<content_node>> content_children(const std::string &parent_id, std::uint64_t offset, std::uint64_t limit,
+                                                operation_context &context) const;
+    result<page<object_info>> objects(std::uint64_t offset, std::uint64_t limit, operation_context &context) const;
+    result<page<relationship_info>> relationships(std::uint64_t offset, std::uint64_t limit,
+                                                  operation_context &context) const;
     result<validation_summary> validation(operation_context &context) const;
-    result<page<validation_issue>>
-    validation_issues(std::uint64_t offset, std::uint64_t limit,
-                      operation_context &context) const;
-    result<waveform_preview> preview(const std::string &object_key,
-                                     std::uint64_t bin_count,
+    result<page<validation_issue>> validation_issues(std::uint64_t offset, std::uint64_t limit,
+                                                     operation_context &context) const;
+    result<waveform_preview> preview(const std::string &object_key, std::uint64_t bin_count,
                                      operation_context &context) const;
-    result<std::vector<std::uint8_t>>
-    waveform_pcm(const std::string &object_key,
-                 operation_context &context) const;
-    result<export_summary>
-    export_audio(const std::string &utf8_output_directory,
-                 const export_options &options,
-                 operation_context &context) const;
+    result<std::vector<std::uint8_t>> waveform_pcm(const std::string &object_key, operation_context &context) const;
+    result<export_summary> export_audio(const std::string &utf8_output_directory, const export_options &options,
+                                        operation_context &context) const;
 
   private:
     struct impl;
@@ -344,13 +328,11 @@ class AXK_SDK_API portable_package final {
     portable_package(const portable_package &) = delete;
     portable_package &operator=(const portable_package &) = delete;
 
-    static result<portable_package> open(const std::string &utf8_path,
-                                         operation_context &context);
-    static result<package_export_summary>
-    export_from(const std::string &utf8_source_path,
-                const std::vector<package_root_selector> &roots,
-                const std::string &utf8_output_path,
-                const write_options &options, operation_context &context);
+    static result<portable_package> open(const std::string &utf8_path, operation_context &context);
+    static result<package_export_summary> export_from(const std::string &utf8_source_path,
+                                                      const std::vector<package_root_selector> &roots,
+                                                      const std::string &utf8_output_path, const write_options &options,
+                                                      operation_context &context);
     result<package_summary> summary() const;
     result<std::vector<package_issue_info>> issues() const;
     result<void> verify(operation_context &context) const;
@@ -370,17 +352,15 @@ class AXK_SDK_API package_import_plan final {
     package_import_plan(const package_import_plan &) = delete;
     package_import_plan &operator=(const package_import_plan &) = delete;
 
-    static result<package_import_plan>
-    create(const std::string &utf8_target_path,
-           const std::vector<std::string> &utf8_package_paths,
-           const package_import_request &request, operation_context &context);
+    static result<package_import_plan> create(const std::string &utf8_target_path,
+                                              const std::vector<std::string> &utf8_package_paths,
+                                              const package_import_request &request, operation_context &context);
     result<package_import_summary> summary() const;
     result<std::vector<package_issue_info>> warnings() const;
     result<std::vector<package_conflict_info>> conflicts() const;
     result<std::vector<package_action_info>> actions() const;
     result<std::vector<package_allocation_info>> allocation() const;
-    result<package_import_result> apply(const std::string &utf8_output_path,
-                                        const write_options &options,
+    result<package_import_result> apply(const std::string &utf8_output_path, const write_options &options,
                                         operation_context &context);
 
   private:
@@ -397,16 +377,12 @@ class AXK_SDK_API snapshot final {
     snapshot(const snapshot &) = delete;
     snapshot &operator=(const snapshot &) = delete;
 
-    result<page<content_node>> content_children(const std::string &parent_id,
-                                                std::uint64_t offset,
+    result<page<content_node>> content_children(const std::string &parent_id, std::uint64_t offset,
                                                 std::uint64_t limit) const;
-    result<page<object_info>> objects(std::uint64_t offset,
-                                      std::uint64_t limit) const;
-    result<page<relationship_info>> relationships(std::uint64_t offset,
-                                                  std::uint64_t limit) const;
+    result<page<object_info>> objects(std::uint64_t offset, std::uint64_t limit) const;
+    result<page<relationship_info>> relationships(std::uint64_t offset, std::uint64_t limit) const;
     result<validation_summary> validation() const;
-    result<page<validation_issue>> validation_issues(std::uint64_t offset,
-                                                     std::uint64_t limit) const;
+    result<page<validation_issue>> validation_issues(std::uint64_t offset, std::uint64_t limit) const;
 
   private:
     struct impl;
@@ -423,13 +399,9 @@ class AXK_SDK_API build_plan final {
     build_plan(const build_plan &) = delete;
     build_plan &operator=(const build_plan &) = delete;
 
-    static result<build_plan>
-    from_manifest(const std::string &utf8_manifest_path,
-                  operation_context &context);
+    static result<build_plan> from_manifest(const std::string &utf8_manifest_path, operation_context &context);
     plan_summary summary() const noexcept;
-    result<void> apply(const std::string &utf8_output_path,
-                       const write_options &options,
-                       operation_context &context);
+    result<void> apply(const std::string &utf8_output_path, const write_options &options, operation_context &context);
 
   private:
     struct impl;
@@ -445,14 +417,10 @@ class AXK_SDK_API transaction final {
     transaction(const transaction &) = delete;
     transaction &operator=(const transaction &) = delete;
 
-    static result<transaction>
-    from_manifest(const std::string &utf8_source_path,
-                  const std::string &utf8_manifest_path,
-                  operation_context &context);
+    static result<transaction> from_manifest(const std::string &utf8_source_path, const std::string &utf8_manifest_path,
+                                             operation_context &context);
     plan_summary summary() const noexcept;
-    result<void> apply(const std::string &utf8_output_path,
-                       const write_options &options,
-                       operation_context &context);
+    result<void> apply(const std::string &utf8_output_path, const write_options &options, operation_context &context);
 
   private:
     struct impl;

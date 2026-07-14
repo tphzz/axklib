@@ -64,13 +64,10 @@ Result<std::string> serialize(const InfoOutput &output) {
                 {"original_exception", error.original_exception},
             });
         }
-        return OrderedJson{{"trees", std::move(trees)},
-                           {"load_errors", std::move(errors)}}
-            .dump(2);
+        return OrderedJson{{"trees", std::move(trees)}, {"load_errors", std::move(errors)}}.dump(2);
     } catch (const nlohmann::json::exception &error) {
-        return std::unexpected{make_error(
-            ErrorCode::invalid_argument, ErrorCategory::internal,
-            std::string{"could not serialize info JSON: "} + error.what())};
+        return std::unexpected{make_error(ErrorCode::invalid_argument, ErrorCategory::internal,
+                                          std::string{"could not serialize info JSON: "} + error.what())};
     }
 }
 

@@ -39,38 +39,30 @@ int main(int argc, char **argv) {
         for (const auto &record : partition.records) {
             nlohmann::ordered_json entries = nlohmann::ordered_json::array();
             for (const auto &entry : record.directory_entries) {
-                entries.push_back({{"flags", entry.flags},
-                                   {"link_id", entry.link_id.value},
-                                   {"name", entry.name}});
+                entries.push_back({{"flags", entry.flags}, {"link_id", entry.link_id.value}, {"name", entry.name}});
             }
-            records.push_back(
-                {{"sfs_id", record.sfs_id.value},
-                 {"extent_count", record.extent_count},
-                 {"cluster_count", record.cluster_count},
-                 {"data_size", record.data_size},
-                 {"payload_kind", payload_kind(record.payload_kind)},
-                 {"object_type", record.object_type},
-                 {"object_name", record.object_name},
-                 {"directory_id",
-                  record.directory_id
-                      ? nlohmann::ordered_json(record.directory_id->value)
-                      : nlohmann::ordered_json(nullptr)},
-                 {"parent_directory_id",
-                  record.parent_directory_id
-                      ? nlohmann::ordered_json(
-                            record.parent_directory_id->value)
-                      : nlohmann::ordered_json(nullptr)},
-                 {"directory_entries", std::move(entries)}});
+            records.push_back({{"sfs_id", record.sfs_id.value},
+                               {"extent_count", record.extent_count},
+                               {"cluster_count", record.cluster_count},
+                               {"data_size", record.data_size},
+                               {"payload_kind", payload_kind(record.payload_kind)},
+                               {"object_type", record.object_type},
+                               {"object_name", record.object_name},
+                               {"directory_id", record.directory_id ? nlohmann::ordered_json(record.directory_id->value)
+                                                                    : nlohmann::ordered_json(nullptr)},
+                               {"parent_directory_id", record.parent_directory_id
+                                                           ? nlohmann::ordered_json(record.parent_directory_id->value)
+                                                           : nlohmann::ordered_json(nullptr)},
+                               {"directory_entries", std::move(entries)}});
         }
         nlohmann::ordered_json free_space = nullptr;
         if (partition.allocation.free_space) {
             const auto &free = *partition.allocation.free_space;
-            free_space = {
-                {"reserved_cluster_count", free.reserved_cluster_count},
-                {"allocated_cluster_count", free.allocated_cluster_count},
-                {"free_cluster_count", free.free_cluster_count},
-                {"free_bytes", free.free_bytes},
-                {"sampler_visible_free_kib", free.sampler_visible_free_kib}};
+            free_space = {{"reserved_cluster_count", free.reserved_cluster_count},
+                          {"allocated_cluster_count", free.allocated_cluster_count},
+                          {"free_cluster_count", free.free_cluster_count},
+                          {"free_bytes", free.free_bytes},
+                          {"sampler_visible_free_kib", free.sampler_visible_free_kib}};
         }
         partitions.push_back(
             {{"index", partition.index.value},
@@ -81,19 +73,14 @@ int main(int argc, char **argv) {
              {"sectors_per_cluster", partition.sectors_per_cluster},
              {"bitmap_cluster", partition.bitmap_cluster},
              {"directory_index_cluster", partition.directory_index_cluster},
-             {"directory_index_span_clusters",
-              partition.directory_index_span_clusters},
+             {"directory_index_span_clusters", partition.directory_index_span_clusters},
              {"backup_header_matches", partition.backup_header_matches},
              {"records", std::move(records)},
              {"allocation",
-              {{"stored_used_cluster_count",
-                partition.allocation.stored_used_cluster_count},
-               {"reconstructed_used_cluster_count",
-                partition.allocation.reconstructed_used_cluster_count},
-               {"invalid_extent_record_count",
-                partition.allocation.invalid_extent_record_count},
-               {"extent_total_mismatch_count",
-                partition.allocation.extent_total_mismatch_count},
+              {{"stored_used_cluster_count", partition.allocation.stored_used_cluster_count},
+               {"reconstructed_used_cluster_count", partition.allocation.reconstructed_used_cluster_count},
+               {"invalid_extent_record_count", partition.allocation.invalid_extent_record_count},
+               {"extent_total_mismatch_count", partition.allocation.extent_total_mismatch_count},
                {"free_space", std::move(free_space)}}}});
     }
     const nlohmann::ordered_json result = {
