@@ -1,0 +1,12 @@
+#include "axklib/version.hpp"
+
+namespace axk {
+
+build_info current_build_info() noexcept {
+    return {
+        "@AXK_SOURCE_IDENTITY@", "@AXK_PACKAGE_BASENAME@", "@AXK_GIT_TAG@", "@AXK_GIT_BRANCH@",
+        "@AXK_GIT_SHA_SHORT@", @AXK_IS_TAGGED_RELEASE_CPP@, @AXK_GIT_DIRTY_CPP@,
+    };
+}
+
+} // namespace axk

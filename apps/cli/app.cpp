@@ -2,7 +2,9 @@
 
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 
 #include <CLI/CLI.hpp>
@@ -14,6 +16,38 @@
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 
+namespace {
+
+std::string version_report() {
+    const auto build = axk::current_build_info();
+    const auto *selected_ref = build.is_tagged_release ? build.git_tag : build.git_branch;
+    std::ostringstream output;
+    output << "axklib " << build.source_identity << '\n'
+           << "version: " << axk::version() << '\n'
+           << "package: " << build.package_basename << '\n'
+           << "git: " << build.git_sha_short << '\n'
+           << "ref: " << selected_ref << '\n'
+           << "source: " << (build.is_dirty ? "modified" : "clean");
+    return output.str();
+}
+
+class RootHelpFormatter final : public CLI::Formatter {
+  public:
+    std::string make_help(const CLI::App *app, std::string name, CLI::AppFormatMode mode) const override {
+        auto output = CLI::Formatter::make_help(app, name, mode);
+        if (app->get_parent() != nullptr)
+            return output;
+
+        const auto usage = make_usage(app, name);
+        const auto usage_offset = output.find(usage);
+        if (usage_offset == std::string::npos)
+            return output;
+        return app->get_description() + '\n' + output.substr(usage_offset);
+    }
+};
+
+} // namespace
+
 int axk::cli::run(int argc, char **argv) {
     using namespace axk::cli::commands;
     for (int index = 0; index < argc; ++index) {
@@ -22,8 +56,9 @@ int axk::cli::run(int argc, char **argv) {
             return 2;
         }
     }
-    CLI::App app{"Yamaha A-series disk image and sampler object tooling"};
-    app.set_version_flag("--version", std::string{axk::version()});
+    CLI::App app{"axklib (" + std::string{axk::current_build_info().source_identity} + ')'};
+    app.formatter(std::make_shared<RootHelpFormatter>());
+    app.set_version_flag("--version", version_report());
 
     axk::cli::InfoRequest info_request;
     auto *info = app.add_subcommand("info", "summarize supported axklib containers");

@@ -46,6 +46,34 @@ include(cmake/AxkSanitizers.cmake)
 include(cmake/AxkCoverage.cmake)
 include(cmake/AxkWarnings.cmake)
 
+set(AXK_BUILD_INFO_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/src/build_info.cpp")
+set(AXK_PACKAGE_BASENAME_FILE "${CMAKE_BINARY_DIR}/package_basename.txt")
+set(AXK_BUILD_INFO_MODULE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkGitBuildInfo.cmake")
+set(AXK_BUILD_INFO_GENERATOR "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateBuildInfo.cmake")
+set(AXK_BUILD_INFO_TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_info.cpp.in")
+set(_axk_build_info_command
+  "${CMAKE_COMMAND}"
+  "-DAXK_VERSION_SOURCE_DIR=${AXK_REPOSITORY_ROOT}"
+  "-DAXK_VERSION_PRODUCT_NAME=axklib"
+  "-DAXK_VERSION_MODULE=${AXK_BUILD_INFO_MODULE}"
+  "-DAXK_VERSION_TEMPLATE=${AXK_BUILD_INFO_TEMPLATE}"
+  "-DAXK_VERSION_OUTPUT_CPP=${AXK_BUILD_INFO_CPP}"
+  "-DAXK_VERSION_OUTPUT_PACKAGE=${AXK_PACKAGE_BASENAME_FILE}"
+  -P "${AXK_BUILD_INFO_GENERATOR}"
+)
+execute_process(COMMAND ${_axk_build_info_command} RESULT_VARIABLE _axk_build_info_result)
+if(NOT _axk_build_info_result EQUAL 0)
+  message(FATAL_ERROR "failed to generate axklib build metadata")
+endif()
+add_custom_target(
+  axk_generate_build_info ALL
+  COMMAND ${_axk_build_info_command}
+  BYPRODUCTS "${AXK_BUILD_INFO_CPP}" "${AXK_PACKAGE_BASENAME_FILE}"
+  VERBATIM
+)
+unset(_axk_build_info_command)
+unset(_axk_build_info_result)
+
 configure_file(
   include/axklib/sdk/version.hpp.in
   "${CMAKE_CURRENT_BINARY_DIR}/generated/include/axklib/sdk/version.hpp"
@@ -77,8 +105,10 @@ add_library(
   src/sfs.cpp
   src/utf8.cpp
   src/version.cpp
+  "${AXK_BUILD_INFO_CPP}"
 )
 add_library(axklib::core ALIAS axk_core)
+add_dependencies(axk_core axk_generate_build_info)
 
 target_compile_features(axk_core PUBLIC cxx_std_23)
 
@@ -202,6 +232,7 @@ if(AXK_BUILD_SHARED_SDK)
     tests/sdk_header_test.cpp
     tests/sdk_result_header_test.cpp
     tests/sdk_export_header_test.cpp
+    tests/sdk_build_info_header_test.cpp
     tests/sdk_version_header_test.cpp
   )
   target_compile_features(axk_sdk_header_tests PRIVATE cxx_std_17)
@@ -280,6 +311,24 @@ if(AXK_BUILD_FUZZERS)
 endif()
 
 if(BUILD_TESTING)
+  add_test(
+    NAME Version.GitMetadata
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DAXK_BUILD_INFO_MODULE=${AXK_BUILD_INFO_MODULE}"
+      "-DAXK_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/git-build-info-test"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestGitBuildInfo.cmake"
+  )
+  add_test(
+    NAME Version.GeneratedMetadata
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DAXK_BUILD_INFO_GENERATOR=${AXK_BUILD_INFO_GENERATOR}"
+      "-DAXK_BUILD_INFO_MODULE=${AXK_BUILD_INFO_MODULE}"
+      "-DAXK_BUILD_INFO_TEMPLATE=${AXK_BUILD_INFO_TEMPLATE}"
+      "-DAXK_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/generated-build-info-test"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestBuildInfoGeneration.cmake"
+  )
   file(READ "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/baseline.json" _axk_contract_baseline)
   string(JSON _axk_fixture_count LENGTH "${_axk_contract_baseline}" fixtures)
   math(EXPR _axk_fixture_last "${_axk_fixture_count} - 1")

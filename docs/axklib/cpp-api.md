@@ -3,7 +3,9 @@
 The installed public declarations are `axklib/sdk.hpp` and its supporting
 headers under `axklib/sdk/`. They compile as C++17 and use namespace `axk`.
 `axklib/sdk/version.hpp` supplies generated compile-time version constants;
-`sdk_version()` reports the linked runtime version.
+`sdk_version()` reports the linked runtime semantic version. The separate
+`sdk_build_info()` accessor reports the Git source identity compiled into that
+library; see [Versioning And Build Identity](versioning.md).
 Operations that can fail return axklib-owned `axk::result<T>` or
 `axk::result<void>` values with stable error categories and native error codes.
 
@@ -16,6 +18,7 @@ Operations that can fail return axklib-owned `axk::result<T>` or
 | `transaction` | Plan and apply an ordered alteration manifest |
 | `portable_package` | Export, inspect, and fully verify portable object packages |
 | `package_import_plan` | Plan and atomically apply a package import to a separate image |
+| `build_info` | Process-lifetime Git source and package identity for the loaded SDK |
 | `error` / `result<T>` | Owned failure and success values |
 
 Readers use bounded random-access I/O and accept a cancellation token. Immutable
@@ -61,3 +64,9 @@ The pre-1.0 binary contract is compiler-family and runtime specific. Public
 facade objects contain only PIMPL ownership, but C++ standard-library values are
 part of signatures. Build consumers with a supported ABI-compatible C++17
 runtime for the downloaded SDK package.
+
+`sdk_build_info()` returns its POD value without allocation and does not call
+Git at runtime. Its string pointers refer to immutable literals owned by the
+loaded shared library and remain valid for the process lifetime. Keep using
+`sdk_version()` or `axklib/sdk/version.hpp` for API compatibility decisions;
+the source identity describes the exact source tree rather than a SemVer value.

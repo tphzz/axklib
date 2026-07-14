@@ -95,5 +95,6 @@ nav:
       - Writer And Alteration: axklib/write.md
   - Distribution:
       - Compatibility: axklib/compatibility.md
+      - Versioning And Build Identity: axklib/versioning.md
       - Native Dependencies: native-dependencies.md
   - Yamaha Glossary: axklib/glossary.md

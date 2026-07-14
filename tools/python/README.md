@@ -15,3 +15,7 @@ uv --project tools/python run pytest tools/python/tests
 The header generators consume versioned JSON tables under `library/data` and
 write deterministic C++ headers. Package inspection, SBOM generation, boundary
 checking, and benchmark comparison are used by release workflows.
+
+`axk-release-metadata` validates generated Git source metadata, resolves the
+source-derived archive name for a platform and build configuration, and checks
+that a staged native CLI reports the expected commit and ref.

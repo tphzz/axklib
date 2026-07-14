@@ -7,6 +7,7 @@ import pytest
 
 import generate_sbom
 import inspect_package
+import release_metadata
 
 
 def test_sbom_includes_base_cli_and_test_dependencies(
@@ -116,3 +117,95 @@ def test_package_inspector_rejects_scripts_and_unlisted_shared_libraries(
     (package / "libsndfile.so").unlink()
     monkeypatch.setattr("sys.argv", ["inspect_package.py", str(package)])
     assert inspect_package.main() == 0
+
+
+def test_release_metadata_uses_source_identity_and_debug_suffix(tmp_path: Path) -> None:
+    package_file = tmp_path / "package_basename.txt"
+    package_file.write_text("axklib-feature-audio-a1b2c3d\n", encoding="utf-8")
+    package = release_metadata.read_package_basename(package_file)
+    release = release_metadata.artifact_metadata(
+        package, "0.1.0", "branch", "feature/audio", "linux-x64", "Release"
+    )
+    debug = release_metadata.artifact_metadata(
+        package, "0.1.0", "branch", "feature/audio", "windows-arm64", "Debug"
+    )
+    assert release.artifact_stem == "axklib-feature-audio-a1b2c3d-linux-x64"
+    assert debug.artifact_stem == "axklib-feature-audio-a1b2c3d-windows-arm64-debug"
+
+
+def test_release_metadata_shortens_only_exact_project_tag() -> None:
+    metadata = release_metadata.artifact_metadata(
+        "axklib-v0.1.0-a1b2c3d",
+        "0.1.0",
+        "tag",
+        "v0.1.0",
+        "macos-universal",
+        "Release",
+    )
+    assert metadata.artifact_stem == "axklib-0.1.0-macos-universal"
+    with pytest.raises(ValueError, match="release tag must be v0.1.0"):
+        release_metadata.artifact_metadata(
+            "axklib-nightly-a1b2c3d",
+            "0.1.0",
+            "tag",
+            "nightly",
+            "linux-arm64",
+            "Release",
+        )
+
+
+@pytest.mark.parametrize(
+    "contents",
+    ["axklib-main-a1b2c3d", "axklib-main-a1b2c3d\nextra\n", "unsafe/name\n"],
+)
+def test_release_metadata_rejects_malformed_package_file(tmp_path: Path, contents: str) -> None:
+    package_file = tmp_path / "package_basename.txt"
+    package_file.write_text(contents, encoding="utf-8")
+    with pytest.raises(ValueError):
+        release_metadata.read_package_basename(package_file)
+
+
+def test_release_metadata_parses_and_verifies_cli_report() -> None:
+    report = release_metadata.parse_version_report(
+        "axklib main-a1b2c3d\n"
+        "version: 0.1.0\n"
+        "package: axklib-main-a1b2c3d\n"
+        "git: a1b2c3d\n"
+        "ref: main\n"
+        "source: clean\n"
+    )
+    release_metadata.verify_version_report(
+        report,
+        semantic_version="0.1.0",
+        package_basename="axklib-main-a1b2c3d",
+        git_sha_short="a1b2c3d",
+        selected_ref="main",
+    )
+    with pytest.raises(ValueError, match="version report mismatch"):
+        release_metadata.verify_version_report(
+            report,
+            semantic_version="0.1.0",
+            package_basename="axklib-main-a1b2c3d",
+            git_sha_short="fffffff",
+            selected_ref="main",
+        )
+
+
+def test_release_metadata_verifies_cross_compiled_binary_strings(tmp_path: Path) -> None:
+    binary = tmp_path / "axklib.exe"
+    binary.write_bytes(
+        b"header\0main-a1b2c3d\0axklib-main-a1b2c3d\0a1b2c3d\0main\0footer"
+    )
+    release_metadata.verify_binary_strings(
+        binary,
+        package_basename="axklib-main-a1b2c3d",
+        git_sha_short="a1b2c3d",
+        selected_ref="main",
+    )
+    with pytest.raises(ValueError, match="does not contain"):
+        release_metadata.verify_binary_strings(
+            binary,
+            package_basename="axklib-main-a1b2c3d",
+            git_sha_short="fffffff",
+            selected_ref="main",
+        )

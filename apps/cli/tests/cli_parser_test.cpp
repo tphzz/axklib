@@ -15,6 +15,7 @@
 #include "content_id.hpp"
 
 #include "axklib/alteration.hpp"
+#include "axklib/version.hpp"
 
 #ifdef AXK_TEST_SHARED_SDK
 #include "axklib/sdk.hpp"
@@ -87,6 +88,27 @@ TEST(Cli11Adapter, ReturnsParserExitCodesWithoutProcessExitMacros) {
     EXPECT_NE(axk::cli::run(static_cast<int>(invalid.size()), invalid.data()), 0);
 }
 
+TEST(Cli11Adapter, ReportsSemanticAndSourceVersionsSeparately) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(run_cli({"axklib", "--version"}), 0);
+    const auto output = normalize_newlines(testing::internal::GetCapturedStdout());
+    const auto build = axk::current_build_info();
+    const auto selected_ref = build.is_tagged_release ? build.git_tag : build.git_branch;
+    const auto expected = std::string{"axklib "} + build.source_identity + "\nversion: " + std::string{axk::version()} +
+                          "\npackage: " + build.package_basename + "\ngit: " + build.git_sha_short +
+                          "\nref: " + selected_ref + "\nsource: " + (build.is_dirty ? "modified" : "clean") + "\n";
+    EXPECT_EQ(output, expected);
+}
+
+TEST(Cli11Adapter, ShowsSourceIdentityInDefaultBanner) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(run_cli({"axklib"}), 0);
+    const auto output = normalize_newlines(testing::internal::GetCapturedStdout());
+    const auto expected_prefix =
+        std::string{"axklib ("} + axk::current_build_info().source_identity + ")\n\naxklib [OPTIONS] [SUBCOMMANDS]\n";
+    EXPECT_EQ(output.substr(0U, expected_prefix.size()), expected_prefix);
+}
+
 TEST(Cli11Adapter, RejectsInvalidUtf8AndRepeatedScalarOptions) {
     std::string invalid_value{"\xc3\x28", 2U};
     std::array invalid_utf8{const_cast<char *>("axklib"), invalid_value.data()};
@@ -117,7 +139,10 @@ TEST(Cli11Adapter, ExposesOnlyMaintainedCommandInventory) {
     const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "library/tests/fixtures/cli/help.txt";
     std::ifstream stream{fixture, std::ios::binary};
     ASSERT_TRUE(stream);
-    const std::string expected{std::istreambuf_iterator<char>{stream}, {}};
+    std::string expected{std::istreambuf_iterator<char>{stream}, {}};
+    const auto marker = expected.find("@AXK_SOURCE_IDENTITY@");
+    ASSERT_NE(marker, std::string::npos);
+    expected.replace(marker, std::string{"@AXK_SOURCE_IDENTITY@"}.size(), axk::current_build_info().source_identity);
     EXPECT_EQ(normalize_newlines(output), normalize_newlines(expected));
 }
 
