@@ -64,6 +64,7 @@ struct StereoRenderDecision {
 
 AXK_API Result<Waveform> decode_waveform(const Container &container, const ObjectSnapshot &snapshot,
                                          const CancellationToken &cancellation = {});
+AXK_API Result<Waveform> decode_waveform(const ObjectSnapshot &snapshot, const std::filesystem::path &source_path);
 AXK_API Result<Waveform> decode_waveform(const MediaObject &object);
 AXK_API Result<std::vector<std::byte>> wav_bytes(const Waveform &waveform);
 AXK_API Result<void> write_wav_atomic(const std::filesystem::path &path, const Waveform &waveform,

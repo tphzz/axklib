@@ -198,7 +198,7 @@ std::string sfs_selector_component(const axk::ContentNode &node) {
 
 std::string first_media_object_directory(const CliLoaded &loaded, const axk::ContentNode &node) {
     if (!node.object_key.empty()) {
-        const auto object = std::ranges::find(loaded.objects, node.object_key, &axk::MediaObject::key);
+        const auto object = std::ranges::find(loaded.objects, node.object_key, &axk::MediaObjectDescriptor::key);
         if (object != loaded.objects.end()) {
             auto directory = std::filesystem::path{object->logical_path}.parent_path();
             if (loaded.media.kind() == axk::MediaKind::iso9660)
@@ -371,7 +371,7 @@ void render_tree_paths(const CliLoaded &loaded, const axk::ContentNode &node, st
 }
 
 int run_info_request(const axk::cli::InfoRequest &request) {
-    const auto loaded = load_cli_paths(request.paths);
+    const auto loaded = load_cli_paths(request.paths, axk::MediaObjectReadMode::decoded_metadata);
     if (request.format == "json") {
         axk::cli::schema::info_v1::InfoOutput output;
         for (const auto &source : loaded.loaded) {

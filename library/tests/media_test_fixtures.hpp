@@ -236,4 +236,31 @@ inline std::vector<std::byte> iso_fixture(bool outside_extent = false) {
     return bytes;
 }
 
+inline std::vector<std::byte> iso_fixture_with_large_smpl(std::size_t object_size) {
+    constexpr std::size_t sector_size = 2048;
+    constexpr std::uint32_t object_sector = 24;
+    const auto object_sectors = static_cast<std::uint32_t>((object_size + sector_size - 1U) / sector_size);
+    const auto sector_count = object_sector + object_sectors;
+    auto bytes = iso_fixture();
+    bytes.resize(static_cast<std::size_t>(sector_count) * sector_size);
+
+    auto pvd = std::span{bytes}.subspan(16U * sector_size, sector_size);
+    le32(pvd, 80, sector_count);
+    be32(pvd, 84, sector_count);
+
+    auto volume = std::span{bytes}.subspan(20U * sector_size, sector_size);
+    constexpr std::size_t object_record = 68;
+    le32(volume, object_record + 2U, object_sector);
+    be32(volume, object_record + 6U, object_sector);
+    le32(volume, object_record + 10U, static_cast<std::uint32_t>(object_size));
+    be32(volume, object_record + 14U, static_cast<std::uint32_t>(object_size));
+
+    auto object = smpl_object("CD WAVE");
+    object.resize(object_size);
+    be32(object, 0x1c, static_cast<std::uint32_t>(object_size - 0xacU));
+    be32(object, 0x20, static_cast<std::uint32_t>(object_size - 0xacU));
+    std::ranges::copy(object, bytes.begin() + static_cast<std::ptrdiff_t>(object_sector * sector_size));
+    return bytes;
+}
+
 } // namespace

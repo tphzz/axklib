@@ -1,5 +1,36 @@
 #include "media_test_fixtures.hpp"
 
+namespace {
+
+class CountingReader final : public axk::RandomAccessReader {
+  public:
+    explicit CountingReader(std::vector<std::byte> bytes) : source_{std::move(bytes)} {}
+
+    [[nodiscard]] std::uint64_t size() const noexcept override { return source_.size(); }
+
+    [[nodiscard]] axk::Result<void> read_exact_at(std::uint64_t offset,
+                                                  std::span<std::byte> destination) const override {
+        ++read_count_;
+        bytes_read_ += destination.size();
+        return source_.read_exact_at(offset, destination);
+    }
+
+    void reset_counts() const noexcept {
+        read_count_ = 0;
+        bytes_read_ = 0;
+    }
+
+    [[nodiscard]] std::uint64_t read_count() const noexcept { return read_count_; }
+    [[nodiscard]] std::uint64_t bytes_read() const noexcept { return bytes_read_; }
+
+  private:
+    axk::MemoryReader source_;
+    mutable std::uint64_t read_count_{};
+    mutable std::uint64_t bytes_read_{};
+};
+
+} // namespace
+
 TEST(Iso9660Reader, LoadsYamahaScopeLabelsObjectsAndStructuredPaths) {
     auto image = axk::IsoImage::open(std::make_shared<axk::MemoryReader>(iso_fixture()), "fixture.iso");
     ASSERT_TRUE(image) << image.error().message;
@@ -22,6 +53,53 @@ TEST(Iso9660Reader, LoadsYamahaScopeLabelsObjectsAndStructuredPaths) {
     ASSERT_TRUE(catalog) << catalog.error().message;
     ASSERT_EQ(catalog->objects.size(), 1U);
     EXPECT_EQ(catalog->objects.front().raw_payload, object.raw_payload);
+}
+
+TEST(Iso9660Reader, MetadataInventorySkipsPcmAndMatchesCompleteCatalog) {
+    constexpr std::size_t object_size = 1024U * 1024U;
+    auto reader = std::make_shared<CountingReader>(iso_fixture_with_large_smpl(object_size));
+    auto image = axk::IsoImage::open(reader, "large.iso");
+    ASSERT_TRUE(image) << image.error().message;
+    const axk::MediaContainer media{*image};
+
+    reader->reset_counts();
+    const auto complete = axk::build_media_inventory(media, axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(complete) << complete.error().message;
+    const auto complete_bytes = reader->bytes_read();
+    ASSERT_EQ(complete->catalog.objects.size(), 1U);
+    ASSERT_EQ(complete->objects.size(), 1U);
+    EXPECT_EQ(complete->catalog.objects.front().raw_payload.size(), object_size);
+    EXPECT_TRUE(complete->raw_payloads_complete);
+
+    reader->reset_counts();
+    const auto metadata = axk::build_media_inventory(media, axk::MediaObjectReadMode::decoded_metadata);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+    ASSERT_EQ(metadata->catalog.objects.size(), 1U);
+    ASSERT_EQ(metadata->objects.size(), 1U);
+    EXPECT_EQ(metadata->objects.front().size, object_size);
+    EXPECT_TRUE(metadata->catalog.objects.front().raw_payload.empty());
+    EXPECT_FALSE(metadata->raw_payloads_complete);
+    EXPECT_LT(reader->bytes_read(), 4096U);
+    EXPECT_LT(reader->bytes_read() * 100U, complete_bytes);
+
+    const auto &complete_object = complete->catalog.objects.front();
+    const auto &metadata_object = metadata->catalog.objects.front();
+    EXPECT_EQ(metadata_object.key, complete_object.key);
+    EXPECT_EQ(metadata_object.scope_key, complete_object.scope_key);
+    EXPECT_EQ(metadata_object.placement->container_directory, complete_object.placement->container_directory);
+    EXPECT_EQ(metadata_object.object.header.raw_type, complete_object.object.header.raw_type);
+    EXPECT_EQ(metadata_object.object.header.name, complete_object.object.header.name);
+    const auto *complete_smpl = std::get_if<axk::CurrentSmpl>(&complete_object.object.payload);
+    const auto *metadata_smpl = std::get_if<axk::CurrentSmpl>(&metadata_object.object.payload);
+    ASSERT_NE(complete_smpl, nullptr);
+    ASSERT_NE(metadata_smpl, nullptr);
+    EXPECT_EQ(metadata_smpl->sample_rate.value, complete_smpl->sample_rate.value);
+    EXPECT_EQ(metadata_smpl->wave_length_frames.value, complete_smpl->wave_length_frames.value);
+
+    const auto complete_graph = axk::build_relationship_graph(complete->catalog);
+    const auto metadata_graph = axk::build_relationship_graph(metadata->catalog);
+    EXPECT_EQ(metadata_graph.relationships.size(), complete_graph.relationships.size());
+    EXPECT_EQ(metadata_graph.bitmap_comparisons.size(), complete_graph.bitmap_comparisons.size());
 }
 
 TEST(Iso9660Reader, RequiresCatalogedDsknameForAConfirmedGroupLabelButKeepsInventory) {

@@ -21,6 +21,7 @@ namespace axk {
 
 enum class MediaKind : std::uint8_t { sfs, fat12_floppy, iso9660, standalone_object };
 enum class LabelStatus : std::uint8_t { confirmed, navigation_aid, raw_identifier };
+enum class MediaObjectReadMode : std::uint8_t { complete, decoded_metadata };
 
 struct FatGeometry {
     std::uint16_t bytes_per_sector{};
@@ -85,6 +86,24 @@ struct MediaObject {
     std::optional<Error> decode_issue;
 };
 
+struct MediaObjectDescriptor {
+    std::string key;
+    std::string logical_path;
+    std::string scope_key;
+    std::string raw_group;
+    std::string raw_volume;
+    MenuLabel group_label;
+    MenuLabel volume_label;
+    std::uint64_t data_offset{};
+    std::uint64_t size{};
+};
+
+struct MediaInventory {
+    std::vector<MediaObjectDescriptor> objects;
+    ObjectCatalog catalog;
+    bool raw_payloads_complete{};
+};
+
 struct StructuredObjectPath {
     std::filesystem::path relative_path;
     MenuLabel group_label;
@@ -107,7 +126,12 @@ class AXK_API FatImage {
     [[nodiscard]] const std::vector<FatFile> &files() const noexcept;
     [[nodiscard]] Result<std::vector<std::byte>> read_file(const FatFile &file,
                                                            const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<std::byte>> read_file_prefix(const FatFile &file, std::size_t maximum_bytes,
+                                                                  const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::vector<MediaObject>> objects(std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
+                                                           const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<MediaObject>> objects(MediaObjectReadMode mode,
+                                                           std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                            const CancellationToken &cancellation = {}) const;
 
   private:
@@ -136,7 +160,12 @@ class AXK_API IsoImage {
     [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
     [[nodiscard]] Result<std::vector<std::byte>> read_file(const IsoFile &file,
                                                            const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<std::byte>> read_file_prefix(const IsoFile &file, std::size_t maximum_bytes,
+                                                                  const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::vector<MediaObject>> objects(std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
+                                                           const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<MediaObject>> objects(MediaObjectReadMode mode,
+                                                           std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                            const CancellationToken &cancellation = {}) const;
 
   private:
@@ -175,6 +204,9 @@ class AXK_API MediaContainer {
     [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
     [[nodiscard]] Result<std::vector<MediaObject>> objects(std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                            const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<MediaObject>> objects(MediaObjectReadMode mode,
+                                                           std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
+                                                           const CancellationToken &cancellation = {}) const;
 
   private:
     MediaStorage storage_;
@@ -185,6 +217,10 @@ AXK_API Result<MediaContainer> open_media(const std::filesystem::path &path,
 AXK_API Result<ObjectCatalog> build_object_catalog(const MediaContainer &container,
                                                    std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                    const CancellationToken &cancellation = {});
+AXK_API Result<MediaInventory> build_media_inventory(const MediaContainer &container,
+                                                     MediaObjectReadMode mode = MediaObjectReadMode::complete,
+                                                     std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
+                                                     const CancellationToken &cancellation = {});
 AXK_API StructuredObjectPath structured_object_path(const MediaObject &object);
 AXK_API std::vector<StructuredObjectPath> structured_object_paths(std::span<const MediaObject> objects);
 AXK_API std::string sanitize_path_component(std::string_view value, std::string_view fallback);

@@ -134,6 +134,16 @@ Result<Waveform> decode_waveform(const Container &container, const ObjectSnapsho
                                    snapshot.object.header.name, *payload);
 }
 
+Result<Waveform> decode_waveform(const ObjectSnapshot &snapshot, const std::filesystem::path &source_path) {
+    const auto *decoded = std::get_if<CurrentSmpl>(&snapshot.object.payload);
+    if (decoded == nullptr) {
+        return std::unexpected{
+            make_error(ErrorCode::invalid_argument, ErrorCategory::audio, "waveform decode requires a SMPL object")};
+    }
+    return decode_waveform_payload(*decoded, snapshot.key, source_path, snapshot.partition, snapshot.sfs_id,
+                                   snapshot.object.header.name, snapshot.raw_payload);
+}
+
 Result<Waveform> decode_waveform(const MediaObject &object) {
     const auto *decoded = std::get_if<CurrentSmpl>(&object.decoded.payload);
     if (decoded == nullptr) {

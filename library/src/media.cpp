@@ -123,10 +123,15 @@ std::span<const MediaValidationIssue> MediaContainer::validation_issues() const 
 
 Result<std::vector<MediaObject>> MediaContainer::objects(std::size_t maximum_object_bytes,
                                                          const CancellationToken &cancellation) const {
+    return objects(MediaObjectReadMode::complete, maximum_object_bytes, cancellation);
+}
+
+Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mode, std::size_t maximum_object_bytes,
+                                                         const CancellationToken &cancellation) const {
     if (const auto *fat = variant_ptr<FatImage>(storage_))
-        return fat->objects(maximum_object_bytes, cancellation);
+        return fat->objects(mode, maximum_object_bytes, cancellation);
     if (const auto *iso = variant_ptr<IsoImage>(storage_))
-        return iso->objects(maximum_object_bytes, cancellation);
+        return iso->objects(mode, maximum_object_bytes, cancellation);
     if (const auto *standalone = variant_ptr<StandaloneObject>(storage_))
         return std::vector{standalone->object()};
     const auto *sfs = variant_ptr<Container>(storage_);

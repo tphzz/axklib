@@ -117,6 +117,11 @@ if(AXK_BUILD_BENCHMARKS)
   target_compile_features(axk_workflow_benchmark PRIVATE cxx_std_23)
   target_link_libraries(axk_workflow_benchmark PRIVATE axklib::audio nlohmann_json::nlohmann_json)
   axk_set_project_warnings(axk_workflow_benchmark)
+
+  add_executable(axk_media_inventory_benchmark benchmarks/media_inventory_benchmark.cpp)
+  target_compile_features(axk_media_inventory_benchmark PRIVATE cxx_std_23)
+  target_link_libraries(axk_media_inventory_benchmark PRIVATE axklib::core nlohmann_json::nlohmann_json)
+  axk_set_project_warnings(axk_media_inventory_benchmark)
 endif()
 target_include_directories(
   axk_core
