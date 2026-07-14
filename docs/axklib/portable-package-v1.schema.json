@@ -186,7 +186,9 @@
             "SBNK_LEFT_MEMBER_LINK",
             "SBNK_RIGHT_MEMBER_LINK",
             "SBNK_GROUP_MEMBERSHIP",
-            "SBNK_PROGRAM_BITMAP"
+            "SBNK_PROGRAM_BITMAP",
+            "SBAC_SLOT_HANDLE",
+            "PROG_ASSIGNMENT_HANDLE"
           ]
         },
         "width": {

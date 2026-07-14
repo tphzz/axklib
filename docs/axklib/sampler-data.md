@@ -382,8 +382,11 @@ SBAC slot row layout, stride `0x14`:
 
 The current reader uses `active_slot_count_0x144` to decide how many rows to
 read, capped by the payload size. The 32-bit handle is retained as a diagnostic
-field. Target matching uses exact name, object type, and local placement before
-it emits a resolved relationship.
+field. It is opaque source-local state rather than a portable object identity.
+Package export declares each active row handle as a relocation, and package
+import writes the hardware-proven zero form while preserving the row order and
+resolved member name. Target matching uses exact name, object type, and local
+placement before it emits a resolved relationship.
 
 ## PROG: Program Object
 
@@ -467,6 +470,14 @@ Program assignment rows start at `0x120` and use a `0x38` byte stride.
 | `+0x28` | 1 | u8 | output2 / active-state gate |
 | `+0x29` | 1 | u8 | filter_cutoff_offset |
 | `+0x2a` | 1 | u8 | filter_gain_offset |
+
+For named kind-`0x10` direct-SBNK and kind-`0x11` SBAC assignments, the 32-bit
+handle is opaque source-local state rather than a portable object identity.
+Package export declares it as a relocation, and package import writes the
+hardware-proven zero form while preserving the assignment ordinal, target name,
+kind, channel, and remaining row bytes. Empty rows and other assignment kinds
+are not covered by this relocation profile.
+
 | `+0x2b` | 1 | u8 | filter_q_width_offset |
 | `+0x2c` | 1 | u8 | cutoff_distance_offset |
 | `+0x2d..0x2e` | 2 | bytes | reserved_0045_0046 |

@@ -213,20 +213,26 @@ Result<RelocationProfile> build_relocation_profile(const DecodedObject &object,
     const auto *group = std::get_if<CurrentSbac>(&object.payload);
     if (group == nullptr)
       return std::unexpected{profile_error(object, "current SBAC payload is not decoded")};
-    if (std::ranges::any_of(group->slots,
-                            [](const SbacSlot &slot) { return slot.raw_handle != 0U; }))
-      return std::unexpected{
-          profile_error(object, "SBAC package profile requires zero member handles")};
+    for (const auto &slot : group->slots) {
+      if (auto added = add_range(result, object, slot.offset + 16U, 4U, "SBAC_SLOT_HANDLE");
+          !added) {
+        return std::unexpected{added.error()};
+      }
+    }
     break;
   }
   case ObjectType::prog: {
     const auto *program = std::get_if<CurrentProg>(&object.payload);
     if (program == nullptr)
       return std::unexpected{profile_error(object, "current PROG payload is not decoded")};
-    if (std::ranges::any_of(program->assignments,
-                            [](const ProgAssignment &row) { return row.raw_handle != 0U; })) {
-      return std::unexpected{
-          profile_error(object, "PROG package profile requires zero assignment handles")};
+    for (std::size_t index = 0; index < program->assignments.size(); ++index) {
+      const auto &assignment = program->assignments[index];
+      const auto supported_kind = assignment.kind == 0x10U || assignment.kind == 0x11U;
+      if (!assignment.name.empty() && supported_kind) {
+        const auto offset = 0x130U + static_cast<std::uint32_t>(index) * 0x38U;
+        if (auto added = add_range(result, object, offset, 4U, "PROG_ASSIGNMENT_HANDLE"); !added)
+          return std::unexpected{added.error()};
+      }
     }
     break;
   }
@@ -335,7 +341,22 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
     flags = context.grouped ? static_cast<std::uint8_t>(flags | 1U)
                             : static_cast<std::uint8_t>(flags & 0xfeU);
     result[0xd0U] = static_cast<std::byte>(flags);
-  } else if (node.object_type != "SBAC" && node.object_type != "PROG") {
+  } else if (node.object_type == "SBAC") {
+    const auto *group = std::get_if<CurrentSbac>(&source_decoded->payload);
+    if (group == nullptr)
+      return std::unexpected{relocation_error(node, "SBAC source payload is not decoded")};
+    for (const auto &slot : group->slots)
+      put_be32(result, slot.offset + 16U, 0U);
+  } else if (node.object_type == "PROG") {
+    const auto *program = std::get_if<CurrentProg>(&source_decoded->payload);
+    if (program == nullptr)
+      return std::unexpected{relocation_error(node, "Program source payload is not decoded")};
+    for (std::size_t index = 0; index < program->assignments.size(); ++index) {
+      const auto &assignment = program->assignments[index];
+      if (!assignment.name.empty() && (assignment.kind == 0x10U || assignment.kind == 0x11U))
+        put_be32(result, 0x130U + index * 0x38U, 0U);
+    }
+  } else {
     return std::unexpected{
         relocation_error(node, "package node type has no admitted relocation implementation")};
   }
@@ -408,6 +429,14 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
       }
     }
   } else if (const auto *program = std::get_if<CurrentProg>(&decoded->payload)) {
+    if (std::ranges::any_of(program->assignments, [](const ProgAssignment &assignment) {
+          return !assignment.name.empty() &&
+                 (assignment.kind == 0x10U || assignment.kind == 0x11U) &&
+                 assignment.raw_handle != 0U;
+        })) {
+      return std::unexpected{
+          relocation_error(node, "relocated Program assignment handle is not zero")};
+    }
     for (const auto &edge : package.relationships) {
       if (edge.source_node_id != node.node_id ||
           (edge.role != "PROG_ASSIGNMENT_TO_SBAC" && edge.role != "PROG_ASSIGNMENT_TO_SBNK")) {

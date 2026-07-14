@@ -118,6 +118,12 @@ one namespace and accepts no group or creation fields. ISO labels must match
 the existing Yamaha catalogs. A new ISO volume must be the next contiguous
 raw volume under its raw group.
 
+All destinations in one import request are resolved against the input image.
+One root can create and populate a new SFS volume, but another root in the same
+request cannot refer to that not-yet-published volume. Import a multi-root
+bundle into the new volume, or publish the volume first and add another package
+in a second atomic import.
+
 Example FAT destination:
 
 ```json
@@ -262,6 +268,13 @@ bit mask, role, and graph edges. Verification recomputes descriptors from the
 admitted object profile. Import may change only the object name and registered
 relocation ranges needed for destination links, Program membership, or group
 membership. Any other byte change fails before publication.
+
+Current `SBAC_SLOT_HANDLE` and `PROG_ASSIGNMENT_HANDLE` words are source-local
+state. Import writes the admitted zero representation while preserving the
+bound graph edge and its ordinal. The Program rule applies only to named
+kind-`0x10` direct-SBNK and kind-`0x11` SBAC assignment rows. Empty rows, other
+assignment kinds, reserved bytes, and undeclared tail words remain
+identity-significant.
 
 ## SDK Surface
 

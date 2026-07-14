@@ -570,6 +570,12 @@ void bind_relocations(PortablePackage &package) {
              edge.role == "SBNK_RIGHT_MEMBER_TO_SMPL") ||
             (relocation.role == "SBNK_GROUP_MEMBERSHIP" && edge.target_node_id == node.node_id &&
              edge.role == "SBAC_SLOT_TO_SBNK") ||
+            (relocation.role == "SBAC_SLOT_HANDLE" && edge.source_node_id == node.node_id &&
+             edge.role == "SBAC_SLOT_TO_SBNK" &&
+             relocation.offset == 0x15cU + edge.ordinal * 0x14U) ||
+            (relocation.role == "PROG_ASSIGNMENT_HANDLE" && edge.source_node_id == node.node_id &&
+             (edge.role == "PROG_ASSIGNMENT_TO_SBAC" || edge.role == "PROG_ASSIGNMENT_TO_SBNK") &&
+             relocation.offset == 0x130U + edge.ordinal * 0x38U) ||
             (relocation.role == "SBNK_PROGRAM_BITMAP" && edge.target_node_id == node.node_id &&
              edge.role == "PROG_ASSIGNMENT_TO_SBNK");
         if (binds)
@@ -747,20 +753,22 @@ Result<void> validate_package_closure(const PortablePackage &package) {
     } else if (const auto *group = std::get_if<CurrentSbac>(&decoded->payload)) {
       auto edges = package_children(package, node.node_id, "SBAC_SLOT_TO_SBNK");
       std::ranges::sort(edges, {}, &PackageRelationship::ordinal);
-      std::vector<std::string> names;
-      for (const auto &slot : group->slots) {
-        if (!slot.name.empty())
-          names.push_back(slot.name);
-      }
-      if (edges.size() != names.size())
+      const auto active_slots = std::ranges::count_if(
+          group->slots, [](const SbacSlot &slot) { return !slot.name.empty(); });
+      if (edges.size() != static_cast<std::size_t>(active_slots))
         return std::unexpected{
             package_error("package SBAC closure does not match its active member slots")};
-      for (std::size_t index = 0; index < names.size(); ++index) {
-        const auto *target = node_by_id(package, edges[index]->target_node_id);
-        if (edges[index]->ordinal != index || target == nullptr || target->object_type != "SBNK" ||
-            target->name != names[index]) {
-          return std::unexpected{
-              package_error("package SBAC edge order or member target is invalid")};
+      std::set<std::uint32_t> ordinals;
+      for (const auto *edge : edges) {
+        const auto *target = node_by_id(package, edge->target_node_id);
+        const auto valid_ordinal = edge->ordinal < group->slots.size();
+        const auto expected_name =
+            valid_ordinal ? std::string_view{group->slots[edge->ordinal].name} : std::string_view{};
+        if (!ordinals.emplace(edge->ordinal).second || expected_name.empty() || target == nullptr ||
+            target->object_type != "SBNK" || target->name != expected_name) {
+          return std::unexpected{package_error(std::format(
+              "package SBAC slot {} requires SBNK '{}', but the edge targets '{}'", edge->ordinal,
+              expected_name, target == nullptr ? "<missing>" : target->name))};
         }
       }
     } else if (const auto *program = std::get_if<CurrentProg>(&decoded->payload)) {
@@ -1397,7 +1405,7 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
     objects.emplace(object.key, &object);
 
   std::set<std::string, std::less<>> included_keys;
-  std::map<std::string, const Relationship *, std::less<>> included_relationships;
+  std::vector<std::pair<const Relationship *, std::uint32_t>> included_relationships;
   std::vector<const ObjectSnapshot *> queue;
   for (const auto &root : *selected)
     queue.insert(queue.end(), root.seeds.begin(), root.seeds.end());
@@ -1416,11 +1424,35 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
     auto required = required_relationships(*object, graph);
     if (!required)
       return std::unexpected{required.error()};
+    std::map<std::string, std::uint32_t, std::less<>> role_ordinals;
+    std::map<std::string, std::vector<std::uint32_t>, std::less<>> sbac_slot_ordinals;
+    std::map<std::string, std::size_t, std::less<>> next_sbac_slot;
+    if (const auto *group = std::get_if<CurrentSbac>(&object->object.payload)) {
+      for (std::size_t index = 0; index < group->slots.size(); ++index) {
+        if (!group->slots[index].name.empty())
+          sbac_slot_ordinals[group->slots[index].name].push_back(static_cast<std::uint32_t>(index));
+      }
+    }
     for (const auto *relationship : *required) {
       const auto found = objects.find(*relationship->target_key);
       if (found == objects.end())
         return std::unexpected{package_error("package relationship target is absent from catalog")};
-      included_relationships.emplace(relationship->key, relationship);
+      std::uint32_t ordinal{};
+      if (relationship->assignment_index) {
+        ordinal = static_cast<std::uint32_t>(*relationship->assignment_index);
+      } else if (relationship->type == "SBAC_SLOT_TO_SBNK") {
+        const auto &target_name = found->second->object.header.name;
+        const auto positions = sbac_slot_ordinals.find(target_name);
+        auto &next = next_sbac_slot[target_name];
+        if (positions == sbac_slot_ordinals.end() || next >= positions->second.size()) {
+          return std::unexpected{
+              package_error("package SBAC relationship has no matching source slot")};
+        }
+        ordinal = positions->second[next++];
+      } else {
+        ordinal = role_ordinals[relationship->type]++;
+      }
+      included_relationships.emplace_back(relationship, ordinal);
       queue.push_back(found->second);
     }
   }
@@ -1468,15 +1500,9 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
   }
   std::ranges::sort(package.nodes, {}, &PackageNode::node_id);
 
-  std::map<std::pair<std::string, std::string>, std::uint32_t> role_ordinals;
-  for (const auto &[key, relationship] : included_relationships) {
-    static_cast<void>(key);
+  for (const auto &[relationship, ordinal] : included_relationships) {
     const auto source_id = node_ids.at(relationship->source_key);
     const auto target_id = node_ids.at(*relationship->target_key);
-    const auto ordinal_key = std::pair{source_id, relationship->type};
-    const auto ordinal = relationship->assignment_index
-                             ? static_cast<std::uint32_t>(*relationship->assignment_index)
-                             : role_ordinals[ordinal_key]++;
     package.relationships.push_back({edge_id(source_id, target_id, relationship->type, ordinal),
                                      source_id, target_id, relationship->type, ordinal});
   }

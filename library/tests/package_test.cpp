@@ -597,6 +597,65 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
   std::filesystem::remove_all(output_root, error);
 }
 
+TEST(PortablePackage, SbacRelationshipOrdinalsPreserveSourceSlotOrder) {
+  const auto output_root = publication_root("axklib-package-sbac-slot-order");
+  const auto audio_path = output_root / "tone.wav";
+  const auto source_path = output_root / "source.hds";
+  std::error_code error;
+  std::filesystem::remove_all(output_root, error);
+  std::filesystem::create_directories(output_root);
+  ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1000)));
+
+  axk::VolumeSpec volume;
+  volume.name = "Slot Order";
+  volume.waveforms.push_back({"wave", "Shared Wave", audio_path, 60U, {}});
+  for (const auto &name : {std::string{"Z Bank"}, std::string{"A Bank"}}) {
+    axk::SampleBankSpec bank;
+    bank.name = name;
+    bank.waveform_id = "wave";
+    bank.root_key = 60U;
+    bank.key_high = 127U;
+    volume.sample_banks.push_back(std::move(bank));
+  }
+  axk::SampleBankSpec direct;
+  direct.name = "Direct Bank";
+  direct.waveform_id = "wave";
+  direct.root_key = 60U;
+  direct.key_high = 127U;
+  volume.sample_banks.push_back(std::move(direct));
+  volume.sample_bank_groups.push_back({"Ordered Group", {"Z Bank", "A Bank"}});
+  volume.programs.push_back({1U, {{"SBAC", "Ordered Group", 1U}, {"SBNK", "Direct Bank", 2U}}});
+  axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+  manifest.partitions.push_back({"P1", {std::move(volume)}});
+  const auto written = axk::write_hds_image(manifest, source_path);
+  ASSERT_TRUE(written) << written.error().message;
+  const auto source = axk::open_media(source_path);
+  ASSERT_TRUE(source) << source.error().message;
+
+  const std::vector roots{root(axk::PackageRootKind::sbac, "Slot Order", "Ordered Group")};
+  const auto built = axk::build_portable_package(*source, roots);
+  ASSERT_TRUE(built) << built.error().message;
+  std::vector<axk::PackageRelationship> edges;
+  for (const auto &edge : built->package.relationships) {
+    if (edge.role == "SBAC_SLOT_TO_SBNK")
+      edges.push_back(edge);
+  }
+  std::ranges::sort(edges, {}, &axk::PackageRelationship::ordinal);
+  ASSERT_EQ(edges.size(), 2U);
+  const auto target_name = [&](const axk::PackageRelationship &edge) {
+    const auto target =
+        std::ranges::find(built->package.nodes, edge.target_node_id, &axk::PackageNode::node_id);
+    EXPECT_NE(target, built->package.nodes.end());
+    return target->name;
+  };
+  EXPECT_EQ(edges[0].ordinal, 0U);
+  EXPECT_EQ(target_name(edges[0]), "Z Bank");
+  EXPECT_EQ(edges[1].ordinal, 1U);
+  EXPECT_EQ(target_name(edges[1]), "A Bank");
+  EXPECT_TRUE(axk::verify_portable_package(built->package));
+  std::filesystem::remove_all(output_root, error);
+}
+
 TEST(PortablePackage, NormativeJsonSchemaMatchesCanonicalManifestShapeAndEnums) {
   const auto output_root = publication_root("axklib-package-schema-drift");
   const auto audio_path = output_root / "tone.wav";
@@ -643,17 +702,27 @@ TEST(PortablePackage, NormativeJsonSchemaMatchesCanonicalManifestShapeAndEnums) 
             (std::set<std::string>{"prog", "sbnk", "sbac", "sequ", "smpl", "volume"}));
   EXPECT_EQ(string_set(definitions.at("object").at("properties").at("object_type").at("enum")),
             (std::set<std::string>{"PRF3", "PROG", "SBAC", "SBNK", "SEQU", "SMPL"}));
+  EXPECT_EQ(
+      string_set(definitions.at("relocation").at("properties").at("role").at("enum")),
+      (std::set<std::string>{"PROG_ASSIGNMENT_HANDLE", "SBAC_SLOT_HANDLE", "SBNK_GROUP_MEMBERSHIP",
+                             "SBNK_LEFT_MEMBER_LINK", "SBNK_PROGRAM_BITMAP",
+                             "SBNK_RIGHT_MEMBER_LINK", "SMPL_GROUP_ID", "SMPL_LINK_ID"}));
   std::filesystem::remove_all(output_root, error);
 }
 
-TEST(PortablePackage, RejectsCompleteVolumeWhenOnePlacedObjectProfileIsNotPortable) {
+TEST(PortablePackage, ExportsCompleteVolumeWithRelocatableNonzeroSbacHandles) {
   auto source = axk::open_media(fixture("HD00_512_single_sbnk_authored.hds"));
   ASSERT_TRUE(source) << source.error().message;
   const std::vector volume_root{root(axk::PackageRootKind::volume, "New Volume")};
   const auto volume = axk::build_portable_package(*source, volume_root);
-  ASSERT_FALSE(volume);
-  EXPECT_EQ(volume.error().code, axk::ErrorCode::unsupported_profile);
-  EXPECT_NE(volume.error().message.find("SBAC"), std::string::npos);
+  ASSERT_TRUE(volume) << volume.error().message;
+  EXPECT_TRUE(axk::verify_portable_package(volume->package));
+  EXPECT_TRUE(std::ranges::any_of(volume->package.nodes, [](const auto &node) {
+    return node.object_type == "SBAC" &&
+           std::ranges::any_of(node.relocations, [](const auto &relocation) {
+             return relocation.role == "SBAC_SLOT_HANDLE" && relocation.expected_hex != "00000000";
+           });
+  }));
 }
 
 TEST(PortablePackage, ManifestKindOverridesARecognizedWrongFilenameExtension) {
@@ -1028,6 +1097,143 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
       EXPECT_EQ(profile->relocations[3].width, 1U);
       EXPECT_EQ(profile->relocations[3].role, "SBNK_GROUP_MEMBERSHIP");
       EXPECT_EQ(profile->relocations[3].mask_hex, "01");
+    } else if (node.object_type == "SBAC") {
+      const auto *group = std::get_if<axk::CurrentSbac>(&decoded->payload);
+      ASSERT_NE(group, nullptr);
+      ASSERT_EQ(profile->relocations.size(), group->slots.size());
+      for (std::size_t index = 0; index < group->slots.size(); ++index) {
+        EXPECT_EQ(profile->relocations[index].offset, group->slots[index].offset + 16U);
+        EXPECT_EQ(profile->relocations[index].width, 4U);
+        EXPECT_EQ(profile->relocations[index].role, "SBAC_SLOT_HANDLE");
+        EXPECT_TRUE(profile->relocations[index].mask_hex.empty());
+        ASSERT_EQ(node.relocations[index].edge_ids.size(), 1U);
+        const auto edge = std::ranges::find(built->package.relationships,
+                                            node.relocations[index].edge_ids.front(),
+                                            &axk::PackageRelationship::edge_id);
+        ASSERT_NE(edge, built->package.relationships.end());
+        EXPECT_EQ(edge->source_node_id, node.node_id);
+        EXPECT_EQ(edge->role, "SBAC_SLOT_TO_SBNK");
+        EXPECT_EQ(edge->ordinal, index);
+      }
+      auto nonzero_handles = node.raw_payload;
+      for (std::size_t index = 0; index < group->slots.size(); ++index) {
+        const auto offset = static_cast<std::size_t>(group->slots[index].offset) + 16U;
+        const auto value = static_cast<std::uint32_t>(0x10203040U + index);
+        nonzero_handles[offset] = static_cast<std::byte>(value >> 24U);
+        nonzero_handles[offset + 1U] = static_cast<std::byte>(value >> 16U);
+        nonzero_handles[offset + 2U] = static_cast<std::byte>(value >> 8U);
+        nonzero_handles[offset + 3U] = static_cast<std::byte>(value);
+      }
+      const auto nonzero_decoded = axk::decode_object(nonzero_handles);
+      ASSERT_TRUE(nonzero_decoded) << nonzero_decoded.error().message;
+      const auto nonzero_profile =
+          axk::package_internal::build_relocation_profile(*nonzero_decoded, nonzero_handles);
+      ASSERT_TRUE(nonzero_profile) << nonzero_profile.error().message;
+      EXPECT_EQ(nonzero_profile->normalized_payload, profile->normalized_payload);
+      auto mutable_nonzero_profile = *nonzero_profile;
+      for (std::size_t index = 0; index < group->slots.size(); ++index) {
+        EXPECT_EQ(nonzero_profile->relocations[index].expected_hex,
+                  std::format("{:08x}", 0x10203040U + index));
+        mutable_nonzero_profile.relocations[index].edge_ids = node.relocations[index].edge_ids;
+      }
+      auto nonzero_node = node;
+      nonzero_node.raw_payload = std::move(nonzero_handles);
+      nonzero_node.relocations = std::move(mutable_nonzero_profile.relocations);
+      axk::package_internal::PackageNodeRelocationContext nonzero_context;
+      nonzero_context.destination_name = node.name;
+      for (const auto &edge : built->package.relationships) {
+        if (edge.source_node_id == node.node_id) {
+          nonzero_context.edge_target_names.emplace(edge.edge_id,
+                                                    target_node(edge.target_node_id).name);
+        }
+      }
+      const auto normalized = axk::package_internal::relocate_package_node(
+          built->package, nonzero_node, nonzero_context);
+      ASSERT_TRUE(normalized) << normalized.error().message;
+      const auto normalized_decoded = axk::decode_object(*normalized);
+      ASSERT_TRUE(normalized_decoded) << normalized_decoded.error().message;
+      const auto *normalized_group = std::get_if<axk::CurrentSbac>(&normalized_decoded->payload);
+      ASSERT_NE(normalized_group, nullptr);
+      EXPECT_TRUE(std::ranges::all_of(normalized_group->slots,
+                                      [](const auto &slot) { return slot.raw_handle == 0U; }));
+    } else if (node.object_type == "PROG") {
+      const auto *program = std::get_if<axk::CurrentProg>(&decoded->payload);
+      ASSERT_NE(program, nullptr);
+      std::vector<std::size_t> portable_rows;
+      for (std::size_t index = 0; index < program->assignments.size(); ++index) {
+        const auto &assignment = program->assignments[index];
+        if (!assignment.name.empty() && (assignment.kind == 0x10U || assignment.kind == 0x11U))
+          portable_rows.push_back(index);
+      }
+      ASSERT_EQ(profile->relocations.size(), portable_rows.size());
+      auto nonzero_handles = node.raw_payload;
+      for (std::size_t relocation_index = 0; relocation_index < portable_rows.size();
+           ++relocation_index) {
+        const auto row_index = portable_rows[relocation_index];
+        const auto offset = 0x130U + row_index * 0x38U;
+        const auto value = static_cast<std::uint32_t>(0x50607080U + relocation_index);
+        nonzero_handles[offset] = static_cast<std::byte>(value >> 24U);
+        nonzero_handles[offset + 1U] = static_cast<std::byte>(value >> 16U);
+        nonzero_handles[offset + 2U] = static_cast<std::byte>(value >> 8U);
+        nonzero_handles[offset + 3U] = static_cast<std::byte>(value);
+        EXPECT_EQ(profile->relocations[relocation_index].offset, offset);
+        EXPECT_EQ(profile->relocations[relocation_index].width, 4U);
+        EXPECT_EQ(profile->relocations[relocation_index].role, "PROG_ASSIGNMENT_HANDLE");
+        EXPECT_TRUE(profile->relocations[relocation_index].mask_hex.empty());
+        ASSERT_EQ(node.relocations[relocation_index].edge_ids.size(), 1U);
+        const auto edge = std::ranges::find(built->package.relationships,
+                                            node.relocations[relocation_index].edge_ids.front(),
+                                            &axk::PackageRelationship::edge_id);
+        ASSERT_NE(edge, built->package.relationships.end());
+        EXPECT_EQ(edge->source_node_id, node.node_id);
+        EXPECT_EQ(edge->ordinal, row_index);
+      }
+      const auto nonzero_decoded = axk::decode_object(nonzero_handles);
+      ASSERT_TRUE(nonzero_decoded) << nonzero_decoded.error().message;
+      const auto nonzero_profile =
+          axk::package_internal::build_relocation_profile(*nonzero_decoded, nonzero_handles);
+      ASSERT_TRUE(nonzero_profile) << nonzero_profile.error().message;
+      EXPECT_EQ(nonzero_profile->normalized_payload, profile->normalized_payload);
+      auto mutable_nonzero_profile = *nonzero_profile;
+      for (std::size_t index = 0; index < portable_rows.size(); ++index) {
+        EXPECT_EQ(nonzero_profile->relocations[index].expected_hex,
+                  std::format("{:08x}", 0x50607080U + index));
+        mutable_nonzero_profile.relocations[index].edge_ids = node.relocations[index].edge_ids;
+      }
+      auto nonzero_node = node;
+      nonzero_node.raw_payload = std::move(nonzero_handles);
+      nonzero_node.relocations = std::move(mutable_nonzero_profile.relocations);
+      axk::package_internal::PackageNodeRelocationContext nonzero_context;
+      nonzero_context.destination_name = node.name;
+      for (const auto &edge : built->package.relationships) {
+        if (edge.source_node_id == node.node_id) {
+          nonzero_context.edge_target_names.emplace(edge.edge_id,
+                                                    target_node(edge.target_node_id).name);
+        }
+      }
+      const auto normalized = axk::package_internal::relocate_package_node(
+          built->package, nonzero_node, nonzero_context);
+      ASSERT_TRUE(normalized) << normalized.error().message;
+      const auto normalized_decoded = axk::decode_object(*normalized);
+      ASSERT_TRUE(normalized_decoded) << normalized_decoded.error().message;
+      const auto *normalized_program = std::get_if<axk::CurrentProg>(&normalized_decoded->payload);
+      ASSERT_NE(normalized_program, nullptr);
+      for (const auto index : portable_rows)
+        EXPECT_EQ(normalized_program->assignments[index].raw_handle, 0U);
+
+      const auto empty_row = std::ranges::find_if(
+          program->assignments, [](const auto &assignment) { return assignment.name.empty(); });
+      ASSERT_NE(empty_row, program->assignments.end());
+      const auto empty_index =
+          static_cast<std::size_t>(std::distance(program->assignments.begin(), empty_row));
+      auto invalid_handle = node.raw_payload;
+      invalid_handle[0x130U + empty_index * 0x38U] = std::byte{0x01};
+      const auto invalid_decoded = axk::decode_object(invalid_handle);
+      ASSERT_TRUE(invalid_decoded) << invalid_decoded.error().message;
+      const auto invalid_profile =
+          axk::package_internal::build_relocation_profile(*invalid_decoded, invalid_handle);
+      ASSERT_TRUE(invalid_profile) << invalid_profile.error().message;
+      EXPECT_NE(invalid_profile->normalized_payload, profile->normalized_payload);
     } else {
       EXPECT_TRUE(profile->relocations.empty()) << node.object_type;
     }
@@ -1130,6 +1336,22 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
       EXPECT_EQ(be32(*relocated, 0xc4U), 0x00000001U);
       EXPECT_EQ(be32(*relocated, 0xc8U), 0x80000000U);
       EXPECT_EQ(be32(*relocated, 0xccU), 0x80000000U);
+    } else if (node.object_type == "SBAC") {
+      const auto relocated_decoded = axk::decode_object(*relocated);
+      ASSERT_TRUE(relocated_decoded) << relocated_decoded.error().message;
+      const auto *group = std::get_if<axk::CurrentSbac>(&relocated_decoded->payload);
+      ASSERT_NE(group, nullptr);
+      EXPECT_TRUE(std::ranges::all_of(group->slots,
+                                      [](const auto &slot) { return slot.raw_handle == 0U; }));
+    } else if (node.object_type == "PROG") {
+      const auto relocated_decoded = axk::decode_object(*relocated);
+      ASSERT_TRUE(relocated_decoded) << relocated_decoded.error().message;
+      const auto *program = std::get_if<axk::CurrentProg>(&relocated_decoded->payload);
+      ASSERT_NE(program, nullptr);
+      EXPECT_TRUE(std::ranges::all_of(program->assignments, [](const auto &assignment) {
+        return assignment.name.empty() || (assignment.kind != 0x10U && assignment.kind != 0x11U) ||
+               assignment.raw_handle == 0U;
+      }));
     }
   }
   EXPECT_EQ(object_types, (std::set<std::string>{"PROG", "SBAC", "SBNK", "SMPL"}));
