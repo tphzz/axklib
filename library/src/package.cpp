@@ -35,7 +35,16 @@
 #include "axklib/relationship.hpp"
 #include "axklib/utf8.hpp"
 
+#include "package_internal.hpp"
+
 namespace axk {
+
+bool package_internal::portable_inactive_program_relationship(const Relationship &relationship) {
+  return (relationship.assignment_state == AssignmentState::source_load ||
+          relationship.assignment_state == AssignmentState::visible_off) &&
+         relationship.quality == RelationshipQuality::known && relationship.target_key.has_value();
+}
+
 namespace {
 
 using Json = nlohmann::json;
@@ -373,13 +382,10 @@ Result<std::vector<const Relationship *>> required_relationships(const ObjectSna
       result.push_back(*row);
     }
     for (const auto *row : candidates) {
-      if (row->assignment_state != AssignmentState::source_load &&
-          row->assignment_state != AssignmentState::visible_off)
+      // Inactive diagnostic rows are portable only when their target is exact.
+      // Ambiguous visible-off rows do not represent active Program content.
+      if (!package_internal::portable_inactive_program_relationship(*row))
         continue;
-      if (row->quality != RelationshipQuality::known || !row->target_key)
-        return std::unexpected{
-            make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
-                       "package closure requires known relocatable Program relationships")};
       if (std::ranges::find(result, row) == result.end())
         result.push_back(row);
     }

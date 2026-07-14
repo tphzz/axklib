@@ -21,6 +21,7 @@
 #include "axklib/package_relocation.hpp"
 #include "axklib/writer.hpp"
 
+#include "../src/package_internal.hpp"
 #include "../src/writer_internal.hpp"
 #include "media_test_fixtures.hpp"
 
@@ -444,6 +445,18 @@ TEST(PortablePackage, BuildsStrictSbnkClosureAndDeduplicatesMultiRootDependencie
   EXPECT_EQ(bundle->package.nodes.size(), bank->package.nodes.size());
   EXPECT_EQ(bundle->package.relationships, bank->package.relationships);
   EXPECT_EQ(bundle->package.roots.size(), 2U);
+}
+
+TEST(PortablePackage, IgnoresAmbiguousInactiveProgramDiagnosticsButKeepsExactRows) {
+  axk::Relationship relationship;
+  relationship.assignment_state = axk::AssignmentState::visible_off;
+  relationship.quality = axk::RelationshipQuality::tentative;
+  EXPECT_FALSE(axk::package_internal::portable_inactive_program_relationship(relationship));
+
+  relationship.assignment_state = axk::AssignmentState::source_load;
+  relationship.quality = axk::RelationshipQuality::known;
+  relationship.target_key = "target";
+  EXPECT_TRUE(axk::package_internal::portable_inactive_program_relationship(relationship));
 }
 
 TEST(PortablePackage, ExportsACompleteSupportedVolumeWithOnePayloadPerDigest) {

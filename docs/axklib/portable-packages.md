@@ -57,7 +57,8 @@ sequence=NAME
 `prog`, `sequ`, and `sample` are accepted aliases. `--partition`, `--group`, and
 `--volume` constrain all roots in one export command. Repeat `--root` to create
 a multi-root `.axkpkg`. A selector must resolve exactly once and every required
-relationship must be known and unambiguous; otherwise no archive is published.
+active relationship must be known and unambiguous; otherwise no archive is
+published. Ambiguous inactive Program diagnostic rows are not package content.
 
 Inspection validates the archive profile, canonical manifest, graph, declared
 entry sizes, and package ID while reading only bounded metadata and the
@@ -279,8 +280,9 @@ identity-significant.
 Program closure retains Known target rows classified as active, source-load,
 or visible-off. The visible-off case is required because an imported zero
 destination handle re-parses in that state even though the sampler can still
-load the named assignment. Duplicate inactive rows, unresolved targets, and
-ambiguous targets remain outside the portable closure.
+load the named assignment. Ambiguous visible-off diagnostics, duplicate
+inactive rows, unresolved targets, and ambiguous targets remain outside the
+portable closure.
 
 ## SDK Surface
 
