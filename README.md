@@ -93,6 +93,9 @@ target. Windows publishes a ZIP, Linux publishes a compressed tar archive, and
 macOS publishes one universal ZIP containing both the self-contained CLI and
 the shared SDK development files.
 
+Maintainers publish tagged releases with the documented
+[manual release procedure](RELEASING.md).
+
 ## License
 
 This project is licensed under the Mozilla Public License 2.0.

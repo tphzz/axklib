@@ -4,11 +4,39 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import tomllib
+from datetime import UTC, datetime
 from pathlib import Path
 
 LICENSE_OVERRIDES = {"soxr": "LGPL-2.1-or-later"}
+
+
+def project_version(root: Path) -> str:
+    cmake_text = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    match = re.search(
+        r"project\s*\(\s*axklib\b.*?\bVERSION\s+([^\s\)]+)",
+        cmake_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError("could not derive axklib version from CMakeLists.txt")
+    cmake_version = match.group(1)
+    manifest = json.loads((root / "vcpkg.json").read_text(encoding="utf-8"))
+    manifest_version = manifest.get("version-semver")
+    if manifest_version != cmake_version:
+        raise ValueError(
+            "axklib version mismatch: "
+            f"CMakeLists.txt has {cmake_version}, vcpkg.json has {manifest_version}"
+        )
+    return cmake_version
+
+
+def creation_timestamp() -> str:
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    instant = datetime.fromtimestamp(int(epoch), UTC) if epoch else datetime.now(UTC)
+    return instant.replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def package(
@@ -130,6 +158,35 @@ def vcpkg_packages(root: Path, profile: str) -> list[dict[str, object]]:
     return rows
 
 
+def sbom_document(
+    profile: str, packages: list[dict[str, object]], created: str
+) -> dict[str, object]:
+    unique = {str(row["SPDXID"]): row for row in packages}
+    ordered_packages = [unique[key] for key in sorted(unique)]
+    name = f"axklib-{profile}-release"
+    identity = {
+        "name": name,
+        "profile": profile,
+        "created": created,
+        "packages": ordered_packages,
+    }
+    namespace_hash = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": name,
+        "documentNamespace": f"https://github.com/tphzz/axklib/spdx/{namespace_hash}",
+        "creationInfo": {
+            "creators": ["Tool: axklib-generate-sbom"],
+            "created": created,
+        },
+        "packages": ordered_packages,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
@@ -137,7 +194,8 @@ def main() -> int:
     parser.add_argument("--axkdeck-root", type=Path)
     parser.add_argument("--profile", choices=("sdk", "cli", "workspace"), default="workspace")
     args = parser.parse_args()
-    packages = [package("axklib", "0.1.0", "axklib", license_expression="MPL-2.0")]
+    version = project_version(args.axklib_root)
+    packages = [package("axklib", version, "axklib", license_expression="MPL-2.0")]
     packages.extend(vcpkg_packages(args.axklib_root, args.profile))
     if args.axkdeck_root:
         cargo = tomllib.loads((args.axkdeck_root / "src-tauri/Cargo.lock").read_text())
@@ -147,17 +205,7 @@ def main() -> int:
         lock_text = (args.axkdeck_root / "pnpm-lock.yaml").read_text()
         npm_rows = set(re.findall(r"^  ([^\s:]+)@([^\s:]+):$", lock_text, re.MULTILINE))
         packages.extend(package(name, version, "npm") for name, version in sorted(npm_rows))
-    unique: dict[str, dict[str, object]] = {str(row["SPDXID"]): row for row in packages}
-    namespace_hash = hashlib.sha256("\n".join(sorted(unique)).encode()).hexdigest()
-    document = {
-        "spdxVersion": "SPDX-2.3",
-        "dataLicense": "CC0-1.0",
-        "SPDXID": "SPDXRef-DOCUMENT",
-        "name": "axklib-native-release",
-        "documentNamespace": f"https://axklib.invalid/spdx/{namespace_hash}",
-        "creationInfo": {"creators": ["Tool: axklib-generate-sbom"], "created": "2026-07-11T00:00:00Z"},
-        "packages": [unique[key] for key in sorted(unique)],
-    }
+    document = sbom_document(args.profile, packages, creation_timestamp())
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(document, indent=2) + "\n")
     return 0

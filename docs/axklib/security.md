@@ -22,4 +22,8 @@ Applications should:
 
 Security reports should include the axklib version, platform, input format,
 stable error code, and the smallest shareable reproducer. Do not include private
-sample libraries unless their redistribution is permitted.
+sample libraries unless their redistribution is permitted. Report suspected
+vulnerabilities through the repository's
+[private vulnerability reporting form](https://github.com/tphzz/axklib/security/advisories/new),
+not a public issue. Include the affected version, impact, reproduction steps,
+and whether the report may contain confidential sample data.

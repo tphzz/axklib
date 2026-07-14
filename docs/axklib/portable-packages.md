@@ -51,10 +51,9 @@ program=NAME
 sbac=NAME
 sbnk=NAME
 smpl=NAME
-sequence=NAME
 ```
 
-`prog`, `sequ`, and `sample` are accepted aliases. `--partition`, `--group`, and
+`prog` and `sample` are accepted aliases. `--partition`, `--group`, and
 `--volume` constrain all roots in one export command. Repeat `--root` to create
 a multi-root `.axkpkg`. A selector must resolve exactly once and every required
 active relationship must be known and unambiguous; otherwise no archive is
@@ -169,11 +168,8 @@ equality alone is diagnostic and never authorizes reuse.
 | Yamaha ISO9660 | One `<raw_group>/<raw_volume>` folder | Another `Fnnn` folder receives another SMPL |
 
 Non-SMPL objects are destination-owned and are not shared across SFS volumes.
-SFS partition-wide sharing is unavailable in v1 because hardware testing
-showed that a dependent volume can be enumerated but cannot independently load
-a waveform physically stored in another volume. Requesting
-`--reuse-scope hardware-proven-partition` returns
-`SFS_REUSE_SCOPE_NOT_PROMOTED`. SFS objects are never shared across partitions.
+SFS partition-wide sharing is unavailable in v1. The import policy is fixed to
+volume-local reuse, and SFS objects are never shared across partitions.
 
 Allocation output uses the target's native units. SFS and FAT plans report
 clusters. ISO plans report 2048-byte payload sectors and the exact projected
@@ -192,7 +188,6 @@ Conflicts block the complete plan.
 | `SFS_DESTINATION_INVALID`, `SFS_DESTINATION_PARTITION_MISSING`, `SFS_DESTINATION_MISSING`, `SFS_DESTINATION_ALREADY_EXISTS`, `SFS_DESTINATION_POLICY_CONFLICT` | Correct the SFS partition, volume, and `create` policy. |
 | `SFS_OBJECT_NAME_INVALID`, `SFS_PROGRAM_SLOT_INVALID`, `SFS_TARGET_NAME_AMBIGUOUS`, `SFS_NAME_CONFLICT` | Correct names, disambiguate target content, or provide an explicit rename. |
 | `SFS_OBJECT_ID_EXHAUSTED`, `SFS_CLUSTER_EXHAUSTED`, `SFS_ROOT_DIRECTORY_MISSING`, `SFS_ROOT_DIRECTORY_CAPACITY_EXHAUSTED`, `SFS_CATEGORY_MISSING`, `SFS_DIRECTORY_CAPACITY_EXHAUSTED`, `SFS_ALLOCATION_INVALID` | Select a target with valid SFS metadata and sufficient IDs, clusters, and directory capacity. |
-| `SFS_REUSE_SCOPE_NOT_PROMOTED` | Use the default volume scope. |
 | `FAT12_DESTINATION_INVALID`, `FAT12_PROFILE_UNSUPPORTED` | Use partition 0 and `FAT root` on an admitted root-only Yamaha FAT12 image. |
 | `FAT12_OBJECT_NAME_INVALID`, `FAT12_PROGRAM_SLOT_INVALID`, `FAT12_TARGET_NAME_AMBIGUOUS`, `FAT12_NAME_CONFLICT` | Correct names, ambiguity, or collisions. |
 | `FAT12_ROOT_ENTRY_EXHAUSTED`, `FAT12_CLUSTER_EXHAUSTED` | Select an image with sufficient FAT root entries and data clusters. |

@@ -205,6 +205,18 @@ TEST(Sdk, BuildAndTransactionPlansApplyThroughTheFacade) {
     EXPECT_EQ(alteration->summary().operation_count, 1U);
     ASSERT_TRUE(alteration->apply(output.string(), {}, context));
     EXPECT_TRUE(std::filesystem::exists(output));
+
+    std::ofstream{output, std::ios::binary | std::ios::trunc} << "occupied";
+    const auto rejected = alteration->apply(output.string(), {}, context);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().message, "output image already exists");
+    EXPECT_EQ(std::filesystem::file_size(output), 8U);
+
+    axk::write_options overwrite;
+    overwrite.overwrite = true;
+    ASSERT_TRUE(alteration->apply(output.string(), overwrite, context));
+    auto reopened = axk::image::open(output.string(), context);
+    ASSERT_TRUE(reopened) << reopened.error().message;
     EXPECT_GT(progress.calls, 0U);
 
     std::filesystem::remove_all(root, filesystem_error);

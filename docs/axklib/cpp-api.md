@@ -12,7 +12,7 @@ Operations that can fail return axklib-owned `axk::result<T>` or
 | `operation_context` | Cancellation and optional progress reporting |
 | `image` | Open media, inventory content, validate, preview, and export |
 | `snapshot` | Immutable paged inventory independent of the source handle |
-| `build_plan` | Validate and apply a fresh-HDS manifest |
+| `build_plan` | Validate and apply a fresh HDS, FAT12, or ISO9660 manifest |
 | `transaction` | Plan and apply an ordered alteration manifest |
 | `portable_package` | Export, inspect, and fully verify portable object packages |
 | `package_import_plan` | Plan and atomically apply a package import to a separate image |

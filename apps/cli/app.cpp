@@ -200,9 +200,8 @@ int axk::cli::run(int argc, char **argv) {
                      "source sampler image")
         ->required();
     package_export
-        ->add_option(
-            "--root", package_export_request.roots,
-            "root selector: volume or program|sbac|sbnk|smpl|sequence=NAME")
+        ->add_option("--root", package_export_request.roots,
+                     "root selector: volume or program|sbac|sbnk|smpl=NAME")
         ->required()
         ->expected(1, -1);
     package_export->add_option("--partition",
@@ -231,8 +230,8 @@ int axk::cli::run(int argc, char **argv) {
             command.add_option("--format", request.format, "summary or json")
                 ->check(CLI::IsMember({"summary", "json"}));
         };
-    auto *package_inspect =
-        package->add_subcommand("inspect", "inspect and verify a package");
+    auto *package_inspect = package->add_subcommand(
+        "inspect", "inspect bounded package metadata without hashing payloads");
     configure_package_read(*package_inspect, package_inspect_request);
     auto *package_verify =
         package->add_subcommand("verify", "verify a package");
@@ -255,11 +254,6 @@ int axk::cli::run(int argc, char **argv) {
             ->expected(1, -1);
         command.add_option("--rename-map", request.rename_map,
                            "JSON array of explicit node renames");
-        command
-            .add_option(
-                "--reuse-scope", request.reuse_scope,
-                "SFS waveform reuse scope: volume or hardware-proven-partition")
-            ->check(CLI::IsMember({"volume", "hardware-proven-partition"}));
         command.add_option("--format", request.format, "summary or json")
             ->check(CLI::IsMember({"summary", "json"}));
     };

@@ -38,21 +38,8 @@ void append_integer(std::string &target, Integer value) {
     append_field(target, std::to_string(value));
 }
 
-std::string reuse_scope_name(PackageWaveformReuseScope scope) {
-    switch (scope) {
-    case PackageWaveformReuseScope::volume:
-        return "volume";
-    case PackageWaveformReuseScope::hardware_proven_partition:
-        return "hardware_proven_partition";
-    case PackageWaveformReuseScope::whole_image:
-        return "whole_image";
-    }
-    return "volume";
-}
-
 std::string policy_digest(const PackageImportPolicy &policy) {
     std::string canonical;
-    append_field(canonical, reuse_scope_name(policy.sfs_waveform_reuse_scope));
     auto renames = policy.renames;
     std::ranges::sort(renames, [](const auto &left, const auto &right) {
         return std::tie(left.package_index, left.node_id,
@@ -2091,13 +2078,6 @@ plan_package_import(const std::filesystem::path &target_path,
         plan.plan_id = plan_identity(plan);
         return plan;
     }
-    if (request.policy.sfs_waveform_reuse_scope !=
-        PackageWaveformReuseScope::volume) {
-        add_conflict(plan, "SFS_REUSE_SCOPE_NOT_PROMOTED",
-                     "SFS package import currently requires volume-local "
-                     "waveform reuse");
-    }
-
     const auto &container = std::get<Container>(target->storage());
     auto catalog =
         build_object_catalog(container, 64U * 1024U * 1024U, cancellation);

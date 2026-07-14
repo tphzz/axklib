@@ -145,6 +145,30 @@ TEST(Cli11Adapter, ExposesCompletePortablePackageCommandFamily) {
         EXPECT_NE(output.find(command), std::string::npos) << command;
 }
 
+TEST(Cli11Adapter, HidesUnavailablePortablePackageChoices) {
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(run_cli({"axklib", "package", "export", "--help"}), 0);
+    const auto export_help = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(export_help.find("sequence"), std::string::npos);
+
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(run_cli({"axklib", "package", "plan-import", "--help"}), 0);
+    const auto import_help = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(import_help.find("--reuse-scope"), std::string::npos);
+
+    const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} /
+                         "tests/fixtures/images" /
+                         "sampler-authored/HD00_512_single_sbnk_authored.hds";
+    testing::internal::CaptureStderr();
+    EXPECT_NE(
+        run_cli({"axklib", "package", "export", fixture.string(), "--root",
+                 "sequence=001", "--partition", "0", "--group", "New Partition",
+                 "--volume", "New Volume", "-o", "unused.axkseq"}),
+        0);
+    const auto error = testing::internal::GetCapturedStderr();
+    EXPECT_NE(error.find("package root kind must be"), std::string::npos);
+}
+
 TEST(Cli11Adapter, WritesStarterBuildManifestsWithoutSilentReplacement) {
     const auto root =
         std::filesystem::temp_directory_path() / "axklib-cli-manifest-template";

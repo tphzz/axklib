@@ -7,7 +7,6 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/library/cmake/AxkVcpkgDefaults.cmake")
 # library-only configuration.
 option(AXK_BUILD_CLI "Build the native axklib CLI" ON)
 option(AXK_BUILD_SHARED_SDK "Build the public axklib shared SDK" ON)
-option(AXK_INSTALL_EMBED_ENGINE "Install private static engine archives for an embedding host" OFF)
 option(BUILD_TESTING "Build the native axklib tests" ON)
 
 set(_axk_vcpkg_features)

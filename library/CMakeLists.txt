@@ -5,7 +5,6 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkVcpkgDefaults.cmake")
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   get_filename_component(AXK_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
   option(AXK_BUILD_SHARED_SDK "Build the public axklib shared SDK" ON)
-  option(AXK_INSTALL_EMBED_ENGINE "Install private static engine archives" OFF)
   option(BUILD_TESTING "Build the native axklib tests" ON)
   option(AXK_ENABLE_SANITIZERS "Enable address and undefined-behavior sanitizers" OFF)
   option(AXK_ENABLE_THREAD_SANITIZER "Enable the thread sanitizer" OFF)
@@ -439,17 +438,6 @@ if(BUILD_TESTING)
   endif()
 endif()
 
-set(AXK_CARGO_STATIC_LIBRARIES
-    axk_audio axk_core sndfile vorbisenc vorbis FLAC ogg opus soxr FatFs)
-set(AXK_CARGO_LINK_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/axk-cargo-link.txt")
-file(WRITE "${AXK_CARGO_LINK_MANIFEST}" "")
-foreach(library IN LISTS AXK_CARGO_STATIC_LIBRARIES)
-  file(APPEND "${AXK_CARGO_LINK_MANIFEST}" "static=${library}\n")
-endforeach()
-if(UNIX)
-  file(APPEND "${AXK_CARGO_LINK_MANIFEST}" "system=m\n")
-endif()
-
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/axklibConfigVersion.cmake"
   VERSION "${PROJECT_VERSION}"
@@ -479,14 +467,6 @@ if(AXK_BUILD_SHARED_SDK)
 endif()
 install(FILES "${AXK_REPOSITORY_ROOT}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/axklib" COMPONENT sdk)
-if(AXK_INSTALL_EMBED_ENGINE)
-  install(
-    TARGETS axk_core axk_audio
-    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT embedding
-  )
-  install(FILES "${AXK_CARGO_LINK_MANIFEST}" DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib"
-          COMPONENT embedding)
-endif()
 foreach(package nlohmann-json libsndfile soxr utfcpp libflac libogg libvorbis opus fatfs)
   install(
     FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${package}/copyright"

@@ -119,7 +119,6 @@ struct PackageImportRequest {
     std::vector<std::string> destinations;
     std::optional<std::filesystem::path> rename_map;
     std::optional<std::filesystem::path> output;
-    std::string reuse_scope{"volume"};
     std::string format{"summary"};
     bool overwrite{};
     bool apply{};

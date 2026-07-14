@@ -14,7 +14,12 @@ version change is invalid.
 | CLI11 | Native command-line argument parsing | BSD-3-Clause |
 | hash-library v8 | CLI pooled-export SHA-1 compatibility identifiers | Zlib |
 | nlohmann/json | Versioned JSON manifests and reports | MIT |
+| FatFs | FAT12 image authoring | BSD-1-Clause |
 | libsndfile | WAV, AIFF, and FLAC decoding | LGPL-2.1-or-later |
+| libFLAC | FLAC codec used by libsndfile | BSD-3-Clause |
+| libogg | Ogg container support used by libsndfile | BSD-3-Clause |
+| libvorbis | Vorbis codec used by libsndfile | BSD-3-Clause |
+| Opus | Opus codec used by libsndfile | BSD-3-Clause |
 | libsoxr | Very-high-quality resampling | LGPL-2.1-or-later |
 | utfcpp 4.1.1 | Internal UTF-8 validation and checked UTF-16 conversion | BSL-1.0 |
 | GoogleTest | Native tests only | BSD-3-Clause |
@@ -46,8 +51,8 @@ policy does not change or waive any dependency license obligation.
 The project linkage boundary is fixed across platforms:
 
 - `axklib::axklib` is the installed C++17 shared SDK and embeds the static engine.
-- The CLI and desktop application embed the engine and native dependencies
-  directly; they do not load the shared SDK.
+- The CLI embeds the engine and native dependencies directly; it does not load
+  the shared SDK.
 
 `BUILD_SHARED_LIBS` does not change these target types. This avoids application
 packages that depend on private axklib or codec libraries beside the executable.

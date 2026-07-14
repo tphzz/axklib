@@ -122,8 +122,6 @@ PackageRootKind internal_root_kind(package_root_kind kind) {
         return PackageRootKind::sbnk;
     case package_root_kind::sample:
         return PackageRootKind::smpl;
-    case package_root_kind::sequence:
-        return PackageRootKind::sequ;
     }
     return PackageRootKind::volume;
 }
@@ -869,11 +867,6 @@ package_import_plan::create(const std::string &utf8_target_path,
         }
 
         PackageImportRequest internal_request;
-        internal_request.policy.sfs_waveform_reuse_scope =
-            request.sfs_waveform_reuse_scope ==
-                    package_waveform_reuse_scope::hardware_proven_partition
-                ? PackageWaveformReuseScope::hardware_proven_partition
-                : PackageWaveformReuseScope::volume;
         internal_request.root_destinations.reserve(
             request.root_destinations.size());
         for (const auto &destination : request.root_destinations) {
@@ -1248,9 +1241,9 @@ result<void> transaction::apply(const std::string &utf8_output_path,
                          error_category::io,
                          "output image already exists",
                          {}};
-        auto altered =
-            alter_hds(impl_->source, impl_->manifest, *output,
-                      context.impl_->cancellation.token(), context.impl_.get());
+        auto altered = alter_hds(impl_->source, impl_->manifest, *output,
+                                 context.impl_->cancellation.token(),
+                                 context.impl_.get(), options.overwrite);
         if (!altered)
             return public_error(altered.error());
         return {};

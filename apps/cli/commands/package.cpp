@@ -44,11 +44,9 @@ Result<PackageRootKind> parse_root_kind(std::string_view value) {
         return PackageRootKind::sbnk;
     if (value == "smpl" || value == "sample")
         return PackageRootKind::smpl;
-    if (value == "sequence" || value == "sequ")
-        return PackageRootKind::sequ;
     return std::unexpected{
         argument_error("package root kind must be volume, program, sbac, sbnk, "
-                       "smpl, or sequence")};
+                       "or smpl")};
 }
 
 Result<PackageRootSelector>
@@ -281,10 +279,6 @@ int run_package_import(const axk::cli::PackageImportRequest &request) {
         packages.push_back(std::move(*package));
     }
     axk::PackageImportRequest internal_request;
-    internal_request.policy.sfs_waveform_reuse_scope =
-        request.reuse_scope == "hardware-proven-partition"
-            ? PackageWaveformReuseScope::hardware_proven_partition
-            : PackageWaveformReuseScope::volume;
     internal_request.root_destinations.reserve(request.destinations.size());
     for (const auto &value : request.destinations) {
         auto destination = parse_destination(value);

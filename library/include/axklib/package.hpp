@@ -142,12 +142,6 @@ enum class PackageImportObjectAction : std::uint8_t {
     conflict,
 };
 
-enum class PackageWaveformReuseScope : std::uint8_t {
-    volume,
-    hardware_proven_partition,
-    whole_image,
-};
-
 struct PackageRootDestination {
     std::size_t package_index{};
     std::size_t root_index{};
@@ -172,8 +166,6 @@ struct PackageNodeRename {
 };
 
 struct PackageImportPolicy {
-    PackageWaveformReuseScope sfs_waveform_reuse_scope{
-        PackageWaveformReuseScope::volume};
     std::vector<PackageNodeRename> renames;
 
     friend bool operator==(const PackageImportPolicy &,

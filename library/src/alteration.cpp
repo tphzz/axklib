@@ -4340,7 +4340,8 @@ Result<AlterationResult>
 alter_hds(const std::filesystem::path &source_path,
           const AlterationManifest &manifest,
           const std::optional<std::filesystem::path> &output_path,
-          const CancellationToken &cancellation, ProgressSink *progress) {
+          const CancellationToken &cancellation, ProgressSink *progress,
+          bool overwrite) {
     if (output_path &&
         std::filesystem::absolute(source_path).lexically_normal() ==
             std::filesystem::absolute(*output_path).lexically_normal()) {
@@ -4384,7 +4385,7 @@ alter_hds(const std::filesystem::path &source_path,
                              : std::optional<std::string>{}});
     }
     if (output_path) {
-        auto applied = publish(state, *output_path, cancellation);
+        auto applied = publish(state, *output_path, cancellation, overwrite);
         if (!applied)
             return std::unexpected{applied.error()};
     }

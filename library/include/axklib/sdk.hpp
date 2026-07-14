@@ -155,13 +155,7 @@ enum class package_root_kind : std::uint8_t {
     program,
     bank_group,
     sample_bank,
-    sample,
-    sequence
-};
-
-enum class package_waveform_reuse_scope : std::uint8_t {
-    volume,
-    hardware_proven_partition
+    sample
 };
 
 struct package_root_selector {
@@ -220,8 +214,6 @@ struct package_node_rename {
 struct package_import_request {
     std::vector<package_root_destination> root_destinations;
     std::vector<package_node_rename> renames;
-    package_waveform_reuse_scope sfs_waveform_reuse_scope{
-        package_waveform_reuse_scope::volume};
 };
 
 struct package_conflict_info {

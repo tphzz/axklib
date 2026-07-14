@@ -2057,8 +2057,7 @@ TEST(MediaWriter, RejectsIsoSectorCountOverflowWithoutAllocatingAnImage) {
     EXPECT_EQ(rejected.error().code, axk::ErrorCode::unsupported_profile);
 }
 
-TEST(PackageImportPlanner,
-     ReportsMissingMappingsAndUnpromotedSfsReusePolicyTogether) {
+TEST(PackageImportPlanner, ReportsMissingDestinationMappings) {
     auto image = axk::FatImage::open(
         std::make_shared<axk::MemoryReader>(fat_fixture()), "fixture.ima");
     ASSERT_TRUE(image) << image.error().message;
@@ -2069,16 +2068,11 @@ TEST(PackageImportPlanner,
     ASSERT_TRUE(built) << built.error().message;
 
     axk::PackageImportRequest request;
-    request.policy.sfs_waveform_reuse_scope =
-        axk::PackageWaveformReuseScope::hardware_proven_partition;
     const std::vector packages{built->package};
     const auto plan = axk::plan_package_import(
         fixture("HD00_512_single_sbnk_authored.hds"), packages, request);
     ASSERT_TRUE(plan) << plan.error().message;
     EXPECT_FALSE(plan->valid());
-    EXPECT_TRUE(std::ranges::any_of(plan->conflicts, [](const auto &conflict) {
-        return conflict.code == "SFS_REUSE_SCOPE_NOT_PROMOTED";
-    }));
     EXPECT_TRUE(std::ranges::any_of(plan->conflicts, [](const auto &conflict) {
         return conflict.code == "DESTINATION_ROOT_MISSING";
     }));

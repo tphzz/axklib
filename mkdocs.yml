@@ -66,7 +66,6 @@ nav:
       - Writer And Alteration: axklib/write.md
   - Distribution:
       - Compatibility: axklib/compatibility.md
-      - Native Migration: axklib/migration.md
       - Native Dependencies: native-dependencies.md
       - Security: axklib/security.md
   - Yamaha Glossary: axklib/glossary.md

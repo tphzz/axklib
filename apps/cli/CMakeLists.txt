@@ -15,8 +15,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(AXK_CLI_SBOM_FILE "" CACHE FILEPATH "Optional SPDX JSON document to install")
   set(AXK_BUILD_CLI ON CACHE BOOL "Build the native axklib CLI" FORCE)
   set(AXK_BUILD_SHARED_SDK OFF CACHE BOOL "Build the public axklib shared SDK" FORCE)
-  set(AXK_INSTALL_EMBED_ENGINE OFF CACHE BOOL
-      "Install private static engine archives for an embedding host" FORCE)
   set(VCPKG_MANIFEST_DIR "${AXK_REPOSITORY_ROOT}")
   set(_axk_vcpkg_features cli)
   if(BUILD_TESTING)

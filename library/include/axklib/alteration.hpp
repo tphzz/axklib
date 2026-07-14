@@ -182,7 +182,7 @@ alter_hds(const std::filesystem::path &source_path,
           const AlterationManifest &manifest,
           const std::optional<std::filesystem::path> &output_path = {},
           const CancellationToken &cancellation = {},
-          ProgressSink *progress = nullptr);
+          ProgressSink *progress = nullptr, bool overwrite = false);
 AXK_AUDIO_API Result<TransactionPlan>
 plan_hds_alteration(const std::filesystem::path &source_path,
                     const AlterationManifest &manifest,

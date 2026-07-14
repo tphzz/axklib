@@ -14,14 +14,13 @@ flowchart LR
     Catalog --> SDK[C++17 PIMPL facade]
     Catalog --> CLI[CLI11 adapter]
     SDK --> Host[Native SDK consumers]
-    Catalog --> Bridge[Static desktop bridge]
 ```
 
 The private C++23 engine owns format behavior and typed errors. The shared SDK
 facade owns PIMPL sessions, results, pagination, cancellation, and progress. The
 CLI adapter owns argument parsing, exit codes, output layout, and report
-serialization. The CLI and desktop bridge link the private engine statically;
-SDK consumers load the shared library.
+serialization. The CLI links the private engine statically; SDK consumers load
+the shared library.
 
 The CLI follows a one-way dependency path:
 
@@ -32,7 +31,7 @@ The source modules reflect that boundary:
 - `apps/cli/main.cpp` and `apps/cli/command_line.*` convert platform arguments to checked
   UTF-8 and contain process-level failures.
 - `apps/cli/app.*` registers the root command and dispatches typed requests.
-- `apps/cli/commands/` owns independent analysis, extraction, report, compatibility,
+- `apps/cli/commands/` owns independent analysis, extraction, report, package,
   and writer/transaction command families.
 - `apps/cli/schema/` owns versioned machine-output data structures and their private
   JSON serialization.
@@ -59,5 +58,5 @@ SDK components.
 
 Fresh-image and alteration operations use manifests and plans. Applying a plan
 writes a temporary destination, validates the result, and then completes the
-replacement. Existing source images remain unchanged unless an in-place
-transaction is explicitly requested.
+replacement. The output path must differ from the source image. Existing source
+images therefore remain unchanged.
