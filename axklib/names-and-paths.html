@@ -1,0 +1,1921 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Native Yamaha A-series disk image and sampler object tooling.">
+      
+      
+      
+        <link rel="canonical" href="https://tphzz.github.io/axklib/axklib/names-and-paths.html">
+      
+      
+        <link rel="prev" href="sampler-data.html">
+      
+      
+        <link rel="next" href="sfz.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Names, Paths, And Exports - axklib</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/axklib-material.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#name-path-and-export-mapping" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="axklib" class="md-header__button md-logo" aria-label="axklib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            axklib
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Names, Paths, And Exports
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tphzz/axklib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tphzz/axklib
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="axklib" class="md-nav__button md-logo" aria-label="axklib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    axklib
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tphzz/axklib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tphzz/axklib
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="typical-usage.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C++ And CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    SDK
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cpp-api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C++ API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="portable-packages.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Portable Object Packages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Formats
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Formats
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="media.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media Containers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sfs-filesystem.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFS Filesystem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="floppy.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAT12 Floppy Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cdrom.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CD-ROM Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sampler-data.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sampler Data Structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output Contracts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Output Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Names, Paths, And Exports
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="names-and-paths.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Names, Paths, And Exports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#text-encodings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Text Encodings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#naming-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Naming Layers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-type-labels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object Type Labels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#program-slot-labels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Slot Labels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sample-bank-group-and-member-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sample Bank Group And Member Levels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sfs-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SFS Paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fat12-floppy-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FAT12 Floppy Paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cd-rom-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CD-ROM Paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#content-tree-sorting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Content Tree Sorting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#program-assignment-details-in-info" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Assignment Details In info
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export-path-sanitization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export Path Sanitization
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exact-export-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exact Export Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#technical-fields-that-stay-in-reports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Technical Fields That Stay In Reports
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sfz.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFZ Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="report-schemas.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Report Schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli-json-schemas.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI JSON Schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="write.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writer And Alteration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distribution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="compatibility.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compatibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-dependencies.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native Dependencies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="glossary.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Yamaha Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#text-encodings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Text Encodings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#naming-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Naming Layers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-type-labels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object Type Labels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#program-slot-labels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Slot Labels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sample-bank-group-and-member-levels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sample Bank Group And Member Levels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sfs-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SFS Paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fat12-floppy-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FAT12 Floppy Paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cd-rom-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CD-ROM Paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#content-tree-sorting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Content Tree Sorting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#program-assignment-details-in-info" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Assignment Details In info
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#export-path-sanitization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Export Path Sanitization
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exact-export-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exact Export Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#technical-fields-that-stay-in-reports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Technical Fields That Stay In Reports
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="name-path-and-export-mapping">Name, Path, And Export Mapping</h1>
+<p>axklib keeps technical identifiers and sampler-facing display names separate.
+Technical identifiers make rows stable in CSV/JSON reports. Display names make
+<code>info</code> output and export folders match the sampler navigation model.</p>
+<h2 id="text-encodings">Text Encodings</h2>
+<p>CLI arguments and JSON text are UTF-8 on every platform. Unix rejects malformed
+argument byte sequences before parsing; Windows receives UTF-16 through
+<code>wmain</code>, rejects lone surrogates, and converts to UTF-8 without using the active
+code page. C++ SDK path inputs are UTF-8 <code>std::string</code> values. Invalid text and
+embedded NUL path values are rejected before filesystem access.</p>
+<p>Native filesystem paths and UTF-8 display/manifest text use explicit conversion
+adapters. axklib does not normalize, case-fold, or transliterate Unicode, so
+canonically equivalent names remain distinct. Path sanitization is a separate
+operation from encoding validation. Yamaha on-disk name fields retain their
+documented ASCII/byte decoding rules and are not interpreted as arbitrary
+UTF-8.</p>
+<p><img alt="Mermaid Diagram" src="../assets/images/names-and-paths_mermaid_0_5d426f7e.svg" /></p>
+<h2 id="naming-layers">Naming Layers</h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Example</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Container raw path</td>
+<td><code>p0:sfs23</code>, <code>BANK001.003</code>, <code>8F6EB510/F001/PROG/F003</code></td>
+<td>Stable technical identity.</td>
+</tr>
+<tr>
+<td>Object header name</td>
+<td><code>001</code>, <code>CFIII DrkTmprd</code>, <code>TS-KICK</code></td>
+<td>Name stored in the object payload header.</td>
+</tr>
+<tr>
+<td>Program display name</td>
+<td><code>001: CFGngDrk</code></td>
+<td>Slot plus Program name read from <code>PROG+0x078..0x07f</code>.</td>
+</tr>
+<tr>
+<td>Sample Bank Group display</td>
+<td><code>B TS-KICK</code></td>
+<td>User-facing rendering of an <code>SBAC</code> object.</td>
+</tr>
+<tr>
+<td>Sample Bank display</td>
+<td><code>TS-KICK</code></td>
+<td>User-facing rendering of an <code>SBNK</code> object.</td>
+</tr>
+<tr>
+<td>Waveform display</td>
+<td><code>TS-KICK</code></td>
+<td>Physical <code>SMPL</code> storage name when waveform context is requested.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="object-type-labels">Object Type Labels</h2>
+<p><code>info</code> renders object types with labels so similarly named objects can be
+distinguished.</p>
+<table>
+<thead>
+<tr>
+<th>Object or node</th>
+<th>Display label</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>partition</td>
+<td><code>[PARTITION]</code></td>
+</tr>
+<tr>
+<td>volume</td>
+<td><code>[VOLUME]</code></td>
+</tr>
+<tr>
+<td>category</td>
+<td><code>[CATEGORY]</code></td>
+</tr>
+<tr>
+<td><code>PROG</code></td>
+<td><code>[PROGRAM]</code></td>
+</tr>
+<tr>
+<td><code>SBAC</code></td>
+<td><code>[SAMPLE BANK GROUP]</code></td>
+</tr>
+<tr>
+<td><code>SBNK</code></td>
+<td><code>[SAMPLE BANK]</code></td>
+</tr>
+<tr>
+<td><code>SMPL</code></td>
+<td><code>[WAVEFORM]</code></td>
+</tr>
+<tr>
+<td><code>SEQU</code></td>
+<td><code>[SEQUENCE]</code></td>
+</tr>
+<tr>
+<td>unresolved Program placeholder</td>
+<td><code>[UNKNOWN]</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="program-slot-labels">Program Slot Labels</h2>
+<p>Program object header names are usually three-digit slot IDs. axklib renders
+Program slots as:</p>
+<div class="highlight"><pre><span></span><code>NNN: &lt;program display name&gt;
+</code></pre></div>
+<p>The display name is read from <code>PROG+0x078..0x07f</code>. If the display name is empty
+and the object header name is a valid slot number from 1 through 128, axklib
+renders:</p>
+<div class="highlight"><pre><span></span><code>NNN: Pgm NNN
+</code></pre></div>
+<p>Default empty Program slots are omitted from normal <code>info</code> output. Use
+<code>--show-default-programs</code> to render the full 128-slot list.</p>
+<h2 id="sample-bank-group-and-member-levels">Sample Bank Group And Member Levels</h2>
+<p><code>SBAC</code> is rendered as the sampler-visible <code>B &lt;name&gt;</code> parent. Its <code>SBNK</code> children
+are rendered below it when the relationship is a navigable <code>SBAC_SLOT_TO_SBNK</code>
+row.</p>
+<p>Example:</p>
+<div class="highlight"><pre><span></span><code>|-- Sample Banks [CATEGORY]
+|   `-- B TS-KICK [SAMPLE BANK GROUP]
+|       `-- TS-KICK [SAMPLE BANK]
+</code></pre></div>
+<p>Program assignments to a Sample Bank Group display the group, not the underlying
+physical waveform objects:</p>
+<div class="highlight"><pre><span></span><code>|-- 001: TSUYOSHI [PROGRAM]
+|   `-- B TS-KICK [SAMPLE BANK GROUP] - Rch Assign: =SMP
+</code></pre></div>
+<p><code>SBNK -&gt; SMPL</code> links are waveform-storage links. They are used by reports,
+validation, and exact export metadata, but they are not displayed as normal
+Program assignment children by default.</p>
+<h2 id="sfs-paths">SFS Paths</h2>
+<p>SFS paths come from directory entries:</p>
+<div class="highlight"><pre><span></span><code>partition -&gt; volume -&gt; category -&gt; object entry
+</code></pre></div>
+<p>The SFS reader uses directory placement for volumes and categories. Report rows
+also keep SFS ID, payload offset, and match method fields.</p>
+<p>User-facing SFS tree shape:</p>
+<div class="highlight"><pre><span></span><code>|-- partition 0: Main [PARTITION]
+|   |-- Piano Volume [VOLUME]
+|   |   |-- Programs [CATEGORY]
+|   |   |   `-- 001: Grand [PROGRAM]
+|   |   `-- Sample Banks [CATEGORY]
+|   |       `-- B Grand Bank [SAMPLE BANK GROUP]
+</code></pre></div>
+<h2 id="fat12-floppy-paths">FAT12 Floppy Paths</h2>
+<p>FAT12 floppy object placement starts at the root directory filename. The FAT
+filename is a technical field; the sampler-facing object name comes from the
+object payload.</p>
+<div class="highlight"><pre><span></span><code>fat_file: SINE____.003
+object header name: SineWave
+info label: SineWave [SAMPLE BANK]
+</code></pre></div>
+<p>Normal floppy tree shape:</p>
+<div class="highlight"><pre><span></span><code>|-- FAT root [VOLUME]
+|   |-- Sample Banks [CATEGORY]
+|   |   `-- SineWave [SAMPLE BANK]
+|   `-- Waveforms [CATEGORY]
+|       `-- SineWave [WAVEFORM]
+</code></pre></div>
+<h2 id="cd-rom-paths">CD-ROM Paths</h2>
+<p>CD-ROM images keep raw ISO folder identity and sampler-facing labels together.</p>
+<div class="highlight"><pre><span></span><code>raw path:        8F6EB510/F001/PROG/F003
+facing path:     ORGANS/Or11 Argent/Programs/003: Arg Per4
+</code></pre></div>
+<p>Display label precedence:</p>
+<ol>
+<li>Decoded CD-ROM menu label stored in the ISO.</li>
+<li>Content-derived fallback from a visible object in the raw folder.</li>
+<li>Raw ISO folder name.</li>
+</ol>
+<p>If the same display label appears more than once in a group, axklib appends the
+raw volume suffix:</p>
+<div class="highlight"><pre><span></span><code>Or11 Argent (F001)
+Or11 Argent (F002)
+</code></pre></div>
+<h2 id="content-tree-sorting">Content Tree Sorting</h2>
+<p>Within a category, nodes sort by:</p>
+<ol>
+<li>unresolved Program placeholders when <code>--show-unresolved</code> is active;</li>
+<li>category order: Programs, Sample Banks, Waveforms, Sequences;</li>
+<li>Program slot number;</li>
+<li>display name;</li>
+<li>object type;</li>
+<li>object key.</li>
+</ol>
+<p>This keeps Program slots numerically stable and makes missing active targets
+visible before normal Program children when explicitly requested.</p>
+<h2 id="program-assignment-details-in-info">Program Assignment Details In <code>info</code></h2>
+<p>Normal <code>info</code> output prints assignment details only for displayed active Program
+children:</p>
+<div class="highlight"><pre><span></span><code>|-- 001: TSUYOSHI [PROGRAM]
+|   |-- B TS-BASS [SAMPLE BANK GROUP] - Rch Assign: =SMP
+|   `-- TS-FX 7 [SAMPLE BANK] - Rch Assign: =SMP
+</code></pre></div>
+<p>Visible/off rows and duplicate-not-active rows are not printed as active Program
+children. They remain in relationship CSV/JSON reports.</p>
+<p>When <code>--show-unresolved</code> is used, active missing local targets appear as Unknown
+placeholders:</p>
+<div class="highlight"><pre><span></span><code>|-- 009: India [PROGRAM]
+|   |-- INDIAN 7 [UNKNOWN]
+|   `-- B India [SAMPLE BANK GROUP] - Rch Assign: =SMP
+</code></pre></div>
+<h2 id="export-path-sanitization">Export Path Sanitization</h2>
+<p>Export paths use sampler-facing names, sanitized for normal filesystems.</p>
+<p>Rules:</p>
+<table>
+<thead>
+<tr>
+<th>Input shape</th>
+<th>Path behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Empty name</td>
+<td>Replaced with a fallback such as <code>sample</code> or <code>unknown_volume</code>.</td>
+</tr>
+<tr>
+<td>Invalid path characters <code>&lt; &gt; : " / \ | ? *</code></td>
+<td>Replaced with <code>_</code>.</td>
+</tr>
+<tr>
+<td>Control characters</td>
+<td>Replaced with <code>_</code>.</td>
+</tr>
+<tr>
+<td>Repeated whitespace</td>
+<td>Collapsed to one space in display-path components.</td>
+</tr>
+<tr>
+<td>Trailing duplicate stars</td>
+<td>Converted to numeric suffixes by default: <code>*</code> -&gt; <code>(2)</code>, <code>**</code> -&gt; <code>(3)</code>. Rendered stereo stems can use an owning sample-bank/group label instead when that is clearer.</td>
+</tr>
+<tr>
+<td>Repeated <code>_</code></td>
+<td>Collapsed.</td>
+</tr>
+<tr>
+<td>Leading/trailing dots, spaces, <code>_</code></td>
+<td>Trimmed from path components.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="exact-export-layout">Exact Export Layout</h2>
+<p>Scoped extraction writes one shared sample pool plus folders for the selected
+scope. Use <code>extract wav file</code> or <code>extract sfz file</code> for whole-input
+exports. Use narrower scopes with <code>--path</code> values copied from
+<code>info --format paths</code>.</p>
+<p>Typical whole-input export layout:</p>
+<div class="highlight"><pre><span></span><code>&lt;output&gt;/
+  _samples/
+    physical/
+      Grand C4__a1b2c3d4e5f6.wav
+    rendered/
+      Grand Stereo__b1c2d3e4f5a6.wav
+  file/
+    source-image/
+      partition-or-group/
+        volume/
+          volume.axklib.json
+          Instrument.sfz
+</code></pre></div>
+<p>Typical scoped Program export layout:</p>
+<div class="highlight"><pre><span></span><code>&lt;output&gt;/
+  _samples/
+    physical/
+    rendered/
+  program/
+    partition_00_Main/
+      Piano Volume/
+        Programs/
+          001_ Grand/
+            Grand.sfz
+</code></pre></div>
+<p>Rules:</p>
+<table>
+<thead>
+<tr>
+<th>Output</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_samples/physical/</code></td>
+<td>Contains exact physical mono WAV files.</td>
+</tr>
+<tr>
+<td><code>_samples/rendered/</code></td>
+<td>Contains interleaved stereo WAVs when a compatible pair is rendered.</td>
+</tr>
+<tr>
+<td><code>file/&lt;source&gt;/.../</code></td>
+<td>Whole-input selection hierarchy, retaining the source name and decoded volume placement.</td>
+</tr>
+<tr>
+<td><code>&lt;scope&gt;/&lt;selector&gt;/</code></td>
+<td>Narrow selected scope folder.</td>
+</tr>
+<tr>
+<td><code>volume.axklib.json</code></td>
+<td>Per-volume object and relationship graph written by both WAV and SFZ extraction.</td>
+</tr>
+</tbody>
+</table>
+<p>Physical WAV names come from <code>SMPL</code> storage names plus a short content hash so
+several selections can share one pool without collisions. They stay
+storage-facing even when that produces a filesystem-safe numeric suffix from a
+sampler duplicate marker. When a physical waveform is referenced by
+sampler-visible <code>SBNK</code> members, the graph records those member names in the
+<code>user_facing_aliases</code> field on the <code>SMPL</code> object. Display-oriented consumers
+should use the first alias when present and fall back to the physical <code>SMPL</code>
+display name only when no alias is known.</p>
+<p>The suffix is the first 12 lowercase hexadecimal characters of SHA-1 over the
+complete emitted WAV container bytes. This 48-bit suffix is retained as an
+export-layout compatibility rule, not for security or as sampler metadata. A
+single export plan reuses a path only when the full digest and WAV bytes match;
+if distinct contents ever share the same shortened path, export fails clearly
+instead of overwriting or choosing an order-dependent name.</p>
+<p>Rendered stereo names come from sampler-facing sample/member names when a known
+stereo relationship supplies a better musical label. For paired sibling <code>SBNK</code>
+stereo, terminal <code>-L</code> and <code>-R</code> are removed from the rendered stem, so
+<code>Grand -L</code> and <code>Grand -R</code> render as <code>Grand.wav</code> while both physical <code>SMPL</code> WAVs
+remain present. If the paired member name is only distinguished by a sampler
+duplicate marker, the rendered stem uses the owning <code>B ...</code> sample-bank or group
+label when available, for example <code>Harpsi 2.1N - Harpsich031.wav</code> instead of a
+numeric duplicate suffix.</p>
+<h2 id="technical-fields-that-stay-in-reports">Technical Fields That Stay In Reports</h2>
+<p>Normal CLI text leads with sampler-facing names. These fields remain available in
+CSV/JSON reports for traceability:</p>
+<table>
+<thead>
+<tr>
+<th>Field family</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SFS placement</td>
+<td><code>partition_index</code>, <code>sfs_id</code>, <code>payload_offset</code>, <code>object_offset</code>.</td>
+</tr>
+<tr>
+<td>FAT placement</td>
+<td><code>fat_file</code>, <code>fat_directory_offset</code>, <code>fat_first_cluster</code>, <code>fat_cluster_count</code>.</td>
+</tr>
+<tr>
+<td>ISO placement</td>
+<td><code>iso_raw_group</code>, <code>iso_raw_volume</code>, <code>iso_extent_sector</code>, <code>iso_data_offset</code>.</td>
+</tr>
+<tr>
+<td>Relationship diagnostics</td>
+<td><code>basis</code>, <code>raw_fields</code>, candidate object keys, assignment row bytes.</td>
+</tr>
+<tr>
+<td>Quality labels</td>
+<td><code>quality</code>, <code>match_quality</code>, <code>placement_quality</code>.</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

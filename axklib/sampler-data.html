@@ -1,0 +1,3407 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Native Yamaha A-series disk image and sampler object tooling.">
+      
+      
+      
+        <link rel="canonical" href="https://tphzz.github.io/axklib/axklib/sampler-data.html">
+      
+      
+        <link rel="prev" href="cdrom.html">
+      
+      
+        <link rel="next" href="names-and-paths.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Sampler Data Structures - axklib</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/axklib-material.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#sampler-data-structures" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="axklib" class="md-header__button md-logo" aria-label="axklib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            axklib
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Sampler Data Structures
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tphzz/axklib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tphzz/axklib
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="axklib" class="md-nav__button md-logo" aria-label="axklib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    axklib
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tphzz/axklib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tphzz/axklib
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="typical-usage.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C++ And CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    SDK
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cpp-api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C++ API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="portable-packages.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Portable Object Packages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Formats
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Formats
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="media.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media Containers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sfs-filesystem.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFS Filesystem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="floppy.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAT12 Floppy Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cdrom.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CD-ROM Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sampler Data Structures
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="sampler-data.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sampler Data Structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#shared-object-header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared Object Header
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-type-tags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object Type Tags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#container-filename-versus-payload-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container Filename Versus Payload Identity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#axklibobject-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AxklibObject Identity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smpl-physical-waveform-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SMPL: Physical Waveform Object
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sbnk-sample-bank-or-member-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SBNK: Sample Bank Or Member Object
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SBNK: Sample Bank Or Member Object">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#member-link-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Member Link Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sample-parameter-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sample Parameter Window
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sbac-sample-bank-group-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SBAC: Sample Bank Group Object
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prog-program-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PROG: Program Object
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PROG: Program Object">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#program-common-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Common Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#program-effect-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Effect Blocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#program-assignment-rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Assignment Rows
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sequ-and-prf3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SEQU And PRF3
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relationship-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relationship Graph
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exact-export-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exact Export Metadata
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output Contracts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Output Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="names-and-paths.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Names, Paths, And Exports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sfz.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFZ Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="report-schemas.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Report Schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli-json-schemas.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI JSON Schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="write.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writer And Alteration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distribution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="compatibility.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compatibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-dependencies.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native Dependencies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="glossary.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Yamaha Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#shared-object-header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared Object Header
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-type-tags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object Type Tags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#container-filename-versus-payload-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container Filename Versus Payload Identity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#axklibobject-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AxklibObject Identity
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smpl-physical-waveform-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SMPL: Physical Waveform Object
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sbnk-sample-bank-or-member-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SBNK: Sample Bank Or Member Object
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SBNK: Sample Bank Or Member Object">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#member-link-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Member Link Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sample-parameter-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sample Parameter Window
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sbac-sample-bank-group-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SBAC: Sample Bank Group Object
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prog-program-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PROG: Program Object
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="PROG: Program Object">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#program-common-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Common Fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#program-effect-blocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Effect Blocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#program-assignment-rows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Assignment Rows
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sequ-and-prf3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SEQU And PRF3
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relationship-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relationship Graph
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exact-export-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exact Export Metadata
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="sampler-data-structures">Sampler Data Structures</h1>
+<p>Yamaha A-series containers store sampler objects as payload files. axklib reads
+the container layer first, then decodes these shared object payloads in the same
+way for SFS hard-disk images, FAT12 floppy images, CD-ROM ISO images, standalone
+object files, and directory scans.</p>
+<p><img alt="Mermaid Diagram" src="../assets/images/sampler-data_mermaid_0_2f634e5c.svg" /></p>
+<h2 id="shared-object-header">Shared Object Header</h2>
+<p>Supported current object payloads begin with:</p>
+<div class="highlight"><pre><span></span><code>FSFSDEV3SPLX&lt;type&gt;
+</code></pre></div>
+<p>Header fields used by axklib:</p>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x00</code></td>
+<td style="text-align: right;">12</td>
+<td>ASCII</td>
+<td>magic</td>
+<td><code>FSFSDEV3SPLX</code>.</td>
+</tr>
+<tr>
+<td><code>0x0c</code></td>
+<td style="text-align: right;">4</td>
+<td>ASCII</td>
+<td>type</td>
+<td>Object type tag.</td>
+</tr>
+<tr>
+<td><code>0x10</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>header_size</td>
+<td>Object header size. For <code>SMPL</code> exact export, this is the stored waveform byte start.</td>
+</tr>
+<tr>
+<td><code>0x14</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>unknown_0x14</td>
+<td>Preserved diagnostic value.</td>
+</tr>
+<tr>
+<td><code>0x18</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>record_size_or_header_used</td>
+<td>Object-specific compact-record or header-size value surfaced as a raw field.</td>
+</tr>
+<tr>
+<td><code>0x1c</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>payload_bytes_0x1c</td>
+<td>Object payload byte-count field. For <code>SMPL</code>, exact export reads this many stored waveform bytes.</td>
+</tr>
+<tr>
+<td><code>0x20</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>payload_bytes_0x20</td>
+<td>Second object payload byte-count field surfaced for diagnostics.</td>
+</tr>
+<tr>
+<td><code>0x28</code></td>
+<td style="text-align: right;">2</td>
+<td>u16be</td>
+<td>sample_rate_guess</td>
+<td><code>SMPL</code> sample-rate field. Empty for other types.</td>
+</tr>
+<tr>
+<td><code>0x2a</code></td>
+<td style="text-align: right;">2</td>
+<td>u16be</td>
+<td>bytes_per_sample_guess</td>
+<td><code>SMPL</code> stored sample width. Empty for other types.</td>
+</tr>
+<tr>
+<td><code>0x32</code></td>
+<td style="text-align: right;">16</td>
+<td>ASCII</td>
+<td>name_guess</td>
+<td>Object header name, trimmed of trailing NUL and spaces.</td>
+</tr>
+</tbody>
+</table>
+<p>The header parser requires at least <code>0x42</code> bytes. Invalid ASCII bytes in names
+are replaced with <code>?</code>. Empty or padded names are represented as empty strings by
+some helper functions and as fallback display names by user-facing renderers.</p>
+<h2 id="object-type-tags">Object Type Tags</h2>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Public role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SMPL</code></td>
+<td>Physical waveform storage object. Exact mono WAV export reads this level.</td>
+</tr>
+<tr>
+<td><code>SBNK</code></td>
+<td>Sample Bank or member object. Stores sampler-visible member parameters and links to physical waveform storage.</td>
+</tr>
+<tr>
+<td><code>SBAC</code></td>
+<td>Sample Bank Group object. User-facing trees render it as <code>B &lt;name&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>PROG</code></td>
+<td>Program object, Program display name, effects, controller data, and assignment rows.</td>
+</tr>
+<tr>
+<td><code>SEQU</code></td>
+<td>Sequence object. Currently surfaced as an object identity and tree entry.</td>
+</tr>
+<tr>
+<td><code>PRF3</code></td>
+<td>Profile/preference-style object. Currently surfaced as an object identity; type-specific fields are not public yet.</td>
+</tr>
+<tr>
+<td>other known tags</td>
+<td>Recognized by low-level helpers, but not loaded as normal public objects unless a container reader explicitly supports them.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="container-filename-versus-payload-identity">Container Filename Versus Payload Identity</h2>
+<p>Every object file is complete from byte <code>0x00</code>; container allocation does not
+replace or remove the shared object header. The container filename locates the
+file, while the four-byte tag at payload offset <code>0x0c</code> determines its type and
+the embedded header supplies its sampler object name.</p>
+<table>
+<thead>
+<tr>
+<th>Container</th>
+<th>Placement filename</th>
+<th>Type and display-name source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FAT12 floppy</td>
+<td>DOS 8.3 name such as <code>AUTHORED.001</code></td>
+<td><code>FSFSDEV3SPLX&lt;type&gt;</code> and embedded object name. A numeric extension is not a type code.</td>
+</tr>
+<tr>
+<td>CD-ROM ISO</td>
+<td><code>&lt;group&gt;/Fnnn/&lt;type&gt;/Fnnn</code>; category <code>0000</code> maps display names to files</td>
+<td>Embedded type and name remain authoritative. The category name and catalog are independently checked placement metadata.</td>
+</tr>
+<tr>
+<td>Standalone file</td>
+<td>Host filename chosen by the caller</td>
+<td>Entire file begins with the shared magic and type tag.</td>
+</tr>
+<tr>
+<td>SFS image</td>
+<td>SFS directory record and object ID rather than a host filename</td>
+<td>Embedded type and name, with SFS placement retained separately.</td>
+</tr>
+</tbody>
+</table>
+<p><code>SMPL</code> and <code>SBNK</code> have variable total file sizes. Consumers must use the
+big-endian length and offset fields in the object rather than inferring payload
+boundaries from a FAT cluster count, ISO extent padding, or an <code>Fnnn</code> name.
+<code>SEQU</code> and <code>PRF3</code> can be inventoried and transferred as complete known-type
+payloads, but their type-specific inner formats are not part of the current
+public decoder contract.</p>
+<h2 id="axklibobject-identity">AxklibObject Identity</h2>
+<p>Every loaded object is represented as <code>AxklibObject</code>. The public identity has
+three parts:</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Fields</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Container</td>
+<td><code>source_image</code>, <code>kind</code>, <code>scope_key</code></td>
+<td>Which input and container scope produced the object.</td>
+</tr>
+<tr>
+<td>Object reference</td>
+<td><code>object_key</code>, <code>partition_index</code>, <code>sfs_id</code>, <code>fat_file</code>, <code>payload_offset</code>, <code>payload_size</code></td>
+<td>Stable object key and physical placement hints.</td>
+</tr>
+<tr>
+<td>Sampler data</td>
+<td><code>object_type</code>, <code>name</code>, <code>payload</code>, <code>header</code>, <code>quality</code>, <code>metadata</code></td>
+<td>Decoded object identity, raw bytes, and container-specific metadata.</td>
+</tr>
+</tbody>
+</table>
+<p>Container-specific placement metadata is documented in the format pages:</p>
+<table>
+<thead>
+<tr>
+<th>Container</th>
+<th>Placement fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SFS</td>
+<td>partition index, SFS ID, payload offset, payload size, scope key.</td>
+</tr>
+<tr>
+<td>FAT12 floppy</td>
+<td>FAT filename, root directory offset, first cluster, cluster count, file size, object offset.</td>
+</tr>
+<tr>
+<td>CD-ROM ISO</td>
+<td>raw ISO path, group/volume labels, extent sector, data offset, file size, loader-quality fields.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="smpl-physical-waveform-object">SMPL: Physical Waveform Object</h2>
+<p><code>SMPL</code> objects are the physical waveform-storage level. Exact export writes one
+mono WAV per decoded physical <code>SMPL</code> object. Stereo rendering is a separate
+operation driven by <code>SBNK</code> relationships.</p>
+<p>Current compact metadata fields:</p>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x28</code></td>
+<td style="text-align: right;">2</td>
+<td>u16be</td>
+<td>sample_rate_guess</td>
+</tr>
+<tr>
+<td><code>0x2a</code></td>
+<td style="text-align: right;">2</td>
+<td>u16be</td>
+<td>bytes_per_sample_guess</td>
+</tr>
+<tr>
+<td><code>0x30</code></td>
+<td style="text-align: right;">variable</td>
+<td>bytes</td>
+<td>compact record, reported as <code>current_smpl_compact_record_hex</code></td>
+</tr>
+<tr>
+<td><code>0x54</code></td>
+<td style="text-align: right;">16</td>
+<td>ASCII</td>
+<td>source_wave_name_guess</td>
+</tr>
+<tr>
+<td><code>0x6c</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>smpl_group_id_0x06c</td>
+</tr>
+<tr>
+<td><code>0x78</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>smpl_link_id_0x078</td>
+</tr>
+<tr>
+<td><code>0x7c</code></td>
+<td style="text-align: right;">2</td>
+<td>u16be</td>
+<td>sample_rate_duplicate_0x07c</td>
+</tr>
+<tr>
+<td><code>0x7e</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>root_key_midi_note_guess</td>
+</tr>
+<tr>
+<td><code>0x7f</code></td>
+<td style="text-align: right;">1</td>
+<td>s8</td>
+<td>fine_tune_cents_guess</td>
+</tr>
+<tr>
+<td><code>0x85</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>loop_mode_candidate_0x085</td>
+</tr>
+<tr>
+<td><code>0x92</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>wave_length_frames_0x092</td>
+</tr>
+<tr>
+<td><code>0x96</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>loop_start_frame_0x096</td>
+</tr>
+<tr>
+<td><code>0x9a</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>loop_length_frames_0x09a</td>
+</tr>
+</tbody>
+</table>
+<p>Derived loop values:</p>
+<div class="highlight"><pre><span></span><code>loop_end_frame_inclusive_guess = loop_start + loop_length - 1
+loop_end_frame_exclusive_guess = loop_start + loop_length
+loop_end_frame_a4000_ui_guess  = loop_start + loop_length
+</code></pre></div>
+<p>Loop-mode display values currently surfaced by axklib:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Raw</th>
+<th>Label</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;"><code>0</code></td>
+<td><code>--&gt;</code></td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>1</code></td>
+<td><code>-&gt;0</code></td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>2</code></td>
+<td><code>-&gt;0-&gt;</code></td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>3</code></td>
+<td><code>&lt;--</code></td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>4</code></td>
+<td><code>One-&gt;</code></td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>5</code></td>
+<td><code>One&lt;-</code></td>
+</tr>
+</tbody>
+</table>
+<p>PCM export mapping:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Stored width</th>
+<th>Stored bytes</th>
+<th>WAV bytes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;"><code>2</code></td>
+<td>16-bit stored samples in big-endian byte order</td>
+<td>Byte-swapped to little-endian 16-bit WAV PCM.</td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>1</code></td>
+<td>8-bit PCM</td>
+<td>Copied directly to WAV frames.</td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>2</code> with alternating-byte compatibility pattern</td>
+<td>Alternating filler bytes with useful high-byte lane</td>
+<td>Useful lane is converted to unsigned 8-bit WAV frames and remains a read/export compatibility case.</td>
+</tr>
+</tbody>
+</table>
+<p><code>header_size</code> is the start offset of stored waveform bytes inside the <code>SMPL</code>
+payload. <code>payload_bytes_0x1c</code> is the stored byte count read by exact export.
+Generated images may store a short compatibility tail after the logical waveform
+frames. In that case the stored byte count includes the tail, while
+<code>wave_length_frames_0x092</code> and <code>loop_length_frames_0x09a</code> describe the logical
+sample window.</p>
+<p>When the alternating-byte compatibility pattern is detected, audio APIs set
+<code>Waveform.alternating_byte_payload_detected</code> and sidecars write
+<code>alternating_byte_payload_detected</code>. In that case <code>stored_payload_transform</code> is
+<code>alternating-byte-signed-high-byte</code>, <code>exactness_status</code> is
+<code>alternating-byte-compatibility-export</code>, and the WAV contains the useful lane as
+8-bit PCM. This is a read/export compatibility path; it is not a normal
+write-support format.</p>
+<h2 id="sbnk-sample-bank-or-member-object">SBNK: Sample Bank Or Member Object</h2>
+<p><code>SBNK</code> objects are sampler-visible sample-bank/member objects. They link to
+physical waveform storage and carry most sample/member parameters.</p>
+<h3 id="member-link-fields">Member Link Fields</h3>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x078</code></td>
+<td style="text-align: right;">16</td>
+<td>ASCII</td>
+<td>left member sample name</td>
+</tr>
+<tr>
+<td><code>0x088</code></td>
+<td style="text-align: right;">16</td>
+<td>ASCII</td>
+<td>right member sample name</td>
+</tr>
+<tr>
+<td><code>0x0a0</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>left SMPL link ID</td>
+</tr>
+<tr>
+<td><code>0x0a4</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>right SMPL link ID</td>
+</tr>
+<tr>
+<td><code>0x0c0</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>linked Programs 001-032 bitmap</td>
+</tr>
+<tr>
+<td><code>0x0c4</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>linked Programs 033-064 bitmap</td>
+</tr>
+<tr>
+<td><code>0x0c8</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>linked Programs 065-096 bitmap</td>
+</tr>
+<tr>
+<td><code>0x0cc</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>linked Programs 097-128 bitmap</td>
+</tr>
+</tbody>
+</table>
+<p>The ordinary stereo layout uses the left and right member link fields on one
+<code>SBNK</code>. Some source media instead stores stereo as two sibling <code>SBNK</code> objects
+under the same <code>SBAC</code> group, with sampler-facing names ending in <code>-L</code> and <code>-R</code>.
+In that layout each sibling still uses its own left-member <code>SMPL</code> link. axklib
+keeps both <code>SBNK</code> objects and both physical <code>SMPL</code> exports, then writes an
+additive rendered stereo WAV when the sibling names and links are known and
+compatible.</p>
+<p>Program-link bitmap decoding:
+<div class="highlight"><pre><span></span><code>for word_index in 0..3:
+    base_program = word_index * 32 + 1
+    for bit_index in 0..31:
+        if word &amp; (1 &lt;&lt; bit_index):
+            linked_program = base_program + bit_index
+</code></pre></div></p>
+<h3 id="sample-parameter-window">Sample Parameter Window</h3>
+<p>The sample parameter window starts at <code>0x0a8</code>. The table below lists the public
+field names currently exposed by the decoder.</p>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x0d0</code></td>
+<td>u8</td>
+<td>sample_flags_0x0d0</td>
+</tr>
+<tr>
+<td><code>0x0d1</code></td>
+<td>u8</td>
+<td>mapout_flags_0x0d1</td>
+</tr>
+<tr>
+<td><code>0x0d2</code></td>
+<td>u8</td>
+<td>midi_receive_channel_0x0d2</td>
+</tr>
+<tr>
+<td><code>0x0d3</code></td>
+<td>u8</td>
+<td>pitch_bend_type_0x0d3</td>
+</tr>
+<tr>
+<td><code>0x0d4</code></td>
+<td>u8</td>
+<td>pitch_bend_range_0x0d4</td>
+</tr>
+<tr>
+<td><code>0x0d5</code></td>
+<td>u8</td>
+<td>coarse_tune_0x0d5</td>
+</tr>
+<tr>
+<td><code>0x0d6</code></td>
+<td>u8</td>
+<td>left_root_key_0x0d6</td>
+</tr>
+<tr>
+<td><code>0x0d7</code></td>
+<td>u8</td>
+<td>right_root_key_0x0d7</td>
+</tr>
+<tr>
+<td><code>0x0d8</code></td>
+<td>u16be</td>
+<td>left_sample_rate_0x0d8</td>
+</tr>
+<tr>
+<td><code>0x0da</code></td>
+<td>u16be</td>
+<td>right_sample_rate_0x0da</td>
+</tr>
+<tr>
+<td><code>0x0dc</code></td>
+<td>s8</td>
+<td>left_fine_tune_cents_0x0dc</td>
+</tr>
+<tr>
+<td><code>0x0dd</code></td>
+<td>s8</td>
+<td>right_fine_tune_cents_0x0dd</td>
+</tr>
+<tr>
+<td><code>0x0de</code></td>
+<td>u16be</td>
+<td>pitch_base_word_0x0de</td>
+</tr>
+<tr>
+<td><code>0x0e0</code></td>
+<td>u16be</td>
+<td>secondary_pitch_base_word_0x0e0</td>
+</tr>
+<tr>
+<td><code>0x0e2</code></td>
+<td>u8</td>
+<td>key_range_high_0x0e2</td>
+</tr>
+<tr>
+<td><code>0x0e3</code></td>
+<td>u8</td>
+<td>key_range_low_0x0e3</td>
+</tr>
+<tr>
+<td><code>0x0e6</code></td>
+<td>u16be</td>
+<td>loop_tempo_0x0e6</td>
+</tr>
+</tbody>
+</table>
+<p>Key-range values <code>0..127</code> are concrete MIDI key limits. The sampler also
+uses direction-specific sentinel bytes for the UI value <code>Orig</code>: raw <code>128</code> in
+<code>key_range_high_0x0e2</code> and raw <code>255</code> in <code>key_range_low_0x0e3</code>. axklib
+preserves those raw values and exposes a <code>resolved_key_range</code> projection in
+volume graphs. The projection resolves <code>Orig</code> to the member root key so export
+formats with only concrete MIDI limits can emit bounded zones. Generated direct
+single-member <code>SBNK</code> objects have been hardware-tested with concrete root key
+and key-range values. For a single-member bank, an empty right member name means
+there is no active right member; the generated writer treats right-member fields
+as inactive compatibility fields rather than as a second playback region.</p>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x0e8</code></td>
+<td>u32be</td>
+<td>left_wave_start_address_0x0e8</td>
+</tr>
+<tr>
+<td><code>0x0ea</code></td>
+<td>u16be</td>
+<td>left_wave_start_low16_0x0ea</td>
+</tr>
+<tr>
+<td><code>0x0ec</code></td>
+<td>u32be</td>
+<td>right_wave_start_address_0x0ec</td>
+</tr>
+<tr>
+<td><code>0x0ee</code></td>
+<td>u16be</td>
+<td>right_wave_start_low16_0x0ee</td>
+</tr>
+<tr>
+<td><code>0x0f0</code></td>
+<td>u32be</td>
+<td>left_wave_length_frames_0x0f0</td>
+</tr>
+<tr>
+<td><code>0x0f4</code></td>
+<td>u32be</td>
+<td>right_wave_length_frames_0x0f4</td>
+</tr>
+<tr>
+<td><code>0x0f8</code></td>
+<td>u32be</td>
+<td>left_loop_start_frame_0x0f8</td>
+</tr>
+<tr>
+<td><code>0x0fc</code></td>
+<td>u32be</td>
+<td>right_loop_start_frame_0x0fc</td>
+</tr>
+<tr>
+<td><code>0x100</code></td>
+<td>u32be</td>
+<td>left_loop_length_frames_0x100</td>
+</tr>
+<tr>
+<td><code>0x104</code></td>
+<td>u32be</td>
+<td>right_loop_length_frames_0x104</td>
+</tr>
+<tr>
+<td><code>0x108</code></td>
+<td>u8</td>
+<td>start_address_velocity_sensitivity_0x108</td>
+</tr>
+<tr>
+<td><code>0x109</code></td>
+<td>u8</td>
+<td>filter_type_0x109</td>
+</tr>
+<tr>
+<td><code>0x10a</code></td>
+<td>u8</td>
+<td>filter_cutoff_0x10a</td>
+</tr>
+<tr>
+<td><code>0x10b</code></td>
+<td>u8</td>
+<td>filter_q_width_0x10b</td>
+</tr>
+<tr>
+<td><code>0x10c</code></td>
+<td>u8</td>
+<td>filter_cutoff_key_scaling_break1_0x10c</td>
+</tr>
+<tr>
+<td><code>0x10d</code></td>
+<td>u8</td>
+<td>filter_cutoff_key_scaling_break2_0x10d</td>
+</tr>
+<tr>
+<td><code>0x10e</code></td>
+<td>u8</td>
+<td>filter_cutoff_key_scaling_level1_0x10e</td>
+</tr>
+<tr>
+<td><code>0x10f</code></td>
+<td>u8</td>
+<td>filter_cutoff_key_scaling_level2_0x10f</td>
+</tr>
+<tr>
+<td><code>0x110</code></td>
+<td>u8</td>
+<td>filter_cutoff_velocity_sensitivity_0x110</td>
+</tr>
+<tr>
+<td><code>0x111</code></td>
+<td>u8</td>
+<td>filter_q_width_velocity_sensitivity_0x111</td>
+</tr>
+<tr>
+<td><code>0x112</code></td>
+<td>u8</td>
+<td>expand_detune_0x112</td>
+</tr>
+<tr>
+<td><code>0x113</code></td>
+<td>u8</td>
+<td>expand_dephase_0x113</td>
+</tr>
+<tr>
+<td><code>0x114</code></td>
+<td>u8</td>
+<td>expand_width_0x114</td>
+</tr>
+<tr>
+<td><code>0x115</code></td>
+<td>u8</td>
+<td>random_pitch_0x115</td>
+</tr>
+<tr>
+<td><code>0x116</code></td>
+<td>u8</td>
+<td>sample_level_0x116</td>
+</tr>
+</tbody>
+</table>
+<p>Generated direct single-member <code>SBNK</code> objects have been hardware-tested with
+sample level values in the normal <code>0..127</code> range. The writer also carries a
+conservative current-format default set for fields that are not yet surfaced as
+public write inputs, including filter, envelope, LFO, output, portamento, and
+sample-control defaults for this direct single-member scope.</p>
+<p>The Yamaha Sample Parameter table labels decimal offsets <code>0170..0179</code> as
+reserved. With the current <code>0x0a8</code> Sample Parameter base, those reserved bytes
+map to <code>SBNK+0x152..0x15b</code>. Hardware-tested generated direct single-member
+<code>SBNK</code> objects require compatible values in this reserved range: <code>0x152..0x156</code>
+gates audible playback, and <code>0x158..0x15b</code> restores the normal unfiltered tone
+for this writer scope.</p>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x117</code></td>
+<td>u8</td>
+<td>pan_0x117</td>
+</tr>
+<tr>
+<td><code>0x118</code></td>
+<td>u8</td>
+<td>velocity_low_limit_0x118</td>
+</tr>
+<tr>
+<td><code>0x119</code></td>
+<td>u8</td>
+<td>velocity_offset_0x119</td>
+</tr>
+<tr>
+<td><code>0x11a</code></td>
+<td>u8</td>
+<td>velocity_range_high_0x11a</td>
+</tr>
+<tr>
+<td><code>0x11b</code></td>
+<td>u8</td>
+<td>velocity_range_low_0x11b</td>
+</tr>
+<tr>
+<td><code>0x11c</code></td>
+<td>u8</td>
+<td>level_scaling_break1_0x11c</td>
+</tr>
+<tr>
+<td><code>0x11d</code></td>
+<td>u8</td>
+<td>level_scaling_break2_0x11d</td>
+</tr>
+<tr>
+<td><code>0x11e</code></td>
+<td>u8</td>
+<td>level_scaling_level1_0x11e</td>
+</tr>
+<tr>
+<td><code>0x11f</code></td>
+<td>u8</td>
+<td>level_scaling_level2_0x11f</td>
+</tr>
+<tr>
+<td><code>0x120</code></td>
+<td>u8</td>
+<td>velocity_sensitivity_0x120</td>
+</tr>
+<tr>
+<td><code>0x121</code></td>
+<td>u8</td>
+<td>alternate_group_0x121</td>
+</tr>
+<tr>
+<td><code>0x122</code></td>
+<td>u8</td>
+<td>sample_eq_frequency_0x122</td>
+</tr>
+<tr>
+<td><code>0x123</code></td>
+<td>u8</td>
+<td>sample_eq_gain_0x123</td>
+</tr>
+<tr>
+<td><code>0x124</code></td>
+<td>u8</td>
+<td>sample_eq_width_0x124</td>
+</tr>
+<tr>
+<td><code>0x125</code></td>
+<td>u8</td>
+<td>filter_cutoff_distance_0x125</td>
+</tr>
+<tr>
+<td><code>0x126</code></td>
+<td>u8</td>
+<td>feg_attack_rate_0x126</td>
+</tr>
+<tr>
+<td><code>0x127</code></td>
+<td>u8</td>
+<td>feg_decay_rate_0x127</td>
+</tr>
+<tr>
+<td><code>0x128</code></td>
+<td>u8</td>
+<td>feg_release_rate_0x128</td>
+</tr>
+<tr>
+<td><code>0x129</code></td>
+<td>u8</td>
+<td>feg_init_level_0x129</td>
+</tr>
+<tr>
+<td><code>0x12a</code></td>
+<td>u8</td>
+<td>feg_attack_level_0x12a</td>
+</tr>
+<tr>
+<td><code>0x12b</code></td>
+<td>u8</td>
+<td>feg_sustain_level_0x12b</td>
+</tr>
+<tr>
+<td><code>0x12c</code></td>
+<td>u8</td>
+<td>feg_release_level_0x12c</td>
+</tr>
+<tr>
+<td><code>0x12d</code></td>
+<td>u8</td>
+<td>feg_rate_key_scaling_0x12d</td>
+</tr>
+<tr>
+<td><code>0x12e</code></td>
+<td>u8</td>
+<td>feg_rate_velocity_sensitivity_0x12e</td>
+</tr>
+<tr>
+<td><code>0x12f</code></td>
+<td>u8</td>
+<td>feg_attack_level_velocity_sensitivity_0x12f</td>
+</tr>
+<tr>
+<td><code>0x130</code></td>
+<td>u8</td>
+<td>feg_level_velocity_sensitivity_0x130</td>
+</tr>
+<tr>
+<td><code>0x131</code></td>
+<td>u8</td>
+<td>peg_attack_rate_0x131</td>
+</tr>
+<tr>
+<td><code>0x132</code></td>
+<td>u8</td>
+<td>peg_decay_rate_0x132</td>
+</tr>
+<tr>
+<td><code>0x133</code></td>
+<td>u8</td>
+<td>peg_release_rate_0x133</td>
+</tr>
+<tr>
+<td><code>0x134</code></td>
+<td>u8</td>
+<td>peg_init_level_0x134</td>
+</tr>
+<tr>
+<td><code>0x135</code></td>
+<td>u8</td>
+<td>peg_attack_level_0x135</td>
+</tr>
+<tr>
+<td><code>0x136</code></td>
+<td>u8</td>
+<td>peg_sustain_level_0x136</td>
+</tr>
+<tr>
+<td><code>0x137</code></td>
+<td>u8</td>
+<td>peg_release_level_0x137</td>
+</tr>
+<tr>
+<td><code>0x138</code></td>
+<td>u8</td>
+<td>peg_rate_key_scaling_0x138</td>
+</tr>
+<tr>
+<td><code>0x139</code></td>
+<td>u8</td>
+<td>peg_rate_velocity_sensitivity_0x139</td>
+</tr>
+<tr>
+<td><code>0x13a</code></td>
+<td>u8</td>
+<td>peg_level_velocity_sensitivity_0x13a</td>
+</tr>
+<tr>
+<td><code>0x13b</code></td>
+<td>u8</td>
+<td>peg_range_0x13b</td>
+</tr>
+<tr>
+<td><code>0x13c</code></td>
+<td>u8</td>
+<td>aeg_attack_rate_0x13c</td>
+</tr>
+<tr>
+<td><code>0x13d</code></td>
+<td>u8</td>
+<td>aeg_decay_rate_0x13d</td>
+</tr>
+<tr>
+<td><code>0x13e</code></td>
+<td>u8</td>
+<td>aeg_release_rate_0x13e</td>
+</tr>
+<tr>
+<td><code>0x141</code></td>
+<td>u8</td>
+<td>aeg_sustain_level_0x141</td>
+</tr>
+<tr>
+<td><code>0x143</code></td>
+<td>u8</td>
+<td>aeg_attack_mode_0x143</td>
+</tr>
+<tr>
+<td><code>0x144</code></td>
+<td>u8</td>
+<td>aeg_rate_key_scaling_0x144</td>
+</tr>
+<tr>
+<td><code>0x145</code></td>
+<td>u8</td>
+<td>aeg_rate_velocity_sensitivity_0x145</td>
+</tr>
+<tr>
+<td><code>0x146</code></td>
+<td>u8</td>
+<td>lfo_wave_0x146</td>
+</tr>
+<tr>
+<td><code>0x147</code></td>
+<td>u8</td>
+<td>lfo_speed_0x147</td>
+</tr>
+<tr>
+<td><code>0x148</code></td>
+<td>u8</td>
+<td>lfo_delay_time_0x148</td>
+</tr>
+<tr>
+<td><code>0x149</code></td>
+<td>u8</td>
+<td>lfo_flags_0x149</td>
+</tr>
+<tr>
+<td><code>0x14a</code></td>
+<td>u8</td>
+<td>lfo_cutoff_mod_depth_0x14a</td>
+</tr>
+<tr>
+<td><code>0x14b</code></td>
+<td>u8</td>
+<td>lfo_pitch_mod_depth_0x14b</td>
+</tr>
+<tr>
+<td><code>0x14c</code></td>
+<td>u8</td>
+<td>lfo_amp_mod_depth_0x14c</td>
+</tr>
+<tr>
+<td><code>0x151</code></td>
+<td>s8</td>
+<td>filter_gain_0x151</td>
+</tr>
+<tr>
+<td><code>0x152..0x156</code></td>
+<td>5 bytes</td>
+<td>single_member_reserved_playback_default_0x152_0x156</td>
+</tr>
+<tr>
+<td><code>0x158..0x15b</code></td>
+<td>4 bytes</td>
+<td>single_member_reserved_tone_default_0x158_0x15b</td>
+</tr>
+<tr>
+<td><code>0x15c</code></td>
+<td>u32be</td>
+<td>wave_end_address_0x15c</td>
+</tr>
+<tr>
+<td><code>0x160</code></td>
+<td>u32be</td>
+<td>loop_end_address_0x160</td>
+</tr>
+<tr>
+<td><code>0x17c</code></td>
+<td>u8</td>
+<td>velocity_xfade_high_0x17c</td>
+</tr>
+<tr>
+<td><code>0x17d</code></td>
+<td>u8</td>
+<td>velocity_xfade_low_0x17d</td>
+</tr>
+<tr>
+<td><code>0x17e</code></td>
+<td>u8</td>
+<td>output1_0x17e</td>
+</tr>
+<tr>
+<td><code>0x17f</code></td>
+<td>u8</td>
+<td>output1_level_0x17f</td>
+</tr>
+<tr>
+<td><code>0x180</code></td>
+<td>u8</td>
+<td>output2_0x180</td>
+</tr>
+<tr>
+<td><code>0x181</code></td>
+<td>u8</td>
+<td>output2_level_0x181</td>
+</tr>
+<tr>
+<td><code>0x182</code></td>
+<td>u8</td>
+<td>sample_portamento_type_0x182</td>
+</tr>
+<tr>
+<td><code>0x183</code></td>
+<td>u8</td>
+<td>sample_portamento_rate_0x183</td>
+</tr>
+<tr>
+<td><code>0x184</code></td>
+<td>u8</td>
+<td>sample_portamento_time_0x184</td>
+</tr>
+</tbody>
+</table>
+<p>Sample control records are six 4-byte records at:</p>
+<div class="highlight"><pre><span></span><code>record_offset = 0x0a8 + 0xbc + (record_index - 1) * 4
+</code></pre></div>
+<p>Each record stores <code>device_u8</code>, <code>function_u8</code>, <code>type_u8</code>, and signed <code>range_s8</code>.</p>
+<h2 id="sbac-sample-bank-group-object">SBAC: Sample Bank Group Object</h2>
+<p><code>SBAC</code> objects are shown as <code>B &lt;name&gt;</code> Sample Bank Groups in user-facing trees.
+They contain member rows that point by name to <code>SBNK</code> objects.</p>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x040..0x11f</code></td>
+<td style="text-align: right;">224</td>
+<td>bytes</td>
+<td>sample_parameter_block_raw_0x040_0x11f</td>
+</tr>
+<tr>
+<td><code>0x120..0x12b</code></td>
+<td style="text-align: right;">12</td>
+<td>3 x u32be</td>
+<td>value_enable_words_0x120_0x12b</td>
+</tr>
+<tr>
+<td><code>0x130</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>bulk_assigned_sample_count_0x130</td>
+</tr>
+<tr>
+<td><code>0x144</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>active_slot_count_0x144</td>
+</tr>
+<tr>
+<td><code>0x14c</code></td>
+<td style="text-align: right;">variable</td>
+<td>rows</td>
+<td>First SBAC member slot row.</td>
+</tr>
+</tbody>
+</table>
+<p>SBAC value-enable bitmap decoding:</p>
+<div class="highlight"><pre><span></span><code>for word_index in 0..2:
+    base_p2 = word_index * 32
+    for bit in 0..31:
+        if word &amp; (1 &lt;&lt; bit):
+            enabled_sample_parameter_p2 = base_p2 + bit
+</code></pre></div>
+<p>SBAC slot row layout, stride <code>0x14</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Row offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>+0x00</code></td>
+<td style="text-align: right;">16</td>
+<td>ASCII</td>
+<td>slot SBNK name</td>
+</tr>
+<tr>
+<td><code>+0x10</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>raw_handle_0x10</td>
+</tr>
+</tbody>
+</table>
+<p>The current reader uses <code>active_slot_count_0x144</code> to decide how many rows to
+read, capped by the payload size. The 32-bit handle is retained as a diagnostic
+field. It is opaque source-local state rather than a portable object identity.
+Package export declares each active row handle as a relocation, and package
+import writes the hardware-proven zero form while preserving the row order and
+resolved member name. Target matching uses exact name, object type, and local
+placement before it emits a resolved relationship.</p>
+<h2 id="prog-program-object">PROG: Program Object</h2>
+<p><code>PROG</code> objects represent Program slots. The object header name is normally a
+three-digit slot ID. The displayed Program name is read from payload
+<code>0x078..0x07f</code>; if that field is empty, axklib displays <code>Pgm NNN</code> for slots
+1 through 128.</p>
+<h3 id="program-common-fields">Program Common Fields</h3>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x068..0x077</code></td>
+<td style="text-align: right;">16</td>
+<td>bytes</td>
+<td>raw_0x068_0x077</td>
+</tr>
+<tr>
+<td><code>0x080</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>program_flags_ad_source_effect_connection_lfo_sync_0x080</td>
+</tr>
+<tr>
+<td><code>0x081</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>program_lfo_cycle_wave_initial_phase_0x081</td>
+</tr>
+<tr>
+<td><code>0x082..0x085</code></td>
+<td style="text-align: right;">4</td>
+<td>bytes</td>
+<td>raw_0x082_0x085</td>
+</tr>
+<tr>
+<td><code>0x086</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>raw_0x086_u8</td>
+</tr>
+<tr>
+<td><code>0x087..0x08a</code></td>
+<td style="text-align: right;">4</td>
+<td>bytes</td>
+<td>raw_0x087_0x08a</td>
+</tr>
+<tr>
+<td><code>0x08f</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>program_lfo_reset_midi_channel_0x08f</td>
+</tr>
+<tr>
+<td><code>0x090</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>program_portamento_type_0x090</td>
+</tr>
+<tr>
+<td><code>0x091</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>program_portamento_rate_0x091</td>
+</tr>
+<tr>
+<td><code>0x092</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>program_portamento_time_0x092</td>
+</tr>
+<tr>
+<td><code>0x093</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>sample_and_hold_speed_0x093</td>
+</tr>
+<tr>
+<td><code>0x094</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>program_lfo_tempo_0x094</td>
+</tr>
+<tr>
+<td><code>0x095</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>program_lfo_reset_note_0x095</td>
+</tr>
+<tr>
+<td><code>0x096..0x097</code></td>
+<td style="text-align: right;">2</td>
+<td>bytes</td>
+<td>raw_0x096_0x097</td>
+</tr>
+<tr>
+<td><code>0x110..0x11f</code></td>
+<td style="text-align: right;">16</td>
+<td>4 records</td>
+<td>Program controller records.</td>
+</tr>
+<tr>
+<td><code>0x358..0x367</code></td>
+<td style="text-align: right;">16</td>
+<td>bytes</td>
+<td>control_tail_raw_0x358_0x367</td>
+</tr>
+</tbody>
+</table>
+<p>Program controller records are 4-byte rows: <code>device_u8</code>, <code>function_u8</code>,
+<code>type_u8</code>, and signed <code>range_s8</code>.</p>
+<h3 id="program-effect-blocks">Program Effect Blocks</h3>
+<p>Program effect blocks start at <code>0x098</code>, <code>0x0c0</code>, and <code>0x0e8</code>. Each block is
+<code>0x28</code> bytes.</p>
+<table>
+<thead>
+<tr>
+<th>Block offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>+0x00</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>active_or_bypass_u8</td>
+</tr>
+<tr>
+<td><code>+0x01</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>input_level_u8</td>
+</tr>
+<tr>
+<td><code>+0x02</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>output_level_u8</td>
+</tr>
+<tr>
+<td><code>+0x03</code></td>
+<td style="text-align: right;">1</td>
+<td>s8</td>
+<td>pan_s8</td>
+</tr>
+<tr>
+<td><code>+0x04</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>output_u8</td>
+</tr>
+<tr>
+<td><code>+0x05</code></td>
+<td style="text-align: right;">1</td>
+<td>s8</td>
+<td>width_raw_s8</td>
+</tr>
+<tr>
+<td><code>+0x06</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>type_u8</td>
+</tr>
+<tr>
+<td><code>+0x07</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>type_mirror_or_reserved_u8</td>
+</tr>
+<tr>
+<td><code>+0x08</code></td>
+<td style="text-align: right;">32</td>
+<td>16 x u16be</td>
+<td>effect parameter words</td>
+</tr>
+</tbody>
+</table>
+<p><code>width_display</code> is calculated as <code>width_raw_s8 + 63</code> when the result is in the
+accepted display range.</p>
+<h3 id="program-assignment-rows">Program Assignment Rows</h3>
+<p>Program assignment rows start at <code>0x120</code> and use a <code>0x38</code> byte stride.</p>
+<table>
+<thead>
+<tr>
+<th>Row offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>+0x00</code></td>
+<td style="text-align: right;">16</td>
+<td>ASCII</td>
+<td>assignment_name</td>
+</tr>
+<tr>
+<td><code>+0x10</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>assignment_raw_handle_or_selector</td>
+</tr>
+<tr>
+<td><code>+0x14</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>assigned_object_type</td>
+</tr>
+<tr>
+<td><code>+0x15</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>midi_receive_channel_assign</td>
+</tr>
+<tr>
+<td><code>+0x16</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>level_offset</td>
+</tr>
+<tr>
+<td><code>+0x17</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>velocity_sensitivity</td>
+</tr>
+<tr>
+<td><code>+0x18</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>pan_offset</td>
+</tr>
+<tr>
+<td><code>+0x19</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>velocity_xfade_high_offset</td>
+</tr>
+<tr>
+<td><code>+0x1a</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>fine_tune_offset</td>
+</tr>
+<tr>
+<td><code>+0x1b</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>velocity_xfade_low_offset</td>
+</tr>
+<tr>
+<td><code>+0x1c</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>coarse_tune_offset</td>
+</tr>
+<tr>
+<td><code>+0x1d</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>output1</td>
+</tr>
+<tr>
+<td><code>+0x1e</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>key_limit_high</td>
+</tr>
+<tr>
+<td><code>+0x1f</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>key_limit_low</td>
+</tr>
+<tr>
+<td><code>+0x20</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>key_range_shift</td>
+</tr>
+<tr>
+<td><code>+0x21</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>velocity_limit_high</td>
+</tr>
+<tr>
+<td><code>+0x22</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>velocity_limit_low</td>
+</tr>
+<tr>
+<td><code>+0x23</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>portamento_mono_key_xfade_flags</td>
+</tr>
+<tr>
+<td><code>+0x24</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>alternate_group_number</td>
+</tr>
+<tr>
+<td><code>+0x25</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>aeg_attack_rate_offset</td>
+</tr>
+<tr>
+<td><code>+0x26</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>aeg_decay_rate_offset</td>
+</tr>
+<tr>
+<td><code>+0x27</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>aeg_release_rate_offset</td>
+</tr>
+<tr>
+<td><code>+0x28</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>output2 / active-state gate</td>
+</tr>
+<tr>
+<td><code>+0x29</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>filter_cutoff_offset</td>
+</tr>
+<tr>
+<td><code>+0x2a</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>filter_gain_offset</td>
+</tr>
+</tbody>
+</table>
+<p>For named kind-<code>0x10</code> direct-SBNK and kind-<code>0x11</code> SBAC assignments, the 32-bit
+handle is opaque source-local state rather than a portable object identity.
+Package export declares it as a relocation, and package import writes the
+hardware-proven zero form while preserving the assignment ordinal, target name,
+kind, channel, and remaining row bytes. Empty rows and other assignment kinds
+are not covered by this relocation profile.</p>
+<table>
+<thead>
+<tr>
+<th>Row offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>+0x2b</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>filter_q_width_offset</td>
+</tr>
+<tr>
+<td><code>+0x2c</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>cutoff_distance_offset</td>
+</tr>
+<tr>
+<td><code>+0x2d..0x2e</code></td>
+<td style="text-align: right;">2</td>
+<td>bytes</td>
+<td>reserved_0045_0046</td>
+</tr>
+<tr>
+<td><code>+0x2f</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>output1_level_offset</td>
+</tr>
+<tr>
+<td><code>+0x30..0x31</code></td>
+<td style="text-align: right;">2</td>
+<td>bytes</td>
+<td>reserved_0048_0049</td>
+</tr>
+<tr>
+<td><code>+0x32</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>output2_level_offset</td>
+</tr>
+<tr>
+<td><code>+0x33</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>midi_control_on</td>
+</tr>
+<tr>
+<td><code>+0x34</code></td>
+<td style="text-align: right;">1</td>
+<td>u8</td>
+<td>reserved_0052</td>
+</tr>
+<tr>
+<td><code>+0x35..0x37</code></td>
+<td style="text-align: right;">3</td>
+<td>bytes</td>
+<td>reserved_0053_0055</td>
+</tr>
+</tbody>
+</table>
+<p>Assignment kind byte mapping currently used for read-side relationship matching:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Kind byte</th>
+<th>Target category</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;"><code>0x10</code></td>
+<td><code>SBNK</code> direct assignment target</td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>0x11</code></td>
+<td><code>SBAC</code> Sample Bank Group target</td>
+</tr>
+</tbody>
+</table>
+<p>Rch Assign display family:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Gate byte <code>+0x28</code></th>
+<th style="text-align: right;">Channel byte <code>+0x15</code></th>
+<th>Display</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;"><code>0x00</code></td>
+<td style="text-align: right;">any</td>
+<td><code>off</code></td>
+</tr>
+<tr>
+<td style="text-align: right;">not <code>0x00</code> or <code>0xff</code></td>
+<td style="text-align: right;">any</td>
+<td><code>unknown</code></td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>0xff</code></td>
+<td style="text-align: right;"><code>0xff</code></td>
+<td><code>=SMP</code></td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>0xff</code></td>
+<td style="text-align: right;"><code>0x00..0x0f</code></td>
+<td><code>01</code> through <code>16</code></td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>0xff</code></td>
+<td style="text-align: right;"><code>0x10</code></td>
+<td><code>BasicRch</code></td>
+</tr>
+<tr>
+<td style="text-align: right;"><code>0xff</code></td>
+<td style="text-align: right;"><code>0x11..0x20</code></td>
+<td><code>B01</code> through <code>B16</code></td>
+</tr>
+</tbody>
+</table>
+<p>Active assignment state is separate from target matching:</p>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>decoded-row</code></td>
+<td>A row was decoded.</td>
+</tr>
+<tr>
+<td><code>confirmed-active</code></td>
+<td>Gate byte indicates an active Program assignment.</td>
+</tr>
+<tr>
+<td><code>confirmed-visible-off</code></td>
+<td>The inventory row is visible but Rch Assign is off.</td>
+</tr>
+<tr>
+<td><code>confirmed-duplicate-not-active</code></td>
+<td>A duplicate row exists but is not the active assignment.</td>
+</tr>
+<tr>
+<td><code>source-load-assignment</code></td>
+<td>CD-ROM source-load row matched to a target object.</td>
+</tr>
+<tr>
+<td><code>unknown</code></td>
+<td>State is not classified beyond diagnostics.</td>
+</tr>
+</tbody>
+</table>
+<p>Normal <code>info</code> output shows active Program children and CD-ROM source-load
+children that are suitable for user-facing display. CSV and JSON relationship
+reports keep all decoded rows, raw selector values, and inactive rows.</p>
+<p>Portable-package closure has a separate preservation rule: Known named
+kind-<code>0x10</code> and kind-<code>0x11</code> targets in <code>confirmed-visible-off</code> state are retained
+because imported zero-handle assignments re-parse in that state and remain
+loadable on hardware. <code>confirmed-duplicate-not-active</code>, unresolved, and
+ambiguous rows remain diagnostic-only.</p>
+<p>Relationship target matching is reported separately from active/off state. Rows
+that are useful for diagnostics but should not become normal Program children use
+<code>diagnostic_category</code> values such as <code>visible-off-assignment</code>,
+<code>program-link-bitmap</code>, <code>sbnk-member-link</code>, or
+<code>active-assignment-missing-target</code>.</p>
+<h2 id="sequ-and-prf3">SEQU And PRF3</h2>
+<p><code>SEQU</code> and <code>PRF3</code> are loaded as supported object identities when their payloads
+use the shared header. Current public behavior preserves object name, type,
+placement metadata, raw payload bytes, and report identity fields. Type-specific
+parameter sections are not currently exposed as public fields.</p>
+<h2 id="relationship-graph">Relationship Graph</h2>
+<p>The shared relationship graph connects decoded objects:</p>
+<table>
+<thead>
+<tr>
+<th>Relationship</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PROG_ASSIGNMENT_TO_SBAC</code></td>
+<td>Program assignment to a visible <code>B &lt;sample bank group&gt;</code> parent.</td>
+</tr>
+<tr>
+<td><code>PROG_ASSIGNMENT_TO_SBNK</code></td>
+<td>Program assignment directly to a Sample Bank or member.</td>
+</tr>
+<tr>
+<td><code>SBAC_SLOT_TO_SBNK</code></td>
+<td>Sample Bank Group member row.</td>
+</tr>
+<tr>
+<td><code>SBNK_LEFT_MEMBER_TO_SMPL</code></td>
+<td>Left member waveform-storage link.</td>
+</tr>
+<tr>
+<td><code>SBNK_RIGHT_MEMBER_TO_SMPL</code></td>
+<td>Right member waveform-storage link.</td>
+</tr>
+</tbody>
+</table>
+<p>Relationship row fields are documented in <a href="report-schemas.html">Report Schemas</a>.</p>
+<h2 id="exact-export-metadata">Exact Export Metadata</h2>
+<p>Exact export keeps physical and rendered audio separate:</p>
+<table>
+<thead>
+<tr>
+<th>Output</th>
+<th>Source level</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_samples/physical/*.wav</code></td>
+<td><code>SMPL</code></td>
+<td>Exact mono physical waveform export.</td>
+</tr>
+<tr>
+<td><code>_samples/rendered/*.wav</code></td>
+<td>linked <code>SBNK</code> pair</td>
+<td>Interleaved stereo render when left/right members are compatible.</td>
+</tr>
+<tr>
+<td>optional selection graph JSON</td>
+<td>objects and relationships</td>
+<td>Scoped graph metadata for objects, relationships, WAV references, quality labels, and diagnostics.</td>
+</tr>
+</tbody>
+</table>
+<p>The original <code>SMPL</code> objects remain represented even when a rendered stereo WAV is
+created.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2117 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Native Yamaha A-series disk image and sampler object tooling.">
+      
+      
+      
+        <link rel="canonical" href="https://tphzz.github.io/axklib/axklib/write.html">
+      
+      
+        <link rel="prev" href="cli-json-schemas.html">
+      
+      
+        <link rel="next" href="compatibility.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Writer And Alteration - axklib</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/axklib-material.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#writer-and-alteration" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="axklib" class="md-header__button md-logo" aria-label="axklib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            axklib
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Writer And Alteration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tphzz/axklib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tphzz/axklib
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="axklib" class="md-nav__button md-logo" aria-label="axklib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    axklib
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tphzz/axklib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tphzz/axklib
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="typical-usage.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C++ And CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    SDK
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cpp-api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C++ API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="portable-packages.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Portable Object Packages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Formats
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Formats
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="media.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media Containers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sfs-filesystem.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFS Filesystem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="floppy.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAT12 Floppy Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cdrom.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CD-ROM Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sampler-data.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sampler Data Structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output Contracts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Output Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="names-and-paths.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Names, Paths, And Exports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sfz.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFZ Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="report-schemas.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Report Schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli-json-schemas.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI JSON Schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writer And Alteration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="write.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writer And Alteration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#generate-a-starter-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generate A Starter Manifest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-authored-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Authored Content
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-a-hand-authored-cd-rom-iso" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create A Hand-Authored CD-ROM ISO
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-a-hand-authored-floppy-ima" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create A Hand-Authored Floppy IMA
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#convert-a-floppy-to-an-iso" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Convert A Floppy To An ISO
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transfer-selected-saved-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transfer Selected Saved Objects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authored-manifest-field-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authored Manifest Field Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alteration-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alteration Manifest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#publication-and-validation-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publication And Validation Guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distribution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="compatibility.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compatibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-dependencies.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native Dependencies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="glossary.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Yamaha Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#generate-a-starter-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generate A Starter Manifest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-authored-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Authored Content
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-a-hand-authored-cd-rom-iso" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create A Hand-Authored CD-ROM ISO
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#create-a-hand-authored-floppy-ima" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create A Hand-Authored Floppy IMA
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#convert-a-floppy-to-an-iso" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Convert A Floppy To An ISO
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transfer-selected-saved-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transfer Selected Saved Objects
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authored-manifest-field-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authored Manifest Field Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alteration-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alteration Manifest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#publication-and-validation-guarantees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publication And Validation Guarantees
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="writer-and-alteration">Writer And Alteration</h1>
+<p>axklib creates fresh HDS, FAT12 floppy, and narrow ISO9660 image files from
+versioned JSON manifests. It can also copy saved Yamaha object payloads into a
+new floppy or ISO container. Existing-image changes use a separate ordered
+transaction manifest.</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>create<span class="w"> </span>hds<span class="w"> </span>image.json<span class="w"> </span>--output<span class="w"> </span>HD00_512_generated.hds
+axklib<span class="w"> </span>create<span class="w"> </span>floppy<span class="w"> </span>floppy.json<span class="w"> </span>--output<span class="w"> </span>generated.ima
+axklib<span class="w"> </span>create<span class="w"> </span>iso<span class="w"> </span>cdrom.json<span class="w"> </span>--output<span class="w"> </span>generated.iso
+axklib<span class="w"> </span>create<span class="w"> </span>manifest<span class="w"> </span>hds<span class="w"> </span>--output<span class="w"> </span>image.json
+axklib<span class="w"> </span>alter<span class="w"> </span>manifest<span class="w"> </span>--output<span class="w"> </span>transaction.json
+axklib<span class="w"> </span>alter<span class="w"> </span>hds<span class="w"> </span>source.hds<span class="w"> </span>transaction.json<span class="w"> </span>--output<span class="w"> </span>altered.hds
+</code></pre></div>
+<p>Manifest-relative input paths are resolved relative to the manifest file, not
+the current working directory. Output publication is atomic. Existing output
+files are refused unless <code>--overwrite</code> is supplied.</p>
+<h2 id="generate-a-starter-manifest">Generate A Starter Manifest</h2>
+<p>Generate a canonical starter instead of writing the schema from memory:</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>create<span class="w"> </span>manifest<span class="w"> </span>hds<span class="w"> </span>--output<span class="w"> </span>image.json
+axklib<span class="w"> </span>create<span class="w"> </span>manifest<span class="w"> </span>floppy<span class="w"> </span>--output<span class="w"> </span>floppy.json
+axklib<span class="w"> </span>create<span class="w"> </span>manifest<span class="w"> </span>iso<span class="w"> </span>--output<span class="w"> </span>cdrom.json
+</code></pre></div>
+<p>The command writes formatted JSON and refuses to replace an existing manifest
+unless <code>--overwrite</code> is supplied. The generated documents have deliberately
+different starting content:</p>
+<ul>
+<li><code>hds</code> is an immediately buildable 512 MiB image definition with one empty
+  partition and one empty volume. It is suitable as a target for
+  <code>axklib package import</code> or as the start of a hand-authored manifest.</li>
+<li><code>floppy</code> contains one waveform and Sample Bank skeleton referring to
+  <code>tone.wav</code>. Replace that path and the sampler-facing names as needed. A
+  Yamaha FAT12 image with no Yamaha objects is not a valid writer target, so
+  the floppy starter cannot be object-empty.</li>
+<li><code>iso</code> is an object-empty one-group, one-volume staging definition. It can be
+  populated with <code>axklib package import</code>. Object-empty ISO output is not a
+  hardware-promoted standalone disc profile; for direct audio authoring, use
+  the complete example below.</li>
+</ul>
+<p>The generated HDS document is:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.0&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;size_bytes&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">536870912</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;partitions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;New Partition&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;volumes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">          </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;New Volume&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">&quot;waveforms&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">          </span><span class="nt">&quot;sample_banks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">      </span><span class="p">]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Create the empty image, inspect it, and then use it as an import target:</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>create<span class="w"> </span>hds<span class="w"> </span>image.json<span class="w"> </span>--output<span class="w"> </span>HD00_512_generated.hds
+axklib<span class="w"> </span>info<span class="w"> </span>HD00_512_generated.hds
+axklib<span class="w"> </span>validate<span class="w"> </span>HD00_512_generated.hds<span class="w"> </span>--output-dir<span class="w"> </span>validation/hds
+</code></pre></div>
+<p>Generate an alteration starter separately:</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>alter<span class="w"> </span>manifest<span class="w"> </span>--output<span class="w"> </span>transaction.json
+</code></pre></div>
+<p>Creation and alteration use different schemas. A creation manifest describes a
+complete new container; an alteration manifest is an ordered transaction
+against an existing HDS image.</p>
+<h2 id="common-authored-content">Common Authored Content</h2>
+<p>Fresh HDS, floppy, and ISO images share the same authored volume fields. HDS
+places those fields inside each <code>partitions[].volumes[]</code> entry; removable-media
+manifests place them in <code>authored_volume</code>. The smallest useful topology is one
+physical waveform (<code>SMPL</code>) and one Sample Bank (<code>SBNK</code>) that references it:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">&quot;authored_volume&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Tone Volume&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;waveforms&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tone&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Tone&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tone.wav&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;root_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;sample_banks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Tone Bank&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;waveform_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tone&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;root_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;key_low&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;key_high&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">127</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;level&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Native PCM16 at a supported sampler rate preserves its exact PCM sample
+sequence without resampling or requantization. The source container and byte
+order still change when those samples are serialized as a Yamaha <code>SMPL</code> object.
+WAV, FLAC, and AIFF input is accepted. Unsupported rates are converted with
+pinned libsoxr VHQ processing; higher-precision input is converted to PCM16
+with the versioned <code>axk-tpdf-pcg32-v1</code> dither policy. See
+<a href="sampler-data.html">Sampler Data Structures</a> for the generated object fields and
+stored PCM representation.</p>
+<p>Names written into Yamaha object and menu fields must be ASCII and at most 16
+bytes. Manifest IDs such as waveform <code>id</code> are manifest-local references and do
+not become sampler-facing names.</p>
+<p>!!! warning "Current loop policy"</p>
+<pre><code>Authored waveforms currently use forward loop mode over the complete
+logical waveform: start frame `0`, loop length equal to the imported frame
+count. The manifest does not yet expose one-shot mode or explicit loop
+points. Use source audio designed for a full-sample loop, or treat the
+resulting loop behavior as experimental. This limitation applies equally
+to HDS, floppy, and ISO authored output.
+</code></pre>
+<h2 id="create-a-hand-authored-cd-rom-iso">Create A Hand-Authored CD-ROM ISO</h2>
+<p>Place <code>tone.wav</code> next to <code>cdrom.json</code> and write:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.0&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;format&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;iso9660&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;iso&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;volume_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;AXK_AUDIO&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;raw_group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;46DEF120&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;group_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;AUTHORED TEST&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;raw_volume&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;F001&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;volume_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;TONE TEST&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;authored_volume&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;TONE TEST&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;waveforms&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tone&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Authored Tone&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tone.wav&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;root_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;sample_banks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Authored Tone&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;waveform_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tone&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;root_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;key_low&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;key_high&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;level&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Create and inspect the image:</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>create<span class="w"> </span>iso<span class="w"> </span>cdrom.json<span class="w"> </span>--output<span class="w"> </span>authored.iso
+axklib<span class="w"> </span>info<span class="w"> </span>authored.iso
+axklib<span class="w"> </span>validate<span class="w"> </span>authored.iso<span class="w"> </span>--output-dir<span class="w"> </span>validation/iso
+</code></pre></div>
+<p>For optical media, burn <code>authored.iso</code> as a finalized, single-session disc
+image. Do not copy the ISO file onto a data disc.</p>
+<p>The exact minimal profile above has been verified on physical Yamaha A-series
+hardware through group and volume enumeration, Sample Bank loading, audible
+waveform playback, and pitch-correct audition. That result covers one group,
+one <code>F001</code> volume, one mono <code>SMPL</code>, and one direct single-member <code>SBNK</code>. It does
+not establish arbitrary group-ID generation, multiple-volume output, every
+object topology, or every sampler model and system version.</p>
+<p>An adjacent fresh profile is also hardware-verified with one Program containing
+both assignment forms supported by the writer: one <code>SBAC</code> parent with one
+<code>SBNK</code> child, plus one direct <code>SBNK</code> assignment. Both Sample Banks reference one
+shared mono <code>SMPL</code>; the Program resolved both channel-specific assignments, and
+both paths loaded and played. This promotes that exact complete hierarchy, not
+arbitrary group sizes, Program counts, or graph shapes.</p>
+<p><code>46DEF120</code> is an accepted observed-form raw group identifier, not a derived
+content ID. Its generation rule is unknown. The writer accepts one to eight
+uppercase letters, digits, or underscores, but the hardware-verified profile
+uses an eight-character uppercase hexadecimal form. Use <code>F001</code> for the one
+volume emitted by the current writer; this places the group label in <code>F002</code> as
+required by the Yamaha menu catalog.</p>
+<p>The generated ISO tree and every filename are specified in
+<a href="cdrom.html#generated-iso-file-layout">CD-ROM Images</a>.</p>
+<h2 id="create-a-hand-authored-floppy-ima">Create A Hand-Authored Floppy IMA</h2>
+<p>Place <code>tone.wav</code> next to <code>floppy.json</code> and write:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.0&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;format&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fat12_floppy&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;authored_volume&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;FAT ROOT&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;waveforms&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tone&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Authored Tone&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tone.wav&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;root_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;sample_banks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Authored Tone&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;waveform_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tone&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;root_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;key_low&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;key_high&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;level&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Create and inspect the image:</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>create<span class="w"> </span>floppy<span class="w"> </span>floppy.json<span class="w"> </span>--output<span class="w"> </span>authored.ima
+axklib<span class="w"> </span>info<span class="w"> </span>authored.ima
+axklib<span class="w"> </span>validate<span class="w"> </span>authored.ima<span class="w"> </span>--output-dir<span class="w"> </span>validation/floppy
+</code></pre></div>
+<p>The output is always a deterministic 1,474,560-byte FAT12 superfloppy with two
+FAT copies, a 224-entry root directory, and one DOS 8.3 root file per Yamaha
+object. The <code>authored_volume.name</code> value is required by the shared schema but a
+floppy has no ISO-style group or volume menu catalog; axklib displays its scope
+as <code>FAT root</code>.</p>
+<p>Host reopen and payload comparison are automated. Fresh floppy output has not
+been verified on physical Yamaha hardware, so a parser-valid IMA is not yet a
+hardware-compatibility guarantee. The exact FAT geometry and generated DOS 8.3
+filenames are specified in
+<a href="floppy.html#generated-floppy-file-layout">FAT12 Floppy Images</a>.</p>
+<h2 id="convert-a-floppy-to-an-iso">Convert A Floppy To An ISO</h2>
+<p>This operation translates the Yamaha object-file set, not the FAT filesystem.
+Given <code>source.ima</code> next to <code>floppy-to-iso.json</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.0&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;format&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;iso9660&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;iso&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;volume_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;FLOPPY_COPY&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;raw_group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;46DEF120&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;group_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;FLOPPY TEST&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;raw_volume&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;F001&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;volume_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;FLOPPY COPY&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;transfer&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;source_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;source.ima&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;selection&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;all&quot;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Create and inspect the result:</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>create<span class="w"> </span>iso<span class="w"> </span>floppy-to-iso.json<span class="w"> </span>--output<span class="w"> </span>floppy-copy.iso
+axklib<span class="w"> </span>info<span class="w"> </span>floppy-copy.iso
+axklib<span class="w"> </span>validate<span class="w"> </span>floppy-copy.iso<span class="w"> </span>--output-dir<span class="w"> </span>validation/floppy-copy
+</code></pre></div>
+<p><code>selection: "all"</code> has this exact scope:</p>
+<ul>
+<li>The source must open as one FAT12 floppy image.</li>
+<li>Every file recognized as a Yamaha object must have a known type and decode
+  cleanly.</li>
+<li>Every recognized Yamaha object payload is copied byte for byte.</li>
+<li>FAT cluster placement, DOS filenames, deleted entries, timestamps, volume
+  labels, and non-object support files are not copied.</li>
+<li>ISO category directories, <code>0000</code> catalogs, <code>Fnnn</code> filenames, group label,
+  and volume label are generated from the decoded object type and name plus the
+  target <code>iso</code> manifest.</li>
+<li>The completed ISO is reopened and its complete object-payload multiset must
+  equal the selected source multiset before publication.</li>
+</ul>
+<p>Non-object files such as <code>YAMAHA.SYM</code> or model-specific system metadata are
+therefore outside whole-source transfer. This is deliberately described as a
+byte-preserving Yamaha-object transfer, not a sector-level floppy clone.</p>
+<p>Physical Yamaha hardware has enumerated the generated group and volume, loaded
+the transferred Program and Sample Banks, resolved their transferred waveform
+relationships, and produced audible playback. The transferred Sequence was
+also visible. This promotes the exact whole-floppy Yamaha-object transfer
+profile through loading and audition, while retaining the boundary above:
+non-object files and FAT filesystem metadata are not transferred.</p>
+<h2 id="transfer-selected-saved-objects">Transfer Selected Saved Objects</h2>
+<p>Root selection copies only requested objects and their known dependency
+closure. First write an object report:</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>objects<span class="w"> </span>source.hds<span class="w"> </span>--output-dir<span class="w"> </span>object-report
+</code></pre></div>
+<p>Then reference one or more reported object keys:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.0&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;format&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fat12_floppy&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;transfer&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;source_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;source.hds&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;selection&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;roots&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;root_object_keys&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;&lt;sample-bank-object-key&gt;&quot;</span><span class="p">]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><code>selection</code> defaults to <code>roots</code> when omitted. Root selection requires a
+non-empty <code>root_object_keys</code> array. Selecting an <code>SBNK</code> includes known linked
+<code>SMPL</code> members. Selecting an <code>SBAC</code> or an active/source-load <code>PROG</code> assignment
+continues through known <code>SBAC -&gt; SBNK</code> and <code>PROG -&gt; SBAC/SBNK</code> relationships.
+An unresolved or ambiguous required edge is an error; the writer does not guess
+a transfer closure.</p>
+<h2 id="authored-manifest-field-reference">Authored Manifest Field Reference</h2>
+<p>Top-level HDS fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schema_version</code></td>
+<td>Required; currently exactly <code>"1.0"</code>.</td>
+</tr>
+<tr>
+<td><code>size_bytes</code></td>
+<td>Required integer from 1 MiB through 2 GiB, divisible by 512. The starter uses 512 MiB.</td>
+</tr>
+<tr>
+<td><code>partitions</code></td>
+<td>Required array containing <code>1..8</code> partition objects.</td>
+</tr>
+</tbody>
+</table>
+<p>HDS partition and volume fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>partition <code>name</code></td>
+<td>Required non-empty sampler-facing partition name.</td>
+</tr>
+<tr>
+<td>partition <code>volumes</code></td>
+<td>Required non-empty array of volume objects.</td>
+</tr>
+<tr>
+<td>volume <code>name</code></td>
+<td>Required non-empty sampler-facing volume name.</td>
+</tr>
+<tr>
+<td>volume <code>waveforms</code></td>
+<td>Required array; it may be empty.</td>
+</tr>
+<tr>
+<td>volume <code>sample_banks</code></td>
+<td>Required array; it may be empty.</td>
+</tr>
+<tr>
+<td>volume <code>sample_bank_groups</code></td>
+<td>Optional array using the common authored-content schema below.</td>
+</tr>
+<tr>
+<td>volume <code>programs</code></td>
+<td>Optional array using the common authored-content schema below.</td>
+</tr>
+</tbody>
+</table>
+<p>Top-level removable-media fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schema_version</code></td>
+<td>Required; currently exactly <code>"1.0"</code>.</td>
+</tr>
+<tr>
+<td><code>format</code></td>
+<td>Required; <code>"fat12_floppy"</code> or <code>"iso9660"</code>.</td>
+</tr>
+<tr>
+<td><code>authored_volume</code> / <code>transfer</code></td>
+<td>Exactly one is required.</td>
+</tr>
+<tr>
+<td><code>iso</code></td>
+<td>Required for <code>iso9660</code>; omitted for <code>fat12_floppy</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><code>authored_volume</code> fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>Required non-empty string. Match <code>iso.volume_name</code> for clear ISO manifests.</td>
+</tr>
+<tr>
+<td><code>waveforms</code></td>
+<td>Required array. Completed FAT12 images must contain at least one generated object. An object-empty ISO volume is accepted only as a package-import staging target; it is not a hardware-promoted standalone profile.</td>
+</tr>
+<tr>
+<td><code>sample_banks</code></td>
+<td>Required array.</td>
+</tr>
+<tr>
+<td><code>sample_bank_groups</code></td>
+<td>Optional array; current groups contain 1..3 distinct Sample Bank names.</td>
+</tr>
+<tr>
+<td><code>programs</code></td>
+<td>Optional array; Program numbers are <code>1..128</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Waveform fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>Required unique manifest-local string.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>Required ASCII sampler object name, at most 16 bytes.</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td>Required WAV, FLAC, or AIFF source path. Relative paths use the manifest directory.</td>
+</tr>
+<tr>
+<td><code>root_key</code></td>
+<td>Required MIDI note <code>0..127</code>.</td>
+</tr>
+<tr>
+<td><code>target_sample_rate</code></td>
+<td>Optional requested output rate. Omit to preserve supported native rates or use the default conversion policy.</td>
+</tr>
+</tbody>
+</table>
+<p>Direct and stereo Sample Bank fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>Required unique ASCII <code>SBNK</code> name, at most 16 bytes.</td>
+</tr>
+<tr>
+<td><code>root_key</code></td>
+<td>Required MIDI note <code>0..127</code>.</td>
+</tr>
+<tr>
+<td><code>key_low</code>, <code>key_high</code></td>
+<td>Required MIDI limits <code>0..127</code>; high must not precede low.</td>
+</tr>
+<tr>
+<td><code>level</code></td>
+<td>Optional <code>0..127</code>; default <code>100</code>.</td>
+</tr>
+<tr>
+<td><code>waveform_id</code></td>
+<td>Direct left/mono member. Mutually exclusive with <code>interleaved_audio_path</code>.</td>
+</tr>
+<tr>
+<td><code>right_waveform_id</code></td>
+<td>Optional direct right member; it must differ from <code>waveform_id</code>.</td>
+</tr>
+<tr>
+<td><code>interleaved_audio_path</code></td>
+<td>Alternative two-channel source that generates linked left/right <code>SMPL</code> objects.</td>
+</tr>
+<tr>
+<td><code>left_waveform_name</code>, <code>right_waveform_name</code></td>
+<td>Optional names for generated interleaved members.</td>
+</tr>
+<tr>
+<td><code>target_sample_rate</code></td>
+<td>Optional conversion target for interleaved input.</td>
+</tr>
+</tbody>
+</table>
+<p>Direct stereo members must have equal sample rate and logical frame count.
+Interleaved input is split into two physical mono objects and inherently meets
+that constraint.</p>
+<p>The current authored <code>SBAC</code>/<code>PROG</code> profile is intentionally narrow. Each group
+contains 1..3 mono Sample Banks. Each Program has exactly two ordered
+assignments: one distinct <code>sample_bank_group</code> on receive channel <code>1</code>, followed
+by one direct <code>sample_bank</code> on receive channel <code>2</code>. Every group and direct bank
+used by this profile is assigned once. Sequence (<code>SEQU</code>) and profile (<code>PRF3</code>)
+payload authoring are not exposed; transfer mode can preserve existing objects
+of those known types.</p>
+<p>ISO-only fields:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>volume_id</code></td>
+<td><code>1..32</code> uppercase ASCII letters, digits, or underscores.</td>
+</tr>
+<tr>
+<td><code>raw_group</code></td>
+<td><code>1..8</code> uppercase ASCII letters, digits, or underscores; eight uppercase hexadecimal characters are the verified form.</td>
+</tr>
+<tr>
+<td><code>group_name</code></td>
+<td>Sampler-facing ASCII label, <code>1..16</code> bytes.</td>
+</tr>
+<tr>
+<td><code>raw_volume</code></td>
+<td>Effective writer range is <code>F001..F998</code>; the next <code>Fnnn</code> name is reserved for the group-label file. Use <code>F001</code> for the hardware-verified profile.</td>
+</tr>
+<tr>
+<td><code>volume_name</code></td>
+<td>Sampler-facing ASCII label, <code>1..16</code> bytes.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="alteration-manifest">Alteration Manifest</h2>
+<p><code>alter hds</code> accepts a strict versioned JSON document with one or more ordered
+operations. Generate the starter instead of guessing field names:</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>alter<span class="w"> </span>manifest<span class="w"> </span>-o<span class="w"> </span>transaction.json
+</code></pre></div>
+<p>The starter contains one valid rename operation with placeholder names:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.0&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;operations&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;rename-waveform&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;rename_waveform&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;partition_index&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;volume_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Volume&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;waveform_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Old Wave&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;new_waveform_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;New Wave&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Every operation has a unique <code>id</code>, a <code>type</code>, and a <code>partition_index</code>. A numeric
+partition index is <code>0..7</code>. An operation may instead use the partition selected
+by an earlier operation:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">&quot;partition_index&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;operation_ref&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;earlier-operation-id&quot;</span><span class="p">}</span>
+</code></pre></div>
+<p>References are backward-only. The complete transaction is planned in order, so
+later operations see the evolving result of earlier operations.</p>
+<p>Supported operation types:</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Required operation-specific fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>delete_volume</code></td>
+<td><code>volume_name</code></td>
+</tr>
+<tr>
+<td><code>insert_volume</code></td>
+<td><code>volume</code> using the common authored-volume schema</td>
+</tr>
+<tr>
+<td><code>delete_waveform</code></td>
+<td><code>volume_name</code>, <code>waveform_name</code></td>
+</tr>
+<tr>
+<td><code>insert_waveform</code></td>
+<td><code>volume_name</code>, <code>audio</code></td>
+</tr>
+<tr>
+<td><code>rename_waveform</code></td>
+<td><code>volume_name</code>, <code>waveform_name</code>, <code>new_waveform_name</code></td>
+</tr>
+<tr>
+<td><code>delete_sbnk</code></td>
+<td><code>volume_name</code>, <code>sample_bank_name</code></td>
+</tr>
+<tr>
+<td><code>insert_sbnk</code></td>
+<td><code>volume_name</code>, <code>sample_bank</code></td>
+</tr>
+<tr>
+<td><code>rename_sbnk</code></td>
+<td><code>volume_name</code>, <code>sample_bank_name</code>, <code>new_sample_bank_name</code></td>
+</tr>
+<tr>
+<td><code>delete_sbac</code></td>
+<td><code>volume_name</code>, <code>sample_bank_group_name</code></td>
+</tr>
+<tr>
+<td><code>insert_sbac</code></td>
+<td><code>volume_name</code>, <code>sample_bank_group</code></td>
+</tr>
+<tr>
+<td><code>rename_sbac</code></td>
+<td><code>volume_name</code>, <code>sample_bank_group_name</code>, <code>new_sample_bank_group_name</code></td>
+</tr>
+<tr>
+<td><code>delete_program</code></td>
+<td><code>volume_name</code>, <code>program_number</code></td>
+</tr>
+<tr>
+<td><code>insert_program</code></td>
+<td><code>volume_name</code>, <code>program</code></td>
+</tr>
+</tbody>
+</table>
+<p>An <code>insert_waveform</code> audio object contains <code>path</code>, one or two distinct
+<code>waveform_names</code>, and <code>root_key</code>; <code>target_sample_rate</code> is optional. Relative
+audio paths resolve from the alteration manifest directory.</p>
+<p>An <code>insert_sbnk</code> object contains <code>name</code>, <code>waveform_name</code>, <code>root_key</code>, <code>key_low</code>,
+and <code>key_high</code>. Optional fields are <code>right_waveform_name</code> and <code>level</code>. The named
+waveforms must already exist at that point in the ordered transaction.</p>
+<p>An <code>insert_sbac</code> object contains <code>name</code> and <code>member_sample_banks</code>, an array of
+one to three distinct existing Sample Bank names. An <code>insert_program</code> object
+contains a Program <code>number</code> and exactly two assignments: a
+<code>sample_bank_group</code> on receive channel 1 followed by a direct <code>sample_bank</code> on
+receive channel 2. These limits match the currently supported authored profile.</p>
+<p>Plan without writing an image:</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>alter<span class="w"> </span>hds<span class="w"> </span>source.hds<span class="w"> </span>transaction.json<span class="w"> </span>--pretty
+</code></pre></div>
+<p>Apply to a different output path only after reviewing that plan:</p>
+<div class="highlight"><pre><span></span><code>axklib<span class="w"> </span>alter<span class="w"> </span>hds<span class="w"> </span>source.hds<span class="w"> </span>transaction.json<span class="w"> </span>-o<span class="w"> </span>altered.hds<span class="w"> </span>--pretty
+</code></pre></div>
+<p>Deletion checks live relationships. Delete a Program or group before deleting
+objects it owns, and delete a Sample Bank before deleting its waveform. The
+engine rejects an operation that would leave a known dangling relationship.</p>
+<h2 id="publication-and-validation-guarantees">Publication And Validation Guarantees</h2>
+<p>Both removable-media writers:</p>
+<ol>
+<li>build into a temporary sibling of the requested output;</li>
+<li>reopen the temporary image through the production reader;</li>
+<li>compare the complete expected and reopened object-payload multisets;</li>
+<li>publish only after those checks pass.</li>
+</ol>
+<p>This proves deterministic container construction and exact object retention
+within axklib. It does not replace physical sampler testing for a new object
+topology or profile. Keep source material until the resulting image has been
+verified in the intended workflow.</p>
+<p>Existing-image alteration performs relationship, capacity, name, and
+operation-order checks before applying an ordered transaction. Application uses
+a temporary destination and validates the completed image before replacement.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

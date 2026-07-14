@@ -1,0 +1,2461 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Native Yamaha A-series disk image and sampler object tooling.">
+      
+      
+      
+        <link rel="canonical" href="https://tphzz.github.io/axklib/axklib/sfs-filesystem.html">
+      
+      
+        <link rel="prev" href="media.html">
+      
+      
+        <link rel="next" href="floppy.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>SFS Filesystem - axklib</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/axklib-material.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#sfs-filesystem" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="axklib" class="md-header__button md-logo" aria-label="axklib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            axklib
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              SFS Filesystem
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tphzz/axklib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tphzz/axklib
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="axklib" class="md-nav__button md-logo" aria-label="axklib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    axklib
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tphzz/axklib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tphzz/axklib
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="typical-usage.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C++ And CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    SDK
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cpp-api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C++ API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="portable-packages.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Portable Object Packages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Formats
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Formats
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="media.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media Containers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFS Filesystem
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="sfs-filesystem.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFS Filesystem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#specification-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Specification Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#byte-order-and-units" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Byte Order And Units
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disk-superblock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disk Superblock
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#partition-header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Partition Header
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#allocation-bitmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allocation Bitmap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#free-space" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Free Space
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#directory-and-file-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Directory And File Index
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#index-record-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index Record Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#direct-extents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct Extents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#continuation-extents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuation Extents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#directory-payload-entries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Directory Payload Entries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-payload-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object Payload Resolution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-facing-tree-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User-Facing Tree Mapping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generated-image-writing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generated Image Writing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Generated Image Writing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#writer-compatibility-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writer Compatibility Metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#minimal-read-walkthrough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal Read Walkthrough
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="floppy.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAT12 Floppy Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cdrom.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CD-ROM Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sampler-data.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sampler Data Structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output Contracts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Output Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="names-and-paths.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Names, Paths, And Exports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sfz.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFZ Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="report-schemas.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Report Schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli-json-schemas.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI JSON Schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="write.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writer And Alteration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distribution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="compatibility.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compatibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-dependencies.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native Dependencies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="glossary.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Yamaha Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#specification-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Specification Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#byte-order-and-units" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Byte Order And Units
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disk-superblock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disk Superblock
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#partition-header" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Partition Header
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#allocation-bitmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allocation Bitmap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#free-space" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Free Space
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#directory-and-file-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Directory And File Index
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#index-record-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Index Record Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#direct-extents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Direct Extents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#continuation-extents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuation Extents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#directory-payload-entries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Directory Payload Entries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-payload-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object Payload Resolution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#user-facing-tree-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User-Facing Tree Mapping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generated-image-writing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generated Image Writing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Generated Image Writing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#writer-compatibility-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writer Compatibility Metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#minimal-read-walkthrough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal Read Walkthrough
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="sfs-filesystem">SFS Filesystem</h1>
+<p>Yamaha A-series hard-disk images use an SFS container for partitions, directories,
+object files, and allocation state. axklib reads this layer before it decodes the
+sampler object payloads described in <a href="sampler-data.html">Sampler Data Structures</a>.</p>
+<p>SFS is the hard-disk container family used by <code>.hda</code>, <code>.hds</code>, and equivalent raw
+hard-disk images. It is not FAT12 and it is not ISO9660. FAT12 floppies and
+CD-ROM images can carry the same sampler object payloads, but their container
+layers are different.</p>
+<h2 id="specification-scope">Specification Scope</h2>
+<p>This page documents the SFS structures that the current axklib reader validates
+and the narrower profile emitted by the writer. It is not a claim that every
+reserved byte has a known meaning.</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Reader contract</th>
+<th>Writer contract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Disk geometry</td>
+<td>Reads the bounded sector and cluster values stored in the image.</td>
+<td>Emits 512-byte sectors, two sectors per cluster, and one to eight partition slots.</td>
+</tr>
+<tr>
+<td>Index and allocation</td>
+<td>Reads direct and continuation extents, reconstructs allocation, and reports inconsistencies.</td>
+<td>Computes the bitmap, index span, extents, and compatibility metadata from the requested image model.</td>
+</tr>
+<tr>
+<td>Directory tree</td>
+<td>Reads reachable and structurally valid directory records while retaining diagnostics for malformed or unreachable records.</td>
+<td>Emits partition, volume, category, and object entries for the supported authored object profile.</td>
+</tr>
+<tr>
+<td>Sampler objects</td>
+<td>Passes supported payloads to the object decoders; see <a href="sampler-data.html">Sampler Data Structures</a>.</td>
+<td>Emits only the object types and topologies listed under <a href="#generated-image-writing">Generated Image Writing</a>.</td>
+</tr>
+<tr>
+<td>Uninterpreted bytes</td>
+<td>Retains or reports relevant raw values without assigning semantics.</td>
+<td>Writes only the documented compatibility values and deliberately zeroes unsupported residue.</td>
+</tr>
+</tbody>
+</table>
+<p>Applications should use the parser and writer APIs instead of treating this
+page as permission to synthesize fields whose meaning is still unspecified.</p>
+<p><img alt="Mermaid Diagram" src="../assets/images/sfs-filesystem_mermaid_0_ef789223.svg" /></p>
+<h2 id="byte-order-and-units">Byte Order And Units</h2>
+<p>SFS container numeric fields used by axklib are big-endian. Disk locations in the
+SFS headers are sector or cluster indexes; axklib converts them to byte offsets
+when reading an image.</p>
+<p>Common units:</p>
+<table>
+<thead>
+<tr>
+<th>Unit</th>
+<th>Size or rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sector</td>
+<td>Stored in the disk superblock, commonly <code>512</code> bytes.</td>
+</tr>
+<tr>
+<td>Cluster</td>
+<td><code>sector_size * sectors_per_cluster</code>; commonly two sectors.</td>
+</tr>
+<tr>
+<td>Index record</td>
+<td><code>72</code> bytes.</td>
+</tr>
+<tr>
+<td>Index block</td>
+<td><code>1024</code> bytes, with 14 usable records and 16 bytes of overhead.</td>
+</tr>
+<tr>
+<td>Directory entry</td>
+<td><code>32</code> bytes in current directory payloads.</td>
+</tr>
+<tr>
+<td>Extent triplet</td>
+<td><code>12</code> bytes.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="disk-superblock">Disk Superblock</h2>
+<p>An SFS disk image starts with a superblock. The second sector stores a duplicate
+copy. axklib uses the first copy for normal reads and reports duplicate/header
+problems through validation.</p>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x000</code></td>
+<td style="text-align: right;">11</td>
+<td>ASCII</td>
+<td>Disk signature <code>YAMAHA_dev3</code>.</td>
+</tr>
+<tr>
+<td><code>0x00b</code></td>
+<td style="text-align: right;">117</td>
+<td>bytes</td>
+<td>Reserved area; the public reader does not interpret it.</td>
+</tr>
+<tr>
+<td><code>0x080</code></td>
+<td style="text-align: right;">28</td>
+<td>bytes</td>
+<td>Disk mode/device metadata area; surfaced only as raw structure when inspected.</td>
+</tr>
+<tr>
+<td><code>0x09c</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Sector size in bytes.</td>
+</tr>
+<tr>
+<td><code>0x0a0</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Total sector count in the image.</td>
+</tr>
+<tr>
+<td><code>0x0a4</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Reserved value; the public reader does not interpret it.</td>
+</tr>
+<tr>
+<td><code>0x0a8</code></td>
+<td style="text-align: right;">64</td>
+<td>table</td>
+<td>Eight partition entries, each 8 bytes.</td>
+</tr>
+<tr>
+<td><code>0x0e8</code></td>
+<td style="text-align: right;">280</td>
+<td>bytes</td>
+<td>Reserved area; the public reader does not interpret it.</td>
+</tr>
+</tbody>
+</table>
+<p>Partition entry layout:</p>
+<table>
+<thead>
+<tr>
+<th>Entry offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>+0x00</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Partition start sector.</td>
+</tr>
+<tr>
+<td><code>+0x04</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Partition sector count.</td>
+</tr>
+</tbody>
+</table>
+<p>A valid active partition entry has both values non-zero. The reader treats an
+entry with either value non-zero as occupied so a half-populated entry is
+reported as invalid geometry instead of being silently ignored. Fresh generated
+images populate both values and the disk mode metadata area.</p>
+<p>A-series hard-disk images also use sector 2, and for multiple partitions the
+sectors immediately before later partitions, as auxiliary formatter-transfer
+sectors. Their leading eight bytes are deterministic transfer tokens from
+<code>ab432100</code> through <code>ab432107</code>; the low three bits carry the partition sequence,
+and the remaining token bits are compatibility values rather than disk geometry
+or persistent disk IDs. Generated images zero prior-token residue at
+<code>+0x09..+0x10</code>.
+axklib does not expose these sectors as part of the directory or object tree.
+Older label-entry marker/name records in them are intentionally zero-generated;
+they are not required for hardware loading.</p>
+<h2 id="partition-header">Partition Header</h2>
+<p>Each active partition starts at its partition start sector. The partition header
+is 1024 bytes and is followed by a duplicate copy.</p>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x000</code></td>
+<td style="text-align: right;">11</td>
+<td>ASCII</td>
+<td>Partition signature <code>YAMAHA_dev3</code>.</td>
+</tr>
+<tr>
+<td><code>0x040</code></td>
+<td style="text-align: right;">16</td>
+<td>ASCII</td>
+<td>Partition name, space-padded.</td>
+</tr>
+<tr>
+<td><code>0x080</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Static or mode value; currently not interpreted by public APIs.</td>
+</tr>
+<tr>
+<td><code>0x084</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Static or mode value; currently not interpreted by public APIs.</td>
+</tr>
+<tr>
+<td><code>0x088</code></td>
+<td style="text-align: right;">8</td>
+<td>bytes</td>
+<td>Reserved bytes; currently not interpreted by public APIs.</td>
+</tr>
+<tr>
+<td><code>0x090</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Number of clusters in the partition.</td>
+</tr>
+<tr>
+<td><code>0x094</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Sectors per cluster.</td>
+</tr>
+<tr>
+<td><code>0x098</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Header-related value; currently surfaced only as raw structure.</td>
+</tr>
+<tr>
+<td><code>0x09c</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Cluster offset to the allocation bitmap.</td>
+</tr>
+<tr>
+<td><code>0x0a0</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Reserved value; currently not interpreted by public APIs.</td>
+</tr>
+<tr>
+<td><code>0x0a4</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Cluster offset to the directory/file index.</td>
+</tr>
+<tr>
+<td><code>0x0a8</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Directory/file index span in clusters.</td>
+</tr>
+</tbody>
+</table>
+<p>For generated images, the full primary and duplicate 1024-byte partition-header
+sectors are part of the write contract. The named fields above are sufficient
+for ordinary parsing, but hardware loading also depends on initialized metadata
+bytes in the otherwise uninterpreted header area. Do not synthesize those header
+sectors by writing only the named fields and leaving the remaining bytes zero.</p>
+<p>Cluster offsets are partition-relative. Convert a cluster offset to an absolute
+byte offset with:</p>
+<div class="highlight"><pre><span></span><code>absolute_sector = partition_start_sector + cluster_offset * sectors_per_cluster
+absolute_offset = absolute_sector * sector_size
+</code></pre></div>
+<h2 id="allocation-bitmap">Allocation Bitmap</h2>
+<p>The allocation bitmap starts at the partition header field <code>0x09c</code>. It stores one
+bit per cluster. A set bit means the cluster is allocated; a clear bit means it
+is free.</p>
+<div class="highlight"><pre><span></span><code>bitmap_offset = (partition_start_sector
+                 + bitmap_cluster_offset * sectors_per_cluster)
+                * sector_size
+
+bitmap_bytes = ceil(number_of_clusters / 8)
+byte_index   = cluster_offset // 8
+bit_mask     = 0x80 &gt;&gt; (cluster_offset &amp; 7)
+allocated    = (bitmap[byte_index] &amp; bit_mask) != 0
+</code></pre></div>
+<p>Validation reconstructs a second bitmap from all valid index-record extents,
+then compares it with the stored bitmap:</p>
+<table>
+<thead>
+<tr>
+<th>Direction</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stored_used_not_reconstructed</code></td>
+<td>Stored bitmap marks a cluster used, but no valid index record owns it.</td>
+</tr>
+<tr>
+<td><code>reconstructed_used_not_stored</code></td>
+<td>A valid index record owns a cluster that is clear in the stored bitmap.</td>
+</tr>
+</tbody>
+</table>
+<p>Mismatch reports use inclusive cluster ranges so large gaps can be reviewed
+without listing every cluster.</p>
+<p>An index record can remain structurally parseable even when it is no longer
+reachable from the root directory. Destructive sampler save operations may
+leave such records behind while clearing some of their extent bits in the
+allocation bitmap. axklib still reports
+<code>index-extent-references-free-cluster</code> as an allocation error: directory
+unreachability explains why the sampler can ignore the remnant, but it does not
+make the record and bitmap agree. The validator does not silently discard or
+repair these records.</p>
+<p>A-series 256 MiB images also carry an early mirror of the first
+allocation-bitmap sector immediately after the duplicate partition header.
+Generated images write that mirror as well, while the partition header field
+<code>0x09c</code> remains the authoritative primary bitmap location for reads and
+validation.</p>
+<h2 id="free-space">Free Space</h2>
+<p>SFS free space excludes both the reserved metadata prefix and clusters marked
+used in the allocation bitmap:</p>
+<div class="highlight"><pre><span></span><code>first_payload_cluster = directory_index_cluster + directory_index_span
+free_clusters = cluster_count - first_payload_cluster - allocated_clusters
+free_bytes = free_clusters * sectors_per_cluster * sector_size
+sampler_visible_free_kib = free_bytes // 1024
+</code></pre></div>
+<p>Use the native function for the same calculation in applications:</p>
+<div class="highlight"><pre><span></span><code><span class="k">auto</span><span class="w"> </span><span class="n">space</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">axk</span><span class="o">::</span><span class="n">calculate_sfs_free_space</span><span class="p">(</span><span class="mi">1&#39;048&#39;575</span><span class="p">,</span><span class="w"> </span><span class="mi">616</span><span class="p">,</span><span class="w"> </span><span class="mi">65</span><span class="p">,</span><span class="w"> </span><span class="mi">512</span><span class="p">);</span>
+<span class="n">assert</span><span class="p">(</span><span class="n">space</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">space</span><span class="o">-&gt;</span><span class="n">sampler_visible_free_kib</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1&#39;047&#39;894</span><span class="p">);</span>
+</code></pre></div>
+<p><code>axklib validate</code> allocation summaries include <code>first_payload_cluster</code>,
+<code>reserved_cluster_count</code>, <code>sampler_free_cluster_count</code>, <code>sampler_free_bytes</code>,
+and <code>sampler_visible_free_kib</code>. Impossible geometry returns a typed error
+instead of negative capacity.</p>
+<h2 id="directory-and-file-index">Directory And File Index</h2>
+<p>The directory/file index starts at partition header field <code>0x0a4</code>:</p>
+<div class="highlight"><pre><span></span><code>index_offset = (partition_start_sector
+                + index_cluster_offset * sectors_per_cluster)
+               * sector_size
+</code></pre></div>
+<p>The index is divided into 1024-byte blocks. Each block contains 14 records of 72
+bytes; the final 16 bytes are block overhead.</p>
+<div class="highlight"><pre><span></span><code>record_offset_in_index = (sfs_id // 14) * 1024 + (sfs_id % 14) * 72
+absolute_record_offset = index_offset + record_offset_in_index
+</code></pre></div>
+<p>The inverse mapping is:</p>
+<div class="highlight"><pre><span></span><code>block = record_offset_in_index // 1024
+slot  = (record_offset_in_index % 1024) // 72
+sfs_id = block * 14 + slot
+</code></pre></div>
+<p>Offsets inside the 16-byte block overhead are not records.</p>
+<h2 id="index-record-layout">Index Record Layout</h2>
+<p>axklib treats an index slot as a valid extent record when the structural fields
+form a readable object or directory payload. The record format used for data
+reads is:</p>
+<table>
+<thead>
+<tr>
+<th>Record offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x00</code></td>
+<td style="text-align: right;">2</td>
+<td>u16be</td>
+<td>Extent count.</td>
+</tr>
+<tr>
+<td><code>0x02</code></td>
+<td style="text-align: right;">2</td>
+<td>u16be</td>
+<td>Reserved or flags; current valid data records use zero here.</td>
+</tr>
+<tr>
+<td><code>0x04</code></td>
+<td style="text-align: right;">2</td>
+<td>u16be</td>
+<td>Total cluster count.</td>
+</tr>
+<tr>
+<td><code>0x06</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Logical data size in bytes.</td>
+</tr>
+<tr>
+<td><code>0x0a</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>First data cluster for direct records, or continuation-list cluster for multi-extent records.</td>
+</tr>
+<tr>
+<td><code>0x0e</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>First direct extent cluster count for direct records.</td>
+</tr>
+<tr>
+<td><code>0x12</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>First direct extent byte count for direct records.</td>
+</tr>
+<tr>
+<td><code>0x42</code></td>
+<td style="text-align: right;">6</td>
+<td>bytes</td>
+<td>Record metadata and flags. The reader does not require these bytes to resolve payload extents.</td>
+</tr>
+</tbody>
+</table>
+<p>The data-size field is the number of logical bytes to return to the object or
+directory decoder. Allocated storage can be larger because cluster allocation is
+rounded up to full clusters.</p>
+<h2 id="direct-extents">Direct Extents</h2>
+<p>Records with one to four extents store extent triplets directly in the index
+record. Triplets start at <code>0x0a</code> and have this layout:</p>
+<table>
+<thead>
+<tr>
+<th>Triplet offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>+0x00</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Cluster offset.</td>
+</tr>
+<tr>
+<td><code>+0x04</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Cluster count.</td>
+</tr>
+<tr>
+<td><code>+0x08</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Byte count to read from this extent.</td>
+</tr>
+</tbody>
+</table>
+<p>Direct read algorithm:</p>
+<div class="highlight"><pre><span></span><code>remaining = record.total_data_size
+for each direct extent in order:
+    capacity = extent.cluster_count * sectors_per_cluster * sector_size
+    read_size = min(extent.byte_count, capacity, remaining)
+    append bytes from cluster_absolute_offset(extent.cluster_offset)
+    remaining -= read_size
+</code></pre></div>
+<p>If the assembled byte count differs from <code>total_data_size</code>, validation reports a
+logical read mismatch.</p>
+<h2 id="continuation-extents">Continuation Extents</h2>
+<p>Records with five or more extents use a continuation-list cluster. The index
+record field at <code>0x0a</code> points to the first list cluster. Each continuation-list
+cluster is allocated storage and starts with this layout:</p>
+<table>
+<thead>
+<tr>
+<th>Offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x00</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Number of triplets in this list cluster.</td>
+</tr>
+<tr>
+<td><code>0x04</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>List bookkeeping value.</td>
+</tr>
+<tr>
+<td><code>0x08</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Next list cluster, or zero at the end.</td>
+</tr>
+<tr>
+<td><code>0x0c</code></td>
+<td style="text-align: right;">variable</td>
+<td>triplets</td>
+<td>12-byte extent triplets.</td>
+</tr>
+</tbody>
+</table>
+<p>Continuation read algorithm:</p>
+<div class="highlight"><pre><span></span><code>list_cluster = record.first_cluster
+remaining_triplets = record.extent_count
+while list_cluster != 0 and remaining_triplets &gt; 0:
+    read one cluster at list_cluster
+    read triplet_count and next_list_cluster
+    append triplets at +0x0c
+    mark list_cluster allocated
+    list_cluster = next_list_cluster
+</code></pre></div>
+<p>The reader stops on loops, out-of-range list clusters, impossible triplet counts,
+or when the requested extent count is consumed. Warnings are carried into
+validation and report outputs.</p>
+<h2 id="directory-payload-entries">Directory Payload Entries</h2>
+<p>Directory payloads contain 32-byte entries. Directory entries connect a name to
+an SFS ID in the same partition.</p>
+<table>
+<thead>
+<tr>
+<th>Entry offset</th>
+<th style="text-align: right;">Size</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x00</code></td>
+<td style="text-align: right;">2</td>
+<td>u16be</td>
+<td>Entry flags or class.</td>
+</tr>
+<tr>
+<td><code>0x02</code></td>
+<td style="text-align: right;">2</td>
+<td>u16be</td>
+<td>Name length including the NUL byte in current entries.</td>
+</tr>
+<tr>
+<td><code>0x04</code></td>
+<td style="text-align: right;">4</td>
+<td>u32be</td>
+<td>Link ID. For current reads this maps to an SFS ID.</td>
+</tr>
+<tr>
+<td><code>0x08</code></td>
+<td style="text-align: right;">variable</td>
+<td>ASCII</td>
+<td>Entry name bytes, NUL-terminated or padded.</td>
+</tr>
+</tbody>
+</table>
+<p>Special names <code>.</code> and <code>..</code> are directory navigation entries. Other entries are
+matched to index records by <code>link_id</code>. axklib classifies the target as a
+directory or an object file by the target index record and payload.</p>
+<h2 id="object-payload-resolution">Object Payload Resolution</h2>
+<p>SFS object loading follows this path:</p>
+<div class="highlight"><pre><span></span><code>directory entry -&gt; link_id -&gt; index record -&gt; extents -&gt; payload bytes
+</code></pre></div>
+<p>A supported current sampler object payload starts with <code>FSFSDEV3SPLX</code>. The object type tag
+is read by the sampler-data decoder at payload offset <code>0x0c..0x0f</code>; the display
+name is read from the object header name field. SFS placement metadata remains
+attached to the object:</p>
+<table>
+<thead>
+<tr>
+<th>Metadata</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>partition_index</code></td>
+<td>Partition entry index from the disk superblock.</td>
+</tr>
+<tr>
+<td><code>sfs_id</code></td>
+<td>Index-record ID that supplied the payload.</td>
+</tr>
+<tr>
+<td><code>payload_offset</code></td>
+<td>Absolute byte offset of the first payload byte.</td>
+</tr>
+<tr>
+<td><code>payload_size</code></td>
+<td>Logical payload byte count from the index record.</td>
+</tr>
+<tr>
+<td><code>scope_key</code></td>
+<td>Source image plus partition scope.</td>
+</tr>
+<tr>
+<td><code>object_key</code></td>
+<td>Stable key such as <code>p0:sfs23</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="user-facing-tree-mapping">User-Facing Tree Mapping</h2>
+<p>axklib builds the user-facing tree from SFS directory placement:</p>
+<div class="highlight"><pre><span></span><code>partition -&gt; volume -&gt; category -&gt; object
+</code></pre></div>
+<p>Current category directories use object type codes such as <code>PROG</code>, <code>SBNK</code>,
+<code>SBAC</code>, <code>SMPL</code>, and <code>SEQU</code>. The normal tree renders these as Programs, Sample
+Banks, Waveforms, and Sequences. <code>SBAC</code> is an internal object type rendered as a
+Sample Bank Group when it appears as the visible <code>B &lt;name&gt;</code> level.</p>
+<p>See <a href="names-and-paths.html">Name, Path, And Export Mapping</a> for display labels,
+duplicate names, default Program slots, and export directory rules.</p>
+<h2 id="validation">Validation</h2>
+<p>SFS validation covers both container structure and sampler object relationships.
+Container checks include:</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Failure shape</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Superblock/header identity</td>
+<td>Unsupported or malformed SFS image.</td>
+</tr>
+<tr>
+<td>Duplicate headers</td>
+<td>Header copy differs or cannot be read.</td>
+</tr>
+<tr>
+<td>Allocation bitmap</td>
+<td>Stored/reconstructed cluster mismatch.</td>
+</tr>
+<tr>
+<td>Index records</td>
+<td>Invalid extent count, impossible extent size, malformed continuation list.</td>
+</tr>
+<tr>
+<td>Directory entries</td>
+<td>Blank names, zero link ID, unknown target, mismatched target type.</td>
+</tr>
+<tr>
+<td>Payload reads</td>
+<td>Logical byte count mismatch or unsupported object payload.</td>
+</tr>
+</tbody>
+</table>
+<p>Relationship and sampler-data validation is reported separately so a caller can
+distinguish a broken filesystem from a readable filesystem that contains broken
+sampler object links.</p>
+<h2 id="generated-image-writing">Generated Image Writing</h2>
+<p>The writer APIs create fresh HDS/SFS images from a small typed model. The
+current writer creates a new hard-disk image, partitions,
+volumes, current-format <code>SMPL</code> waveform objects, direct single-member <code>SBNK</code>
+sample-bank objects, equal-format two-member stereo <code>SBNK</code> objects, and one
+explicitly bounded one-to-three-member <code>SBAC</code> / Program profile. It does not modify
+existing images and does not require a template container image.</p>
+<p>The first writer scope is intentionally narrow:</p>
+<ul>
+<li>image size is capped at <code>2_147_483_648</code> bytes;</li>
+<li>each generated partition is capped at <code>1_073_741_824</code> bytes;</li>
+<li>audio input may use any libsndfile-supported container and subtype, but must
+  be mono for ordinary waveform import or stereo for one-call stereo-bank
+  import; sources are converted to signed 16-bit PCM and unsupported rates are
+  resampled with the soxr VHQ profile;</li>
+<li>generated sampler objects are current <code>FSFSDEV3SPLX</code> <code>SMPL</code> and <code>SBNK</code> records;</li>
+<li>generated <code>SBNK</code> objects link either one waveform member or a confirmed
+  left/right pair by name and link ID;</li>
+<li>generated disk headers include the bounded superblock compatibility block,
+  initialized sector-2 disk metadata, full primary and duplicate partition-header
+  sectors for the supported hard-disk metadata profile, and the early
+  first-bitmap-sector mirror used by A-series hard-disk images;</li>
+<li>generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;</li>
+<li>generated current <code>SMPL</code> object payloads use a <code>0x200</code> object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;</li>
+<li>generated current <code>SBNK</code> object payloads use the current single-member sample-bank object span, populated default parameter/control block, and header fields for a normal sample bank that references one waveform object;</li>
+<li>generated two-member stereo <code>SBNK</code> objects reference two physical mono SMPL
+  objects. The members must have matching 16-bit width, sample rate, and logical
+  frame count. One interleaved source can be split into those physical members
+  during import; extraction may render them as interleaved stereo again;</li>
+<li>generated direct single-member <code>SBNK</code> objects include hardware-tested reserved
+  Sample Parameter defaults at <code>SBNK+0x152..0x15b</code>. Yamaha labels the
+  corresponding decimal Sample Parameter offsets <code>0170..0179</code> as reserved, but
+  generated images need compatible values there for audible playback and normal
+  tone.</li>
+<li>the initial SBAC/PROG profile uses the general supported image geometry. A
+  partition may contain multiple independently configured volumes. Each volume
+  may contain multiple groups of one through three mono children, with one
+  matching Program and direct mono control per group. Programs <code>001..128</code> assign their group to
+  receive channel <code>1</code> and their direct control to channel <code>2</code>.
+  Runtime handles, unused bank state, unused Program effect/controller blocks,
+  and unused Program tail state are zero; only the direct SBNK receives the
+  corresponding Program relationship bitmap.</li>
+</ul>
+<p>Callers should treat this as a generated-image API, not as an image repair or
+mutation API. Use <code>axklib info</code>, <code>axklib validate</code>, and <code>axklib extract wav file</code>
+on generated images before testing them on hardware.</p>
+<p>Hardware loading has shown that sector 2, per-partition metadata sectors, and
+full partition-header sectors are part of the loadable generated-image contract.
+Generated hard-disk partitions use 512-byte sectors and two-sector clusters.
+The writer accepts 512-byte-aligned images from 1 MiB through 2 GiB with one
+through eight equal partition slots. Given <code>N</code> partitions, <code>total_sectors</code> is
+<code>size_bytes / 512</code>, the slot span is
+<code>min(floor((total_sectors - 2) / N), 0x1fffff)</code>, partition <code>i</code> starts at
+<code>3 + i * slot_span</code>, and its stored sector count is <code>slot_span - 1</code>. Every slot
+must have at least 2045 partition sectors. Division remainder and capacity past
+the 1 GiB slot-span cap remain unused at the end of the image.</p>
+<p>That geometry and metadata algorithm has loaded successfully across one through
+eight partition indexes, smaller and capped slot spans, a division remainder,
+the 1 MiB minimum, and the 2 GiB maximum. Generated images with multiple
+volumes, multiple current <code>SMPL</code> objects, direct single-member <code>SBNK</code> objects,
+and isolated object-count growth have also loaded successfully. The tested
+generated SBNK root key, key range, and sample level fields are sampler-visible.
+Copying non-logical allocated-cluster tail bytes was not required. axklib treats
+those tail bytes as storage padding unless a later compatibility case proves
+otherwise.</p>
+<p>The writer constructs the superblock, partition table, sector-2 metadata,
+partition headers, allocation bitmap, directory index, and object payload
+extents from the typed image model. Fields with known formulas, such as
+partition slot placement, partition-header start/count words, partition-index
+words, leading formatter-transfer tokens, and dynamic header words, are
+generated explicitly.
+Partition headers are zero-initialized, and only the retained explicit fields
+are written. Hardware checks showed that the former fixed nonzero tail bytes
+are not required; they remain zero for generated images. The validated
+non-required residue range at <code>+0x1bc..+0x1e3</code> is also zero-generated. Sector-2
+label-entry records and the <code>+0x30..+0x3e</code> range are deliberately zero-generated.</p>
+<h3 id="writer-compatibility-metadata">Writer Compatibility Metadata</h3>
+<p>The writer keeps compatibility metadata explicit and computes geometry-dependent
+values from small formulas. It does not copy broad binary templates.</p>
+<table>
+<thead>
+<tr>
+<th>Metadata area</th>
+<th>Public contract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Superblock formatter-residue block at <code>+0x80..+0x9b</code></td>
+<td>Preserved as one fixed compatibility block. The writer does not interpret its seven words as geometry fields.</td>
+</tr>
+<tr>
+<td>Leading formatter-transfer token at sector <code>+0x00..+0x07</code></td>
+<td>Rendered as eight lowercase hexadecimal digits from base <code>ab432100</code> plus the bounded three-bit partition sequence. The base is not derived from disk geometry.</td>
+</tr>
+<tr>
+<td>Prior-token residue at sector <code>+0x09..+0x10</code></td>
+<td>Zeroed after object-bearing hardware checks showed it is not required.</td>
+</tr>
+<tr>
+<td>Sector-2 range at <code>+0x30..+0x3e</code></td>
+<td>Zeroed after hardware validation showed it is not required.</td>
+</tr>
+<tr>
+<td>Former partition-header fixed tail bytes</td>
+<td>Zeroed after object-bearing hardware checks showed they are not required. Retained tail words are written explicitly.</td>
+</tr>
+<tr>
+<td>Partition-header residue range at <code>+0x1bc..+0x1e3</code></td>
+<td>Zeroed after hardware validation showed it is not required.</td>
+</tr>
+<tr>
+<td>Partition-header <code>+0x14c</code></td>
+<td>Written as total image sectors for one or two partitions; for <code>N &gt;= 3</code>, written as total image sectors minus <code>N - 2</code>.</td>
+</tr>
+<tr>
+<td>Partition-header <code>+0x194</code></td>
+<td>Written as zero for layouts with three or more partitions; otherwise uses the count marker required by one- and two-partition layouts.</td>
+</tr>
+</tbody>
+</table>
+<p>These fields are part of the compatibility envelope for generated images. Bytes
+that hardware validation shows are not required are deliberately zeroed.
+Applications should use the typed writer or JSON manifest rather than
+constructing these fields manually.</p>
+<h2 id="minimal-read-walkthrough">Minimal Read Walkthrough</h2>
+<p>A minimal SFS reader performs these steps:</p>
+<ol>
+<li>Read sector 0 and check <code>YAMAHA_dev3</code>.</li>
+<li>Read sector size and the eight partition entries.</li>
+<li>For each active partition, read the partition header and cluster geometry.</li>
+<li>Read the allocation bitmap and directory/file index region.</li>
+<li>Walk 72-byte index records using the 14-record-per-block mapping.</li>
+<li>Read directory payloads and match entry <code>link_id</code> values to SFS IDs.</li>
+<li>For each object file entry, read extents and return logical payload bytes.</li>
+<li>Pass <code>FSFSDEV3SPLX</code> payloads to the sampler-data decoder.</li>
+<li>Attach SFS placement metadata to every decoded object.</li>
+<li>Run allocation and directory validation if a consistency report is needed.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

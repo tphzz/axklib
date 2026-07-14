@@ -1,0 +1,2277 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Native Yamaha A-series disk image and sampler object tooling.">
+      
+      
+      
+        <link rel="canonical" href="https://tphzz.github.io/axklib/axklib/cdrom.html">
+      
+      
+        <link rel="prev" href="floppy.html">
+      
+      
+        <link rel="next" href="sampler-data.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>CD-ROM Images - axklib</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/axklib-material.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cd-rom-images" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../index.html" title="axklib" class="md-header__button md-logo" aria-label="axklib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            axklib
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CD-ROM Images
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tphzz/axklib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tphzz/axklib
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../index.html" title="axklib" class="md-nav__button md-logo" aria-label="axklib" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    axklib
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tphzz/axklib" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tphzz/axklib
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="typical-usage.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C++ And CLI Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SDK
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    SDK
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cpp-api.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    C++ API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="portable-packages.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Portable Object Packages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Formats
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Formats
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="media.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Media Containers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sfs-filesystem.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFS Filesystem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="floppy.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAT12 Floppy Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CD-ROM Images
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="cdrom.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CD-ROM Images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#iso9660-reader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ISO9660 Reader
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#raw-folder-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw Folder Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generated-iso-file-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generated ISO File Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object Discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loader-quality-classes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loader-Quality Classes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sampler-menu-labels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sampler Menu Labels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#duplicate-volume-labels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate Volume Labels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#program-source-load-assignments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Source-Load Assignments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#paired-sample-member-stereo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Paired Sample-Member Stereo
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#path-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path Mapping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#minimal-read-walkthrough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal Read Walkthrough
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sampler-data.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sampler Data Structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output Contracts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Output Contracts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="names-and-paths.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Names, Paths, And Exports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="sfz.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SFZ Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="report-schemas.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Report Schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="cli-json-schemas.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI JSON Schemas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="write.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writer And Alteration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distribution
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Distribution
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="compatibility.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compatibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-dependencies.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native Dependencies
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="glossary.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Yamaha Glossary
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#iso9660-reader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ISO9660 Reader
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#raw-folder-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw Folder Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generated-iso-file-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generated ISO File Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Object Discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loader-quality-classes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loader-Quality Classes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sampler-menu-labels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sampler Menu Labels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#duplicate-volume-labels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate Volume Labels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#program-source-load-assignments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Program Source-Load Assignments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#paired-sample-member-stereo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Paired Sample-Member Stereo
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#path-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path Mapping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#minimal-read-walkthrough" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal Read Walkthrough
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="cd-rom-images">CD-ROM Images</h1>
+<p>axklib can inspect Yamaha A-series CD-ROM ISO images. These images use ISO9660
+for the outer container and often add a sampler menu layer above the folders that
+hold Yamaha object files. The object payloads use the shared format described in
+<a href="sampler-data.html">Sampler Data Structures</a>.</p>
+<p><img alt="Mermaid Diagram" src="../assets/images/cdrom_mermaid_0_0c503768.svg" /></p>
+<h2 id="iso9660-reader">ISO9660 Reader</h2>
+<p>The low-level ISO reader expects a Primary Volume Descriptor at sector 16. ISO
+sectors are 2048 bytes.</p>
+<p>This is the primary-directory profile used by maintained Yamaha
+A-series CD-ROMs, not a general ISO implementation. Multi-extent files are
+rejected. Joliet names, Rock Ridge system-use extensions, alternate descriptor
+trees are not interpreted. A hybrid disc can still open through
+its valid primary ISO9660 tree; extension-only names and metadata remain outside
+the supported contract.</p>
+<p>Fresh ISO creation uses a deterministic narrow writer for the same primary-tree
+profile. A libarchive writer was evaluated, but its release build provides no
+supported way to override the image creation timestamp, so it could not satisfy
+the byte-reproducibility contract. The narrow writer emits path tables, bounded
+single-sector directories, Yamaha group/volume menu records, and single-extent
+object files. It reopens the image with the production reader before publishing
+it. Physical Yamaha hardware has enumerated, loaded, and played the minimal
+generated profile containing one mono <code>SMPL</code> and one direct single-member
+<code>SBNK</code>. A second generated profile has also loaded and played one complete
+<code>PROG</code> containing both a <code>PROG -&gt; SBAC -&gt; SBNK -&gt; SMPL</code> assignment and a direct
+<code>PROG -&gt; SBNK -&gt; SMPL</code> assignment that share the same waveform. Byte-preserving
+whole-floppy Yamaha-object transfer has likewise loaded and played its
+transferred Program and Sample Banks from a generated CD-ROM. These checks are
+intentionally narrower than every tree or object topology the reader can parse.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PVD sector</td>
+<td><code>16</code></td>
+</tr>
+<tr>
+<td>PVD identifier</td>
+<td>bytes <code>1..5</code> equal <code>CD001</code></td>
+</tr>
+<tr>
+<td>Volume ID</td>
+<td>bytes <code>40..71</code>, ASCII, right-trimmed</td>
+</tr>
+<tr>
+<td>Root directory record</td>
+<td>starts at PVD offset <code>156</code></td>
+</tr>
+</tbody>
+</table>
+<p>Directory records carry both little-endian and big-endian copies of their
+numeric fields. axklib requires those copies to agree. It strips <code>;version</code>
+suffixes and trailing dots from ISO names before building logical paths.</p>
+<p>Directory record fields used by this profile:</p>
+<table>
+<thead>
+<tr>
+<th>Record offset</th>
+<th style="text-align: right;">Size</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x00</code></td>
+<td style="text-align: right;">1</td>
+<td>Directory record length.</td>
+</tr>
+<tr>
+<td><code>0x01</code></td>
+<td style="text-align: right;">1</td>
+<td>Extended attribute record length; generated images use zero.</td>
+</tr>
+<tr>
+<td><code>0x02</code></td>
+<td style="text-align: right;">4</td>
+<td>Extent sector, u32le.</td>
+</tr>
+<tr>
+<td><code>0x06</code></td>
+<td style="text-align: right;">4</td>
+<td>Extent sector, u32be; must match <code>0x02</code>.</td>
+</tr>
+<tr>
+<td><code>0x0a</code></td>
+<td style="text-align: right;">4</td>
+<td>Data size, u32le.</td>
+</tr>
+<tr>
+<td><code>0x0e</code></td>
+<td style="text-align: right;">4</td>
+<td>Data size, u32be; must match <code>0x0a</code>.</td>
+</tr>
+<tr>
+<td><code>0x12</code></td>
+<td style="text-align: right;">7</td>
+<td>Recording time: years since 1900, month, day, hour, minute, second, signed GMT offset.</td>
+</tr>
+<tr>
+<td><code>0x19</code></td>
+<td style="text-align: right;">1</td>
+<td>File flags; bit <code>0x02</code> means directory.</td>
+</tr>
+<tr>
+<td><code>0x1a</code></td>
+<td style="text-align: right;">1</td>
+<td>File unit size; generated images use zero.</td>
+</tr>
+<tr>
+<td><code>0x1b</code></td>
+<td style="text-align: right;">1</td>
+<td>Interleave gap size; generated images use zero.</td>
+</tr>
+<tr>
+<td><code>0x1c</code></td>
+<td style="text-align: right;">2</td>
+<td>Volume sequence number, u16le.</td>
+</tr>
+<tr>
+<td><code>0x1e</code></td>
+<td style="text-align: right;">2</td>
+<td>Volume sequence number, u16be; must match <code>0x1c</code>.</td>
+</tr>
+<tr>
+<td><code>0x20</code></td>
+<td style="text-align: right;">1</td>
+<td>File identifier length.</td>
+</tr>
+<tr>
+<td><code>0x21</code></td>
+<td style="text-align: right;">variable</td>
+<td>File identifier bytes.</td>
+</tr>
+</tbody>
+</table>
+<p>Directory records with name byte <code>0x00</code> are <code>.</code> and name byte <code>0x01</code> are <code>..</code>.
+Other names are ASCII with replacement for invalid bytes.</p>
+<h2 id="raw-folder-layout">Raw Folder Layout</h2>
+<p>Yamaha CD-ROMs handled by the profile use a raw folder layout shaped like this:</p>
+<div class="highlight"><pre><span></span><code>&lt;raw-group&gt;/&lt;raw-volume&gt;/&lt;object-category&gt;/&lt;object-file&gt;
+</code></pre></div>
+<p>The raw group is an opaque identifier, commonly eight uppercase hexadecimal
+characters. Its derivation is not part of the supported contract. Raw volume
+directories use <code>Fnnn</code>; populated object category directories use the embedded
+type tags <code>SMPL</code>, <code>SBNK</code>, <code>SBAC</code>, <code>PROG</code>, <code>SEQU</code>, and <code>PRF3</code>.</p>
+<p>An ordinary one-volume tree is:</p>
+<div class="highlight"><pre><span></span><code>&lt;raw-group&gt;/
+  0000                         group volume-label catalog
+  F001/                        first raw volume directory
+    PROG/
+      0000                     Program catalog
+      F001 ...                 Program object payloads
+    SBAC/
+      0000                     Sample Bank Group catalog
+      F001 ...                 SBAC object payloads
+    SBNK/
+      0000                     Sample Bank catalog
+      F001 ...                 SBNK object payloads
+    SMPL/
+      0000                     waveform catalog
+      F001 ...                 SMPL object payloads
+    SEQU/
+      0000                     Sequence catalog
+      F001 ...                 SEQU object payloads
+    PRF3/
+      0000                     profile catalog
+      F001 ...                 PRF3 object payloads
+  F002                         fixed-width group display label
+</code></pre></div>
+<p>Only populated category directories need to exist. Object numbering restarts
+at <code>F001</code> inside every category; an <code>F001</code> under <code>SMPL</code> and an <code>F001</code> under
+<code>SBNK</code> are unrelated files. Each object file is a complete
+<code>FSFSDEV3SPLX&lt;type&gt;</code> payload. Its embedded tag and name are authoritative; the
+<code>Fnnn</code> filename is a catalog identity, not an object type or sampler-facing
+name.</p>
+<p>Input images may encode ISO file identifiers as <code>0000;1</code> or <code>F001;1</code>. The
+reader strips the <code>;version</code> suffix and a trailing dot when constructing logical
+paths. The generated writer emits identifiers without <code>;1</code>.</p>
+<p>axklib keeps both raw and sampler-facing identities:</p>
+<table>
+<thead>
+<tr>
+<th>Identity</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Raw ISO path</td>
+<td>Stable technical trace in CSV/JSON reports.</td>
+</tr>
+<tr>
+<td>Sampler-facing label</td>
+<td>Normal display name in <code>info</code> and structured exports.</td>
+</tr>
+</tbody>
+</table>
+<p>For one object, axklib records:</p>
+<table>
+<thead>
+<tr>
+<th>Metadata</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>iso_raw_group</code></td>
+<td>First path component in the raw ISO tree.</td>
+</tr>
+<tr>
+<td><code>iso_raw_volume</code></td>
+<td>Second path component, often <code>Fnnn</code>.</td>
+</tr>
+<tr>
+<td><code>iso_group_label</code></td>
+<td>Decoded sampler-facing group label when available.</td>
+</tr>
+<tr>
+<td><code>iso_volume_label</code></td>
+<td>Decoded sampler-facing volume label when available.</td>
+</tr>
+<tr>
+<td><code>iso_extent_sector</code></td>
+<td>ISO extent sector for the file.</td>
+</tr>
+<tr>
+<td><code>iso_data_offset</code></td>
+<td>Absolute byte offset, <code>extent_sector * 2048</code>.</td>
+</tr>
+<tr>
+<td><code>iso_file_size</code></td>
+<td>File size from the ISO directory record.</td>
+</tr>
+<tr>
+<td><code>iso_recovery_quality</code></td>
+<td>Loader-quality classification for the object row.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="generated-iso-file-layout">Generated ISO File Layout</h2>
+<p><code>axklib create iso</code> currently emits exactly one group and one volume. The
+hardware-verified one-volume profile uses raw volume <code>F001</code>, so its group label
+is file <code>F002</code>. The complete generated ordering is deterministic:</p>
+<table>
+<thead>
+<tr>
+<th>Sector / region</th>
+<th>Generated content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0..15</code></td>
+<td>Zero-filled ISO system area.</td>
+</tr>
+<tr>
+<td><code>16</code></td>
+<td>One Primary Volume Descriptor.</td>
+</tr>
+<tr>
+<td><code>17</code></td>
+<td>Volume Descriptor Set Terminator.</td>
+</tr>
+<tr>
+<td><code>18</code></td>
+<td>Little-endian Type-L path table.</td>
+</tr>
+<tr>
+<td><code>19</code></td>
+<td>Big-endian Type-M path table.</td>
+</tr>
+<tr>
+<td><code>20...</code></td>
+<td>Root, group, volume, and populated category directories; one 2048-byte sector each.</td>
+</tr>
+<tr>
+<td>following sectors</td>
+<td>Group catalog, group label, category catalogs, then object payloads in deterministic tree order.</td>
+</tr>
+</tbody>
+</table>
+<p>The writer uses 2048-byte logical blocks, one extent per file, one sector per
+directory, and both-endian ISO9660 numeric fields. It sets the PVD System
+Identifier to:</p>
+<div class="highlight"><pre><span></span><code>APPLE COMPUTER, INC., TYPE: 0002
+</code></pre></div>
+<p>The manifest <code>iso.volume_id</code> supplies the PVD Volume Identifier and Volume Set
+Identifier. Publisher, preparer, and application fields are <code>AXKLIB</code>.
+Descriptor timestamps are fixed to the reproducible 1970 value used by this
+profile. The writer emits no supplementary descriptor, Joliet tree, Rock Ridge
+records, Apple <code>AA</code> system-use bytes, multi-extent file, optional duplicate path
+tables, or boot catalog.</p>
+<p>The generated Primary Volume Descriptor uses these fixed or manifest-derived
+fields. Unlisted optional text fields remain space-filled or zero-filled:</p>
+<table>
+<thead>
+<tr>
+<th>PVD offset</th>
+<th style="text-align: right;">Size</th>
+<th>Generated value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x00</code></td>
+<td style="text-align: right;">1</td>
+<td>Type <code>1</code>, Primary Volume Descriptor.</td>
+</tr>
+<tr>
+<td><code>0x01</code></td>
+<td style="text-align: right;">5</td>
+<td><code>CD001</code>.</td>
+</tr>
+<tr>
+<td><code>0x06</code></td>
+<td style="text-align: right;">1</td>
+<td>Descriptor version <code>1</code>.</td>
+</tr>
+<tr>
+<td><code>0x08</code></td>
+<td style="text-align: right;">32</td>
+<td>System Identifier shown above, space-padded.</td>
+</tr>
+<tr>
+<td><code>0x28</code></td>
+<td style="text-align: right;">32</td>
+<td><code>iso.volume_id</code>, space-padded.</td>
+</tr>
+<tr>
+<td><code>0x50</code></td>
+<td style="text-align: right;">8</td>
+<td>Total logical block count, both-endian u32.</td>
+</tr>
+<tr>
+<td><code>0x78</code></td>
+<td style="text-align: right;">4</td>
+<td>Volume Set Size <code>1</code>, both-endian u16.</td>
+</tr>
+<tr>
+<td><code>0x7c</code></td>
+<td style="text-align: right;">4</td>
+<td>Volume Sequence Number <code>1</code>, both-endian u16.</td>
+</tr>
+<tr>
+<td><code>0x80</code></td>
+<td style="text-align: right;">4</td>
+<td>Logical Block Size <code>2048</code>, both-endian u16.</td>
+</tr>
+<tr>
+<td><code>0x84</code></td>
+<td style="text-align: right;">8</td>
+<td>Path-table byte count, both-endian u32.</td>
+</tr>
+<tr>
+<td><code>0x8c</code></td>
+<td style="text-align: right;">4</td>
+<td>Type-L path-table sector <code>18</code>, u32le.</td>
+</tr>
+<tr>
+<td><code>0x94</code></td>
+<td style="text-align: right;">4</td>
+<td>Type-M path-table sector <code>19</code>, u32be.</td>
+</tr>
+<tr>
+<td><code>0x9c</code></td>
+<td style="text-align: right;">34</td>
+<td>Root directory record.</td>
+</tr>
+<tr>
+<td><code>0xbe</code></td>
+<td style="text-align: right;">128</td>
+<td>Volume Set Identifier from <code>iso.volume_id</code>, space-padded.</td>
+</tr>
+<tr>
+<td><code>0x13e</code>, <code>0x1be</code>, <code>0x23e</code></td>
+<td style="text-align: right;">128 each</td>
+<td>Publisher, preparer, and application identifiers: <code>AXKLIB</code>.</td>
+</tr>
+<tr>
+<td><code>0x32d</code>, <code>0x33e</code>, <code>0x360</code></td>
+<td style="text-align: right;">17 each</td>
+<td>Fixed creation, modification, and effective timestamps.</td>
+</tr>
+<tr>
+<td><code>0x371</code></td>
+<td style="text-align: right;">1</td>
+<td>File structure version <code>1</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The Type-L and Type-M path tables contain the same directory sequence in their
+respective byte order. Directory records contain <code>.</code> and <code>..</code> followed by
+children in deterministic insertion order. If all records do not fit in one
+sector, creation fails with an unsupported-profile error rather than extending
+the directory using an unverified layout.</p>
+<p>Each generated path-table record has this shape; a zero pad byte follows an odd
+identifier length so the next record starts on an even boundary:</p>
+<table>
+<thead>
+<tr>
+<th>Record offset</th>
+<th style="text-align: right;">Size</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x00</code></td>
+<td style="text-align: right;">1</td>
+<td>Directory identifier length. The root identifier is one byte <code>00</code>.</td>
+</tr>
+<tr>
+<td><code>0x01</code></td>
+<td style="text-align: right;">1</td>
+<td>Extended attribute record length <code>0</code>.</td>
+</tr>
+<tr>
+<td><code>0x02</code></td>
+<td style="text-align: right;">4</td>
+<td>Directory extent sector, little-endian in Type-L and big-endian in Type-M.</td>
+</tr>
+<tr>
+<td><code>0x06</code></td>
+<td style="text-align: right;">2</td>
+<td>One-based parent path-table record number in the table's byte order. Root uses <code>1</code>.</td>
+</tr>
+<tr>
+<td><code>0x08</code></td>
+<td style="text-align: right;">variable</td>
+<td>Directory identifier followed by optional zero padding.</td>
+</tr>
+</tbody>
+</table>
+<p>Every generated directory record uses the fixed recording-time bytes
+<code>46 01 01 00 00 00 00</code>, representing <code>1970-01-01 00:00:00</code> with GMT offset
+zero. File unit and interleave sizes are zero, and the volume sequence number
+is one.</p>
+<p>Populated categories are chosen from each payload's decoded object type. Their
+objects are ordered deterministically by type, embedded name, and payload size;
+within each category they receive <code>F001</code>, <code>F002</code>, and so on. A category's
+<code>0000</code> records use the same order. Fresh authoring currently produces <code>SMPL</code>,
+<code>SBNK</code>, optional <code>SBAC</code>, and optional <code>PROG</code> objects. Transfer mode can retain
+clean existing <code>SEQU</code> and <code>PRF3</code> payloads as well.</p>
+<p>The exact manifest and commands are in
+<a href="write.html#create-a-hand-authored-cd-rom-iso">Create A Hand-Authored CD-ROM ISO</a>.</p>
+<h2 id="object-discovery">Object Discovery</h2>
+<p>A clean ISO object row comes from an ISO9660 file entry whose bytes start with:</p>
+<div class="highlight"><pre><span></span><code>FSFSDEV3SPLX&lt;type&gt;
+</code></pre></div>
+<p>The loader reads the exact file span from the ISO directory entry and accepts the
+normal object type tags listed in <a href="sampler-data.html">Sampler Data Structures</a>.</p>
+<p>The object key is based on the source image name and logical ISO path. The scope
+key is the source image plus ISO scope.</p>
+<h2 id="loader-quality-classes">Loader-Quality Classes</h2>
+<p>CD-ROM images can contain unusual or partially readable object spans. axklib
+keeps a loader-quality field so downstream reports can keep clean ISO traversal
+separate from weaker rows.</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>clean-iso9660-object</code></td>
+<td>Object came from a normal ISO9660 directory entry.</td>
+</tr>
+<tr>
+<td><code>raw-scan-recovered-object</code></td>
+<td>Object came from a fallback scan path after directory traversal was incomplete.</td>
+</tr>
+<tr>
+<td><code>nonstandard-iso-object</code></td>
+<td>Object came from a nonstandard reader path.</td>
+</tr>
+<tr>
+<td><code>impossible-internal-capacity</code></td>
+<td>Object span has internal counts that exceed its recovered capacity.</td>
+</tr>
+<tr>
+<td><code>raw-scan-impossible-internal-capacity</code></td>
+<td>Same capacity problem on a fallback scan row.</td>
+</tr>
+</tbody>
+</table>
+<p>Normal user-facing trees prefer clean and authoritative rows. Diagnostic reports
+keep the loader-quality field for every object.</p>
+<h2 id="sampler-menu-labels">Sampler Menu Labels</h2>
+<p>Yamaha CD-ROM images can store labels used by the sampler's disk menu. axklib
+uses these labels for user-facing paths when they are present.</p>
+<p>Label sources:</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Typical storage shape</th>
+<th>Metadata field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Group label</td>
+<td>Final <code>_DSKNAME</code> row in the group <code>0000</code> catalog references a 16-byte label file.</td>
+<td><code>iso_group_label</code></td>
+</tr>
+<tr>
+<td>Volume label</td>
+<td>Row in a group-local compact menu table.</td>
+<td><code>iso_volume_label</code></td>
+</tr>
+</tbody>
+</table>
+<p>Group catalog rows and one observed category-catalog form are 32 bytes:</p>
+<table>
+<thead>
+<tr>
+<th>Row offset</th>
+<th style="text-align: right;">Size</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x00</code></td>
+<td style="text-align: right;">1</td>
+<td>Hash of the 16-byte display-name field.</td>
+</tr>
+<tr>
+<td><code>0x01</code></td>
+<td style="text-align: right;">16</td>
+<td>Display name. Ordinary rows are ASCII and space-padded.</td>
+</tr>
+<tr>
+<td><code>0x11</code></td>
+<td style="text-align: right;">1</td>
+<td>Hash of the filename bytes.</td>
+</tr>
+<tr>
+<td><code>0x12</code></td>
+<td style="text-align: right;">11</td>
+<td>ASCII filename such as <code>F001</code>, followed by zero bytes.</td>
+</tr>
+<tr>
+<td><code>0x1d</code></td>
+<td style="text-align: right;">3</td>
+<td>Zero.</td>
+</tr>
+</tbody>
+</table>
+<p>The hash starts at zero and processes at most 16 bytes, stopping at NUL:</p>
+<div class="highlight"><pre><span></span><code>table = [0xaa, 0x55, 0xc3, 0x3c]
+hash = 0
+for byte in field[0:16]:
+    if byte == 0: break
+    hash = ((hash XOR table[hash AND 3]) + byte) modulo 256
+</code></pre></div>
+<p>Some Yamaha CD-ROM category catalogs use a shifted-first-row variant. The first
+logical 32-byte row has its initial four bytes (the name hash and first three
+display-name bytes) elided, so the retained 28 bytes start with the remaining
+13 display-name bytes and place the filename at file offset <code>0x0e</code>. Subsequent
+rows are ordinary 32-byte rows starting at file offset <code>0x1c</code>, and four zero
+bytes pad the tail. The reader selects the layout that yields coherent <code>Fnnn</code>
+targets; the generated writer uses ordinary 32-byte category rows.</p>
+<p>An ordinary group row maps a 16-byte volume display name to an <code>Fnnn</code> volume
+directory. An ordinary category row maps an object display name to an <code>Fnnn</code>
+object file. The special final group row differs from ordinary padding: bytes
+<code>0x01..0x08</code> are <code>_DSKNAME</code>, bytes <code>0x09..0x10</code> are NUL, and its filename points
+to the group-label file.</p>
+<p>For populated recognized categories, validation checks that <code>0000</code> exists,
+that the supported row layout yields distinct <code>Fnnn</code> targets, that every target
+file exists, and that every <code>Fnnn</code> object file has a catalog row. Empty category
+directories do not require a catalog. Payload decoding remains in the object
+inventory and validation pass; opening the ISO does not read every waveform
+payload merely to validate menu structure. Display labels may be truncated or
+space-normalized relative to embedded names and are not required to match.
+These are diagnostics: the ISO tree and independently readable objects remain
+available even when the Yamaha menu catalog is inconsistent. Catalog hash bytes
+are not currently a validation gate.</p>
+<p>For <code>N</code> consecutively numbered volume directories starting at <code>F001</code>, the final
+<code>_DSKNAME</code> row points to <code>F(N+1)</code>. That file is exactly 16 bytes containing the
+ASCII group display name padded with spaces. A one-volume writer image therefore
+uses this group-level layout:</p>
+<div class="highlight"><pre><span></span><code>0000 row 0: &lt;volume display name&gt; -&gt; F001
+0000 row 1: _DSKNAME             -&gt; F002
+F002:         16-byte group display name
+</code></pre></div>
+<p>A group label is confirmed only when the final row references an existing
+16-byte file. Missing or malformed label metadata does not prevent object
+inventory; axklib retains the raw group identifier instead. <code>axklib validate</code>
+reports these sampler-incompatible menu contracts as errors without turning
+them into ISO open failures. This keeps recovery and extraction available while
+preventing a readable image from being mistaken for one the sampler will
+enumerate.</p>
+<p>The validated compatibility contract requires each Yamaha group menu to have a
+group-level <code>0000</code> file made of complete 32-byte rows. Its final row must be
+<code>_DSKNAME</code>, must reference <code>F(N+1)</code> after <code>N</code> volume directories, and that target
+must be an existing, non-empty, fixed-width 16-byte group-label file. Catalog
+hash validation is not part of this compatibility gate because hardware has not
+isolated hash rejection independently. The writer nevertheless emits the hash
+algorithm above for every group and category row.</p>
+<p>Label precedence for display paths:</p>
+<ol>
+<li>Decoded CD-ROM menu label stored in the ISO.</li>
+<li>Content-derived fallback from visible objects in the raw folder.</li>
+<li>Raw ISO folder identifier.</li>
+</ol>
+<p>Content-derived fallback labels are navigation aids. Reports keep raw folder
+fields so callers can distinguish fallback labels from decoded menu labels.</p>
+<h2 id="duplicate-volume-labels">Duplicate Volume Labels</h2>
+<p>Sampler-facing CD-ROM volume labels are not required to be unique within a group.
+When two raw volume folders have the same display label, axklib keeps them as
+separate volumes and appends the raw folder suffix:</p>
+<div class="highlight"><pre><span></span><code>|-- Or11 Argent (F001) [VOLUME]
+|-- Or11 Argent (F002) [VOLUME]
+</code></pre></div>
+<p>This prevents separate ISO folders from being merged while preserving the label
+a sampler user recognizes.</p>
+<h2 id="program-source-load-assignments">Program Source-Load Assignments</h2>
+<p>CD-ROM Program assignment rows can describe how objects are loaded from the disc
+rather than the active/off state stored in a hard-disk save. axklib keeps this
+separate from hard-disk Program assignment state.</p>
+<p>Public behavior:</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th><code>info</code> behavior</th>
+<th>Report behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Source-load assignment matched to a target object</td>
+<td>Can be shown as a Program child when relationship quality is sufficient.</td>
+<td>Row keeps raw ISO path, match method, assignment row, and quality fields.</td>
+</tr>
+<tr>
+<td>Assignment row with lower quality or no target</td>
+<td>Not shown as a normal Program child.</td>
+<td>Kept in relationship CSV/JSON diagnostics.</td>
+</tr>
+<tr>
+<td>Source row whose loaded active/off state is not represented by the ISO row</td>
+<td>Stored row remains diagnostic; loaded state is not invented.</td>
+<td><code>active_assignment_state</code> can be <code>source-load-assignment</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The raw selector bytes in Program rows are diagnostic fields. They are not used
+as public target IDs.</p>
+<p>CD-ROM visible/off rows with missing local SBAC targets stay relationship
+diagnostics, not Program children. A CD-ROM SBNK member link that selects one
+physical waveform in another ISO object folder but whose member name does not
+confirm the target stays <code>Tentative</code> and is reported as an <code>sbnk-member-link</code>
+diagnostic.</p>
+<h2 id="paired-sample-member-stereo">Paired Sample-Member Stereo</h2>
+<p>Some CD-ROM volumes store stereo material as paired sampler-visible <code>SBNK</code>
+members in one <code>SBAC</code> group. The left and right members have matching names with
+terminal <code>-L</code> and <code>-R</code>, and each member links to its own physical <code>SMPL</code> object.
+Structured waveform export keeps the physical mono <code>SMPL</code> files and writes an
+additional <code>_samples/rendered/</code> stereo WAV when the pair is known and audio-compatible.
+For rendered stereo names, duplicate-marked paired members can use the owning
+sample-bank or group label so the output path remains sampler-facing instead of
+only numeric.</p>
+<h2 id="path-mapping">Path Mapping</h2>
+<p>CD-ROM path mapping combines raw folder identity and decoded labels:</p>
+<div class="highlight"><pre><span></span><code>raw path:        8F6EB510/F001/PROG/F003
+facing path:     ORGANS/Or11 Argent/Programs/003: Arg Per4
+report fields:   raw group, raw volume, object key, display labels
+</code></pre></div>
+<p>See <a href="names-and-paths.html">Name, Path, And Export Mapping</a> for duplicate label,
+path sanitization, and export directory behavior.</p>
+<h2 id="validation">Validation</h2>
+<p>CD-ROM validation and diagnostics cover:</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Handling</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Missing or malformed PVD</td>
+<td>Unsupported ISO container.</td>
+</tr>
+<tr>
+<td>Short read from an ISO extent</td>
+<td>Load error for the affected source.</td>
+</tr>
+<tr>
+<td>Missing group-level <code>0000</code></td>
+<td>Validation error; readable object inventory remains available.</td>
+</tr>
+<tr>
+<td>Group <code>0000</code> not a multiple of 32 bytes</td>
+<td>Validation error for incomplete menu rows.</td>
+</tr>
+<tr>
+<td>Missing, misplaced, or wrongly targeted <code>_DSKNAME</code> row</td>
+<td>Validation error with the raw group and expected <code>Fnnn</code> target.</td>
+</tr>
+<tr>
+<td>Missing, empty, or non-16-byte group-label file</td>
+<td>Validation error; the raw group remains usable for diagnostics.</td>
+</tr>
+<tr>
+<td>Clean ISO object with impossible internal count</td>
+<td>Object row marked with an impossible-capacity loader-quality value.</td>
+</tr>
+<tr>
+<td>Duplicate volume labels</td>
+<td>Display name gets raw suffix; reports keep both raw identities.</td>
+</tr>
+<tr>
+<td>Broken active Program path</td>
+<td>Validation reports sampler-facing volume and Program examples.</td>
+</tr>
+<tr>
+<td>Unmatched source-load assignment</td>
+<td>Relationship report row stays diagnostic instead of becoming a Program child.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="minimal-read-walkthrough">Minimal Read Walkthrough</h2>
+<ol>
+<li>Read sector 16 and validate the ISO Primary Volume Descriptor.</li>
+<li>Parse the root directory record.</li>
+<li>Walk directory records recursively, skipping <code>.</code> and <code>..</code>.</li>
+<li>Read file bytes by <code>extent_sector * 2048</code> and ISO file size.</li>
+<li>Select files beginning with <code>FSFSDEV3SPLX</code> and supported type tags.</li>
+<li>Decode group and volume labels from Yamaha menu files when present.</li>
+<li>Attach raw path and sampler-facing label metadata to every object.</li>
+<li>Decode shared object payloads.</li>
+<li>Build relationships and source-load Program assignment rows.</li>
+<li>Render user-facing paths with duplicate-label disambiguation.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "search.highlight", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
