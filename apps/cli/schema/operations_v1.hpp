@@ -12,19 +12,7 @@
 
 namespace axk::cli::schema::operations_v1 {
 
-inline constexpr std::string_view preview_schema_version{"1.0"};
 inline constexpr std::string_view alteration_schema_version{"compat-v1"};
-
-struct PreviewBin {
-  std::int32_t minimum{};
-  std::int32_t maximum{};
-};
-
-struct PreviewOutput {
-  std::string object_key;
-  std::uint64_t frame_count{};
-  std::vector<PreviewBin> bins;
-};
 
 struct AudioImportOutput {
   std::string source_path_utf8;
@@ -61,9 +49,7 @@ struct AlterationOutput {
   std::vector<OperationOutput> operations;
 };
 
-PreviewOutput project_preview(std::string_view object_key, const PreviewEnvelope &preview);
 AlterationOutput project_alteration(const AlterationResult &altered);
-Result<std::string> serialize(const PreviewOutput &output, bool pretty);
 Result<std::string> serialize(const AlterationOutput &output, bool pretty);
 
 } // namespace axk::cli::schema::operations_v1

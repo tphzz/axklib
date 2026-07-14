@@ -1,20 +1,14 @@
 # CLI JSON Schemas
 
 Machine-readable CLI output uses typed DTOs that are separate from sampler
-domain models and from the private JSON library. JSON key spelling, field order,
+domain models and from the implementation JSON library. JSON key spelling, field order,
 null behavior, and pretty/compact rendering belong to the serializer named
 below. Human renderers consume the same service results without parsing JSON.
 
 | Output | Version | DTO and serializer owner |
 | --- | --- | --- |
 | `info --format json` | `compat-v1` (wire shape has no version field) | `cli/schema/info_v1.*` |
-| `objects` / hidden `object-json` | `1.0` | `cli/schema/objects_v1.*` |
-| `relationships` stdout | `1.0` | `cli/schema/semantic_v1.*` |
-| Hidden `tree` stdout | `1.0` | `cli/schema/semantic_v1.*` |
-| Hidden `extract-wav` stdout | `1.0` | `cli/schema/semantic_v1.*` |
-| Hidden `preview` stdout | `1.0` | `cli/schema/operations_v1.*` |
 | `alter hds` stdout | `compat-v1` (wire shape has no version field) | `cli/schema/operations_v1.*` |
-| Hidden `export` summary | `1.0` | `cli/schema/export_v1.*` |
 | `volume.axklib.json` | `axklib.volume_graph.v1` | `cli/schema/export_v1.*` |
 | Inventory, validation, coverage, orphan, relationship, and corpus report JSON | Per-file schema sidecar | Typed `ReportRow` projection and `axklib/report.*` |
 

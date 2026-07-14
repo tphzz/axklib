@@ -48,17 +48,15 @@ add_library(
   command_line.cpp
   commands/analysis.cpp
   commands/extract.cpp
-  commands/legacy.cpp
   commands/package.cpp
   commands/reports.cpp
   commands/support.cpp
+  commands/writer.cpp
   content_id.cpp
   schema/export_v1.cpp
   schema/info_v1.cpp
-  schema/objects_v1.cpp
   schema/operations_v1.cpp
   schema/package_v1.cpp
-  schema/semantic_v1.cpp
   writer_commands.cpp
 )
 target_compile_features(axk_cli_adapter PUBLIC cxx_std_23)
@@ -103,6 +101,37 @@ if(BUILD_TESTING)
   axk_enable_sanitizers(axk_cli_tests)
   axk_enable_coverage(axk_cli_tests)
   gtest_discover_tests(axk_cli_tests)
+  add_executable(axk_object_semantic_dump tests/object_semantic_dump.cpp schema/objects_v1.cpp)
+  target_compile_features(axk_object_semantic_dump PRIVATE cxx_std_23)
+  target_include_directories(
+    axk_object_semantic_dump
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${AXK_REPOSITORY_ROOT}/library/internal"
+  )
+  target_link_libraries(
+    axk_object_semantic_dump
+    PRIVATE axklib::core nlohmann_json::nlohmann_json
+  )
+  axk_set_project_warnings(axk_object_semantic_dump)
+  axk_enable_sanitizers(axk_object_semantic_dump)
+
+  add_executable(axk_preview_dump tests/preview_dump.cpp)
+  target_compile_features(axk_preview_dump PRIVATE cxx_std_23)
+  target_link_libraries(axk_preview_dump PRIVATE axklib::audio nlohmann_json::nlohmann_json)
+  axk_set_project_warnings(axk_preview_dump)
+  axk_enable_sanitizers(axk_preview_dump)
+  set(_axk_semantic_fixture
+      "${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_multi_sbnk_authored.hds"
+  )
+  add_test(
+    NAME Development.ObjectSemanticDump
+    COMMAND axk_object_semantic_dump "${_axk_semantic_fixture}"
+  )
+  add_test(
+    NAME Development.PreviewDump
+    COMMAND axk_preview_dump "${_axk_semantic_fixture}" "p0:sfs9" 257
+  )
+  unset(_axk_semantic_fixture)
+
   add_test(
     NAME Cli.UnicodeProcessPaths
     COMMAND

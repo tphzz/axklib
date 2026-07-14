@@ -60,13 +60,6 @@ int axk::cli::run(int argc, char **argv) {
                     "allow writing into a non-empty output directory");
   objects->add_flag("--pretty", objects_request.pretty, "indent stdout JSON");
 
-  std::filesystem::path object_json_path;
-  bool object_json_pretty = false;
-  auto *object_json = app.add_subcommand("object-json", "emit canonical object semantics");
-  object_json->group("");
-  object_json->add_option("image", object_json_path, "input HDA/HDS image")->required();
-  object_json->add_flag("--pretty", object_json_pretty, "indent JSON output");
-
   axk::cli::RelationshipsRequest relationships_request;
   auto *relationships = app.add_subcommand("relationships", "resolve sampler object links as JSON");
   relationships
@@ -223,16 +216,6 @@ int axk::cli::run(int argc, char **argv) {
   package_import->add_flag("--overwrite", package_import_request.overwrite,
                            "atomically replace an existing output image");
 
-  std::filesystem::path tree_path;
-  bool tree_pretty = false;
-  bool include_default_programs = false;
-  auto *tree = app.add_subcommand("tree", "render sampler-facing organization as JSON");
-  tree->group("");
-  tree->add_option("image", tree_path, "input HDA/HDS image")->required();
-  tree->add_flag("--pretty", tree_pretty, "indent JSON output");
-  tree->add_flag("--include-default-programs", include_default_programs,
-                 "include all 128 Program slots");
-
   axk::cli::OrphansRequest orphans_request;
   auto *orphans = app.add_subcommand("orphans", "classify physical waveform ownership as JSON");
   orphans->add_option("paths", orphans_request.paths, "input HDS image paths")
@@ -260,41 +243,6 @@ int axk::cli::run(int argc, char **argv) {
   validate->add_flag("--overwrite", validate_request.overwrite,
                      "allow writing into a non-empty output directory");
 
-  std::filesystem::path extract_wav_path;
-  std::filesystem::path extract_wav_output;
-  bool extract_wav_overwrite = false;
-  bool extract_wav_pretty = false;
-  auto *extract_wav = app.add_subcommand("extract-wav", "export exact physical SMPL WAV files");
-  extract_wav->group("");
-  extract_wav->add_option("image", extract_wav_path, "input HDA/HDS image")->required();
-  extract_wav->add_option("--output-dir", extract_wav_output, "output directory")->required();
-  extract_wav->add_flag("--overwrite", extract_wav_overwrite, "replace existing WAV files");
-  extract_wav->add_flag("--pretty", extract_wav_pretty, "indent JSON output");
-
-  std::filesystem::path export_path;
-  std::filesystem::path export_output;
-  bool export_overwrite = false;
-  bool export_sfz = false;
-  bool export_pretty = false;
-  auto *export_command = app.add_subcommand("export", "write structured exact audio exports");
-  export_command->group("");
-  export_command->add_option("image", export_path, "input HDA/HDS image")->required();
-  export_command->add_option("--output-dir", export_output, "output directory")->required();
-  export_command->add_flag("--overwrite", export_overwrite, "replace existing files");
-  export_command->add_flag("--sfz", export_sfz, "write SFZ instruments");
-  export_command->add_flag("--pretty", export_pretty, "indent command JSON output");
-
-  std::filesystem::path preview_path;
-  std::string preview_object_key;
-  std::size_t preview_bins = 256;
-  bool preview_pretty = false;
-  auto *preview = app.add_subcommand("preview", "build a bounded waveform min/max envelope");
-  preview->group("");
-  preview->add_option("image", preview_path, "input HDA/HDS image")->required();
-  preview->add_option("object-key", preview_object_key, "SMPL object key")->required();
-  preview->add_option("--bins", preview_bins, "requested envelope bin count");
-  preview->add_flag("--pretty", preview_pretty, "indent JSON output");
-
   WriterCommandState writer_commands;
   register_writer_commands(app, writer_commands);
 
@@ -308,8 +256,6 @@ int axk::cli::run(int argc, char **argv) {
   }
   if (*objects)
     return run_objects_request(objects_request);
-  if (*object_json)
-    return run_objects(object_json_path, object_json_pretty);
   if (*relationships)
     return run_relationships_request(relationships_request);
   if (*inventory)
@@ -332,8 +278,6 @@ int axk::cli::run(int argc, char **argv) {
     return run_package_import(package_plan_request);
   if (*package_import)
     return run_package_import(package_import_request);
-  if (*tree)
-    return run_tree(tree_path, tree_pretty, include_default_programs);
   if (*orphans)
     return run_orphans_request(orphans_request);
   if (*validate) {
@@ -341,16 +285,7 @@ int axk::cli::run(int argc, char **argv) {
       validate_request.policy = "strict";
     return run_validate_request(validate_request);
   }
-  if (*extract_wav) {
-    return run_extract_wav(extract_wav_path, extract_wav_output, extract_wav_overwrite,
-                           extract_wav_pretty);
-  }
-  if (*export_command) {
-    return run_export(export_path, export_output, export_overwrite, export_sfz, export_pretty);
-  }
-  if (*preview)
-    return run_preview(preview_path, preview_object_key, preview_bins, preview_pretty);
-  if (*writer_commands.create_hds_legacy || *writer_commands.create_hds) {
+  if (*writer_commands.create_hds) {
     return run_create_hds(writer_commands.create_manifest, writer_commands.create_output,
                           writer_commands.create_overwrite, writer_commands.create_pretty);
   }

@@ -7,40 +7,18 @@
 
 #include "schema/export_v1.hpp"
 #include "schema/info_v1.hpp"
-#include "schema/objects_v1.hpp"
 #include "schema/operations_v1.hpp"
 #include "schema/package_v1.hpp"
-#include "schema/semantic_v1.hpp"
 
 namespace schema = axk::cli::schema::operations_v1;
 namespace info_schema = axk::cli::schema::info_v1;
 namespace export_schema = axk::cli::schema::export_v1;
-namespace object_schema = axk::cli::schema::objects_v1;
 namespace package_schema = axk::cli::schema::package_v1;
-namespace semantic_schema = axk::cli::schema::semantic_v1;
 
-TEST(CliSchema, ObjectRelationshipTreeAndExportSummarySchemasStayParseable) {
+TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
   EXPECT_EQ(info_schema::schema_version, "compat-v1");
   EXPECT_EQ(schema::alteration_schema_version, "compat-v1");
-  EXPECT_EQ(schema::preview_schema_version, "1.0");
-  EXPECT_EQ(object_schema::schema_version, "1.0");
-  EXPECT_EQ(semantic_schema::schema_version, "1.0");
-  EXPECT_EQ(export_schema::schema_version, "1.0");
   EXPECT_EQ(export_schema::volume_graph_schema_version, "axklib.volume_graph.v1");
-  object_schema::ObjectsOutput objects{
-      .shape = object_schema::ContainerShape::sfs,
-      .container_kind = {},
-      .objects = {},
-  };
-  object_schema::ObjectOutput object;
-  object.partition_index = 7U;
-  object.sfs_id = 4'294'967'295U;
-  object.header.raw_type = "TEST";
-  object.decoded.header = object.header;
-  objects.objects.push_back(std::move(object));
-  const auto object_json = object_schema::serialize(objects, false);
-  ASSERT_TRUE(object_json);
-  EXPECT_EQ(nlohmann::json::parse(*object_json)["objects"][0]["sfs_id"], 4'294'967'295U);
 
   axk::RelationshipGraph graph;
   graph.relationships.push_back({
@@ -58,11 +36,6 @@ TEST(CliSchema, ObjectRelationshipTreeAndExportSummarySchemasStayParseable) {
       .assignment_state = axk::AssignmentState::active,
       .receive_channel_display = "off",
   });
-  const auto relationships =
-      semantic_schema::serialize(semantic_schema::project_relationships(graph), false);
-  ASSERT_TRUE(relationships);
-  EXPECT_TRUE(nlohmann::json::parse(*relationships)["relationships"][0]["target_key"].is_null());
-
   axk::VolumeExport volume;
   axk::Waveform non_looping;
   non_looping.loop_start = 66U;
@@ -103,16 +76,6 @@ TEST(CliSchema, ObjectRelationshipTreeAndExportSummarySchemasStayParseable) {
   }));
   EXPECT_EQ(parsed_graph["objects"]["sbac"][0]["members"].size(), 1U);
   EXPECT_EQ(parsed_graph["objects"]["sbac"][0]["relationship_bank_keys"].size(), 2U);
-
-  const std::vector summaries{export_schema::VolumeSummaryOutput{
-      .path_utf8 = "partition/\xc3\xa4",
-      .graph_path_utf8 = "partition/\xc3\xa4/volume.axklib.json",
-      .waveform_count = 1U,
-      .sample_bank_count = 2U,
-  }};
-  const auto summary = export_schema::serialize(summaries, false);
-  ASSERT_TRUE(summary);
-  EXPECT_EQ(nlohmann::json::parse(*summary)["volumes"][0]["sample_bank_count"], 2U);
 }
 
 TEST(CliSchema, InfoV1KeepsRecursiveOrderNullCountsAndUtf8Paths) {
@@ -159,23 +122,6 @@ TEST(CliSchema, InfoV1KeepsRecursiveOrderNullCountsAndUtf8Paths) {
   EXPECT_EQ(parsed["load_errors"][0]["error_code"], 100U);
 }
 
-TEST(CliSchema, PreviewV1HasStableCompactAndPrettyOutput) {
-  const schema::PreviewOutput output{
-      .object_key = "wave \"\xc3\xa4\"",
-      .frame_count = std::numeric_limits<std::uint64_t>::max(),
-      .bins = {{-32'768, 32'767}},
-  };
-  const auto compact = schema::serialize(output, false);
-  ASSERT_TRUE(compact);
-  EXPECT_EQ(*compact, "{\"schema_version\":\"1.0\",\"object_key\":\"wave \\\"\xc3\xa4\\\"\","
-                      "\"frame_count\":18446744073709551615,\"bins\":[[-32768,32767]]}");
-  EXPECT_NO_THROW([[maybe_unused]] const auto parsed = nlohmann::json::parse(*compact));
-
-  const auto pretty = schema::serialize(output, true);
-  ASSERT_TRUE(pretty);
-  EXPECT_EQ(pretty->substr(0U, 28U), "{\n  \"schema_version\": \"1.0\",");
-}
-
 TEST(CliSchema, AlterationV1DistinguishesNullEmptyAndPresentValues) {
   schema::AlterationOutput output{
       .source_path_utf8 = "source/\xc3\xa4.hds",
@@ -207,8 +153,12 @@ TEST(CliSchema, AlterationV1DistinguishesNullEmptyAndPresentValues) {
 }
 
 TEST(CliSchema, SerializationRejectsInvalidInternalUtf8) {
-  schema::PreviewOutput output{
-      .object_key = std::string{"\xc3\x28", 2U}, .frame_count = 0U, .bins = {}};
+  schema::AlterationOutput output{
+      .source_path_utf8 = std::string{"\xc3\x28", 2U},
+      .output_path_utf8 = std::nullopt,
+      .applied = false,
+      .operations = {},
+  };
   const auto serialized = schema::serialize(output, false);
   EXPECT_FALSE(serialized);
 }

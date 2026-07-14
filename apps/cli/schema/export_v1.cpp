@@ -269,22 +269,4 @@ Result<std::string> serialize_volume_graph(const VolumeExport &volume,
   }
 }
 
-Result<std::string> serialize(const std::vector<VolumeSummaryOutput> &volumes, bool pretty) {
-  try {
-    auto rows = OrderedJson::array();
-    for (const auto &volume : volumes) {
-      rows.push_back({{"path", volume.path_utf8},
-                      {"graph_path", volume.graph_path_utf8},
-                      {"waveform_count", volume.waveform_count},
-                      {"sample_bank_count", volume.sample_bank_count}});
-    }
-    return OrderedJson{{"schema_version", schema_version}, {"volumes", std::move(rows)}}.dump(
-        pretty ? 2 : -1);
-  } catch (const nlohmann::json::exception &error) {
-    return std::unexpected{
-        make_error(ErrorCode::invalid_argument, ErrorCategory::internal,
-                   std::string{"could not serialize export JSON: "} + error.what())};
-  }
-}
-
 } // namespace axk::cli::schema::export_v1

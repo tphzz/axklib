@@ -100,7 +100,7 @@ TEST(Cli11Adapter, RejectsInvalidUtf8AndRepeatedScalarOptions) {
   EXPECT_NE(axk::cli::run(static_cast<int>(repeated.size()), repeated.data()), 0);
 }
 
-TEST(Cli11Adapter, ExposesMaintainedCommandInventoryAndHidesLegacyAliases) {
+TEST(Cli11Adapter, ExposesOnlyMaintainedCommandInventory) {
   std::array help{const_cast<char *>("axklib"), const_cast<char *>("--help")};
   testing::internal::CaptureStdout();
   EXPECT_EQ(axk::cli::run(static_cast<int>(help.size()), help.data()), 0);
@@ -108,8 +108,13 @@ TEST(Cli11Adapter, ExposesMaintainedCommandInventoryAndHidesLegacyAliases) {
   for (const auto command : {"info", "inventory", "validate", "relationships", "coverage", "create",
                              "alter", "orphans", "objects", "corpus", "extract", "package"})
     EXPECT_NE(output.find(command), std::string::npos) << command;
-  EXPECT_EQ(output.find("extract-wav"), std::string::npos);
-  EXPECT_EQ(output.find("create-hds"), std::string::npos);
+  for (const auto command :
+       {"create-hds", "object-json", "tree", "extract-wav", "export", "preview"}) {
+    EXPECT_EQ(output.find(command), std::string::npos) << command;
+    testing::internal::CaptureStderr();
+    EXPECT_NE(run_cli({"axklib", command}), 0) << command;
+    static_cast<void>(testing::internal::GetCapturedStderr());
+  }
 
   const auto fixture =
       std::filesystem::path{AXK_SOURCE_ROOT} / "library/tests/fixtures/cli/help.txt";

@@ -35,15 +35,6 @@ OrderedJson audio_json(const AudioImportOutput &audio) {
 
 } // namespace
 
-PreviewOutput project_preview(std::string_view object_key, const PreviewEnvelope &preview) {
-  PreviewOutput result{
-      .object_key = std::string{object_key}, .frame_count = preview.frame_count, .bins = {}};
-  result.bins.reserve(preview.bins.size());
-  for (const auto &bin : preview.bins)
-    result.bins.push_back({bin.minimum, bin.maximum});
-  return result;
-}
-
 AlterationOutput project_alteration(const AlterationResult &altered) {
   AlterationOutput result{
       .source_path_utf8 = text::path_to_utf8(altered.source_path),
@@ -92,23 +83,6 @@ AlterationOutput project_alteration(const AlterationResult &altered) {
     result.operations.push_back(std::move(projected));
   }
   return result;
-}
-
-Result<std::string> serialize(const PreviewOutput &output, bool pretty) {
-  try {
-    auto bins = OrderedJson::array();
-    for (const auto &bin : output.bins)
-      bins.push_back({bin.minimum, bin.maximum});
-    return OrderedJson{
-        {"schema_version", preview_schema_version},
-        {"object_key", output.object_key},
-        {"frame_count", output.frame_count},
-        {"bins", std::move(bins)},
-    }
-        .dump(pretty ? 2 : -1);
-  } catch (const nlohmann::json::exception &error) {
-    return std::unexpected{serialization_error(error)};
-  }
 }
 
 Result<std::string> serialize(const AlterationOutput &output, bool pretty) {

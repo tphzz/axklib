@@ -37,6 +37,17 @@
 
 namespace axk::cli::commands {
 
+axk::Result<SemanticSnapshot> load_semantic_snapshot(const std::filesystem::path &path) {
+  auto container = axk::open_image(path);
+  if (!container)
+    return std::unexpected{container.error()};
+  auto catalog = axk::build_object_catalog(*container);
+  if (!catalog)
+    return std::unexpected{catalog.error()};
+  auto graph = axk::build_relationship_graph(*catalog);
+  return SemanticSnapshot{std::move(*container), std::move(*catalog), std::move(graph)};
+}
+
 std::string object_type_text(axk::ObjectType type) {
   switch (type) {
   case axk::ObjectType::smpl:

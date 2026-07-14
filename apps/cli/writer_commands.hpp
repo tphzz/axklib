@@ -17,7 +17,6 @@ struct WriterCommandState {
   bool create_overwrite{};
   bool create_pretty{};
   bool create_manifest_overwrite{};
-  CLI::App *create_hds_legacy{};
   CLI::App *create_hds{};
   CLI::App *create_floppy{};
   CLI::App *create_iso{};

@@ -3,18 +3,6 @@
 #include <CLI/CLI.hpp>
 
 void axk::cli::register_writer_commands(CLI::App &app, WriterCommandState &state) {
-  state.create_hds_legacy =
-      app.add_subcommand("create-hds", "create a fresh HDS image from a manifest");
-  state.create_hds_legacy->group("");
-  state.create_hds_legacy
-      ->add_option("--manifest", state.create_manifest, "HDS build manifest JSON")
-      ->required();
-  state.create_hds_legacy->add_option("--output", state.create_output, "output HDS path")
-      ->required();
-  state.create_hds_legacy->add_flag("--overwrite", state.create_overwrite,
-                                    "replace an existing output");
-  state.create_hds_legacy->add_flag("--pretty", state.create_pretty, "indent JSON output");
-
   auto *create = app.add_subcommand("create", "create a fresh sampler container");
   state.create_hds = create->add_subcommand("hds", "create a fresh HDS image");
   state.create_hds->add_option("manifest", state.create_manifest, "HDS build manifest JSON")

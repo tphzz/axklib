@@ -43,13 +43,8 @@ namespace axk::cli::commands {
 using Json = nlohmann::json;
 
 int run_objects_request(const axk::cli::ObjectsRequest &request) {
-  if (!request.output_directory) {
-    if (request.paths.size() != 1U) {
-      std::cerr << "objects requires one input when --output-dir is omitted\n";
-      return 2;
-    }
-    return run_objects(request.paths.front(), request.pretty);
-  }
+  if (!request.output_directory)
+    return 2;
   if (const auto ready = prepare_report_directory(*request.output_directory, request.overwrite);
       !ready)
     return report_failure(ready.error());

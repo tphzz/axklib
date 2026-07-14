@@ -753,18 +753,18 @@ TEST(PortablePackage, ManifestKindOverridesARecognizedWrongFilenameExtension) {
   EXPECT_EQ(reopened->issues.front().code, "PACKAGE_EXTENSION_MISMATCH");
   EXPECT_FALSE(reopened->issues.front().fatal);
 
-  const auto legacy_named = axk::open_portable_package(built->archive, "legacy.axkpkg");
-  ASSERT_TRUE(legacy_named) << legacy_named.error().message;
-  EXPECT_EQ(legacy_named->kind, axk::PackageKind::smpl);
-  EXPECT_EQ(legacy_named->package_id, built->package.package_id);
-  ASSERT_EQ(legacy_named->issues.size(), 1U);
-  EXPECT_EQ(legacy_named->issues.front().code, "PACKAGE_EXTENSION_MISMATCH");
-  EXPECT_FALSE(legacy_named->issues.front().fatal);
-  EXPECT_TRUE(axk::verify_portable_package(*legacy_named));
+  const auto bundle_named = axk::open_portable_package(built->archive, "bundle.axkpkg");
+  ASSERT_TRUE(bundle_named) << bundle_named.error().message;
+  EXPECT_EQ(bundle_named->kind, axk::PackageKind::smpl);
+  EXPECT_EQ(bundle_named->package_id, built->package.package_id);
+  ASSERT_EQ(bundle_named->issues.size(), 1U);
+  EXPECT_EQ(bundle_named->issues.front().code, "PACKAGE_EXTENSION_MISMATCH");
+  EXPECT_FALSE(bundle_named->issues.front().fatal);
+  EXPECT_TRUE(axk::verify_portable_package(*bundle_named));
 
   axk::PackageImportRequest request;
   request.root_destinations.push_back(destination(0U, "New Volume"));
-  const std::vector packages{*legacy_named};
+  const std::vector packages{*bundle_named};
   const auto plan =
       axk::plan_package_import(fixture("HD00_512_single_sbnk_authored.hds"), packages, request);
   ASSERT_TRUE(plan) << plan.error().message;

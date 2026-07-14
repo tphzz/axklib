@@ -40,11 +40,6 @@
 namespace axk::cli::commands {
 
 int run_relationships_request(const axk::cli::RelationshipsRequest &request) {
-  if (request.output_directory.empty()) {
-    if (request.paths.size() != 1U)
-      return 2;
-    return run_relationships(request.paths.front(), false);
-  }
   if (const auto ready = prepare_report_directory(request.output_directory, request.overwrite);
       !ready)
     return report_failure(ready.error());
