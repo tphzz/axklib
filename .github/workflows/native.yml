@@ -90,7 +90,7 @@ jobs:
             macos_slice: arm64
     runs-on: ${{ matrix.runner }}
     env:
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives
 
     steps:
       - name: Checkout axklib
@@ -106,7 +106,7 @@ jobs:
       - name: Restore vcpkg binary cache
         uses: actions/cache@v6
         with:
-          path: .cache/vcpkg/archives
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
           key: vcpkg-f87344cac031-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}
 
       - name: Prepare vcpkg binary cache directory

@@ -205,6 +205,8 @@ def test_release_assets_require_every_distribution_and_exact_checksums(tmp_path:
 def test_native_workflow_creates_only_release_drafts() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives" in workflow
+    assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache" not in workflow
     assert "draft-release:" in workflow
     assert "if: ${{ !inputs.debug }}" in workflow
     assert "uses: actions/download-artifact@v8" in workflow
