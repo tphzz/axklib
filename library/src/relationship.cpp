@@ -181,9 +181,11 @@ Match match_named_target(const ObjectSnapshot &source, std::string_view name, Ob
   }
   if (candidates.size() > 1 && use_same_volume) {
     if (const auto *local = unique_local(source, candidates); local != nullptr) {
-      return {local, candidates, RelationshipQuality::likely,
-              std::format("{}+{}", unique_basis, local_suffix(source)),
-              "duplicate names have one same-volume candidate"};
+      const auto quality = source.placement && source.placement->container_directory.empty()
+                               ? RelationshipQuality::known
+                               : RelationshipQuality::likely;
+      return {local, candidates, quality, std::format("{}+{}", unique_basis, local_suffix(source)),
+              "duplicate names have one exact local container candidate"};
     }
   }
   return {nullptr, candidates,

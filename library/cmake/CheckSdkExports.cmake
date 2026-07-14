@@ -50,7 +50,7 @@ else()
         message(FATAL_ERROR "shared SDK exports private implementation RTTI: ${line}")
       endif()
       if(NOT line MATCHES
-         "axk::(build_plan|sdk_version|transaction|render_error|progress_sink|operation_context|image|snapshot)")
+         "axk::(build_plan|package_import_plan|portable_package|sdk_version|transaction|render_error|progress_sink|operation_context|image|snapshot)")
         message(FATAL_ERROR "shared SDK exports a non-facade axklib symbol: ${line}")
       endif()
     elseif(line MATCHES " [VvWwu] .*std::")

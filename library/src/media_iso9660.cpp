@@ -222,6 +222,12 @@ Result<IsoImage> IsoImage::open(const std::filesystem::path &path,
 const std::string &IsoImage::volume_id() const noexcept { return volume_id_; }
 const std::string &IsoImage::source_name() const noexcept { return source_name_; }
 const std::vector<IsoFile> &IsoImage::files() const noexcept { return files_; }
+std::span<const std::pair<std::string, std::string>> IsoImage::group_labels() const noexcept {
+  return group_labels_;
+}
+std::span<const std::pair<std::string, std::string>> IsoImage::volume_labels() const noexcept {
+  return volume_labels_;
+}
 std::span<const MediaValidationIssue> IsoImage::validation_issues() const noexcept {
   return validation_issues_;
 }

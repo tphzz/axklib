@@ -44,6 +44,14 @@ TEST(ObjectCatalog, DerivesExactVolumeAndCategoryPlacementFromDirectories) {
   EXPECT_EQ(sample->placement->volume_name, "New Volume");
   EXPECT_EQ(sample->placement->category_name, "SMPL");
   EXPECT_EQ(sample->placement->entry_name, "sine wave");
+  const auto source_payload =
+      container->read_record_data(sample->partition, sample->sfs_id, 64U * 1024U * 1024U);
+  ASSERT_TRUE(source_payload) << source_payload.error().message;
+  EXPECT_EQ(sample->raw_payload, *source_payload);
+  const auto decoded_payload = axk::decode_object(sample->raw_payload);
+  ASSERT_TRUE(decoded_payload) << decoded_payload.error().message;
+  EXPECT_EQ(decoded_payload->header.type, sample->object.header.type);
+  EXPECT_EQ(decoded_payload->header.name, sample->object.header.name);
 }
 
 TEST(RelationshipGraph, MatchesMaintainedFixtureCountsAndSamplerHierarchy) {
@@ -334,6 +342,44 @@ TEST(ProgramRelationships, KeepsVisibleOffAmbiguousGroupsAsDiagnosticCandidates)
   EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
   EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::tentative);
   EXPECT_EQ(graph.relationships.front().basis, "assignment-visible-off-name-ambiguous-sbac");
+}
+
+TEST(RelationshipGraph, ResolvesActiveSfsGroupMemberWithinItsOwningVolume) {
+  axk::ObjectCatalog catalog;
+  for (const auto &[key, volume] : {std::pair{"bank-a", 1U}, std::pair{"bank-b", 2U}}) {
+    axk::DecodedObject bank;
+    bank.header.type = axk::ObjectType::sbnk;
+    bank.header.name = "Duplicate Bank";
+    bank.payload = axk::CurrentSbnk{};
+    catalog.objects.push_back({key, axk::PartitionIndex{0}, axk::SfsId{volume}, "partition:0",
+                               std::move(bank),
+                               axk::ObjectPlacement{axk::PartitionIndex{0},
+                                                    "Disk",
+                                                    axk::SfsId{volume},
+                                                    "Volume",
+                                                    "SBNK",
+                                                    "Duplicate Bank",
+                                                    {}}});
+  }
+
+  axk::CurrentSbac current_group;
+  current_group.slots.push_back({"Duplicate Bank", 1U, 0x14cU});
+  axk::DecodedObject group;
+  group.header.type = axk::ObjectType::sbac;
+  group.header.name = "Group";
+  group.payload = std::move(current_group);
+  catalog.objects.push_back(
+      {"group", axk::PartitionIndex{0}, axk::SfsId{3}, "partition:0", std::move(group),
+       axk::ObjectPlacement{
+           axk::PartitionIndex{0}, "Disk", axk::SfsId{2}, "Volume", "SBAC", "Group", {}}});
+
+  const auto graph = axk::build_relationship_graph(catalog);
+  ASSERT_EQ(graph.relationships.size(), 1U);
+  ASSERT_TRUE(graph.relationships.front().target_key);
+  EXPECT_EQ(*graph.relationships.front().target_key, "bank-b");
+  EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::known);
+  EXPECT_EQ(graph.relationships.front().basis, "active-sbac-slot-name+same-volume");
+  EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
 }
 
 TEST(ProgramRelationships, IdentifiesOneSameVolumeVisibleOffDiagnosticCandidate) {

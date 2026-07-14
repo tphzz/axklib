@@ -1,10 +1,25 @@
 {
   "schema_version": "2.0",
+  "build_contract": {
+    "cmake_minimum": "3.28",
+    "public_cpp_standard": 17,
+    "implementation_cpp_standard": 23,
+    "warnings_as_errors": true,
+    "vcpkg_builtin_baseline": "f87344cac03158cbf1467264565f1fd36b382a24",
+    "quality_commands": [
+      "cmake --preset release",
+      "cmake --build --preset release",
+      "ctest --preset release --output-on-failure",
+      "clang-format --dry-run --Werror"
+    ]
+  },
   "commands": [
     "alter hds",
     "corpus audit",
     "coverage",
+    "create floppy",
     "create hds",
+    "create iso",
     "extract sfz file",
     "extract wav file",
     "info",
@@ -34,7 +49,9 @@
   "writer_profiles": [
     "alteration_full_chain_v1",
     "alteration_rename_v1",
+    "fat12_yamaha_1440k_v1",
     "hds_geometry_v1",
+    "iso9660_yamaha_catalog_v1",
     "sbac_prog_v1",
     "sbnk_mono_stereo_v1",
     "smpl_audio_import_v1"

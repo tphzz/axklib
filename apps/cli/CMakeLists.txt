@@ -49,6 +49,7 @@ add_library(
   commands/analysis.cpp
   commands/extract.cpp
   commands/legacy.cpp
+  commands/package.cpp
   commands/reports.cpp
   commands/support.cpp
   content_id.cpp
@@ -56,6 +57,7 @@ add_library(
   schema/info_v1.cpp
   schema/objects_v1.cpp
   schema/operations_v1.cpp
+  schema/package_v1.cpp
   schema/semantic_v1.cpp
 )
 target_compile_features(axk_cli_adapter PUBLIC cxx_std_23)
@@ -92,6 +94,10 @@ if(BUILD_TESTING)
     axk_cli_tests
     PRIVATE axk_cli_adapter GTest::gtest_main nlohmann_json::nlohmann_json
   )
+  if(TARGET axklib::axklib)
+    target_link_libraries(axk_cli_tests PRIVATE axklib::axklib)
+    target_compile_definitions(axk_cli_tests PRIVATE AXK_TEST_SHARED_SDK=1)
+  endif()
   axk_set_project_warnings(axk_cli_tests)
   axk_enable_sanitizers(axk_cli_tests)
   axk_enable_coverage(axk_cli_tests)

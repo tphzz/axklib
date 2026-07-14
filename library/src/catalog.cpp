@@ -131,6 +131,7 @@ Result<ObjectCatalog> build_object_catalog(const Container &container,
           std::format("partition:{}", partition.index.value),
           std::move(*decoded),
           std::move(placement),
+          std::move(*bytes),
       });
     }
   }

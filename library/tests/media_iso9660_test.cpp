@@ -17,6 +17,12 @@ TEST(Iso9660Reader, LoadsYamahaScopeLabelsObjectsAndStructuredPaths) {
   EXPECT_EQ(object.volume_label.status, axk::LabelStatus::confirmed);
   const auto path = axk::structured_object_path(object);
   EXPECT_EQ(path.relative_path.generic_string(), "Mapped Group/Mapped Vol/SMPL/CD WAVE");
+
+  const axk::MediaContainer media{*image};
+  const auto catalog = axk::build_object_catalog(media);
+  ASSERT_TRUE(catalog) << catalog.error().message;
+  ASSERT_EQ(catalog->objects.size(), 1U);
+  EXPECT_EQ(catalog->objects.front().raw_payload, object.raw_payload);
 }
 
 TEST(Iso9660Reader, RequiresCatalogedDsknameForAConfirmedGroupLabelButKeepsInventory) {

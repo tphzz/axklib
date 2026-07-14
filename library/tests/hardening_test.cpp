@@ -19,6 +19,8 @@
 #include "axklib/io.hpp"
 #include "axklib/media.hpp"
 #include "axklib/object.hpp"
+#include "axklib/package.hpp"
+#include "axklib/package_archive.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
 
@@ -117,6 +119,11 @@ TEST(Hardening, EveryFocusedFuzzerSeedHasANormalTestReplay) {
         auto envelope = axk::fuzz::iso_record_envelope(bytes);
         static_cast<void>(axk::IsoImage::open(
             std::make_shared<axk::MemoryReader>(std::move(envelope)), "seed.iso"));
+      } else if (target == "package_archive") {
+        const axk::MemoryReader reader{bytes};
+        static_cast<void>(axk::package_internal::inspect_archive(reader));
+        static_cast<void>(axk::package_internal::read_archive(bytes));
+        static_cast<void>(axk::open_portable_package(bytes, "seed.axkpkg"));
       } else {
         const std::string json{reinterpret_cast<const char *>(bytes.data()), bytes.size()};
         if (target == "build_manifest")

@@ -50,6 +50,7 @@ nav:
       - CLI Reference: axklib/cli.md
   - SDK:
       - C++ API: axklib/cpp-api.md
+      - Portable Object Packages: axklib/portable-packages.md
       - Architecture: architecture.md
   - Formats:
       - Media Containers: axklib/media.md

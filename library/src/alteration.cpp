@@ -8,6 +8,7 @@
 #include <concepts>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <random>
@@ -30,6 +31,9 @@
 
 #include "axklib/catalog.hpp"
 #include "axklib/object.hpp"
+#include "axklib/package.hpp"
+#include "axklib/package_archive.hpp"
+#include "axklib/package_relocation.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/sfs.hpp"
 #include "writer_internal.hpp"
@@ -903,7 +907,8 @@ Result<std::pair<SfsId, std::uint64_t>> allocate_record(MutablePartition &partit
                                                         std::optional<SfsId> requested_id = {},
                                                         std::uint16_t directory_tail = 0U) {
   const auto ids = requested_id ? std::vector{*requested_id} : free_ids(partition, 1U);
-  if (ids.empty() || (requested_id && partition.inserted.contains(*requested_id))) {
+  if (ids.empty() || (requested_id && (record_exists(partition, *requested_id) ||
+                                       partition.inserted.contains(*requested_id)))) {
     return std::unexpected{transaction_error("partition has no free SFS record")};
   }
   const auto clusters =
@@ -2308,19 +2313,26 @@ Result<void> flush_file_to_disk(const std::filesystem::path &path) {
 }
 
 Result<void> publish_temporary(const std::filesystem::path &temporary,
-                               const std::filesystem::path &output) {
+                               const std::filesystem::path &output, bool overwrite) {
 #if defined(_WIN32)
-  if (MoveFileExW(temporary.c_str(), output.c_str(), MOVEFILE_WRITE_THROUGH) == 0)
+  const auto flags = MOVEFILE_WRITE_THROUGH | (overwrite ? MOVEFILE_REPLACE_EXISTING : 0U);
+  if (MoveFileExW(temporary.c_str(), output.c_str(), flags) == 0)
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "could not atomically publish alteration output")};
 #else
-  if (::link(temporary.c_str(), output.c_str()) != 0)
-    return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                      "could not atomically publish alteration output")};
-  if (::unlink(temporary.c_str()) != 0)
-    return std::unexpected{
-        make_error(ErrorCode::io_read_failed, ErrorCategory::io,
-                   "alteration output was published but its temporary link could not be removed")};
+  if (overwrite) {
+    if (::rename(temporary.c_str(), output.c_str()) != 0)
+      return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                                        "could not atomically replace alteration output")};
+  } else {
+    if (::link(temporary.c_str(), output.c_str()) != 0)
+      return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                                        "could not atomically publish alteration output")};
+    if (::unlink(temporary.c_str()) != 0)
+      return std::unexpected{make_error(
+          ErrorCode::io_read_failed, ErrorCategory::io,
+          "alteration output was published but its temporary link could not be removed")};
+  }
   const auto parent =
       output.parent_path().empty() ? std::filesystem::path{"."} : output.parent_path();
   const auto descriptor = ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY);
@@ -2402,9 +2414,61 @@ Result<void> validate_temporary(const std::filesystem::path &temporary,
   return {};
 }
 
-Result<void> publish(const TransactionState &state, const std::filesystem::path &output_path,
-                     const CancellationToken &cancellation) {
-  if (std::filesystem::exists(output_path))
+Result<TransactionState> open_transaction_state(const std::filesystem::path &source_path,
+                                                const CancellationToken &cancellation,
+                                                ProgressSink *progress) {
+  OpenOptions options;
+  options.cancellation = cancellation;
+  options.progress = progress;
+  auto container = open_image(source_path, options);
+  if (!container)
+    return std::unexpected{container.error()};
+  auto catalog = build_object_catalog(*container, 64U * 1024U * 1024U, cancellation);
+  if (!catalog)
+    return std::unexpected{catalog.error()};
+  auto graph = build_relationship_graph(*catalog);
+  TransactionState state{std::move(*container), std::move(*catalog), std::move(graph), {}, {}, {}};
+  std::map<std::string, std::pair<PartitionIndex, SfsId>> object_ids;
+  for (const auto &object : state.catalog.objects)
+    object_ids.emplace(object.key, std::pair{object.partition, object.sfs_id});
+  for (const auto &relationship : state.graph.relationships) {
+    if (relationship.quality != RelationshipQuality::known || !relationship.target_key)
+      continue;
+    const auto source = object_ids.find(relationship.source_key);
+    const auto target = object_ids.find(*relationship.target_key);
+    if (source != object_ids.end() && target != object_ids.end() &&
+        source->second.first == target->second.first) {
+      state.known_edges.emplace_back(source->second.first, source->second.second,
+                                     target->second.second);
+    }
+  }
+  for (const auto &partition : state.container.partitions()) {
+    if (!partition.allocation.reconstructed_not_stored.empty() ||
+        partition.allocation.extent_total_mismatch_count != 0U) {
+      return std::unexpected{
+          transaction_error("source allocation cannot safely support alteration")};
+    }
+    const auto bitmap_size = (partition.cluster_count + 7U) / 8U;
+    const auto bitmap_offset =
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
+        512U;
+    auto bitmap = read_raw(source_path, bitmap_offset, bitmap_size);
+    if (!bitmap)
+      return std::unexpected{bitmap.error()};
+    MutablePartition mutable_partition;
+    mutable_partition.source = &partition;
+    mutable_partition.bitmap = std::move(*bitmap);
+    state.partitions.emplace(partition.index.value, std::move(mutable_partition));
+  }
+  return state;
+}
+
+Result<void> publish(
+    const TransactionState &state, const std::filesystem::path &output_path,
+    const CancellationToken &cancellation, bool overwrite = false,
+    const std::function<Result<void>(const std::filesystem::path &)> &temporary_validator = {}) {
+  if (!overwrite && std::filesystem::exists(output_path))
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "alteration output already exists")};
   std::error_code error;
@@ -2567,11 +2631,557 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
     cleanup();
     return std::unexpected{validated.error()};
   }
-  if (auto published = publish_temporary(temporary, output_path); !published) {
+  if (temporary_validator) {
+    auto package_validated = temporary_validator(temporary);
+    if (!package_validated) {
+      cleanup();
+      return std::unexpected{package_validated.error()};
+    }
+  }
+  if (const auto check = cancellation.check(); !check) {
+    cleanup();
+    return std::unexpected{check.error()};
+  }
+  if (auto published = publish_temporary(temporary, output_path, overwrite); !published) {
     cleanup();
     return std::unexpected{published.error()};
   }
   return {};
+}
+
+bool has_action(const PlannedPackageObject &object, PackageImportObjectAction action) {
+  return std::ranges::contains(object.actions, action);
+}
+
+const PackageNode *package_node(const PortablePackage &package, std::string_view node_id) {
+  const auto found = std::ranges::find(package.nodes, node_id, &PackageNode::node_id);
+  return found == package.nodes.end() ? nullptr : &*found;
+}
+
+const PlannedPackageObject *planned_node(const PackageImportPlan &plan,
+                                         const PlannedPackageObject &owner,
+                                         std::string_view node_id) {
+  const auto found = std::ranges::find_if(plan.objects, [&](const auto &candidate) {
+    return candidate.package_index == owner.package_index &&
+           candidate.root_index == owner.root_index && candidate.node_id == node_id &&
+           candidate.partition_index == owner.partition_index &&
+           candidate.group_name == owner.group_name && candidate.volume_name == owner.volume_name &&
+           candidate.raw_group == owner.raw_group && candidate.raw_volume == owner.raw_volume;
+  });
+  return found == plan.objects.end() ? nullptr : &*found;
+}
+
+Result<package_internal::PackageNodeRelocationContext>
+relocation_context(const PortablePackage &package, const PackageImportPlan &plan,
+                   const PlannedPackageObject &owner) {
+  package_internal::PackageNodeRelocationContext context;
+  context.destination_name = owner.destination_name;
+  context.smpl_link_id = owner.target_link_id;
+  context.linked_program_numbers = owner.target_program_numbers;
+  context.grouped = owner.target_grouped;
+  for (const auto &edge : package.relationships) {
+    if (edge.source_node_id != owner.node_id)
+      continue;
+    const auto *target = planned_node(plan, owner, edge.target_node_id);
+    if (target == nullptr) {
+      return std::unexpected{
+          transaction_error("package import plan omits a relationship target action")};
+    }
+    context.edge_target_names.emplace(edge.edge_id, target->destination_name);
+    if (target->target_link_id)
+      context.edge_target_link_ids.emplace(edge.edge_id, *target->target_link_id);
+  }
+  return context;
+}
+
+Result<std::string> normalized_payload_digest(std::span<const std::byte> payload) {
+  auto decoded = decode_object(payload);
+  if (!decoded)
+    return std::unexpected{decoded.error()};
+  auto profile = package_internal::build_relocation_profile(*decoded, payload);
+  if (!profile)
+    return std::unexpected{profile.error()};
+  return package_internal::hex_digest(package_internal::sha256(profile->normalized_payload));
+}
+
+std::optional<std::pair<std::string, std::string>>
+package_iso_raw_scope(const ObjectSnapshot &snapshot) {
+  if (!snapshot.placement)
+    return std::nullopt;
+  const auto &path = snapshot.placement->container_directory;
+  const auto separator = path.find('/');
+  if (separator == std::string::npos || path.find('/', separator + 1U) != std::string::npos)
+    return std::nullopt;
+  return std::pair{path.substr(0, separator), path.substr(separator + 1U)};
+}
+
+Result<void> validate_flat_package_result(const std::filesystem::path &temporary,
+                                          std::span<const PortablePackage> packages,
+                                          const PackageImportPlan &plan,
+                                          const CancellationToken &cancellation) {
+  auto media = open_media(temporary, cancellation);
+  if (!media)
+    return std::unexpected{media.error()};
+  if (media->kind() != plan.target_kind)
+    return std::unexpected{transaction_error("package result reopened as the wrong media kind")};
+  auto catalog = build_object_catalog(*media, 64U * 1024U * 1024U, cancellation);
+  if (!catalog)
+    return std::unexpected{catalog.error()};
+  const auto graph = build_relationship_graph(*catalog);
+  std::map<std::string, const ObjectSnapshot *, std::less<>> actual_by_action;
+  for (const auto &object : plan.objects) {
+    std::vector<const ObjectSnapshot *> matches;
+    for (const auto &snapshot : catalog->objects) {
+      const auto scope = package_iso_raw_scope(snapshot);
+      const auto scope_matches =
+          plan.target_kind != MediaKind::iso9660 ||
+          (scope && scope->first == object.raw_group && scope->second == object.raw_volume);
+      if (snapshot.object.header.raw_type == object.object_type &&
+          snapshot.object.header.name == object.destination_name && scope_matches) {
+        matches.push_back(&snapshot);
+      }
+    }
+    if (matches.size() != 1U) {
+      return std::unexpected{
+          transaction_error("post-write package object is not unique in its media scope")};
+    }
+    auto normalized = normalized_payload_digest(matches.front()->raw_payload);
+    if (!normalized)
+      return std::unexpected{normalized.error()};
+    if (*normalized != object.normalized_sha256)
+      return std::unexpected{transaction_error("post-write package object changed identity")};
+    if (object.target_link_id) {
+      const auto *sample = std::get_if<CurrentSmpl>(&matches.front()->object.payload);
+      if (sample == nullptr || sample->link_id.value != *object.target_link_id) {
+        return std::unexpected{
+            transaction_error("post-write SMPL link ID differs from the import plan")};
+      }
+    }
+    if (object.object_type == "SBNK") {
+      const auto *bank = std::get_if<CurrentSbnk>(&matches.front()->object.payload);
+      if (bank == nullptr || bank->linked_program_numbers != object.target_program_numbers ||
+          (((bank->sample_flags & 1U) != 0U) != object.target_grouped)) {
+        return std::unexpected{
+            transaction_error("post-write SBNK graph metadata differs from the import plan")};
+      }
+    }
+    actual_by_action.emplace(object.action_id, matches.front());
+  }
+  for (const auto &owner : plan.objects) {
+    const auto &package = packages[owner.package_index];
+    for (const auto &edge : package.relationships) {
+      if (edge.source_node_id != owner.node_id)
+        continue;
+      const auto *target_plan = planned_node(plan, owner, edge.target_node_id);
+      if (target_plan == nullptr)
+        return std::unexpected{transaction_error("post-write edge has no target action")};
+      const auto source = actual_by_action.find(owner.action_id);
+      const auto target = actual_by_action.find(target_plan->action_id);
+      if (source == actual_by_action.end() || target == actual_by_action.end())
+        return std::unexpected{transaction_error("post-write edge endpoint is missing")};
+      const auto relationships = graph.children(source->second->key);
+      if (std::ranges::find_if(relationships, [&](const Relationship *actual) {
+            return actual->type == edge.role && actual->quality == RelationshipQuality::known &&
+                   actual->target_key && *actual->target_key == target->second->key;
+          }) == relationships.end()) {
+        return std::unexpected{transaction_error(
+            std::format("post-write {} relationship from {} to {} differs from the package plan",
+                        edge.role, owner.destination_name, target_plan->destination_name))};
+      }
+    }
+  }
+  return {};
+}
+
+Result<PackageImportReport>
+apply_fat12_package_import(const std::filesystem::path &target_path,
+                           std::span<const PortablePackage> packages, const PackageImportPlan &plan,
+                           const std::filesystem::path &output_path, bool overwrite,
+                           const CancellationToken &cancellation, ProgressSink *progress) {
+  auto media = open_media(target_path, cancellation);
+  if (!media)
+    return std::unexpected{media.error()};
+  if (media->kind() != MediaKind::fat12_floppy)
+    return std::unexpected{transaction_error("FAT12 package target changed media kind")};
+  auto media_objects = media->objects(64U * 1024U * 1024U, cancellation);
+  if (!media_objects)
+    return std::unexpected{media_objects.error()};
+
+  detail::PreparedMediaImage prepared;
+  prepared.manifest.schema_version = "1.0";
+  prepared.manifest.format = MediaImageFormat::fat12_floppy;
+  std::map<std::string, std::size_t, std::less<>> object_indices;
+  std::set<std::string, std::less<>> object_paths;
+  for (const auto &object : *media_objects) {
+    object_indices.emplace(object.key, prepared.objects.size());
+    object_paths.insert(object.logical_path);
+    prepared.objects.push_back(
+        {object.decoded.header.type, object.decoded.header.name, object.raw_payload});
+  }
+  const auto &fat = std::get<FatImage>(media->storage());
+  for (const auto &file : fat.files()) {
+    if (object_paths.contains(file.path))
+      continue;
+    auto payload = fat.read_file(file, cancellation);
+    if (!payload)
+      return std::unexpected{payload.error()};
+    prepared.retained_files.push_back({file.path, std::move(*payload)});
+  }
+
+  std::set<std::string, std::less<>> updated_physical_objects;
+  std::uint64_t completed{};
+  for (const auto &object : plan.objects) {
+    if (const auto checked = cancellation.check(); !checked)
+      return std::unexpected{checked.error()};
+    if (!object.canonical_action_id) {
+      const auto physical_key = object.existing_object_key
+                                    ? "existing:" + *object.existing_object_key
+                                    : "planned:" + object.action_id;
+      if (updated_physical_objects.insert(physical_key).second &&
+          (std::ranges::contains(object.actions, PackageImportObjectAction::insert) ||
+           std::ranges::contains(object.actions, PackageImportObjectAction::relocate))) {
+        const auto &package = packages[object.package_index];
+        const auto *node = package_node(package, object.node_id);
+        if (node == nullptr)
+          return std::unexpected{transaction_error("FAT12 package node is missing")};
+        auto context = relocation_context(package, plan, object);
+        if (!context)
+          return std::unexpected{context.error()};
+        auto payload = package_internal::relocate_package_node(package, *node, *context);
+        if (!payload)
+          return std::unexpected{payload.error()};
+        auto decoded = decode_object(*payload);
+        if (!decoded)
+          return std::unexpected{decoded.error()};
+        if (object.existing_object_key) {
+          const auto existing = object_indices.find(*object.existing_object_key);
+          if (existing == object_indices.end())
+            return std::unexpected{transaction_error("planned FAT12 reused object is absent")};
+          prepared.objects[existing->second] = {decoded->header.type, object.destination_name,
+                                                std::move(*payload)};
+        } else {
+          prepared.objects.push_back(
+              {decoded->header.type, object.destination_name, std::move(*payload)});
+        }
+      }
+    }
+    ++completed;
+    if (progress) {
+      progress->report({ProgressPhase::writing, completed, plan.objects.size(),
+                        "rebuilding FAT12 portable package graph", output_path.string()});
+    }
+  }
+  std::ranges::sort(prepared.objects, [](const auto &left, const auto &right) {
+    return std::tuple{left.type, left.name, left.payload.size()} <
+           std::tuple{right.type, right.name, right.payload.size()};
+  });
+  std::ranges::sort(prepared.retained_files, {}, &detail::PreparedMediaFile::path);
+  const auto validator = [&](const std::filesystem::path &temporary) {
+    return validate_flat_package_result(temporary, packages, plan, cancellation);
+  };
+  auto written =
+      detail::write_prepared_media_image(prepared, output_path, overwrite, cancellation, validator);
+  if (!written)
+    return std::unexpected{written.error()};
+  auto reader = FileReader::open(output_path);
+  if (!reader)
+    return std::unexpected{reader.error()};
+  auto digest = package_internal::sha256_reader(**reader, cancellation);
+  if (!digest)
+    return std::unexpected{digest.error()};
+  return PackageImportReport{target_path,
+                             output_path,
+                             plan.plan_id,
+                             plan.target_snapshot_id,
+                             package_internal::hex_digest(*digest),
+                             true,
+                             plan.objects,
+                             plan.allocation};
+}
+
+Result<PackageImportReport> apply_iso9660_package_import(
+    const std::filesystem::path &target_path, std::span<const PortablePackage> packages,
+    const PackageImportPlan &plan, const std::filesystem::path &output_path, bool overwrite,
+    const CancellationToken &cancellation, ProgressSink *progress) {
+  auto media = open_media(target_path, cancellation);
+  if (!media)
+    return std::unexpected{media.error()};
+  if (media->kind() != MediaKind::iso9660)
+    return std::unexpected{transaction_error("ISO9660 package target changed media kind")};
+  auto media_objects = media->objects(64U * 1024U * 1024U, cancellation);
+  if (!media_objects)
+    return std::unexpected{media_objects.error()};
+  const auto &iso = std::get<IsoImage>(media->storage());
+
+  detail::PreparedMediaImage prepared;
+  prepared.manifest.schema_version = "1.0";
+  prepared.manifest.format = MediaImageFormat::iso9660;
+  prepared.manifest.iso_volume_id = iso.volume_id();
+
+  std::map<std::string, std::string, std::less<>> group_labels;
+  for (const auto &[raw, label] : iso.group_labels())
+    group_labels.emplace(raw, label);
+  std::map<std::pair<std::string, std::string>, std::string> volume_labels;
+  for (const auto &[raw_path, label] : iso.volume_labels()) {
+    const auto separator = raw_path.find('/');
+    if (separator != std::string::npos)
+      volume_labels.emplace(
+          std::pair{raw_path.substr(0, separator), raw_path.substr(separator + 1U)}, label);
+  }
+  std::map<std::pair<std::string, std::string>, std::size_t> volume_indices;
+  std::map<std::string, std::size_t, std::less<>> existing_group_volume_counts;
+  for (const auto &file : iso.files()) {
+    if (!file.is_directory)
+      continue;
+    const auto separator = file.path.find('/');
+    if (separator == std::string::npos || file.path.find('/', separator + 1U) != std::string::npos)
+      continue;
+    const auto scope = std::pair{file.path.substr(0, separator), file.path.substr(separator + 1U)};
+    const auto group = group_labels.find(scope.first);
+    const auto volume = volume_labels.find(scope);
+    if (group == group_labels.end() || volume == volume_labels.end())
+      return std::unexpected{
+          transaction_error("cataloged ISO9660 volume labels changed after planning")};
+    volume_indices.emplace(scope, prepared.iso_volumes.size());
+    ++existing_group_volume_counts[scope.first];
+    prepared.iso_volumes.push_back({scope.first, group->second, scope.second, volume->second, {}});
+  }
+  for (const auto &destination : plan.destinations) {
+    const auto scope = std::pair{destination.raw_group, destination.raw_volume};
+    if (volume_indices.contains(scope))
+      continue;
+    if (!destination.create)
+      return std::unexpected{transaction_error("planned ISO9660 destination is absent")};
+    volume_indices.emplace(scope, prepared.iso_volumes.size());
+    prepared.iso_volumes.push_back({destination.raw_group,
+                                    destination.group_name,
+                                    destination.raw_volume,
+                                    destination.volume_name,
+                                    {}});
+  }
+  std::map<std::string, std::pair<std::size_t, std::size_t>, std::less<>> object_indices;
+  std::set<std::string, std::less<>> generated_files;
+  std::map<std::string, std::size_t, std::less<>> group_volume_counts;
+  for (const auto &volume : prepared.iso_volumes)
+    ++group_volume_counts[volume.raw_group];
+  for (const auto &[group, count] : group_volume_counts) {
+    generated_files.insert(group + "/0000");
+    generated_files.insert(group + "/" + std::format("F{:03}", count + 1U));
+  }
+  for (const auto &[group, count] : existing_group_volume_counts)
+    generated_files.insert(group + "/" + std::format("F{:03}", count + 1U));
+  for (const auto &object : *media_objects) {
+    const auto scope = std::pair{object.raw_group, object.raw_volume};
+    const auto volume = volume_indices.find(scope);
+    if (volume == volume_indices.end())
+      return std::unexpected{
+          transaction_error("existing ISO9660 object has no cataloged raw volume")};
+    auto &objects = prepared.iso_volumes[volume->second].objects;
+    object_indices.emplace(object.key, std::pair{volume->second, objects.size()});
+    objects.push_back({object.decoded.header.type, object.decoded.header.name, object.raw_payload});
+    generated_files.insert(object.logical_path);
+    const auto separator = object.logical_path.rfind('/');
+    if (separator != std::string::npos)
+      generated_files.insert(object.logical_path.substr(0, separator) + "/0000");
+  }
+  for (const auto &file : iso.files()) {
+    if (file.is_directory || generated_files.contains(file.path))
+      continue;
+    auto payload = iso.read_file(file, cancellation);
+    if (!payload)
+      return std::unexpected{payload.error()};
+    prepared.retained_files.push_back({file.path, std::move(*payload)});
+  }
+
+  std::set<std::string, std::less<>> updated_physical_objects;
+  std::uint64_t completed{};
+  for (const auto &object : plan.objects) {
+    if (const auto checked = cancellation.check(); !checked)
+      return std::unexpected{checked.error()};
+    if (!object.canonical_action_id) {
+      const auto physical_key = object.existing_object_key
+                                    ? "existing:" + *object.existing_object_key
+                                    : "planned:" + object.action_id;
+      if (updated_physical_objects.insert(physical_key).second &&
+          (has_action(object, PackageImportObjectAction::insert) ||
+           has_action(object, PackageImportObjectAction::relocate))) {
+        const auto &package = packages[object.package_index];
+        const auto *node = package_node(package, object.node_id);
+        if (node == nullptr)
+          return std::unexpected{transaction_error("ISO9660 package node is missing")};
+        auto context = relocation_context(package, plan, object);
+        if (!context)
+          return std::unexpected{context.error()};
+        auto payload = package_internal::relocate_package_node(package, *node, *context);
+        if (!payload)
+          return std::unexpected{payload.error()};
+        auto decoded = decode_object(*payload);
+        if (!decoded)
+          return std::unexpected{decoded.error()};
+        if (object.existing_object_key) {
+          const auto existing = object_indices.find(*object.existing_object_key);
+          if (existing == object_indices.end())
+            return std::unexpected{transaction_error("planned ISO9660 reused object is absent")};
+          auto &[volume_index, object_index] = existing->second;
+          prepared.iso_volumes[volume_index].objects[object_index] = {
+              decoded->header.type, object.destination_name, std::move(*payload)};
+        } else {
+          const auto volume = volume_indices.find({object.raw_group, object.raw_volume});
+          if (volume == volume_indices.end())
+            return std::unexpected{transaction_error("planned ISO9660 insertion volume is absent")};
+          prepared.iso_volumes[volume->second].objects.push_back(
+              {decoded->header.type, object.destination_name, std::move(*payload)});
+        }
+      }
+    }
+    ++completed;
+    if (progress) {
+      progress->report({ProgressPhase::writing, completed, plan.objects.size(),
+                        "rebuilding ISO9660 portable package graph", output_path.string()});
+    }
+  }
+  std::ranges::sort(prepared.iso_volumes, [](const auto &left, const auto &right) {
+    return std::tie(left.raw_group, left.raw_volume) < std::tie(right.raw_group, right.raw_volume);
+  });
+  prepared.objects.clear();
+  for (auto &volume : prepared.iso_volumes) {
+    std::ranges::sort(volume.objects, [](const auto &left, const auto &right) {
+      return std::tuple{left.type, left.name, left.payload.size()} <
+             std::tuple{right.type, right.name, right.payload.size()};
+    });
+    prepared.objects.insert(prepared.objects.end(), volume.objects.begin(), volume.objects.end());
+  }
+  std::ranges::sort(prepared.retained_files, {}, &detail::PreparedMediaFile::path);
+  const auto validator = [&](const std::filesystem::path &temporary) -> Result<void> {
+    if (plan.allocation.empty())
+      return std::unexpected{transaction_error("ISO9660 package plan has no projected allocation")};
+    std::error_code size_error;
+    const auto actual_size = std::filesystem::file_size(temporary, size_error);
+    const auto expected_size = plan.allocation.front().projected_image_size_bytes;
+    if (size_error || actual_size != expected_size ||
+        std::ranges::any_of(plan.allocation, [&](const auto &allocation) {
+          return allocation.projected_image_size_bytes != expected_size;
+        })) {
+      return std::unexpected{transaction_error(
+          size_error ? std::format("cannot inspect rebuilt ISO9660 size: {}", size_error.message())
+                     : std::format("rebuilt ISO9660 size differs from the package plan: planned "
+                                   "{} bytes, emitted {} bytes",
+                                   expected_size, actual_size))};
+    }
+    return validate_flat_package_result(temporary, packages, plan, cancellation);
+  };
+  auto written =
+      detail::write_prepared_media_image(prepared, output_path, overwrite, cancellation, validator);
+  if (!written)
+    return std::unexpected{written.error()};
+  auto reader = FileReader::open(output_path);
+  if (!reader)
+    return std::unexpected{reader.error()};
+  auto digest = package_internal::sha256_reader(**reader, cancellation);
+  if (!digest)
+    return std::unexpected{digest.error()};
+  return PackageImportReport{target_path,
+                             output_path,
+                             plan.plan_id,
+                             plan.target_snapshot_id,
+                             package_internal::hex_digest(*digest),
+                             true,
+                             plan.objects,
+                             plan.allocation};
+}
+
+Result<void> validate_package_result(const std::filesystem::path &temporary,
+                                     std::span<const PortablePackage> packages,
+                                     const PackageImportPlan &plan,
+                                     const CancellationToken &cancellation) {
+  auto media = open_media(temporary, cancellation);
+  if (!media)
+    return std::unexpected{media.error()};
+  if (media->kind() != MediaKind::sfs)
+    return std::unexpected{transaction_error("package result is not an SFS image")};
+  auto catalog = build_object_catalog(*media, 64U * 1024U * 1024U, cancellation);
+  if (!catalog)
+    return std::unexpected{catalog.error()};
+  const auto graph = build_relationship_graph(*catalog);
+  std::map<std::string, const ObjectSnapshot *, std::less<>> actual_by_action;
+  for (const auto &object : plan.objects) {
+    std::vector<const ObjectSnapshot *> matches;
+    for (const auto &snapshot : catalog->objects) {
+      if (!object.target_sfs_id || !snapshot.placement ||
+          snapshot.partition.value != object.partition_index ||
+          snapshot.sfs_id.value != *object.target_sfs_id ||
+          snapshot.placement->volume_name != object.volume_name ||
+          snapshot.object.header.raw_type != object.object_type ||
+          snapshot.object.header.name != object.destination_name) {
+        continue;
+      }
+      matches.push_back(&snapshot);
+    }
+    if (matches.size() != 1U) {
+      return std::unexpected{
+          transaction_error("post-write package object does not match its planned placement")};
+    }
+    auto normalized = normalized_payload_digest(matches.front()->raw_payload);
+    if (!normalized)
+      return std::unexpected{normalized.error()};
+    if (*normalized != object.normalized_sha256) {
+      return std::unexpected{
+          transaction_error("post-write package object changed normalized identity")};
+    }
+    if (object.target_link_id) {
+      const auto *sample = std::get_if<CurrentSmpl>(&matches.front()->object.payload);
+      if (sample == nullptr || sample->link_id.value != *object.target_link_id) {
+        return std::unexpected{
+            transaction_error("post-write SMPL link ID differs from the import plan")};
+      }
+    }
+    if (object.object_type == "SBNK") {
+      const auto *bank = std::get_if<CurrentSbnk>(&matches.front()->object.payload);
+      if (bank == nullptr || bank->linked_program_numbers != object.target_program_numbers ||
+          (((bank->sample_flags & 1U) != 0U) != object.target_grouped)) {
+        return std::unexpected{
+            transaction_error("post-write SBNK graph metadata differs from the import plan")};
+      }
+    }
+    actual_by_action.emplace(object.action_id, matches.front());
+  }
+
+  for (const auto &owner : plan.objects) {
+    const auto &package = packages[owner.package_index];
+    for (const auto &edge : package.relationships) {
+      if (edge.source_node_id != owner.node_id)
+        continue;
+      const auto *target_plan = planned_node(plan, owner, edge.target_node_id);
+      if (target_plan == nullptr)
+        return std::unexpected{transaction_error("post-write edge has no target action")};
+      const auto source = actual_by_action.find(owner.action_id);
+      const auto target = actual_by_action.find(target_plan->action_id);
+      if (source == actual_by_action.end() || target == actual_by_action.end())
+        return std::unexpected{transaction_error("post-write edge endpoint is missing")};
+      const auto relationships = graph.children(source->second->key);
+      const auto matched = std::ranges::find_if(relationships, [&](const Relationship *actual) {
+        return actual->type == edge.role && actual->quality == RelationshipQuality::known &&
+               actual->target_key && *actual->target_key == target->second->key;
+      });
+      if (matched == relationships.end()) {
+        return std::unexpected{transaction_error(
+            std::format("post-write {} relationship from {} to {} differs from the package plan",
+                        edge.role, owner.destination_name, target_plan->destination_name))};
+      }
+    }
+  }
+  return {};
+}
+
+Result<std::string> file_snapshot_id(const std::filesystem::path &path,
+                                     const CancellationToken &cancellation) {
+  auto reader = FileReader::open(path);
+  if (!reader)
+    return std::unexpected{reader.error()};
+  auto digest = package_internal::sha256_reader(**reader, cancellation);
+  if (!digest)
+    return std::unexpected{digest.error()};
+  return package_internal::hex_digest(*digest);
 }
 
 } // namespace
@@ -3037,51 +3647,10 @@ Result<AlterationResult> alter_hds(const std::filesystem::path &source_path,
                          std::filesystem::absolute(*output_path).lexically_normal()) {
     return std::unexpected{transaction_error("alteration output must differ from source")};
   }
-  OpenOptions options;
-  options.cancellation = cancellation;
-  options.progress = progress;
-  auto container = open_image(source_path, options);
-  if (!container)
-    return std::unexpected{container.error()};
-  auto catalog = build_object_catalog(*container, 64U * 1024U * 1024U, cancellation);
-  if (!catalog)
-    return std::unexpected{catalog.error()};
-  auto graph = build_relationship_graph(*catalog);
-  TransactionState state{std::move(*container), std::move(*catalog), std::move(graph), {}, {}, {}};
-  std::map<std::string, std::pair<PartitionIndex, SfsId>> object_ids;
-  for (const auto &object : state.catalog.objects) {
-    object_ids.emplace(object.key, std::pair{object.partition, object.sfs_id});
-  }
-  for (const auto &relationship : state.graph.relationships) {
-    if (relationship.quality != RelationshipQuality::known || !relationship.target_key) {
-      continue;
-    }
-    const auto source = object_ids.find(relationship.source_key);
-    const auto target = object_ids.find(*relationship.target_key);
-    if (source != object_ids.end() && target != object_ids.end() &&
-        source->second.first == target->second.first) {
-      state.known_edges.emplace_back(source->second.first, source->second.second,
-                                     target->second.second);
-    }
-  }
-  for (const auto &partition : state.container.partitions()) {
-    if (!partition.allocation.reconstructed_not_stored.empty() ||
-        partition.allocation.extent_total_mismatch_count != 0U)
-      return std::unexpected{
-          transaction_error("source allocation cannot safely support alteration")};
-    const auto bitmap_size = (partition.cluster_count + 7U) / 8U;
-    const auto bitmap_offset =
-        (static_cast<std::uint64_t>(partition.start_sector) +
-         static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
-        512U;
-    auto bitmap = read_raw(source_path, bitmap_offset, bitmap_size);
-    if (!bitmap)
-      return std::unexpected{bitmap.error()};
-    MutablePartition mutable_partition;
-    mutable_partition.source = &partition;
-    mutable_partition.bitmap = std::move(*bitmap);
-    state.partitions.emplace(partition.index.value, std::move(mutable_partition));
-  }
+  auto opened = open_transaction_state(source_path, cancellation, progress);
+  if (!opened)
+    return std::unexpected{opened.error()};
+  auto state = std::move(*opened);
   if (progress)
     progress->report(
         {ProgressPhase::writing, 0U, manifest.operations.size(), "planning alteration", {}});
@@ -3123,6 +3692,248 @@ Result<TransactionPlan> plan_hds_alteration(const std::filesystem::path &source_
   if (!result)
     return std::unexpected{result.error()};
   return TransactionPlan{result->source_path, std::move(result->operations)};
+}
+
+Result<PackageImportReport>
+apply_package_import(const std::filesystem::path &target_path,
+                     std::span<const PortablePackage> packages, const PackageImportPlan &plan,
+                     const std::filesystem::path &output_path, bool overwrite,
+                     const CancellationToken &cancellation, ProgressSink *progress) {
+  try {
+    if (std::filesystem::absolute(target_path).lexically_normal() ==
+        std::filesystem::absolute(output_path).lexically_normal()) {
+      return std::unexpected{
+          transaction_error("package import output must differ from its source image")};
+    }
+    if (!overwrite && std::filesystem::exists(output_path)) {
+      return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                                        "package import output already exists")};
+    }
+    if (const auto verified = verify_package_import_plan(plan); !verified)
+      return std::unexpected{verified.error()};
+    if (!plan.valid())
+      return std::unexpected{transaction_error("a conflicting package import plan cannot apply")};
+    if (plan.target_kind != MediaKind::sfs && plan.target_kind != MediaKind::fat12_floppy &&
+        plan.target_kind != MediaKind::iso9660)
+      return std::unexpected{transaction_error("package import target adapter is unsupported")};
+    if (packages.size() != plan.package_ids.size())
+      return std::unexpected{
+          transaction_error("package import inputs do not match the planned package count")};
+    for (std::size_t index = 0; index < packages.size(); ++index) {
+      if (const auto verified = verify_portable_package(packages[index]); !verified)
+        return std::unexpected{verified.error()};
+      if (packages[index].package_id != plan.package_ids[index]) {
+        return std::unexpected{
+            transaction_error("package import input identity differs from the plan")};
+      }
+    }
+    auto snapshot = file_snapshot_id(target_path, cancellation);
+    if (!snapshot)
+      return std::unexpected{snapshot.error()};
+    if (*snapshot != plan.target_snapshot_id)
+      return std::unexpected{transaction_error("package import plan is stale for this target")};
+
+    if (plan.target_kind == MediaKind::fat12_floppy) {
+      return apply_fat12_package_import(target_path, packages, plan, output_path, overwrite,
+                                        cancellation, progress);
+    }
+    if (plan.target_kind == MediaKind::iso9660) {
+      return apply_iso9660_package_import(target_path, packages, plan, output_path, overwrite,
+                                          cancellation, progress);
+    }
+
+    auto opened = open_transaction_state(target_path, cancellation, progress);
+    if (!opened)
+      return std::unexpected{opened.error()};
+    auto state = std::move(*opened);
+    auto confirmed_snapshot = file_snapshot_id(target_path, cancellation);
+    if (!confirmed_snapshot)
+      return std::unexpected{confirmed_snapshot.error()};
+    if (*confirmed_snapshot != plan.target_snapshot_id)
+      return std::unexpected{
+          transaction_error("package import target changed before transaction preparation")};
+
+    std::size_t completed{};
+    for (const auto &destination : plan.destinations) {
+      if (!destination.create)
+        continue;
+      if (const auto checked = cancellation.check(); !checked)
+        return std::unexpected{checked.error()};
+      OperationView operation;
+      operation.id = std::format("package-destination-{}-{}", destination.partition_index,
+                                 destination.volume_name);
+      operation.type = "insert_volume";
+      operation.partition = PartitionIndex{destination.partition_index};
+      operation.volume_name = destination.volume_name;
+      operation.volume = VolumeSpec{destination.volume_name, {}, {}, {}, {}};
+      auto inserted = insert_volume(state, operation, cancellation);
+      if (!inserted)
+        return std::unexpected{inserted.error()};
+      std::vector<std::uint32_t> actual_ids;
+      for (const auto id : inserted->inserted_sfs_ids)
+        actual_ids.push_back(id.value);
+      if (actual_ids != destination.infrastructure_sfs_ids ||
+          inserted->allocated_clusters != destination.infrastructure_clusters) {
+        return std::unexpected{
+            transaction_error("actual destination volume allocation differs from the import plan")};
+      }
+      state.reports.push_back(std::move(*inserted));
+      if (progress) {
+        progress->report({ProgressPhase::writing, completed, plan.objects.size(),
+                          "creating package destination volume", output_path.string()});
+      }
+    }
+    std::set<std::pair<std::uint8_t, std::uint32_t>> updated_reused_objects;
+    for (const auto &object : plan.objects) {
+      if (const auto checked = cancellation.check(); !checked)
+        return std::unexpected{checked.error()};
+      if (!has_action(object, PackageImportObjectAction::insert)) {
+        if (has_action(object, PackageImportObjectAction::reuse) &&
+            has_action(object, PackageImportObjectAction::relocate)) {
+          if (!object.target_sfs_id || object.object_type != "SBNK") {
+            return std::unexpected{
+                transaction_error("planned reused relocation is not a fixed SBNK object")};
+          }
+          const auto physical_key = std::pair{object.partition_index, *object.target_sfs_id};
+          if (updated_reused_objects.emplace(physical_key).second) {
+            const auto &package = packages[object.package_index];
+            const auto *node = package_node(package, object.node_id);
+            if (node == nullptr)
+              return std::unexpected{transaction_error("package import action node is missing")};
+            auto context = relocation_context(package, plan, object);
+            if (!context)
+              return std::unexpected{context.error()};
+            auto payload = package_internal::relocate_package_node(package, *node, *context);
+            if (!payload)
+              return std::unexpected{payload.error()};
+            auto normalized = normalized_payload_digest(*payload);
+            if (!normalized)
+              return std::unexpected{normalized.error()};
+            if (*normalized != object.normalized_sha256) {
+              return std::unexpected{
+                  transaction_error("relocated reused node differs from its planned identity")};
+            }
+            const auto partition = state.partitions.find(object.partition_index);
+            if (partition == state.partitions.end()) {
+              return std::unexpected{transaction_error("package import partition is invalid")};
+            }
+            if (auto replaced = replace_fixed_object_payload(state, partition->second,
+                                                             SfsId{*object.target_sfs_id},
+                                                             std::move(*payload), cancellation);
+                !replaced) {
+              return std::unexpected{replaced.error()};
+            }
+          }
+        }
+        ++completed;
+        if (progress) {
+          progress->report({ProgressPhase::writing, completed, plan.objects.size(),
+                            "reusing portable package object", output_path.string()});
+        }
+        continue;
+      }
+      const auto &package = packages[object.package_index];
+      const auto *node = package_node(package, object.node_id);
+      if (node == nullptr)
+        return std::unexpected{transaction_error("package import action node is missing")};
+      auto context = relocation_context(package, plan, object);
+      if (!context)
+        return std::unexpected{context.error()};
+      auto payload = package_internal::relocate_package_node(package, *node, *context);
+      if (!payload)
+        return std::unexpected{payload.error()};
+      auto normalized = normalized_payload_digest(*payload);
+      if (!normalized)
+        return std::unexpected{normalized.error()};
+      if (*normalized != object.normalized_sha256) {
+        return std::unexpected{
+            transaction_error("relocated package node differs from its planned identity")};
+      }
+      const auto partition = state.partitions.find(object.partition_index);
+      if (partition == state.partitions.end() || !object.target_sfs_id)
+        return std::unexpected{transaction_error("package import partition or SFS ID is invalid")};
+      auto &mutable_partition = partition->second;
+      auto allocated = allocate_record(mutable_partition, std::move(*payload), PayloadKind::object,
+                                       SfsId{*object.target_sfs_id});
+      if (!allocated)
+        return std::unexpected{allocated.error()};
+      const auto inserted = mutable_partition.inserted.find(SfsId{*object.target_sfs_id});
+      if (inserted == mutable_partition.inserted.end())
+        return std::unexpected{transaction_error("package insertion did not reserve its record")};
+      std::uint64_t payload_clusters{};
+      for (const auto &extent : inserted->second.extents)
+        payload_clusters += extent.cluster_count;
+      if (payload_clusters != object.payload_clusters ||
+          inserted->second.continuation_clusters.size() != object.continuation_clusters ||
+          allocated->second != object.payload_clusters + object.continuation_clusters) {
+        return std::unexpected{
+            transaction_error("actual package allocation differs from the import plan")};
+      }
+      auto directory = volume_category(state, mutable_partition, object.volume_name,
+                                       object.object_type, cancellation);
+      if (!directory)
+        return std::unexpected{directory.error()};
+      if (auto appended = append_directory_entry(state, mutable_partition, *directory,
+                                                 SfsId{*object.target_sfs_id},
+                                                 object.destination_name, cancellation);
+          !appended) {
+        return std::unexpected{appended.error()};
+      }
+      ++completed;
+      if (progress) {
+        progress->report({ProgressPhase::writing, completed, plan.objects.size(),
+                          "importing portable package object", output_path.string()});
+      }
+    }
+
+    std::set<std::tuple<std::uint8_t, SfsId, SfsId>> added_edges;
+    for (const auto &owner : plan.objects) {
+      const auto &package = packages[owner.package_index];
+      for (const auto &edge : package.relationships) {
+        if (edge.source_node_id != owner.node_id)
+          continue;
+        const auto *target = planned_node(plan, owner, edge.target_node_id);
+        if (target == nullptr || !owner.target_sfs_id || !target->target_sfs_id)
+          return std::unexpected{
+              transaction_error("package relationship lacks a planned SFS endpoint")};
+        const auto tuple = std::tuple{owner.partition_index, SfsId{*owner.target_sfs_id},
+                                      SfsId{*target->target_sfs_id}};
+        if (added_edges.emplace(tuple).second &&
+            !std::ranges::contains(state.known_edges,
+                                   std::tuple{PartitionIndex{owner.partition_index},
+                                              SfsId{*owner.target_sfs_id},
+                                              SfsId{*target->target_sfs_id}})) {
+          state.known_edges.emplace_back(PartitionIndex{owner.partition_index},
+                                         SfsId{*owner.target_sfs_id},
+                                         SfsId{*target->target_sfs_id});
+        }
+      }
+    }
+
+    const auto validator = [&](const std::filesystem::path &temporary) {
+      return validate_package_result(temporary, packages, plan, cancellation);
+    };
+    if (auto published = publish(state, output_path, cancellation, overwrite, validator);
+        !published) {
+      return std::unexpected{published.error()};
+    }
+    auto output_snapshot = file_snapshot_id(output_path, cancellation);
+    if (!output_snapshot)
+      return std::unexpected{output_snapshot.error()};
+    return PackageImportReport{target_path,
+                               output_path,
+                               plan.plan_id,
+                               plan.target_snapshot_id,
+                               std::move(*output_snapshot),
+                               true,
+                               plan.objects,
+                               plan.allocation};
+  } catch (const std::exception &error) {
+    return std::unexpected{
+        transaction_error(std::string{"package import callback failed: "} + error.what())};
+  } catch (...) {
+    return std::unexpected{transaction_error("package import callback failed")};
+  }
 }
 
 } // namespace axk

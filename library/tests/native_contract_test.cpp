@@ -19,6 +19,14 @@ nlohmann::json read_contract(const std::string &filename) {
   return nlohmann::json::parse(input);
 }
 
+nlohmann::json read_repository_json(const std::string &filename) {
+  const std::string path = std::string{AXK_SOURCE_ROOT} + '/' + filename;
+  std::ifstream input{path};
+  if (!input)
+    throw std::runtime_error{"cannot open repository JSON: " + path};
+  return nlohmann::json::parse(input);
+}
+
 } // namespace
 
 TEST(NativeContracts, HasCanonicalInventoryAndUniqueEntries) {
@@ -36,6 +44,29 @@ TEST(NativeContracts, HasCanonicalInventoryAndUniqueEntries) {
   EXPECT_EQ(profiles.size(), profile_set.size());
   EXPECT_TRUE(profile_set.contains("hds_geometry_v1"));
   EXPECT_TRUE(profile_set.contains("alteration_rename_v1"));
+  EXPECT_TRUE(profile_set.contains("fat12_yamaha_1440k_v1"));
+  EXPECT_TRUE(profile_set.contains("iso9660_yamaha_catalog_v1"));
+}
+
+TEST(NativeContracts, PinsTheBuildContractAndRetainedMediaCommands) {
+  const auto baseline = read_contract("baseline.json");
+  const auto build = baseline.at("build_contract");
+  EXPECT_EQ(build.at("cmake_minimum"), "3.28");
+  EXPECT_EQ(build.at("public_cpp_standard"), 17);
+  EXPECT_EQ(build.at("implementation_cpp_standard"), 23);
+  EXPECT_TRUE(build.at("warnings_as_errors").get<bool>());
+  const auto quality_commands = build.at("quality_commands").get<std::vector<std::string>>();
+  const std::set<std::string> quality_command_set{quality_commands.begin(), quality_commands.end()};
+  EXPECT_EQ(quality_commands.size(), quality_command_set.size());
+
+  const auto vcpkg = read_repository_json("vcpkg.json");
+  EXPECT_EQ(build.at("vcpkg_builtin_baseline"), vcpkg.at("builtin-baseline"));
+
+  const auto commands = baseline.at("commands").get<std::vector<std::string>>();
+  const std::set<std::string> command_set{commands.begin(), commands.end()};
+  EXPECT_TRUE(command_set.contains("create hds"));
+  EXPECT_TRUE(command_set.contains("create floppy"));
+  EXPECT_TRUE(command_set.contains("create iso"));
 }
 
 TEST(NativeContracts, UsesOnlyRelativeFixturePathsAndSha256Digests) {

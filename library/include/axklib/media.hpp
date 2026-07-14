@@ -130,6 +130,8 @@ public:
   [[nodiscard]] const std::string &volume_id() const noexcept;
   [[nodiscard]] const std::string &source_name() const noexcept;
   [[nodiscard]] const std::vector<IsoFile> &files() const noexcept;
+  [[nodiscard]] std::span<const std::pair<std::string, std::string>> group_labels() const noexcept;
+  [[nodiscard]] std::span<const std::pair<std::string, std::string>> volume_labels() const noexcept;
   [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
   [[nodiscard]] Result<std::vector<std::byte>>
   read_file(const IsoFile &file, const CancellationToken &cancellation = {}) const;

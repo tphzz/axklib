@@ -16,6 +16,7 @@ SUBCOMMANDS:
   coverage                    summarize current relationship coverage
   corpus                      run corpus-level workflows
   extract                     extract data from supported containers
+  package                     move self-contained sampler object graphs
   orphans                     classify physical waveform ownership as JSON
   validate                    validate container and sampler organization
   create                      create a fresh sampler container

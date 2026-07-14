@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -94,6 +95,34 @@ struct ExtractRequest {
   bool overwrite{};
   bool strict{};
   bool sfz{};
+};
+
+struct PackageExportRequest {
+  std::filesystem::path source;
+  std::vector<std::string> roots;
+  std::optional<std::uint32_t> partition_index;
+  std::string group_name;
+  std::string volume_name;
+  std::filesystem::path output;
+  std::string format{"summary"};
+  bool overwrite{};
+};
+
+struct PackageReadRequest {
+  std::filesystem::path package;
+  std::string format{"summary"};
+};
+
+struct PackageImportRequest {
+  std::filesystem::path target;
+  std::vector<std::filesystem::path> packages;
+  std::vector<std::string> destinations;
+  std::optional<std::filesystem::path> rename_map;
+  std::optional<std::filesystem::path> output;
+  std::string reuse_scope{"volume"};
+  std::string format{"summary"};
+  bool overwrite{};
+  bool apply{};
 };
 
 } // namespace axk::cli

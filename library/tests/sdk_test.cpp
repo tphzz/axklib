@@ -37,6 +37,8 @@ TEST(Sdk, PublicFacadeOwnsVersionResultAndMoveOnlySessions) {
   static_assert(sizeof(axk::image) <= sizeof(void *) * 2U);
   static_assert(sizeof(axk::snapshot) <= sizeof(void *) * 2U);
   static_assert(sizeof(axk::build_plan) <= sizeof(void *) * 2U);
+  static_assert(sizeof(axk::portable_package) <= sizeof(void *) * 2U);
+  static_assert(sizeof(axk::package_import_plan) <= sizeof(void *) * 2U);
   static_assert(sizeof(axk::transaction) <= sizeof(void *) * 2U);
   EXPECT_EQ(axk::sdk_version(), "0.1.0");
 
@@ -157,7 +159,12 @@ public:
 
 class ThrowingProgressSink final : public axk::progress_sink {
 public:
-  void report(const axk::progress_event &) override { throw std::runtime_error{"callback"}; }
+  void report(const axk::progress_event &) override {
+    ++calls;
+    throw std::runtime_error{"callback"};
+  }
+
+  std::uint64_t calls{};
 };
 
 TEST(Sdk, BuildAndTransactionPlansApplyThroughTheFacade) {
@@ -214,6 +221,117 @@ TEST(Sdk, MediaBuildPlanCreatesAFat12Image) {
   ASSERT_TRUE(plan->apply(output.string(), {}, context));
   EXPECT_EQ(std::filesystem::file_size(output), 1'474'560U);
 
+  std::filesystem::remove_all(root, filesystem_error);
+}
+
+TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
+  const auto root = std::filesystem::temp_directory_path() / "axklib-sdk-package";
+  const auto package_stem = root / "waveform";
+  const auto target_manifest = root / "target.json";
+  const auto target = root / "target.hds";
+  const auto imported = root / "imported.hds";
+  std::error_code filesystem_error;
+  std::filesystem::remove_all(root, filesystem_error);
+  std::filesystem::create_directories(root);
+
+  axk::operation_context context;
+  ThrowingProgressSink throwing_progress;
+  context.set_progress_sink(&throwing_progress);
+  auto source = axk::image::open(fixture_path().string(), context);
+  ASSERT_TRUE(source) << source.error().message;
+  auto objects = source->objects(0U, 64U, context);
+  ASSERT_TRUE(objects) << objects.error().message;
+  const auto waveform =
+      std::find_if(objects->items.begin(), objects->items.end(),
+                   [](const axk::object_info &item) { return item.type == "SMPL"; });
+  ASSERT_NE(waveform, objects->items.end());
+
+  axk::package_root_selector selector;
+  selector.kind = axk::package_root_kind::sample;
+  selector.partition_index = waveform->partition_index;
+  selector.group_name = waveform->partition_name;
+  selector.volume_name = waveform->volume_name;
+  selector.object_name = waveform->name;
+  selector.object_key = waveform->key;
+  auto exported = axk::portable_package::export_from(fixture_path().string(), {selector},
+                                                     package_stem.string(), {}, context);
+  ASSERT_TRUE(exported) << exported.error().message;
+  EXPECT_GT(throwing_progress.calls, 0U);
+  EXPECT_EQ(exported->package_kind, "smpl");
+  EXPECT_EQ(exported->required_extension, ".axksmpl");
+  EXPECT_EQ(std::filesystem::path{exported->output_path}.extension(), ".axksmpl");
+
+  auto package = axk::portable_package::open(exported->output_path, context);
+  ASSERT_TRUE(package) << package.error().message;
+  auto package_summary = package->summary();
+  ASSERT_TRUE(package_summary) << package_summary.error().message;
+  EXPECT_EQ(package_summary->package_id, exported->package_id);
+  EXPECT_EQ(package_summary->object_count, 1U);
+  EXPECT_FALSE(package_summary->payloads_verified);
+  EXPECT_TRUE(package->verify(context));
+
+  const std::string invalid_export_path = root.string() + "/invalid-\xc3\x28";
+  const auto invalid_export = axk::portable_package::export_from(
+      fixture_path().string(), {selector}, invalid_export_path, {}, context);
+  ASSERT_FALSE(invalid_export);
+  EXPECT_EQ(invalid_export.error().code, axk::error_code::invalid_argument);
+
+  std::ofstream{target_manifest}
+      << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"sample_banks":[]}]}]})";
+  auto target_plan = axk::build_plan::from_manifest(target_manifest.string(), context);
+  ASSERT_TRUE(target_plan) << target_plan.error().message;
+  ASSERT_TRUE(target_plan->apply(target.string(), {}, context));
+
+  axk::package_import_request request;
+  axk::package_root_destination destination;
+  destination.package_index = 0U;
+  destination.root_index = 0U;
+  destination.partition_index = 0U;
+  destination.volume_name = "Imported";
+  request.root_destinations.push_back(std::move(destination));
+  auto import_plan =
+      axk::package_import_plan::create(target.string(), {exported->output_path}, request, context);
+  ASSERT_TRUE(import_plan) << import_plan.error().message;
+  auto import_summary = import_plan->summary();
+  ASSERT_TRUE(import_summary) << import_summary.error().message;
+  if (!import_summary->valid) {
+    const auto conflicts = import_plan->conflicts();
+    ASSERT_TRUE(conflicts) << conflicts.error().message;
+    for (const auto &conflict : *conflicts)
+      ADD_FAILURE() << conflict.code << ": " << conflict.message;
+  }
+  EXPECT_TRUE(import_summary->valid);
+  EXPECT_EQ(import_summary->package_count, 1U);
+  EXPECT_EQ(import_summary->object_count, 1U);
+  auto actions = import_plan->actions();
+  ASSERT_TRUE(actions) << actions.error().message;
+  ASSERT_EQ(actions->size(), 1U);
+  EXPECT_NE(std::find(actions->front().actions.begin(), actions->front().actions.end(), "insert"),
+            actions->front().actions.end());
+
+  const std::string invalid_import_path = root.string() + "/invalid-\xc3\x28";
+  const auto invalid_apply = import_plan->apply(invalid_import_path, {}, context);
+  ASSERT_FALSE(invalid_apply);
+  EXPECT_EQ(invalid_apply.error().code, axk::error_code::invalid_argument);
+  EXPECT_FALSE(std::filesystem::exists(imported));
+
+  auto applied = import_plan->apply(imported.string(), {}, context);
+  ASSERT_TRUE(applied) << applied.error().message;
+  EXPECT_TRUE(applied->applied);
+  EXPECT_EQ(applied->object_count, 1U);
+  auto reopened = axk::image::open(imported.string(), context);
+  ASSERT_TRUE(reopened) << reopened.error().message;
+  auto imported_objects = reopened->objects(0U, 64U, context);
+  ASSERT_TRUE(imported_objects) << imported_objects.error().message;
+  EXPECT_NE(std::find_if(imported_objects->items.begin(), imported_objects->items.end(),
+                         [&](const axk::object_info &item) {
+                           return item.type == "SMPL" && item.name == waveform->name &&
+                                  item.volume_name == "Imported";
+                         }),
+            imported_objects->items.end());
+  EXPECT_GT(throwing_progress.calls, 2U);
+
+  context.set_progress_sink(nullptr);
   std::filesystem::remove_all(root, filesystem_error);
 }
 

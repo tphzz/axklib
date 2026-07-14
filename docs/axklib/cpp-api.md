@@ -14,6 +14,8 @@ Operations that can fail return axklib-owned `axk::result<T>` or
 | `snapshot` | Immutable paged inventory independent of the source handle |
 | `build_plan` | Validate and apply a fresh-HDS manifest |
 | `transaction` | Plan and apply an ordered alteration manifest |
+| `portable_package` | Export, inspect, and fully verify portable object packages |
+| `package_import_plan` | Plan and atomically apply a package import to a separate image |
 | `error` / `result<T>` | Owned failure and success values |
 
 Readers use bounded random-access I/O and accept a cancellation token. Immutable
@@ -34,9 +36,17 @@ synchronous, callbacks must return promptly, and exceptions thrown by a callback
 are contained and ignored. A callback must not destroy or move the context that
 is invoking it and must not call `set_progress_sink`. Detaching waits for an
 in-flight callback to return, after which the former sink may be destroyed.
-Snapshot reads are concurrent; `image`, `build_plan`,
-`transaction`, and context mutation require external serialization. Build plans
-and transactions are bound to their creating thread when applied.
+Snapshot reads are concurrent; `image`, `build_plan`, `transaction`,
+`portable_package`, `package_import_plan`, and context mutation require external
+serialization. Mutation plans are bound to their creating thread when applied.
+
+`portable_package::open()` performs bounded archive and manifest inspection. It
+does not read or hash payload bodies. `portable_package::verify()` performs the
+full payload, object-profile, graph-closure, identity, and relocation checks.
+`package_import_plan::create()` fully verifies all packages regardless of prior
+inspection and returns a complete conflict and allocation plan before opening a
+temporary output. See [Portable Object Packages](portable-packages.md) for the
+schema, target policies, and examples.
 
 Facade classes use PIMPL storage. Raw record, parser, allocation, codec, JSON,
 and transport types are not installed. Exceptions from the implementation are

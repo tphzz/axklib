@@ -138,7 +138,7 @@ namespace axk::detail {
 Result<void> write_fat12_image(const PreparedMediaImage &image,
                                const std::filesystem::path &temporary_path,
                                const CancellationToken &cancellation) {
-  if (image.objects.size() > 224U) {
+  if (image.objects.size() + image.retained_files.size() > 224U) {
     return std::unexpected{
         make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                    "FAT12 floppy profile supports at most 224 root-directory objects")};
@@ -162,6 +162,45 @@ Result<void> write_fat12_image(const PreparedMediaImage &image,
     return std::unexpected{fatfs_error("could not mount formatted FAT12 image", status)};
   }
 
+  std::set<std::string> filenames;
+  const auto write_file = [&](std::string_view filename,
+                              std::span<const std::byte> payload) -> Result<void> {
+    FIL file{};
+    auto write_status = f_open(&file, std::string{filename}.c_str(), FA_CREATE_NEW | FA_WRITE);
+    if (write_status == FR_OK) {
+      UINT written{};
+      write_status = f_write(&file, payload.data(), static_cast<UINT>(payload.size()), &written);
+      if (write_status == FR_OK && written != payload.size())
+        write_status = FR_DISK_ERR;
+      const auto close_status = f_close(&file);
+      if (write_status == FR_OK)
+        write_status = close_status;
+    }
+    if (write_status != FR_OK)
+      return std::unexpected{fatfs_error("could not write FAT12 file", write_status)};
+    return {};
+  };
+  for (const auto &retained : image.retained_files) {
+    if (const auto check = cancellation.check(); !check) {
+      f_mount(nullptr, "", 0);
+      reset_disk();
+      return std::unexpected{check.error()};
+    }
+    if (retained.path.empty() || retained.path.size() > 12U ||
+        retained.path.find_first_of("/\\") != std::string::npos ||
+        !filenames.insert(retained.path).second) {
+      f_mount(nullptr, "", 0);
+      reset_disk();
+      return std::unexpected{
+          make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                     "retained FAT12 files must be unique root-level 8.3 names")};
+    }
+    if (auto written = write_file(retained.path, retained.payload); !written) {
+      f_mount(nullptr, "", 0);
+      reset_disk();
+      return std::unexpected{written.error()};
+    }
+  }
   std::set<std::string> stems;
   for (std::size_t index = 0; index < image.objects.size(); ++index) {
     if (const auto check = cancellation.check(); !check) {
@@ -182,24 +221,24 @@ Result<void> write_fat12_image(const PreparedMediaImage &image,
                                           "FAT12 object names cannot be made unique")};
       }
     }
-    const auto filename =
-        stem + "." + std::to_string(1000U + static_cast<unsigned int>(index + 1U)).substr(1);
-    FIL file{};
-    status = f_open(&file, filename.c_str(), FA_CREATE_NEW | FA_WRITE);
-    if (status == FR_OK) {
-      UINT written{};
-      const auto &payload = image.objects[index].payload;
-      status = f_write(&file, payload.data(), static_cast<UINT>(payload.size()), &written);
-      if (status == FR_OK && written != payload.size())
-        status = FR_DISK_ERR;
-      const auto close_status = f_close(&file);
-      if (status == FR_OK)
-        status = close_status;
+    auto suffix_index = index + 1U;
+    auto filename =
+        stem + "." + std::to_string(1000U + static_cast<unsigned int>(suffix_index)).substr(1);
+    while (filenames.contains(filename) && suffix_index < 999U) {
+      ++suffix_index;
+      filename =
+          stem + "." + std::to_string(1000U + static_cast<unsigned int>(suffix_index)).substr(1);
     }
-    if (status != FR_OK) {
+    if (!filenames.insert(filename).second) {
       f_mount(nullptr, "", 0);
       reset_disk();
-      return std::unexpected{fatfs_error("could not write FAT12 object file", status)};
+      return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                        "FAT12 object filename space is exhausted")};
+    }
+    if (auto written = write_file(filename, image.objects[index].payload); !written) {
+      f_mount(nullptr, "", 0);
+      reset_disk();
+      return std::unexpected{written.error()};
     }
   }
   f_mount(nullptr, "", 0);

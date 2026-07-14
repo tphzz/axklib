@@ -11,6 +11,7 @@
 #include "axklib/alteration.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/relationship.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
 
@@ -154,6 +155,29 @@ void patch_record_byte(const std::filesystem::path &path, const axk::Partition &
   image.seekp(static_cast<std::streamoff>(absolute));
   image.put(static_cast<char>(value));
   ASSERT_TRUE(image);
+}
+
+void patch_record_be32(const std::filesystem::path &path, const axk::Partition &partition,
+                       const axk::IndexRecord &record, std::size_t payload_offset,
+                       std::uint32_t value) {
+  patch_record_byte(path, partition, record, payload_offset,
+                    static_cast<std::byte>((value >> 24U) & 0xffU));
+  patch_record_byte(path, partition, record, payload_offset + 1U,
+                    static_cast<std::byte>((value >> 16U) & 0xffU));
+  patch_record_byte(path, partition, record, payload_offset + 2U,
+                    static_cast<std::byte>((value >> 8U) & 0xffU));
+  patch_record_byte(path, partition, record, payload_offset + 3U,
+                    static_cast<std::byte>(value & 0xffU));
+}
+
+void patch_record_name(const std::filesystem::path &path, const axk::Partition &partition,
+                       const axk::IndexRecord &record, std::size_t payload_offset,
+                       std::string_view name) {
+  ASSERT_LE(name.size(), 16U);
+  for (std::size_t index = 0; index < 16U; ++index) {
+    patch_record_byte(path, partition, record, payload_offset + index,
+                      index < name.size() ? static_cast<std::byte>(name[index]) : std::byte{' '});
+  }
 }
 
 } // namespace
@@ -528,6 +552,123 @@ TEST(Alteration, WaveformDeletionRequiresPriorSampleBankDeletion) {
     ]})");
   ASSERT_TRUE(accepted);
   ASSERT_TRUE(axk::alter_hds(source, *accepted, output));
+  std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, VolumeDeletionRejectsKnownCrossVolumeWaveformDependency) {
+  const auto root =
+      std::filesystem::temp_directory_path() / "axklib-alteration-cross-volume-waveform";
+  const auto audio = root / "tone.wav";
+  const auto source = root / "source.hds";
+  const auto shared = root / "shared.hds";
+  std::error_code error;
+  std::filesystem::remove_all(root, error);
+  std::filesystem::create_directories(root);
+  ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+
+  axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+  axk::VolumeSpec volume_a;
+  volume_a.name = "Volume A";
+  volume_a.waveforms.push_back({"shared-a", "Shared Wave", audio, 60U, {}});
+  axk::SampleBankSpec bank_a;
+  bank_a.name = "Bank A";
+  bank_a.waveform_id = "shared-a";
+  bank_a.root_key = 60U;
+  bank_a.key_high = 127U;
+  volume_a.sample_banks.push_back(std::move(bank_a));
+  axk::VolumeSpec volume_b;
+  volume_b.name = "Volume B";
+  volume_b.waveforms.push_back({"unused-b", "Unused Wave", audio, 60U, {}});
+  axk::SampleBankSpec bank_b_spec;
+  bank_b_spec.name = "Bank B";
+  bank_b_spec.waveform_id = "unused-b";
+  bank_b_spec.root_key = 67U;
+  bank_b_spec.key_high = 127U;
+  volume_b.sample_banks.push_back(std::move(bank_b_spec));
+  manifest.partitions.push_back({"hd1", {std::move(volume_a), std::move(volume_b)}});
+  ASSERT_TRUE(axk::write_hds_image(manifest, source));
+
+  const auto container = axk::open_image(source);
+  ASSERT_TRUE(container) << container.error().message;
+  const auto catalog = axk::build_object_catalog(*container);
+  ASSERT_TRUE(catalog) << catalog.error().message;
+  const auto sample_a = std::ranges::find_if(catalog->objects, [](const auto &object) {
+    return object.placement && object.placement->volume_name == "Volume A" &&
+           object.object.header.type == axk::ObjectType::smpl &&
+           object.object.header.name == "Shared Wave";
+  });
+  const auto bank_b = std::ranges::find_if(catalog->objects, [](const auto &object) {
+    return object.placement && object.placement->volume_name == "Volume B" &&
+           object.object.header.type == axk::ObjectType::sbnk &&
+           object.object.header.name == "Bank B";
+  });
+  const auto sample_b = std::ranges::find_if(catalog->objects, [](const auto &object) {
+    return object.placement && object.placement->volume_name == "Volume B" &&
+           object.object.header.type == axk::ObjectType::smpl &&
+           object.object.header.name == "Unused Wave";
+  });
+  ASSERT_NE(sample_a, catalog->objects.end());
+  ASSERT_NE(bank_b, catalog->objects.end());
+  ASSERT_NE(sample_b, catalog->objects.end());
+  const auto *decoded_sample = std::get_if<axk::CurrentSmpl>(&sample_a->object.payload);
+  ASSERT_NE(decoded_sample, nullptr);
+  const auto &partition = container->partitions().front();
+  const auto record_b =
+      std::ranges::find(partition.records, bank_b->sfs_id, &axk::IndexRecord::sfs_id);
+  const auto sample_record_b =
+      std::ranges::find(partition.records, sample_b->sfs_id, &axk::IndexRecord::sfs_id);
+  ASSERT_NE(record_b, partition.records.end());
+  ASSERT_NE(sample_record_b, partition.records.end());
+  const auto disposable_link = decoded_sample->link_id.value + 1U;
+  patch_record_be32(source, partition, *sample_record_b, 0x6cU, disposable_link - 0xbaU);
+  patch_record_be32(source, partition, *sample_record_b, 0x78U, disposable_link);
+  patch_record_name(source, partition, *record_b, 0x78U, "Shared Wave");
+  patch_record_be32(source, partition, *record_b, 0xa0U, decoded_sample->link_id.value);
+
+  const auto remove_duplicate = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"wave","type":"delete_waveform","partition_index":0,
+       "volume_name":"Volume B","waveform_name":"Unused Wave"}
+    ]})");
+  ASSERT_TRUE(remove_duplicate);
+  const auto removed_duplicate = axk::alter_hds(source, *remove_duplicate, shared);
+  ASSERT_TRUE(removed_duplicate) << removed_duplicate.error().message;
+
+  const auto reopened = axk::open_image(shared);
+  ASSERT_TRUE(reopened) << reopened.error().message;
+  const auto shared_catalog = axk::build_object_catalog(*reopened);
+  ASSERT_TRUE(shared_catalog) << shared_catalog.error().message;
+  EXPECT_EQ(std::ranges::count_if(shared_catalog->objects,
+                                  [](const auto &object) {
+                                    return object.object.header.type == axk::ObjectType::smpl &&
+                                           object.object.header.name == "Shared Wave";
+                                  }),
+            1);
+  const auto graph = axk::build_relationship_graph(*shared_catalog);
+  const auto cross_volume = std::ranges::find_if(graph.relationships, [&](const auto &relation) {
+    if (relation.type != "SBNK_LEFT_MEMBER_TO_SMPL" ||
+        relation.quality != axk::RelationshipQuality::known || !relation.target_key)
+      return false;
+    const auto source_object =
+        std::ranges::find(shared_catalog->objects, relation.source_key, &axk::ObjectSnapshot::key);
+    const auto target_object =
+        std::ranges::find(shared_catalog->objects, *relation.target_key, &axk::ObjectSnapshot::key);
+    return source_object != shared_catalog->objects.end() && source_object->placement &&
+           source_object->placement->volume_name == "Volume B" &&
+           target_object != shared_catalog->objects.end() && target_object->placement &&
+           target_object->placement->volume_name == "Volume A";
+  });
+  ASSERT_NE(cross_volume, graph.relationships.end());
+
+  const auto delete_owner = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"volume","type":"delete_volume","partition_index":0,
+       "volume_name":"Volume A"}
+    ]})");
+  ASSERT_TRUE(delete_owner);
+  const auto rejected = axk::alter_hds(shared, *delete_owner);
+  ASSERT_FALSE(rejected);
+  EXPECT_EQ(rejected.error().message, "a known object relationship crosses the volume closure");
   std::filesystem::remove_all(root, error);
 }
 

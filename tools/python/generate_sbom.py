@@ -39,8 +39,10 @@ def package(
 def dependency_name(value: object) -> str:
     if isinstance(value, str):
         return value
-    if isinstance(value, dict) and isinstance(value.get("name"), str):
-        return value["name"]
+    if isinstance(value, dict):
+        name = value.get("name")
+        if isinstance(name, str):
+            return name
     raise ValueError("vcpkg dependency has no name")
 
 

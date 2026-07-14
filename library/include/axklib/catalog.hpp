@@ -30,6 +30,7 @@ struct ObjectSnapshot {
   std::string scope_key;
   DecodedObject object;
   std::optional<ObjectPlacement> placement;
+  std::vector<std::byte> raw_payload{};
 };
 
 struct CatalogIssue {

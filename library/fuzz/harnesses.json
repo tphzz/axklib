@@ -15,6 +15,7 @@
     {"target":"fat_record","source":"media_record_fuzz.cpp","corpus":"fat_record","parser":"FAT12 BPB, FAT, root directory, and object enumeration","envelope":"valid 1.44 MB FAT12 image with mutated root directory","maximum_input_bytes":4194304,"invariants":["bounded object enumeration","no chain loop"]},
     {"target":"iso_record","source":"media_record_fuzz.cpp","corpus":"iso_record","parser":"ISO9660 descriptor and root directory enumeration","envelope":"valid minimal ISO9660 descriptor with mutated root directory","maximum_input_bytes":4194304,"invariants":["bounded extent reads","bounded object enumeration"]},
     {"target":"build_manifest","source":"manifest_parser_fuzz.cpp","corpus":"build_manifest","parser":"parse_hds_build_manifest","envelope":"none","maximum_input_bytes":4194304,"invariants":["typed result","no output publication"]},
-    {"target":"transaction","source":"manifest_parser_fuzz.cpp","corpus":"transaction","parser":"parse_alteration_manifest","envelope":"none","maximum_input_bytes":4194304,"invariants":["typed result","no output publication"]}
+    {"target":"transaction","source":"manifest_parser_fuzz.cpp","corpus":"transaction","parser":"parse_alteration_manifest","envelope":"none","maximum_input_bytes":4194304,"invariants":["typed result","no output publication"]},
+    {"target":"package_archive","source":"package_archive_fuzz.cpp","corpus":"package_archive","parser":"bounded package ZIP inspection, full archive parsing, and portable-package verification","envelope":"none","maximum_input_bytes":4194304,"invariants":["bounded metadata reads","typed success or failure","no file publication"]}
   ]
 }

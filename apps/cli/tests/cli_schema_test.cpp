@@ -9,12 +9,14 @@
 #include "schema/info_v1.hpp"
 #include "schema/objects_v1.hpp"
 #include "schema/operations_v1.hpp"
+#include "schema/package_v1.hpp"
 #include "schema/semantic_v1.hpp"
 
 namespace schema = axk::cli::schema::operations_v1;
 namespace info_schema = axk::cli::schema::info_v1;
 namespace export_schema = axk::cli::schema::export_v1;
 namespace object_schema = axk::cli::schema::objects_v1;
+namespace package_schema = axk::cli::schema::package_v1;
 namespace semantic_schema = axk::cli::schema::semantic_v1;
 
 TEST(CliSchema, ObjectRelationshipTreeAndExportSummarySchemasStayParseable) {
@@ -209,4 +211,69 @@ TEST(CliSchema, SerializationRejectsInvalidInternalUtf8) {
       .object_key = std::string{"\xc3\x28", 2U}, .frame_count = 0U, .bins = {}};
   const auto serialized = schema::serialize(output, false);
   EXPECT_FALSE(serialized);
+}
+
+TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
+  EXPECT_EQ(package_schema::schema_version, "1.0");
+  package_schema::PackageOutput package{
+      .path_utf8 = "portable/Bank.axksbnk",
+      .package_id = "digest",
+      .package_kind = "sbnk",
+      .required_extension = ".axksbnk",
+      .source_media_kind = "sfs",
+      .valid = true,
+      .payloads_verified = false,
+      .relationship_count = std::numeric_limits<std::uint64_t>::max(),
+      .roots = {{"sbnk", "Bank", {"node"}}},
+      .objects = {{"node", "SBNK", "Bank", "payload", "normalized", std::nullopt, std::nullopt}},
+      .issues = {},
+  };
+  const auto serialized_package = package_schema::serialize(package, false);
+  ASSERT_TRUE(serialized_package);
+  const auto package_json = nlohmann::json::parse(*serialized_package);
+  EXPECT_EQ(package_json["package_kind"], "sbnk");
+  EXPECT_EQ(package_json["required_extension"], ".axksbnk");
+  EXPECT_FALSE(package_json["payloads_verified"]);
+  EXPECT_TRUE(package_json["objects"][0]["semantic_sha256"].is_null());
+  EXPECT_TRUE(package_json["objects"][0]["audio_sha256"].is_null());
+  EXPECT_EQ(package_json["relationship_count"], std::numeric_limits<std::uint64_t>::max());
+
+  package_schema::PlanOutput plan{
+      .target_path_utf8 = "target.hds",
+      .package_paths_utf8 = {"portable/Bank.axksbnk"},
+      .plan_id = "plan",
+      .target_kind = "sfs",
+      .target_snapshot_id = "snapshot",
+      .valid = true,
+      .warnings = {},
+      .conflicts = {{"TEST", "conflict", std::nullopt, std::nullopt, "digest", "node", std::nullopt,
+                     "", "Volume", "", ""}},
+      .objects = {{"action",
+                   0U,
+                   0U,
+                   "digest",
+                   "node",
+                   "SBNK",
+                   "Bank",
+                   "Bank",
+                   0U,
+                   "",
+                   "Volume",
+                   "",
+                   "",
+                   {"insert"},
+                   std::nullopt,
+                   std::nullopt,
+                   std::nullopt}},
+      .allocation = {},
+      .result = std::nullopt,
+  };
+  const auto serialized_plan = package_schema::serialize(plan, false);
+  ASSERT_TRUE(serialized_plan);
+  const auto plan_json = nlohmann::json::parse(*serialized_plan);
+  EXPECT_TRUE(plan_json["conflicts"][0]["package_index"].is_null());
+  EXPECT_TRUE(plan_json["conflicts"][0]["partition_index"].is_null());
+  EXPECT_TRUE(plan_json["objects"][0]["canonical_action_id"].is_null());
+  EXPECT_TRUE(plan_json["objects"][0]["target_sfs_id"].is_null());
+  EXPECT_TRUE(plan_json["result"].is_null());
 }

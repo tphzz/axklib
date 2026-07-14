@@ -184,6 +184,39 @@ Result<void> validate_written_image(const detail::PreparedMediaImage &prepared,
     return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
                                       "written media object payloads failed reopen validation")};
   }
+  if (prepared.manifest.format == MediaImageFormat::fat12_floppy) {
+    const auto &fat = std::get<FatImage>(media->storage());
+    for (const auto &retained : prepared.retained_files) {
+      const auto found = std::ranges::find(fat.files(), retained.path, &FatFile::path);
+      if (found == fat.files().end()) {
+        return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                          "retained FAT12 file is absent after rebuild")};
+      }
+      const auto payload = fat.read_file(*found, cancellation);
+      if (!payload)
+        return std::unexpected{payload.error()};
+      if (*payload != retained.payload) {
+        return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                          "retained FAT12 file changed during rebuild")};
+      }
+    }
+  } else {
+    const auto &iso = std::get<IsoImage>(media->storage());
+    for (const auto &retained : prepared.retained_files) {
+      const auto found = std::ranges::find(iso.files(), retained.path, &IsoFile::path);
+      if (found == iso.files().end() || found->is_directory) {
+        return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                          "retained ISO9660 file is absent after rebuild")};
+      }
+      const auto payload = iso.read_file(*found, cancellation);
+      if (!payload)
+        return std::unexpected{payload.error()};
+      if (*payload != retained.payload) {
+        return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                          "retained ISO9660 file changed during rebuild")};
+      }
+    }
+  }
   return {};
 }
 
@@ -205,21 +238,19 @@ detail::prepare_media_image(const MediaBuildManifest &manifest,
     return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                       "media image must contain at least one Yamaha object")};
   }
-  return PreparedMediaImage{manifest, std::move(*objects)};
+  return PreparedMediaImage{manifest, std::move(*objects), {}, {}};
 }
 
-Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
-                                            const std::filesystem::path &output_path,
-                                            bool overwrite, const CancellationToken &cancellation) {
+Result<WrittenMediaImage> detail::write_prepared_media_image(
+    const PreparedMediaImage &prepared, const std::filesystem::path &output_path, bool overwrite,
+    const CancellationToken &cancellation,
+    const std::function<Result<void>(const std::filesystem::path &)> &validator) {
   if (const auto check = cancellation.check(); !check)
     return std::unexpected{check.error()};
   if (!overwrite && std::filesystem::exists(output_path)) {
     return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                       "fresh media output already exists")};
   }
-  auto prepared = detail::prepare_media_image(manifest, cancellation);
-  if (!prepared)
-    return std::unexpected{prepared.error()};
   std::error_code filesystem_error;
   if (!output_path.parent_path().empty())
     std::filesystem::create_directories(output_path.parent_path(), filesystem_error);
@@ -231,13 +262,17 @@ Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
   if (!temporary)
     return std::unexpected{temporary.error()};
   TemporaryFileCleanup cleanup{*temporary};
-  const auto written = manifest.format == MediaImageFormat::fat12_floppy
-                           ? detail::write_fat12_image(*prepared, *temporary, cancellation)
-                           : detail::write_iso9660_image(*prepared, *temporary, cancellation);
+  const auto written = prepared.manifest.format == MediaImageFormat::fat12_floppy
+                           ? write_fat12_image(prepared, *temporary, cancellation)
+                           : write_iso9660_image(prepared, *temporary, cancellation);
   if (!written)
     return std::unexpected{written.error()};
-  if (auto validated = validate_written_image(*prepared, *temporary, cancellation); !validated)
+  if (auto validated = validate_written_image(prepared, *temporary, cancellation); !validated)
     return std::unexpected{validated.error()};
+  if (validator) {
+    if (auto validated = validator(*temporary); !validated)
+      return std::unexpected{validated.error()};
+  }
   const auto size = std::filesystem::file_size(*temporary, filesystem_error);
   if (filesystem_error) {
     return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
@@ -252,7 +287,16 @@ Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
                                       "could not publish fresh media output")};
   }
   cleanup.release();
-  return WrittenMediaImage{output_path, manifest.format, size, prepared->objects.size()};
+  return WrittenMediaImage{output_path, prepared.manifest.format, size, prepared.objects.size()};
+}
+
+Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
+                                            const std::filesystem::path &output_path,
+                                            bool overwrite, const CancellationToken &cancellation) {
+  auto prepared = detail::prepare_media_image(manifest, cancellation);
+  if (!prepared)
+    return std::unexpected{prepared.error()};
+  return detail::write_prepared_media_image(*prepared, output_path, overwrite, cancellation);
 }
 
 } // namespace axk

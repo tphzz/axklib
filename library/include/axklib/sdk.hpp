@@ -50,6 +50,8 @@ private:
   std::unique_ptr<impl> impl_;
   friend class image;
   friend class build_plan;
+  friend class portable_package;
+  friend class package_import_plan;
   friend class transaction;
 };
 
@@ -148,7 +150,153 @@ struct plan_summary {
   bool applies_changes{};
 };
 
+enum class package_root_kind : std::uint8_t {
+  volume,
+  program,
+  bank_group,
+  sample_bank,
+  sample,
+  sequence
+};
+
+enum class package_waveform_reuse_scope : std::uint8_t { volume, hardware_proven_partition };
+
+struct package_root_selector {
+  package_root_kind kind{package_root_kind::volume};
+  std::optional<std::uint32_t> partition_index;
+  std::string group_name;
+  std::string volume_name;
+  std::string object_name;
+  std::optional<std::string> object_key;
+};
+
+struct package_export_summary {
+  std::string output_path;
+  std::string package_id;
+  std::string package_kind;
+  std::string required_extension;
+  std::uint64_t size_bytes{};
+};
+
+struct package_summary {
+  std::string schema_version;
+  std::string package_id;
+  std::string package_kind;
+  std::string required_extension;
+  std::string source_media_kind;
+  std::uint64_t root_count{};
+  std::uint64_t object_count{};
+  std::uint64_t relationship_count{};
+  std::uint64_t issue_count{};
+  bool payloads_verified{};
+};
+
+struct package_issue_info {
+  std::string code;
+  std::string message;
+  bool fatal{};
+};
+
+struct package_root_destination {
+  std::uint64_t package_index{};
+  std::uint64_t root_index{};
+  std::optional<std::uint32_t> partition_index;
+  std::string group_name;
+  std::string volume_name;
+  std::string raw_group;
+  std::string raw_volume;
+  bool create_destination{};
+};
+
+struct package_node_rename {
+  std::uint64_t package_index{};
+  std::string node_id;
+  std::string destination_name;
+};
+
+struct package_import_request {
+  std::vector<package_root_destination> root_destinations;
+  std::vector<package_node_rename> renames;
+  package_waveform_reuse_scope sfs_waveform_reuse_scope{package_waveform_reuse_scope::volume};
+};
+
+struct package_conflict_info {
+  std::string code;
+  std::string message;
+  std::optional<std::uint64_t> package_index;
+  std::optional<std::uint64_t> root_index;
+  std::string package_id;
+  std::string node_id;
+  std::optional<std::uint32_t> partition_index;
+  std::string group_name;
+  std::string volume_name;
+  std::string raw_group;
+  std::string raw_volume;
+};
+
+struct package_action_info {
+  std::string action_id;
+  std::uint64_t package_index{};
+  std::uint64_t root_index{};
+  std::string package_id;
+  std::string node_id;
+  std::string object_type;
+  std::string source_name;
+  std::string destination_name;
+  std::uint32_t partition_index{};
+  std::string group_name;
+  std::string volume_name;
+  std::string raw_group;
+  std::string raw_volume;
+  std::vector<std::string> actions;
+  std::optional<std::string> canonical_action_id;
+  std::optional<std::uint32_t> target_sfs_id;
+  std::optional<std::uint32_t> target_link_id;
+};
+
+struct package_allocation_info {
+  std::uint32_t partition_index{};
+  std::string group_name;
+  std::string volume_name;
+  std::string raw_group;
+  std::string raw_volume;
+  std::uint64_t inserted_object_count{};
+  std::uint64_t reused_object_count{};
+  std::uint64_t payload_clusters{};
+  std::uint64_t payload_sectors{};
+  std::uint64_t continuation_clusters{};
+  std::uint64_t directory_growth_bytes{};
+  std::uint64_t remaining_object_ids{};
+  std::uint64_t remaining_clusters{};
+  std::uint64_t projected_image_sectors{};
+  std::uint64_t projected_image_size_bytes{};
+};
+
+struct package_import_summary {
+  std::string schema_version;
+  std::string plan_id;
+  std::string target_kind;
+  std::string target_snapshot_id;
+  std::uint64_t package_count{};
+  std::uint64_t destination_count{};
+  std::uint64_t object_count{};
+  std::uint64_t conflict_count{};
+  std::uint64_t warning_count{};
+  bool valid{};
+};
+
+struct package_import_result {
+  std::string output_path;
+  std::string plan_id;
+  std::string source_snapshot_id;
+  std::string output_snapshot_id;
+  std::uint64_t object_count{};
+  bool applied{};
+};
+
 class snapshot;
+class portable_package;
+class package_import_plan;
 
 class AXK_SDK_API image final {
 public:
@@ -183,6 +331,57 @@ private:
   struct impl;
   std::unique_ptr<impl> impl_;
   friend class snapshot;
+};
+
+class AXK_SDK_API portable_package final {
+public:
+  portable_package();
+  ~portable_package();
+  portable_package(portable_package &&) noexcept;
+  portable_package &operator=(portable_package &&) noexcept;
+  portable_package(const portable_package &) = delete;
+  portable_package &operator=(const portable_package &) = delete;
+
+  static result<portable_package> open(const std::string &utf8_path, operation_context &context);
+  static result<package_export_summary> export_from(const std::string &utf8_source_path,
+                                                    const std::vector<package_root_selector> &roots,
+                                                    const std::string &utf8_output_path,
+                                                    const write_options &options,
+                                                    operation_context &context);
+  result<package_summary> summary() const;
+  result<std::vector<package_issue_info>> issues() const;
+  result<void> verify(operation_context &context) const;
+
+private:
+  struct impl;
+  std::unique_ptr<impl> impl_;
+  friend class package_import_plan;
+};
+
+class AXK_SDK_API package_import_plan final {
+public:
+  package_import_plan();
+  ~package_import_plan();
+  package_import_plan(package_import_plan &&) noexcept;
+  package_import_plan &operator=(package_import_plan &&) noexcept;
+  package_import_plan(const package_import_plan &) = delete;
+  package_import_plan &operator=(const package_import_plan &) = delete;
+
+  static result<package_import_plan> create(const std::string &utf8_target_path,
+                                            const std::vector<std::string> &utf8_package_paths,
+                                            const package_import_request &request,
+                                            operation_context &context);
+  result<package_import_summary> summary() const;
+  result<std::vector<package_issue_info>> warnings() const;
+  result<std::vector<package_conflict_info>> conflicts() const;
+  result<std::vector<package_action_info>> actions() const;
+  result<std::vector<package_allocation_info>> allocation() const;
+  result<package_import_result> apply(const std::string &utf8_output_path,
+                                      const write_options &options, operation_context &context);
+
+private:
+  struct impl;
+  std::unique_ptr<impl> impl_;
 };
 
 class AXK_SDK_API snapshot final {

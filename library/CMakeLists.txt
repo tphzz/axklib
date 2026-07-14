@@ -68,6 +68,10 @@ add_library(
   src/media_iso9660.cpp
   src/media_yamaha.cpp
   src/object.cpp
+  src/package.cpp
+  src/package_archive.cpp
+  src/package_import.cpp
+  src/package_relocation.cpp
   src/relationship.cpp
   src/report.cpp
   src/semantic.cpp
@@ -191,6 +195,23 @@ if(AXK_BUILD_SHARED_SDK)
   axk_set_project_warnings(axklib_shared)
   axk_enable_sanitizers(axklib_shared)
   axk_enable_coverage(axklib_shared)
+
+  # This is a compile contract rather than a runtime test. Keep it available
+  # when BUILD_TESTING is off so cross-compiled release jobs still prove that
+  # every installed SDK header is consumable as C++17.
+  add_library(axk_sdk_header_tests OBJECT
+    tests/sdk_header_test.cpp
+    tests/sdk_result_header_test.cpp
+    tests/sdk_export_header_test.cpp
+    tests/sdk_version_header_test.cpp
+  )
+  target_compile_features(axk_sdk_header_tests PRIVATE cxx_std_17)
+  target_include_directories(axk_sdk_header_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/include"
+  )
+  set_target_properties(axk_sdk_header_tests PROPERTIES CXX_EXTENSIONS OFF)
+  axk_set_project_warnings(axk_sdk_header_tests)
 endif()
 
 if(AXK_BUILD_FUZZERS)
@@ -230,6 +251,7 @@ if(AXK_BUILD_FUZZERS)
   target_compile_definitions(axk_build_manifest_fuzz PRIVATE AXK_FUZZ_MANIFEST_KIND=0)
   axk_add_fuzzer(transaction manifest_parser_fuzz.cpp)
   target_compile_definitions(axk_transaction_fuzz PRIVATE AXK_FUZZ_MANIFEST_KIND=1)
+  axk_add_fuzzer(package_archive package_archive_fuzz.cpp)
 
   add_custom_target(fuzz-local)
   get_property(fuzz_targets GLOBAL PROPERTY AXK_FUZZ_TARGETS)
@@ -311,6 +333,8 @@ if(BUILD_TESTING)
     tests/media_iso9660_test.cpp
     tests/media_yamaha_test.cpp
     tests/object_test.cpp
+    tests/package_archive_test.cpp
+    tests/package_test.cpp
     tests/report_test.cpp
     tests/sfs_test.cpp
     tests/utf8_test.cpp
@@ -330,22 +354,19 @@ if(BUILD_TESTING)
     axk_core_tests
     PRIVATE axklib::audio axk_test_support GTest::gtest_main SndFile::sndfile
   )
+  if(UNIX)
+    find_program(AXK_TEST_ISOINFO NAMES isoinfo)
+    find_program(AXK_TEST_XORRISO NAMES xorriso)
+    if(AXK_TEST_ISOINFO)
+      target_compile_definitions(axk_core_tests PRIVATE AXK_TEST_ISOINFO="${AXK_TEST_ISOINFO}")
+    endif()
+    if(AXK_TEST_XORRISO)
+      target_compile_definitions(axk_core_tests PRIVATE AXK_TEST_XORRISO="${AXK_TEST_XORRISO}")
+    endif()
+  endif()
   if(AXK_BUILD_SHARED_SDK)
     target_sources(axk_core_tests PRIVATE tests/sdk_test.cpp)
     target_link_libraries(axk_core_tests PRIVATE axklib::axklib)
-    add_library(axk_sdk_header_tests OBJECT
-      tests/sdk_header_test.cpp
-      tests/sdk_result_header_test.cpp
-      tests/sdk_export_header_test.cpp
-      tests/sdk_version_header_test.cpp
-    )
-    target_compile_features(axk_sdk_header_tests PRIVATE cxx_std_17)
-    target_include_directories(axk_sdk_header_tests PRIVATE
-      "${CMAKE_CURRENT_SOURCE_DIR}/include"
-      "${CMAKE_CURRENT_BINARY_DIR}/generated/include"
-    )
-    set_target_properties(axk_sdk_header_tests PROPERTIES CXX_EXTENSIONS OFF)
-    axk_set_project_warnings(axk_sdk_header_tests)
   endif()
   axk_set_project_warnings(axk_core_tests)
   axk_enable_sanitizers(axk_core_tests)

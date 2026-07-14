@@ -4,6 +4,13 @@ Treat disk images, object files, manifests, and audio imports as untrusted input
 The library bounds reads, validates arithmetic, rejects path traversal and unsafe
 names, and uses temporary files for destination replacement.
 
+Portable-package inspection reads only bounded ZIP metadata and
+`manifest.json`; it deliberately reports that payloads are not verified. Full
+verification streams every declared payload, checks its digest, decodes its
+object profile, and validates graph closure and relocation bindings. Import
+always performs full verification. Archive path rules and hard limits are
+specified in [Portable Object Packages](portable-packages.md).
+
 Applications should:
 
 - set reasonable object and output limits for their workflow;

@@ -23,6 +23,7 @@ TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
   ASSERT_TRUE(catalog);
   ASSERT_EQ(catalog->objects.size(), 1U);
   EXPECT_EQ(catalog->objects[0].placement->volume_name, "FAT root");
+  EXPECT_EQ(catalog->objects[0].raw_payload, objects->front().raw_payload);
   const auto graph = axk::build_relationship_graph(*catalog);
   auto plan = axk::build_export_plan(media, *catalog, graph);
   ASSERT_TRUE(plan);

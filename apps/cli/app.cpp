@@ -155,6 +155,73 @@ int axk::cli::run(int argc, char **argv) {
       extract->add_subcommand("sfz", "export targeted WAVs and generate SFZ files");
   configure_extract(*extract_sfz_nested, extract_sfz_request);
 
+  axk::cli::PackageExportRequest package_export_request;
+  axk::cli::PackageReadRequest package_inspect_request;
+  axk::cli::PackageReadRequest package_verify_request;
+  axk::cli::PackageImportRequest package_plan_request;
+  axk::cli::PackageImportRequest package_import_request;
+  package_import_request.apply = true;
+  auto *package = app.add_subcommand("package", "move self-contained sampler object graphs");
+  auto *package_export = package->add_subcommand("export", "export one portable package");
+  package_export->add_option("source", package_export_request.source, "source sampler image")
+      ->required();
+  package_export
+      ->add_option("--root", package_export_request.roots,
+                   "root selector: volume or program|sbac|sbnk|smpl|sequence=NAME")
+      ->required()
+      ->expected(1, -1);
+  package_export->add_option("--partition", package_export_request.partition_index,
+                             "numeric source partition index");
+  package_export->add_option("--group", package_export_request.group_name,
+                             "source partition or CD-ROM group label");
+  package_export->add_option("--volume", package_export_request.volume_name, "source volume label");
+  package_export
+      ->add_option("-o,--output", package_export_request.output,
+                   "package filename or suffix-free stem")
+      ->required();
+  package_export->add_option("--format", package_export_request.format, "summary or json")
+      ->check(CLI::IsMember({"summary", "json"}));
+  package_export->add_flag("--overwrite", package_export_request.overwrite,
+                           "replace an existing package atomically");
+
+  const auto configure_package_read = [](CLI::App &command, axk::cli::PackageReadRequest &request) {
+    command.add_option("package", request.package, "portable package file")->required();
+    command.add_option("--format", request.format, "summary or json")
+        ->check(CLI::IsMember({"summary", "json"}));
+  };
+  auto *package_inspect = package->add_subcommand("inspect", "inspect and verify a package");
+  configure_package_read(*package_inspect, package_inspect_request);
+  auto *package_verify = package->add_subcommand("verify", "verify a package");
+  configure_package_read(*package_verify, package_verify_request);
+
+  const auto configure_package_import = [](CLI::App &command,
+                                           axk::cli::PackageImportRequest &request) {
+    command.add_option("target", request.target, "target sampler image")->required();
+    command.add_option("packages", request.packages, "portable package files")
+        ->required()
+        ->expected(1, -1);
+    command
+        .add_option("--destination", request.destinations,
+                    "JSON destination object with package, root, and sampler scope")
+        ->required()
+        ->expected(1, -1);
+    command.add_option("--rename-map", request.rename_map, "JSON array of explicit node renames");
+    command
+        .add_option("--reuse-scope", request.reuse_scope,
+                    "SFS waveform reuse scope: volume or hardware-proven-partition")
+        ->check(CLI::IsMember({"volume", "hardware-proven-partition"}));
+    command.add_option("--format", request.format, "summary or json")
+        ->check(CLI::IsMember({"summary", "json"}));
+  };
+  auto *package_plan = package->add_subcommand("plan-import", "plan a package import");
+  configure_package_import(*package_plan, package_plan_request);
+  auto *package_import = package->add_subcommand("import", "atomically import packages");
+  configure_package_import(*package_import, package_import_request);
+  package_import->add_option("-o,--output", package_import_request.output, "output sampler image")
+      ->required();
+  package_import->add_flag("--overwrite", package_import_request.overwrite,
+                           "atomically replace an existing output image");
+
   std::filesystem::path tree_path;
   bool tree_pretty = false;
   bool include_default_programs = false;
@@ -289,6 +356,16 @@ int axk::cli::run(int argc, char **argv) {
     return run_extract_request(extract_wav_request);
   if (*extract_sfz_nested)
     return run_extract_request(extract_sfz_request);
+  if (*package_export)
+    return run_package_export(package_export_request);
+  if (*package_inspect)
+    return run_package_inspect(package_inspect_request, false);
+  if (*package_verify)
+    return run_package_inspect(package_verify_request, true);
+  if (*package_plan)
+    return run_package_import(package_plan_request);
+  if (*package_import)
+    return run_package_import(package_import_request);
   if (*tree)
     return run_tree(tree_path, tree_pretty, include_default_programs);
   if (*orphans)

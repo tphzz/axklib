@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <format>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <set>
+#include <tuple>
 
 namespace axk::detail {
 namespace {
@@ -172,66 +175,236 @@ void append_path_record(std::vector<std::byte> &table, const IsoNode &node,
 
 } // namespace
 
+Result<std::uint32_t> checked_iso9660_sector_count(std::size_t directory_count,
+                                                   std::span<const std::uint64_t> file_sizes) {
+  constexpr std::uint64_t initial_sector_count = 20U;
+  constexpr std::uint64_t maximum_sector_count = std::numeric_limits<std::uint32_t>::max();
+  if (directory_count > maximum_sector_count - initial_sector_count) {
+    return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                      "ISO9660 sector count exceeds the 32-bit extent profile")};
+  }
+  auto sectors = initial_sector_count + directory_count;
+  for (const auto size : file_sizes) {
+    const auto whole = size / sector_size;
+    const auto remainder = size % sector_size == 0U ? 0U : 1U;
+    if (whole > maximum_sector_count - remainder ||
+        whole + remainder > maximum_sector_count - sectors) {
+      return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                        "ISO9660 sector count exceeds the 32-bit extent profile")};
+    }
+    sectors += whole + remainder;
+  }
+  return static_cast<std::uint32_t>(sectors);
+}
+
 Result<void> write_iso9660_image(const PreparedMediaImage &image,
                                  const std::filesystem::path &temporary_path,
                                  const CancellationToken &cancellation) {
   const auto &manifest = image.manifest;
-  if (!iso_identifier(manifest.raw_group, 8U) || manifest.raw_volume.size() != 4U ||
-      manifest.raw_volume[0] != 'F' ||
-      !std::ranges::all_of(std::string_view{manifest.raw_volume}.substr(1),
-                           [](unsigned char value) { return std::isdigit(value) != 0; }) ||
-      manifest.raw_volume == "F000" || !iso_identifier(manifest.iso_volume_id, 32U) ||
-      manifest.group_name.empty() || manifest.group_name.size() > 16U ||
-      manifest.volume_name.empty() || manifest.volume_name.size() > 16U) {
+  if (!iso_identifier(manifest.iso_volume_id, 32U)) {
     return std::unexpected{
         make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                   "ISO9660 writer requires uppercase ISO identifiers, an F001..F999 volume, "
-                   "and bounded Yamaha menu labels")};
+                   "ISO9660 writer requires an uppercase ISO volume identifier")};
+  }
+
+  std::vector<PreparedIsoVolume> volumes = image.iso_volumes;
+  if (volumes.empty()) {
+    volumes.push_back({manifest.raw_group, manifest.group_name, manifest.raw_volume,
+                       manifest.volume_name, image.objects});
+  }
+  if (volumes.empty())
+    return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                      "ISO9660 writer requires at least one Yamaha volume")};
+  std::ranges::sort(volumes, [](const auto &left, const auto &right) {
+    return std::tie(left.raw_group, left.raw_volume) < std::tie(right.raw_group, right.raw_volume);
+  });
+
+  std::map<std::string, std::vector<const PreparedIsoVolume *>, std::less<>> groups;
+  std::set<std::pair<std::string, std::string>> volume_ids;
+  std::map<std::string, std::string, std::less<>> group_labels;
+  for (const auto &volume : volumes) {
+    if (!iso_identifier(volume.raw_group, 8U) || volume.raw_volume.size() != 4U ||
+        volume.raw_volume[0] != 'F' || volume.raw_volume == "F000" ||
+        !std::ranges::all_of(std::string_view{volume.raw_volume}.substr(1),
+                             [](unsigned char value) { return std::isdigit(value) != 0; }) ||
+        volume.group_name.empty() || volume.group_name.size() > 16U || volume.volume_name.empty() ||
+        volume.volume_name.size() > 16U ||
+        !volume_ids.emplace(volume.raw_group, volume.raw_volume).second) {
+      return std::unexpected{
+          make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                     "ISO9660 writer requires unique uppercase groups, F001..F999 volumes, and "
+                     "bounded Yamaha menu labels")};
+    }
+    const auto [label, inserted] = group_labels.emplace(volume.raw_group, volume.group_name);
+    if (!inserted && label->second != volume.group_name) {
+      return std::unexpected{make_error(
+          ErrorCode::manifest_invalid, ErrorCategory::manifest,
+          "ISO9660 volumes in one raw group must share one sampler-visible group label")};
+    }
+    groups[volume.raw_group].push_back(&volume);
+  }
+  for (const auto &[raw_group, group_volumes] : groups) {
+    for (std::size_t index = 0; index < group_volumes.size(); ++index) {
+      if (group_volumes[index]->raw_volume != std::format("F{:03}", index + 1U)) {
+        return std::unexpected{
+            make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                       std::format("ISO9660 raw group '{}' must use contiguous volumes F001..Fnnn",
+                                   raw_group))};
+      }
+    }
   }
 
   std::vector<IsoNode> nodes{{"", true, 0, {}, 0}};
-  const auto add_directory = [&](std::string name, std::size_t parent) {
+  const auto add_directory = [&](std::string name, std::size_t parent) -> Result<std::size_t> {
+    if (!iso_identifier(name, 31U)) {
+      return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                        "ISO9660 path component is outside the narrow profile")};
+    }
+    if (std::ranges::find_if(nodes, [&](const auto &node) {
+          return node.parent == parent && node.name == name;
+        }) != nodes.end()) {
+      return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                        "duplicate ISO9660 path")};
+    }
     nodes.push_back({std::move(name), true, 0, {}, parent});
     return nodes.size() - 1U;
   };
-  const auto add_file = [&](std::string name, std::vector<std::byte> data, std::size_t parent) {
-    nodes.push_back({std::move(name), false, 0, std::move(data), parent});
-  };
-  const auto group = add_directory(manifest.raw_group, 0);
-  const auto group_label_number =
-      static_cast<unsigned int>(std::stoul(manifest.raw_volume.substr(1))) + 1U;
-  if (group_label_number > 999U) {
-    return std::unexpected{
-        make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                   "ISO9660 writer cannot place a group label after volume F999")};
-  }
-  const auto group_label_filename = "F" + std::to_string(1000U + group_label_number).substr(1);
-  auto group_catalog = catalog_record(manifest.volume_name, manifest.raw_volume);
-  const auto name_record = disk_name_record(group_label_filename);
-  group_catalog.insert(group_catalog.end(), name_record.begin(), name_record.end());
-  add_file("0000", std::move(group_catalog), group);
-  const auto volume = add_directory(manifest.raw_volume, group);
-  add_file(group_label_filename, label_file(manifest.group_name), group);
-
-  std::map<std::string, std::vector<const PreparedMediaObject *>> categories;
-  for (const auto &object : image.objects)
-    categories[category(object.type)].push_back(&object);
-  for (const auto &[name, objects] : categories) {
-    const auto category_node = add_directory(name, volume);
-    std::vector<std::byte> catalog_bytes;
-    std::vector<std::string> filenames;
-    catalog_bytes.reserve(objects.size() * 32U);
-    filenames.reserve(objects.size());
-    for (std::size_t index = 0; index < objects.size(); ++index) {
-      auto filename = "F" + std::to_string(1001U + static_cast<unsigned int>(index)).substr(1);
-      const auto record = catalog_record(objects[index]->name, filename);
-      catalog_bytes.insert(catalog_bytes.end(), record.begin(), record.end());
-      filenames.push_back(std::move(filename));
+  const auto add_file = [&](std::string name, std::vector<std::byte> data,
+                            std::size_t parent) -> Result<void> {
+    if (!iso_identifier(name, 31U) || std::ranges::find_if(nodes, [&](const auto &node) {
+                                        return node.parent == parent && node.name == name;
+                                      }) != nodes.end()) {
+      return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                        "invalid or duplicate ISO9660 file path")};
     }
-    add_file("0000", std::move(catalog_bytes), category_node);
-    for (std::size_t index = 0; index < objects.size(); ++index)
-      add_file(std::move(filenames[index]), objects[index]->payload, category_node);
+    nodes.push_back({std::move(name), false, 0, std::move(data), parent});
+    return {};
+  };
+  const auto find_child = [&](std::size_t parent,
+                              std::string_view name) -> std::optional<std::size_t> {
+    for (std::size_t index = 1U; index < nodes.size(); ++index) {
+      if (nodes[index].parent == parent && nodes[index].name == name)
+        return index;
+    }
+    return std::nullopt;
+  };
+  const auto ensure_directory = [&](std::string_view path) -> Result<std::size_t> {
+    std::size_t parent{};
+    std::size_t begin{};
+    while (begin < path.size()) {
+      const auto end = path.find('/', begin);
+      const auto component =
+          path.substr(begin, end == std::string_view::npos ? path.size() - begin : end - begin);
+      if (component.empty()) {
+        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                          "ISO9660 retained path contains an empty component")};
+      }
+      if (const auto child = find_child(parent, component); child) {
+        if (!nodes[*child].directory) {
+          return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                            "ISO9660 retained path collides with a file")};
+        }
+        parent = *child;
+      } else {
+        auto created = add_directory(std::string{component}, parent);
+        if (!created)
+          return std::unexpected{created.error()};
+        parent = *created;
+      }
+      if (end == std::string_view::npos)
+        break;
+      begin = end + 1U;
+    }
+    return parent;
+  };
+
+  for (const auto &[raw_group, group_volumes] : groups) {
+    auto group = add_directory(raw_group, 0U);
+    if (!group)
+      return std::unexpected{group.error()};
+    std::vector<std::byte> group_catalog;
+    for (const auto *volume : group_volumes) {
+      const auto record = catalog_record(volume->volume_name, volume->raw_volume);
+      group_catalog.insert(group_catalog.end(), record.begin(), record.end());
+    }
+    const auto group_label_filename = std::format("F{:03}", group_volumes.size() + 1U);
+    const auto name_record = disk_name_record(group_label_filename);
+    group_catalog.insert(group_catalog.end(), name_record.begin(), name_record.end());
+    if (auto added = add_file("0000", std::move(group_catalog), *group); !added)
+      return std::unexpected{added.error()};
+    std::vector<std::pair<const PreparedIsoVolume *, std::size_t>> volume_nodes;
+    volume_nodes.reserve(group_volumes.size());
+    for (const auto *volume : group_volumes) {
+      auto volume_node = add_directory(volume->raw_volume, *group);
+      if (!volume_node)
+        return std::unexpected{volume_node.error()};
+      volume_nodes.emplace_back(volume, *volume_node);
+    }
+    if (auto added = add_file(group_label_filename, label_file(group_labels.at(raw_group)), *group);
+        !added) {
+      return std::unexpected{added.error()};
+    }
+    for (const auto &[volume, volume_node] : volume_nodes) {
+      std::map<std::string, std::vector<const PreparedMediaObject *>> categories;
+      for (const auto &object : volume->objects)
+        categories[category(object.type)].push_back(&object);
+      for (auto &[name, objects] : categories) {
+        std::ranges::sort(objects, [](const auto *left, const auto *right) {
+          return std::tuple{left->name, left->payload.size()} <
+                 std::tuple{right->name, right->payload.size()};
+        });
+        auto category_node = add_directory(name, volume_node);
+        if (!category_node)
+          return std::unexpected{category_node.error()};
+        std::vector<std::byte> catalog_bytes;
+        std::vector<std::string> filenames;
+        catalog_bytes.reserve(objects.size() * 32U);
+        filenames.reserve(objects.size());
+        for (std::size_t index = 0; index < objects.size(); ++index) {
+          auto filename = std::format("F{:03}", index + 1U);
+          const auto record = catalog_record(objects[index]->name, filename);
+          catalog_bytes.insert(catalog_bytes.end(), record.begin(), record.end());
+          filenames.push_back(std::move(filename));
+        }
+        if (auto added = add_file("0000", std::move(catalog_bytes), *category_node); !added)
+          return std::unexpected{added.error()};
+        for (std::size_t index = 0; index < objects.size(); ++index) {
+          if (auto added =
+                  add_file(std::move(filenames[index]), objects[index]->payload, *category_node);
+              !added) {
+            return std::unexpected{added.error()};
+          }
+        }
+      }
+    }
   }
+
+  for (const auto &retained : image.retained_files) {
+    const auto separator = retained.path.rfind('/');
+    const auto parent_path = separator == std::string::npos
+                                 ? std::string_view{}
+                                 : std::string_view{retained.path}.substr(0, separator);
+    const auto name = separator == std::string::npos
+                          ? std::string_view{retained.path}
+                          : std::string_view{retained.path}.substr(separator + 1U);
+    auto parent = ensure_directory(parent_path);
+    if (!parent)
+      return std::unexpected{parent.error()};
+    if (auto added = add_file(std::string{name}, retained.payload, *parent); !added)
+      return std::unexpected{added.error()};
+  }
+
+  std::vector<std::uint64_t> file_sizes;
+  file_sizes.reserve(nodes.size());
+  for (const auto &node : nodes) {
+    if (!node.directory)
+      file_sizes.push_back(node.data.size());
+  }
+  const auto directory_count =
+      static_cast<std::size_t>(std::ranges::count(nodes, true, &IsoNode::directory));
+  const auto sector_count = checked_iso9660_sector_count(directory_count, file_sizes);
+  if (!sector_count)
+    return std::unexpected{sector_count.error()};
 
   constexpr std::uint32_t little_path_sector = 18;
   constexpr std::uint32_t big_path_sector = 19;
@@ -244,9 +417,14 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image,
     if (node.directory)
       continue;
     node.sector = next_sector;
-    next_sector += static_cast<std::uint32_t>((node.data.size() + sector_size - 1U) / sector_size);
+    next_sector += static_cast<std::uint32_t>(node.data.size() / sector_size +
+                                              (node.data.size() % sector_size == 0U ? 0U : 1U));
   }
-  std::vector<std::byte> image_bytes(static_cast<std::size_t>(next_sector) * sector_size);
+  if (next_sector != *sector_count) {
+    return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
+                                      "ISO9660 sector projection disagrees with allocation")};
+  }
+  std::vector<std::byte> image_bytes(static_cast<std::size_t>(*sector_count) * sector_size);
 
   std::vector<std::size_t> directory_indices;
   for (std::size_t index = 0; index < nodes.size(); ++index) {
@@ -262,6 +440,10 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image,
     const auto parent_number = index == 0 ? std::uint16_t{1} : path_numbers.at(nodes[index].parent);
     append_path_record(little_path, nodes[index], parent_number, false);
     append_path_record(big_path, nodes[index], parent_number, true);
+  }
+  if (little_path.size() > sector_size || big_path.size() > sector_size) {
+    return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                      "ISO9660 path table exceeds the narrow one-sector profile")};
   }
   std::ranges::copy(little_path, image_bytes.begin() + little_path_sector * sector_size);
   std::ranges::copy(big_path, image_bytes.begin() + big_path_sector * sector_size);
