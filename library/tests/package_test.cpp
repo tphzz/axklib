@@ -885,9 +885,11 @@ TEST(PortablePackage, RejectsWrongOutputSuffixAndPreservesExistingTarget) {
     const auto rejected = axk::export_portable_package(media, roots, target, false);
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, axk::ErrorCode::io_open_failed);
-    std::ifstream existing{target, std::ios::binary};
-    const std::string retained{std::istreambuf_iterator<char>{existing}, {}};
-    EXPECT_EQ(retained, "preserve-me");
+    {
+        std::ifstream existing{target, std::ios::binary};
+        const std::string retained{std::istreambuf_iterator<char>{existing}, {}};
+        EXPECT_EQ(retained, "preserve-me");
+    }
 
     const auto replaced = axk::export_portable_package(media, roots, target, true);
     ASSERT_TRUE(replaced) << replaced.error().message;
