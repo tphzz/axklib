@@ -118,8 +118,8 @@ The native GitHub workflow combines those components into one distribution per
 target. Windows publishes a ZIP, Linux publishes a compressed tar archive, and
 macOS publishes one universal ZIP containing both the self-contained CLI and
 the shared SDK development files. Development archives use a Git-derived source
-identity such as `axklib-main-a1b2c3d-linux-x64`; validated `v0.1.0` tag builds
-use the concise `axklib-0.1.0-linux-x64` form while retaining the tag and commit
+identity such as `axklib-main-a1b2c3d-linux-x64`; validated `v1.2.3` tag builds
+use the concise `axklib-1.2.3-linux-x64` form while retaining the tag and commit
 inside the binaries. Debug archives add `-debug`. See
 [Versioning and build identity](docs/axklib/versioning.md) for the complete
 contract.

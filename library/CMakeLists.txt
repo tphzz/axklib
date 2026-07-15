@@ -24,9 +24,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
       "axklib library vcpkg manifest features" FORCE)
   unset(_axk_vcpkg_features)
 
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkProjectVersion.cmake")
+  axk_derive_project_version("${AXK_REPOSITORY_ROOT}")
+
   project(
     axklib_library
-    VERSION 0.1.0
+    VERSION ${AXK_PROJECT_VERSION}
     DESCRIPTION "Yamaha A-series disk image and sampler object library"
     LANGUAGES CXX
   )
@@ -49,16 +52,22 @@ include(cmake/AxkWarnings.cmake)
 set(AXK_BUILD_INFO_CPP "${CMAKE_CURRENT_BINARY_DIR}/generated/src/build_info.cpp")
 set(AXK_PACKAGE_BASENAME_FILE "${CMAKE_BINARY_DIR}/package_basename.txt")
 set(AXK_BUILD_INFO_MODULE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkGitBuildInfo.cmake")
+set(AXK_PROJECT_VERSION_MODULE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkProjectVersion.cmake")
 set(AXK_BUILD_INFO_GENERATOR "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateBuildInfo.cmake")
 set(AXK_BUILD_INFO_TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_info.cpp.in")
+set(AXK_VERSION_METADATA_FILE "${CMAKE_BINARY_DIR}/version_metadata.json")
 set(_axk_build_info_command
   "${CMAKE_COMMAND}"
   "-DAXK_VERSION_SOURCE_DIR=${AXK_REPOSITORY_ROOT}"
   "-DAXK_VERSION_PRODUCT_NAME=axklib"
   "-DAXK_VERSION_MODULE=${AXK_BUILD_INFO_MODULE}"
+  "-DAXK_VERSION_PROJECT_MODULE=${AXK_PROJECT_VERSION_MODULE}"
   "-DAXK_VERSION_TEMPLATE=${AXK_BUILD_INFO_TEMPLATE}"
   "-DAXK_VERSION_OUTPUT_CPP=${AXK_BUILD_INFO_CPP}"
   "-DAXK_VERSION_OUTPUT_PACKAGE=${AXK_PACKAGE_BASENAME_FILE}"
+  "-DAXK_VERSION_OUTPUT_METADATA=${AXK_VERSION_METADATA_FILE}"
+  "-DAXK_VERSION_EXPECTED_SEMANTIC=${AXK_SEMANTIC_VERSION}"
+  "-DAXK_VERSION_EXPECTED_PROJECT=${AXK_PROJECT_VERSION}"
   -P "${AXK_BUILD_INFO_GENERATOR}"
 )
 execute_process(COMMAND ${_axk_build_info_command} RESULT_VARIABLE _axk_build_info_result)
@@ -69,6 +78,7 @@ add_custom_target(
   axk_generate_build_info ALL
   COMMAND ${_axk_build_info_command}
   BYPRODUCTS "${AXK_BUILD_INFO_CPP}" "${AXK_PACKAGE_BASENAME_FILE}"
+             "${AXK_VERSION_METADATA_FILE}"
   VERBATIM
 )
 unset(_axk_build_info_command)
@@ -126,7 +136,9 @@ if(AXK_BUILD_BENCHMARKS)
 endif()
 target_include_directories(
   axk_core
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/internal"
+  PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/internal"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/include"
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -332,8 +344,17 @@ if(BUILD_TESTING)
       "-DAXK_BUILD_INFO_GENERATOR=${AXK_BUILD_INFO_GENERATOR}"
       "-DAXK_BUILD_INFO_MODULE=${AXK_BUILD_INFO_MODULE}"
       "-DAXK_BUILD_INFO_TEMPLATE=${AXK_BUILD_INFO_TEMPLATE}"
+      "-DAXK_PROJECT_VERSION_MODULE=${AXK_PROJECT_VERSION_MODULE}"
       "-DAXK_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/generated-build-info-test"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestBuildInfoGeneration.cmake"
+  )
+  add_test(
+    NAME Version.ProjectVersion
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DAXK_PROJECT_VERSION_MODULE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkProjectVersion.cmake"
+      "-DAXK_TEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/project-version-test"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestProjectVersion.cmake"
   )
   file(READ "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/baseline.json" _axk_contract_baseline)
   string(JSON _axk_fixture_count LENGTH "${_axk_contract_baseline}" fixtures)

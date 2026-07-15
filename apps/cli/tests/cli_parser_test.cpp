@@ -117,12 +117,12 @@ TEST(Cli11Adapter, ReportsSemanticAndSourceVersionsSeparately) {
     EXPECT_EQ(output, expected);
 }
 
-TEST(Cli11Adapter, ShowsSourceIdentityInDefaultBanner) {
+TEST(Cli11Adapter, ShowsVersionAndSourceIdentityInDefaultBanner) {
     testing::internal::CaptureStdout();
     EXPECT_EQ(run_cli({"axklib"}), 0);
     const auto output = normalize_newlines(testing::internal::GetCapturedStdout());
-    const auto expected_prefix =
-        std::string{"axklib ("} + axk::current_build_info().source_identity + ")\n\naxklib [OPTIONS] [SUBCOMMANDS]\n";
+    const auto expected_prefix = std::string{"axklib "} + std::string{axk::version()} + " (" +
+                                 axk::current_build_info().source_identity + ")\n\naxklib [OPTIONS] [SUBCOMMANDS]\n";
     EXPECT_EQ(output.substr(0U, expected_prefix.size()), expected_prefix);
 }
 
@@ -157,9 +157,13 @@ TEST(Cli11Adapter, ExposesOnlyMaintainedCommandInventory) {
     std::ifstream stream{fixture, std::ios::binary};
     ASSERT_TRUE(stream);
     std::string expected{std::istreambuf_iterator<char>{stream}, {}};
-    const auto marker = expected.find("@AXK_SOURCE_IDENTITY@");
-    ASSERT_NE(marker, std::string::npos);
-    expected.replace(marker, std::string{"@AXK_SOURCE_IDENTITY@"}.size(), axk::current_build_info().source_identity);
+    const auto version_marker = expected.find("@AXK_VERSION@");
+    ASSERT_NE(version_marker, std::string::npos);
+    expected.replace(version_marker, std::string{"@AXK_VERSION@"}.size(), axk::version());
+    const auto identity_marker = expected.find("@AXK_SOURCE_IDENTITY@");
+    ASSERT_NE(identity_marker, std::string::npos);
+    expected.replace(identity_marker, std::string{"@AXK_SOURCE_IDENTITY@"}.size(),
+                     axk::current_build_info().source_identity);
     EXPECT_EQ(normalize_newlines(output), normalize_newlines(expected));
 }
 

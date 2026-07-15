@@ -3,10 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include "axklib/sdk/version.hpp"
 #include "axklib/version.hpp"
 
 TEST(Version, KeepsSemanticVersionSeparateFromSourceIdentity) {
-    EXPECT_EQ(axk::version(), std::string_view{"0.1.0"});
+    EXPECT_EQ(axk::version(), std::string_view{axk::version_string});
     const auto build = axk::current_build_info();
     ASSERT_NE(build.source_identity, nullptr);
     ASSERT_NE(build.package_basename, nullptr);

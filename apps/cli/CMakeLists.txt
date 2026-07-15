@@ -24,9 +24,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
       "axklib CLI vcpkg manifest features" FORCE)
   unset(_axk_vcpkg_features)
 
+  include("${AXK_REPOSITORY_ROOT}/library/cmake/AxkProjectVersion.cmake")
+  axk_derive_project_version("${AXK_REPOSITORY_ROOT}")
+
   project(
     axklib_cli_project
-    VERSION 0.1.0
+    VERSION ${AXK_PROJECT_VERSION}
     DESCRIPTION "Standalone Yamaha A-series disk image command-line tool"
     LANGUAGES CXX
   )

@@ -1,4 +1,5 @@
 #include "axklib/sdk.hpp"
+#include "axklib/sdk/version.hpp"
 #include "axklib/version.hpp"
 
 #include <algorithm>
@@ -39,7 +40,8 @@ TEST(Sdk, PublicFacadeOwnsVersionResultAndMoveOnlySessions) {
     static_assert(sizeof(axk::portable_package) <= sizeof(void *) * 2U);
     static_assert(sizeof(axk::package_import_plan) <= sizeof(void *) * 2U);
     static_assert(sizeof(axk::transaction) <= sizeof(void *) * 2U);
-    EXPECT_EQ(axk::sdk_version(), "0.1.0");
+    EXPECT_EQ(axk::sdk_version(), axk::version_string);
+    EXPECT_EQ(axk::sdk_version(), axk::version());
     const auto sdk_build = axk::sdk_build_info();
     const auto core_build = axk::current_build_info();
     EXPECT_STREQ(sdk_build.source_identity, core_build.source_identity);

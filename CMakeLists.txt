@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.28)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/library/cmake/AxkVcpkgDefaults.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/library/cmake/AxkProjectVersion.cmake")
+axk_derive_project_version("${CMAKE_CURRENT_SOURCE_DIR}")
 
 # These options must exist before project() loads the vcpkg toolchain. They
 # select manifest features without making CLI or test dependencies part of a
@@ -22,7 +24,7 @@ unset(_axk_vcpkg_features)
 
 project(
   axklib
-  VERSION 0.1.0
+  VERSION ${AXK_PROJECT_VERSION}
   DESCRIPTION "Yamaha A-series disk image and sampler object library"
   LANGUAGES CXX
 )
@@ -70,7 +72,7 @@ endif()
 
 set(CPACK_PACKAGE_NAME "axklib")
 set(CPACK_PACKAGE_VENDOR "axklib contributors")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_VERSION "${AXK_SEMANTIC_VERSION}")
 set(CPACK_PACKAGE_FILE_NAME
     "${_axk_package_basename}-${_axk_package_platform}-${_axk_package_processor}${_axk_package_debug_suffix}")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")

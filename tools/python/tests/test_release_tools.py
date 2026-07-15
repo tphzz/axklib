@@ -9,6 +9,32 @@ import pytest
 import generate_sbom
 import inspect_package
 import release_metadata
+import version_metadata
+
+
+def metadata(
+    semantic_version: str = "0.0.0",
+    project_version: str = "0.0.0",
+    release_tag: str = "",
+    *,
+    is_prerelease: bool = False,
+) -> version_metadata.VersionMetadata:
+    major, minor, patch = (int(value) for value in project_version.split("."))
+    return version_metadata.VersionMetadata(
+        schema_version=1,
+        semantic_version=semantic_version,
+        project_version=project_version,
+        major=major,
+        minor=minor,
+        patch=patch,
+        release_tag=release_tag,
+        is_release=bool(release_tag),
+        is_prerelease=is_prerelease,
+    )
+
+
+def write_metadata(path: Path, value: version_metadata.VersionMetadata) -> None:
+    path.write_text(json.dumps(value.__dict__) + "\n", encoding="utf-8")
 
 
 def test_sbom_includes_base_cli_and_test_dependencies(
@@ -16,9 +42,19 @@ def test_sbom_includes_base_cli_and_test_dependencies(
 ) -> None:
     root = Path(__file__).resolve().parents[3]
     output = tmp_path / "sbom.json"
+    version_file = tmp_path / "version.json"
+    write_metadata(version_file, metadata("1.2.3-rc.1", "1.2.3", "v1.2.3-rc.1", is_prerelease=True))
     monkeypatch.setattr(
         "sys.argv",
-        ["generate_sbom.py", "--axklib-root", str(root), "--output", str(output)],
+        [
+            "generate_sbom.py",
+            "--axklib-root",
+            str(root),
+            "--version-metadata-file",
+            str(version_file),
+            "--output",
+            str(output),
+        ],
     )
     assert generate_sbom.main() == 0
     document = json.loads(output.read_text(encoding="utf-8"))
@@ -28,7 +64,7 @@ def test_sbom_includes_base_cli_and_test_dependencies(
     assert sndfile["versionInfo"].startswith("1.2.2")
     assert sndfile["licenseDeclared"] == "LGPL-2.1-or-later"
     axklib = next(item for item in document["packages"] if item["name"] == "axklib")
-    assert axklib["versionInfo"] == "0.1.0"
+    assert axklib["versionInfo"] == "1.2.3-rc.1"
     assert document["name"] == "axklib-workspace-release"
     assert document["documentNamespace"].startswith(
         "https://github.com/tphzz/axklib/spdx/"
@@ -40,6 +76,8 @@ def test_sdk_sbom_excludes_cli_and_test_only_dependencies(
 ) -> None:
     root = Path(__file__).resolve().parents[3]
     output = tmp_path / "sdk.json"
+    version_file = tmp_path / "version.json"
+    write_metadata(version_file, metadata())
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -48,6 +86,8 @@ def test_sdk_sbom_excludes_cli_and_test_only_dependencies(
             str(root),
             "--profile",
             "sdk",
+            "--version-metadata-file",
+            str(version_file),
             "--output",
             str(output),
         ],
@@ -58,16 +98,11 @@ def test_sdk_sbom_excludes_cli_and_test_only_dependencies(
     assert names.isdisjoint({"cli11", "hash-library", "gtest"})
 
 
-def test_project_version_rejects_manifest_drift(tmp_path: Path) -> None:
-    (tmp_path / "CMakeLists.txt").write_text(
-        "project(\n  axklib\n  VERSION 1.2.3\n  LANGUAGES CXX\n)\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "vcpkg.json").write_text(
-        json.dumps({"version-semver": "1.2.4"}), encoding="utf-8"
-    )
-    with pytest.raises(ValueError, match="version mismatch"):
-        generate_sbom.project_version(tmp_path)
+def test_version_metadata_rejects_inconsistent_values(tmp_path: Path) -> None:
+    path = tmp_path / "version.json"
+    write_metadata(path, metadata("1.2.3", "1.2.4", "v1.2.3"))
+    with pytest.raises(ValueError, match="numeric core"):
+        version_metadata.read(path)
 
 
 def test_sbom_timestamp_and_namespace_are_reproducible(
@@ -125,29 +160,30 @@ def test_release_metadata_uses_source_identity_and_debug_suffix(tmp_path: Path) 
     package_file.write_text("axklib-feature-audio-a1b2c3d\n", encoding="utf-8")
     package = release_metadata.read_package_basename(package_file)
     release = release_metadata.artifact_metadata(
-        package, "0.1.0", "branch", "feature/audio", "linux-x64", "Release"
+        package, metadata(), "branch", "feature/audio", "linux-x64", "Release"
     )
     debug = release_metadata.artifact_metadata(
-        package, "0.1.0", "branch", "feature/audio", "windows-arm64", "Debug"
+        package, metadata(), "branch", "feature/audio", "windows-arm64", "Debug"
     )
     assert release.artifact_stem == "axklib-feature-audio-a1b2c3d-linux-x64"
     assert debug.artifact_stem == "axklib-feature-audio-a1b2c3d-windows-arm64-debug"
 
 
 def test_release_metadata_shortens_only_exact_project_tag() -> None:
-    metadata = release_metadata.artifact_metadata(
-        "axklib-v0.1.0-a1b2c3d",
-        "0.1.0",
+    version = metadata("1.2.3-rc.1+build.4", "1.2.3", "v1.2.3-rc.1+build.4", is_prerelease=True)
+    artifact = release_metadata.artifact_metadata(
+        "axklib-v1.2.3-rc.1-build.4-a1b2c3d",
+        version,
         "tag",
-        "v0.1.0",
+        "v1.2.3-rc.1+build.4",
         "macos-universal",
         "Release",
     )
-    assert metadata.artifact_stem == "axklib-0.1.0-macos-universal"
-    with pytest.raises(ValueError, match="release tag must be v0.1.0"):
+    assert artifact.artifact_stem == "axklib-1.2.3-rc.1+build.4-macos-universal"
+    with pytest.raises(ValueError, match="release tag must be v1.2.3-rc.1[+]build.4"):
         release_metadata.artifact_metadata(
             "axklib-nightly-a1b2c3d",
-            "0.1.0",
+            version,
             "tag",
             "nightly",
             "linux-arm64",
@@ -156,7 +192,7 @@ def test_release_metadata_shortens_only_exact_project_tag() -> None:
 
 
 def test_release_target_uses_preview_for_branches_and_preserves_tags() -> None:
-    branch = release_metadata.draft_release_target("branch", "features/packages")
+    branch = release_metadata.draft_release_target("branch", "features/packages", metadata())
     assert branch == release_metadata.DraftReleaseTarget(
         tag_name="features/packages-preview",
         title="features/packages-preview",
@@ -164,18 +200,21 @@ def test_release_target_uses_preview_for_branches_and_preserves_tags() -> None:
         verify_tag=False,
         prerelease=True,
     )
-    tag = release_metadata.draft_release_target("tag", "v0.1.0")
+    stable = metadata("2.0.0", "2.0.0", "v2.0.0")
+    tag = release_metadata.draft_release_target("tag", "v2.0.0", stable)
     assert tag == release_metadata.DraftReleaseTarget(
-        tag_name="v0.1.0",
-        title="v0.1.0",
+        tag_name="v2.0.0",
+        title="v2.0.0",
         cleanup_tag=False,
         verify_tag=True,
         prerelease=False,
     )
+    prerelease = metadata("2.1.0-beta.1", "2.1.0", "v2.1.0-beta.1", is_prerelease=True)
+    assert release_metadata.draft_release_target("tag", "v2.1.0-beta.1", prerelease).prerelease
     with pytest.raises(ValueError, match="single line"):
-        release_metadata.draft_release_target("branch", "")
+        release_metadata.draft_release_target("branch", "", metadata())
     with pytest.raises(ValueError, match="unsupported"):
-        release_metadata.draft_release_target("pull_request", "123")
+        release_metadata.draft_release_target("pull_request", "123", metadata())
 
 
 def test_release_assets_require_every_distribution_and_exact_checksums(tmp_path: Path) -> None:
@@ -212,6 +251,9 @@ def test_native_workflow_creates_only_release_drafts() -> None:
     assert "uses: actions/download-artifact@v8" in workflow
     assert "gh release create" in workflow
     assert "--draft" in workflow
+    assert "version_metadata.json" in workflow
+    assert '"libaxklib.so.${project_version}"' in workflow
+    assert '"libaxklib.${project_version}.dylib"' in workflow
 
 
 @pytest.mark.parametrize(
@@ -227,37 +269,38 @@ def test_release_metadata_rejects_malformed_package_file(tmp_path: Path, content
 
 def test_release_metadata_parses_and_verifies_cli_report() -> None:
     report = release_metadata.parse_version_report(
-        "axklib main-a1b2c3d\n"
-        "version: 0.1.0\n"
-        "package: axklib-main-a1b2c3d\n"
+        "axklib v1.2.3-a1b2c3d\n"
+        "version: 1.2.3\n"
+        "package: axklib-v1.2.3-a1b2c3d\n"
         "git: a1b2c3d\n"
-        "ref: main\n"
+        "ref: v1.2.3\n"
         "source: clean\n"
     )
     release_metadata.verify_version_report(
         report,
-        semantic_version="0.1.0",
-        package_basename="axklib-main-a1b2c3d",
+        version=metadata("1.2.3", "1.2.3", "v1.2.3"),
+        package_basename="axklib-v1.2.3-a1b2c3d",
         git_sha_short="a1b2c3d",
-        selected_ref="main",
+        selected_ref="v1.2.3",
     )
     with pytest.raises(ValueError, match="version report mismatch"):
         release_metadata.verify_version_report(
             report,
-            semantic_version="0.1.0",
-            package_basename="axklib-main-a1b2c3d",
+            version=metadata("1.2.3", "1.2.3", "v1.2.3"),
+            package_basename="axklib-v1.2.3-a1b2c3d",
             git_sha_short="fffffff",
-            selected_ref="main",
+            selected_ref="v1.2.3",
         )
 
 
 def test_release_metadata_verifies_cross_compiled_binary_strings(tmp_path: Path) -> None:
     binary = tmp_path / "axklib.exe"
     binary.write_bytes(
-        b"header\0main-a1b2c3d\0axklib-main-a1b2c3d\0a1b2c3d\0main\0footer"
+        b"header\0" b"0.0.0\0main-a1b2c3d\0axklib-main-a1b2c3d\0a1b2c3d\0main\0footer"
     )
     release_metadata.verify_binary_strings(
         binary,
+        version=metadata(),
         package_basename="axklib-main-a1b2c3d",
         git_sha_short="a1b2c3d",
         selected_ref="main",
@@ -265,6 +308,7 @@ def test_release_metadata_verifies_cross_compiled_binary_strings(tmp_path: Path)
     with pytest.raises(ValueError, match="does not contain"):
         release_metadata.verify_binary_strings(
             binary,
+            version=metadata(),
             package_basename="axklib-main-a1b2c3d",
             git_sha_short="fffffff",
             selected_ref="main",

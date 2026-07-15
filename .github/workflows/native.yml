@@ -40,6 +40,15 @@ jobs:
           uv --project tools/python run ruff check tools/python
           uv --project tools/python run mypy tools/python
           uv --project tools/python run pytest tools/python/tests
+      - name: Validate selected release ref
+        run: |
+          cmake -DAXK_VERSION_SOURCE_DIR="${GITHUB_WORKSPACE}" \
+            -DAXK_VERSION_PROJECT_MODULE="${GITHUB_WORKSPACE}/library/cmake/AxkProjectVersion.cmake" \
+            -DAXK_VERSION_OUTPUT_METADATA="${GITHUB_WORKSPACE}/build/version_metadata.json" \
+            -P library/cmake/GenerateProjectVersion.cmake
+          python tools/python/release_metadata.py release-target \
+            --version-metadata-file build/version_metadata.json \
+            --ref-type "${GITHUB_REF_TYPE}" --ref-name "${GITHUB_REF_NAME}"
 
   native:
     name: ${{ matrix.name }}
@@ -188,7 +197,7 @@ jobs:
           sha="$(git rev-parse --short=7 HEAD)"
           test -n "$sha"
           python tools/python/release_metadata.py resolve \
-            --axklib-root . \
+            --version-metadata-file "$root/version_metadata.json" \
             --package-basename-file "$root/package_basename.txt" \
             --ref-type "${GITHUB_REF_TYPE}" \
             --ref-name "${GITHUB_REF_NAME}" \
@@ -201,11 +210,12 @@ jobs:
           fi
           if [[ "${{ matrix.triplet }}" == "arm64-windows-axk" ]]; then
             python tools/python/release_metadata.py verify-binary \
+              --version-metadata-file "$root/version_metadata.json" \
               --package-basename-file "$root/package_basename.txt" \
               --binary "$cli" --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
           else
             python tools/python/release_metadata.py verify-cli \
-              --axklib-root . \
+              --version-metadata-file "$root/version_metadata.json" \
               --package-basename-file "$root/package_basename.txt" \
               --cli "$cli" --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
           fi
@@ -215,9 +225,11 @@ jobs:
         run: |
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          python tools/python/generate_sbom.py --axklib-root . --profile sdk \
+          python tools/python/generate_sbom.py --axklib-root . \
+            --version-metadata-file "$root/version_metadata.json" --profile sdk \
             --output "$root/axklib-sdk.spdx.json"
-          python tools/python/generate_sbom.py --axklib-root . --profile cli \
+          python tools/python/generate_sbom.py --axklib-root . \
+            --version-metadata-file "$root/version_metadata.json" --profile cli \
             --output "$root/axklib-cli.spdx.json"
 
       - name: Test native targets
@@ -238,23 +250,20 @@ jobs:
           cmake --install "$root" --prefix "$scan/cli" --component cli
           cmake --install "$root" --prefix "$distribution" --component sdk
           cmake --install "$root" --prefix "$distribution" --component cli
-          python tools/python/inspect_package.py "$scan/sdk" \
-            --allow-library axklib.dll \
-            --allow-library libaxklib.so \
-            --allow-library libaxklib.so.0 \
-            --allow-library libaxklib.so.0.1.0 \
-            --allow-library libaxklib.dylib \
-            --allow-library libaxklib.0.dylib \
-            --allow-library libaxklib.0.1.0.dylib
+          project_version="${{ steps.package.outputs.project_version }}"
+          soversion="${{ steps.package.outputs.soversion }}"
+          library_args=(
+            --allow-library axklib.dll
+            --allow-library libaxklib.so
+            --allow-library "libaxklib.so.${soversion}"
+            --allow-library "libaxklib.so.${project_version}"
+            --allow-library libaxklib.dylib
+            --allow-library "libaxklib.${soversion}.dylib"
+            --allow-library "libaxklib.${project_version}.dylib"
+          )
+          python tools/python/inspect_package.py "$scan/sdk" "${library_args[@]}"
           python tools/python/inspect_package.py "$scan/cli"
-          python tools/python/inspect_package.py "$distribution" \
-            --allow-library axklib.dll \
-            --allow-library libaxklib.so \
-            --allow-library libaxklib.so.0 \
-            --allow-library libaxklib.so.0.1.0 \
-            --allow-library libaxklib.dylib \
-            --allow-library libaxklib.0.dylib \
-            --allow-library libaxklib.0.1.0.dylib
+          python tools/python/inspect_package.py "$distribution" "${library_args[@]}"
           test -f "$scan/sdk/share/axklib/axklib.spdx.json"
           test -f "$scan/cli/share/axklib/axklib-cli.spdx.json"
           test -f "$distribution/share/axklib/axklib.spdx.json"
@@ -325,7 +334,7 @@ jobs:
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
           cli_dependencies="$(otool -L "$root/apps/cli/axklib")"
-          sdk_dependencies="$(otool -L "$root/library/libaxklib.0.1.0.dylib")"
+          sdk_dependencies="$(otool -L "$root/library/libaxklib.${{ steps.package.outputs.project_version }}.dylib")"
           printf '%s\n' "$cli_dependencies" "$sdk_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
@@ -415,6 +424,8 @@ jobs:
             -C "build/tmp/distribution-${{ matrix.artifact }}" .
           cp "build/native/${{ inputs.debug && 'debug' || 'release' }}/package_basename.txt" \
             "build/tmp/macos-${{ matrix.macos_slice }}-package-basename.txt"
+          cp "build/native/${{ inputs.debug && 'debug' || 'release' }}/version_metadata.json" \
+            "build/tmp/macos-${{ matrix.macos_slice }}-version-metadata.json"
 
       - name: Cache macOS slice for universal assembly
         if: runner.os == 'macOS'
@@ -423,6 +434,7 @@ jobs:
           path: |
             build/tmp/macos-${{ matrix.macos_slice }}.tar.gz
             build/tmp/macos-${{ matrix.macos_slice }}-package-basename.txt
+            build/tmp/macos-${{ matrix.macos_slice }}-version-metadata.json
           key: macos-${{ matrix.macos_slice }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload combined Linux or Windows distribution
@@ -455,6 +467,7 @@ jobs:
           path: |
             build/tmp/macos-x86_64.tar.gz
             build/tmp/macos-x86_64-package-basename.txt
+            build/tmp/macos-x86_64-version-metadata.json
           key: macos-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
           fail-on-cache-miss: true
 
@@ -464,6 +477,7 @@ jobs:
           path: |
             build/tmp/macos-arm64.tar.gz
             build/tmp/macos-arm64-package-basename.txt
+            build/tmp/macos-arm64-version-metadata.json
           key: macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}
           fail-on-cache-miss: true
 
@@ -479,6 +493,8 @@ jobs:
           set -euo pipefail
           cmp build/tmp/macos-x86_64-package-basename.txt \
             build/tmp/macos-arm64-package-basename.txt
+          cmp build/tmp/macos-x86_64-version-metadata.json \
+            build/tmp/macos-arm64-version-metadata.json
           mkdir -p build/tmp/{x86_64,arm64,universal} build/artifacts
           tar -xzf build/tmp/macos-x86_64.tar.gz -C build/tmp/x86_64
           tar -xzf build/tmp/macos-arm64.tar.gz -C build/tmp/arm64
@@ -536,14 +552,15 @@ jobs:
           fi
           sha="$(git rev-parse --short=7 HEAD)"
           package_file="build/tmp/macos-arm64-package-basename.txt"
+          version_file="build/tmp/macos-arm64-version-metadata.json"
           python tools/python/release_metadata.py resolve \
-            --axklib-root . --package-basename-file "$package_file" \
+            --version-metadata-file "$version_file" --package-basename-file "$package_file" \
             --ref-type "${GITHUB_REF_TYPE}" --ref-name "${GITHUB_REF_NAME}" \
             --platform macos-universal \
             --configuration "${{ inputs.debug && 'Debug' || 'Release' }}" \
             --github-output "$GITHUB_OUTPUT"
           python tools/python/release_metadata.py verify-cli \
-            --axklib-root . --package-basename-file "$package_file" \
+            --version-metadata-file "$version_file" --package-basename-file "$package_file" \
             --cli build/tmp/universal/bin/axklib \
             --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
 
@@ -665,11 +682,15 @@ jobs:
 
       - name: Resolve draft release target
         id: release
-        run: >-
-          python tools/python/release_metadata.py release-target
-          --ref-type "${GITHUB_REF_TYPE}"
-          --ref-name "${GITHUB_REF_NAME}"
-          --github-output "${GITHUB_OUTPUT}"
+        run: |
+          cmake -DAXK_VERSION_SOURCE_DIR="${GITHUB_WORKSPACE}" \
+            -DAXK_VERSION_PROJECT_MODULE="${GITHUB_WORKSPACE}/library/cmake/AxkProjectVersion.cmake" \
+            -DAXK_VERSION_OUTPUT_METADATA="${GITHUB_WORKSPACE}/build/version_metadata.json" \
+            -P library/cmake/GenerateProjectVersion.cmake
+          python tools/python/release_metadata.py release-target \
+            --version-metadata-file build/version_metadata.json \
+            --ref-type "${GITHUB_REF_TYPE}" --ref-name "${GITHUB_REF_NAME}" \
+            --github-output "${GITHUB_OUTPUT}"
 
       - name: Create release notes
         shell: bash

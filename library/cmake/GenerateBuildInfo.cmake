@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.28)
 
 foreach(required_variable IN ITEMS AXK_VERSION_SOURCE_DIR AXK_VERSION_PRODUCT_NAME
-                                   AXK_VERSION_MODULE AXK_VERSION_TEMPLATE
-                                   AXK_VERSION_OUTPUT_CPP AXK_VERSION_OUTPUT_PACKAGE)
+                                   AXK_VERSION_MODULE AXK_VERSION_PROJECT_MODULE
+                                   AXK_VERSION_TEMPLATE AXK_VERSION_OUTPUT_CPP
+                                   AXK_VERSION_OUTPUT_PACKAGE AXK_VERSION_OUTPUT_METADATA
+                                   AXK_VERSION_EXPECTED_SEMANTIC AXK_VERSION_EXPECTED_PROJECT)
   if(NOT DEFINED ${required_variable})
     message(FATAL_ERROR "${required_variable} is required")
   endif()
@@ -13,6 +15,15 @@ if(DEFINED AXK_VERSION_GIT_EXECUTABLE)
   set(AXK_GIT_EXECUTABLE "${AXK_VERSION_GIT_EXECUTABLE}")
 endif()
 axk_derive_git_build_info("${AXK_VERSION_SOURCE_DIR}" "${AXK_VERSION_PRODUCT_NAME}")
+include("${AXK_VERSION_PROJECT_MODULE}")
+axk_derive_project_version("${AXK_VERSION_SOURCE_DIR}")
+if(NOT AXK_SEMANTIC_VERSION STREQUAL AXK_VERSION_EXPECTED_SEMANTIC OR
+   NOT AXK_PROJECT_VERSION STREQUAL AXK_VERSION_EXPECTED_PROJECT)
+  message(FATAL_ERROR
+    "axklib version changed from configured '${AXK_VERSION_EXPECTED_SEMANTIC}' "
+    "to '${AXK_SEMANTIC_VERSION}'; rerun CMake configure")
+endif()
+axk_write_project_version_metadata("${AXK_VERSION_OUTPUT_METADATA}")
 
 if(AXK_IS_TAGGED_RELEASE)
   set(AXK_IS_TAGGED_RELEASE_CPP true)

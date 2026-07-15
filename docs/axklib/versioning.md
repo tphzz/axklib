@@ -1,17 +1,50 @@
 # Versioning And Build Identity
 
-axklib keeps release compatibility and source traceability as separate values.
-A branch name or commit hash does not replace the semantic version used by the
-SDK and package metadata.
+axklib derives its product version from Git release tags. Source identity is a
+separate value that identifies the exact checkout used for a build.
 
-## Version Domains
+## Release Version
 
-| Domain | Example | Purpose |
-| --- | --- | --- |
-| Semantic version | `0.1.0` | C++ API compatibility, CMake package metadata, vcpkg, and SBOM package version |
-| Source identity | `main-a1b2c3d` | Exact Git ref, abbreviated commit, and source-tree state compiled into a binary |
-| Package basename | `axklib-main-a1b2c3d` | Development-build archive and artifact base |
-| Release artifact label | `axklib-0.1.0-linux-x64` | Concise download name for the validated tag `v0.1.0` |
+An official release is built from a detached commit with exactly one valid
+semantic-version tag:
+
+```text
+vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+```
+
+Examples include `v1.2.3`, `v1.2.3-rc.1`, and
+`v1.2.3-rc.1+build.4`. The leading `v` belongs to the Git tag and is omitted
+from runtime, SDK, package, and SBOM version strings.
+
+The complete semantic version is used by:
+
+- `axklib --version` and the no-argument CLI banner;
+- `axk::version()` and `axk::sdk_version()`;
+- installed SDK version constants;
+- release artifact names and SPDX SBOM metadata; and
+- CPack package metadata.
+
+CMake's `project(VERSION)` field and shared-library ABI filenames require a
+numeric version. They use only the `MAJOR.MINOR.PATCH` core. For example,
+`v1.2.3-rc.1+build.4` has semantic version `1.2.3-rc.1+build.4` and CMake
+project version `1.2.3`.
+
+Named-branch builds and source trees without usable Git metadata deliberately
+use product version `0.0.0`. A release version is never guessed from a branch,
+manifest, or tracked literal. The top-level vcpkg manifest therefore does not
+declare an independent axklib version.
+
+In GitHub Actions, the selected workflow ref type is explicit: a branch run is
+always a development build, while a tag run validates `GITHUB_REF_NAME` against
+`HEAD`. This avoids making version selection depend on how checkout represents
+the ref locally.
+
+Configuration fails when a GitHub tag build uses an invalid tag, when the
+selected tag does not identify `HEAD`, or when a detached local commit has more
+than one valid semantic-version tag. Switching a configured tree between a
+development checkout and a release tag requires rerunning CMake.
+
+## Source Identity
 
 The source identity has the form:
 
@@ -43,35 +76,34 @@ known commit and a clean source tree.
 
 ## Runtime Information
 
-`axklib --version` reports both domains:
+For a branch build, `axklib --version` reports:
 
 ```text
 axklib main-a1b2c3d
-version: 0.1.0
+version: 0.0.0
 package: axklib-main-a1b2c3d
 git: a1b2c3d
 ref: main
 source: clean
 ```
 
-Other CLI commands do not receive this header, so JSON, CSV, and normal command
-output contracts are unchanged.
+For a detached `v1.2.3` release build, `version` is `1.2.3` and the ref is
+`v1.2.3`. Other CLI commands do not receive this header, so JSON, CSV, and
+normal command output contracts are unchanged.
 
-The installed SDK exposes the semantic version through `sdk_version()` and the
+The installed SDK exposes the product version through `sdk_version()` and the
 source identity through `sdk_build_info()`. `build_info` contains
 `source_identity`, `package_basename`, `git_tag`, `git_branch`,
 `git_sha_short`, `is_tagged_release`, and `is_dirty`. It is returned by value;
 its string pointers refer to literals in the loaded library and remain valid
 for the process lifetime.
 
-`is_tagged_release` identifies how the source ref was selected. It does not by
-itself assert that a tag is a supported axklib release version.
-
 ## Build And Artifact Names
 
-CMake writes `package_basename.txt` to the build root and refreshes it during
-each normal build. A Git-state change updates compiled metadata; an unchanged
-state does not rewrite the generated C++ source.
+CMake writes `version_metadata.json` and `package_basename.txt` to the build
+root. Release and SBOM tools consume these generated files rather than parsing
+separate version declarations. A Git-state change refreshes compiled source
+identity metadata; an unchanged state does not rewrite generated files.
 
 Manual Native CI builds use these names:
 
@@ -79,23 +111,20 @@ Manual Native CI builds use these names:
 | --- | --- |
 | Branch Release | `axklib-main-a1b2c3d-linux-x64` |
 | Branch Debug | `axklib-main-a1b2c3d-linux-x64-debug` |
-| Tagged Release | `axklib-0.1.0-linux-x64` |
-
-A workflow tag must be exactly `v<semantic-version>`. The shorter tagged
-artifact name does not remove source traceability from the executable or shared
-library: their embedded identity still contains the tag and commit.
+| Tagged Release | `axklib-1.2.3-linux-x64` |
+| Tagged prerelease | `axklib-1.2.3-rc.1-linux-x64` |
 
 After every successful Release-configuration Native CI run, the workflow
 collects the Linux x64, Linux ARM64, Windows x64, Windows ARM64, and universal
 macOS distributions into an unpublished GitHub draft release. Branch
 `features/packages` targets the prerelease draft and generated tag
-`features/packages-preview`; a tag build targets an unpublished release with
-the exact version tag. A matching draft is replaced by the next successful
-run. A matching published release is never deleted automatically and
-causes the workflow to fail. Debug builds remain available only as workflow
-artifacts.
+`features/packages-preview`; a semantic-version tag build targets an
+unpublished release with that exact tag. Semantic-version prereleases are
+marked as GitHub prereleases. A matching draft is replaced by the next
+successful run. A matching published release is never deleted automatically
+and causes the workflow to fail. Debug builds remain available only as
+workflow artifacts.
 
-Direct CPack filenames use the source identity captured at CMake configure
-time. Reconfigure before running CPack after switching branches, tags, or
-commits. Native CI reads the refreshed metadata after compilation and verifies
-the staged CLI before producing its archive.
+The version fields in `docs/pyproject.toml` and `tools/python/pyproject.toml`
+version their independent Python environments. They are not axklib product
+version sources.

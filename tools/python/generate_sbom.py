@@ -10,27 +10,9 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
+import version_metadata
+
 LICENSE_OVERRIDES = {"soxr": "LGPL-2.1-or-later"}
-
-
-def project_version(root: Path) -> str:
-    cmake_text = (root / "CMakeLists.txt").read_text(encoding="utf-8")
-    match = re.search(
-        r"project\s*\(\s*axklib\b.*?\bVERSION\s+([^\s\)]+)",
-        cmake_text,
-        re.DOTALL | re.IGNORECASE,
-    )
-    if not match:
-        raise ValueError("could not derive axklib version from CMakeLists.txt")
-    cmake_version = match.group(1)
-    manifest = json.loads((root / "vcpkg.json").read_text(encoding="utf-8"))
-    manifest_version = manifest.get("version-semver")
-    if manifest_version != cmake_version:
-        raise ValueError(
-            "axklib version mismatch: "
-            f"CMakeLists.txt has {cmake_version}, vcpkg.json has {manifest_version}"
-        )
-    return cmake_version
 
 
 def creation_timestamp() -> str:
@@ -191,10 +173,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--axklib-root", type=Path, default=Path.cwd())
+    parser.add_argument("--version-metadata-file", required=True, type=Path)
     parser.add_argument("--axkdeck-root", type=Path)
     parser.add_argument("--profile", choices=("sdk", "cli", "workspace"), default="workspace")
     args = parser.parse_args()
-    version = project_version(args.axklib_root)
+    version = version_metadata.read(args.version_metadata_file).semantic_version
     packages = [package("axklib", version, "axklib", license_expression="MPL-2.0")]
     packages.extend(vcpkg_packages(args.axklib_root, args.profile))
     if args.axkdeck_root:

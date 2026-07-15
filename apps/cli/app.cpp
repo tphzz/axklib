@@ -56,7 +56,8 @@ int axk::cli::run(int argc, char **argv) {
             return 2;
         }
     }
-    CLI::App app{"axklib (" + std::string{axk::current_build_info().source_identity} + ')'};
+    CLI::App app{"axklib " + std::string{axk::version()} + " (" +
+                 std::string{axk::current_build_info().source_identity} + ')'};
     app.formatter(std::make_shared<RootHelpFormatter>());
     app.set_version_flag("--version", version_report());
 

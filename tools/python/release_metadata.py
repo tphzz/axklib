@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-import generate_sbom
+import version_metadata
 
 PLATFORMS = (
     "linux-x64",
@@ -33,6 +33,10 @@ RELEASE_ASSET_EXTENSIONS = {
 class ArtifactMetadata:
     package_basename: str
     artifact_stem: str
+    semantic_version: str
+    project_version: str
+    soversion: str
+    is_prerelease: bool
 
 
 @dataclass(frozen=True)
@@ -72,7 +76,7 @@ def read_package_basename(path: Path) -> str:
 
 def artifact_metadata(
     package_basename: str,
-    semantic_version: str,
+    version: version_metadata.VersionMetadata,
     ref_type: str,
     ref_name: str,
     platform: str,
@@ -84,26 +88,41 @@ def artifact_metadata(
     if normalized_configuration not in {"debug", "release"}:
         raise ValueError(f"unsupported build configuration: {configuration}")
     if ref_type == "tag":
-        expected_tag = f"v{semantic_version}"
+        expected_tag = version.release_tag
+        if not version.is_release:
+            raise ValueError("tag builds require release version metadata")
         if ref_name != expected_tag:
             raise ValueError(f"release tag must be {expected_tag}, found {ref_name or '<empty>'}")
-        artifact_base = f"axklib-{semantic_version}"
+        artifact_base = f"axklib-{version.semantic_version}"
     elif ref_type == "branch":
         artifact_base = package_basename
     else:
         raise ValueError(f"unsupported GitHub ref type: {ref_type or '<empty>'}")
     debug_suffix = "-debug" if normalized_configuration == "debug" else ""
-    return ArtifactMetadata(package_basename, f"{artifact_base}-{platform}{debug_suffix}")
+    return ArtifactMetadata(
+        package_basename,
+        f"{artifact_base}-{platform}{debug_suffix}",
+        version.semantic_version,
+        version.project_version,
+        str(version.major),
+        version.is_prerelease,
+    )
 
 
-def draft_release_target(ref_type: str, ref_name: str) -> DraftReleaseTarget:
+def draft_release_target(
+    ref_type: str, ref_name: str, version: version_metadata.VersionMetadata
+) -> DraftReleaseTarget:
     if not ref_name or "\n" in ref_name or "\r" in ref_name:
         raise ValueError("GitHub ref name must be a non-empty single line")
     if ref_type == "branch":
         tag_name = f"{ref_name}-preview"
         return DraftReleaseTarget(tag_name, tag_name, True, False, True)
     if ref_type == "tag":
-        return DraftReleaseTarget(ref_name, ref_name, False, True, False)
+        if not version.is_release or ref_name != version.release_tag:
+            raise ValueError(
+                f"release tag must be {version.release_tag or '<none>'}, found {ref_name}"
+            )
+        return DraftReleaseTarget(ref_name, ref_name, False, True, version.is_prerelease)
     raise ValueError(f"unsupported GitHub ref type: {ref_type or '<empty>'}")
 
 
@@ -152,14 +171,14 @@ def parse_version_report(text: str) -> VersionReport:
 def verify_version_report(
     report: VersionReport,
     *,
-    semantic_version: str,
+    version: version_metadata.VersionMetadata,
     package_basename: str,
     git_sha_short: str,
     selected_ref: str,
 ) -> None:
     expected = VersionReport(
         source_identity=package_basename.removeprefix("axklib-"),
-        semantic_version=semantic_version,
+        semantic_version=version.semantic_version,
         package_basename=package_basename,
         git_sha_short=git_sha_short,
         selected_ref=sanitize_ref(selected_ref),
@@ -170,10 +189,21 @@ def verify_version_report(
 
 
 def verify_binary_strings(
-    binary: Path, *, package_basename: str, git_sha_short: str, selected_ref: str
+    binary: Path,
+    *,
+    version: version_metadata.VersionMetadata,
+    package_basename: str,
+    git_sha_short: str,
+    selected_ref: str,
 ) -> None:
     source_identity = package_basename.removeprefix("axklib-")
-    required = (source_identity, package_basename, git_sha_short, sanitize_ref(selected_ref))
+    required = (
+        version.semantic_version,
+        source_identity,
+        package_basename,
+        git_sha_short,
+        sanitize_ref(selected_ref),
+    )
     contents = binary.read_bytes()
     missing = [value for value in required if value.encode("ascii") not in contents]
     if missing:
@@ -184,6 +214,10 @@ def write_github_outputs(path: Path, metadata: ArtifactMetadata) -> None:
     with path.open("a", encoding="utf-8", newline="\n") as output:
         output.write(f"package_basename={metadata.package_basename}\n")
         output.write(f"artifact_stem={metadata.artifact_stem}\n")
+        output.write(f"semantic_version={metadata.semantic_version}\n")
+        output.write(f"project_version={metadata.project_version}\n")
+        output.write(f"soversion={metadata.soversion}\n")
+        output.write(f"is_prerelease={str(metadata.is_prerelease).lower()}\n")
 
 
 def write_release_github_outputs(path: Path, target: DraftReleaseTarget) -> None:
@@ -196,9 +230,10 @@ def write_release_github_outputs(path: Path, target: DraftReleaseTarget) -> None
 
 
 def resolve_command(args: argparse.Namespace) -> int:
+    version = version_metadata.read(args.version_metadata_file)
     metadata = artifact_metadata(
         read_package_basename(args.package_basename_file),
-        generate_sbom.project_version(args.axklib_root.resolve()),
+        version,
         args.ref_type,
         args.ref_name,
         args.platform,
@@ -211,7 +246,9 @@ def resolve_command(args: argparse.Namespace) -> int:
 
 
 def release_target_command(args: argparse.Namespace) -> int:
-    target = draft_release_target(args.ref_type, args.ref_name)
+    target = draft_release_target(
+        args.ref_type, args.ref_name, version_metadata.read(args.version_metadata_file)
+    )
     if args.github_output:
         write_release_github_outputs(args.github_output, target)
     print(json.dumps(asdict(target), sort_keys=True))
@@ -225,14 +262,14 @@ def verify_release_assets_command(args: argparse.Namespace) -> int:
 
 
 def verify_command(args: argparse.Namespace) -> int:
-    root = args.axklib_root.resolve()
+    version = version_metadata.read(args.version_metadata_file)
     package_basename = read_package_basename(args.package_basename_file)
     completed = subprocess.run(
         [str(args.cli), "--version"], check=True, capture_output=True, text=True
     )
     verify_version_report(
         parse_version_report(completed.stdout),
-        semantic_version=generate_sbom.project_version(root),
+        version=version,
         package_basename=package_basename,
         git_sha_short=args.git_sha_short,
         selected_ref=args.ref_name,
@@ -243,6 +280,7 @@ def verify_command(args: argparse.Namespace) -> int:
 def verify_binary_command(args: argparse.Namespace) -> int:
     verify_binary_strings(
         args.binary,
+        version=version_metadata.read(args.version_metadata_file),
         package_basename=read_package_basename(args.package_basename_file),
         git_sha_short=args.git_sha_short,
         selected_ref=args.ref_name,
@@ -255,7 +293,7 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     resolve = subparsers.add_parser("resolve")
-    resolve.add_argument("--axklib-root", type=Path, default=Path.cwd())
+    resolve.add_argument("--version-metadata-file", required=True, type=Path)
     resolve.add_argument("--package-basename-file", required=True, type=Path)
     resolve.add_argument("--ref-type", required=True)
     resolve.add_argument("--ref-name", required=True)
@@ -265,6 +303,7 @@ def main() -> int:
     resolve.set_defaults(handler=resolve_command)
 
     release_target = subparsers.add_parser("release-target")
+    release_target.add_argument("--version-metadata-file", required=True, type=Path)
     release_target.add_argument("--ref-type", required=True)
     release_target.add_argument("--ref-name", required=True)
     release_target.add_argument("--github-output", type=Path)
@@ -275,7 +314,7 @@ def main() -> int:
     verify_release_assets_parser.set_defaults(handler=verify_release_assets_command)
 
     verify = subparsers.add_parser("verify-cli")
-    verify.add_argument("--axklib-root", type=Path, default=Path.cwd())
+    verify.add_argument("--version-metadata-file", required=True, type=Path)
     verify.add_argument("--package-basename-file", required=True, type=Path)
     verify.add_argument("--cli", required=True, type=Path)
     verify.add_argument("--git-sha-short", required=True)
@@ -283,6 +322,7 @@ def main() -> int:
     verify.set_defaults(handler=verify_command)
 
     verify_binary = subparsers.add_parser("verify-binary")
+    verify_binary.add_argument("--version-metadata-file", required=True, type=Path)
     verify_binary.add_argument("--package-basename-file", required=True, type=Path)
     verify_binary.add_argument("--binary", required=True, type=Path)
     verify_binary.add_argument("--git-sha-short", required=True)
