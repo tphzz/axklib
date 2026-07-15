@@ -1,6 +1,7 @@
 {
   "name": "fatfs",
   "version": "0.16",
+  "port-version": 1,
   "description": "FatFs generic FAT filesystem module",
   "homepage": "https://elm-chan.org/fsw/ff/",
   "license": "BSD-1-Clause",

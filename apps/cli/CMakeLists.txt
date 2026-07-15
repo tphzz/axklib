@@ -98,6 +98,15 @@ if(BUILD_TESTING)
   axk_set_project_warnings(axk_cli_tests)
   axk_enable_sanitizers(axk_cli_tests)
   axk_enable_coverage(axk_cli_tests)
+  if(WIN32 AND TARGET axklib::axklib)
+    add_custom_command(
+      TARGET axk_cli_tests
+      POST_BUILD
+      COMMAND "${CMAKE_COMMAND}" -E copy -t "$<TARGET_FILE_DIR:axk_cli_tests>"
+              "$<TARGET_RUNTIME_DLLS:axk_cli_tests>"
+      COMMAND_EXPAND_LISTS
+    )
+  endif()
   gtest_discover_tests(axk_cli_tests)
   add_executable(axk_object_semantic_dump tests/object_semantic_dump.cpp schema/objects_v1.cpp)
   target_compile_features(axk_object_semantic_dump PRIVATE cxx_std_23)
