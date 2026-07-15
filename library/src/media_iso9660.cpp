@@ -214,8 +214,13 @@ std::span<const std::pair<std::string, std::string>> IsoImage::volume_labels() c
 std::span<const MediaValidationIssue> IsoImage::validation_issues() const noexcept { return validation_issues_; }
 
 Result<std::vector<std::byte>> IsoImage::read_file(const IsoFile &file, const CancellationToken &cancellation) const {
+    return read_file_prefix(file, file.size, cancellation);
+}
+
+Result<std::vector<std::byte>> IsoImage::read_file_prefix(const IsoFile &file, std::size_t maximum_bytes,
+                                                          const CancellationToken &cancellation) const {
     return detail::read_bytes(*reader_, static_cast<std::uint64_t>(file.extent_sector) * detail::iso_sector_size,
-                              file.size, cancellation);
+                              std::min<std::size_t>(file.size, maximum_bytes), cancellation);
 }
 
 } // namespace axk

@@ -106,3 +106,23 @@ TEST(FileReader, ReadsBeyondTwoGiBWithoutAllocatingTheWholeFile) {
     ASSERT_FALSE(cancelled);
     EXPECT_EQ(cancelled.error().code, axk::ErrorCode::operation_cancelled);
 }
+
+#if !defined(_WIN32)
+TEST(FileReader, KeepsTheOpenedFileAvailableForItsLifetime) {
+    TemporaryFile file{"axklib-persistent-reader"};
+    {
+        std::ofstream output{file.path(), std::ios::binary};
+        ASSERT_TRUE(output);
+        output.write("abcd", 4);
+    }
+
+    const auto reader = axk::FileReader::open(file.path());
+    ASSERT_TRUE(reader);
+    ASSERT_TRUE(std::filesystem::remove(file.path()));
+
+    std::array<std::byte, 2> bytes{};
+    ASSERT_TRUE((*reader)->read_exact_at(1U, bytes));
+    EXPECT_EQ(bytes[0], std::byte{'b'});
+    EXPECT_EQ(bytes[1], std::byte{'c'});
+}
+#endif

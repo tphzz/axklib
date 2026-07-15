@@ -15,7 +15,8 @@ Documentation is published at <https://tphzz.github.io/axklib/>.
 ## Native Build
 
 Building requires CMake 3.28 or newer, Ninja, Git, and a compiler with C++23
-support. Dependencies and the vcpkg tool are pinned by the repository.
+support. Dependencies, FatFs source, and the vcpkg tool are pinned by the
+repository.
 
 ```bash
 git clone --recurse-submodules https://github.com/tphzz/axklib.git
@@ -31,8 +32,8 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-For an existing checkout, initialize or update the pinned vcpkg submodule with
-`git submodule update --init --recursive` before configuring.
+For an existing checkout, initialize or update the pinned dependency submodules
+with `git submodule update --init --recursive` before configuring.
 
 On Windows PowerShell, use an out-of-tree build directory:
 
@@ -116,7 +117,12 @@ architecture. After changing triplets or updating an existing checkout, use
 The native GitHub workflow combines those components into one distribution per
 target. Windows publishes a ZIP, Linux publishes a compressed tar archive, and
 macOS publishes one universal ZIP containing both the self-contained CLI and
-the shared SDK development files.
+the shared SDK development files. Development archives use a Git-derived source
+identity such as `axklib-main-a1b2c3d-linux-x64`; validated `v0.1.0` tag builds
+use the concise `axklib-0.1.0-linux-x64` form while retaining the tag and commit
+inside the binaries. Debug archives add `-debug`. See
+[Versioning and build identity](docs/axklib/versioning.md) for the complete
+contract.
 
 ## Documentation
 
@@ -147,3 +153,7 @@ behavior.
 ## License
 
 This project is licensed under the Mozilla Public License 2.0.
+Third-party dependencies retain their own licenses. In particular,
+`external/fatfs` is a separate BSD-1-Clause-licensed Git submodule; see
+[Native dependency policy](docs/native-dependencies.md) for the dependency and
+distribution summary.

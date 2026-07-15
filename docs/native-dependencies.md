@@ -1,13 +1,25 @@
 # Native dependency policy
 
-The C++ library uses a pinned vcpkg manifest. The manifest baseline and package
-versions are part of the reproducible native build contract.
+The C++ library uses a pinned vcpkg manifest. The manifest baseline, package
+versions, and source submodule revisions are part of the reproducible native
+build contract.
 
-Clone with `git submodule update --init --recursive`, then bootstrap
-`external/vcpkg` using its platform script. To update vcpkg, review one explicit
-submodule commit, set `builtin-baseline` to that same commit, regenerate SBOMs,
-and run the complete architecture matrix. A manifest-only or submodule-only
-version change is invalid.
+Clone with `git submodule update --init --recursive`. This initializes both the
+vcpkg tool under `external/vcpkg` and the FatFs source under `external/fatfs`.
+Bootstrap vcpkg using its platform script.
+
+To update vcpkg, review one explicit submodule commit, set `builtin-baseline` to
+that same commit, regenerate SBOMs, and run the complete architecture matrix. A
+manifest-only or submodule-only vcpkg version change is invalid.
+
+FatFs is pinned to the `abbrev/fatfs` R0.16 commit
+`30ca13c62615df0d2e9104ab41256985b96590c1c`. That repository is an unofficial
+Git mirror, not the FatFs upstream. The overlay port verifies the exact `ff.c`,
+`ff.h`, `diskio.h`, and `LICENSE.txt` bytes against hashes derived from the
+official R0.16 archive before building. Updating FatFs requires comparison with
+an official release archive, updating the pinned submodule commit and overlay
+hashes, incrementing the overlay port revision, and running the complete native
+architecture matrix.
 
 | Package | Purpose | Upstream license |
 | --- | --- | --- |

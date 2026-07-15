@@ -12,3 +12,8 @@ CTest inventory pass covers the sparse 2 GiB, eight-partition boundary under a
 256 MiB process budget.
 Platform release jobs may maintain separate baselines because compiler, storage,
 and operating-system timing differ.
+
+`axk_media_inventory_benchmark IMAGE OUTPUT_JSON` compares complete object
+loading with the decoded-metadata profile used by `axklib info`. It accepts any
+supported media container and records open, inventory, and relationship timings
+without depending on a checked-in corpus image.

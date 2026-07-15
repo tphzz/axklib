@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -93,11 +94,12 @@ class AXK_API FileReader final : public RandomAccessReader {
                                              const CancellationToken &cancellation) const;
 
   private:
-    FileReader(std::filesystem::path path, std::uint64_t size) noexcept;
+    FileReader(std::filesystem::path path, std::uint64_t size, std::ifstream input) noexcept;
 
     std::filesystem::path path_;
     std::uint64_t size_{};
     mutable std::mutex mutex_;
+    mutable std::ifstream input_;
 };
 
 } // namespace axk

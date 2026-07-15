@@ -1999,7 +1999,6 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
                                  "content to the same object name",
                                  candidate.destination, candidate.package, candidate.node);
                     mark_conflict(plan.objects[found->second]);
-                    const auto &canonical = plan.objects[found->second];
                     PackageImportConflict canonical_conflict;
                     canonical_conflict.code = "SFS_NAME_CONFLICT";
                     canonical_conflict.message = "incoming package roots assign different content to "

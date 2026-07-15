@@ -1088,6 +1088,8 @@ result<void> transaction::apply(const std::string &utf8_output_path, const write
 
 std::string sdk_version() { return version_string; }
 
+build_info sdk_build_info() noexcept { return current_build_info(); }
+
 std::string render_error(const error &failure) {
     ErrorContext context;
     context.source_path = failure.context.source_path;

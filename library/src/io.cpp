@@ -51,7 +51,8 @@ Result<void> MemoryReader::read_exact_at(std::uint64_t offset, std::span<std::by
     return {};
 }
 
-FileReader::FileReader(std::filesystem::path path, std::uint64_t size) noexcept : path_{std::move(path)}, size_{size} {}
+FileReader::FileReader(std::filesystem::path path, std::uint64_t size, std::ifstream input) noexcept
+    : path_{std::move(path)}, size_{size}, input_{std::move(input)} {}
 
 Result<std::shared_ptr<FileReader>> FileReader::open(const std::filesystem::path &path) {
     std::error_code error;
@@ -68,7 +69,14 @@ Result<std::shared_ptr<FileReader>> FileReader::open(const std::filesystem::path
         return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
                                           "input file size exceeds the supported 64-bit range", std::move(context))};
     }
-    return std::shared_ptr<FileReader>{new FileReader{path, static_cast<std::uint64_t>(file_size)}};
+    std::ifstream input{path, std::ios::binary};
+    if (!input) {
+        ErrorContext context;
+        context.source_path = text::path_to_utf8(path);
+        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                                          "cannot open input file for reading", std::move(context))};
+    }
+    return std::shared_ptr<FileReader>{new FileReader{path, static_cast<std::uint64_t>(file_size), std::move(input)}};
 }
 
 std::uint64_t FileReader::size() const noexcept { return size_; }
@@ -95,16 +103,17 @@ Result<void> FileReader::read_exact_at(std::uint64_t offset, std::span<std::byte
     }
 
     std::scoped_lock lock{mutex_};
-    std::ifstream input{path_, std::ios::binary};
-    if (!input) {
+    input_.clear();
+    input_.seekg(static_cast<std::streamoff>(offset));
+    if (!input_) {
         ErrorContext context;
         context.source_path = text::path_to_utf8(path_);
-        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                          "cannot open input file for reading", std::move(context))};
+        context.raw_offset = offset;
+        return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
+                                          "failed to seek to the requested file offset", std::move(context))};
     }
-    input.seekg(static_cast<std::streamoff>(offset));
-    input.read(reinterpret_cast<char *>(destination.data()), static_cast<std::streamsize>(destination.size()));
-    if (input.gcount() != static_cast<std::streamsize>(destination.size())) {
+    input_.read(reinterpret_cast<char *>(destination.data()), static_cast<std::streamsize>(destination.size()));
+    if (input_.gcount() != static_cast<std::streamsize>(destination.size())) {
         ErrorContext context;
         context.source_path = text::path_to_utf8(path_);
         context.raw_offset = offset;

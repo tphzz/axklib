@@ -2,12 +2,11 @@
 
 #include <algorithm>
 #include <array>
-#include <fstream>
 #include <limits>
 
 #include "axklib/bytes.hpp"
 #include "axklib/media.hpp"
-#include "axklib/utf8.hpp"
+#include "axklib/wav_stream.hpp"
 
 namespace axk {
 namespace {
@@ -134,6 +133,16 @@ Result<Waveform> decode_waveform(const Container &container, const ObjectSnapsho
                                    snapshot.object.header.name, *payload);
 }
 
+Result<Waveform> decode_waveform(const ObjectSnapshot &snapshot, const std::filesystem::path &source_path) {
+    const auto *decoded = std::get_if<CurrentSmpl>(&snapshot.object.payload);
+    if (decoded == nullptr) {
+        return std::unexpected{
+            make_error(ErrorCode::invalid_argument, ErrorCategory::audio, "waveform decode requires a SMPL object")};
+    }
+    return decode_waveform_payload(*decoded, snapshot.key, source_path, snapshot.partition, snapshot.sfs_id,
+                                   snapshot.object.header.name, snapshot.raw_payload);
+}
+
 Result<Waveform> decode_waveform(const MediaObject &object) {
     const auto *decoded = std::get_if<CurrentSmpl>(&object.decoded.payload);
     if (decoded == nullptr) {
@@ -181,42 +190,7 @@ Result<std::vector<std::byte>> wav_bytes(const Waveform &waveform) {
 }
 
 Result<void> write_wav_atomic(const std::filesystem::path &path, const Waveform &waveform, bool overwrite) {
-    if (!overwrite && std::filesystem::exists(path)) {
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "refusing to replace an existing WAV")};
-    }
-    const auto bytes = wav_bytes(waveform);
-    if (!bytes)
-        return std::unexpected{bytes.error()};
-    std::error_code error;
-    if (!path.parent_path().empty()) {
-        std::filesystem::create_directories(path.parent_path(), error);
-    }
-    if (error) {
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create WAV output directory")};
-    }
-    const auto temporary = text::temporary_sibling(path);
-    if (!temporary)
-        return std::unexpected{temporary.error()};
-    {
-        std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
-        if (!output ||
-            !output.write(reinterpret_cast<const char *>(bytes->data()), static_cast<std::streamsize>(bytes->size()))) {
-            std::filesystem::remove(*temporary, error);
-            return std::unexpected{
-                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary WAV")};
-        }
-    }
-    if (overwrite)
-        std::filesystem::remove(path, error);
-    std::filesystem::rename(*temporary, path, error);
-    if (error) {
-        std::filesystem::remove(*temporary, error);
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not publish WAV atomically")};
-    }
-    return {};
+    return audio_internal::write_wav_atomic(path, audio_internal::WavSource::from_physical(waveform), overwrite);
 }
 
 Result<PreviewEnvelope> build_preview_envelope(const Waveform &waveform, std::size_t bin_count) {

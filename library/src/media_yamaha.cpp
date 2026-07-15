@@ -10,6 +10,7 @@
 #include <tuple>
 
 #include "axklib/bytes.hpp"
+#include "axklib/catalog_internal.hpp"
 #include "axklib/utf8.hpp"
 #include "media_internal.hpp"
 
@@ -27,13 +28,13 @@ struct MediaDecode {
     std::optional<Error> issue;
 };
 
-Result<MediaDecode> decode_media_object(std::span<const std::byte> bytes) {
+Result<MediaDecode> decode_media_object(std::span<const std::byte> bytes, std::uint64_t stored_size) {
     auto decoded = decode_object(bytes);
     if (decoded) {
         std::optional<Error> issue;
         if (std::holds_alternative<CurrentSmpl>(decoded->payload)) {
             const auto pcm_end = checked_add(decoded->header.header_size, decoded->header.payload_bytes_0x1c);
-            if (!pcm_end || *pcm_end > bytes.size()) {
+            if (!pcm_end || *pcm_end > stored_size) {
                 issue = make_error(ErrorCode::object_malformed, ErrorCategory::object,
                                    "SMPL stored PCM range exceeds the object payload");
             }
@@ -389,18 +390,35 @@ Result<IsoMenuLabels> read_yamaha_iso_menu_labels(const IsoImage &image, const C
 
 Result<std::vector<MediaObject>> FatImage::objects(std::size_t maximum_object_bytes,
                                                    const CancellationToken &cancellation) const {
+    return objects(MediaObjectReadMode::complete, maximum_object_bytes, cancellation);
+}
+
+Result<std::vector<MediaObject>> FatImage::objects(MediaObjectReadMode mode, std::size_t maximum_object_bytes,
+                                                   const CancellationToken &cancellation) const {
+    constexpr std::size_t metadata_prefix_size = 0xacU;
     std::vector<MediaObject> result;
     for (const auto &file : files_) {
         if (file.size > maximum_object_bytes)
             continue;
-        auto bytes = read_file(file, cancellation);
+        auto bytes = mode == MediaObjectReadMode::decoded_metadata
+                         ? read_file_prefix(file, metadata_prefix_size, cancellation)
+                         : read_file(file, cancellation);
         if (!bytes)
             return std::unexpected{bytes.error()};
         if (!detail::object_prefix(*bytes))
             continue;
-        auto decoded = decode_media_object(*bytes);
+        const bool sample =
+            bytes->size() >= 0x10U && detail::clean_ascii(std::span{*bytes}.subspan(0x0cU, 4U)) == "SMPL";
+        if (mode == MediaObjectReadMode::decoded_metadata && !sample) {
+            bytes = read_file(file, cancellation);
+            if (!bytes)
+                return std::unexpected{bytes.error()};
+        }
+        auto decoded = decode_media_object(*bytes, file.size);
         if (!decoded)
             return std::unexpected{decoded.error()};
+        auto raw_payload =
+            mode == MediaObjectReadMode::decoded_metadata && sample ? std::vector<std::byte>{} : std::move(*bytes);
         result.push_back({std::format("fat:{}", file.path),
                           file.path,
                           "fat-root",
@@ -411,7 +429,7 @@ Result<std::vector<MediaObject>> FatImage::objects(std::size_t maximum_object_by
                           file.first_data_offset,
                           file.size,
                           std::move(decoded->object),
-                          std::move(*bytes),
+                          std::move(raw_payload),
                           std::move(decoded->issue)});
     }
     return result;
@@ -419,6 +437,12 @@ Result<std::vector<MediaObject>> FatImage::objects(std::size_t maximum_object_by
 
 Result<std::vector<MediaObject>> IsoImage::objects(std::size_t maximum_object_bytes,
                                                    const CancellationToken &cancellation) const {
+    return objects(MediaObjectReadMode::complete, maximum_object_bytes, cancellation);
+}
+
+Result<std::vector<MediaObject>> IsoImage::objects(MediaObjectReadMode mode, std::size_t maximum_object_bytes,
+                                                   const CancellationToken &cancellation) const {
+    constexpr std::size_t metadata_prefix_size = 0xacU;
     struct PendingObject {
         MediaObject object;
         std::vector<std::byte> bytes;
@@ -430,12 +454,21 @@ Result<std::vector<MediaObject>> IsoImage::objects(std::size_t maximum_object_by
         const auto file_offset = static_cast<std::uint64_t>(file.extent_sector) * detail::iso_sector_size;
         if (file_offset > reader_->size() || file.size > reader_->size() - file_offset)
             continue;
-        auto bytes = read_file(file, cancellation);
+        auto bytes = mode == MediaObjectReadMode::decoded_metadata
+                         ? read_file_prefix(file, metadata_prefix_size, cancellation)
+                         : read_file(file, cancellation);
         if (!bytes)
             return std::unexpected{bytes.error()};
         if (!detail::object_prefix(*bytes))
             continue;
-        auto decoded = decode_media_object(*bytes);
+        const bool sample =
+            bytes->size() >= 0x10U && detail::clean_ascii(std::span{*bytes}.subspan(0x0cU, 4U)) == "SMPL";
+        if (mode == MediaObjectReadMode::decoded_metadata && !sample) {
+            bytes = read_file(file, cancellation);
+            if (!bytes)
+                return std::unexpected{bytes.error()};
+        }
+        auto decoded = decode_media_object(*bytes, file.size);
         if (!decoded)
             return std::unexpected{decoded.error()};
         const auto parts = path_parts(file.path);
@@ -503,7 +536,8 @@ Result<std::vector<MediaObject>> IsoImage::objects(std::size_t maximum_object_by
     std::vector<MediaObject> result;
     result.reserve(pending.size());
     for (auto &item : pending) {
-        item.object.raw_payload = std::move(item.bytes);
+        if (mode == MediaObjectReadMode::complete || item.object.decoded.header.type != ObjectType::smpl)
+            item.object.raw_payload = std::move(item.bytes);
         result.push_back(std::move(item.object));
     }
     std::ranges::sort(result, {}, &MediaObject::logical_path);
@@ -523,7 +557,7 @@ Result<StandaloneObject> StandaloneObject::open(std::shared_ptr<const RandomAcce
         return std::unexpected{detail::media_error(ErrorCode::container_unrecognized,
                                                    "file is not a standalone Yamaha object", source_name)};
     }
-    auto decoded = decode_media_object(*bytes);
+    auto decoded = decode_media_object(*bytes, reader->size());
     if (!decoded)
         return std::unexpected{decoded.error()};
     StandaloneObject result;
@@ -551,18 +585,37 @@ Result<StandaloneObject> StandaloneObject::open(const std::filesystem::path &pat
 
 const MediaObject &StandaloneObject::object() const noexcept { return object_; }
 
-Result<ObjectCatalog> build_object_catalog(const MediaContainer &container, std::size_t maximum_object_bytes,
-                                           const CancellationToken &cancellation) {
-    if (const auto *sfs = std::get_if<Container>(&container.storage()))
-        return build_object_catalog(*sfs, maximum_object_bytes, cancellation);
-    auto objects = container.objects(maximum_object_bytes, cancellation);
-    if (!objects)
-        return std::unexpected{objects.error()};
+namespace {
+
+MediaObjectDescriptor describe_media_object(const MediaObject &object) {
+    return {
+        object.key,         object.logical_path, object.scope_key,   object.raw_group, object.raw_volume,
+        object.group_label, object.volume_label, object.data_offset, object.size,
+    };
+}
+
+MediaObjectDescriptor describe_catalog_object(const ObjectSnapshot &object) {
+    const auto &placement = object.placement;
+    return {
+        object.key,
+        placement ? std::format("{}/{}/{}", placement->volume_name, placement->category_name, placement->entry_name)
+                  : object.key,
+        object.scope_key,
+        {},
+        {},
+        {placement ? placement->partition_name : std::string{}, LabelStatus::confirmed, "SFS partition directory"},
+        {placement ? placement->volume_name : std::string{}, LabelStatus::confirmed, "SFS volume directory"},
+        0U,
+        object.raw_payload.size(),
+    };
+}
+
+ObjectCatalog catalog_from_media_objects(std::vector<MediaObject> objects) {
     ObjectCatalog result;
     std::map<std::pair<std::string, std::string>, std::uint32_t> volume_ids;
     std::uint32_t next_volume = 1;
     std::uint32_t next_object = 1;
-    for (auto &object : *objects) {
+    for (auto &object : objects) {
         const auto scope = std::pair{object.raw_group, object.raw_volume};
         if (!volume_ids.contains(scope))
             volume_ids.emplace(scope, next_volume++);
@@ -585,6 +638,43 @@ Result<ObjectCatalog> build_object_catalog(const MediaContainer &container, std:
         }
     }
     return result;
+}
+
+} // namespace
+
+Result<ObjectCatalog> build_object_catalog(const MediaContainer &container, std::size_t maximum_object_bytes,
+                                           const CancellationToken &cancellation) {
+    auto inventory =
+        build_media_inventory(container, MediaObjectReadMode::complete, maximum_object_bytes, cancellation);
+    if (!inventory)
+        return std::unexpected{inventory.error()};
+    return std::move(inventory->catalog);
+}
+
+Result<MediaInventory> build_media_inventory(const MediaContainer &container, MediaObjectReadMode mode,
+                                             std::size_t maximum_object_bytes, const CancellationToken &cancellation) {
+    if (const auto *sfs = std::get_if<Container>(&container.storage())) {
+        const bool retain_raw_payloads = mode == MediaObjectReadMode::complete;
+        auto catalog = detail::build_object_catalog(*sfs, maximum_object_bytes, cancellation, retain_raw_payloads);
+        if (!catalog)
+            return std::unexpected{catalog.error()};
+        std::vector<MediaObjectDescriptor> objects;
+        objects.reserve(catalog->objects.size());
+        for (const auto &object : catalog->objects)
+            objects.push_back(describe_catalog_object(object));
+        return MediaInventory{std::move(objects), std::move(*catalog), retain_raw_payloads};
+    }
+
+    auto loaded = container.objects(mode, maximum_object_bytes, cancellation);
+    if (!loaded)
+        return std::unexpected{loaded.error()};
+    std::vector<MediaObjectDescriptor> objects;
+    objects.reserve(loaded->size());
+    for (const auto &object : *loaded)
+        objects.push_back(describe_media_object(object));
+    const bool raw_payloads_complete =
+        mode == MediaObjectReadMode::complete || container.kind() == MediaKind::standalone_object;
+    return MediaInventory{std::move(objects), catalog_from_media_objects(std::move(*loaded)), raw_payloads_complete};
 }
 
 std::string sanitize_path_component(std::string_view value, std::string_view fallback) {

@@ -18,7 +18,7 @@ namespace axk::cli::commands {
 struct CliLoaded {
     std::filesystem::path path;
     MediaContainer media;
-    std::vector<MediaObject> objects;
+    std::vector<MediaObjectDescriptor> objects;
     ObjectCatalog catalog;
     RelationshipGraph graph;
 };
@@ -37,7 +37,8 @@ struct CliLoadResult {
 std::string object_type_text(ObjectType type);
 std::string media_kind_text(MediaKind kind);
 std::vector<std::filesystem::path> expand_cli_paths(const std::vector<std::filesystem::path> &inputs);
-CliLoadResult load_cli_paths(const std::vector<std::filesystem::path> &inputs);
+CliLoadResult load_cli_paths(const std::vector<std::filesystem::path> &inputs,
+                             MediaObjectReadMode mode = MediaObjectReadMode::complete);
 Result<SemanticSnapshot> load_semantic_snapshot(const std::filesystem::path &path);
 Result<void> prepare_report_directory(const std::filesystem::path &path, bool overwrite);
 Result<ReportSchemaManifest> write_cli_report(const std::filesystem::path &output, std::string name,

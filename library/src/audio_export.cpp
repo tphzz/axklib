@@ -12,6 +12,7 @@
 
 #include "axklib/media.hpp"
 #include "axklib/utf8.hpp"
+#include "axklib/wav_stream.hpp"
 
 namespace axk {
 namespace {
@@ -175,47 +176,6 @@ Result<void> write_text_atomic(const std::filesystem::path &path, std::string_vi
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not publish SFZ atomically")};
     }
     return {};
-}
-
-struct AudioSource {
-    const Waveform *physical{};
-    const Waveform *left{};
-    const Waveform *right{};
-};
-
-Result<Waveform> materialize_audio(const AudioSource &source) {
-    if (source.physical != nullptr)
-        return *source.physical;
-    if (source.left == nullptr || source.right == nullptr) {
-        return std::unexpected{
-            make_error(ErrorCode::invalid_argument, ErrorCategory::audio, "audio export source is incomplete")};
-    }
-    return render_stereo(*source.left, *source.right);
-}
-
-Result<bool> same_audio(const AudioSource &first, const AudioSource &second) {
-    std::optional<Waveform> first_rendered;
-    std::optional<Waveform> second_rendered;
-    const auto *first_waveform = first.physical;
-    const auto *second_waveform = second.physical;
-    if (first_waveform == nullptr) {
-        auto rendered = materialize_audio(first);
-        if (!rendered)
-            return std::unexpected{rendered.error()};
-        first_rendered = std::move(*rendered);
-        first_waveform = &*first_rendered;
-    }
-    if (second_waveform == nullptr) {
-        auto rendered = materialize_audio(second);
-        if (!rendered)
-            return std::unexpected{rendered.error()};
-        second_rendered = std::move(*rendered);
-        second_waveform = &*second_rendered;
-    }
-    return first_waveform->format.channels == second_waveform->format.channels &&
-           first_waveform->format.sample_width_bytes == second_waveform->format.sample_width_bytes &&
-           first_waveform->format.sample_rate == second_waveform->format.sample_rate &&
-           first_waveform->pcm == second_waveform->pcm;
 }
 
 using VolumeKey = std::pair<std::uint8_t, std::uint32_t>;
@@ -512,12 +472,13 @@ Result<ExportPlan> build_export_plan(const MediaContainer &container, const Obje
 Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::filesystem::path &output_directory,
                                         bool overwrite, const CancellationToken &cancellation) {
     ExportResult result;
-    std::map<std::filesystem::path, AudioSource> targets;
-    const auto register_target = [&](const std::filesystem::path &path, AudioSource source) -> Result<void> {
+    std::map<std::filesystem::path, audio_internal::WavSource> targets;
+    const auto register_target = [&](const std::filesystem::path &path,
+                                     audio_internal::WavSource source) -> Result<void> {
         const auto [existing, inserted] = targets.emplace(path, source);
         if (inserted)
             return {};
-        auto equal = same_audio(existing->second, source);
+        auto equal = audio_internal::equal_wav(existing->second, source, cancellation);
         if (!equal)
             return std::unexpected{equal.error()};
         if (!*equal) {
@@ -529,7 +490,8 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
     for (const auto &volume : plan.volumes) {
         for (const auto &waveform : volume.waveforms) {
             const auto path = (output_directory / volume.relative_root / waveform.relative_wav_path).lexically_normal();
-            if (auto registered = register_target(path, {.physical = &waveform.waveform}); !registered)
+            if (auto registered = register_target(path, audio_internal::WavSource::from_physical(waveform.waveform));
+                !registered)
                 return std::unexpected{registered.error()};
         }
         for (const auto &bank : volume.sample_banks) {
@@ -542,7 +504,8 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
             if (left == volume.waveforms.end() || right == volume.waveforms.end())
                 continue;
             const auto path = (output_directory / volume.relative_root / *bank.rendered_wav_path).lexically_normal();
-            if (auto registered = register_target(path, {.left = &left->waveform, .right = &right->waveform});
+            if (auto registered =
+                    register_target(path, audio_internal::WavSource::from_stereo(left->waveform, right->waveform));
                 !registered)
                 return std::unexpected{registered.error()};
         }
@@ -559,16 +522,8 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
     for (const auto &[path, source] : targets) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
-        if (source.physical != nullptr) {
-            if (const auto written = write_wav_atomic(path, *source.physical, overwrite); !written)
-                return std::unexpected{written.error()};
-        } else {
-            auto rendered = materialize_audio(source);
-            if (!rendered)
-                return std::unexpected{rendered.error()};
-            if (const auto written = write_wav_atomic(path, *rendered, overwrite); !written)
-                return std::unexpected{written.error()};
-        }
+        if (const auto written = audio_internal::write_wav_atomic(path, source, overwrite, cancellation); !written)
+            return std::unexpected{written.error()};
         result.written_files.push_back(path);
     }
     return result;

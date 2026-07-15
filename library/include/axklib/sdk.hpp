@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "axklib/sdk/build_info.hpp"
 #include "axklib/sdk/export.hpp"
 #include "axklib/sdk/result.hpp"
 
@@ -428,6 +429,7 @@ class AXK_SDK_API transaction final {
 };
 
 AXK_SDK_API std::string sdk_version();
+[[nodiscard]] AXK_SDK_API build_info sdk_build_info() noexcept;
 AXK_SDK_API std::string render_error(const error &failure);
 
 } // namespace axk

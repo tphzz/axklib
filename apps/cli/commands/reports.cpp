@@ -155,12 +155,12 @@ const axk::ObjectSnapshot *catalog_object(const CliLoaded &loaded, std::string_v
     return found == loaded.catalog.objects.end() ? nullptr : &*found;
 }
 
-const axk::MediaObject *media_object(const CliLoaded &loaded, std::string_view key) {
-    const auto found = std::ranges::find(loaded.objects, key, &axk::MediaObject::key);
+const axk::MediaObjectDescriptor *media_object(const CliLoaded &loaded, std::string_view key) {
+    const auto found = std::ranges::find(loaded.objects, key, &axk::MediaObjectDescriptor::key);
     return found == loaded.objects.end() ? nullptr : &*found;
 }
 
-const axk::FatFile *fat_file_metadata(const CliLoaded &loaded, const axk::MediaObject *object) {
+const axk::FatFile *fat_file_metadata(const CliLoaded &loaded, const axk::MediaObjectDescriptor *object) {
     if (object == nullptr)
         return nullptr;
     const auto *fat = std::get_if<axk::FatImage>(&loaded.media.storage());
@@ -279,8 +279,7 @@ std::vector<axk::ReportRow> sbac_detail_rows(const CliLoadResult &loaded) {
                  optional_unsigned(sfs || sbac_media != nullptr,
                                    sfs ? sfs_payload_offset(source, *sbac_item) : sbac_media->data_offset)},
                 {"sbac_name", sbac_item->object.header.name},
-                {"sbac_payload_size",
-                 sbac_media != nullptr ? static_cast<std::uint64_t>(sbac_media->raw_payload.size()) : std::uint64_t{0}},
+                {"sbac_payload_size", sbac_media != nullptr ? sbac_media->size : std::uint64_t{0}},
                 {"sbac_slot_count_0x144", static_cast<std::uint64_t>(sbac->active_slot_count)},
                 {"slot_index", static_cast<std::uint64_t>(slot_index)},
                 {"slot_offset", static_cast<std::uint64_t>(slot->offset)},
@@ -508,9 +507,7 @@ std::vector<axk::ReportRow> program_detail_rows(const CliLoadResult &loaded) {
                  optional_unsigned(sfs || program_media != nullptr,
                                    sfs ? sfs_payload_offset(source, *program_item) : program_media->data_offset)},
                 {"prog_name", program_item->object.header.name},
-                {"prog_payload_size", program_media != nullptr
-                                          ? static_cast<std::uint64_t>(program_media->raw_payload.size())
-                                          : std::uint64_t{0}},
+                {"prog_payload_size", program_media != nullptr ? program_media->size : std::uint64_t{0}},
                 {"assignment_index", static_cast<std::uint64_t>(*relation.assignment_index)},
                 {"assignment_offset", static_cast<std::uint64_t>(0x120U + *relation.assignment_index * 0x38U)},
                 {"assignment_name", assignment.name},
@@ -646,9 +643,7 @@ std::vector<axk::ReportRow> program_ignored_detail_rows(const CliLoadResult &loa
                                                               : program_media == nullptr ? 0U
                                                                                          : program_media->data_offset)},
                     {"prog_name", item.object.header.name},
-                    {"prog_payload_size", program_media == nullptr
-                                              ? std::uint64_t{0}
-                                              : static_cast<std::uint64_t>(program_media->raw_payload.size())},
+                    {"prog_payload_size", program_media == nullptr ? std::uint64_t{0} : program_media->size},
                     {"assignment_index", static_cast<std::uint64_t>(index)},
                     {"assignment_offset", static_cast<std::uint64_t>(0x120U + index * 0x38U)},
                     {"raw_name_guess", assignment.name},
@@ -1455,16 +1450,16 @@ std::vector<axk::ReportRow> validate_media_details(const CliLoaded &source, bool
                                                     issue.sampler_path, {}, "Confirmed", issue.basis,
                                                     issue.recommended_next_check));
         }
-        for (const auto &object : source.objects) {
-            const auto required = static_cast<std::uint64_t>(object.decoded.header.header_size) +
-                                  object.decoded.header.payload_bytes_0x1c;
-            if (required <= object.raw_payload.size())
+        for (const auto &object : source.catalog.objects) {
+            const auto media = media_object(source, object.key);
+            const auto required =
+                static_cast<std::uint64_t>(object.object.header.header_size) + object.object.header.payload_bytes_0x1c;
+            if (media == nullptr || required <= media->size)
                 continue;
-            issues.push_back(
-                media_validation_issue(source, "error", "OBJECT_PAYLOAD_TRUNCATED",
-                                       std::format("Object header requires {} bytes but payload has {} bytes.",
-                                                   required, object.raw_payload.size()),
-                                       "object", {}, public_object_key(source, object.key), "Known", "validation"));
+            issues.push_back(media_validation_issue(
+                source, "error", "OBJECT_PAYLOAD_TRUNCATED",
+                std::format("Object header requires {} bytes but payload has {} bytes.", required, media->size),
+                "object", {}, public_object_key(source, object.key), "Known", "validation"));
         }
     }
 
@@ -1850,12 +1845,12 @@ int run_corpus_audit_request(const axk::cli::CorpusAuditRequest &request) {
                     source.media.kind() == axk::MediaKind::sfs
                         ? axk::decode_waveform(std::get<axk::Container>(source.media.storage()), item)
                         : [&]() -> axk::Result<axk::Waveform> {
-                    const auto object = std::ranges::find(source.objects, item.key, &axk::MediaObject::key);
+                    const auto object = std::ranges::find(source.objects, item.key, &axk::MediaObjectDescriptor::key);
                     if (object == source.objects.end())
                         return std::unexpected{axk::make_error(axk::ErrorCode::object_malformed,
                                                                axk::ErrorCategory::object,
                                                                "waveform object payload is unavailable")};
-                    return axk::decode_waveform(*object);
+                    return axk::decode_waveform(item, object->logical_path);
                 }();
                 if (waveform) {
                     ++successful;

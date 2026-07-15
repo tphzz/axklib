@@ -1,5 +1,4 @@
-Yamaha A-series disk image and sampler object tooling
-
+axklib (@AXK_SOURCE_IDENTITY@)
 
 axklib [OPTIONS] [SUBCOMMANDS]
 

@@ -18,6 +18,15 @@ error. Commands that publish files refuse existing destinations unless
 package import publish through a temporary sibling so a failed operation does
 not leave a partial destination.
 
+## Version Information
+
+`axklib --version` prints the semantic API version and the independently
+generated Git source identity, package basename, abbreviated commit, selected
+ref, and source-tree state. Normal commands do not print this header, so their
+structured and human-readable output remains unchanged. See
+[Versioning And Build Identity](versioning.md) for field meanings and artifact
+naming.
+
 ## Command Map
 
 | Command | Purpose |

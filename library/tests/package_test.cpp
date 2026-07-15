@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <future>
 #include <limits>
@@ -333,6 +334,7 @@ std::string shell_quote(const std::filesystem::path &path) {
 #endif
 
 void expect_external_iso_tools_accept(const std::filesystem::path &path) {
+    static_cast<void>(path);
 #ifdef AXK_TEST_ISOINFO
     const auto isoinfo = shell_quote(AXK_TEST_ISOINFO) + " -i " + shell_quote(path) + " -f >/dev/null 2>&1";
     EXPECT_EQ(std::system(isoinfo.c_str()), 0) << "isoinfo rejected " << path;
@@ -883,9 +885,11 @@ TEST(PortablePackage, RejectsWrongOutputSuffixAndPreservesExistingTarget) {
     const auto rejected = axk::export_portable_package(media, roots, target, false);
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, axk::ErrorCode::io_open_failed);
-    std::ifstream existing{target, std::ios::binary};
-    const std::string retained{std::istreambuf_iterator<char>{existing}, {}};
-    EXPECT_EQ(retained, "preserve-me");
+    {
+        std::ifstream existing{target, std::ios::binary};
+        const std::string retained{std::istreambuf_iterator<char>{existing}, {}};
+        EXPECT_EQ(retained, "preserve-me");
+    }
 
     const auto replaced = axk::export_portable_package(media, roots, target, true);
     ASSERT_TRUE(replaced) << replaced.error().message;

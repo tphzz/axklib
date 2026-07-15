@@ -7,7 +7,9 @@
 
 int main() {
     axk::result<int> value{42};
-    if (axk::sdk_version() != std::string{"0.1.0"} || !value || *value != 42)
+    const auto build = axk::sdk_build_info();
+    if (axk::sdk_version() != std::string{"0.1.0"} || build.source_identity == nullptr ||
+        std::string{build.package_basename}.rfind("axklib-", 0) != 0 || !value || *value != 42)
         return 1;
 
     axk::operation_context context;

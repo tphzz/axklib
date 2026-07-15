@@ -296,9 +296,15 @@ const std::string &FatImage::source_name() const noexcept { return source_name_;
 const std::vector<FatFile> &FatImage::files() const noexcept { return files_; }
 
 Result<std::vector<std::byte>> FatImage::read_file(const FatFile &file, const CancellationToken &cancellation) const {
+    return read_file_prefix(file, file.size, cancellation);
+}
+
+Result<std::vector<std::byte>> FatImage::read_file_prefix(const FatFile &file, std::size_t maximum_bytes,
+                                                          const CancellationToken &cancellation) const {
     std::vector<std::byte> result;
-    result.reserve(file.size);
-    auto remaining = static_cast<std::size_t>(file.size);
+    const auto requested = std::min<std::size_t>(file.size, maximum_bytes);
+    result.reserve(requested);
+    auto remaining = requested;
     for (const auto cluster : file.clusters) {
         const auto take = std::min<std::size_t>(remaining, geometry_.cluster_size());
         const auto bytes = detail::read_bytes(*reader_, fat_cluster_offset(geometry_, cluster), take, cancellation);

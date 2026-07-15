@@ -1,14 +1,17 @@
 # Compatibility
 
-axklib versions two public surfaces independently:
+axklib versions four public surfaces independently:
 
 - The C++ API follows the project semantic version.
+- Each binary carries a Git-derived source identity for precise build identification.
 - JSON and CSV schemas carry their own major and minor versions.
 - Portable object packages carry an independent manifest schema version.
 
 The project is currently `0.1.0`. Installed PIMPL classes constrain public object
 layout, but pre-1.0 releases may still change source or binary compatibility.
 Supported consumers use C++17 and a documented compiler/runtime combination.
+Source identities such as `main-a1b2c3d` do not change the API compatibility
+version. See [Versioning And Build Identity](versioning.md).
 
 | Package | Build toolchain | Architectures |
 | --- | --- | --- |

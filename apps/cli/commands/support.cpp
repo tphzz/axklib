@@ -102,7 +102,7 @@ std::vector<std::filesystem::path> expand_cli_paths(const std::vector<std::files
     return result;
 }
 
-CliLoadResult load_cli_paths(const std::vector<std::filesystem::path> &inputs) {
+CliLoadResult load_cli_paths(const std::vector<std::filesystem::path> &inputs, axk::MediaObjectReadMode mode) {
     CliLoadResult result;
     for (const auto &path : expand_cli_paths(inputs)) {
         auto media = axk::open_media(path);
@@ -114,26 +114,18 @@ CliLoadResult load_cli_paths(const std::vector<std::filesystem::path> &inputs) {
                                      {"original_exception", "axk::Error"}});
             continue;
         }
-        auto catalog = axk::build_object_catalog(*media);
-        if (!catalog) {
+        auto inventory = axk::build_media_inventory(*media, mode);
+        if (!inventory) {
             result.errors.push_back({{"path", axk::text::path_to_utf8(path)},
-                                     {"error_code", static_cast<std::uint64_t>(catalog.error().code)},
-                                     {"message", catalog.error().message},
+                                     {"error_code", static_cast<std::uint64_t>(inventory.error().code)},
+                                     {"message", inventory.error().message},
                                      {"recoverable", true},
                                      {"original_exception", "axk::Error"}});
             continue;
         }
-        auto objects = media->objects();
-        if (!objects) {
-            result.errors.push_back({{"path", axk::text::path_to_utf8(path)},
-                                     {"error_code", static_cast<std::uint64_t>(objects.error().code)},
-                                     {"message", objects.error().message},
-                                     {"recoverable", true},
-                                     {"original_exception", "axk::Error"}});
-            continue;
-        }
-        auto graph = axk::build_relationship_graph(*catalog);
-        result.loaded.push_back({path, std::move(*media), std::move(*objects), std::move(*catalog), std::move(graph)});
+        auto graph = axk::build_relationship_graph(inventory->catalog);
+        result.loaded.push_back(
+            {path, std::move(*media), std::move(inventory->objects), std::move(inventory->catalog), std::move(graph)});
     }
     return result;
 }
@@ -184,7 +176,7 @@ axk::Result<axk::ReportSchemaManifest> write_cli_report(const std::filesystem::p
 std::string public_object_key(const CliLoaded &loaded, std::string_view native_key) {
     if (loaded.media.kind() == axk::MediaKind::sfs)
         return std::string{native_key};
-    const auto object = std::ranges::find(loaded.objects, native_key, &axk::MediaObject::key);
+    const auto object = std::ranges::find(loaded.objects, native_key, &axk::MediaObjectDescriptor::key);
     if (object == loaded.objects.end())
         return std::string{native_key};
     if (loaded.media.kind() == axk::MediaKind::fat12_floppy)
@@ -201,14 +193,14 @@ std::string public_scope_key(const CliLoaded &loaded, const axk::ObjectSnapshot 
         return std::format("{}:fat-root", axk::text::path_to_utf8(loaded.path));
     if (loaded.media.kind() == axk::MediaKind::standalone_object)
         return std::format("{}:standalone-object", axk::text::path_to_utf8(loaded.path));
-    const auto object = std::ranges::find(loaded.objects, item.key, &axk::MediaObject::key);
+    const auto object = std::ranges::find(loaded.objects, item.key, &axk::MediaObjectDescriptor::key);
     return object == loaded.objects.end()
                ? std::format("{}:iso", axk::text::path_to_utf8(loaded.path))
                : std::format("{}:{}", axk::text::path_to_utf8(loaded.path), object->scope_key);
 }
 
 axk::ReportRow inventory_row(const CliLoaded &loaded, const axk::ObjectSnapshot &item) {
-    const auto media_object = std::ranges::find(loaded.objects, item.key, &axk::MediaObject::key);
+    const auto media_object = std::ranges::find(loaded.objects, item.key, &axk::MediaObjectDescriptor::key);
     const auto iso = loaded.media.kind() == axk::MediaKind::iso9660;
     const auto fat = loaded.media.kind() == axk::MediaKind::fat12_floppy;
     const auto sfs = loaded.media.kind() == axk::MediaKind::sfs;
@@ -249,7 +241,7 @@ axk::ReportRow inventory_row(const CliLoaded &loaded, const axk::ObjectSnapshot 
     }
     const auto payload_size =
         media_object != loaded.objects.end()
-            ? static_cast<std::uint64_t>(media_object->raw_payload.size())
+            ? media_object->size
             : static_cast<std::uint64_t>(item.object.header.header_size) + item.object.header.payload_bytes_0x1c;
     const axk::FatFile *fat_metadata{};
     if (fat && media_object != loaded.objects.end()) {
