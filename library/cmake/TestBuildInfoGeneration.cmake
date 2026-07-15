@@ -24,7 +24,9 @@ endfunction()
 
 function(generate repository output_cpp output_package output_metadata)
   execute_process(
-    COMMAND "${CMAKE_COMMAND}"
+    COMMAND
+      "${CMAKE_COMMAND}" -E env --unset=GITHUB_REF_TYPE --unset=GITHUB_REF_NAME
+      "${CMAKE_COMMAND}"
       "-DAXK_VERSION_SOURCE_DIR=${repository}"
       -DAXK_VERSION_PRODUCT_NAME=axklib
       "-DAXK_VERSION_MODULE=${AXK_BUILD_INFO_MODULE}"
@@ -46,7 +48,9 @@ endfunction()
 
 function(expect_generation_failure repository output_cpp output_package output_metadata expected_error)
   execute_process(
-    COMMAND "${CMAKE_COMMAND}"
+    COMMAND
+      "${CMAKE_COMMAND}" -E env --unset=GITHUB_REF_TYPE --unset=GITHUB_REF_NAME
+      "${CMAKE_COMMAND}"
       "-DAXK_VERSION_SOURCE_DIR=${repository}"
       -DAXK_VERSION_PRODUCT_NAME=axklib
       "-DAXK_VERSION_MODULE=${AXK_BUILD_INFO_MODULE}"
