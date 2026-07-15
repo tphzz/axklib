@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/audio.hpp"
+#include "axklib/wav_stream.hpp"
 
 TEST(Audio, DecodesExactCurrentPcmAndWritesDeterministicWave) {
     const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
@@ -64,4 +65,53 @@ TEST(Audio, RejectsInconsistentPcmBeforeWavePreviewOrStereoAccess) {
 
     valid.format.channels = 3;
     EXPECT_FALSE(axk::wav_bytes(valid));
+}
+
+TEST(Audio, StreamsPhysicalAndRenderedWaveBytesWithoutChangingTheirEncoding) {
+    axk::Waveform left;
+    left.format = {1, 2, 44100};
+    left.frame_count = 3;
+    left.pcm = {std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}, std::byte{6}};
+    auto right = left;
+    right.frame_count = 2;
+    right.pcm.resize(4);
+
+    const auto collect = [](const axk::audio_internal::WavSource &source) {
+        std::vector<std::byte> result;
+        const auto streamed = axk::audio_internal::stream_wav(source, [&](std::span<const std::byte> bytes) {
+            result.insert(result.end(), bytes.begin(), bytes.end());
+            return axk::Result<void>{};
+        });
+        EXPECT_TRUE(streamed);
+        return result;
+    };
+
+    const auto physical = axk::wav_bytes(left);
+    ASSERT_TRUE(physical);
+    EXPECT_EQ(collect(axk::audio_internal::WavSource::from_physical(left)), *physical);
+
+    const auto rendered = axk::render_stereo(left, right);
+    ASSERT_TRUE(rendered);
+    const auto rendered_bytes = axk::wav_bytes(*rendered);
+    ASSERT_TRUE(rendered_bytes);
+    EXPECT_EQ(collect(axk::audio_internal::WavSource::from_stereo(left, right)), *rendered_bytes);
+}
+
+TEST(Audio, ComparesStreamedWaveBytesExactly) {
+    axk::Waveform first;
+    first.format = {1, 2, 44100};
+    first.frame_count = 2;
+    first.pcm = {std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+    auto equal = first;
+    auto distinct = first;
+    distinct.pcm.back() = std::byte{5};
+
+    const auto same = axk::audio_internal::equal_wav(axk::audio_internal::WavSource::from_physical(first),
+                                                     axk::audio_internal::WavSource::from_physical(equal));
+    ASSERT_TRUE(same);
+    EXPECT_TRUE(*same);
+    const auto different = axk::audio_internal::equal_wav(axk::audio_internal::WavSource::from_physical(first),
+                                                          axk::audio_internal::WavSource::from_physical(distinct));
+    ASSERT_TRUE(different);
+    EXPECT_FALSE(*different);
 }

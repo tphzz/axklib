@@ -87,6 +87,7 @@ if(BUILD_TESTING)
   add_executable(axk_cli_tests tests/cli_parser_test.cpp tests/cli_schema_test.cpp)
   target_compile_features(axk_cli_tests PRIVATE cxx_std_23)
   target_compile_definitions(axk_cli_tests PRIVATE AXK_SOURCE_ROOT="${AXK_REPOSITORY_ROOT}")
+  target_include_directories(axk_cli_tests PRIVATE "${AXK_REPOSITORY_ROOT}/library/internal")
   target_link_libraries(
     axk_cli_tests
     PRIVATE axk_cli_adapter GTest::gtest_main nlohmann_json::nlohmann_json

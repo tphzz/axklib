@@ -30,24 +30,40 @@ ContentId sha1_content_id(std::span<const std::byte> bytes) {
     return {.algorithm = "sha1", .digest_hex = hash.getHash()};
 }
 
-PooledPathAllocator::PooledPathAllocator(ContentIdProvider provider) : provider_{std::move(provider)} {}
+Result<ContentId> sha1_wav_content_id(const audio_internal::WavSource &source) {
+    SHA1 hash;
+    const auto streamed = audio_internal::stream_wav(source, [&](std::span<const std::byte> bytes) -> Result<void> {
+        hash.add(bytes.data(), bytes.size());
+        return {};
+    });
+    if (!streamed)
+        return std::unexpected{streamed.error()};
+    return ContentId{.algorithm = "sha1", .digest_hex = hash.getHash()};
+}
+
+PooledPathAllocator::PooledPathAllocator(WavContentIdProvider provider) : provider_{std::move(provider)} {}
 
 Result<std::filesystem::path> PooledPathAllocator::allocate(const std::filesystem::path &selection_root,
                                                             std::string_view kind, std::string_view safe_stem,
-                                                            std::span<const std::byte> bytes) {
-    const auto id = provider_(bytes);
-    if (!valid_sha1(id))
+                                                            const audio_internal::WavSource &source) {
+    const auto id = provider_(source);
+    if (!id)
+        return std::unexpected{id.error()};
+    if (!valid_sha1(*id))
         return std::unexpected{content_id_error("content identifier provider returned invalid SHA-1")};
 
     const auto target = std::filesystem::path{"_samples"} / kind /
-                        std::format("{}__{}.wav", safe_stem, id.digest_hex.substr(0U, pooled_suffix_length));
+                        std::format("{}__{}.wav", safe_stem, id->digest_hex.substr(0U, pooled_suffix_length));
     if (const auto existing = entries_.find(target); existing != entries_.end()) {
-        if (existing->second.id.digest_hex != id.digest_hex || !std::ranges::equal(existing->second.bytes, bytes)) {
+        auto equal = audio_internal::equal_wav(existing->second.source, source);
+        if (!equal)
+            return std::unexpected{equal.error()};
+        if (existing->second.id.digest_hex != id->digest_hex || !*equal) {
             return std::unexpected{
                 content_id_error("distinct WAV contents share pooled export path " + axk::text::path_to_utf8(target))};
         }
     } else {
-        entries_.emplace(target, Entry{id, {bytes.begin(), bytes.end()}});
+        entries_.emplace(target, Entry{*id, source});
     }
 
     std::error_code error;

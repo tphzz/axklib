@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "axklib/catalog_internal.hpp"
+
 namespace axk {
 namespace {
 
@@ -19,8 +21,8 @@ std::string object_key(PartitionIndex partition, SfsId sfs_id) {
 
 } // namespace
 
-Result<ObjectCatalog> build_object_catalog(const Container &container, std::size_t maximum_object_bytes,
-                                           const CancellationToken &cancellation) {
+Result<ObjectCatalog> detail::build_object_catalog(const Container &container, std::size_t maximum_object_bytes,
+                                                   const CancellationToken &cancellation, bool retain_raw_payloads) {
     ObjectCatalog result;
     for (const auto &partition : container.partitions()) {
         if (const auto check = cancellation.check(); !check) {
@@ -121,20 +123,20 @@ Result<ObjectCatalog> build_object_catalog(const Container &container, std::size
                     record.sfs_id,
                 });
             }
-            result.objects.push_back({
-                object_key(partition.index, record.sfs_id),
-                partition.index,
-                record.sfs_id,
-                std::format("partition:{}", partition.index.value),
-                std::move(*decoded),
-                std::move(placement),
-                std::move(*bytes),
-            });
+            auto raw_payload = retain_raw_payloads ? std::move(*bytes) : std::vector<std::byte>{};
+            result.objects.push_back({object_key(partition.index, record.sfs_id), partition.index, record.sfs_id,
+                                      std::format("partition:{}", partition.index.value), std::move(*decoded),
+                                      std::move(placement), std::move(raw_payload)});
         }
     }
     std::ranges::sort(result.objects, {},
                       [](const ObjectSnapshot &item) { return std::pair{item.partition.value, item.sfs_id.value}; });
     return result;
+}
+
+Result<ObjectCatalog> build_object_catalog(const Container &container, std::size_t maximum_object_bytes,
+                                           const CancellationToken &cancellation) {
+    return detail::build_object_catalog(container, maximum_object_bytes, cancellation, true);
 }
 
 } // namespace axk

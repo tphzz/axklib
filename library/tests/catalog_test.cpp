@@ -2,11 +2,13 @@
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <tuple>
 #include <variant>
 
 #include <gtest/gtest.h>
 
 #include "axklib/catalog.hpp"
+#include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
 #include "axklib/sfs.hpp"
@@ -51,6 +53,41 @@ TEST(ObjectCatalog, DerivesExactVolumeAndCategoryPlacementFromDirectories) {
     ASSERT_TRUE(decoded_payload) << decoded_payload.error().message;
     EXPECT_EQ(decoded_payload->header.type, sample->object.header.type);
     EXPECT_EQ(decoded_payload->header.name, sample->object.header.name);
+}
+
+TEST(ObjectCatalog, SfsMetadataInventoryRetainsDecodedTopologyWithoutRawPayloads) {
+    const auto media = axk::open_media(fixture("HD00_512_single_sbnk_authored.hds"));
+    ASSERT_TRUE(media) << media.error().message;
+    const auto complete = axk::build_media_inventory(*media, axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(complete) << complete.error().message;
+    const auto metadata = axk::build_media_inventory(*media, axk::MediaObjectReadMode::decoded_metadata);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+
+    ASSERT_TRUE(complete->raw_payloads_complete);
+    ASSERT_FALSE(metadata->raw_payloads_complete);
+    ASSERT_EQ(metadata->catalog.objects.size(), complete->catalog.objects.size());
+    EXPECT_TRUE(
+        std::ranges::all_of(complete->catalog.objects, [](const auto &object) { return !object.raw_payload.empty(); }));
+    EXPECT_TRUE(
+        std::ranges::all_of(metadata->catalog.objects, [](const auto &object) { return object.raw_payload.empty(); }));
+    const auto relationship_signature = [](const axk::ObjectCatalog &catalog) {
+        std::vector<
+            std::tuple<std::string, std::string, std::optional<std::string>, std::string, axk::RelationshipQuality>>
+            result;
+        for (const auto &relationship : axk::build_relationship_graph(catalog).relationships) {
+            result.emplace_back(relationship.key, relationship.source_key, relationship.target_key, relationship.type,
+                                relationship.quality);
+        }
+        return result;
+    };
+    EXPECT_EQ(relationship_signature(metadata->catalog), relationship_signature(complete->catalog));
+    for (std::size_t index = 0U; index < complete->catalog.objects.size(); ++index) {
+        const auto &expected = complete->catalog.objects[index];
+        const auto &actual = metadata->catalog.objects[index];
+        EXPECT_EQ(actual.key, expected.key);
+        EXPECT_EQ(actual.object.header.raw_type, expected.object.header.raw_type);
+        EXPECT_EQ(actual.object.header.name, expected.object.header.name);
+    }
 }
 
 TEST(RelationshipGraph, MatchesMaintainedFixtureCountsAndSamplerHierarchy) {

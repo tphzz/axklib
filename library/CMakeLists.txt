@@ -85,6 +85,7 @@ add_library(
   STATIC
   src/audio.cpp
   src/audio_export.cpp
+  src/wav_stream.cpp
   src/bytes.cpp
   src/catalog.cpp
   src/error.cpp

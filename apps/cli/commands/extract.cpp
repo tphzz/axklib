@@ -35,6 +35,7 @@
 #include "axklib/sfs.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
+#include "axklib/wav_stream.hpp"
 #include "axklib/writer.hpp"
 
 namespace axk::cli::commands {
@@ -97,11 +98,9 @@ axk::Result<void> retarget_export_plan(axk::ExportPlan &plan, const std::filesys
         volume.relative_root = preserve_volume_roots ? selection_root / volume.relative_root : selection_root;
         std::map<std::string, std::filesystem::path> waveform_paths;
         for (auto &waveform : volume.waveforms) {
-            auto bytes = axk::wav_bytes(waveform.waveform);
-            if (!bytes)
-                return std::unexpected{bytes.error()};
             auto pooled = pooled_paths.allocate(volume.relative_root, "physical",
-                                                safe_display_path_name(waveform.display_name, "sample"), *bytes);
+                                                safe_display_path_name(waveform.display_name, "sample"),
+                                                axk::audio_internal::WavSource::from_physical(waveform.waveform));
             if (!pooled)
                 return std::unexpected{pooled.error()};
             waveform.relative_wav_path = std::move(*pooled);
@@ -118,14 +117,9 @@ axk::Result<void> retarget_export_plan(axk::ExportPlan &plan, const std::filesys
                 const auto right = std::ranges::find(volume.waveforms, bank.members[1].waveform_key,
                                                      &axk::PhysicalWaveformExport::object_key);
                 if (left != volume.waveforms.end() && right != volume.waveforms.end()) {
-                    auto stereo = axk::render_stereo(left->waveform, right->waveform);
-                    if (!stereo)
-                        return std::unexpected{stereo.error()};
-                    auto bytes = axk::wav_bytes(*stereo);
-                    if (!bytes)
-                        return std::unexpected{bytes.error()};
-                    auto pooled = pooled_paths.allocate(volume.relative_root, "rendered",
-                                                        safe_display_path_name(bank.display_name, "sample"), *bytes);
+                    auto pooled = pooled_paths.allocate(
+                        volume.relative_root, "rendered", safe_display_path_name(bank.display_name, "sample"),
+                        axk::audio_internal::WavSource::from_stereo(left->waveform, right->waveform));
                     if (!pooled)
                         return std::unexpected{pooled.error()};
                     bank.rendered_wav_path = std::move(*pooled);
@@ -281,58 +275,62 @@ int run_extract_request(const axk::cli::ExtractRequest &request) {
         std::cerr << "error: could not create export output directory\n";
         return 1;
     }
-    const auto loaded = load_cli_paths(request.paths);
     axk::ExportPlan combined;
-    axk::cli::detail::PooledPathAllocator pooled_paths;
     std::map<std::filesystem::path, std::string> volume_graphs;
-    const auto selectors = request.scope == "file" ? std::vector<std::string>{""} : request.selector_paths;
-    for (const auto &selector : selectors) {
-        bool found = request.scope == "file";
-        for (const auto &source : loaded.loaded) {
-            std::vector<const axk::ContentNode *> matches;
-            const auto tree = cli_content_tree(source, false);
-            if (request.scope != "file") {
-                for (const auto &root : tree.roots)
-                    find_selector_nodes(source, root, request.scope, selector, {}, matches);
-                if (matches.empty())
-                    continue;
-                found = true;
-            }
-            auto plan = axk::build_export_plan(source.media, source.catalog, source.graph);
-            if (!plan)
-                return report_failure(plan.error());
-            if (request.scope != "file")
-                filter_export_plan(*plan, source, request.scope, selector, matches.front()->object_key);
-            auto root = selection_root(request.scope, selector);
-            if (request.scope == "file") {
-                root /= safe_display_path_name(axk::text::path_to_utf8(source.path.stem()), "source");
-            }
-            if (auto retargeted = retarget_export_plan(*plan, root, request.scope == "file", pooled_paths);
-                !retargeted) {
-                return report_failure(retargeted.error());
-            }
-            std::ranges::move(plan->decode_errors, std::back_inserter(combined.decode_errors));
-            for (const auto &volume : plan->volumes) {
-                auto graph = axk::cli::schema::export_v1::serialize_volume_graph(volume, source.graph, source.path,
-                                                                                 media_kind_text(source.media.kind()));
-                if (!graph)
-                    return report_failure(graph.error());
-                const auto path = request.output_directory / volume.relative_root / "volume.axklib.json";
-                const auto [existing, inserted] = volume_graphs.emplace(path, *graph);
-                if (!inserted && existing->second != *graph) {
-                    std::cerr << "error: distinct volume graphs share output path: " << axk::text::path_to_utf8(path)
-                              << '\n';
-                    return 1;
+    std::size_t load_error_count{};
+    {
+        const auto loaded = load_cli_paths(request.paths, axk::MediaObjectReadMode::decoded_metadata);
+        axk::cli::detail::PooledPathAllocator pooled_paths;
+        const auto selectors = request.scope == "file" ? std::vector<std::string>{""} : request.selector_paths;
+        for (const auto &selector : selectors) {
+            bool found = request.scope == "file";
+            for (const auto &source : loaded.loaded) {
+                std::vector<const axk::ContentNode *> matches;
+                const auto tree = cli_content_tree(source, false);
+                if (request.scope != "file") {
+                    for (const auto &root : tree.roots)
+                        find_selector_nodes(source, root, request.scope, selector, {}, matches);
+                    if (matches.empty())
+                        continue;
+                    found = true;
                 }
+                auto plan = axk::build_export_plan(source.media, source.catalog, source.graph);
+                if (!plan)
+                    return report_failure(plan.error());
+                if (request.scope != "file")
+                    filter_export_plan(*plan, source, request.scope, selector, matches.front()->object_key);
+                auto root = selection_root(request.scope, selector);
+                if (request.scope == "file") {
+                    root /= safe_display_path_name(axk::text::path_to_utf8(source.path.stem()), "source");
+                }
+                if (auto retargeted = retarget_export_plan(*plan, root, request.scope == "file", pooled_paths);
+                    !retargeted) {
+                    return report_failure(retargeted.error());
+                }
+                std::ranges::move(plan->decode_errors, std::back_inserter(combined.decode_errors));
+                for (const auto &volume : plan->volumes) {
+                    auto graph = axk::cli::schema::export_v1::serialize_volume_graph(
+                        volume, source.graph, source.path, media_kind_text(source.media.kind()));
+                    if (!graph)
+                        return report_failure(graph.error());
+                    const auto path = request.output_directory / volume.relative_root / "volume.axklib.json";
+                    const auto [existing, inserted] = volume_graphs.emplace(path, *graph);
+                    if (!inserted && existing->second != *graph) {
+                        std::cerr << "error: distinct volume graphs share output path: "
+                                  << axk::text::path_to_utf8(path) << '\n';
+                        return 1;
+                    }
+                }
+                std::ranges::move(plan->volumes, std::back_inserter(combined.volumes));
             }
-            std::ranges::move(plan->volumes, std::back_inserter(combined.volumes));
+            if (!found) {
+                std::cerr << "selector path not found for " << request.scope << ": " << selector
+                          << ". Run `axklib info --format paths` and copy the path "
+                             "column.\n";
+                return 4;
+            }
         }
-        if (!found) {
-            std::cerr << "selector path not found for " << request.scope << ": " << selector
-                      << ". Run `axklib info --format paths` and copy the path "
-                         "column.\n";
-            return 4;
-        }
+        load_error_count = loaded.errors.size();
     }
     if (!request.overwrite) {
         const auto existing =
@@ -366,8 +364,8 @@ int run_extract_request(const axk::cli::ExtractRequest &request) {
                         [](std::size_t count, const auto &volume) { return count + volume.waveforms.size(); });
     std::cout << "waveforms=" << waveform_count << " written_files=" << written_files
               << " selection_graphs=" << volume_graphs.size() << " sfz_files=" << sfz_count
-              << " decode_errors=" << combined.decode_errors.size() << " load_errors=" << loaded.errors.size() << '\n';
-    return loaded.errors.empty() ? 0 : 1;
+              << " decode_errors=" << combined.decode_errors.size() << " load_errors=" << load_error_count << '\n';
+    return load_error_count == 0U ? 0 : 1;
 }
 
 axk::ReportRow coverage_summary(const CliLoadResult &loaded, std::span<const axk::ReportRow> relationships) {

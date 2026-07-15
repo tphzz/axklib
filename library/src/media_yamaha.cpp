@@ -10,6 +10,7 @@
 #include <tuple>
 
 #include "axklib/bytes.hpp"
+#include "axklib/catalog_internal.hpp"
 #include "axklib/utf8.hpp"
 #include "media_internal.hpp"
 
@@ -653,14 +654,15 @@ Result<ObjectCatalog> build_object_catalog(const MediaContainer &container, std:
 Result<MediaInventory> build_media_inventory(const MediaContainer &container, MediaObjectReadMode mode,
                                              std::size_t maximum_object_bytes, const CancellationToken &cancellation) {
     if (const auto *sfs = std::get_if<Container>(&container.storage())) {
-        auto catalog = build_object_catalog(*sfs, maximum_object_bytes, cancellation);
+        const bool retain_raw_payloads = mode == MediaObjectReadMode::complete;
+        auto catalog = detail::build_object_catalog(*sfs, maximum_object_bytes, cancellation, retain_raw_payloads);
         if (!catalog)
             return std::unexpected{catalog.error()};
         std::vector<MediaObjectDescriptor> objects;
         objects.reserve(catalog->objects.size());
         for (const auto &object : catalog->objects)
             objects.push_back(describe_catalog_object(object));
-        return MediaInventory{std::move(objects), std::move(*catalog), true};
+        return MediaInventory{std::move(objects), std::move(*catalog), retain_raw_payloads};
     }
 
     auto loaded = container.objects(mode, maximum_object_bytes, cancellation);
