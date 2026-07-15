@@ -1,0 +1,33 @@
+#pragma once
+
+#include <cstddef>
+#include <filesystem>
+#include <optional>
+#include <string_view>
+
+#include "requests.hpp"
+
+namespace axk::cli::commands {
+
+int run_info_request(const InfoRequest &request);
+int run_objects_request(const ObjectsRequest &request);
+int run_relationships_request(const RelationshipsRequest &request);
+int run_inventory_request(const InventoryRequest &request);
+int run_coverage_request(const CoverageRequest &request);
+int run_corpus_audit_request(const CorpusAuditRequest &request);
+int run_extract_request(const ExtractRequest &request);
+int run_package_export(const PackageExportRequest &request);
+int run_package_inspect(const PackageReadRequest &request, bool verify_only);
+int run_package_import(const PackageImportRequest &request);
+int run_orphans_request(const OrphansRequest &request);
+int run_validate_request(const ValidateRequest &request);
+int run_create_hds(const std::filesystem::path &manifest_path, const std::filesystem::path &output_path, bool overwrite,
+                   bool pretty);
+int run_create_media(const std::filesystem::path &manifest_path, const std::filesystem::path &output_path,
+                     std::string_view expected_format, bool overwrite, bool pretty);
+int run_create_manifest(std::string_view kind, const std::filesystem::path &output_path, bool overwrite);
+int run_alter_manifest(const std::filesystem::path &output_path, bool overwrite);
+int run_alter_hds(const std::filesystem::path &source_path, const std::filesystem::path &manifest_path,
+                  const std::optional<std::filesystem::path> &output_path, bool pretty);
+
+} // namespace axk::cli::commands

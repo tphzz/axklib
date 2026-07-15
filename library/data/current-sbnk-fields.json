@@ -1,0 +1,635 @@
+{
+  "sbnk_fields": [
+    {
+      "name": "sample_flags_0x0d0",
+      "offset": 208,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "mapout_flags_0x0d1",
+      "offset": 209,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "midi_receive_channel_0x0d2",
+      "offset": 210,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "pitch_bend_type_0x0d3",
+      "offset": 211,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "pitch_bend_range_0x0d4",
+      "offset": 212,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "coarse_tune_0x0d5",
+      "offset": 213,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "left_root_key_0x0d6",
+      "offset": 214,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "right_root_key_0x0d7",
+      "offset": 215,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "left_sample_rate_0x0d8",
+      "offset": 216,
+      "signed": false,
+      "width": 2
+    },
+    {
+      "name": "right_sample_rate_0x0da",
+      "offset": 218,
+      "signed": false,
+      "width": 2
+    },
+    {
+      "name": "left_fine_tune_cents_0x0dc",
+      "offset": 220,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "right_fine_tune_cents_0x0dd",
+      "offset": 221,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "pitch_base_word_0x0de",
+      "offset": 222,
+      "signed": false,
+      "width": 2
+    },
+    {
+      "name": "secondary_pitch_base_word_0x0e0",
+      "offset": 224,
+      "signed": false,
+      "width": 2
+    },
+    {
+      "name": "key_range_high_0x0e2",
+      "offset": 226,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "key_range_low_0x0e3",
+      "offset": 227,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "loop_tempo_0x0e6",
+      "offset": 230,
+      "signed": false,
+      "width": 2
+    },
+    {
+      "name": "left_wave_start_address_0x0e8",
+      "offset": 232,
+      "signed": false,
+      "width": 4
+    },
+    {
+      "name": "left_wave_start_low16_0x0ea",
+      "offset": 234,
+      "signed": false,
+      "width": 2
+    },
+    {
+      "name": "right_wave_start_address_0x0ec",
+      "offset": 236,
+      "signed": false,
+      "width": 4
+    },
+    {
+      "name": "right_wave_start_low16_0x0ee",
+      "offset": 238,
+      "signed": false,
+      "width": 2
+    },
+    {
+      "name": "left_wave_length_frames_0x0f0",
+      "offset": 240,
+      "signed": false,
+      "width": 4
+    },
+    {
+      "name": "right_wave_length_frames_0x0f4",
+      "offset": 244,
+      "signed": false,
+      "width": 4
+    },
+    {
+      "name": "left_loop_start_frame_0x0f8",
+      "offset": 248,
+      "signed": false,
+      "width": 4
+    },
+    {
+      "name": "right_loop_start_frame_0x0fc",
+      "offset": 252,
+      "signed": false,
+      "width": 4
+    },
+    {
+      "name": "left_loop_length_frames_0x100",
+      "offset": 256,
+      "signed": false,
+      "width": 4
+    },
+    {
+      "name": "right_loop_length_frames_0x104",
+      "offset": 260,
+      "signed": false,
+      "width": 4
+    },
+    {
+      "name": "start_address_velocity_sensitivity_0x108",
+      "offset": 264,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "filter_type_0x109",
+      "offset": 265,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "filter_cutoff_0x10a",
+      "offset": 266,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "filter_q_width_0x10b",
+      "offset": 267,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "filter_cutoff_key_scaling_break1_0x10c",
+      "offset": 268,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "filter_cutoff_key_scaling_break2_0x10d",
+      "offset": 269,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "filter_cutoff_key_scaling_level1_0x10e",
+      "offset": 270,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "filter_cutoff_key_scaling_level2_0x10f",
+      "offset": 271,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "filter_cutoff_velocity_sensitivity_0x110",
+      "offset": 272,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "filter_q_width_velocity_sensitivity_0x111",
+      "offset": 273,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "expand_detune_0x112",
+      "offset": 274,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "expand_dephase_0x113",
+      "offset": 275,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "expand_width_0x114",
+      "offset": 276,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "random_pitch_0x115",
+      "offset": 277,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "sample_level_0x116",
+      "offset": 278,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "pan_0x117",
+      "offset": 279,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "velocity_low_limit_0x118",
+      "offset": 280,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "velocity_offset_0x119",
+      "offset": 281,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "velocity_range_high_0x11a",
+      "offset": 282,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "velocity_range_low_0x11b",
+      "offset": 283,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "level_scaling_break1_0x11c",
+      "offset": 284,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "level_scaling_break2_0x11d",
+      "offset": 285,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "level_scaling_level1_0x11e",
+      "offset": 286,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "level_scaling_level2_0x11f",
+      "offset": 287,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "velocity_sensitivity_0x120",
+      "offset": 288,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "alternate_group_0x121",
+      "offset": 289,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "sample_eq_frequency_0x122",
+      "offset": 290,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "sample_eq_gain_0x123",
+      "offset": 291,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "sample_eq_width_0x124",
+      "offset": 292,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "filter_cutoff_distance_0x125",
+      "offset": 293,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "feg_attack_rate_0x126",
+      "offset": 294,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "feg_decay_rate_0x127",
+      "offset": 295,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "feg_release_rate_0x128",
+      "offset": 296,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "feg_init_level_0x129",
+      "offset": 297,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "feg_attack_level_0x12a",
+      "offset": 298,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "feg_sustain_level_0x12b",
+      "offset": 299,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "feg_release_level_0x12c",
+      "offset": 300,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "feg_rate_key_scaling_0x12d",
+      "offset": 301,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "feg_rate_velocity_sensitivity_0x12e",
+      "offset": 302,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "feg_attack_level_velocity_sensitivity_0x12f",
+      "offset": 303,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "feg_level_velocity_sensitivity_0x130",
+      "offset": 304,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "peg_attack_rate_0x131",
+      "offset": 305,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "peg_decay_rate_0x132",
+      "offset": 306,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "peg_release_rate_0x133",
+      "offset": 307,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "peg_init_level_0x134",
+      "offset": 308,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "peg_attack_level_0x135",
+      "offset": 309,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "peg_sustain_level_0x136",
+      "offset": 310,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "peg_release_level_0x137",
+      "offset": 311,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "peg_rate_key_scaling_0x138",
+      "offset": 312,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "peg_rate_velocity_sensitivity_0x139",
+      "offset": 313,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "peg_level_velocity_sensitivity_0x13a",
+      "offset": 314,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "peg_range_0x13b",
+      "offset": 315,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "aeg_attack_rate_0x13c",
+      "offset": 316,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "aeg_decay_rate_0x13d",
+      "offset": 317,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "aeg_release_rate_0x13e",
+      "offset": 318,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "aeg_sustain_level_0x141",
+      "offset": 321,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "aeg_attack_mode_0x143",
+      "offset": 323,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "aeg_rate_key_scaling_0x144",
+      "offset": 324,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "aeg_rate_velocity_sensitivity_0x145",
+      "offset": 325,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "lfo_wave_0x146",
+      "offset": 326,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "lfo_speed_0x147",
+      "offset": 327,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "lfo_delay_time_0x148",
+      "offset": 328,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "lfo_flags_0x149",
+      "offset": 329,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "lfo_cutoff_mod_depth_0x14a",
+      "offset": 330,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "lfo_pitch_mod_depth_0x14b",
+      "offset": 331,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "lfo_amp_mod_depth_0x14c",
+      "offset": 332,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "filter_gain_0x151",
+      "offset": 337,
+      "signed": true,
+      "width": 1
+    },
+    {
+      "name": "wave_end_address_0x15c",
+      "offset": 348,
+      "signed": false,
+      "width": 4
+    },
+    {
+      "name": "loop_end_address_0x160",
+      "offset": 352,
+      "signed": false,
+      "width": 4
+    },
+    {
+      "name": "velocity_xfade_high_0x17c",
+      "offset": 380,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "velocity_xfade_low_0x17d",
+      "offset": 381,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "output1_0x17e",
+      "offset": 382,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "output1_level_0x17f",
+      "offset": 383,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "output2_0x180",
+      "offset": 384,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "output2_level_0x181",
+      "offset": 385,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "sample_portamento_type_0x182",
+      "offset": 386,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "sample_portamento_rate_0x183",
+      "offset": 387,
+      "signed": false,
+      "width": 1
+    },
+    {
+      "name": "sample_portamento_time_0x184",
+      "offset": 388,
+      "signed": false,
+      "width": 1
+    }
+  ],
+  "schema_version": "1.0"
+}

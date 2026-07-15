@@ -1,0 +1,847 @@
+{
+  "schema_version": "1.0",
+  "tables": [
+    {
+      "name": "sample_eq_frequency_ui_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "32Hz"
+        },
+        {
+          "key": 1,
+          "label": "36Hz"
+        },
+        {
+          "key": 2,
+          "label": "40Hz"
+        },
+        {
+          "key": 3,
+          "label": "45Hz"
+        },
+        {
+          "key": 4,
+          "label": "50Hz"
+        },
+        {
+          "key": 5,
+          "label": "56Hz"
+        },
+        {
+          "key": 6,
+          "label": "63Hz"
+        },
+        {
+          "key": 7,
+          "label": "70Hz"
+        },
+        {
+          "key": 8,
+          "label": "80Hz"
+        },
+        {
+          "key": 9,
+          "label": "90Hz"
+        },
+        {
+          "key": 10,
+          "label": "100Hz"
+        },
+        {
+          "key": 11,
+          "label": "110Hz"
+        },
+        {
+          "key": 12,
+          "label": "125Hz"
+        },
+        {
+          "key": 13,
+          "label": "140Hz"
+        },
+        {
+          "key": 14,
+          "label": "160Hz"
+        },
+        {
+          "key": 15,
+          "label": "180Hz"
+        },
+        {
+          "key": 16,
+          "label": "200Hz"
+        },
+        {
+          "key": 17,
+          "label": "225Hz"
+        },
+        {
+          "key": 18,
+          "label": "250Hz"
+        },
+        {
+          "key": 19,
+          "label": "280Hz"
+        },
+        {
+          "key": 20,
+          "label": "315Hz"
+        },
+        {
+          "key": 21,
+          "label": "355Hz"
+        },
+        {
+          "key": 22,
+          "label": "400Hz"
+        },
+        {
+          "key": 23,
+          "label": "450Hz"
+        },
+        {
+          "key": 24,
+          "label": "500Hz"
+        },
+        {
+          "key": 25,
+          "label": "560Hz"
+        },
+        {
+          "key": 26,
+          "label": "630Hz"
+        },
+        {
+          "key": 27,
+          "label": "700Hz"
+        },
+        {
+          "key": 28,
+          "label": "800Hz"
+        },
+        {
+          "key": 29,
+          "label": "900Hz"
+        },
+        {
+          "key": 30,
+          "label": "1.0kHz"
+        },
+        {
+          "key": 31,
+          "label": "1.1kHz"
+        },
+        {
+          "key": 32,
+          "label": "1.2kHz"
+        },
+        {
+          "key": 33,
+          "label": "1.4kHz"
+        },
+        {
+          "key": 34,
+          "label": "1.6kHz"
+        },
+        {
+          "key": 35,
+          "label": "1.8kHz"
+        },
+        {
+          "key": 36,
+          "label": "2.0kHz"
+        },
+        {
+          "key": 37,
+          "label": "2.2kHz"
+        },
+        {
+          "key": 38,
+          "label": "2.5kHz"
+        },
+        {
+          "key": 39,
+          "label": "2.8kHz"
+        },
+        {
+          "key": 40,
+          "label": "3.2kHz"
+        },
+        {
+          "key": 41,
+          "label": "3.6kHz"
+        },
+        {
+          "key": 42,
+          "label": "4.0kHz"
+        },
+        {
+          "key": 43,
+          "label": "4.5kHz"
+        },
+        {
+          "key": 44,
+          "label": "5.0kHz"
+        },
+        {
+          "key": 45,
+          "label": "5.6kHz"
+        },
+        {
+          "key": 46,
+          "label": "6.3kHz"
+        },
+        {
+          "key": 47,
+          "label": "7.0kHz"
+        },
+        {
+          "key": 48,
+          "label": "8.0kHz"
+        },
+        {
+          "key": 49,
+          "label": "9.0kHz"
+        },
+        {
+          "key": 50,
+          "label": "10.0kHz"
+        },
+        {
+          "key": 51,
+          "label": "11.0kHz"
+        },
+        {
+          "key": 52,
+          "label": "12.0kHz"
+        },
+        {
+          "key": 53,
+          "label": "14.0kHz"
+        },
+        {
+          "key": 54,
+          "label": "16.0kHz"
+        }
+      ]
+    },
+    {
+      "name": "sample_eq_type_ui_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "PeakDip"
+        },
+        {
+          "key": 1,
+          "label": "LoShelv"
+        },
+        {
+          "key": 2,
+          "label": "HiShelv"
+        }
+      ]
+    },
+    {
+      "name": "sample_control_function_ui_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "off"
+        },
+        {
+          "key": 1,
+          "label": "PitchModDepth"
+        },
+        {
+          "key": 2,
+          "label": "AmpModDepth"
+        },
+        {
+          "key": 3,
+          "label": "CutoffMdDpth"
+        },
+        {
+          "key": 4,
+          "label": "Cutoff Bias"
+        },
+        {
+          "key": 5,
+          "label": "Filter Q/Width"
+        },
+        {
+          "key": 6,
+          "label": "Pan Bias"
+        },
+        {
+          "key": 7,
+          "label": "Pitch Bias"
+        },
+        {
+          "key": 8,
+          "label": "Level"
+        },
+        {
+          "key": 9,
+          "label": "LFO Speed"
+        },
+        {
+          "key": 10,
+          "label": "LFO Delay"
+        },
+        {
+          "key": 11,
+          "label": "AEG Attack Rate"
+        },
+        {
+          "key": 12,
+          "label": "AEG Release Rate"
+        },
+        {
+          "key": 13,
+          "label": "PEG Attack Rate"
+        },
+        {
+          "key": 14,
+          "label": "PEG Release Rate"
+        },
+        {
+          "key": 15,
+          "label": "FEG Attack Rate"
+        },
+        {
+          "key": 16,
+          "label": "FEG Release Rate"
+        },
+        {
+          "key": 17,
+          "label": "Pitch Bend"
+        },
+        {
+          "key": 18,
+          "label": "Start Address"
+        },
+        {
+          "key": 19,
+          "label": "FEG Level"
+        },
+        {
+          "key": 20,
+          "label": "Cutoff Distance"
+        },
+        {
+          "key": 21,
+          "label": "Filter Gain"
+        },
+        {
+          "key": 22,
+          "label": "Portamento Rate/Time"
+        },
+        {
+          "key": 23,
+          "label": "AEG Decay Rate"
+        },
+        {
+          "key": 24,
+          "label": "AEG Sustain Level"
+        },
+        {
+          "key": 25,
+          "label": "FEG Dcy Rate"
+        },
+        {
+          "key": 26,
+          "label": "FEG Init Level"
+        },
+        {
+          "key": 27,
+          "label": "FEG Sustain Level"
+        },
+        {
+          "key": 28,
+          "label": "PEG Decay Rate"
+        },
+        {
+          "key": 29,
+          "label": "PEG Init Level"
+        },
+        {
+          "key": 30,
+          "label": "PEG Sustain Level"
+        },
+        {
+          "key": 31,
+          "label": "Control1 Range"
+        },
+        {
+          "key": 32,
+          "label": "Control2 Range"
+        },
+        {
+          "key": 33,
+          "label": "Control3 Range"
+        },
+        {
+          "key": 34,
+          "label": "Control4 Range"
+        },
+        {
+          "key": 35,
+          "label": "Control5 Range"
+        },
+        {
+          "key": 36,
+          "label": "Control6 Range"
+        }
+      ]
+    },
+    {
+      "name": "sample_control_type_ui_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "+offset"
+        },
+        {
+          "key": 1,
+          "label": "-/+offset"
+        },
+        {
+          "key": 2,
+          "label": "+ofst(-exp)"
+        },
+        {
+          "key": 3,
+          "label": "+ofst(+exp)"
+        }
+      ]
+    },
+    {
+      "name": "sample_control_device_ui_labels",
+      "values": [
+        {
+          "key": 1,
+          "label": "001/ModWhel"
+        },
+        {
+          "key": 7,
+          "label": "007/Volume"
+        },
+        {
+          "key": 10,
+          "label": "010/Pan"
+        },
+        {
+          "key": 64,
+          "label": "064/Sustain"
+        },
+        {
+          "key": 65,
+          "label": "---"
+        },
+        {
+          "key": 66,
+          "label": "066/Sostenuto"
+        }
+      ]
+    },
+    {
+      "name": "filter_type_ui_labels",
+      "values": [
+        {
+          "key": 15,
+          "label": "HPF+Peak"
+        }
+      ]
+    },
+    {
+      "name": "output1_destination_ui_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "off"
+        },
+        {
+          "key": 1,
+          "label": "StereoOut"
+        },
+        {
+          "key": 2,
+          "label": "E1-Through"
+        },
+        {
+          "key": 3,
+          "label": "E2-Through"
+        },
+        {
+          "key": 4,
+          "label": "E3-Through"
+        },
+        {
+          "key": 5,
+          "label": "AssnOutL&R"
+        },
+        {
+          "key": 6,
+          "label": "AssnOut1&2"
+        },
+        {
+          "key": 7,
+          "label": "AssnOut3&4"
+        },
+        {
+          "key": 8,
+          "label": "AssnOut5&6"
+        },
+        {
+          "key": 9,
+          "label": "DIG&OPT"
+        },
+        {
+          "key": 10,
+          "label": "StereoOut"
+        },
+        {
+          "key": 11,
+          "label": "StereoOut"
+        },
+        {
+          "key": 12,
+          "label": "StereoOut"
+        }
+      ]
+    },
+    {
+      "name": "output2_destination_ui_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "off"
+        },
+        {
+          "key": 1,
+          "label": "AssnOutL&R"
+        },
+        {
+          "key": 2,
+          "label": "AssnOut1&2"
+        },
+        {
+          "key": 3,
+          "label": "AssnOut3&4"
+        },
+        {
+          "key": 4,
+          "label": "AssnOut5&6"
+        },
+        {
+          "key": 5,
+          "label": "DIG&OPT"
+        },
+        {
+          "key": 6,
+          "label": "StereoOut"
+        },
+        {
+          "key": 7,
+          "label": "E1-Through"
+        },
+        {
+          "key": 8,
+          "label": "E2-Through"
+        },
+        {
+          "key": 9,
+          "label": "E3-Through"
+        },
+        {
+          "key": 10,
+          "label": "StereoOut"
+        },
+        {
+          "key": 11,
+          "label": "StereoOut"
+        },
+        {
+          "key": 12,
+          "label": "StereoOut"
+        }
+      ]
+    },
+    {
+      "name": "sample_portamento_type_ui_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "off"
+        },
+        {
+          "key": 1,
+          "label": "Pgm"
+        },
+        {
+          "key": 2,
+          "label": "rate (fingered)"
+        },
+        {
+          "key": 3,
+          "label": "rate (fulltime)"
+        },
+        {
+          "key": 4,
+          "label": "time(fingered)"
+        },
+        {
+          "key": 5,
+          "label": "time(fulltime)"
+        }
+      ]
+    },
+    {
+      "name": "pitch_bend_type_ui_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "Normal"
+        },
+        {
+          "key": 1,
+          "label": "Slow"
+        },
+        {
+          "key": 2,
+          "label": "Slow&Rev"
+        },
+        {
+          "key": 3,
+          "label": "Stop"
+        },
+        {
+          "key": 4,
+          "label": "Stop&Rev"
+        },
+        {
+          "key": 5,
+          "label": "Up2Dwn3"
+        },
+        {
+          "key": 6,
+          "label": "Up2Dwn4"
+        },
+        {
+          "key": 7,
+          "label": "Up2Dwn5"
+        },
+        {
+          "key": 8,
+          "label": "Up2Dwn12"
+        },
+        {
+          "key": 9,
+          "label": "Up3Dwn2"
+        },
+        {
+          "key": 10,
+          "label": "Up3Dwn4"
+        },
+        {
+          "key": 11,
+          "label": "Up3Dwn5"
+        },
+        {
+          "key": 12,
+          "label": "Up3Dwn12"
+        }
+      ]
+    },
+    {
+      "name": "prog_lfo_cycle_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "e"
+        },
+        {
+          "key": 1,
+          "label": "q"
+        },
+        {
+          "key": 2,
+          "label": "e x 3"
+        },
+        {
+          "key": 3,
+          "label": "q x 2"
+        },
+        {
+          "key": 4,
+          "label": "q x 4"
+        },
+        {
+          "key": 5,
+          "label": "q x 8"
+        },
+        {
+          "key": 6,
+          "label": "q x 16"
+        }
+      ]
+    },
+    {
+      "name": "prog_lfo_wave_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "off"
+        },
+        {
+          "key": 1,
+          "label": "Sine"
+        },
+        {
+          "key": 2,
+          "label": "Saw"
+        },
+        {
+          "key": 3,
+          "label": "Triangle"
+        },
+        {
+          "key": 4,
+          "label": "Square"
+        },
+        {
+          "key": 5,
+          "label": "S/H"
+        },
+        {
+          "key": 6,
+          "label": "StepWave"
+        }
+      ]
+    },
+    {
+      "name": "prog_lfo_initial_phase_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "0"
+        },
+        {
+          "key": 1,
+          "label": "90"
+        },
+        {
+          "key": 2,
+          "label": "180"
+        },
+        {
+          "key": 3,
+          "label": "270"
+        }
+      ]
+    },
+    {
+      "name": "prog_lfo_reset_channel_labels",
+      "values": [
+        {
+          "key": 16,
+          "label": "Bch"
+        },
+        {
+          "key": 254,
+          "label": "off"
+        },
+        {
+          "key": 255,
+          "label": "AUD"
+        }
+      ]
+    },
+    {
+      "name": "prog_portamento_type_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "rate(fingered)"
+        },
+        {
+          "key": 1,
+          "label": "rate(fulltime)"
+        },
+        {
+          "key": 2,
+          "label": "time(fingered)"
+        },
+        {
+          "key": 3,
+          "label": "time(fulltime)"
+        }
+      ]
+    },
+    {
+      "name": "prog_control_type_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "+offset"
+        },
+        {
+          "key": 1,
+          "label": "-/+offset"
+        },
+        {
+          "key": 2,
+          "label": "+ofst(-exp)"
+        },
+        {
+          "key": 3,
+          "label": "+ofst(+exp)"
+        }
+      ]
+    },
+    {
+      "name": "prog_slot_kind_target_category",
+      "values": [
+        {
+          "key": 16,
+          "label": "SBNK"
+        },
+        {
+          "key": 17,
+          "label": "SBAC"
+        }
+      ]
+    },
+    {
+      "name": "current_smpl_loop_mode_labels",
+      "values": [
+        {
+          "key": 0,
+          "label": "-->"
+        },
+        {
+          "key": 1,
+          "label": "->0"
+        },
+        {
+          "key": 2,
+          "label": "->0->"
+        },
+        {
+          "key": 3,
+          "label": "<--"
+        },
+        {
+          "key": 4,
+          "label": "One->"
+        },
+        {
+          "key": 5,
+          "label": "One<-"
+        }
+      ]
+    }
+  ]
+}

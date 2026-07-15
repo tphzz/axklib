@@ -1,0 +1,24 @@
+# Generated outputs
+/build
+/node_modules/
+/vcpkg_installed/
+
+# libFuzzer writes content-addressed discoveries into its first corpus path.
+/library/fuzz/corpus/*/*
+!/library/fuzz/corpus/*/*.seed
+
+# Python/tool caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+.venv/
+
+node_modules/
+
+# Local editor/OS noise
+.DS_Store
+Thumbs.db

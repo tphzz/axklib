@@ -1,0 +1,66 @@
+{
+  "schema_version": "2.0",
+  "build_contract": {
+    "cmake_minimum": "3.28",
+    "public_cpp_standard": 17,
+    "implementation_cpp_standard": 23,
+    "warnings_as_errors": true,
+    "vcpkg_builtin_baseline": "f87344cac03158cbf1467264565f1fd36b382a24",
+    "quality_commands": [
+      "cmake --preset release",
+      "cmake --build --preset release",
+      "ctest --preset release --output-on-failure",
+      "clang-format --dry-run --Werror"
+    ]
+  },
+  "commands": [
+    "alter hds",
+    "alter manifest",
+    "corpus audit",
+    "coverage",
+    "create floppy",
+    "create hds",
+    "create iso",
+    "create manifest",
+    "extract sfz file",
+    "extract wav file",
+    "info",
+    "inventory",
+    "objects",
+    "orphans",
+    "package export",
+    "package import",
+    "package inspect",
+    "package plan-import",
+    "package verify",
+    "relationships",
+    "validate"
+  ],
+  "fixtures": [
+    {
+      "path": "tests/fixtures/images/sampler-authored/HD00_512_multi_sbnk_authored.hds",
+      "sha256": "733b25eb1b9da4b155ec543f48e0c0f3ab5480dbba587ee80fea5df40dfa0d7d",
+      "size_bytes": 1048576
+    },
+    {
+      "path": "tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds",
+      "sha256": "9604f208c23360f2b69c78bc7ae94cf9f9c12cf96ffddb3567dfadd8200cc816",
+      "size_bytes": 1048576
+    },
+    {
+      "path": "tests/fixtures/images/sampler-authored/MANIFEST.json",
+      "sha256": "18f0499db0638881af15a9b510e5c4686e1758e86440e9764f3efa1ce0f9fc8f",
+      "size_bytes": 1437
+    }
+  ],
+  "writer_profiles": [
+    "alteration_full_chain_v1",
+    "alteration_rename_v1",
+    "fat12_yamaha_1440k_v1",
+    "hds_geometry_v1",
+    "iso9660_yamaha_catalog_v1",
+    "sbac_prog_v1",
+    "sbnk_mono_stereo_v1",
+    "smpl_audio_import_v1"
+  ]
+}

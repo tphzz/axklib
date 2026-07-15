@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/axklibTargets.cmake")
+
+set(axklib_axklib_FOUND TRUE)
+
+check_required_components(axklib)

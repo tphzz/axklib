@@ -1,0 +1,22 @@
+axklib @AXK_VERSION@ (@AXK_SOURCE_IDENTITY@)
+
+axklib [OPTIONS] [SUBCOMMANDS]
+
+
+OPTIONS:
+  -h,     --help              Print this help message and exit
+          --version           Display program version information and exit
+
+SUBCOMMANDS:
+  info                        summarize supported axklib containers
+  objects                     decode current sampler objects as JSON
+  relationships               resolve sampler object links as JSON
+  inventory                   decode object inventory through the model
+  coverage                    summarize current relationship coverage
+  corpus                      run corpus-level workflows
+  extract                     extract data from supported containers
+  package                     move self-contained sampler object graphs
+  orphans                     classify physical waveform ownership as JSON
+  validate                    validate container and sampler organization
+  create                      create a fresh sampler container
+  alter                       alter an existing sampler container

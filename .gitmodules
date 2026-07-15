@@ -1,0 +1,6 @@
+[submodule "external/vcpkg"]
+	path = external/vcpkg
+	url = https://github.com/microsoft/vcpkg.git
+[submodule "external/fatfs"]
+	path = external/fatfs
+	url = https://github.com/abbrev/fatfs.git
