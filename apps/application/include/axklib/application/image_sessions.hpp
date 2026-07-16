@@ -140,7 +140,8 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImagePage<ImageObjectItem>>
     objects(std::string_view image_id, std::string_view owner_id, std::size_t limit,
             std::optional<std::string_view> cursor = std::nullopt,
-            std::optional<std::string_view> object_type = std::nullopt);
+            std::optional<std::string_view> object_type = std::nullopt,
+            std::optional<std::string_view> content_scope_id = std::nullopt);
     [[nodiscard]] Result<ImagePage<ImageRelationshipItem>>
     relationships(std::string_view image_id, std::string_view owner_id, std::size_t limit,
                   std::optional<std::string_view> cursor = std::nullopt);

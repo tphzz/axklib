@@ -67,6 +67,8 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("components").at("schemas").contains("ErrorResponse"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("Job"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("JobEvent"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentItem"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentPageResponse"));
     const auto &policy = document.at("info").at("x-axklib-deprecation-policy");
     EXPECT_EQ(policy.at("minimumNoticeDays"), 180);
     EXPECT_TRUE(policy.at("removalRequiresNewApiMajor"));
@@ -74,6 +76,30 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(headers.contains("Deprecation"));
     EXPECT_TRUE(headers.contains("Sunset"));
     EXPECT_TRUE(headers.contains("DeprecationLink"));
+}
+
+TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    const auto &parameters = document.at("paths").at("/images/{imageId}/objects").at("parameters");
+    const auto scope = std::ranges::find_if(parameters, [](const auto &parameter) {
+        return parameter.is_object() && parameter.value("name", "") == "scopeId";
+    });
+    ASSERT_NE(scope, parameters.end());
+    EXPECT_EQ(scope->at("in"), "query");
+    EXPECT_FALSE(scope->value("required", false));
+    EXPECT_EQ(scope->at("schema").at("type"), "string");
+
+    const auto &content_response = document.at("paths")
+                                       .at("/images/{imageId}/content")
+                                       .at("get")
+                                       .at("responses")
+                                       .at("200")
+                                       .at("content")
+                                       .at("application/json")
+                                       .at("schema")
+                                       .at("$ref");
+    EXPECT_EQ(content_response, "#/components/schemas/ImageContentPageResponse");
 }
 
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {

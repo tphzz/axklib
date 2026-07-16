@@ -147,6 +147,43 @@ TEST_F(ImageSessionTest, FiltersObjectsAndBindsCursorsToTheObjectType) {
     }
 }
 
+TEST_F(ImageSessionTest, FiltersObjectsByContentScopeAndBindsCursorsToTheScope) {
+    axk::app::ImageSessionManager sessions{*sandbox_, 4U, 1U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    const auto roots = sessions.content(opened->image_id, "owner-a", 1U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    ASSERT_FALSE(roots->items.empty());
+    const auto volumes = sessions.content(opened->image_id, "owner-a", 1U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes) << volumes.error().message;
+    const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(volume, volumes->items.end());
+
+    const auto waveforms = sessions.objects(opened->image_id, "owner-a", 1U, std::nullopt, "SMPL", volume->id);
+    ASSERT_TRUE(waveforms) << waveforms.error().message;
+    ASSERT_FALSE(waveforms->items.empty());
+    EXPECT_TRUE(std::ranges::all_of(waveforms->items, [&](const auto &item) {
+        return item.type == "SMPL" && item.volume_name == volume->display_name;
+    }));
+
+    const auto missing =
+        sessions.objects(opened->image_id, "owner-a", 1U, std::nullopt, std::nullopt, "content-missing");
+    ASSERT_FALSE(missing);
+    EXPECT_EQ(missing.error().code, "content_not_found");
+
+    const auto scoped = sessions.objects(opened->image_id, "owner-a", 1U, std::nullopt, std::nullopt, volume->id);
+    ASSERT_TRUE(scoped) << scoped.error().message;
+    ASSERT_TRUE(scoped->next_cursor);
+    const auto wrong_type = sessions.objects(opened->image_id, "owner-a", 1U, *scoped->next_cursor, "SMPL", volume->id);
+    ASSERT_FALSE(wrong_type);
+    EXPECT_EQ(wrong_type.error().code, "invalid_cursor");
+    const auto wrong_scope =
+        sessions.objects(opened->image_id, "owner-a", 1U, *scoped->next_cursor, std::nullopt, roots->items.front().id);
+    ASSERT_FALSE(wrong_scope);
+    EXPECT_EQ(wrong_scope.error().code, "invalid_cursor");
+}
+
 TEST_F(ImageSessionTest, PagesContentByParentAndBindsCursorsToThatParent) {
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 2U};
     const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");

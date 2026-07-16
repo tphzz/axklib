@@ -1259,6 +1259,124 @@
         ],
         "type": "object"
       },
+      "ImageContentItem": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "type": "string"
+          },
+          "childCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "depth": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "details": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "objectId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "objectType": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quality": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "parentId",
+          "depth",
+          "kind",
+          "displayName",
+          "childCount",
+          "objectId",
+          "objectType",
+          "quality",
+          "basis",
+          "notes",
+          "details"
+        ],
+        "type": "object"
+      },
+      "ImageContentPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImageContentItem"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalCount": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "totalCount",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "ImageContentPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImageContentPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "type": "object"
+      },
       "ImageObjectItem": {
         "additionalProperties": false,
         "properties": {
@@ -6694,6 +6812,13 @@
         "operationId": "images.content",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageContentPageResponse"
+                }
+              }
+            },
             "description": "Bounded sampler-facing content page",
             "headers": {
               "X-Request-Id": {
@@ -6763,6 +6888,15 @@
           "name": "type",
           "schema": {
             "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "description": "Semantic content node whose descendant objects define the query scope.",
+          "in": "query",
+          "name": "scopeId",
+          "schema": {
             "minLength": 1,
             "type": "string"
           }

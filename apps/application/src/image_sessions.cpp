@@ -94,7 +94,9 @@ struct axk::app::ImageSessionManager::Implementation {
         std::vector<ImageContentItem> content;
         std::unordered_map<std::string, std::vector<std::size_t>> content_children;
         std::vector<ImageObjectItem> objects;
+        std::unordered_map<std::string, std::size_t> object_indices_by_id;
         std::unordered_map<std::string, std::vector<std::size_t>> object_indices_by_type;
+        std::unordered_map<std::string, std::vector<std::size_t>> object_indices_by_content_scope;
         std::vector<ImageRelationshipItem> relationships;
         std::vector<ImageValidationItem> validation;
         std::optional<MediaContainer> media;
@@ -264,6 +266,7 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
                                              .loop_start_frame = waveform->loop_start_frame.value,
                                              .loop_length_frames = waveform->loop_length_frames.value};
         }
+        session->object_indices_by_id[item.id] = session->objects.size();
         session->object_indices_by_type[item.type].push_back(session->objects.size());
         session->objects.push_back(std::move(item));
     }
@@ -297,7 +300,7 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
 
     const auto append_content = [&](const auto &self, const axk::ContentNode &node,
                                     const std::optional<std::string> &parent_id,
-                                    std::size_t depth) -> axk::app::Result<void> {
+                                    std::size_t depth) -> axk::app::Result<std::vector<std::size_t>> {
         auto generated_id = random_identifier("content-");
         if (!generated_id)
             return std::unexpected(generated_id.error());
@@ -322,11 +325,24 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
         session->content.push_back(std::move(item));
         session->content_children[parent_id.value_or("")].push_back(item_index);
         session->content_children.try_emplace(id);
-        for (const auto &child : node.children) {
-            if (auto appended = self(self, child, id, depth + 1U); !appended)
-                return appended;
+        std::vector<std::size_t> scoped_indices;
+        if (session->content[item_index].object_id) {
+            if (const auto found = session->object_indices_by_id.find(*session->content[item_index].object_id);
+                found != session->object_indices_by_id.end()) {
+                scoped_indices.push_back(found->second);
+            }
         }
-        return {};
+        for (const auto &child : node.children) {
+            auto appended = self(self, child, id, depth + 1U);
+            if (!appended)
+                return std::unexpected(appended.error());
+            scoped_indices.insert(scoped_indices.end(), appended->begin(), appended->end());
+        }
+        std::ranges::sort(scoped_indices);
+        const auto unique_end = std::ranges::unique(scoped_indices).begin();
+        scoped_indices.erase(unique_end, scoped_indices.end());
+        session->object_indices_by_content_scope.emplace(id, scoped_indices);
+        return scoped_indices;
     };
     session->content_children.try_emplace("");
     for (const auto &root : tree.roots) {
@@ -436,22 +452,37 @@ axk::app::ImageSessionManager::content(std::string_view image_id, std::string_vi
                                  &children->second);
 }
 
-axk::app::Result<axk::app::ImagePage<axk::app::ImageObjectItem>>
-axk::app::ImageSessionManager::objects(std::string_view image_id, std::string_view owner_id, std::size_t limit,
-                                       std::optional<std::string_view> cursor,
-                                       std::optional<std::string_view> object_type) {
+axk::app::Result<axk::app::ImagePage<axk::app::ImageObjectItem>> axk::app::ImageSessionManager::objects(
+    std::string_view image_id, std::string_view owner_id, std::size_t limit, std::optional<std::string_view> cursor,
+    std::optional<std::string_view> object_type, std::optional<std::string_view> content_scope_id) {
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
-    if (!object_type)
+    if (!object_type && !content_scope_id)
         return implementation_->page((*session)->objects, (*session)->object_cursors, limit, cursor);
-    const auto scope = "type:" + std::string{*object_type};
-    const auto found = (*session)->object_indices_by_type.find(std::string{*object_type});
-    if (found == (*session)->object_indices_by_type.end()) {
-        static const std::vector<std::size_t> empty;
-        return implementation_->page((*session)->objects, (*session)->object_cursors, limit, cursor, scope, &empty);
+
+    const auto scope =
+        "content:" + std::string{content_scope_id.value_or("")} + "\ntype:" + std::string{object_type.value_or("")};
+    const std::vector<std::size_t> *indices = nullptr;
+    static const std::vector<std::size_t> empty;
+    if (content_scope_id) {
+        const auto found = (*session)->object_indices_by_content_scope.find(std::string{*content_scope_id});
+        if (found == (*session)->object_indices_by_content_scope.end())
+            return std::unexpected(session_error("content_not_found", "content scope does not exist"));
+        indices = &found->second;
+    } else {
+        const auto found = (*session)->object_indices_by_type.find(std::string{*object_type});
+        indices = found == (*session)->object_indices_by_type.end() ? &empty : &found->second;
     }
-    return implementation_->page((*session)->objects, (*session)->object_cursors, limit, cursor, scope, &found->second);
+
+    std::vector<std::size_t> filtered;
+    if (content_scope_id && object_type) {
+        filtered.reserve(indices->size());
+        std::ranges::copy_if(*indices, std::back_inserter(filtered),
+                             [&](const std::size_t index) { return (*session)->objects[index].type == *object_type; });
+        indices = &filtered;
+    }
+    return implementation_->page((*session)->objects, (*session)->object_cursors, limit, cursor, scope, indices);
 }
 
 axk::app::Result<axk::app::ImagePage<axk::app::ImageRelationshipItem>>

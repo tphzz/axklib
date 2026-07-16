@@ -1174,10 +1174,13 @@ class ServerApplication {
         std::optional<std::string_view> object_type;
         if (const auto *value = request.url_params.get("type"); value != nullptr && *value != '\0')
             object_type = value;
+        std::optional<std::string_view> content_scope_id;
+        if (const auto *value = request.url_params.get("scopeId"); value != nullptr && *value != '\0')
+            content_scope_id = value;
         return image_page_response<axk::app::ImageObjectItem>(
             request, image_id,
-            [this, object_type](auto id, auto owner, auto limit, auto cursor) {
-                return images_.objects(id, owner, limit, cursor, object_type);
+            [this, object_type, content_scope_id](auto id, auto owner, auto limit, auto cursor) {
+                return images_.objects(id, owner, limit, cursor, object_type, content_scope_id);
             },
             [](const axk::app::ImageObjectItem &item) {
                 Json waveform;
