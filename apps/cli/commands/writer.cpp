@@ -3,46 +3,232 @@
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
+#include <nlohmann/json.hpp>
+
+#include "local_operations.hpp"
 #include "schema/operations_v1.hpp"
 #include "support.hpp"
 
 #include "axklib/alteration.hpp"
+#include "axklib/application/operation_registry.hpp"
+#include "axklib/application/write_operations.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/writer.hpp"
 
 namespace axk::cli::commands {
+namespace {
+
+int report_application_failure(const axk::app::Error &error) {
+    std::cerr << error.code << ": " << error.message << '\n';
+    return 2;
+}
+
+axk::Result<void> publish_manifest(const std::filesystem::path &output_path, std::string_view contents, bool overwrite,
+                                   std::string_view kind) {
+    std::error_code filesystem_error;
+    if (!overwrite && std::filesystem::exists(output_path, filesystem_error)) {
+        return std::unexpected{axk::make_error(axk::ErrorCode::io_open_failed, axk::ErrorCategory::io,
+                                               "refusing to replace existing " + std::string{kind} +
+                                                   " manifest: " + axk::text::path_to_utf8(output_path))};
+    }
+    if (filesystem_error) {
+        return std::unexpected{axk::make_error(axk::ErrorCode::io_open_failed, axk::ErrorCategory::io,
+                                               "could not inspect manifest output path")};
+    }
+    if (!output_path.parent_path().empty())
+        std::filesystem::create_directories(output_path.parent_path(), filesystem_error);
+    if (filesystem_error) {
+        return std::unexpected{axk::make_error(axk::ErrorCode::io_open_failed, axk::ErrorCategory::io,
+                                               "could not create manifest output directory")};
+    }
+    auto temporary = axk::text::temporary_sibling(output_path);
+    if (!temporary)
+        return std::unexpected{temporary.error()};
+    {
+        std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
+        output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+        if (!output) {
+            std::filesystem::remove(*temporary, filesystem_error);
+            return std::unexpected{axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
+                                                   "could not write temporary manifest")};
+        }
+    }
+    if (auto flushed = axk::detail::flush_file_to_disk(*temporary); !flushed) {
+        std::filesystem::remove(*temporary, filesystem_error);
+        return flushed;
+    }
+    if (auto published = axk::detail::publish_temporary_file(*temporary, output_path, overwrite); !published) {
+        std::filesystem::remove(*temporary, filesystem_error);
+        return published;
+    }
+    return {};
+}
+
+axk::app::Result<nlohmann::json> invoke_create_image(std::string_view kind, const std::filesystem::path &manifest_path,
+                                                     const std::filesystem::path &output_path, bool overwrite) {
+    auto prepared = axk::app::prepare_local_build_manifest(kind, manifest_path);
+    if (!prepared) {
+        return std::unexpected(axk::app::Error{"manifest_invalid", axk::render_error(prepared.error())});
+    }
+    std::vector<std::filesystem::path> runtime_paths{output_path};
+    for (const auto &binding : prepared->bindings)
+        runtime_paths.push_back(binding.input_path);
+    auto runtime = LocalOperationRuntime::create(runtime_paths);
+    if (!runtime)
+        return std::unexpected(runtime.error());
+    auto output = (*runtime)->file_ref(output_path);
+    if (!output)
+        return std::unexpected(output.error());
+    auto bindings = nlohmann::json::array();
+    for (const auto &binding : prepared->bindings) {
+        auto source = (*runtime)->file_ref(binding.input_path);
+        if (!source)
+            return std::unexpected(source.error());
+        bindings.push_back(
+            {{"manifestPath", binding.manifest_path},
+             {"input", {{"fileRef", {{"rootId", source->root_id}, {"relativePath", source->relative_path}}}}}});
+    }
+    auto plan = (*runtime)->invoke("create.plan",
+                                   {{"kind", kind},
+                                    {"manifest", {{"inline", std::move(prepared->manifest)}}},
+                                    {"inputBindings", std::move(bindings)},
+                                    {"output", {{"rootId", output->root_id}, {"relativePath", output->relative_path}}},
+                                    {"overwrite", overwrite}});
+    if (!plan)
+        return std::unexpected(plan.error());
+    auto operation = std::string{"create."};
+    operation += kind == "HDS" ? "hds" : kind == "FLOPPY" ? "floppy" : "iso";
+    return (*runtime)->invoke(operation, {{"planToken", plan->at("planToken")}});
+}
+
+axk::app::Result<nlohmann::json> invoke_alteration(const std::filesystem::path &source_path,
+                                                   const std::filesystem::path &manifest_path,
+                                                   const std::optional<std::filesystem::path> &output_path) {
+    auto prepared = axk::app::prepare_local_alteration_manifest(manifest_path);
+    if (!prepared) {
+        return std::unexpected(axk::app::Error{"manifest_invalid", axk::render_error(prepared.error())});
+    }
+    std::vector<std::filesystem::path> runtime_paths{source_path};
+    if (output_path)
+        runtime_paths.push_back(*output_path);
+    for (const auto &binding : prepared->bindings)
+        runtime_paths.push_back(binding.input_path);
+    auto runtime = LocalOperationRuntime::create(runtime_paths);
+    if (!runtime)
+        return std::unexpected(runtime.error());
+    auto source = (*runtime)->file_ref(source_path);
+    if (!source)
+        return std::unexpected(source.error());
+    auto output = output_path ? (*runtime)->file_ref(*output_path)
+                              : axk::app::Result<axk::app::FileRef>{(*runtime)->scratch_file_ref("dry-run.hds")};
+    if (!output)
+        return std::unexpected(output.error());
+    auto bindings = nlohmann::json::array();
+    for (const auto &binding : prepared->bindings) {
+        auto input = (*runtime)->file_ref(binding.input_path);
+        if (!input)
+            return std::unexpected(input.error());
+        bindings.push_back(
+            {{"manifestPath", binding.manifest_path},
+             {"input", {{"fileRef", {{"rootId", input->root_id}, {"relativePath", input->relative_path}}}}}});
+    }
+    auto plan = (*runtime)->invoke("alter.plan",
+                                   {{"source", {{"rootId", source->root_id}, {"relativePath", source->relative_path}}},
+                                    {"manifest", {{"inline", std::move(prepared->manifest)}}},
+                                    {"inputBindings", std::move(bindings)},
+                                    {"output", {{"rootId", output->root_id}, {"relativePath", output->relative_path}}},
+                                    {"overwrite", false}});
+    if (!plan)
+        return std::unexpected(plan.error());
+    const auto restore_local_audio_paths = [&](nlohmann::json &result) {
+        for (auto &operation : result.at("operations")) {
+            auto &audio = operation.at("audioImport");
+            if (audio.is_null())
+                continue;
+            const auto &logical = audio.at("sourcePath").get_ref<const std::string &>();
+            const auto binding =
+                std::ranges::find(prepared->bindings, logical, &axk::app::LocalManifestInputBinding::manifest_path);
+            if (binding != prepared->bindings.end())
+                audio["sourcePath"] = axk::text::path_to_utf8(binding->input_path);
+        }
+    };
+    if (!output_path) {
+        (*plan)["applied"] = false;
+        restore_local_audio_paths(*plan);
+        return plan;
+    }
+    auto result = (*runtime)->invoke("alter.hds", {{"planToken", plan->at("planToken")}});
+    if (result)
+        restore_local_audio_paths(*result);
+    return result;
+}
+
+axk::cli::schema::operations_v1::OperationOutput project_operation(const nlohmann::json &operation) {
+    auto type = operation.at("type").get<std::string>();
+    std::ranges::transform(type, type.begin(), [](char character) {
+        return character >= 'A' && character <= 'Z' ? static_cast<char>(character + ('a' - 'A')) : character;
+    });
+    axk::cli::schema::operations_v1::OperationOutput result{
+        .id = operation.at("id").get<std::string>(),
+        .type = std::move(type),
+        .partition_index = operation.at("partitionIndex").get<std::uint8_t>(),
+        .volume_name = operation.at("volumeName").get<std::string>(),
+        .object_name = operation.at("objectName").get<std::string>(),
+        .removed_sfs_ids = operation.at("removedSfsIds").get<std::vector<std::uint32_t>>(),
+        .inserted_sfs_ids = operation.at("insertedSfsIds").get<std::vector<std::uint32_t>>(),
+        .freed_clusters = operation.at("freedClusters").get<std::uint64_t>(),
+        .allocated_clusters = operation.at("allocatedClusters").get<std::uint64_t>(),
+        .audio_import = std::nullopt,
+    };
+    if (!operation.at("audioImport").is_null()) {
+        const auto &audio = operation.at("audioImport");
+        result.audio_import = axk::cli::schema::operations_v1::AudioImportOutput{
+            .source_path_utf8 = audio.at("sourcePath").get<std::string>(),
+            .source_format = audio.at("sourceFormat").get<std::string>(),
+            .source_subtype = audio.at("sourceSubtype").get<std::string>(),
+            .source_channels = audio.at("sourceChannels").get<std::uint8_t>(),
+            .source_sample_rate = audio.at("sourceSampleRate").get<std::uint32_t>(),
+            .output_sample_rate = audio.at("outputSampleRate").get<std::uint32_t>(),
+            .output_frames = audio.at("outputFrames").get<std::uint64_t>(),
+            .resampled = audio.at("resampled").get<bool>(),
+            .quantized = audio.at("quantized").get<bool>(),
+            .dither_algorithm = audio.at("ditherAlgorithm").get<std::string>(),
+            .split_stereo = audio.at("splitStereo").get<bool>(),
+            .clipped_samples = audio.at("clippedSamples").get<std::uint64_t>(),
+        };
+    }
+    return result;
+}
+
+} // namespace
 
 int run_create_hds(const std::filesystem::path &manifest_path, const std::filesystem::path &output_path, bool overwrite,
                    bool pretty) {
     static_cast<void>(pretty);
-    const auto manifest = axk::load_hds_build_manifest(manifest_path);
-    if (!manifest) {
-        std::cerr << axk::render_error(manifest.error()) << '\n';
-        return 2;
-    }
-    const auto written = axk::write_hds_image(*manifest, output_path, overwrite);
+    const auto written = invoke_create_image("HDS", manifest_path, output_path, overwrite);
     if (!written) {
-        std::cerr << axk::render_error(written.error()) << '\n';
+        std::cerr << written.error().message << '\n';
         return 2;
     }
-    std::size_t object_count{};
-    if (const auto media = axk::open_media(written->path); media) {
-        if (const auto catalog = axk::build_object_catalog(*media); catalog)
-            object_count = catalog->objects.size();
-    }
-    std::cout << "image=" << axk::text::path_to_utf8(written->path) << " size_bytes=" << written->size_bytes
-              << " partitions=" << written->partitions.size() << " objects=" << object_count
-              << " unused_tail_sectors=" << written->unused_tail_sectors << '\n';
-    for (const auto &partition : written->partitions) {
-        std::cout << "partition=" << static_cast<unsigned int>(partition.geometry.index) << " name='" << partition.name
-                  << "' start_sector=" << partition.geometry.start_sector
-                  << " sector_count=" << partition.geometry.filesystem_sector_count
-                  << " cluster_count=" << partition.geometry.cluster_count
-                  << " free_kib=" << partition.sampler_visible_free_kib << '\n';
+    std::cout << "image=" << axk::text::path_to_utf8(output_path)
+              << " size_bytes=" << written->at("sizeBytes").get<std::uint64_t>()
+              << " partitions=" << written->at("partitions").size()
+              << " objects=" << written->at("objectCount").get<std::size_t>()
+              << " unused_tail_sectors=" << written->at("unusedTailSectors").get<std::uint64_t>() << '\n';
+    for (const auto &partition : written->at("partitions")) {
+        std::cout << "partition=" << partition.at("index").get<unsigned int>() << " name='"
+                  << partition.at("name").get_ref<const std::string &>()
+                  << "' start_sector=" << partition.at("startSector").get<std::uint32_t>()
+                  << " sector_count=" << partition.at("sectorCount").get<std::uint32_t>()
+                  << " cluster_count=" << partition.at("clusterCount").get<std::uint32_t>()
+                  << " free_kib=" << partition.at("freeKiB").get<std::uint64_t>() << '\n';
     }
     return 0;
 }
@@ -50,42 +236,38 @@ int run_create_hds(const std::filesystem::path &manifest_path, const std::filesy
 int run_create_media(const std::filesystem::path &manifest_path, const std::filesystem::path &output_path,
                      std::string_view expected_format, bool overwrite, bool pretty) {
     static_cast<void>(pretty);
-    const auto manifest = axk::load_media_build_manifest(manifest_path);
-    if (!manifest) {
-        std::cerr << axk::render_error(manifest.error()) << '\n';
-        return 2;
-    }
-    const auto actual_format = manifest->format == axk::MediaImageFormat::fat12_floppy
-                                   ? std::string_view{"fat12_floppy"}
-                                   : std::string_view{"iso9660"};
-    if (actual_format != expected_format) {
-        std::cerr << "manifest format '" << actual_format << "' does not match create "
-                  << (expected_format == "fat12_floppy" ? "floppy" : "iso") << '\n';
-        return 2;
-    }
-    const auto written = axk::write_media_image(*manifest, output_path, overwrite);
+    const auto service_kind = expected_format == "fat12_floppy" ? std::string_view{"FLOPPY"} : std::string_view{"ISO"};
+    const auto written = invoke_create_image(service_kind, manifest_path, output_path, overwrite);
     if (!written) {
-        std::cerr << axk::render_error(written.error()) << '\n';
+        std::cerr << written.error().message << '\n';
         return 2;
     }
-    std::cout << "image=" << axk::text::path_to_utf8(written->path) << " format=" << actual_format
-              << " size_bytes=" << written->size_bytes << " objects=" << written->object_count << '\n';
+    std::cout << "image=" << axk::text::path_to_utf8(output_path) << " format=" << expected_format
+              << " size_bytes=" << written->at("sizeBytes").get<std::uint64_t>()
+              << " objects=" << written->at("objectCount").get<std::size_t>() << '\n';
     return 0;
 }
 
-int run_create_manifest(std::string_view kind, const std::filesystem::path &output_path, bool overwrite) {
-    std::optional<axk::BuildManifestKind> manifest_kind;
+int run_create_manifest(const axk::app::OperationRegistry &registry, std::string_view kind,
+                        const std::filesystem::path &output_path, bool overwrite) {
+    std::string service_kind;
     if (kind == "hds")
-        manifest_kind = axk::BuildManifestKind::hds;
+        service_kind = "HDS";
     else if (kind == "floppy")
-        manifest_kind = axk::BuildManifestKind::fat12_floppy;
+        service_kind = "FLOPPY";
     else if (kind == "iso")
-        manifest_kind = axk::BuildManifestKind::iso9660;
-    if (!manifest_kind) {
+        service_kind = "ISO";
+    if (service_kind.empty()) {
         std::cerr << "manifest kind must be hds, floppy, or iso\n";
         return 2;
     }
-    const auto written = axk::write_build_manifest_template(*manifest_kind, output_path, overwrite);
+    const axk::app::OperationContext context{
+        .owner_id = "cli", .request_id = "cli", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const auto manifest = registry.invoke("create.manifest", {{"kind", service_kind}}, context);
+    if (!manifest)
+        return report_application_failure(manifest.error());
+    const auto written =
+        publish_manifest(output_path, manifest->at("canonicalJson").get_ref<const std::string &>(), overwrite, "build");
     if (!written) {
         std::cerr << axk::render_error(written.error()) << '\n';
         return 2;
@@ -94,8 +276,15 @@ int run_create_manifest(std::string_view kind, const std::filesystem::path &outp
     return 0;
 }
 
-int run_alter_manifest(const std::filesystem::path &output_path, bool overwrite) {
-    const auto written = axk::write_alteration_manifest_template(output_path, overwrite);
+int run_alter_manifest(const axk::app::OperationRegistry &registry, const std::filesystem::path &output_path,
+                       bool overwrite) {
+    const axk::app::OperationContext context{
+        .owner_id = "cli", .request_id = "cli", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const auto manifest = registry.invoke("alter.manifest", nlohmann::json::object(), context);
+    if (!manifest)
+        return report_application_failure(manifest.error());
+    const auto written = publish_manifest(output_path, manifest->at("canonicalJson").get_ref<const std::string &>(),
+                                          overwrite, "alteration");
     if (!written) {
         std::cerr << axk::render_error(written.error()) << '\n';
         return 2;
@@ -106,18 +295,20 @@ int run_alter_manifest(const std::filesystem::path &output_path, bool overwrite)
 
 int run_alter_hds(const std::filesystem::path &source_path, const std::filesystem::path &manifest_path,
                   const std::optional<std::filesystem::path> &output_path, bool pretty) {
-    const auto manifest = axk::load_alteration_manifest(manifest_path);
-    if (!manifest) {
-        std::cerr << axk::render_error(manifest.error()) << '\n';
-        return 2;
-    }
-    const auto altered = axk::alter_hds(source_path, *manifest, output_path);
+    const auto altered = invoke_alteration(source_path, manifest_path, output_path);
     if (!altered) {
-        std::cerr << axk::render_error(altered.error()) << '\n';
+        std::cerr << altered.error().message << '\n';
         return 2;
     }
-    const auto serialized = axk::cli::schema::operations_v1::serialize(
-        axk::cli::schema::operations_v1::project_alteration(*altered), pretty);
+    axk::cli::schema::operations_v1::AlterationOutput projected{
+        .source_path_utf8 = axk::text::path_to_utf8(source_path),
+        .output_path_utf8 = output_path ? std::optional{axk::text::path_to_utf8(*output_path)} : std::nullopt,
+        .applied = altered->at("applied").get<bool>(),
+        .operations = {},
+    };
+    for (const auto &operation : altered->at("operations"))
+        projected.operations.push_back(project_operation(operation));
+    const auto serialized = axk::cli::schema::operations_v1::serialize(projected, pretty);
     if (!serialized) {
         std::cerr << axk::render_error(serialized.error()) << '\n';
         return 2;

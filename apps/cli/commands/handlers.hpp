@@ -7,6 +7,10 @@
 
 #include "requests.hpp"
 
+namespace axk::app {
+class OperationRegistry;
+}
+
 namespace axk::cli::commands {
 
 int run_info_request(const InfoRequest &request);
@@ -25,8 +29,10 @@ int run_create_hds(const std::filesystem::path &manifest_path, const std::filesy
                    bool pretty);
 int run_create_media(const std::filesystem::path &manifest_path, const std::filesystem::path &output_path,
                      std::string_view expected_format, bool overwrite, bool pretty);
-int run_create_manifest(std::string_view kind, const std::filesystem::path &output_path, bool overwrite);
-int run_alter_manifest(const std::filesystem::path &output_path, bool overwrite);
+int run_create_manifest(const axk::app::OperationRegistry &registry, std::string_view kind,
+                        const std::filesystem::path &output_path, bool overwrite);
+int run_alter_manifest(const axk::app::OperationRegistry &registry, const std::filesystem::path &output_path,
+                       bool overwrite);
 int run_alter_hds(const std::filesystem::path &source_path, const std::filesystem::path &manifest_path,
                   const std::optional<std::filesystem::path> &output_path, bool pretty);
 

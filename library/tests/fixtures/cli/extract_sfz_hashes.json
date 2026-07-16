@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "source": "tests/fixtures/images/sampler-authored/HD00_512_multi_sbnk_authored.hds",
+  "summary": {
+    "waveform_count": 2,
+    "written_file_count": 23,
+    "selection_graph_count": 1,
+    "sfz_file_count": 20,
+    "decode_error_count": 0,
+    "load_error_count": 0
+  },
+  "artifacts": [
+    {"relative_path": "_samples/physical/SMP 252511__06e34e1bb152.wav", "sha256": "124d7084b942324d7670eb815dd0343b4aea4b9ea813a8048ab7645e0d10b8d4"},
+    {"relative_path": "_samples/physical/pulse 1__e76401b5de8f.wav", "sha256": "1b81385dca4b478abe779b83b3026073d8ef4b560382c7b1763569707e3603e7"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/B SB01.sfz", "sha256": "484420a5d8e606ee41c8399558ceea5e360e48b914a6ee6ecd2a99525d891c1d"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/B SB02 (3).sfz", "sha256": "19bfd907c568b7e6ce5a8194f212d1c73272f359c5ba0b7f9738ee2c02543ba9"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/B SB03 (6).sfz", "sha256": "0c5c0f394ac0c5c80f3607f36086a49706ea794c6dc1f13a165adf55e12f2640"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/B SB04 (11).sfz", "sha256": "7bb738b10ebc24127d35f88a4e6f77e95333897d399394fa4144fb0ebef88310"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/B SB05 (4).sfz", "sha256": "0bb3aee5a52ce1231099f9c73bf8cc0c42a6c37b826b323391ea942f3a5079c7"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/B SB06 (5).sfz", "sha256": "c87602a20e5fcd608062b85f7f69e714d57104fe3a76a92271eb399a4f25784a"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/B SB07 (7).sfz", "sha256": "be70dade85434c49c412af6e4475b8b6cb010aedfd61759e7141987e048abc7e"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/B SB08 (8).sfz", "sha256": "8c9d4db541384a6f957395bec7dcb89e50f6d74c79874705bceee5bf492a087d"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/B SB09 (9).sfz", "sha256": "b98c2e6cda8b0b97f18070f21ee4726b0a303008251f88fa728043396bfba932"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/B SB10 (2).sfz", "sha256": "89ddba00d77d86814be89255be4f12d849591ff9c6ff4b95d563172583c91211"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/JS01.sfz", "sha256": "8ccc8f0c526c4deca355e1e580b3ee5434cc41f11c8e402a6db1d914891d7043"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/JS02 (2).sfz", "sha256": "1b92a1dbe50d927563ea6f86c6c2d7df57c625f1eb3072469a1368cbeb12d46d"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/JS03 (10).sfz", "sha256": "3fd509dcfa0260fd71202f33103c1e35374f04bc951b77cc150e5ffea681b706"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/JS04 (9).sfz", "sha256": "37bc9c17447d9127ffb317be58e28c97ba877f66ba2cd596474245a1db085a45"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/JS05 (8).sfz", "sha256": "b9c546ea5877291d0c046921ce685dd40cbc0e368f2a2b2f344188214673008c"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/JS06 (7).sfz", "sha256": "362fef8c0112db5b67999b4fba423b10053cd9968196ce3b2409232e7d85a0cf"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/JS07 (6).sfz", "sha256": "2102a9f70c4745969a407dd15bb42a4602e1fa914a737c814cb602dac22c3ed8"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/JS08 (5).sfz", "sha256": "8f48193503eef5cfaabce6fd3746af5f393305e801123c9e2cec5cb60fb86596"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/JS09 (4).sfz", "sha256": "63dcf5aa477c1b23afd8552a224f7fc1303f36d3edf16cc440f689eb247d58fe"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/JS10 (3).sfz", "sha256": "2b4b41b5ef76f4617c0186e194cc05ce0d73c9c75c5c94b675ac993c231d4b29"},
+    {"relative_path": "file/HD00_512_multi_sbnk_authored/partition_00_New_Partition/New Volume/volume.axklib.json", "sha256": "a0c9491ae9d33ba1409776e651ce1afa337f6ee7cfc4e00be6bf076f473d5575"}
+  ]
+}

@@ -96,5 +96,6 @@ nav:
   - Distribution:
       - Compatibility: axklib/compatibility.md
       - Versioning And Build Identity: axklib/versioning.md
+      - REST And WebSocket Server: axklib/server.md
       - Native Dependencies: native-dependencies.md
   - Yamaha Glossary: axklib/glossary.md

@@ -1,8 +1,9 @@
 # axklib
 
 axklib is native tooling for Yamaha A3000, A4000, and A5000 disk images and
-sampler objects. It provides a C++17 shared SDK and a separate self-contained
-command-line application backed by a C++23 implementation.
+sampler objects. It provides a C++17 shared SDK, a self-contained command-line
+application, and a Crow-based REST and WebSocket server backed by a C++23
+implementation.
 
 The project reads SFS HDA/HDS images, Yamaha-supported FAT12 floppy and ISO9660
 sample CD-ROM profiles, and standalone sampler objects. It can inspect and
@@ -54,6 +55,12 @@ example.
 The CLI lives under `apps/cli`, links the private engine statically, and does not
 load the shared SDK. Official builds use the `*-axk` overlay triplets under
 `library/cmake/triplets`.
+
+The server lives under `apps/server`, links the private application services
+statically, and uses upstream Crow for both HTTP and WebSocket transport. Crow
+does not enter the SDK or CLI link interfaces. Domain routes are generated from
+the shared operation registry; adding an operation does not require a Crow
+route or server-owned capability entry.
 
 The two source projects also configure independently:
 
@@ -149,6 +156,24 @@ Start with the [typical usage guide](docs/axklib/typical-usage.md) for image
 inspection, extraction, package transfer, image authoring, and alteration. The
 [CLI reference](docs/axklib/cli.md) lists the full command surface and safety
 behavior.
+
+## Server
+
+Start an authenticated loopback server:
+
+```bash
+build/native/debug/apps/server/axklib-server \
+  --token 0123456789abcdef0123456789abcdef
+```
+
+The API is rooted at `http://127.0.0.1:7331/api/v1`. On first use, add one or
+more named workspaces through the authenticated workspace API or axkdeck's
+workspace selector. Disk images and durable outputs remain ordinary files below
+those persisted workspaces. Browser-selected
+audio, package, and manifest files use temporary uploads; images are not
+uploaded into memory. See [REST and WebSocket server](docs/axklib/server.md) for
+workspace setup, configuration, filesystem references, downloads, jobs, LAN
+deployment, and the OpenAPI contract.
 
 ## License
 

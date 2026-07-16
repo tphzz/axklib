@@ -80,7 +80,7 @@ class CancellingProgress final : public axk::ProgressSink {
         : source_(source), cancel_after_(cancel_after) {}
 
     void report(const axk::Progress &progress) noexcept override {
-        if (progress.phase == axk::ProgressPhase::writing && progress.completed == cancel_after_) {
+        if (progress.phase == axk::ProgressPhase::allocating && progress.completed == cancel_after_) {
             source_.cancel();
         }
     }

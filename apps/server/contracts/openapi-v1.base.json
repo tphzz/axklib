@@ -1,0 +1,1454 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "axklib-server API",
+    "version": "1.0.0",
+    "x-axklib-deprecation-policy": {
+      "minimumNoticeDays": 180,
+      "removalRequiresNewApiMajor": true,
+      "headers": ["Deprecation", "Sunset", "Link"]
+    }
+  },
+  "servers": [{"url": "/api/v1"}],
+  "paths": {
+    "/system/version": {
+      "get": {
+        "operationId": "system.version",
+        "responses": {"200": {"description": "Version and source identity"}}
+      }
+    },
+    "/system/capabilities": {
+      "get": {
+        "operationId": "system.capabilities",
+        "responses": {
+          "200": {
+            "description": "Registered operations and limits",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CapabilitiesResponse"}}}
+          }
+        }
+      }
+    },
+    "/system/metrics": {
+      "get": {
+        "operationId": "system.metrics",
+        "responses": {
+          "200": {
+            "description": "Bounded process, job-runtime, and event-delivery counters",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MetricsResponse"}}}
+          }
+        }
+      }
+    },
+    "/system/health/live": {
+      "get": {
+        "operationId": "system.health.live",
+        "security": [],
+        "responses": {"204": {"description": "Process is live"}}
+      }
+    },
+    "/system/health/ready": {
+      "get": {
+        "operationId": "system.health.ready",
+        "responses": {
+          "200": {"description": "Configuration, workspace state, sandbox, state storage, startup cleanup, and executor admission are ready"},
+          "503": {"description": "One or more required readiness checks failed"}
+        }
+      }
+    },
+    "/system/shutdown": {
+      "post": {
+        "operationId": "system.shutdown",
+        "description": "Request a clean process shutdown. This route exists only in authenticated connection-file sidecar mode.",
+        "responses": {
+          "202": {"description": "Shutdown accepted"},
+          "404": {"description": "Shutdown is unavailable outside sidecar mode"},
+          "409": {"description": "Shutdown is already in progress"}
+        }
+      }
+    },
+    "/roots": {
+      "get": {
+        "operationId": "filesystem.roots",
+        "responses": {"200": {"description": "Currently available workspace roots"}}
+      }
+    },
+    "/workspaces": {
+      "get": {
+        "operationId": "workspaces.list",
+        "responses": {"200": {"description": "Persisted workspaces and their current availability"}}
+      },
+      "post": {
+        "operationId": "workspaces.create",
+        "responses": {"201": {"description": "Workspace persisted and activated"}, "409": {"description": "Revision conflict"}}
+      }
+    },
+    "/workspaces/{workspaceId}": {
+      "parameters": [{"name": "workspaceId", "in": "path", "required": true, "schema": {"type": "string"}}],
+      "patch": {
+        "operationId": "workspaces.update",
+        "responses": {"200": {"description": "Workspace updated"}, "409": {"description": "Revision conflict"}}
+      },
+      "delete": {
+        "operationId": "workspaces.delete",
+        "responses": {"204": {"description": "Workspace removed"}, "409": {"description": "Revision conflict"}}
+      }
+    },
+    "/workspaces/recovery/reset": {
+      "post": {
+        "operationId": "workspaces.recovery.reset",
+        "responses": {"200": {"description": "Existing store archived and empty store created"}}
+      }
+    },
+    "/host-directories/roots": {
+      "get": {
+        "operationId": "hostDirectories.roots",
+        "description": "Authenticated setup-only host directory roots. This route does not expose files.",
+        "responses": {"200": {"description": "Host directory browser roots"}}
+      }
+    },
+    "/host-directories/list": {
+      "post": {
+        "operationId": "hostDirectories.list",
+        "description": "Authenticated setup-only directory listing. Symlinks and non-directory entries are excluded.",
+        "responses": {"200": {"description": "Bounded host directory listing"}}
+      }
+    },
+    "/files/list": {
+      "post": {
+        "operationId": "filesystem.list",
+        "responses": {"200": {"description": "Bounded sandbox directory listing"}}
+      }
+    },
+    "/files/metadata": {
+      "post": {
+        "operationId": "filesystem.metadata",
+        "responses": {"200": {"description": "Sandbox entry metadata"}}
+      }
+    },
+    "/files/content": {
+      "get": {
+        "operationId": "filesystem.download",
+        "parameters": [
+          {"name": "rootId", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "relativePath", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "Range", "in": "header", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "Authenticated streamed sandbox file"},
+          "206": {"description": "Bounded byte range"},
+          "416": {"description": "Invalid or oversized byte range"}
+        }
+      }
+    },
+    "/files/archive": {
+      "post": {
+        "operationId": "filesystem.archive.create",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["directory"], "properties": {"directory": {"$ref": "#/components/schemas/DirectoryRef"}}}}}
+        },
+        "responses": {
+          "201": {"description": "Bounded temporary TAR archive created"},
+          "413": {"description": "Requested archive exceeds configured limits"},
+          "429": {"description": "Archive staging quota exhausted", "headers": {"Retry-After": {"schema": {"type": "integer", "minimum": 1}, "description": "Minimum retry delay in seconds"}}}
+        }
+      }
+    },
+    "/download-archives/{archiveId}/content": {
+      "parameters": [
+        {"name": "archiveId", "in": "path", "required": true, "schema": {"type": "string"}}
+      ],
+      "get": {
+        "operationId": "filesystem.archive.download",
+        "responses": {"200": {"description": "Short-lived TAR archive stream"}, "404": {"description": "Archive absent, expired, or owned by another principal"}}
+      },
+      "delete": {
+        "operationId": "filesystem.archive.delete",
+        "responses": {"204": {"description": "Temporary archive deleted"}, "404": {"description": "Archive absent, expired, or owned by another principal"}}
+      }
+    },
+    "/images": {
+      "post": {
+        "operationId": "images.open",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "required": ["source"], "properties": {"source": {"$ref": "#/components/schemas/FileRef"}}}}}
+        },
+        "responses": {"201": {"description": "Immutable metadata-only image session opened"}}
+      }
+    },
+    "/images/{imageId}": {
+      "parameters": [
+        {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}}
+      ],
+      "get": {"operationId": "images.status", "responses": {"200": {"description": "Image session summary"}}},
+      "delete": {"operationId": "images.close", "responses": {"200": {"description": "Image session closed idempotently"}}}
+    },
+    "/images/{imageId}/content": {
+      "parameters": [
+        {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "parentId", "in": "query", "schema": {"type": "string", "minLength": 1}},
+        {"$ref": "#/components/parameters/PageLimit"},
+        {"$ref": "#/components/parameters/PageCursor"}
+      ],
+      "get": {"operationId": "images.content", "responses": {"200": {"description": "Bounded sampler-facing content page"}}}
+    },
+    "/images/{imageId}/objects": {
+      "parameters": [
+        {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "type", "in": "query", "schema": {"type": "string", "minLength": 1, "maxLength": 16}},
+        {"$ref": "#/components/parameters/PageLimit"},
+        {"$ref": "#/components/parameters/PageCursor"}
+      ],
+      "get": {"operationId": "images.objects", "responses": {"200": {"description": "Bounded decoded object metadata page"}}}
+    },
+    "/images/{imageId}/relationships": {
+      "parameters": [
+        {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"$ref": "#/components/parameters/PageLimit"},
+        {"$ref": "#/components/parameters/PageCursor"}
+      ],
+      "get": {"operationId": "images.relationships", "responses": {"200": {"description": "Bounded relationship page using session-local object IDs"}}}
+    },
+    "/images/{imageId}/validation/issues": {
+      "parameters": [
+        {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"$ref": "#/components/parameters/PageLimit"},
+        {"$ref": "#/components/parameters/PageCursor"}
+      ],
+      "get": {"operationId": "images.validation.issues", "responses": {"200": {"description": "Bounded validation issue page"}}}
+    },
+    "/images/{imageId}/preview": {
+      "parameters": [
+        {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "objectId", "in": "query", "required": true, "schema": {"type": "string"}},
+        {"name": "bins", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1}}
+      ],
+      "get": {"operationId": "images.preview", "responses": {"200": {"description": "Bounded waveform min/max envelope"}}}
+    },
+    "/uploads": {
+      "post": {
+        "operationId": "uploads.create",
+        "responses": {"201": {"description": "Temporary upload initiated"}}
+      }
+    },
+    "/uploads/{uploadId}": {
+      "parameters": [
+        {"name": "uploadId", "in": "path", "required": true, "schema": {"type": "string"}}
+      ],
+      "get": {"operationId": "uploads.status", "responses": {"200": {"description": "Upload status"}}},
+      "put": {
+        "operationId": "uploads.append",
+        "parameters": [
+          {"name": "Upload-Offset", "in": "header", "required": true, "schema": {"type": "integer", "minimum": 0}}
+        ],
+        "responses": {"200": {"description": "Bounded upload chunk stored"}}
+      },
+      "delete": {"operationId": "uploads.delete", "responses": {"204": {"description": "Upload deleted"}}}
+    },
+    "/uploads/{uploadId}/complete": {
+      "parameters": [
+        {"name": "uploadId", "in": "path", "required": true, "schema": {"type": "string"}}
+      ],
+      "post": {
+        "operationId": "uploads.complete",
+        "responses": {"200": {"description": "Upload size and optional SHA-256 verified"}}
+      }
+    },
+    "/uploads/{uploadId}/materialize": {
+      "parameters": [
+        {"name": "uploadId", "in": "path", "required": true, "schema": {"type": "string"}}
+      ],
+      "post": {
+        "operationId": "uploads.materialize",
+        "responses": {"201": {"description": "Upload atomically copied to a persistent sandbox FileRef"}}
+      }
+    },
+    "/jobs/{jobId}": {
+      "parameters": [
+        {"name": "jobId", "in": "path", "required": true, "schema": {"type": "string"}}
+      ],
+      "get": {
+        "operationId": "jobs.status",
+        "responses": {
+          "200": {
+            "description": "Authoritative job status",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobResponse"}}}
+          },
+          "404": {"description": "Unknown or unowned job"}
+        }
+      },
+      "delete": {
+        "operationId": "jobs.cancel",
+        "responses": {
+          "200": {
+            "description": "Cancellation requested or terminal job unchanged",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobResponse"}}}
+          },
+          "404": {"description": "Unknown or unowned job"}
+        }
+      }
+    },
+    "/jobs/{jobId}/events": {
+      "parameters": [
+        {"name": "jobId", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "afterSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}
+      ],
+      "get": {
+        "operationId": "jobs.events.replay",
+        "responses": {
+          "200": {
+            "description": "Retained ordered job events",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobEventListResponse"}}}
+          },
+          "409": {"description": "Requested replay window expired"},
+          "404": {"description": "Unknown or unowned job"}
+        }
+      }
+    },
+    "/event-tickets": {
+      "post": {
+        "operationId": "events.ticket.create",
+        "responses": {
+          "201": {
+            "description": "Short-lived single-use WebSocket ticket",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EventTicketResponse"}}}
+          },
+          "429": {"description": "Ticket capacity exhausted", "headers": {"Retry-After": {"schema": {"type": "integer", "minimum": 1}, "description": "Minimum retry delay in seconds"}}}
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "operationId": "events.websocket",
+        "parameters": [
+          {"name": "ticket", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"101": {"description": "Crow WebSocket using axklib.events.v1"}},
+        "x-axklib-websocket-subprotocol": "axklib.events.v1"
+      }
+    }
+  },
+  "components": {
+    "headers": {
+      "Deprecation": {
+        "description": "RFC 9745 structured date indicating when this resource is or will be deprecated",
+        "schema": {"type": "string", "pattern": "^@[0-9]+$"}
+      },
+      "Sunset": {
+        "description": "RFC 8594 HTTP date after which this resource may become unavailable",
+        "schema": {"type": "string"}
+      },
+      "DeprecationLink": {
+        "description": "Link to migration guidance using rel=deprecation",
+        "schema": {"type": "string"}
+      }
+    },
+    "parameters": {
+      "PageLimit": {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 5000}},
+      "PageCursor": {"name": "cursor", "in": "query", "schema": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[A-Za-z0-9_-]+$"}}
+    },
+    "securitySchemes": {
+      "bearerAuth": {"type": "http", "scheme": "bearer"}
+    },
+    "schemas": {
+      "FileRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rootId", "relativePath"],
+        "properties": {
+          "rootId": {"type": "string", "minLength": 1},
+          "relativePath": {"type": "string"}
+        }
+      },
+      "DirectoryRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rootId", "relativePath"],
+        "properties": {
+          "rootId": {"type": "string", "minLength": 1},
+          "relativePath": {"type": "string"}
+        }
+      },
+      "UploadRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uploadId"],
+        "properties": {"uploadId": {"type": "string", "minLength": 1}}
+      },
+      "EmptyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "maxProperties": 0
+      },
+      "JsonObject": {"type": "object"},
+      "VersionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["semanticVersion", "sourceIdentity", "packageBasename", "gitShaShort", "gitRef", "isDirty", "isTaggedRelease", "apiVersion", "eventSchemaVersion"],
+        "properties": {
+          "semanticVersion": {"type": "string", "minLength": 1},
+          "sourceIdentity": {"type": "string", "minLength": 1},
+          "packageBasename": {"type": "string", "minLength": 1},
+          "gitShaShort": {"type": "string", "minLength": 1},
+          "gitRef": {"type": "string"},
+          "isDirty": {"type": "boolean"},
+          "isTaggedRelease": {"type": "boolean"},
+          "apiVersion": {"const": "v1"},
+          "eventSchemaVersion": {"const": "1"}
+        }
+      },
+      "OperationCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "method", "route", "mode", "operationClass", "requiresIdempotency", "cliParity", "variant", "requestSchema", "resultSchema", "implemented"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "method": {"enum": ["GET", "POST"]},
+          "route": {"type": "string", "pattern": "^/api/v1/"},
+          "mode": {"enum": ["REQUEST", "JOB"]},
+          "operationClass": {"enum": ["READ", "WRITE"]},
+          "requiresIdempotency": {"type": "boolean"},
+          "cliParity": {"type": "boolean"},
+          "variant": {"type": ["string", "null"]},
+          "requestSchema": {"type": "string", "minLength": 1},
+          "resultSchema": {"type": "string", "minLength": 1},
+          "implemented": {"type": "boolean"}
+        }
+      },
+      "ApiLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["maximumJsonBytes", "maximumJsonDepth", "maximumJsonNodes", "maximumJsonContainerItems", "maximumJsonStringBytes", "maximumUploadBytes", "maximumUploadTotalBytes", "maximumUploadChunkBytes", "maximumDownloadRangeBytes", "maximumDownloadArchiveBytes", "maximumDownloadArchiveTotalBytes", "maximumDownloadArchiveEntries", "downloadArchiveRetentionSeconds", "maximumWebsocketDeliveryEvents", "maximumWebsocketDeliveryBytes", "maximumQueuedJobs", "maximumImageSessions", "maximumPageSize"],
+        "properties": {
+          "maximumJsonBytes": {"type": "integer", "minimum": 1},
+          "maximumJsonDepth": {"type": "integer", "minimum": 1},
+          "maximumJsonNodes": {"type": "integer", "minimum": 1},
+          "maximumJsonContainerItems": {"type": "integer", "minimum": 1},
+          "maximumJsonStringBytes": {"type": "integer", "minimum": 1},
+          "maximumUploadBytes": {"type": "integer", "minimum": 1},
+          "maximumUploadTotalBytes": {"type": "integer", "minimum": 1},
+          "maximumUploadChunkBytes": {"type": "integer", "minimum": 1},
+          "maximumDownloadRangeBytes": {"type": "integer", "minimum": 1},
+          "maximumDownloadArchiveBytes": {"type": "integer", "minimum": 1},
+          "maximumDownloadArchiveTotalBytes": {"type": "integer", "minimum": 1},
+          "maximumDownloadArchiveEntries": {"type": "integer", "minimum": 1},
+          "downloadArchiveRetentionSeconds": {"type": "integer", "minimum": 1},
+          "maximumWebsocketDeliveryEvents": {"type": "integer", "minimum": 1},
+          "maximumWebsocketDeliveryBytes": {"type": "integer", "minimum": 1},
+          "maximumQueuedJobs": {"type": "integer", "minimum": 1},
+          "maximumImageSessions": {"type": "integer", "minimum": 1},
+          "maximumPageSize": {"type": "integer", "minimum": 1, "maximum": 5000}
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["apiVersion", "operations", "limits"],
+        "properties": {
+          "apiVersion": {"const": "v1"},
+          "operations": {"type": "array", "items": {"$ref": "#/components/schemas/OperationCapability"}},
+          "limits": {"$ref": "#/components/schemas/ApiLimits"}
+        }
+      },
+      "CapabilitiesResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/Capabilities"},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "InputRef": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["fileRef"], "properties": {"fileRef": {"$ref": "#/components/schemas/FileRef"}}},
+          {"type": "object", "additionalProperties": false, "required": ["uploadRef"], "properties": {"uploadRef": {"$ref": "#/components/schemas/UploadRef"}}}
+        ]
+      },
+      "ManifestInput": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["inline"], "properties": {"inline": {"type": "object"}}},
+          {"type": "object", "additionalProperties": false, "required": ["fileRef"], "properties": {"fileRef": {"$ref": "#/components/schemas/FileRef"}}},
+          {"type": "object", "additionalProperties": false, "required": ["uploadRef"], "properties": {"uploadRef": {"$ref": "#/components/schemas/UploadRef"}}}
+        ]
+      },
+      "InputBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["manifestPath", "input"],
+        "properties": {
+          "manifestPath": {"type": "string", "minLength": 1},
+          "input": {"$ref": "#/components/schemas/InputRef"}
+        }
+      },
+      "ReportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sources", "destination"],
+        "properties": {
+          "sources": {"type": "array", "minItems": 1, "maxItems": 1024, "items": {"$ref": "#/components/schemas/FileRef"}},
+          "destination": {"$ref": "#/components/schemas/DirectoryRef"},
+          "overwrite": {"type": "boolean", "default": false},
+          "strict": {"type": "boolean", "default": false},
+          "includeDefaultPrograms": {"type": "boolean", "default": false}
+        }
+      },
+      "InfoRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sources"],
+        "properties": {
+          "sources": {"type": "array", "minItems": 1, "maxItems": 1024, "items": {"$ref": "#/components/schemas/FileRef"}},
+          "strict": {"type": "boolean", "default": false},
+          "includeDefaultPrograms": {"type": "boolean", "default": false}
+        }
+      },
+      "ObjectsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sources", "destination"],
+        "properties": {
+          "sources": {"type": "array", "minItems": 1, "maxItems": 1024, "items": {"$ref": "#/components/schemas/FileRef"}},
+          "destination": {"$ref": "#/components/schemas/DirectoryRef"},
+          "objectType": {"enum": ["SMPL", "SBNK", "SBAC", "PROG", "SEQU", "PRF3"]},
+          "overwrite": {"type": "boolean", "default": false},
+          "strict": {"type": "boolean", "default": false},
+          "includeDefaultPrograms": {"type": "boolean", "default": false}
+        }
+      },
+      "RelationshipsRequest": {"$ref": "#/components/schemas/ReportRequest"},
+      "InventoryRequest": {"$ref": "#/components/schemas/ReportRequest"},
+      "CoverageRequest": {"$ref": "#/components/schemas/ReportRequest"},
+      "CorpusAuditRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sources", "destination"],
+        "properties": {
+          "sources": {"type": "array", "minItems": 1, "maxItems": 1024, "items": {"$ref": "#/components/schemas/FileRef"}},
+          "destination": {"$ref": "#/components/schemas/DirectoryRef"},
+          "policy": {
+            "enum": ["NORMAL", "STRICT", "SALVAGE_AWARE"],
+            "default": "NORMAL",
+            "x-axklib-application-enum": {"NORMAL": "normal", "STRICT": "strict", "SALVAGE_AWARE": "salvage-aware"}
+          },
+          "waveSmokeLimit": {"type": "integer", "minimum": 0, "maximum": 1000000, "default": 10},
+          "skipWaveSmoke": {"type": "boolean", "default": false},
+          "overwrite": {"type": "boolean", "default": false}
+        }
+      },
+      "OrphansRequest": {"$ref": "#/components/schemas/ReportRequest"},
+      "ValidationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["destination"],
+        "properties": {
+          "sources": {"type": "array", "minItems": 1, "maxItems": 1024, "items": {"$ref": "#/components/schemas/FileRef"}},
+          "exports": {"$ref": "#/components/schemas/DirectoryRef"},
+          "destination": {"$ref": "#/components/schemas/DirectoryRef"},
+          "policy": {
+            "enum": ["NORMAL", "STRICT", "SALVAGE_AWARE"],
+            "default": "NORMAL",
+            "x-axklib-application-enum": {"NORMAL": "normal", "STRICT": "strict", "SALVAGE_AWARE": "salvage-aware"}
+          },
+          "overwrite": {"type": "boolean", "default": false}
+        },
+        "oneOf": [
+          {"required": ["sources"]},
+          {"required": ["exports"]}
+        ]
+      },
+      "ReportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationId", "sourceCount", "loadedCount", "failedCount", "rowCount", "artifacts"],
+        "properties": {
+          "operationId": {"type": "string"},
+          "sourceCount": {"type": "integer", "minimum": 1},
+          "loadedCount": {"type": "integer", "minimum": 0},
+          "failedCount": {"type": "integer", "minimum": 0},
+          "rowCount": {"type": "integer", "minimum": 0},
+          "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/FileRef"}}
+        }
+      },
+      "InfoResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationId", "sourceCount", "loadedCount", "failedCount", "trees", "loadErrors"],
+        "properties": {
+          "operationId": {"const": "report.info"},
+          "sourceCount": {"type": "integer", "minimum": 1},
+          "loadedCount": {"type": "integer", "minimum": 0},
+          "failedCount": {"type": "integer", "minimum": 0},
+          "trees": {"type": "array", "items": {"type": "object"}},
+          "loadErrors": {"type": "array", "items": {"type": "object"}}
+        }
+      },
+      "InventoryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationId", "sourceCount", "loadedCount", "failedCount", "rowCount", "decodeIssueCount", "artifacts"],
+        "properties": {
+          "operationId": {"const": "report.inventory"},
+          "sourceCount": {"type": "integer", "minimum": 1},
+          "loadedCount": {"type": "integer", "minimum": 0},
+          "failedCount": {"type": "integer", "minimum": 0},
+          "rowCount": {"type": "integer", "minimum": 0},
+          "decodeIssueCount": {"type": "integer", "minimum": 0},
+          "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/FileRef"}}
+        }
+      },
+      "RelationshipsResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationId", "sourceCount", "loadedCount", "failedCount", "rowCount", "ambiguousCount", "artifacts"],
+        "properties": {
+          "operationId": {"const": "report.relationships"},
+          "sourceCount": {"type": "integer", "minimum": 1},
+          "loadedCount": {"type": "integer", "minimum": 0},
+          "failedCount": {"type": "integer", "minimum": 0},
+          "rowCount": {"type": "integer", "minimum": 0},
+          "ambiguousCount": {"type": "integer", "minimum": 0},
+          "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/FileRef"}}
+        }
+      },
+      "OrphansResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationId", "sourceCount", "loadedCount", "failedCount", "rowCount", "summaries", "artifacts"],
+        "properties": {
+          "operationId": {"const": "report.orphans"},
+          "sourceCount": {"type": "integer", "minimum": 1},
+          "loadedCount": {"type": "integer", "minimum": 0},
+          "failedCount": {"type": "integer", "minimum": 0},
+          "rowCount": {"type": "integer", "minimum": 0},
+          "summaries": {"type": "array", "items": {"type": "object"}},
+          "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/FileRef"}}
+        }
+      },
+      "CorpusAuditResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationId", "sourceCount", "loadedCount", "failedCount", "objectCount", "validationIssueCount", "validationFailed", "relationshipCount", "waveSmokeDecoded", "waveSmokeErrorCount", "artifacts"],
+        "properties": {
+          "operationId": {"const": "corpus.audit"},
+          "sourceCount": {"type": "integer", "minimum": 1},
+          "loadedCount": {"type": "integer", "minimum": 0},
+          "failedCount": {"type": "integer", "minimum": 0},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "validationIssueCount": {"type": "integer", "minimum": 0},
+          "validationFailed": {"type": "boolean"},
+          "relationshipCount": {"type": "integer", "minimum": 0},
+          "waveSmokeDecoded": {"type": "integer", "minimum": 0},
+          "waveSmokeErrorCount": {"type": "integer", "minimum": 0},
+          "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/FileRef"}}
+        }
+      },
+      "ValidationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationId", "sourceCount", "issueCount", "failed", "policy", "artifacts"],
+        "properties": {
+          "operationId": {"const": "report.validate"},
+          "sourceCount": {"type": "integer", "minimum": 0},
+          "issueCount": {"type": "integer", "minimum": 0},
+          "failed": {"type": "boolean"},
+          "policy": {
+            "enum": ["NORMAL", "STRICT", "SALVAGE_AWARE"],
+            "x-axklib-application-enum": {"NORMAL": "normal", "STRICT": "strict", "SALVAGE_AWARE": "salvage-aware"}
+          },
+          "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/FileRef"}}
+        }
+      },
+      "ExtractionSelector": {
+        "oneOf": [
+          {"type": "string", "minLength": 1},
+          {"type": "object", "additionalProperties": false, "required": ["path"], "properties": {"path": {"type": "string", "minLength": 1}}}
+        ]
+      },
+      "ExtractionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sources", "destination", "scope"],
+        "properties": {
+          "sources": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/components/schemas/FileRef"}},
+          "destination": {"$ref": "#/components/schemas/DirectoryRef"},
+          "scope": {
+            "enum": ["FILE", "VOLUME", "PROGRAM", "SBAC", "SBNK"],
+            "x-axklib-application-enum": {"FILE": "file", "VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk"}
+          },
+          "selectors": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/components/schemas/ExtractionSelector"}},
+          "stereo": {
+            "enum": ["AUTO", "NONE"],
+            "default": "AUTO",
+            "x-axklib-application-enum": {"AUTO": "auto", "NONE": "none"}
+          },
+          "overwrite": {"type": "boolean", "default": false},
+          "strict": {"type": "boolean", "default": false}
+        }
+      },
+      "ExtractionArtifact": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fileRef", "relativePath", "mediaType", "sizeBytes", "sha256", "owners"],
+        "properties": {
+          "fileRef": {"$ref": "#/components/schemas/FileRef"},
+          "relativePath": {"type": "string", "minLength": 1},
+          "mediaType": {"type": "string", "minLength": 1},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "owners": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/ExtractionArtifactOwner"}}
+        }
+      },
+      "ExtractionArtifactOwner": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "partitionIndex", "volumeName", "objectType", "objectName"],
+        "properties": {
+          "source": {"$ref": "#/components/schemas/FileRef"},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "volumeName": {"type": "string"},
+          "objectType": {"enum": ["VOLUME", "SMPL", "SBNK", "SBAC"]},
+          "objectName": {"type": "string"}
+        }
+      },
+      "Issue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "source": {"type": "string"},
+          "fatal": {"type": "boolean"}
+        }
+      },
+      "ExtractionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "mode",
+          "destination",
+          "artifactCount",
+          "waveformCount",
+          "writtenFileCount",
+          "selectionGraphCount",
+          "sfzFileCount",
+          "decodeErrorCount",
+          "loadErrorCount",
+          "artifacts",
+          "warnings"
+        ],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "mode": {"enum": ["WAV", "SFZ"]},
+          "destination": {"$ref": "#/components/schemas/DirectoryRef"},
+          "artifactCount": {"type": "integer", "minimum": 0},
+          "waveformCount": {"type": "integer", "minimum": 0},
+          "writtenFileCount": {"type": "integer", "minimum": 0},
+          "selectionGraphCount": {"type": "integer", "minimum": 0},
+          "sfzFileCount": {"type": "integer", "minimum": 0},
+          "decodeErrorCount": {"type": "integer", "minimum": 0},
+          "loadErrorCount": {"type": "integer", "minimum": 0},
+          "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/ExtractionArtifact"}},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}}
+        }
+      },
+      "PackageRootSelector": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": {
+            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL"],
+            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "prog", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl"}
+          },
+          "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
+          "groupName": {"type": "string"},
+          "volumeName": {"type": "string"},
+          "objectName": {"type": "string"}
+        }
+      },
+      "PackageReadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["package"],
+        "properties": {"package": {"$ref": "#/components/schemas/InputRef"}}
+      },
+      "PackageExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "output", "roots"],
+        "properties": {
+          "source": {"$ref": "#/components/schemas/FileRef"},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "roots": {"type": "array", "minItems": 1, "maxItems": 1024, "items": {"$ref": "#/components/schemas/PackageRootSelector"}},
+          "overwrite": {"type": "boolean", "default": false}
+        }
+      },
+      "PackageRoot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "displayName", "nodeIds"],
+        "properties": {
+          "kind": {
+            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL"],
+            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "prog", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl"}
+          },
+          "displayName": {"type": "string"},
+          "nodeIds": {"type": "array", "items": {"type": "string"}}
+        }
+      },
+      "PackageObject": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["nodeId", "objectType", "name", "payloadSha256", "normalizedSha256", "semanticSha256", "audioSha256"],
+        "properties": {
+          "nodeId": {"type": "string"},
+          "objectType": {"type": "string"},
+          "name": {"type": "string"},
+          "payloadSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "normalizedSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "semanticSha256": {"type": ["string", "null"]},
+          "audioSha256": {"type": ["string", "null"]}
+        }
+      },
+      "PackageInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "packageId", "packageKind", "requiredExtension", "sourceMediaKind", "valid", "payloadsVerified", "roots", "objects", "relationshipCount", "issues"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "packageId": {"type": "string", "minLength": 1},
+          "packageKind": {
+            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "BUNDLE"],
+            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "BUNDLE": "bundle"}
+          },
+          "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
+          "sourceMediaKind": {
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "UNKNOWN"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "UNKNOWN": "unknown"}
+          },
+          "valid": {"type": "boolean"},
+          "payloadsVerified": {"type": "boolean"},
+          "roots": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRoot"}},
+          "objects": {"type": "array", "items": {"$ref": "#/components/schemas/PackageObject"}},
+          "relationshipCount": {"type": "integer", "minimum": 0},
+          "issues": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}}
+        }
+      },
+      "PackageVerification": {"$ref": "#/components/schemas/PackageInspection"},
+      "PackageExportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "packageId", "packageKind", "requiredExtension", "sourceMediaKind", "valid", "payloadsVerified", "roots", "objects", "relationshipCount", "issues", "output", "sizeBytes"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "packageId": {"type": "string", "minLength": 1},
+          "packageKind": {
+            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "BUNDLE"],
+            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "BUNDLE": "bundle"}
+          },
+          "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
+          "sourceMediaKind": {
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "UNKNOWN"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "UNKNOWN": "unknown"}
+          },
+          "valid": {"type": "boolean"},
+          "payloadsVerified": {"type": "boolean"},
+          "roots": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRoot"}},
+          "objects": {"type": "array", "items": {"$ref": "#/components/schemas/PackageObject"}},
+          "relationshipCount": {"type": "integer", "minimum": 0},
+          "issues": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "sizeBytes": {"type": "integer", "minimum": 0}
+        }
+      },
+      "PackageDestination": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packageIndex", "rootIndex"],
+        "properties": {
+          "packageIndex": {"type": "integer", "minimum": 0},
+          "rootIndex": {"type": "integer", "minimum": 0},
+          "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
+          "groupName": {"type": "string"},
+          "volumeName": {"type": "string"},
+          "rawGroup": {"type": "string"},
+          "rawVolume": {"type": "string"},
+          "create": {"type": "boolean"}
+        }
+      },
+      "PackageImportPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target", "output", "packages", "destinations"],
+        "properties": {
+          "target": {"$ref": "#/components/schemas/FileRef"},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "packages": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/components/schemas/InputRef"}},
+          "destinations": {"type": "array", "items": {"$ref": "#/components/schemas/PackageDestination"}},
+          "renames": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRename"}},
+          "overwrite": {"type": "boolean", "default": false}
+        }
+      },
+      "PackageRename": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packageIndex", "nodeId", "destinationName"],
+        "properties": {
+          "packageIndex": {"type": "integer", "minimum": 0},
+          "nodeId": {"type": "string", "minLength": 1},
+          "destinationName": {"type": "string", "minLength": 1}
+        }
+      },
+      "PackageImportConflict": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "packageIndex", "rootIndex", "packageId", "nodeId", "partitionIndex", "groupName", "volumeName", "rawGroup", "rawVolume"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "packageIndex": {"type": ["integer", "null"], "minimum": 0},
+          "rootIndex": {"type": ["integer", "null"], "minimum": 0},
+          "packageId": {"type": "string"},
+          "nodeId": {"type": "string"},
+          "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
+          "groupName": {"type": "string"},
+          "volumeName": {"type": "string"},
+          "rawGroup": {"type": "string"},
+          "rawVolume": {"type": "string"}
+        }
+      },
+      "PackageImportAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["actionId", "packageIndex", "rootIndex", "packageId", "nodeId", "objectType", "sourceName", "destinationName", "partitionIndex", "groupName", "volumeName", "rawGroup", "rawVolume", "actions", "canonicalActionId", "targetSfsId", "targetLinkId"],
+        "properties": {
+          "actionId": {"type": "string", "minLength": 1},
+          "packageIndex": {"type": "integer", "minimum": 0},
+          "rootIndex": {"type": "integer", "minimum": 0},
+          "packageId": {"type": "string", "minLength": 1},
+          "nodeId": {"type": "string", "minLength": 1},
+          "objectType": {"type": "string", "minLength": 1},
+          "sourceName": {"type": "string"},
+          "destinationName": {"type": "string"},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "groupName": {"type": "string"},
+          "volumeName": {"type": "string"},
+          "rawGroup": {"type": "string"},
+          "rawVolume": {"type": "string"},
+          "actions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "enum": ["REUSE", "RENAME", "RELOCATE", "INSERT", "CONFLICT"],
+              "x-axklib-application-enum": {"REUSE": "reuse", "RENAME": "rename", "RELOCATE": "relocate", "INSERT": "insert", "CONFLICT": "conflict"}
+            }
+          },
+          "canonicalActionId": {"type": ["string", "null"]},
+          "targetSfsId": {"type": ["integer", "null"], "minimum": 0},
+          "targetLinkId": {"type": ["integer", "null"], "minimum": 0}
+        }
+      },
+      "PackageAllocationEstimate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partitionIndex", "groupName", "volumeName", "rawGroup", "rawVolume", "insertedObjectCount", "reusedObjectCount", "payloadClusters", "payloadSectors", "continuationClusters", "directoryGrowthBytes", "remainingObjectIds", "remainingClusters", "projectedImageSectors", "projectedImageSizeBytes"],
+        "properties": {
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "groupName": {"type": "string"},
+          "volumeName": {"type": "string"},
+          "rawGroup": {"type": "string"},
+          "rawVolume": {"type": "string"},
+          "insertedObjectCount": {"type": "integer", "minimum": 0},
+          "reusedObjectCount": {"type": "integer", "minimum": 0},
+          "payloadClusters": {"type": "integer", "minimum": 0},
+          "payloadSectors": {"type": "integer", "minimum": 0},
+          "continuationClusters": {"type": "integer", "minimum": 0},
+          "directoryGrowthBytes": {"type": "integer", "minimum": 0},
+          "remainingObjectIds": {"type": "integer", "minimum": 0},
+          "remainingClusters": {"type": "integer", "minimum": 0},
+          "projectedImageSectors": {"type": "integer", "minimum": 0},
+          "projectedImageSizeBytes": {"type": "integer", "minimum": 0}
+        }
+      },
+      "PackageImportPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "allocation"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "planToken": {"type": "string", "minLength": 1},
+          "expiresInSeconds": {"type": "integer", "minimum": 1},
+          "planId": {"type": "string", "minLength": 1},
+          "targetKind": {
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660"}
+          },
+          "targetSnapshotId": {"type": "string", "minLength": 1},
+          "valid": {"type": "boolean"},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "conflicts": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportConflict"}},
+          "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
+          "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}}
+        }
+      },
+      "PlanTokenRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["planToken"],
+        "properties": {"planToken": {"type": "string", "minLength": 1}}
+      },
+      "PackageImportRequest": {"$ref": "#/components/schemas/PlanTokenRequest"},
+      "PackageImportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "planId", "output", "sourceSnapshotId", "outputSnapshotId", "applied"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "planId": {"type": "string", "minLength": 1},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "sourceSnapshotId": {"type": "string", "minLength": 1},
+          "outputSnapshotId": {"type": "string", "minLength": 1},
+          "applied": {"type": "boolean"}
+        }
+      },
+      "ManifestTemplateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {"kind": {"enum": ["HDS", "FLOPPY", "ISO"]}}
+      },
+      "AlterationManifestTemplateRequest": {"$ref": "#/components/schemas/EmptyRequest"},
+      "ManifestTemplateChoices": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["manifestSources", "inputBindingSources", "wholeSourceInputSources", "modes", "profiles"],
+        "properties": {
+          "manifestSources": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"enum": ["INLINE", "FILE_REF", "UPLOAD_REF"]}
+          },
+          "inputBindingSources": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"enum": ["FILE_REF", "UPLOAD_REF"]}
+          },
+          "wholeSourceInputSources": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"const": "FILE_REF"}
+          },
+          "modes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"enum": ["AUTHORED", "WHOLE_SOURCE", "ALTERATION"]}
+          },
+          "profiles": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"enum": ["YAMAHA_SFS_HDS", "YAMAHA_FAT12", "YAMAHA_ISO9660"]}
+          }
+        }
+      },
+      "ManifestTemplateResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "kind", "manifest", "canonicalJson", "choices", "documentation"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "kind": {"enum": ["HDS", "FLOPPY", "ISO", "ALTERATION"]},
+          "manifest": {"type": "object"},
+          "canonicalJson": {"type": "string", "minLength": 2, "maxLength": 1048576},
+          "choices": {"$ref": "#/components/schemas/ManifestTemplateChoices"},
+          "documentation": {"type": "string"}
+        }
+      },
+      "ImageBuildPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "manifest", "output"],
+        "properties": {
+          "kind": {"enum": ["HDS", "FLOPPY", "ISO"]},
+          "manifest": {"$ref": "#/components/schemas/ManifestInput"},
+          "inputBindings": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/components/schemas/InputBinding"}},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "overwrite": {"type": "boolean", "default": false}
+        }
+      },
+      "ImageBuildPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "kind", "output", "overwrite", "summary", "semanticVersion", "sourceIdentity", "valid"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "planToken": {"type": "string", "minLength": 1},
+          "expiresInSeconds": {"type": "integer", "minimum": 1},
+          "kind": {"enum": ["HDS", "FLOPPY", "ISO"]},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "overwrite": {"type": "boolean"},
+          "summary": {"$ref": "#/components/schemas/ImageBuildSummary"},
+          "semanticVersion": {"type": "string"},
+          "sourceIdentity": {"type": "string"},
+          "valid": {"const": true}
+        }
+      },
+      "ImageBuildRequest": {"$ref": "#/components/schemas/PlanTokenRequest"},
+      "ImageBuildSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["format", "objectCount"],
+        "properties": {
+          "format": {"enum": ["HDS", "FLOPPY", "ISO"]},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "partitionCount": {"type": "integer", "minimum": 1, "maximum": 8}
+        }
+      },
+      "ImageBuildPartition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "name", "startSector", "sectorCount", "clusterCount", "freeKiB"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 0, "maximum": 7},
+          "name": {"type": "string"},
+          "startSector": {"type": "integer", "minimum": 0},
+          "sectorCount": {"type": "integer", "minimum": 0},
+          "clusterCount": {"type": "integer", "minimum": 0},
+          "freeKiB": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ImageBuildResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "kind", "summary", "output", "sizeBytes", "sha256", "objectCount", "validation"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "kind": {"enum": ["HDS", "FLOPPY", "ISO"]},
+          "summary": {"$ref": "#/components/schemas/ImageBuildSummary"},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "partitions": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/components/schemas/ImageBuildPartition"}},
+          "unusedTailSectors": {"type": "integer", "minimum": 0},
+          "validation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["valid", "issueCount"],
+            "properties": {
+              "valid": {"type": "boolean"},
+              "issueCount": {"type": "integer", "minimum": 0}
+            }
+          }
+        }
+      },
+      "ImageAlterationPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "manifest", "output"],
+        "properties": {
+          "source": {"$ref": "#/components/schemas/FileRef"},
+          "manifest": {"$ref": "#/components/schemas/ManifestInput"},
+          "inputBindings": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/components/schemas/InputBinding"}},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "overwrite": {"type": "boolean", "default": false}
+        }
+      },
+      "AlterationAudioImportSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sourcePath", "sourceFormat", "sourceSubtype", "sourceChannels", "sourceSampleRate", "outputSampleRate", "outputFrames", "resampled", "quantized", "ditherAlgorithm", "splitStereo", "clippedSamples"],
+        "properties": {
+          "sourcePath": {"type": "string", "minLength": 1},
+          "sourceFormat": {"type": "string"},
+          "sourceSubtype": {"type": "string"},
+          "sourceChannels": {"type": "integer", "minimum": 1},
+          "sourceSampleRate": {"type": "integer", "minimum": 1},
+          "outputSampleRate": {"type": "integer", "minimum": 1},
+          "outputFrames": {"type": "integer", "minimum": 0},
+          "resampled": {"type": "boolean"},
+          "quantized": {"type": "boolean"},
+          "ditherAlgorithm": {"type": "string"},
+          "splitStereo": {"type": "boolean"},
+          "clippedSamples": {"type": "integer", "minimum": 0}
+        }
+      },
+      "AlterationOperationReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "partitionIndex", "volumeName", "objectName", "removedSfsIds", "insertedSfsIds", "freedClusters", "allocatedClusters", "audioImport"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "type": {
+            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM"],
+            "x-axklib-application-enum": {
+              "DELETE_VOLUME": "delete_volume",
+              "INSERT_VOLUME": "insert_volume",
+              "DELETE_SBNK": "delete_sbnk",
+              "INSERT_SBNK": "insert_sbnk",
+              "INSERT_WAVEFORM": "insert_waveform",
+              "DELETE_WAVEFORM": "delete_waveform",
+              "RENAME_WAVEFORM": "rename_waveform",
+              "RENAME_SBNK": "rename_sbnk",
+              "DELETE_SBAC": "delete_sbac",
+              "INSERT_SBAC": "insert_sbac",
+              "RENAME_SBAC": "rename_sbac",
+              "DELETE_PROGRAM": "delete_program",
+              "INSERT_PROGRAM": "insert_program"
+            }
+          },
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
+          "volumeName": {"type": "string"},
+          "objectName": {"type": "string"},
+          "removedSfsIds": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
+          "insertedSfsIds": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
+          "freedClusters": {"type": "integer", "minimum": 0},
+          "allocatedClusters": {"type": "integer", "minimum": 0},
+          "audioImport": {"oneOf": [{"$ref": "#/components/schemas/AlterationAudioImportSummary"}, {"type": "null"}]}
+        }
+      },
+      "AlterationSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationCount", "freedClusters", "allocatedClusters"],
+        "properties": {
+          "operationCount": {"type": "integer", "minimum": 0},
+          "freedClusters": {"type": "integer", "minimum": 0},
+          "allocatedClusters": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ImageAlterationPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "kind", "output", "overwrite", "summary", "semanticVersion", "sourceIdentity", "valid", "warnings", "validation", "operations"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "planToken": {"type": "string", "minLength": 1},
+          "expiresInSeconds": {"type": "integer", "minimum": 1},
+          "kind": {"const": "ALTERATION"},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "overwrite": {"type": "boolean"},
+          "summary": {"$ref": "#/components/schemas/AlterationSummary"},
+          "semanticVersion": {"type": "string"},
+          "sourceIdentity": {"type": "string"},
+          "valid": {"const": true},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "validation": {"$ref": "#/components/schemas/ImageBuildResult/properties/validation"},
+          "operations": {"type": "array", "items": {"$ref": "#/components/schemas/AlterationOperationReport"}}
+        }
+      },
+      "ImageAlterationRequest": {"$ref": "#/components/schemas/PlanTokenRequest"},
+      "ImageAlterationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "kind", "summary", "output", "sizeBytes", "sha256", "objectCount", "validation", "warnings", "applied", "operations"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "kind": {"const": "ALTERATION"},
+          "summary": {"$ref": "#/components/schemas/AlterationSummary"},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "validation": {"$ref": "#/components/schemas/ImageBuildResult/properties/validation"},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "applied": {"type": "boolean"},
+          "operations": {"type": "array", "items": {"$ref": "#/components/schemas/AlterationOperationReport"}}
+        }
+      },
+      "ErrorContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "partitionIndex": {"type": "integer", "minimum": 0},
+          "volumeName": {"type": "string"},
+          "objectType": {"type": "string"},
+          "objectName": {"type": "string"},
+          "relativePath": {"type": "string"}
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "context", "requestId", "retryable"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "context": {"$ref": "#/components/schemas/ErrorContext"},
+          "requestId": {"type": "string", "minLength": 1},
+          "retryable": {"type": "boolean"}
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["error"],
+        "properties": {"error": {"$ref": "#/components/schemas/Error"}}
+      },
+      "Warning": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "context"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "context": {"$ref": "#/components/schemas/ErrorContext"}
+        }
+      },
+      "ResponseMeta": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["requestId"],
+        "properties": {
+          "requestId": {"type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[A-Za-z0-9_.-]+$"},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Warning"}}
+        }
+      },
+      "JobProgress": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phase", "completed", "total", "message"],
+        "properties": {
+          "phase": {"type": "string"},
+          "completed": {"type": "integer", "minimum": 0},
+          "total": {"type": ["integer", "null"], "minimum": 0},
+          "message": {"type": "string"}
+        }
+      },
+      "Job": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["jobId", "operationId", "state", "latestSequence", "progress", "result", "error"],
+        "properties": {
+          "jobId": {"type": "string"},
+          "operationId": {"type": "string"},
+          "state": {"enum": ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]},
+          "latestSequence": {"type": "integer", "minimum": 1},
+          "progress": {"oneOf": [{"$ref": "#/components/schemas/JobProgress"}, {"type": "null"}]},
+          "result": {},
+          "error": {"type": ["object", "null"]}
+        }
+      },
+      "JobResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/Job"},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "JobEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "eventId", "sequence", "jobId", "operationId", "type", "timestampUnixMs", "state", "progress", "jobUrl"],
+        "properties": {
+          "schemaVersion": {"const": "1"},
+          "eventId": {"type": "string"},
+          "sequence": {"type": "integer", "minimum": 1},
+          "jobId": {"type": "string"},
+          "operationId": {"type": "string"},
+          "type": {"type": "string"},
+          "timestampUnixMs": {"type": "integer", "minimum": 0},
+          "state": {"enum": ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]},
+          "progress": {"oneOf": [{"$ref": "#/components/schemas/JobProgress"}, {"type": "null"}]},
+          "jobUrl": {"type": "string"}
+        }
+      },
+      "JobEventListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["events"],
+            "properties": {
+              "events": {"type": "array", "items": {"$ref": "#/components/schemas/JobEvent"}}
+            }
+          },
+          "meta": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requestId", "afterSequence"],
+            "properties": {
+              "requestId": {"type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[A-Za-z0-9_.-]+$"},
+              "afterSequence": {"type": "integer", "minimum": 0}
+            }
+          }
+        }
+      },
+      "MetricsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "totalRequests", "activeRequests", "responses2xx", "responses4xx", "responses5xx",
+              "totalDurationMs", "submittedJobs", "queuedJobs", "runningJobs", "completedJobs", "failedJobs",
+              "cancelledJobs", "publishedJobEvents", "progressJobEvents", "totalJobQueueWaitMs",
+              "totalJobExecutionMs", "totalJobPhaseDurationMs", "totalJobCancellationLatencyMs",
+              "websocketEventsDelivered", "websocketEventsDropped", "websocketEventsPending",
+              "websocketClientsEvicted"
+            ],
+            "properties": {
+              "totalRequests": {"type": "integer", "minimum": 0},
+              "activeRequests": {"type": "integer", "minimum": 0},
+              "responses2xx": {"type": "integer", "minimum": 0},
+              "responses4xx": {"type": "integer", "minimum": 0},
+              "responses5xx": {"type": "integer", "minimum": 0},
+              "totalDurationMs": {"type": "integer", "minimum": 0},
+              "submittedJobs": {"type": "integer", "minimum": 0},
+              "queuedJobs": {"type": "integer", "minimum": 0},
+              "runningJobs": {"type": "integer", "minimum": 0},
+              "completedJobs": {"type": "integer", "minimum": 0},
+              "failedJobs": {"type": "integer", "minimum": 0},
+              "cancelledJobs": {"type": "integer", "minimum": 0},
+              "publishedJobEvents": {"type": "integer", "minimum": 0},
+              "progressJobEvents": {"type": "integer", "minimum": 0},
+              "totalJobQueueWaitMs": {"type": "integer", "minimum": 0},
+              "totalJobExecutionMs": {"type": "integer", "minimum": 0},
+              "totalJobPhaseDurationMs": {"type": "integer", "minimum": 0},
+              "totalJobCancellationLatencyMs": {"type": "integer", "minimum": 0},
+              "websocketEventsDelivered": {"type": "integer", "minimum": 0},
+              "websocketEventsDropped": {"type": "integer", "minimum": 0},
+              "websocketEventsPending": {"type": "integer", "minimum": 0},
+              "websocketClientsEvicted": {"type": "integer", "minimum": 0}
+            }
+          },
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "EventTicketResponse": {
+        "type": "object",
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["ticket", "expiresInSeconds", "websocketUrl", "subprotocol"],
+            "properties": {
+              "ticket": {"type": "string"},
+              "expiresInSeconds": {"type": "integer", "minimum": 1},
+              "websocketUrl": {"const": "/api/v1/events"},
+              "subprotocol": {"const": "axklib.events.v1"}
+            }
+          },
+          "meta": {"type": "object"}
+        }
+      }
+    }
+  },
+  "security": [{"bearerAuth": []}]
+}

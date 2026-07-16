@@ -1,0 +1,5 @@
+#include "axklib/server/server.hpp"
+
+std::string_view axk::server::embedded_openapi() noexcept {
+    return R"AXK_OPENAPI(@AXK_SERVER_OPENAPI_JSON@)AXK_OPENAPI";
+}

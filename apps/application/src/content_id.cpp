@@ -1,4 +1,4 @@
-#include "content_id.hpp"
+#include "axklib/application/content_id.hpp"
 
 #include <algorithm>
 #include <format>
@@ -7,7 +7,7 @@
 
 #include "axklib/utf8.hpp"
 
-namespace axk::cli::detail {
+namespace axk::app {
 namespace {
 
 constexpr std::size_t pooled_suffix_length = 12U;
@@ -30,12 +30,13 @@ ContentId sha1_content_id(std::span<const std::byte> bytes) {
     return {.algorithm = "sha1", .digest_hex = hash.getHash()};
 }
 
-Result<ContentId> sha1_wav_content_id(const audio_internal::WavSource &source) {
+axk::Result<ContentId> sha1_wav_content_id(const audio_internal::WavSource &source) {
     SHA1 hash;
-    const auto streamed = audio_internal::stream_wav(source, [&](std::span<const std::byte> bytes) -> Result<void> {
-        hash.add(bytes.data(), bytes.size());
-        return {};
-    });
+    const auto streamed =
+        audio_internal::stream_wav(source, [&](std::span<const std::byte> bytes) -> axk::Result<void> {
+            hash.add(bytes.data(), bytes.size());
+            return {};
+        });
     if (!streamed)
         return std::unexpected{streamed.error()};
     return ContentId{.algorithm = "sha1", .digest_hex = hash.getHash()};
@@ -43,9 +44,9 @@ Result<ContentId> sha1_wav_content_id(const audio_internal::WavSource &source) {
 
 PooledPathAllocator::PooledPathAllocator(WavContentIdProvider provider) : provider_{std::move(provider)} {}
 
-Result<std::filesystem::path> PooledPathAllocator::allocate(const std::filesystem::path &selection_root,
-                                                            std::string_view kind, std::string_view safe_stem,
-                                                            const audio_internal::WavSource &source) {
+axk::Result<std::filesystem::path> PooledPathAllocator::allocate(const std::filesystem::path &selection_root,
+                                                                 std::string_view kind, std::string_view safe_stem,
+                                                                 const audio_internal::WavSource &source) {
     const auto id = provider_(source);
     if (!id)
         return std::unexpected{id.error()};
@@ -71,4 +72,4 @@ Result<std::filesystem::path> PooledPathAllocator::allocate(const std::filesyste
     return error ? target : relative;
 }
 
-} // namespace axk::cli::detail
+} // namespace axk::app

@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "axklib/catalog.hpp"
+#include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/utf8.hpp"
@@ -273,14 +274,10 @@ detail::write_prepared_media_image(const PreparedMediaImage &prepared, const std
         return std::unexpected{
             make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not determine written media image size")};
     }
-    if (overwrite)
-        std::filesystem::remove(output_path, filesystem_error);
-    filesystem_error.clear();
-    std::filesystem::rename(*temporary, output_path, filesystem_error);
-    if (filesystem_error) {
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not publish fresh media output")};
-    }
+    if (auto flushed = detail::flush_file_to_disk(*temporary); !flushed)
+        return std::unexpected{flushed.error()};
+    if (auto published = detail::publish_temporary_file(*temporary, output_path, overwrite); !published)
+        return std::unexpected{published.error()};
     cleanup.release();
     return WrittenMediaImage{output_path, prepared.manifest.format, size, prepared.objects.size()};
 }
@@ -292,6 +289,14 @@ Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
     if (!prepared)
         return std::unexpected{prepared.error()};
     return detail::write_prepared_media_image(*prepared, output_path, overwrite, cancellation);
+}
+
+Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildManifest &manifest,
+                                               const CancellationToken &cancellation) {
+    auto prepared = detail::prepare_media_image(manifest, cancellation);
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    return MediaBuildPlanSummary{manifest.format, prepared->objects.size()};
 }
 
 } // namespace axk

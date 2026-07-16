@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -40,6 +41,9 @@ struct TreeOutput {
     std::string source_path_utf8;
     std::string container_kind;
     std::string detected_format;
+    std::uint64_t object_count{};
+    std::map<std::string, std::uint64_t> object_counts{};
+    std::optional<std::string> recovery{};
     std::vector<NodeOutput> roots;
     std::vector<IssueOutput> issues;
 };

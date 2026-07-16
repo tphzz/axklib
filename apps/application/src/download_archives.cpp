@@ -1,0 +1,379 @@
+#include "axklib/application/download_archives.hpp"
+
+#include <algorithm>
+#include <array>
+#include <charconv>
+#include <fstream>
+#include <limits>
+#include <mutex>
+#include <ranges>
+#include <span>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "axklib/application/secure_random.hpp"
+#include "axklib/utf8.hpp"
+
+namespace {
+
+constexpr std::size_t tar_block_size = 512U;
+
+axk::app::Error archive_error(std::string code, std::string message, bool retryable = false) {
+    return {std::move(code), std::move(message), {}, retryable};
+}
+
+struct SourceEntry {
+    std::string path;
+    std::uint64_t size{};
+};
+
+bool split_tar_path(std::string_view path, std::string_view &name, std::string_view &prefix) {
+    if (path.empty() || path.size() > 255U)
+        return false;
+    if (path.size() <= 100U) {
+        name = path;
+        prefix = {};
+        return true;
+    }
+    auto split = path.rfind('/');
+    while (split != std::string_view::npos) {
+        if (split <= 155U && path.size() - split - 1U <= 100U) {
+            prefix = path.substr(0U, split);
+            name = path.substr(split + 1U);
+            return !name.empty();
+        }
+        if (split == 0U)
+            break;
+        split = path.rfind('/', split - 1U);
+    }
+    return false;
+}
+
+bool write_octal(std::span<char> target, std::uint64_t value) {
+    if (target.size() < 2U)
+        return false;
+    std::ranges::fill(target, '0');
+    target.back() = '\0';
+    auto first = target.data();
+    auto last = target.data() + static_cast<std::ptrdiff_t>(target.size() - 1U);
+    const auto converted = std::to_chars(first, last, value, 8);
+    if (converted.ec != std::errc{})
+        return false;
+    const auto digits = static_cast<std::size_t>(converted.ptr - first);
+    const auto width = target.size() - 1U;
+    if (digits > width)
+        return false;
+    std::move_backward(first, converted.ptr, target.data() + static_cast<std::ptrdiff_t>(width));
+    std::fill(first, first + static_cast<std::ptrdiff_t>(width - digits), '0');
+    return true;
+}
+
+axk::app::Result<std::array<char, tar_block_size>> tar_header(const SourceEntry &entry) {
+    std::string_view name;
+    std::string_view prefix;
+    if (!split_tar_path(entry.path, name, prefix))
+        return std::unexpected(
+            archive_error("archive_path_too_long", "directory entry does not fit the TAR path profile"));
+    std::array<char, tar_block_size> header{};
+    std::ranges::copy(name, header.begin());
+    if (!write_octal(std::span{header}.subspan(100U, 8U), 0644U) ||
+        !write_octal(std::span{header}.subspan(108U, 8U), 0U) ||
+        !write_octal(std::span{header}.subspan(116U, 8U), 0U) ||
+        !write_octal(std::span{header}.subspan(124U, 12U), entry.size) ||
+        !write_octal(std::span{header}.subspan(136U, 12U), 0U)) {
+        return std::unexpected(archive_error("archive_too_large", "directory entry does not fit the TAR size profile"));
+    }
+    std::fill(header.begin() + 148, header.begin() + 156, ' ');
+    header[156] = '0';
+    constexpr std::string_view magic{"ustar\0", 6U};
+    std::ranges::copy(magic, header.begin() + 257);
+    header[263] = '0';
+    header[264] = '0';
+    std::ranges::copy(prefix, header.begin() + 345);
+    std::uint64_t checksum{};
+    for (const auto byte : header)
+        checksum += static_cast<unsigned char>(byte);
+    auto checksum_field = std::span{header}.subspan(148U, 8U);
+    if (!write_octal(checksum_field.first(7U), checksum))
+        return std::unexpected(archive_error("archive_failed", "TAR checksum cannot be represented"));
+    checksum_field[6] = '\0';
+    checksum_field[7] = ' ';
+    return header;
+}
+
+std::uint64_t padded_size(std::uint64_t size) { return (size + tar_block_size - 1U) / tar_block_size * tar_block_size; }
+
+std::string archive_filename(const axk::app::DirectoryRef &source) {
+    const auto path = axk::text::path_from_utf8(source.relative_path);
+    auto stem = path ? axk::text::path_to_utf8(path->filename()) : std::string{};
+    if (stem.empty() || stem == ".")
+        stem = source.root_id;
+    return stem + ".tar";
+}
+
+} // namespace
+
+struct axk::app::DownloadArchiveStore::Implementation {
+    struct Entry {
+        std::string owner_id;
+        std::string filename;
+        std::filesystem::path path;
+        std::uint64_t size_bytes{};
+        std::size_t entry_count{};
+        std::chrono::steady_clock::time_point expires_at;
+    };
+
+    std::filesystem::path staging_directory;
+    std::uint64_t maximum_total_bytes{};
+    std::uint64_t maximum_archive_bytes{};
+    std::size_t maximum_entries{};
+    std::chrono::seconds retention{};
+    Clock clock;
+    std::uint64_t reserved_bytes{};
+    std::mutex mutex;
+    std::unordered_map<std::string, Entry> entries;
+
+    Implementation(std::filesystem::path directory, std::uint64_t total_bytes, std::uint64_t archive_bytes,
+                   std::size_t entry_limit, std::chrono::seconds archive_retention, Clock archive_clock)
+        : staging_directory(std::move(directory)), maximum_total_bytes(total_bytes),
+          maximum_archive_bytes(archive_bytes), maximum_entries(entry_limit), retention(archive_retention),
+          clock(std::move(archive_clock)) {}
+
+    void cleanup_locked() {
+        const auto now = clock();
+        for (auto iterator = entries.begin(); iterator != entries.end();) {
+            if (iterator->second.expires_at > now) {
+                ++iterator;
+                continue;
+            }
+            std::error_code error;
+            std::filesystem::remove(iterator->second.path, error);
+            if (error) {
+                ++iterator;
+                continue;
+            }
+            reserved_bytes -= iterator->second.size_bytes;
+            iterator = entries.erase(iterator);
+        }
+    }
+
+    [[nodiscard]] DownloadArchiveSnapshot snapshot(std::string_view id, const Entry &entry) const {
+        const auto remaining =
+            entry.expires_at > clock()
+                ? std::chrono::duration_cast<std::chrono::seconds>(entry.expires_at - clock()).count()
+                : 0;
+        return {{std::string{id}},
+                entry.filename,
+                entry.size_bytes,
+                entry.entry_count,
+                static_cast<std::uint64_t>(remaining)};
+    }
+
+    [[nodiscard]] Result<std::unordered_map<std::string, Entry>::iterator> owned(const DownloadArchiveRef &reference,
+                                                                                 std::string_view owner_id) {
+        cleanup_locked();
+        const auto found = entries.find(reference.archive_id);
+        if (found == entries.end() || found->second.owner_id != owner_id)
+            return std::unexpected(archive_error("download_archive_not_found", "download archive does not exist"));
+        return found;
+    }
+};
+
+axk::app::DownloadArchiveStore::DownloadArchiveStore(std::filesystem::path staging_directory,
+                                                     std::uint64_t maximum_total_bytes,
+                                                     std::uint64_t maximum_archive_bytes, std::size_t maximum_entries,
+                                                     std::chrono::seconds retention, Clock clock)
+    : implementation_(std::make_shared<Implementation>(std::move(staging_directory), maximum_total_bytes,
+                                                       maximum_archive_bytes, maximum_entries, retention,
+                                                       std::move(clock))) {
+    std::error_code error;
+    std::filesystem::create_directories(implementation_->staging_directory, error);
+    if (!error) {
+        for (const auto &entry : std::filesystem::directory_iterator{implementation_->staging_directory, error}) {
+            if (error)
+                break;
+            if (entry.is_regular_file(error) &&
+                (entry.path().extension() == ".tar" || entry.path().extension() == ".part"))
+                std::filesystem::remove(entry.path(), error);
+            if (error)
+                break;
+        }
+    }
+}
+
+axk::app::DownloadArchiveStore::~DownloadArchiveStore() = default;
+axk::app::DownloadArchiveStore::DownloadArchiveStore(DownloadArchiveStore &&) noexcept = default;
+axk::app::DownloadArchiveStore &axk::app::DownloadArchiveStore::operator=(DownloadArchiveStore &&) noexcept = default;
+
+axk::app::Result<axk::app::DownloadArchiveSnapshot>
+axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sandbox, const DirectoryRef &source) {
+    if (owner_id.empty())
+        return std::unexpected(archive_error("invalid_archive_request", "download archive owner is required"));
+    const auto root = sandbox.resolve_directory(source);
+    if (!root)
+        return std::unexpected(root.error());
+
+    std::vector<SourceEntry> files;
+    std::uint64_t archive_size = tar_block_size * 2U;
+    std::error_code error;
+    for (std::filesystem::recursive_directory_iterator iterator{*root, error}, end; iterator != end;
+         iterator.increment(error)) {
+        if (error)
+            return std::unexpected(archive_error("archive_source_unavailable", "directory cannot be enumerated"));
+        const auto status = iterator->symlink_status(error);
+        if (error || std::filesystem::is_symlink(status))
+            return std::unexpected(archive_error("archive_link_not_allowed", "directory archives do not follow links"));
+        if (std::filesystem::is_directory(status))
+            continue;
+        if (!std::filesystem::is_regular_file(status))
+            return std::unexpected(
+                archive_error("archive_entry_not_allowed", "directory contains a non-regular entry"));
+        auto relative = std::filesystem::relative(iterator->path(), *root, error);
+        if (error)
+            return std::unexpected(
+                archive_error("archive_source_unavailable", "directory entry path cannot be resolved"));
+        const auto relative_utf8 = text::path_to_utf8(relative);
+        std::string_view name;
+        std::string_view prefix;
+        if (!split_tar_path(relative_utf8, name, prefix))
+            return std::unexpected(
+                archive_error("archive_path_too_long", "directory entry does not fit the TAR path profile"));
+        const auto size = iterator->file_size(error);
+        if (error || size > std::numeric_limits<std::uint64_t>::max() - archive_size - tar_block_size)
+            return std::unexpected(archive_error("archive_too_large", "directory archive size overflows"));
+        archive_size += tar_block_size + padded_size(size);
+        files.push_back({relative_utf8, size});
+        if (files.size() > implementation_->maximum_entries || archive_size > implementation_->maximum_archive_bytes)
+            return std::unexpected(
+                archive_error("download_archive_too_large", "directory archive exceeds configured limits"));
+    }
+    std::ranges::sort(files, {}, &SourceEntry::path);
+
+    std::string id;
+    std::filesystem::path final_path;
+    {
+        const std::scoped_lock lock{implementation_->mutex};
+        implementation_->cleanup_locked();
+        if (archive_size > implementation_->maximum_total_bytes - implementation_->reserved_bytes)
+            return std::unexpected(
+                archive_error("download_archive_quota_exceeded", "download archive staging quota is exhausted", true));
+        do {
+            auto generated = secure_random_hex(32U);
+            if (!generated)
+                return std::unexpected(archive_error("archive_storage_unavailable", generated.error().message));
+            id = std::move(*generated);
+        } while (implementation_->entries.contains(id));
+        final_path = implementation_->staging_directory / (id + ".tar");
+        implementation_->reserved_bytes += archive_size;
+    }
+
+    const auto temporary_path = implementation_->staging_directory / (id + ".part");
+    auto release_reservation = [&] {
+        const std::scoped_lock lock{implementation_->mutex};
+        implementation_->reserved_bytes -= archive_size;
+        std::error_code ignored;
+        std::filesystem::remove(temporary_path, ignored);
+    };
+    std::ofstream output{temporary_path, std::ios::binary | std::ios::trunc};
+    if (!output) {
+        release_reservation();
+        return std::unexpected(archive_error("archive_storage_unavailable", "download archive cannot be created"));
+    }
+    std::array<char, 1024U * 1024U> buffer{};
+    for (const auto &file : files) {
+        const auto resolved = sandbox.resolve_file(
+            {source.root_id, source.relative_path.empty() ? file.path : source.relative_path + "/" + file.path});
+        if (!resolved || std::filesystem::file_size(*resolved, error) != file.size || error) {
+            output.close();
+            release_reservation();
+            return std::unexpected(archive_error("archive_source_changed", "directory changed while it was archived"));
+        }
+        const auto header = tar_header(file);
+        if (!header) {
+            output.close();
+            release_reservation();
+            return std::unexpected(header.error());
+        }
+        output.write(header->data(), static_cast<std::streamsize>(header->size()));
+        std::ifstream input{*resolved, std::ios::binary};
+        std::uint64_t remaining = file.size;
+        while (remaining != 0U) {
+            const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.size()));
+            input.read(buffer.data(), static_cast<std::streamsize>(count));
+            output.write(buffer.data(), static_cast<std::streamsize>(count));
+            if (!input || !output) {
+                output.close();
+                release_reservation();
+                return std::unexpected(
+                    archive_error("archive_source_changed", "directory entry could not be archived"));
+            }
+            remaining -= count;
+        }
+        const std::array<char, tar_block_size> padding{};
+        const auto padding_size = padded_size(file.size) - file.size;
+        output.write(padding.data(), static_cast<std::streamsize>(padding_size));
+    }
+    const std::array<char, tar_block_size * 2U> end_blocks{};
+    output.write(end_blocks.data(), static_cast<std::streamsize>(end_blocks.size()));
+    output.close();
+    if (!output) {
+        release_reservation();
+        return std::unexpected(archive_error("archive_storage_unavailable", "download archive could not be finalized"));
+    }
+    std::filesystem::rename(temporary_path, final_path, error);
+    if (error) {
+        release_reservation();
+        return std::unexpected(archive_error("archive_storage_unavailable", "download archive could not be published"));
+    }
+
+    const std::scoped_lock lock{implementation_->mutex};
+    auto [position, inserted] = implementation_->entries.emplace(
+        id, Implementation::Entry{owner_id, archive_filename(source), final_path, archive_size, files.size(),
+                                  implementation_->clock() + implementation_->retention});
+    if (!inserted) {
+        implementation_->reserved_bytes -= archive_size;
+        std::filesystem::remove(final_path, error);
+        return std::unexpected(archive_error("archive_storage_unavailable", "download archive ID collision"));
+    }
+    return implementation_->snapshot(position->first, position->second);
+}
+
+axk::app::Result<axk::app::DownloadArchiveSnapshot>
+axk::app::DownloadArchiveStore::inspect(const DownloadArchiveRef &reference, std::string_view owner_id) {
+    const std::scoped_lock lock{implementation_->mutex};
+    auto found = implementation_->owned(reference, owner_id);
+    if (!found)
+        return std::unexpected(found.error());
+    return implementation_->snapshot(reference.archive_id, (**found).second);
+}
+
+axk::app::Result<std::filesystem::path> axk::app::DownloadArchiveStore::resolve(const DownloadArchiveRef &reference,
+                                                                                std::string_view owner_id) {
+    const std::scoped_lock lock{implementation_->mutex};
+    auto found = implementation_->owned(reference, owner_id);
+    if (!found)
+        return std::unexpected(found.error());
+    (**found).second.expires_at = implementation_->clock() + implementation_->retention;
+    return (**found).second.path;
+}
+
+axk::app::Result<void> axk::app::DownloadArchiveStore::remove(const DownloadArchiveRef &reference,
+                                                              std::string_view owner_id) {
+    const std::scoped_lock lock{implementation_->mutex};
+    auto found = implementation_->owned(reference, owner_id);
+    if (!found)
+        return std::unexpected(found.error());
+    std::error_code error;
+    std::filesystem::remove((**found).second.path, error);
+    if (error)
+        return std::unexpected(archive_error("archive_storage_unavailable", "download archive cannot be removed"));
+    implementation_->reserved_bytes -= (**found).second.size_bytes;
+    implementation_->entries.erase(*found);
+    return {};
+}
+
+void axk::app::DownloadArchiveStore::cleanup() {
+    const std::scoped_lock lock{implementation_->mutex};
+    implementation_->cleanup_locked();
+}

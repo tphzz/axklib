@@ -24,6 +24,8 @@ enum class ProgressPhase : std::uint8_t {
     validating,
     exporting,
     writing,
+    allocating,
+    publishing,
 };
 
 struct Progress {

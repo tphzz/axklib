@@ -49,6 +49,132 @@ jobs:
           python tools/python/release_metadata.py release-target \
             --version-metadata-file build/version_metadata.json \
             --ref-type "${GITHUB_REF_TYPE}" --ref-name "${GITHUB_REF_NAME}"
+      - name: Validate checked-in server contract compatibility
+        run: >-
+          python tools/python/openapi_compat.py check
+          --baseline apps/server/contracts/openapi-v1.compatibility.json
+          --candidate apps/server/contracts/openapi-v1.json
+
+  server-off:
+    name: Server-off isolation
+    needs: release-tools
+    runs-on: ubuntu-24.04
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives
+    steps:
+      - name: Checkout axklib
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-f87344cac031-server-off-${{ hashFiles('vcpkg.json') }}
+      - name: Bootstrap vcpkg
+        run: |
+          cmake -E make_directory "${VCPKG_DEFAULT_BINARY_CACHE}"
+          ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - name: Build without server dependencies
+        run: |
+          cmake -S . -B build/native/server-off -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="${GITHUB_WORKSPACE}/external/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux-axk \
+            -DVCPKG_OVERLAY_TRIPLETS="${GITHUB_WORKSPACE}/library/cmake/triplets" \
+            -DAXK_BUILD_SERVER=OFF -DAXK_BUILD_CLI=ON -DBUILD_TESTING=OFF
+          cmake --build build/native/server-off
+          test ! -e build/native/server-off/apps/server
+          test ! -e build/native/server-off/vcpkg_installed/x64-linux-axk/share/crow
+          test ! -e build/native/server-off/vcpkg_installed/x64-linux-axk/share/asio
+
+  server-sanitizers:
+    name: Server ${{ matrix.name }}
+    needs: release-tools
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ASan and UBSan
+            preset: asan
+          - name: TSan
+            preset: tsan
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives
+    steps:
+      - name: Checkout axklib
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-f87344cac031-server-${{ matrix.preset }}-${{ hashFiles('vcpkg.json') }}
+      - name: Bootstrap vcpkg
+        run: |
+          cmake -E make_directory "${VCPKG_DEFAULT_BINARY_CACHE}"
+          ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - name: Configure instrumented server build
+        run: >-
+          cmake --preset ${{ matrix.preset }}
+          -DVCPKG_TARGET_TRIPLET=x64-linux-axk
+          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
+      - name: Build instrumented server tests
+        run: >-
+          cmake --build --preset ${{ matrix.preset }} --target
+          axk_application_tests axk_server_tests axk_server_fixture
+          axk_server_direct_benchmark axklib_server
+      - name: Run instrumented application and server tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1:suppressions=${{ github.workspace }}/apps/server/sanitizers/ubsan.supp
+          TSAN_OPTIONS: halt_on_error=1:history_size=7
+        run: >-
+          ctest --test-dir build/native/${{ matrix.preset }}
+          --output-on-failure -L '^(application|server)$'
+
+  server-fuzz:
+    name: Server request fuzz smoke
+    needs: release-tools
+    runs-on: ubuntu-24.04
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives
+    steps:
+      - name: Checkout axklib
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Install Clang with libFuzzer
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-f87344cac031-server-fuzz-${{ hashFiles('vcpkg.json') }}
+      - name: Bootstrap vcpkg
+        run: |
+          cmake -E make_directory "${VCPKG_DEFAULT_BINARY_CACHE}"
+          ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+      - name: Configure server fuzz target
+        run: >-
+          cmake --preset fuzz-local
+          -DBUILD_TESTING=OFF
+          -DVCPKG_TARGET_TRIPLET=x64-linux-axk
+          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
+      - name: Run bounded server fuzz smoke
+        run: >-
+          cmake --build --preset fuzz-local
+          --target axk_server_request_validation_fuzz_smoke
 
   native:
     name: ${{ matrix.name }}
@@ -76,13 +202,15 @@ jobs:
             build_testing: "ON"
             run_tests: true
             msvc_arch: x64
+            msvc_component: Microsoft.VisualStudio.Component.VC.Tools.x86.x64
           - name: Windows ARM64
-            runner: windows-2025-vs2026
+            runner: windows-11-vs2026-arm
             artifact: windows-arm64
             triplet: arm64-windows-axk
-            build_testing: "OFF"
-            run_tests: false
-            msvc_arch: amd64_arm64
+            build_testing: "ON"
+            run_tests: true
+            msvc_arch: arm64
+            msvc_component: Microsoft.VisualStudio.Component.VC.Tools.ARM64
           - name: macOS x64 slice
             runner: macos-15-intel
             artifact: macos-x64
@@ -128,7 +256,7 @@ jobs:
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           $installation = & $vswhere -version '[18.0,19.0)' -products '*' `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -requires '${{ matrix.msvc_component }}' `
             -property installationPath |
             Select-Object -First 1
           if ([string]::IsNullOrWhiteSpace($installation)) {
@@ -174,9 +302,11 @@ jobs:
       - name: Configure native build
         run: >-
           cmake --preset ${{ inputs.debug && 'debug' || 'release' }}
+          -DAXK_BUILD_SERVER=ON
           -DBUILD_TESTING=${{ matrix.build_testing }}
           -DAXK_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-sdk.spdx.json
           -DAXK_CLI_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-cli.spdx.json
+          -DAXK_SERVER_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-server.spdx.json
           -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
           -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
 
@@ -208,17 +338,10 @@ jobs:
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             cli="${cli}.exe"
           fi
-          if [[ "${{ matrix.triplet }}" == "arm64-windows-axk" ]]; then
-            python tools/python/release_metadata.py verify-binary \
-              --version-metadata-file "$root/version_metadata.json" \
-              --package-basename-file "$root/package_basename.txt" \
-              --binary "$cli" --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
-          else
-            python tools/python/release_metadata.py verify-cli \
-              --version-metadata-file "$root/version_metadata.json" \
-              --package-basename-file "$root/package_basename.txt" \
-              --cli "$cli" --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
-          fi
+          python tools/python/release_metadata.py verify-cli \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" \
+            --cli "$cli" --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
 
       - name: Generate component SBOMs
         shell: bash
@@ -226,11 +349,17 @@ jobs:
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
           python tools/python/generate_sbom.py --axklib-root . \
-            --version-metadata-file "$root/version_metadata.json" --profile sdk \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" --profile sdk \
             --output "$root/axklib-sdk.spdx.json"
           python tools/python/generate_sbom.py --axklib-root . \
-            --version-metadata-file "$root/version_metadata.json" --profile cli \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" --profile cli \
             --output "$root/axklib-cli.spdx.json"
+          python tools/python/generate_sbom.py --axklib-root . \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" --profile server \
+            --output "$root/axklib-server.spdx.json"
 
       - name: Test native targets
         if: matrix.run_tests
@@ -245,11 +374,13 @@ jobs:
           distribution="build/tmp/distribution-${{ matrix.artifact }}"
           rm -rf "$scan"
           rm -rf "$distribution"
-          mkdir -p "$scan/sdk" "$scan/cli" "$distribution"
+          mkdir -p "$scan/sdk" "$scan/cli" "$scan/server" "$distribution"
           cmake --install "$root" --prefix "$scan/sdk" --component sdk
           cmake --install "$root" --prefix "$scan/cli" --component cli
+          cmake --install "$root" --prefix "$scan/server" --component server
           cmake --install "$root" --prefix "$distribution" --component sdk
           cmake --install "$root" --prefix "$distribution" --component cli
+          cmake --install "$root" --prefix "$distribution" --component server
           project_version="${{ steps.package.outputs.project_version }}"
           soversion="${{ steps.package.outputs.soversion }}"
           library_args=(
@@ -263,11 +394,35 @@ jobs:
           )
           python tools/python/inspect_package.py "$scan/sdk" "${library_args[@]}"
           python tools/python/inspect_package.py "$scan/cli"
+          python tools/python/inspect_package.py "$scan/server"
           python tools/python/inspect_package.py "$distribution" "${library_args[@]}"
           test -f "$scan/sdk/share/axklib/axklib.spdx.json"
           test -f "$scan/cli/share/axklib/axklib-cli.spdx.json"
+          server_binary="axklib-server"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            server_binary="${server_binary}.exe"
+          fi
+          test -f "$scan/server/bin/$server_binary"
+          test -f "$scan/server/share/axklib/axklib-server.spdx.json"
+          test -f "$scan/server/share/axklib/server/openapi-v1.json"
+          test -f "$scan/server/share/doc/axklib/server.md"
           test -f "$distribution/share/axklib/axklib.spdx.json"
           test -f "$distribution/share/axklib/axklib-cli.spdx.json"
+          test -f "$distribution/share/axklib/axklib-server.spdx.json"
+          test -f "$distribution/share/doc/axklib/server.md"
+
+      - name: Smoke-test installed server
+        if: matrix.run_tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          server="build/tmp/package-scan-${{ matrix.artifact }}/server/bin/axklib-server"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            server="${server}.exe"
+          fi
+          python tools/python/release_server_smoke.py \
+            --server "$server" \
+            --fixture tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds
 
       - name: Package combined Linux or Windows distribution
         if: runner.os != 'macOS'
@@ -314,11 +469,17 @@ jobs:
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
           cli_dependencies="$(ldd "$root/apps/cli/axklib")"
+          server_dependencies="$(ldd "$root/apps/server/axklib-server")"
           sdk_dependencies="$(ldd "$root/library/libaxklib.so")"
-          printf '%s\n' "$cli_dependencies" "$sdk_dependencies"
+          printf '%s\n' "$cli_dependencies" "$server_dependencies" "$sdk_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$cli_dependencies"; then
             echo "CLI has a private native runtime dependency" >&2
+            exit 1
+          fi
+          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$server_dependencies"; then
+            echo "server has a private native runtime dependency" >&2
             exit 1
           fi
           if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
@@ -334,11 +495,17 @@ jobs:
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
           cli_dependencies="$(otool -L "$root/apps/cli/axklib")"
+          server_dependencies="$(otool -L "$root/apps/server/axklib-server")"
           sdk_dependencies="$(otool -L "$root/library/libaxklib.${{ steps.package.outputs.project_version }}.dylib")"
-          printf '%s\n' "$cli_dependencies" "$sdk_dependencies"
+          printf '%s\n' "$cli_dependencies" "$server_dependencies" "$sdk_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
             echo "CLI has a private native runtime dependency" >&2
+            exit 1
+          fi
+          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$(tail -n +2 <<<"$server_dependencies")"; then
+            echo "server has a private native runtime dependency" >&2
             exit 1
           fi
           if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
@@ -353,18 +520,24 @@ jobs:
         run: |
           $root = "build/native/${{ inputs.debug && 'debug' || 'release' }}"
           $cli = Get-ChildItem $root -Recurse -Filter axklib.exe | Select-Object -First 1
+          $server = Get-ChildItem $root -Recurse -Filter axklib-server.exe | Select-Object -First 1
           $sdk = Get-ChildItem $root -Recurse -Filter axklib.dll | Select-Object -First 1
-          if ($null -eq $cli -or $null -eq $sdk) {
+          if ($null -eq $cli -or $null -eq $server -or $null -eq $sdk) {
             throw "native runtime artifacts are missing"
           }
           $cliDependencies = (dumpbin /dependents $cli.FullName) -join "`n"
+          $serverDependencies = (dumpbin /dependents $server.FullName) -join "`n"
           $sdkDependencies = (dumpbin /dependents $sdk.FullName) -join "`n"
           Write-Host $cliDependencies
+          Write-Host $serverDependencies
           Write-Host $sdkDependencies
           $privateCli = '(?im)^\s+(?:lib)?(?:axk|sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
           $privateCodec = '(?im)^\s+(?:lib)?(?:sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
           if ($cliDependencies -match $privateCli) {
             throw "CLI has a private native runtime dependency: $($Matches[0])"
+          }
+          if ($serverDependencies -match $privateCli) {
+            throw "server has a private native runtime dependency: $($Matches[0])"
           }
           if ($sdkDependencies -match $privateCodec) {
             throw "C++ SDK has a private codec runtime dependency: $($Matches[0])"
@@ -387,6 +560,11 @@ jobs:
           $sdkHeaders = dumpbin /headers $sdk.FullName
           if (@($sdkHeaders | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$').Count -eq 0) {
             throw 'axklib.dll is not an ARM64 binary'
+          }
+          $serverHeaders = dumpbin /headers `
+            build/native/${{ inputs.debug && 'debug' || 'release' }}/apps/server/axklib-server.exe
+          if (@($serverHeaders | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$').Count -eq 0) {
+            throw 'axklib-server.exe is not an ARM64 binary'
           }
 
       - name: Print native dependency failure logs
@@ -504,6 +682,10 @@ jobs:
             build/tmp/x86_64/bin/axklib \
             build/tmp/arm64/bin/axklib \
             -output build/tmp/universal/bin/axklib
+          lipo -create \
+            build/tmp/x86_64/bin/axklib-server \
+            build/tmp/arm64/bin/axklib-server \
+            -output build/tmp/universal/bin/axklib-server
 
           while IFS= read -r arm64_library; do
             relative_path="${arm64_library#build/tmp/arm64/}"
@@ -516,6 +698,8 @@ jobs:
 
           lipo build/tmp/universal/bin/axklib -verify_arch x86_64 arm64
           lipo -info build/tmp/universal/bin/axklib
+          lipo build/tmp/universal/bin/axklib-server -verify_arch x86_64 arm64
+          lipo -info build/tmp/universal/bin/axklib-server
           while IFS= read -r library; do
             lipo "$library" -verify_arch x86_64 arm64
             lipo -info "$library"
@@ -523,15 +707,22 @@ jobs:
             \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
 
           build/tmp/universal/bin/axklib --version
+          build/tmp/universal/bin/axklib-server --print-version
           cli_dependencies="$(otool -L build/tmp/universal/bin/axklib)"
+          server_dependencies="$(otool -L build/tmp/universal/bin/axklib-server)"
           sdk_library=$(find build/tmp/universal/lib -type f \
             -name 'libaxklib*.dylib' -print -quit)
           test -n "$sdk_library"
           sdk_dependencies="$(otool -L "$sdk_library")"
-          printf '%s\n' "$cli_dependencies" "$sdk_dependencies"
+          printf '%s\n' "$cli_dependencies" "$server_dependencies" "$sdk_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
             echo "universal CLI has a private native runtime dependency" >&2
+            exit 1
+          fi
+          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$(tail -n +2 <<<"$server_dependencies")"; then
+            echo "universal server has a private native runtime dependency" >&2
             exit 1
           fi
           if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
@@ -564,6 +755,12 @@ jobs:
             --cli build/tmp/universal/bin/axklib \
             --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
 
+      - name: Smoke-test universal installed server
+        run: >-
+          python tools/python/release_server_smoke.py
+          --server build/tmp/universal/bin/axklib-server
+          --fixture tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds
+
       - name: Sign macOS universal distribution
         shell: bash
         env:
@@ -587,6 +784,9 @@ jobs:
           codesign --force --timestamp --options runtime \
             --sign "$MACOS_DEV_ID_CERT_NAME" build/tmp/universal/bin/axklib
           codesign --verify --strict --verbose=2 build/tmp/universal/bin/axklib
+          codesign --force --timestamp --options runtime \
+            --sign "$MACOS_DEV_ID_CERT_NAME" build/tmp/universal/bin/axklib-server
+          codesign --verify --strict --verbose=2 build/tmp/universal/bin/axklib-server
 
       - name: Package signed macOS universal distribution
         shell: bash

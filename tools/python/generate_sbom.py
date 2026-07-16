@@ -10,6 +10,7 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
+import release_metadata
 import version_metadata
 
 LICENSE_OVERRIDES = {"soxr": "LGPL-2.1-or-later"}
@@ -74,16 +75,25 @@ def port_version(value: dict[str, object]) -> str:
     return "unknown"
 
 
+def source_hashes(portfile: Path) -> list[str]:
+    return sorted(set(re.findall(r"(?m)^\s*SHA512\s+([0-9a-fA-F]{128})\s*$", portfile.read_text())))
+
+
 def vcpkg_packages(root: Path, profile: str) -> list[dict[str, object]]:
     manifest = json.loads((root / "vcpkg.json").read_text(encoding="utf-8"))
     selected = list(manifest["dependencies"])
+    if profile in {"cli", "server", "workspace"}:
+        selected.extend(manifest["features"]["application"]["dependencies"])
     if profile in {"cli", "workspace"}:
         selected.extend(manifest["features"]["cli"]["dependencies"])
+    if profile in {"server", "workspace"}:
+        selected.extend(manifest["features"]["server"]["dependencies"])
     if profile == "workspace":
         selected.extend(manifest["features"]["tests"]["dependencies"])
     queue = [(item, dependency_features(item)) for item in selected]
     requested: dict[str, set[str]] = {}
     metadata: dict[str, dict[str, object]] = {}
+    metadata_paths: dict[str, Path] = {}
     while queue:
         dependency, explicit_features = queue.pop(0)
         name = dependency_name(dependency)
@@ -103,6 +113,7 @@ def vcpkg_packages(root: Path, profile: str) -> list[dict[str, object]]:
         )
         value = json.loads(path.read_text(encoding="utf-8"))
         metadata[name] = value
+        metadata_paths[name] = path
         dependencies = list(value.get("dependencies", [])) if first_visit else []
         active_features = set(new_features)
         uses_defaults = not (
@@ -127,6 +138,8 @@ def vcpkg_packages(root: Path, profile: str) -> list[dict[str, object]]:
         license_value = value.get("license") or LICENSE_OVERRIDES.get(name, "NOASSERTION")
         homepage = value.get("homepage", "NOASSERTION")
         features = sorted(requested[name])
+        hashes = source_hashes(metadata_paths[name].parent / "portfile.cmake")
+        hash_note = f"; source SHA512: {','.join(hashes)}" if hashes else ""
         rows.append(
             package(
                 name,
@@ -134,14 +147,17 @@ def vcpkg_packages(root: Path, profile: str) -> list[dict[str, object]]:
                 "vcpkg",
                 license_expression=str(license_value),
                 download_location=str(homepage),
-                comment=f"vcpkg baseline {baseline}; features: {','.join(features) or 'core'}",
+                comment=f"vcpkg baseline {baseline}; features: {','.join(features) or 'core'}{hash_note}",
             )
         )
     return rows
 
 
 def sbom_document(
-    profile: str, packages: list[dict[str, object]], created: str
+    profile: str,
+    source_identity: str,
+    packages: list[dict[str, object]],
+    created: str,
 ) -> dict[str, object]:
     unique = {str(row["SPDXID"]): row for row in packages}
     ordered_packages = [unique[key] for key in sorted(unique)]
@@ -149,6 +165,7 @@ def sbom_document(
     identity = {
         "name": name,
         "profile": profile,
+        "source_identity": source_identity,
         "created": created,
         "packages": ordered_packages,
     }
@@ -160,6 +177,7 @@ def sbom_document(
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": name,
+        "comment": f"axklib source identity: {source_identity}",
         "documentNamespace": f"https://github.com/tphzz/axklib/spdx/{namespace_hash}",
         "creationInfo": {
             "creators": ["Tool: axklib-generate-sbom"],
@@ -174,10 +192,16 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--axklib-root", type=Path, default=Path.cwd())
     parser.add_argument("--version-metadata-file", required=True, type=Path)
+    parser.add_argument("--package-basename-file", required=True, type=Path)
     parser.add_argument("--axkdeck-root", type=Path)
-    parser.add_argument("--profile", choices=("sdk", "cli", "workspace"), default="workspace")
+    parser.add_argument(
+        "--profile", choices=("sdk", "cli", "server", "workspace"), default="workspace"
+    )
     args = parser.parse_args()
     version = version_metadata.read(args.version_metadata_file).semantic_version
+    source_identity = release_metadata.read_package_basename(
+        args.package_basename_file
+    ).removeprefix("axklib-")
     packages = [package("axklib", version, "axklib", license_expression="MPL-2.0")]
     packages.extend(vcpkg_packages(args.axklib_root, args.profile))
     if args.axkdeck_root:
@@ -188,7 +212,9 @@ def main() -> int:
         lock_text = (args.axkdeck_root / "pnpm-lock.yaml").read_text()
         npm_rows = set(re.findall(r"^  ([^\s:]+)@([^\s:]+):$", lock_text, re.MULTILINE))
         packages.extend(package(name, version, "npm") for name, version in sorted(npm_rows))
-    document = sbom_document(args.profile, packages, creation_timestamp())
+    document = sbom_document(
+        args.profile, source_identity, packages, creation_timestamp()
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(document, indent=2) + "\n")
     return 0

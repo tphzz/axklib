@@ -52,5 +52,11 @@ TEST(Utf8, BuildsTemporarySiblingWithoutNarrowingTheNativeFilename) {
     ASSERT_TRUE(temporary);
     EXPECT_EQ(axk::text::path_to_utf8(*temporary), "audio/.Gr\xc3\xb6\xc3\x9f"
                                                    "e \xe9\x9f\xb3.wav.alter.1234.tmp");
+    const auto publication = axk::text::temporary_sibling(*target);
+    ASSERT_TRUE(publication);
+    const auto publication_text = axk::text::path_to_utf8(*publication);
+    EXPECT_TRUE(publication_text.starts_with("audio/.Gr\xc3\xb6\xc3\x9f"
+                                             "e \xe9\x9f\xb3.wav.axklib-publication.p"));
+    EXPECT_TRUE(publication_text.ends_with(".tmp"));
     EXPECT_FALSE(axk::text::temporary_sibling(*target, "../unsafe"));
 }

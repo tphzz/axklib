@@ -66,6 +66,7 @@ TEST(ObjectCatalog, SfsMetadataInventoryRetainsDecodedTopologyWithoutRawPayloads
     ASSERT_TRUE(complete->raw_payloads_complete);
     ASSERT_FALSE(metadata->raw_payloads_complete);
     ASSERT_EQ(metadata->catalog.objects.size(), complete->catalog.objects.size());
+    ASSERT_EQ(metadata->objects.size(), complete->objects.size());
     EXPECT_TRUE(
         std::ranges::all_of(complete->catalog.objects, [](const auto &object) { return !object.raw_payload.empty(); }));
     EXPECT_TRUE(
@@ -87,6 +88,8 @@ TEST(ObjectCatalog, SfsMetadataInventoryRetainsDecodedTopologyWithoutRawPayloads
         EXPECT_EQ(actual.key, expected.key);
         EXPECT_EQ(actual.object.header.raw_type, expected.object.header.raw_type);
         EXPECT_EQ(actual.object.header.name, expected.object.header.name);
+        EXPECT_EQ(metadata->objects[index].size, complete->objects[index].size);
+        EXPECT_NE(metadata->objects[index].size, 0U);
     }
 }
 

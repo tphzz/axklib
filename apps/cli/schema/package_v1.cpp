@@ -1,4 +1,4 @@
-#include "package_v1.hpp"
+#include "commands/package_projection.hpp"
 
 #include <iterator>
 #include <ranges>
@@ -23,6 +23,10 @@ OrderedJson optional_string(const std::optional<std::string> &value) {
 
 template <typename T> OrderedJson optional_number(const std::optional<T> &value) {
     return value ? OrderedJson(*value) : OrderedJson(nullptr);
+}
+
+template <typename T> std::optional<T> optional_value(const nlohmann::json &value) {
+    return value.is_null() ? std::nullopt : std::optional<T>{value.get<T>()};
 }
 
 OrderedJson issue_json(const IssueOutput &issue) {
@@ -55,6 +59,41 @@ PackageOutput project_package(const std::filesystem::path &path, const PortableP
         return IssueOutput{issue.code, issue.message, issue.fatal};
     });
     return result;
+}
+
+Result<PackageOutput> project_package(const std::filesystem::path &path, const nlohmann::json &service_result) {
+    try {
+        PackageOutput result;
+        result.path_utf8 = text::path_to_utf8(path);
+        result.package_id = service_result.at("packageId").get<std::string>();
+        result.package_kind = service_result.at("packageKind").get<std::string>();
+        result.required_extension = service_result.at("requiredExtension").get<std::string>();
+        result.source_media_kind = service_result.at("sourceMediaKind").get<std::string>();
+        result.valid = service_result.at("valid").get<bool>();
+        result.payloads_verified = service_result.at("payloadsVerified").get<bool>();
+        result.relationship_count = service_result.at("relationshipCount").get<std::uint64_t>();
+        for (const auto &root : service_result.at("roots")) {
+            result.roots.push_back({root.at("kind").get<std::string>(), root.at("displayName").get<std::string>(),
+                                    root.at("nodeIds").get<std::vector<std::string>>()});
+        }
+        for (const auto &node : service_result.at("objects")) {
+            result.objects.push_back(
+                {node.at("nodeId").get<std::string>(), node.at("objectType").get<std::string>(),
+                 node.at("name").get<std::string>(), node.at("payloadSha256").get<std::string>(),
+                 node.at("normalizedSha256").get<std::string>(),
+                 node.at("semanticSha256").is_null() ? std::nullopt
+                                                     : std::optional{node.at("semanticSha256").get<std::string>()},
+                 node.at("audioSha256").is_null() ? std::nullopt
+                                                  : std::optional{node.at("audioSha256").get<std::string>()}});
+        }
+        for (const auto &issue : service_result.at("issues")) {
+            result.issues.push_back({issue.at("code").get<std::string>(), issue.at("message").get<std::string>(),
+                                     issue.at("fatal").get<bool>()});
+        }
+        return result;
+    } catch (const nlohmann::json::exception &error) {
+        return std::unexpected{serialization_error(error)};
+    }
 }
 
 PlanOutput project_plan(const std::filesystem::path &target, const std::vector<std::filesystem::path> &package_paths,
@@ -145,6 +184,94 @@ PlanOutput project_plan(const std::filesystem::path &target, const std::vector<s
         };
     }
     return result;
+}
+
+Result<PlanOutput> project_plan(const std::filesystem::path &target,
+                                const std::vector<std::filesystem::path> &package_paths,
+                                const nlohmann::json &service_plan,
+                                const std::optional<std::filesystem::path> &output_path,
+                                const nlohmann::json *service_result) {
+    try {
+        PlanOutput result;
+        result.target_path_utf8 = text::path_to_utf8(target);
+        result.package_paths_utf8.reserve(package_paths.size());
+        std::ranges::transform(package_paths, std::back_inserter(result.package_paths_utf8),
+                               [](const auto &path) { return text::path_to_utf8(path); });
+        result.plan_id = service_plan.at("planId").get<std::string>();
+        result.target_kind = service_plan.at("targetKind").get<std::string>();
+        result.target_snapshot_id = service_plan.at("targetSnapshotId").get<std::string>();
+        result.valid = service_plan.at("valid").get<bool>();
+        for (const auto &warning : service_plan.at("warnings")) {
+            result.warnings.push_back({warning.at("code").get<std::string>(), warning.at("message").get<std::string>(),
+                                       warning.at("fatal").get<bool>()});
+        }
+        for (const auto &conflict : service_plan.at("conflicts")) {
+            result.conflicts.push_back({
+                conflict.at("code").get<std::string>(),
+                conflict.at("message").get<std::string>(),
+                optional_value<std::uint64_t>(conflict.at("packageIndex")),
+                optional_value<std::uint64_t>(conflict.at("rootIndex")),
+                conflict.at("packageId").get<std::string>(),
+                conflict.at("nodeId").get<std::string>(),
+                optional_value<std::uint32_t>(conflict.at("partitionIndex")),
+                conflict.at("groupName").get<std::string>(),
+                conflict.at("volumeName").get<std::string>(),
+                conflict.at("rawGroup").get<std::string>(),
+                conflict.at("rawVolume").get<std::string>(),
+            });
+        }
+        for (const auto &object : service_plan.at("actions")) {
+            result.objects.push_back({
+                object.at("actionId").get<std::string>(),
+                object.at("packageIndex").get<std::uint64_t>(),
+                object.at("rootIndex").get<std::uint64_t>(),
+                object.at("packageId").get<std::string>(),
+                object.at("nodeId").get<std::string>(),
+                object.at("objectType").get<std::string>(),
+                object.at("sourceName").get<std::string>(),
+                object.at("destinationName").get<std::string>(),
+                object.at("partitionIndex").get<std::uint32_t>(),
+                object.at("groupName").get<std::string>(),
+                object.at("volumeName").get<std::string>(),
+                object.at("rawGroup").get<std::string>(),
+                object.at("rawVolume").get<std::string>(),
+                object.at("actions").get<std::vector<std::string>>(),
+                optional_value<std::string>(object.at("canonicalActionId")),
+                optional_value<std::uint32_t>(object.at("targetSfsId")),
+                optional_value<std::uint32_t>(object.at("targetLinkId")),
+            });
+        }
+        for (const auto &allocation : service_plan.at("allocation")) {
+            result.allocation.push_back({
+                allocation.at("partitionIndex").get<std::uint32_t>(),
+                allocation.at("groupName").get<std::string>(),
+                allocation.at("volumeName").get<std::string>(),
+                allocation.at("rawGroup").get<std::string>(),
+                allocation.at("rawVolume").get<std::string>(),
+                allocation.at("insertedObjectCount").get<std::uint64_t>(),
+                allocation.at("reusedObjectCount").get<std::uint64_t>(),
+                allocation.at("payloadClusters").get<std::uint64_t>(),
+                allocation.at("payloadSectors").get<std::uint64_t>(),
+                allocation.at("continuationClusters").get<std::uint64_t>(),
+                allocation.at("directoryGrowthBytes").get<std::uint64_t>(),
+                allocation.at("remainingObjectIds").get<std::uint64_t>(),
+                allocation.at("remainingClusters").get<std::uint64_t>(),
+                allocation.at("projectedImageSectors").get<std::uint64_t>(),
+                allocation.at("projectedImageSizeBytes").get<std::uint64_t>(),
+            });
+        }
+        if (service_result != nullptr) {
+            if (!output_path)
+                return std::unexpected{make_error(ErrorCode::invalid_argument, ErrorCategory::internal,
+                                                  "package import result requires an output path")};
+            result.result = ImportResultOutput{
+                text::path_to_utf8(*output_path), service_result->at("sourceSnapshotId").get<std::string>(),
+                service_result->at("outputSnapshotId").get<std::string>(), service_result->at("applied").get<bool>()};
+        }
+        return result;
+    } catch (const nlohmann::json::exception &error) {
+        return std::unexpected{serialization_error(error)};
+    }
 }
 
 Result<std::string> serialize(const PackageOutput &output, bool pretty) {

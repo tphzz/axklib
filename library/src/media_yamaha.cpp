@@ -594,7 +594,7 @@ MediaObjectDescriptor describe_media_object(const MediaObject &object) {
     };
 }
 
-MediaObjectDescriptor describe_catalog_object(const ObjectSnapshot &object) {
+MediaObjectDescriptor describe_catalog_object(const ObjectSnapshot &object, std::uint64_t stored_size) {
     const auto &placement = object.placement;
     return {
         object.key,
@@ -606,7 +606,7 @@ MediaObjectDescriptor describe_catalog_object(const ObjectSnapshot &object) {
         {placement ? placement->partition_name : std::string{}, LabelStatus::confirmed, "SFS partition directory"},
         {placement ? placement->volume_name : std::string{}, LabelStatus::confirmed, "SFS volume directory"},
         0U,
-        object.raw_payload.size(),
+        stored_size,
     };
 }
 
@@ -658,10 +658,18 @@ Result<MediaInventory> build_media_inventory(const MediaContainer &container, Me
         auto catalog = detail::build_object_catalog(*sfs, maximum_object_bytes, cancellation, retain_raw_payloads);
         if (!catalog)
             return std::unexpected{catalog.error()};
+        std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> stored_sizes;
+        for (const auto &partition : sfs->partitions()) {
+            for (const auto &record : partition.records)
+                stored_sizes.emplace(std::pair{partition.index.value, record.sfs_id.value}, record.data_size);
+        }
         std::vector<MediaObjectDescriptor> objects;
         objects.reserve(catalog->objects.size());
-        for (const auto &object : catalog->objects)
-            objects.push_back(describe_catalog_object(object));
+        for (const auto &object : catalog->objects) {
+            const auto stored = stored_sizes.find({object.partition.value, object.sfs_id.value});
+            const auto stored_size = stored == stored_sizes.end() ? object.raw_payload.size() : stored->second;
+            objects.push_back(describe_catalog_object(object, stored_size));
+        }
         return MediaInventory{std::move(objects), std::move(*catalog), retain_raw_payloads};
     }
 
@@ -675,6 +683,63 @@ Result<MediaInventory> build_media_inventory(const MediaContainer &container, Me
     const bool raw_payloads_complete =
         mode == MediaObjectReadMode::complete || container.kind() == MediaKind::standalone_object;
     return MediaInventory{std::move(objects), catalog_from_media_objects(std::move(*loaded)), raw_payloads_complete};
+}
+
+Result<MediaObject> load_media_object(const MediaContainer &container, const MediaObjectDescriptor &descriptor,
+                                      std::size_t maximum_object_bytes, const CancellationToken &cancellation) {
+    if (descriptor.size > maximum_object_bytes) {
+        return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
+                                          "media object exceeds the configured size limit")};
+    }
+    if (const auto *sfs = std::get_if<Container>(&container.storage())) {
+        auto catalog = detail::build_object_catalog(*sfs, maximum_object_bytes, cancellation, false);
+        if (!catalog)
+            return std::unexpected{catalog.error()};
+        const auto found = std::ranges::find(catalog->objects, descriptor.key, &ObjectSnapshot::key);
+        if (found == catalog->objects.end())
+            return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                              "media object is not present in the image")};
+        auto bytes = sfs->read_record_data(found->partition, found->sfs_id, maximum_object_bytes, cancellation);
+        if (!bytes)
+            return std::unexpected{bytes.error()};
+        return MediaObject{descriptor.key,          descriptor.logical_path, descriptor.scope_key,
+                           descriptor.raw_group,    descriptor.raw_volume,   descriptor.group_label,
+                           descriptor.volume_label, descriptor.data_offset,  bytes->size(),
+                           found->object,           std::move(*bytes),       std::nullopt};
+    }
+
+    std::vector<std::byte> bytes;
+    if (const auto *fat = std::get_if<FatImage>(&container.storage())) {
+        const auto file = std::ranges::find(fat->files(), descriptor.logical_path, &FatFile::path);
+        if (file == fat->files().end())
+            return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                              "media object is not present in the FAT12 image")};
+        auto loaded = fat->read_file(*file, cancellation);
+        if (!loaded)
+            return std::unexpected{loaded.error()};
+        bytes = std::move(*loaded);
+    } else if (const auto *iso = std::get_if<IsoImage>(&container.storage())) {
+        const auto file = std::ranges::find(iso->files(), descriptor.logical_path, &IsoFile::path);
+        if (file == iso->files().end() || file->is_directory)
+            return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                              "media object is not present in the ISO9660 image")};
+        auto loaded = iso->read_file(*file, cancellation);
+        if (!loaded)
+            return std::unexpected{loaded.error()};
+        bytes = std::move(*loaded);
+    } else if (const auto *standalone = std::get_if<StandaloneObject>(&container.storage())) {
+        if (standalone->object().key != descriptor.key)
+            return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                              "standalone media object does not match the descriptor")};
+        return standalone->object();
+    }
+    auto decoded = decode_media_object(bytes, bytes.size());
+    if (!decoded)
+        return std::unexpected{decoded.error()};
+    return MediaObject{
+        descriptor.key,        descriptor.logical_path,    descriptor.scope_key,    descriptor.raw_group,
+        descriptor.raw_volume, descriptor.group_label,     descriptor.volume_label, descriptor.data_offset,
+        bytes.size(),          std::move(decoded->object), std::move(bytes),        std::move(decoded->issue)};
 }
 
 std::string sanitize_path_component(std::string_view value, std::string_view fallback) {

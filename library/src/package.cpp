@@ -1107,9 +1107,8 @@ class TemporaryPackageCleanup {
 };
 
 Result<std::filesystem::path> reserve_unique_temporary(const std::filesystem::path &output) {
-    std::random_device random;
     for (std::size_t attempt = 0; attempt < 64U; ++attempt) {
-        auto temporary = text::temporary_sibling(output, std::format(".package.{:08x}.tmp", random()));
+        auto temporary = text::temporary_sibling(output);
         if (!temporary)
             return std::unexpected{temporary.error()};
 #if defined(_WIN32)
@@ -1620,6 +1619,11 @@ Result<PackagePublication> export_portable_package(const MediaContainer &source,
 Result<PortablePackage> open_portable_package(const std::filesystem::path &path,
                                               const CancellationToken &cancellation) {
     const auto filename = text::path_to_utf8(path.filename());
+    return open_portable_package(path, filename, cancellation);
+}
+
+Result<PortablePackage> open_portable_package(const std::filesystem::path &path, std::string_view filename,
+                                              const CancellationToken &cancellation) {
     if (!text::is_valid_utf8(filename)) {
         return std::unexpected{
             make_error(ErrorCode::invalid_argument, ErrorCategory::io, "package input path is not valid UTF-8")};
@@ -1633,6 +1637,11 @@ Result<PortablePackage> open_portable_package(const std::filesystem::path &path,
 Result<PortablePackage> inspect_portable_package(const std::filesystem::path &path,
                                                  const CancellationToken &cancellation) {
     const auto filename = text::path_to_utf8(path.filename());
+    return inspect_portable_package(path, filename, cancellation);
+}
+
+Result<PortablePackage> inspect_portable_package(const std::filesystem::path &path, std::string_view filename,
+                                                 const CancellationToken &cancellation) {
     if (!text::is_valid_utf8(filename)) {
         return std::unexpected{
             make_error(ErrorCode::invalid_argument, ErrorCategory::io, "package input path is not valid UTF-8")};

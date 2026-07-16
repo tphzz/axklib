@@ -1,15 +1,33 @@
 #include "axklib/utf8.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <format>
 #include <utility>
 
 #include <utf8cpp/utf8.h>
+
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace axk::text {
 namespace {
 
 Error text_error(std::string message) {
     return make_error(ErrorCode::invalid_argument, ErrorCategory::io, std::move(message));
+}
+
+std::string publication_suffix() {
+    static std::atomic<std::uint64_t> sequence{1U};
+#if defined(_WIN32)
+    const auto process = static_cast<std::uint64_t>(_getpid());
+#else
+    const auto process = static_cast<std::uint64_t>(getpid());
+#endif
+    return std::format(".axklib-publication.p{}.{}.tmp", process, sequence.fetch_add(1U, std::memory_order_relaxed));
 }
 
 } // namespace
@@ -40,8 +58,9 @@ std::string path_to_utf8(const std::filesystem::path &value) {
 }
 
 Result<std::filesystem::path> temporary_sibling(const std::filesystem::path &target, std::string_view suffix) {
+    const auto generated = suffix.empty() ? publication_suffix() : std::string{suffix};
     auto prefix_path = path_from_utf8(".");
-    auto suffix_path = path_from_utf8(suffix);
+    auto suffix_path = path_from_utf8(generated);
     if (!prefix_path)
         return std::unexpected{prefix_path.error()};
     if (!suffix_path)

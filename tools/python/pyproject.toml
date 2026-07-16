@@ -12,6 +12,7 @@ axk-check-benchmark = "check_benchmark:main"
 axk-check-production-boundary = "check_production_boundary:main"
 axk-generate-sbom = "generate_sbom:main"
 axk-inspect-package = "inspect_package:main"
+axk-openapi-compat = "openapi_compat:main"
 axk-release-metadata = "release_metadata:main"
 
 [dependency-groups]
@@ -30,6 +31,7 @@ py-modules = [
   "generate_current_lookups",
   "generate_sbom",
   "inspect_package",
+  "openapi_compat",
   "release_metadata",
   "version_metadata",
 ]

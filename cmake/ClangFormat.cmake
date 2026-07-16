@@ -40,6 +40,14 @@ file(GLOB_RECURSE AXK_CLANG_FORMAT_FILES
   "${AXK_SOURCE_ROOT}/apps/cli/*.hpp"
   "${AXK_SOURCE_ROOT}/apps/cli/*.hxx")
 
+file(GLOB_RECURSE AXK_APPLICATION_FORMAT_FILES
+  LIST_DIRECTORIES false
+  "${AXK_SOURCE_ROOT}/apps/application/*.cpp"
+  "${AXK_SOURCE_ROOT}/apps/application/*.hpp"
+  "${AXK_SOURCE_ROOT}/apps/server/*.cpp"
+  "${AXK_SOURCE_ROOT}/apps/server/*.hpp")
+list(APPEND AXK_CLANG_FORMAT_FILES ${AXK_APPLICATION_FORMAT_FILES})
+
 if(NOT AXK_CLANG_FORMAT_FILES)
   message(FATAL_ERROR "No maintained C or C++ files were found")
 endif()

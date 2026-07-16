@@ -39,7 +39,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 
 find_package(CLI11 CONFIG REQUIRED)
-find_package(unofficial-hash-library CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(
@@ -47,13 +46,13 @@ add_library(
   STATIC
   app.cpp
   command_line.cpp
+  local_operations.cpp
   commands/analysis.cpp
   commands/extract.cpp
   commands/package.cpp
   commands/reports.cpp
   commands/support.cpp
   commands/writer.cpp
-  content_id.cpp
   schema/export_v1.cpp
   schema/info_v1.cpp
   schema/operations_v1.cpp
@@ -68,8 +67,8 @@ target_include_directories(
 )
 target_link_libraries(
   axk_cli_adapter
-  PUBLIC axklib::core
-  PRIVATE axklib::audio CLI11::CLI11 nlohmann_json::nlohmann_json unofficial::hash-library
+  PUBLIC axklib::core axklib::application
+  PRIVATE axklib::audio CLI11::CLI11 nlohmann_json::nlohmann_json
 )
 axk_set_project_warnings(axk_cli_adapter)
 axk_enable_sanitizers(axk_cli_adapter)

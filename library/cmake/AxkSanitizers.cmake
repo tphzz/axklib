@@ -7,6 +7,12 @@ function(axk_enable_sanitizers target)
       message(FATAL_ERROR "thread sanitizer is not supported by this MSVC configuration")
     endif()
     target_compile_options(${target} PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      # GCC warns when dependencies use atomic fences because its TSan runtime
+      # cannot model them. Preserve the diagnostic without making it a build
+      # error; all supported TSan instrumentation remains enabled.
+      target_compile_options(${target} PRIVATE -Wno-error=tsan)
+    endif()
     target_link_options(${target} PRIVATE -fsanitize=thread)
     return()
   endif()

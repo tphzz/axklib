@@ -100,6 +100,7 @@ add_library(
   src/catalog.cpp
   src/error.cpp
   src/effects.cpp
+  src/file_publication.cpp
   src/io.cpp
   src/media.cpp
   src/media_fat12.cpp
@@ -402,6 +403,7 @@ if(BUILD_TESTING)
     tests/audio_export_test.cpp
     tests/catalog_test.cpp
     tests/effects_test.cpp
+    tests/file_publication_test.cpp
     tests/io_test.cpp
     tests/hardening_test.cpp
     tests/media_fat12_test.cpp

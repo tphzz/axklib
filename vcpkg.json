@@ -16,11 +16,23 @@
     "utfcpp"
   ],
   "features": {
+    "application": {
+      "description": "Dependencies used only by the internal application service",
+      "dependencies": [
+        "hash-library"
+      ]
+    },
     "cli": {
       "description": "Dependencies used only by the standalone axklib CLI",
       "dependencies": [
-        "cli11",
-        "hash-library"
+        "cli11"
+      ]
+    },
+    "server": {
+      "description": "Dependencies used only by the Crow REST and WebSocket server",
+      "dependencies": [
+        "crow",
+        "json-schema-validator"
       ]
     },
     "tests": {

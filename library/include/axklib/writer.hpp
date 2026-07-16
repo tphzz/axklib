@@ -151,6 +151,18 @@ struct WrittenMediaImage {
     std::size_t object_count{};
 };
 
+struct HdsBuildPlanSummary {
+    std::uint64_t size_bytes{};
+    std::size_t partition_count{};
+    std::size_t object_count{};
+    std::vector<PartitionGeometry> partitions;
+};
+
+struct MediaBuildPlanSummary {
+    MediaImageFormat format{MediaImageFormat::fat12_floppy};
+    std::size_t object_count{};
+};
+
 AXK_AUDIO_API Result<HdsBuildManifest> parse_hds_build_manifest(std::string_view json,
                                                                 const std::filesystem::path &base_directory = {});
 AXK_AUDIO_API Result<HdsBuildManifest> load_hds_build_manifest(const std::filesystem::path &path);
@@ -161,6 +173,10 @@ AXK_AUDIO_API Result<std::string> serialize_build_manifest_template(BuildManifes
 AXK_AUDIO_API Result<void>
 write_build_manifest_template(BuildManifestKind kind, const std::filesystem::path &output_path, bool overwrite = false);
 AXK_AUDIO_API Result<std::vector<PartitionGeometry>> plan_hds_geometry(const HdsBuildManifest &manifest);
+AXK_AUDIO_API Result<HdsBuildPlanSummary> plan_hds_build(const HdsBuildManifest &manifest,
+                                                         const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildManifest &manifest,
+                                                             const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<std::uint32_t> choose_sampler_sample_rate(std::uint32_t source_rate,
                                                                std::optional<std::uint32_t> target_sample_rate = {});
 AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path,

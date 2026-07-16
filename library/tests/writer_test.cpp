@@ -242,17 +242,18 @@ TEST(HdsWriter, CancellationPublishesNoImageOrTemporarySibling) {
     volume.name = "Volume";
     manifest_value.partitions.push_back({"hd1", {std::move(volume)}});
     const auto path = std::filesystem::temp_directory_path() / "axklib-cancelled-writer.hds";
-    const auto temporary = path.parent_path() / ("." + path.filename().string() + ".tmp");
     std::error_code error;
     std::filesystem::remove(path, error);
-    std::filesystem::remove(temporary, error);
     axk::CancellationSource cancellation;
     cancellation.cancel();
     const auto written = axk::write_hds_image(manifest_value, path, false, cancellation.token());
     ASSERT_FALSE(written);
     EXPECT_EQ(written.error().code, axk::ErrorCode::operation_cancelled);
     EXPECT_FALSE(std::filesystem::exists(path));
-    EXPECT_FALSE(std::filesystem::exists(temporary));
+    for (const auto &entry : std::filesystem::directory_iterator{path.parent_path()}) {
+        const auto name = entry.path().filename().string();
+        EXPECT_FALSE(name.starts_with("." + path.filename().string() + ".axklib-publication.p"));
+    }
 }
 
 TEST(HdsWriter, OverwriteReplacesSymlinkWithoutFollowingItsTarget) {
@@ -278,6 +279,37 @@ TEST(HdsWriter, OverwriteReplacesSymlinkWithoutFollowingItsTarget) {
     EXPECT_FALSE(std::filesystem::is_symlink(output));
     EXPECT_EQ(std::filesystem::file_size(output), axk::minimum_hds_size);
     std::filesystem::remove_all(root, error);
+}
+
+TEST(ImageBuildPlanning, PreparesEveryInputWithoutPublishingAnOutput) {
+    axk::HdsBuildManifest hds{"1.0", axk::minimum_hds_size, {}};
+    axk::VolumeSpec volume;
+    volume.name = "Volume";
+    volume.waveforms.push_back({"missing", "Missing", "missing.wav", 60U, {}});
+    hds.partitions.push_back({"hd1", {volume}});
+
+    const auto invalid_hds = axk::plan_hds_build(hds);
+    ASSERT_FALSE(invalid_hds);
+
+    hds.partitions.front().volumes.front().waveforms.clear();
+    const auto valid_hds = axk::plan_hds_build(hds);
+    ASSERT_TRUE(valid_hds) << valid_hds.error().message;
+    EXPECT_EQ(valid_hds->size_bytes, axk::minimum_hds_size);
+    EXPECT_EQ(valid_hds->partition_count, 1U);
+    EXPECT_EQ(valid_hds->object_count, 0U);
+
+    axk::MediaBuildManifest iso;
+    iso.schema_version = "1.0";
+    iso.format = axk::MediaImageFormat::iso9660;
+    iso.authored_volume = volume;
+    const auto invalid_iso = axk::plan_media_build(iso);
+    ASSERT_FALSE(invalid_iso);
+
+    iso.authored_volume->waveforms.clear();
+    const auto valid_iso = axk::plan_media_build(iso);
+    ASSERT_TRUE(valid_iso) << valid_iso.error().message;
+    EXPECT_EQ(valid_iso->format, axk::MediaImageFormat::iso9660);
+    EXPECT_EQ(valid_iso->object_count, 0U);
 }
 
 TEST(MediaManifest, ParsesStrictAuthoredAndTransferModes) {

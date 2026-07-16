@@ -1,0 +1,4 @@
+# Crow 1.3.3 default-constructs crow::request without initializing its HTTP
+# version and connection flags, then move-assigns that object while resetting
+# its parser. Keep this source-scoped until upstream initializes those fields.
+bool:http_request.h

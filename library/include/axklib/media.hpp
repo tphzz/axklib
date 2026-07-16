@@ -221,6 +221,9 @@ AXK_API Result<MediaInventory> build_media_inventory(const MediaContainer &conta
                                                      MediaObjectReadMode mode = MediaObjectReadMode::complete,
                                                      std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                      const CancellationToken &cancellation = {});
+AXK_API Result<MediaObject> load_media_object(const MediaContainer &container, const MediaObjectDescriptor &descriptor,
+                                              std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
+                                              const CancellationToken &cancellation = {});
 AXK_API StructuredObjectPath structured_object_path(const MediaObject &object);
 AXK_API std::vector<StructuredObjectPath> structured_object_paths(std::span<const MediaObject> objects);
 AXK_API std::string sanitize_path_component(std::string_view value, std::string_view fallback);

@@ -10,6 +10,9 @@
 #include <set>
 #include <span>
 
+#include "axklib/catalog.hpp"
+#include "axklib/file_publication.hpp"
+#include "axklib/media.hpp"
 #include "axklib/utf8.hpp"
 #include "writer_internal.hpp"
 
@@ -20,6 +23,31 @@ constexpr std::uint64_t cluster_size = 1024;
 
 using detail::PreparedRecord;
 using detail::RecordKind;
+
+Result<void> validate_hds_image(const std::filesystem::path &path,
+                                const std::vector<std::vector<PreparedRecord>> &records,
+                                const CancellationToken &cancellation) {
+    auto media = open_media(path, cancellation);
+    if (!media)
+        return std::unexpected{media.error()};
+    if (media->kind() != MediaKind::sfs) {
+        return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                          "written HDS reopened as the wrong container type")};
+    }
+    auto catalog = build_object_catalog(*media, 64U * 1024U * 1024U, cancellation);
+    if (!catalog)
+        return std::unexpected{catalog.error()};
+    std::size_t expected_objects{};
+    for (const auto &partition : records) {
+        expected_objects += static_cast<std::size_t>(std::ranges::count_if(
+            partition, [](const PreparedRecord &record) { return record.kind == RecordKind::object; }));
+    }
+    if (catalog->objects.size() != expected_objects) {
+        return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                          "written HDS object inventory failed reopen validation")};
+    }
+    return {};
+}
 
 void be16(std::span<std::byte> data, std::size_t offset, std::uint16_t value) {
     data[offset] = static_cast<std::byte>(value >> 8U);
@@ -844,17 +872,34 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
     }
     output.flush();
     output.close();
-    if (overwrite)
-        std::filesystem::remove(output_path, filesystem_error);
-    std::filesystem::rename(*temporary, output_path, filesystem_error);
-    if (filesystem_error) {
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not publish fresh HDS output")};
-    }
+    if (auto flushed = detail::flush_file_to_disk(*temporary); !flushed)
+        return std::unexpected{flushed.error()};
+    if (auto validated = validate_hds_image(*temporary, all_records, cancellation); !validated)
+        return std::unexpected{validated.error()};
+    if (auto published = detail::publish_temporary_file(*temporary, output_path, overwrite); !published)
+        return std::unexpected{published.error()};
     cleanup.release();
     const auto &last = geometries->back();
     layout.unused_tail_sectors = manifest.size_bytes / 512U - (last.start_sector + last.filesystem_sector_count);
     return layout;
+}
+
+Result<HdsBuildPlanSummary> plan_hds_build(const HdsBuildManifest &manifest, const CancellationToken &cancellation) {
+    if (const auto check = cancellation.check(); !check)
+        return std::unexpected{check.error()};
+    auto geometries = plan_hds_geometry(manifest);
+    if (!geometries)
+        return std::unexpected{geometries.error()};
+    std::size_t object_count{};
+    for (std::size_t index = 0; index < geometries->size(); ++index) {
+        auto records = detail::prepare_partition_records(manifest.partitions[index], (*geometries)[index],
+                                                         geometries->size(), cancellation);
+        if (!records)
+            return std::unexpected{records.error()};
+        object_count += static_cast<std::size_t>(std::ranges::count_if(
+            *records, [](const PreparedRecord &record) { return record.kind == RecordKind::object; }));
+    }
+    return HdsBuildPlanSummary{manifest.size_bytes, geometries->size(), object_count, std::move(*geometries)};
 }
 
 } // namespace axk

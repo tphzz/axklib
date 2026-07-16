@@ -4,8 +4,11 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <CLI/CLI.hpp>
 
@@ -13,21 +16,26 @@
 #include "requests.hpp"
 #include "writer_commands.hpp"
 
+#include "axklib/application/operation_registry.hpp"
+#include "axklib/application/system_service.hpp"
+#include "axklib/application/write_operations.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 
 namespace {
 
-std::string version_report() {
-    const auto build = axk::current_build_info();
-    const auto *selected_ref = build.is_tagged_release ? build.git_tag : build.git_branch;
+std::string version_report(const axk::app::OperationRegistry &registry) {
+    const auto version = axk::app::registered_system_version(registry);
+    if (!version)
+        std::terminate();
+
     std::ostringstream output;
-    output << "axklib " << build.source_identity << '\n'
-           << "version: " << axk::version() << '\n'
-           << "package: " << build.package_basename << '\n'
-           << "git: " << build.git_sha_short << '\n'
-           << "ref: " << selected_ref << '\n'
-           << "source: " << (build.is_dirty ? "modified" : "clean");
+    output << "axklib " << version->source_identity << '\n'
+           << "version: " << version->semantic_version << '\n'
+           << "package: " << version->package_basename << '\n'
+           << "git: " << version->git_sha_short << '\n'
+           << "ref: " << version->git_ref << '\n'
+           << "source: " << (version->is_dirty ? "modified" : "clean");
     return output.str();
 }
 
@@ -46,6 +54,45 @@ class RootHelpFormatter final : public CLI::Formatter {
     }
 };
 
+void collect_leaf_commands(const CLI::App &command, std::string path, std::set<std::string> &result) {
+    const auto subcommands = command.get_subcommands({});
+    if (subcommands.empty()) {
+        result.insert(std::move(path));
+        return;
+    }
+    for (const auto *child : subcommands) {
+        const auto child_path = path.empty() ? child->get_name() : path + ' ' + child->get_name();
+        collect_leaf_commands(*child, child_path, result);
+    }
+}
+
+std::optional<std::string> validate_cli_operation_catalogue(const CLI::App &cli,
+                                                            const axk::app::OperationRegistry &registry) {
+    std::set<std::string> actual{"axklib --version"};
+    for (const auto *command : cli.get_subcommands({}))
+        collect_leaf_commands(*command, "axklib " + command->get_name(), actual);
+
+    std::set<std::string> expected;
+    for (const auto &entry : registry.entries()) {
+        if (entry.descriptor.cli_parity)
+            expected.insert(entry.descriptor.cli_command);
+    }
+    if (actual == expected)
+        return std::nullopt;
+
+    std::ostringstream message;
+    message << "CLI command catalogue does not match the application operation registry";
+    for (const auto &command : actual) {
+        if (!expected.contains(command))
+            message << "\n  CLI-only: " << command;
+    }
+    for (const auto &command : expected) {
+        if (!actual.contains(command))
+            message << "\n  registry-only: " << command;
+    }
+    return message.str();
+}
+
 } // namespace
 
 int axk::cli::run(int argc, char **argv) {
@@ -56,10 +103,13 @@ int axk::cli::run(int argc, char **argv) {
             return 2;
         }
     }
+    auto registry = axk::app::make_operation_registry();
+    if (!axk::app::bind_manifest_operations(registry))
+        std::terminate();
     CLI::App app{"axklib " + std::string{axk::version()} + " (" +
                  std::string{axk::current_build_info().source_identity} + ')'};
     app.formatter(std::make_shared<RootHelpFormatter>());
-    app.set_version_flag("--version", version_report());
+    app.set_version_flag("--version", version_report(registry));
 
     axk::cli::InfoRequest info_request;
     auto *info = app.add_subcommand("info", "summarize supported axklib containers");
@@ -222,6 +272,11 @@ int axk::cli::run(int argc, char **argv) {
     WriterCommandState writer_commands;
     register_writer_commands(app, writer_commands);
 
+    if (const auto mismatch = validate_cli_operation_catalogue(app, registry)) {
+        std::cerr << "error: " << *mismatch << '\n';
+        return 2;
+    }
+
     try {
         app.parse(argc, argv);
     } catch (const CLI::ParseError &error) {
@@ -274,10 +329,11 @@ int axk::cli::run(int argc, char **argv) {
                                 writer_commands.create_overwrite, writer_commands.create_pretty);
     }
     if (*writer_commands.create_manifest_command)
-        return run_create_manifest(writer_commands.create_manifest_kind, writer_commands.create_manifest_output,
-                                   writer_commands.create_manifest_overwrite);
+        return run_create_manifest(registry, writer_commands.create_manifest_kind,
+                                   writer_commands.create_manifest_output, writer_commands.create_manifest_overwrite);
     if (*writer_commands.alter_manifest_command)
-        return run_alter_manifest(writer_commands.alter_manifest_output, writer_commands.alter_manifest_overwrite);
+        return run_alter_manifest(registry, writer_commands.alter_manifest_output,
+                                  writer_commands.alter_manifest_overwrite);
     if (*writer_commands.alter_hds) {
         const auto output = !writer_commands.alter_output.empty()
                                 ? std::optional<std::filesystem::path>{writer_commands.alter_output}

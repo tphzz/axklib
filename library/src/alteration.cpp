@@ -2132,9 +2132,8 @@ Result<void> write_continuation_lists(std::fstream &output, const Partition &par
 
 Result<std::filesystem::path> copy_to_unique_temporary(const std::filesystem::path &source,
                                                        const std::filesystem::path &output) {
-    std::random_device random;
     for (std::size_t attempt = 0; attempt < 32U; ++attempt) {
-        const auto temporary = text::temporary_sibling(output, std::format(".alter.{:08x}.tmp", random()));
+        const auto temporary = text::temporary_sibling(output);
         if (!temporary)
             return std::unexpected{temporary.error()};
         std::error_code error;
@@ -2316,7 +2315,8 @@ Result<TransactionState> open_transaction_state(const std::filesystem::path &sou
 
 Result<void> publish(const TransactionState &state, const std::filesystem::path &output_path,
                      const CancellationToken &cancellation, bool overwrite = false,
-                     const std::function<Result<void>(const std::filesystem::path &)> &temporary_validator = {}) {
+                     const std::function<Result<void>(const std::filesystem::path &)> &temporary_validator = {},
+                     ProgressSink *progress = nullptr) {
     if (!overwrite && std::filesystem::exists(output_path))
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "alteration output already exists")};
@@ -2326,6 +2326,12 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
     if (error)
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create alteration output directory")};
+    if (progress) {
+        progress->report(
+            {ProgressPhase::writing, 0U, state.partitions.size(), "writing alteration image", output_path.string()});
+    }
+    if (const auto check = cancellation.check(); !check)
+        return std::unexpected{check.error()};
     auto temporary_result = copy_to_unique_temporary(state.container.source_path(), output_path);
     if (!temporary_result)
         return std::unexpected{temporary_result.error()};
@@ -2337,6 +2343,7 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not open temporary alteration output")};
     }
+    std::uint64_t completed_partitions{};
     for (const auto &[index, item] : state.partitions) {
         static_cast<void>(index);
         if (const auto check = cancellation.check(); !check) {
@@ -2460,6 +2467,11 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
             output.close();
             cleanup();
             return written;
+        }
+        ++completed_partitions;
+        if (progress) {
+            progress->report({ProgressPhase::writing, completed_partitions, state.partitions.size(),
+                              "writing alteration image", output_path.string()});
         }
     }
     output.flush();
@@ -3505,7 +3517,7 @@ Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, con
         return std::unexpected{opened.error()};
     auto state = std::move(*opened);
     if (progress)
-        progress->report({ProgressPhase::writing, 0U, manifest.operations.size(), "planning alteration", {}});
+        progress->report({ProgressPhase::allocating, 0U, manifest.operations.size(), "planning alteration", {}});
     using OperationHandler =
         Result<OperationReport> (*)(TransactionState &, const OperationView &, const CancellationToken &);
     constexpr std::array<OperationHandler, std::variant_size_v<AlterationOperationData>> handlers{
@@ -3521,11 +3533,11 @@ Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, con
         state.reports.push_back(std::move(*report));
         if (progress)
             progress->report(
-                {ProgressPhase::writing, operation_index + 1U, manifest.operations.size(), operation.type,
+                {ProgressPhase::allocating, operation_index + 1U, manifest.operations.size(), operation.type,
                  output_path ? std::optional{text::path_to_utf8(*output_path)} : std::optional<std::string>{}});
     }
     if (output_path) {
-        auto applied = publish(state, *output_path, cancellation, overwrite);
+        auto applied = publish(state, *output_path, cancellation, overwrite, {}, progress);
         if (!applied)
             return std::unexpected{applied.error()};
     }
@@ -3754,7 +3766,7 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
         const auto validator = [&](const std::filesystem::path &temporary) {
             return validate_package_result(temporary, packages, plan, cancellation);
         };
-        if (auto published = publish(state, output_path, cancellation, overwrite, validator); !published) {
+        if (auto published = publish(state, output_path, cancellation, overwrite, validator, progress); !published) {
             return std::unexpected{published.error()};
         }
         auto output_snapshot = file_snapshot_id(output_path, cancellation);
