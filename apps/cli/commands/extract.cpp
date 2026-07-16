@@ -54,9 +54,9 @@ int run_extract_request(const axk::cli::ExtractRequest &request) {
     }
     for (const auto &warning : result->at("warnings")) {
         if (warning.at("code") == "waveform_skipped")
-            std::cerr << "warning: skipped waveform " << warning.at("message").get<std::string>() << '\n';
+            std::cerr << "warning: skipped Wave Data " << warning.at("message").get<std::string>() << '\n';
     }
-    std::cout << "waveforms=" << result->at("waveformCount").get<std::size_t>()
+    std::cout << "wave_data=" << result->at("waveformCount").get<std::size_t>()
               << " written_files=" << result->at("writtenFileCount").get<std::size_t>()
               << " selection_graphs=" << result->at("selectionGraphCount").get<std::size_t>()
               << " sfz_files=" << result->at("sfzFileCount").get<std::size_t>()

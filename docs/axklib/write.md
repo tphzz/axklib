@@ -88,7 +88,7 @@ against an existing HDS image.
 Fresh HDS, floppy, and ISO images share the same authored volume fields. HDS
 places those fields inside each `partitions[].volumes[]` entry; removable-media
 manifests place them in `authored_volume`. The smallest useful topology is one
-physical waveform (`SMPL`) and one Sample Bank (`SBNK`) that references it:
+Wave Data object (`SMPL`) and one Sample (`SBNK`) that references it:
 
 ```json
 "authored_volume": {
@@ -129,7 +129,7 @@ not become sampler-facing names.
 
 !!! warning "Current loop policy"
 
-    Authored waveforms currently use forward loop mode over the complete
+    Authored Wave Data entries currently use forward loop mode over the complete
     logical waveform: start frame `0`, loop length equal to the imported frame
     count. The manifest does not yet expose one-shot mode or explicit loop
     points. Use source audio designed for a full-sample loop, or treat the
@@ -189,14 +189,16 @@ image. Do not copy the ISO file onto a data disc.
 The exact minimal profile above has been verified on physical Yamaha A-series
 hardware through group and volume enumeration, Sample Bank loading, audible
 waveform playback, and pitch-correct audition. That result covers one group,
-one `F001` volume, one mono `SMPL`, and one direct single-member `SBNK`. It does
+one `F001` volume, one mono Wave Data object (`SMPL`), and one direct
+single-member Sample (`SBNK`). It does
 not establish arbitrary group-ID generation, multiple-volume output, every
 object topology, or every sampler model and system version.
 
 An adjacent fresh profile is also hardware-verified with one Program containing
-both assignment forms supported by the writer: one `SBAC` parent with one
-`SBNK` child, plus one direct `SBNK` assignment. Both Sample Banks reference one
-shared mono `SMPL`; the Program resolved both channel-specific assignments, and
+both assignment forms supported by the writer: one Sample Bank (`SBAC`) parent
+with one Sample (`SBNK`) child, plus one direct `SBNK` assignment. Both Samples
+reference one shared mono Wave Data object (`SMPL`); the Program resolved both
+channel-specific assignments, and
 both paths loaded and played. This promotes that exact complete hierarchy, not
 arbitrary group sizes, Program counts, or graph shapes.
 
@@ -312,7 +314,7 @@ therefore outside whole-source transfer. This is deliberately described as a
 byte-preserving Yamaha-object transfer, not a sector-level floppy clone.
 
 Physical Yamaha hardware has enumerated the generated group and volume, loaded
-the transferred Program and Sample Banks, resolved their transferred waveform
+the transferred Program, Sample Banks, and Samples and resolved their transferred Wave Data
 relationships, and produced audible playback. The transferred Sequence was
 also visible. This promotes the exact whole-floppy Yamaha-object transfer
 profile through loading and audition, while retaining the boundary above:
@@ -418,7 +420,7 @@ Interleaved input is split into two physical mono objects and inherently meets
 that constraint.
 
 The current authored `SBAC`/`PROG` profile is intentionally narrow. Each group
-contains 1..3 mono Sample Banks. Each Program has exactly two ordered
+contains 1..3 mono Samples. Each Program has exactly two ordered
 assignments: one distinct `sample_bank_group` on receive channel `1`, followed
 by one direct `sample_bank` on receive channel `2`. Every group and direct bank
 used by this profile is assigned once. Sequence (`SEQU`) and profile (`PRF3`)
@@ -497,7 +499,8 @@ audio paths resolve from the alteration manifest directory.
 
 An `insert_sbnk` object contains `name`, `waveform_name`, `root_key`, `key_low`,
 and `key_high`. Optional fields are `right_waveform_name` and `level`. The named
-waveforms must already exist at that point in the ordered transaction.
+Wave Data entries in the manifest's `waveforms` array must already exist at
+that point in the ordered transaction.
 
 An `insert_sbac` object contains `name` and `member_sample_banks`, an array of
 one to three distinct existing Sample Bank names. An `insert_program` object

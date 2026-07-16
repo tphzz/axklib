@@ -110,7 +110,7 @@ int run_orphans_request(const axk::cli::OrphansRequest &request) {
         return axk::cli::report_application_failure(result.error());
     for (const auto &summary : result->at("summaries")) {
         std::cout << "image=" << summary.at("sourcePath").get<std::string>()
-                  << " waveforms=" << summary.at("waveformCount").get<std::size_t>()
+                  << " wave_data=" << summary.at("waveformCount").get<std::size_t>()
                   << " referenced=" << summary.at("referencedCount").get<std::size_t>()
                   << " known_unreferenced=" << summary.at("knownUnreferencedCount").get<std::size_t>()
                   << " ambiguous_or_unresolved=" << summary.at("ambiguousOrUnresolvedCount").get<std::size_t>() << '\n';

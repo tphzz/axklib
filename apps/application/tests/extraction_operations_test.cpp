@@ -281,7 +281,7 @@ TEST_F(ExtractionOperationsTest, VolumeSelectionRejectsMissingVolumeWithoutPubli
 }
 
 TEST_F(ExtractionOperationsTest, SbnkPathSelectionRetainsOnlyTheSelectedDependencyClosure) {
-    constexpr std::string_view selector = "partition_00_New_Partition/New Volume/Sample Banks/sine wave";
+    constexpr std::string_view selector = "partition_00_New_Partition/New Volume/Sample Banks and Samples/sine wave";
     const auto extracted = registry_.invoke("extract.wav",
                                             {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
                                              {"destination", {{"rootId", "workspace"}, {"relativePath", "bank"}}},
@@ -289,8 +289,8 @@ TEST_F(ExtractionOperationsTest, SbnkPathSelectionRetainsOnlyTheSelectedDependen
                                              {"selectors", {{{"path", selector}}}}},
                                             context());
     ASSERT_TRUE(extracted) << extracted.error().message;
-    const auto graph_path = root_ / "bank" / "sbnk" / "partition_00_New_Partition" / "New Volume" / "Sample Banks" /
-                            "sine wave" / "volume.axklib.json";
+    const auto graph_path = root_ / "bank" / "sbnk" / "partition_00_New_Partition" / "New Volume" /
+                            "Sample Banks and Samples" / "sine wave" / "volume.axklib.json";
     ASSERT_TRUE(std::filesystem::is_regular_file(graph_path));
     const auto graph = nlohmann::json::parse(read_text(graph_path));
     ASSERT_EQ(graph.at("objects").at("sbnk").size(), 1U);
@@ -301,7 +301,8 @@ TEST_F(ExtractionOperationsTest, SbnkPathSelectionRetainsOnlyTheSelectedDependen
 }
 
 TEST_F(ExtractionOperationsTest, SbacPathSelectionRetainsItsMemberBankAndWaveform) {
-    constexpr std::string_view selector = "partition_00_New_Partition/New Volume/Sample Banks/B New SmpBank";
+    constexpr std::string_view selector =
+        "partition_00_New_Partition/New Volume/Sample Banks and Samples/B New SmpBank";
     const auto extracted = registry_.invoke("extract.sfz",
                                             {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
                                              {"destination", {{"rootId", "workspace"}, {"relativePath", "group"}}},
@@ -309,8 +310,8 @@ TEST_F(ExtractionOperationsTest, SbacPathSelectionRetainsItsMemberBankAndWavefor
                                              {"selectors", {selector}}},
                                             context());
     ASSERT_TRUE(extracted) << extracted.error().message;
-    const auto graph_path = root_ / "group" / "sbac" / "partition_00_New_Partition" / "New Volume" / "Sample Banks" /
-                            "B New SmpBank" / "volume.axklib.json";
+    const auto graph_path = root_ / "group" / "sbac" / "partition_00_New_Partition" / "New Volume" /
+                            "Sample Banks and Samples" / "B New SmpBank" / "volume.axklib.json";
     ASSERT_TRUE(std::filesystem::is_regular_file(graph_path));
     const auto graph = nlohmann::json::parse(read_text(graph_path));
     ASSERT_EQ(graph.at("objects").at("sbac").size(), 1U);

@@ -666,7 +666,7 @@ TEST(Cli11Adapter, ExtractSfzWritesAudioInstrumentsAndVolumeGraph) {
     testing::internal::CaptureStdout();
     ASSERT_EQ(axk::cli::run(static_cast<int>(argv.size()), argv.data()), 0);
     EXPECT_EQ(testing::internal::GetCapturedStdout(),
-              "waveforms=2 written_files=23 selection_graphs=1 sfz_files=20 decode_errors=0 load_errors=0\n");
+              "wave_data=2 written_files=23 selection_graphs=1 sfz_files=20 decode_errors=0 load_errors=0\n");
 
     const std::array runtime_paths{fixture, service_output};
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
@@ -716,14 +716,17 @@ TEST(Cli11Adapter, InfoUsesCanonicalServiceDataForEveryRenderingMode) {
     ASSERT_EQ(run_cli({"axklib", "info", fixture.string(), "--format", "tree"}), 0);
     const auto tree = testing::internal::GetCapturedStdout();
     EXPECT_TRUE(tree.starts_with(fixture.string() + " [sfs]\n`-- partition 0: New Partition [PARTITION] (1)\n"));
-    EXPECT_NE(tree.find("B New SmpBank [SAMPLE BANK GROUP]"), std::string::npos);
-    EXPECT_NE(tree.find("_NewSample [SAMPLE BANK]"), std::string::npos);
+    EXPECT_NE(tree.find("Sample Banks/Samples (SBAC/SBNK) [CATEGORY]"), std::string::npos);
+    EXPECT_NE(tree.find("B New SmpBank [SAMPLE BANK (SBAC)]"), std::string::npos);
+    EXPECT_NE(tree.find("_NewSample [SAMPLE (SBNK)]"), std::string::npos);
+    EXPECT_NE(tree.find("Wave Data (SMPL) [CATEGORY]"), std::string::npos);
+    EXPECT_NE(tree.find("SMP 252511 [WAVE DATA (SMPL)]"), std::string::npos);
 
     testing::internal::CaptureStdout();
     ASSERT_EQ(run_cli({"axklib", "info", fixture.string(), "--format", "paths"}), 0);
     const auto paths = testing::internal::GetCapturedStdout();
     EXPECT_TRUE(paths.starts_with("source_path\tscope\tpath\tdisplay_name\tobject_type\tobject_key\n"));
-    EXPECT_NE(paths.find("\tsbac\tpartition_00_New_Partition/New Volume/Sample Banks/B New SmpBank\tB New "
+    EXPECT_NE(paths.find("\tsbac\tpartition_00_New_Partition/New Volume/Sample Banks and Samples/B New SmpBank\tB New "
                          "SmpBank\tSBAC\tp0:sfs23\n"),
               std::string::npos);
 

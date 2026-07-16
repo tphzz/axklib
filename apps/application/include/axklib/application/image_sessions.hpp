@@ -72,6 +72,7 @@ struct ImageObjectItem {
     std::string volume_name;
     std::string category_name;
     std::string entry_name;
+    std::uint64_t stored_size_bytes{};
     std::optional<WaveformMetadata> waveform;
 };
 

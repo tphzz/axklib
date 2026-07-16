@@ -119,12 +119,21 @@ TEST(RelationshipGraph, MatchesMaintainedFixtureCountsAndSamplerHierarchy) {
     ASSERT_EQ(tree.roots.size(), 1U);
     ASSERT_EQ(tree.roots[0].children.size(), 1U);
     const auto &volume = tree.roots[0].children[0];
-    const auto bank_category =
-        std::ranges::find(volume.children, std::string{"Sample Banks"}, &axk::ContentNode::display_name);
+    const auto bank_category = std::ranges::find(volume.children, std::string{"Sample Banks/Samples (SBAC/SBNK)"},
+                                                 &axk::ContentNode::display_name);
     ASSERT_NE(bank_category, volume.children.end());
     const auto group =
         std::ranges::find(bank_category->children, std::string{"B New SmpBank"}, &axk::ContentNode::display_name);
     ASSERT_NE(group, bank_category->children.end());
+    EXPECT_EQ(group->object_type, "SBAC");
+    ASSERT_FALSE(group->children.empty());
+    EXPECT_EQ(group->children.front().object_type, "SBNK");
+
+    const auto wave_data_category =
+        std::ranges::find(volume.children, std::string{"Wave Data (SMPL)"}, &axk::ContentNode::display_name);
+    ASSERT_NE(wave_data_category, volume.children.end());
+    ASSERT_FALSE(wave_data_category->children.empty());
+    EXPECT_EQ(wave_data_category->children.front().object_type, "SMPL");
     ASSERT_EQ(group->children.size(), 1U);
     EXPECT_EQ(group->children[0].display_name, "_NewSample");
 }

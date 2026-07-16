@@ -1279,6 +1279,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert all(
                 item["id"].startswith("object-") for item in objects["data"]["items"]
             )
+            assert all(item["sizeBytes"] > 0 for item in objects["data"]["items"])
             assert root not in json.dumps(objects)
             status, waveforms = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/objects?limit=100&type=SMPL"
@@ -2371,7 +2372,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                     root_path / server_destination
                 ) == artifact_hashes(root_path / cli_destination)
 
-            selector = "partition_00_New_Partition/New Volume/Sample Banks/sine wave"
+            selector = "partition_00_New_Partition/New Volume/Sample Banks and Samples/sine wave"
             selected_server = Path("extractions/server/selected")
             selected_cli = Path("extractions/cli/selected")
             selected = run_extraction(

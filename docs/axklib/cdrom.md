@@ -101,7 +101,7 @@ An ordinary one-volume tree is:
       0000                     Program catalog
       F001 ...                 Program object payloads
     SBAC/
-      0000                     Sample Bank Group catalog
+      0000                     Sample Bank catalog
       F001 ...                 SBAC object payloads
     SBNK/
       0000                     Sample Bank catalog
@@ -392,7 +392,7 @@ as public target IDs.
 
 CD-ROM visible/off rows with missing local SBAC targets stay relationship
 diagnostics, not Program children. A CD-ROM SBNK member link that selects one
-physical waveform in another ISO object folder but whose member name does not
+Wave Data object in another ISO object folder but whose Sample name does not
 confirm the target stays `Tentative` and is reported as an `sbnk-member-link`
 diagnostic.
 

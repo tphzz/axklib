@@ -14,10 +14,10 @@ person; it does not select a parser or override the manifest.
 | Selected roots | Manifest `package_kind` | Extension | Meaning |
 | --- | --- | --- | --- |
 | One complete volume | `volume` | `.axkvol` | Every admitted object placed in the volume and its complete known closure |
-| One Program | `program` | `.axkprg` | The Program, assigned banks or groups, and required waveforms |
-| One bank group | `sbac` | `.axksbac` | One sampler-visible `B <name>` group, member banks, and waveforms |
-| One member bank/sample | `sbnk` | `.axksbnk` | One SBNK and its physical waveform dependencies |
-| One physical waveform | `smpl` | `.axksmpl` | One SMPL storage object |
+| One Program | `program` | `.axkprg` | The Program, assigned Sample Banks or Samples, and required Wave Data |
+| One Sample Bank | `sbac` | `.axksbac` | One sampler-visible `B <name>` Sample Bank, its Samples, and required Wave Data |
+| One Sample | `sbnk` | `.axksbnk` | One Sample (`SBNK`) and its Wave Data dependencies |
+| One Wave Data object | `smpl` | `.axksmpl` | One Wave Data (`SMPL`) storage object |
 | One admitted sequence | `sequence` | `.axkseq` | Reserved for a future admitted SEQU dependency profile |
 | Two or more roots | `bundle` | `.axkpkg` | A same-type or mixed-type collection of explicitly selected roots |
 

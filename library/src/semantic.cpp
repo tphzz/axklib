@@ -1,6 +1,7 @@
 #include "axklib/semantic.hpp"
 
 #include "axklib/media.hpp"
+#include "axklib/terminology.hpp"
 #include "axklib/utf8.hpp"
 
 #include <algorithm>
@@ -394,9 +395,9 @@ static ContentTree build_content_tree_impl(std::string source_path,
                                        std::move(programs)});
         }
         if (!banks.empty()) {
-            volume.children.push_back({"category:Sample Banks",
+            volume.children.push_back({std::string{sample_structure_category_id},
                                        "category",
-                                       "Sample Banks",
+                                       std::string{sample_structure_category_label},
                                        {},
                                        {},
                                        RelationshipQuality::known,
@@ -406,9 +407,9 @@ static ContentTree build_content_tree_impl(std::string source_path,
                                        std::move(banks)});
         }
         if (!waveforms.empty()) {
-            volume.children.push_back({"category:Waveforms",
+            volume.children.push_back({std::string{wave_data_category_id},
                                        "category",
-                                       "Waveforms",
+                                       std::string{wave_data_category_label},
                                        {},
                                        {},
                                        RelationshipQuality::known,

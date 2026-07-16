@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "axklib/terminology.hpp"
 #include "axklib/utf8.hpp"
 
 namespace {
@@ -53,6 +54,10 @@ std::string sfs_selector_component(const axk::ContentNode &node) {
 }
 
 std::string selector_component(axk::MediaKind media_kind, const axk::ContentNode &node) {
+    if (node.node_id == axk::sample_structure_category_id)
+        return std::string{axk::sample_structure_selector_component};
+    if (node.node_id == axk::wave_data_category_id)
+        return std::string{axk::wave_data_selector_component};
     return media_kind == axk::MediaKind::sfs ? sfs_selector_component(node) : node.display_name;
 }
 

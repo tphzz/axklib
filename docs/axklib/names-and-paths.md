@@ -37,9 +37,9 @@ flowchart TD
 | Container raw path | `p0:sfs23`, `BANK001.003`, `8F6EB510/F001/PROG/F003` | Stable technical identity. |
 | Object header name | `001`, `CFIII DrkTmprd`, `TS-KICK` | Name stored in the object payload header. |
 | Program display name | `001: CFGngDrk` | Slot plus Program name read from `PROG+0x078..0x07f`. |
-| Sample Bank Group display | `B TS-KICK` | User-facing rendering of an `SBAC` object. |
-| Sample Bank display | `TS-KICK` | User-facing rendering of an `SBNK` object. |
-| Waveform display | `TS-KICK` | Physical `SMPL` storage name when waveform context is requested. |
+| Sample Bank display | `B TS-KICK` | User-facing rendering of an `SBAC` object. |
+| Sample display | `TS-KICK` | User-facing rendering of an `SBNK` object. |
+| Wave Data display | `TS-KICK` | `SMPL` storage name when Wave Data context is requested. |
 
 ## Object Type Labels
 
@@ -51,11 +51,11 @@ distinguished.
 | partition | `[PARTITION]` |
 | volume | `[VOLUME]` |
 | category | `[CATEGORY]` |
-| `PROG` | `[PROGRAM]` |
-| `SBAC` | `[SAMPLE BANK GROUP]` |
-| `SBNK` | `[SAMPLE BANK]` |
-| `SMPL` | `[WAVEFORM]` |
-| `SEQU` | `[SEQUENCE]` |
+| `PROG` | `[PROGRAM (PROG)]` |
+| `SBAC` | `[SAMPLE BANK (SBAC)]` |
+| `SBNK` | `[SAMPLE (SBNK)]` |
+| `SMPL` | `[WAVE DATA (SMPL)]` |
+| `SEQU` | `[SEQUENCE (SEQU)]` |
 | unresolved Program placeholder | `[UNKNOWN]` |
 
 ## Program Slot Labels
@@ -78,29 +78,29 @@ NNN: Pgm NNN
 Default empty Program slots are omitted from normal `info` output. Use
 `--show-default-programs` to render the full 128-slot list.
 
-## Sample Bank Group And Member Levels
+## Sample Bank And Sample Levels
 
-`SBAC` is rendered as the sampler-visible `B <name>` parent. Its `SBNK` children
-are rendered below it when the relationship is a navigable `SBAC_SLOT_TO_SBNK`
-row.
+`SBAC` is rendered as the sampler-visible `B <name>` Sample Bank parent. Its
+`SBNK` Samples are rendered below it when the relationship is a navigable
+`SBAC_SLOT_TO_SBNK` row.
 
 Example:
 
 ```text
-|-- Sample Banks [CATEGORY]
-|   `-- B TS-KICK [SAMPLE BANK GROUP]
-|       `-- TS-KICK [SAMPLE BANK]
+|-- Sample Banks/Samples (SBAC/SBNK) [CATEGORY]
+|   `-- B TS-KICK [SAMPLE BANK (SBAC)]
+|       `-- TS-KICK [SAMPLE (SBNK)]
 ```
 
-Program assignments to a Sample Bank Group display the group, not the underlying
-physical waveform objects:
+Program assignments to a Sample Bank display the bank, not the underlying Wave
+Data objects:
 
 ```text
-|-- 001: TSUYOSHI [PROGRAM]
-|   `-- B TS-KICK [SAMPLE BANK GROUP] - Rch Assign: =SMP
+|-- 001: TSUYOSHI [PROGRAM (PROG)]
+|   `-- B TS-KICK [SAMPLE BANK (SBAC)] - Rch Assign: =SMP
 ```
 
-`SBNK -> SMPL` links are waveform-storage links. They are used by reports,
+`SBNK -> SMPL` links are Sample-to-Wave-Data storage links. They are used by reports,
 validation, and exact export metadata, but they are not displayed as normal
 Program assignment children by default.
 
@@ -121,9 +121,9 @@ User-facing SFS tree shape:
 |-- partition 0: Main [PARTITION]
 |   |-- Piano Volume [VOLUME]
 |   |   |-- Programs [CATEGORY]
-|   |   |   `-- 001: Grand [PROGRAM]
-|   |   `-- Sample Banks [CATEGORY]
-|   |       `-- B Grand Bank [SAMPLE BANK GROUP]
+|   |   |   `-- 001: Grand [PROGRAM (PROG)]
+|   |   `-- Sample Banks/Samples (SBAC/SBNK) [CATEGORY]
+|   |       `-- B Grand Bank [SAMPLE BANK (SBAC)]
 ```
 
 ## FAT12 Floppy Paths
@@ -135,17 +135,17 @@ object payload.
 ```text
 fat_file: SINE____.003
 object header name: SineWave
-info label: SineWave [SAMPLE BANK]
+info label: SineWave [SAMPLE (SBNK)]
 ```
 
 Normal floppy tree shape:
 
 ```text
 |-- FAT root [VOLUME]
-|   |-- Sample Banks [CATEGORY]
-|   |   `-- SineWave [SAMPLE BANK]
-|   `-- Waveforms [CATEGORY]
-|       `-- SineWave [WAVEFORM]
+|   |-- Sample Banks/Samples (SBAC/SBNK) [CATEGORY]
+|   |   `-- SineWave [SAMPLE (SBNK)]
+|   `-- Wave Data (SMPL) [CATEGORY]
+|       `-- SineWave [WAVE DATA (SMPL)]
 ```
 
 ## CD-ROM Paths
@@ -176,7 +176,7 @@ Or11 Argent (F002)
 Within a category, nodes sort by:
 
 1. unresolved Program placeholders when `--show-unresolved` is active;
-2. category order: Programs, Sample Banks, Waveforms, Sequences;
+2. category order: Programs, Sample Banks/Samples (SBAC/SBNK), Wave Data (SMPL), Sequences;
 3. Program slot number;
 4. display name;
 5. object type;
@@ -191,9 +191,9 @@ Normal `info` output prints assignment details only for displayed active Program
 children:
 
 ```text
-|-- 001: TSUYOSHI [PROGRAM]
-|   |-- B TS-BASS [SAMPLE BANK GROUP] - Rch Assign: =SMP
-|   `-- TS-FX 7 [SAMPLE BANK] - Rch Assign: =SMP
+|-- 001: TSUYOSHI [PROGRAM (PROG)]
+|   |-- B TS-BASS [SAMPLE BANK (SBAC)] - Rch Assign: =SMP
+|   `-- TS-FX 7 [SAMPLE (SBNK)] - Rch Assign: =SMP
 ```
 
 Visible/off rows and duplicate-not-active rows are not printed as active Program
@@ -203,9 +203,9 @@ When `--show-unresolved` is used, active missing local targets appear as Unknown
 placeholders:
 
 ```text
-|-- 009: India [PROGRAM]
+|-- 009: India [PROGRAM (PROG)]
 |   |-- INDIAN 7 [UNKNOWN]
-|   `-- B India [SAMPLE BANK GROUP] - Rch Assign: =SMP
+|   `-- B India [SAMPLE BANK (SBAC)] - Rch Assign: =SMP
 ```
 
 ## Export Path Sanitization
@@ -226,7 +226,7 @@ Rules:
 
 ## Exact Export Layout
 
-Scoped extraction writes one shared sample pool plus folders for the selected
+Scoped extraction writes one shared WAV pool plus folders for the selected
 scope. Use `extract wav file` or `extract sfz file` for whole-input
 exports. Use narrower scopes with `--path` values copied from
 `info --format paths`.
@@ -276,8 +276,8 @@ Rules:
 Physical WAV names come from `SMPL` storage names plus a short content hash so
 several selections can share one pool without collisions. They stay
 storage-facing even when that produces a filesystem-safe numeric suffix from a
-sampler duplicate marker. When a physical waveform is referenced by
-sampler-visible `SBNK` members, the graph records those member names in the
+sampler duplicate marker. When Wave Data is referenced by
+sampler-visible Samples (`SBNK`), the graph records those Sample names in the
 `user_facing_aliases` field on the `SMPL` object. Display-oriented consumers
 should use the first alias when present and fall back to the physical `SMPL`
 display name only when no alias is known.
@@ -289,12 +289,12 @@ single export plan reuses a path only when the full digest and WAV bytes match;
 if distinct contents ever share the same shortened path, export fails clearly
 instead of overwriting or choosing an order-dependent name.
 
-Rendered stereo names come from sampler-facing sample/member names when a known
+Rendered stereo names come from sampler-facing Sample names when a known
 stereo relationship supplies a better musical label. For paired sibling `SBNK`
 stereo, terminal `-L` and `-R` are removed from the rendered stem, so
 `Grand -L` and `Grand -R` render as `Grand.wav` while both physical `SMPL` WAVs
 remain present. If the paired member name is only distinguished by a sampler
-duplicate marker, the rendered stem uses the owning `B ...` sample-bank or group
+duplicate marker, the rendered stem uses the owning `B ...` Sample Bank
 label when available, for example `Harpsi 2.1N - Harpsich031.wav` instead of a
 numeric duplicate suffix.
 ## Technical Fields That Stay In Reports

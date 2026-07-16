@@ -33,6 +33,7 @@
 #include "axklib/report.hpp"
 #include "axklib/semantic.hpp"
 #include "axklib/sfs.hpp"
+#include "axklib/terminology.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 #include "axklib/writer.hpp"
@@ -167,17 +168,7 @@ std::string tree_type_label(const axk::cli::schema::info_v1::NodeOutput &node) {
     if (node.node_type == "unresolved" || node.node_type == "relationship_target" ||
         node.node_type == "unresolved_program_assignment")
         return "UNKNOWN";
-    if (node.object_type == "PROG")
-        return "PROGRAM";
-    if (node.object_type == "SBAC")
-        return "SAMPLE BANK GROUP";
-    if (node.object_type == "SBNK")
-        return "SAMPLE BANK";
-    if (node.object_type == "SMPL")
-        return "WAVEFORM";
-    if (node.object_type == "SEQU")
-        return "SEQUENCE";
-    return {};
+    return std::string{axk::sampler_object_tree_label(node.object_type)};
 }
 
 void render_tree_text(const axk::cli::schema::info_v1::NodeOutput &node, std::size_t depth, std::string prefix,

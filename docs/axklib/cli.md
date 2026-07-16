@@ -31,8 +31,8 @@ naming.
 
 | Command | Purpose |
 | --- | --- |
-| `info` | Render sampler-facing partitions, groups, volumes, Programs, Sample Banks, and waveforms. |
-| `extract wav` | Export selected waveform audio into a shared WAV pool. |
+| `info` | Render sampler-facing partitions, groups, volumes, Programs (`PROG`), Sample Banks (`SBAC`), Samples (`SBNK`), and Wave Data (`SMPL`). |
+| `extract wav` | Export selected Wave Data audio into a shared WAV pool. |
 | `extract sfz` | Export WAVs and SFZ instruments for selected objects. |
 | `package export` | Export a complete portable object dependency closure. |
 | `package inspect` / `verify` | Inspect bounded package metadata or fully verify every payload. |
@@ -46,8 +46,8 @@ naming.
 | `inventory` | Write a normalized object inventory. |
 | `relationships` | Write resolved sampler-object relationships. |
 | `coverage` | Summarize relationship coverage and unresolved classifications. |
-| `orphans` | Classify physical waveforms by resolved ownership status. |
-| `corpus audit` | Run inventory, validation, relationship, and bounded waveform checks over many inputs. |
+| `orphans` | Classify Wave Data by resolved ownership status. |
+| `corpus audit` | Run inventory, validation, relationship, and bounded Wave Data checks over many inputs. |
 
 The reporting commands write versioned JSON/CSV data plus schema sidecars to
 their required output directory. See [Report Schemas](report-schemas.md) and
@@ -100,7 +100,7 @@ axklib extract sfz program source.hds \
 ```
 
 `--stereo auto` renders confirmed compatible left/right members and is the
-default. `--stereo none` keeps physical mono waveforms only. `--strict` stops
+default. `--stereo none` keeps exact mono Wave Data exports only. `--strict` stops
 after the first load failure; `--progress always|never|auto` controls progress
 display.
 

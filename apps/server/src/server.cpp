@@ -1201,6 +1201,7 @@ class ServerApplication {
                             {"volumeName", item.volume_name},
                             {"categoryName", item.category_name},
                             {"entryName", item.entry_name},
+                            {"sizeBytes", item.stored_size_bytes},
                             {"waveform", std::move(waveform)}};
             });
     }

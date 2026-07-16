@@ -98,7 +98,7 @@ axklib package import target.hds source-volume.axkvol \
 ```
 
 Inspect and validate `imported.hds` before use. Package imports are volume-local
-on SFS: identical physical waveform content in another volume is copied because
+on SFS: identical Wave Data content in another volume is copied because
 cross-volume waveform sharing is not a supported hardware topology.
 
 ## Author A New HDS Image
@@ -110,7 +110,8 @@ axklib create manifest hds -o image.json
 ```
 
 The starter creates a 512 MiB image with one partition and one empty volume.
-Add authored `waveforms`, `sample_banks`, optional `sample_bank_groups`, and
+Add authored Wave Data in `waveforms`, Samples in `sample_banks`, optional
+Sample Banks in `sample_bank_groups`, and
 optional `programs` using the common schema in [Writer And
 Alteration](write.md#common-authored-content), then build and check it:
 

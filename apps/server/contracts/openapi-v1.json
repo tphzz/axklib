@@ -1259,6 +1259,118 @@
         ],
         "type": "object"
       },
+      "ImageObjectItem": {
+        "additionalProperties": false,
+        "properties": {
+          "categoryName": {
+            "type": "string"
+          },
+          "entryName": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "partitionIndex": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "partitionName": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "description": "Complete stored object file or record size, including object metadata and stored payload bytes.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": {
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          },
+          "volumeName": {
+            "type": "string"
+          },
+          "waveform": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WaveDataMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name",
+          "format",
+          "partitionIndex",
+          "partitionName",
+          "volumeName",
+          "categoryName",
+          "entryName",
+          "sizeBytes",
+          "waveform"
+        ],
+        "type": "object"
+      },
+      "ImageObjectPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImageObjectItem"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalCount": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "totalCount",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "ImageObjectPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImageObjectPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "type": "object"
+      },
       "InfoRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3271,6 +3383,66 @@
           "code",
           "message",
           "context"
+        ],
+        "type": "object"
+      },
+      "WaveDataMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "fineTuneCents": {
+            "maximum": 127,
+            "minimum": -128,
+            "type": "integer"
+          },
+          "frameCount": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loopLengthFrames": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loopMode": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loopModeLabel": {
+            "type": "string"
+          },
+          "loopStartFrame": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rootKey": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sampleRate": {
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sampleWidthBytes": {
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sampleRate",
+          "sampleWidthBytes",
+          "rootKey",
+          "fineTuneCents",
+          "loopMode",
+          "loopModeLabel",
+          "frameCount",
+          "loopStartFrame",
+          "loopLengthFrames"
         ],
         "type": "object"
       }
@@ -6561,6 +6733,13 @@
         "operationId": "images.objects",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageObjectPageResponse"
+                }
+              }
+            },
             "description": "Bounded decoded object metadata page",
             "headers": {
               "X-Request-Id": {

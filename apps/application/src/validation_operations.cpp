@@ -503,11 +503,11 @@ std::string media_object_report_path(const ValidationSource &source, std::string
         const auto &placement = *item->placement;
         const auto category = [&]() -> std::string_view {
             if (placement.category_name == "SMPL")
-                return "Samples";
+                return "Wave Data";
             if (placement.category_name == "SBNK")
-                return "Sample Banks";
+                return "Samples";
             if (placement.category_name == "SBAC")
-                return "Sample Bank Accessories";
+                return "Sample Banks";
             if (placement.category_name == "SEQU")
                 return "Sequences";
             if (placement.category_name == "PROG")
@@ -561,7 +561,7 @@ std::pair<std::string, std::string> ambiguous_relationship_message(const axk::Re
     if (row.basis == "assignment-visible-off-same-volume-sbac-diagnostic" ||
         row.basis == "assignment-visible-off-same-volume-sbnk-diagnostic") {
         const auto target =
-            row.basis == "assignment-visible-off-same-volume-sbac-diagnostic" ? "sample-bank group" : "sample-bank";
+            row.basis == "assignment-visible-off-same-volume-sbac-diagnostic" ? "Sample Bank (SBAC)" : "Sample (SBNK)";
         return {std::format("Visible/off Program assignment row names a {} with one same-volume diagnostic candidate "
                             "plus other duplicate-name candidates; this is decoded Program inventory, not active "
                             "Program content loss.",
@@ -575,39 +575,40 @@ std::pair<std::string, std::string> ambiguous_relationship_message(const axk::Re
                 "Use relationships.csv candidate fields only when auditing off rows; do not treat this warning as a "
                 "missing active Program child."};
     if (row.type == "PROG_ASSIGNMENT_TO_SBAC")
-        return {"Program assignment to a sample-bank group has multiple possible targets.",
-                "Verify the sampler-visible Program assignment and group target before promotion."};
+        return {"Program assignment to a Sample Bank (SBAC) has multiple possible targets.",
+                "Verify the sampler-visible Program assignment and Sample Bank target before promotion."};
     if (row.type == "PROG_ASSIGNMENT_TO_SBNK")
-        return {"Direct Program assignment has multiple possible sample-bank targets.",
+        return {"Direct Program assignment has multiple possible Sample (SBNK) targets.",
                 "Verify the sampler-visible Program assignment target before promotion."};
     if (row.type == "SBAC_SLOT_TO_SBNK")
-        return {"Sample-bank group slot has multiple possible sample-bank member targets.",
-                "Inspect duplicate same-name sample-bank candidates before using this group slot as authoritative."};
+        return {"Sample Bank (SBAC) slot has multiple possible Sample (SBNK) targets.",
+                "Inspect duplicate same-name Sample candidates before using this slot as authoritative."};
     if (row.basis == "sbnk-member-link-id-only-iso-cross-folder-name-mismatch")
-        return {"Sample-bank member link ID points to one physical waveform in another ISO object folder, but the "
-                "member name does not confirm it.",
-                "Inspect the waveform candidate before treating this member link as exact."};
+        return {"Sample (SBNK) link ID points to one Wave Data (SMPL) object in another ISO object folder, but the "
+                "Sample name does not confirm it.",
+                "Inspect the Wave Data candidate before treating this link as exact."};
     if (row.basis == "sbnk-member-link-id-only-name-mismatch")
-        return {"Sample-bank member link ID points to one physical waveform, but the member name does not confirm it.",
-                "Inspect the waveform candidate before treating this member link as exact."};
+        return {"Sample (SBNK) link ID points to one Wave Data (SMPL) object, but the Sample name does not confirm it.",
+                "Inspect the Wave Data candidate before treating this link as exact."};
     if (row.type.starts_with("SBNK_") && row.type.ends_with("_TO_SMPL"))
-        return {"Sample-bank member link has multiple possible physical waveform targets.",
-                "Inspect candidate waveform objects before treating this sample-bank member link as exact."};
+        return {"Sample (SBNK) link has multiple possible Wave Data (SMPL) targets.",
+                "Inspect candidate Wave Data objects before treating this Sample link as exact."};
     if (row.basis.starts_with("sbnk-program-link-bitmap-")) {
         std::string message;
         if (row.basis.find("disambiguates-ambiguous-direct-assignment") != std::string::npos)
-            message = "Sample-bank Program-link bitmap points to one Program from an ambiguous direct-assignment set.";
+            message =
+                "Sample (SBNK) Program-link bitmap points to one Program from an ambiguous direct-assignment set.";
         else if (row.basis.find("known-direct-assignment-missing-bitmap") != std::string::npos)
-            message = "Known direct Program assignment is missing from the sample-bank Program-link bitmap.";
+            message = "Known direct Program assignment is missing from the Sample (SBNK) Program-link bitmap.";
         else if (row.basis.find("nondefault-flag-direct-assignment-without-bitmap") != std::string::npos)
-            message = "Nondefault direct Program assignment is missing from the sample-bank Program-link bitmap.";
+            message = "Nondefault direct Program assignment is missing from the Sample (SBNK) Program-link bitmap.";
         else
-            message = "Sample-bank Program-link bitmap differs from resolved direct Program assignments.";
+            message = "Sample (SBNK) Program-link bitmap differs from resolved direct Program assignments.";
         return {std::move(message), "Use this as bitmap consistency data only; do not treat it as Program content loss "
                                     "unless another public rule proves the bitmap is authoritative."};
     }
     if (row.type == "SBNK_PROGRAM_BITMAP_TO_PROG")
-        return {"Sample-bank Program-link bitmap maps to multiple possible Program slots.",
+        return {"Sample (SBNK) Program-link bitmap maps to multiple possible Program slots.",
                 "Use this as bitmap consistency data only until the Program target is disambiguated."};
     return {"Relationship has ambiguous candidate targets.",
             "Inspect candidate set before using for authoritative placement."};
@@ -629,7 +630,7 @@ std::pair<std::string, std::string> missing_relationship_message(const axk::Rela
                 "Inspect the Program assignment and source object group; user-facing info may show an unresolved "
                 "placeholder instead of a normal Program child."};
     if (row.assignment_state == axk::AssignmentState::visible_off) {
-        const auto expected = row.type == "PROG_ASSIGNMENT_TO_SBAC" ? "sample-bank group" : "sample-bank";
+        const auto expected = row.type == "PROG_ASSIGNMENT_TO_SBAC" ? "Sample Bank (SBAC)" : "Sample (SBNK)";
         return {std::format("Visible/off Program assignment row names a missing local {} target; this is decoded "
                             "Program inventory, not active Program content loss.",
                             expected),
@@ -641,8 +642,8 @@ std::pair<std::string, std::string> missing_relationship_message(const axk::Rela
                 "Keep the selector as diagnostic source data until sampler-loaded placement or another public rule "
                 "proves a target."};
     if (row.type.starts_with("SBNK_") && row.type.ends_with("_TO_SMPL"))
-        return {"Sample-bank member link does not resolve to a physical waveform target.",
-                "Inspect the object group before treating this sample-bank member as complete."};
+        return {"Sample (SBNK) link does not resolve to a Wave Data (SMPL) target.",
+                "Inspect the object group before treating this Sample as complete."};
     return {"Relationship target could not be resolved.",
             "Inspect the relationship row and decoded source object before treating the target as present."};
 }
@@ -739,21 +740,20 @@ std::vector<axk::ReportRow> validate_media_details(const ValidationSource &sourc
                 active_summary += std::format("; +{} more", labels.size() - 4U);
             issues.push_back(media_validation_issue(
                 source, "error", "REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING",
-                std::format("{} sample-bank member link(s) across {} sample bank(s) do not resolve to physical sample "
-                            "objects and are reachable from active Program assignments.",
+                std::format("{} Sample-to-Wave-Data link(s) across {} Sample(s) do not resolve to Wave Data objects "
+                            "and are reachable from active Program assignments.",
                             member_count, bank_count),
                 "relationship", std::format("{} | {}", group.first, active_summary), *source_keys.begin(), "Unknown",
                 "SBNK member target aggregation",
-                "Treat the affected Program/sample-bank path as incomplete until the missing physical sample objects "
-                "are found or the source is confirmed partially loadable."));
+                "Treat the affected Program/Sample path as incomplete until the missing Wave Data objects are found "
+                "or the source is confirmed partially loadable."));
         } else {
             issues.push_back(media_validation_issue(
                 source, "warning", "REL_SBNK_MEMBER_TARGET_MISSING",
-                std::format("{} sample-bank member link(s) across {} sample bank(s) do not resolve to physical sample "
-                            "objects.",
+                std::format("{} Sample-to-Wave-Data link(s) across {} Sample(s) do not resolve to Wave Data objects.",
                             member_count, bank_count),
                 "relationship", group.first, *source_keys.begin(), "Unknown", "SBNK member target aggregation",
-                "Inspect the sample-bank member links before treating this object group as complete."));
+                "Inspect the Sample-to-Wave-Data links before treating this object set as complete."));
         }
     }
     for (const auto &row : source.graph.relationships) {

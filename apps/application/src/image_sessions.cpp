@@ -245,6 +245,7 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
         item.type = object.object.header.raw_type;
         item.name = object.object.header.name;
         item.format = object_format_name(object.object.format);
+        item.stored_size_bytes = session->descriptors_by_id.at(item.id).size;
         if (object.placement) {
             item.partition_index = object.partition.value;
             item.partition_name = object.placement->partition_name;

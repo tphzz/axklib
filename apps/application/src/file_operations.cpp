@@ -22,6 +22,7 @@
 #include "axklib/relationship.hpp"
 #include "axklib/report.hpp"
 #include "axklib/semantic.hpp"
+#include "axklib/terminology.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 
@@ -462,6 +463,10 @@ std::string first_media_object_directory(const LoadedSource &source, const axk::
 }
 
 std::string selector_component(const LoadedSource &source, const axk::ContentNode &node) {
+    if (node.node_id == axk::sample_structure_category_id)
+        return std::string{axk::sample_structure_selector_component};
+    if (node.node_id == axk::wave_data_category_id)
+        return std::string{axk::wave_data_selector_component};
     if (source.media.kind() == axk::MediaKind::sfs)
         return sfs_selector_component(node);
     if (node.node_type == "partition" || node.node_type == "volume") {
@@ -1667,7 +1672,7 @@ axk::app::Result<Json> execute_orphans(const axk::app::Sandbox &sandbox, const J
             return std::unexpected(source.error());
         const auto *container = std::get_if<axk::Container>(&source->media.storage());
         if (container == nullptr) {
-            return std::unexpected(operation_error("unsupported_media", "waveform orphan analysis requires SFS media",
+            return std::unexpected(operation_error("unsupported_media", "Wave Data orphan analysis requires SFS media",
                                                    source_ref.relative_path));
         }
         const auto report = axk::analyze_waveform_orphans(*container, source->inventory.catalog, source->graph);
@@ -1965,7 +1970,7 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
                     if (object == source.inventory.objects.end()) {
                         return std::unexpected{axk::make_error(axk::ErrorCode::object_malformed,
                                                                axk::ErrorCategory::object,
-                                                               "waveform object payload is unavailable")};
+                                                               "Wave Data object payload is unavailable")};
                     }
                     return axk::decode_waveform(item, object->logical_path);
                 }();

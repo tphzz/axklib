@@ -9,9 +9,9 @@ object files, and directory scans.
 flowchart TD
   container[Container reader] --> object[AxklibObject]
   object --> header[Shared object header]
-  header --> smpl[SMPL waveform]
-  header --> sbnk[SBNK sample bank]
-  header --> sbac[SBAC sample bank group]
+  header --> smpl[SMPL Wave Data]
+  header --> sbnk[SBNK Sample]
+  header --> sbac[SBAC Sample Bank]
   header --> prog[PROG program]
   header --> sequ[SEQU sequence]
   header --> prf3[PRF3 profile]
@@ -52,9 +52,9 @@ some helper functions and as fallback display names by user-facing renderers.
 
 | Type | Public role |
 | --- | --- |
-| `SMPL` | Physical waveform storage object. Exact mono WAV export reads this level. |
-| `SBNK` | Sample Bank or member object. Stores sampler-visible member parameters and links to physical waveform storage. |
-| `SBAC` | Sample Bank Group object. User-facing trees render it as `B <name>`. |
+| `SMPL` | Wave Data storage object. Exact mono WAV export reads this level. |
+| `SBNK` | Sampler-visible Sample object. Stores Sample parameters and links to Wave Data storage. |
+| `SBAC` | Sampler-visible Sample Bank object. User-facing trees render it as `B <name>`. |
 | `PROG` | Program object, Program display name, effects, controller data, and assignment rows. |
 | `SEQU` | Sequence object. Currently surfaced as an object identity and tree entry. |
 | `PRF3` | Profile/preference-style object. Currently surfaced as an object identity; type-specific fields are not public yet. |
@@ -100,10 +100,10 @@ Container-specific placement metadata is documented in the format pages:
 | FAT12 floppy | FAT filename, root directory offset, first cluster, cluster count, file size, object offset. |
 | CD-ROM ISO | raw ISO path, group/volume labels, extent sector, data offset, file size, loader-quality fields. |
 
-## SMPL: Physical Waveform Object
+## SMPL: Wave Data Object
 
-`SMPL` objects are the physical waveform-storage level. Exact export writes one
-mono WAV per decoded physical `SMPL` object. Stereo rendering is a separate
+`SMPL` objects are the Wave Data storage level. Exact export writes one mono
+WAV per decoded `SMPL` object. Stereo rendering is a separate
 operation driven by `SBNK` relationships.
 
 Current compact metadata fields:
@@ -166,10 +166,10 @@ When the alternating-byte compatibility pattern is detected, audio APIs set
 8-bit PCM. This is a read/export compatibility path; it is not a normal
 write-support format.
 
-## SBNK: Sample Bank Or Member Object
+## SBNK: Sample Object
 
-`SBNK` objects are sampler-visible sample-bank/member objects. They link to
-physical waveform storage and carry most sample/member parameters.
+`SBNK` objects are sampler-visible Samples. They link to Wave Data storage and
+carry most Sample parameters.
 
 ### Member Link Fields
 
@@ -354,10 +354,10 @@ record_offset = 0x0a8 + 0xbc + (record_index - 1) * 4
 
 Each record stores `device_u8`, `function_u8`, `type_u8`, and signed `range_s8`.
 
-## SBAC: Sample Bank Group Object
+## SBAC: Sample Bank Object
 
-`SBAC` objects are shown as `B <name>` Sample Bank Groups in user-facing trees.
-They contain member rows that point by name to `SBNK` objects.
+`SBAC` objects are shown as `B <name>` Sample Banks in user-facing trees. They
+contain member rows that point by name to Sample (`SBNK`) objects.
 
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
@@ -499,7 +499,7 @@ Assignment kind byte mapping currently used for read-side relationship matching:
 | Kind byte | Target category |
 | ---: | --- |
 | `0x10` | `SBNK` direct assignment target |
-| `0x11` | `SBAC` Sample Bank Group target |
+| `0x11` | `SBAC` Sample Bank target |
 
 Rch Assign display family:
 
@@ -552,11 +552,11 @@ The shared relationship graph connects decoded objects:
 
 | Relationship | Meaning |
 | --- | --- |
-| `PROG_ASSIGNMENT_TO_SBAC` | Program assignment to a visible `B <sample bank group>` parent. |
-| `PROG_ASSIGNMENT_TO_SBNK` | Program assignment directly to a Sample Bank or member. |
-| `SBAC_SLOT_TO_SBNK` | Sample Bank Group member row. |
-| `SBNK_LEFT_MEMBER_TO_SMPL` | Left member waveform-storage link. |
-| `SBNK_RIGHT_MEMBER_TO_SMPL` | Right member waveform-storage link. |
+| `PROG_ASSIGNMENT_TO_SBAC` | Program assignment to a visible `B <Sample Bank>` parent. |
+| `PROG_ASSIGNMENT_TO_SBNK` | Program assignment directly to a Sample. |
+| `SBAC_SLOT_TO_SBNK` | Sample Bank-to-Sample member row. |
+| `SBNK_LEFT_MEMBER_TO_SMPL` | Left member Wave Data storage link. |
+| `SBNK_RIGHT_MEMBER_TO_SMPL` | Right member Wave Data storage link. |
 
 Relationship row fields are documented in [Report Schemas](report-schemas.md).
 
@@ -566,7 +566,7 @@ Exact export keeps physical and rendered audio separate:
 
 | Output | Source level | Meaning |
 | --- | --- | --- |
-| `_samples/physical/*.wav` | `SMPL` | Exact mono physical waveform export. |
+| `_samples/physical/*.wav` | `SMPL` | Exact mono Wave Data export. |
 | `_samples/rendered/*.wav` | linked `SBNK` pair | Interleaved stereo render when left/right members are compatible. |
 | optional selection graph JSON | objects and relationships | Scoped graph metadata for objects, relationships, WAV references, quality labels, and diagnostics. |
 

@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/application/image_sessions.hpp"
+#include "axklib/media.hpp"
 
 namespace {
 
@@ -64,6 +65,29 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
             EXPECT_TRUE(item.object_id->starts_with("object-"));
         }
     }
+}
+
+TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {
+    const auto media = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(media) << media.error().message;
+    const auto inventory = axk::build_media_inventory(*media, axk::MediaObjectReadMode::decoded_metadata);
+    ASSERT_TRUE(inventory) << inventory.error().message;
+    const auto catalog_object = std::ranges::find_if(
+        inventory->catalog.objects, [](const auto &item) { return item.object.header.raw_type == "SMPL"; });
+    ASSERT_NE(catalog_object, inventory->catalog.objects.end());
+    const auto descriptor =
+        std::ranges::find(inventory->objects, catalog_object->key, &axk::MediaObjectDescriptor::key);
+    ASSERT_NE(descriptor, inventory->objects.end());
+
+    axk::app::ImageSessionManager sessions{*sandbox_};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = sessions.objects(opened->image_id, "owner-a", 100U, std::nullopt, "SMPL");
+    ASSERT_TRUE(objects) << objects.error().message;
+    const auto object =
+        std::ranges::find(objects->items, catalog_object->object.header.name, &axk::app::ImageObjectItem::name);
+    ASSERT_NE(object, objects->items.end());
+    EXPECT_EQ(object->stored_size_bytes, descriptor->size);
 }
 
 TEST_F(ImageSessionTest, TracksWorkspaceUseUntilTheLastSessionCloses) {

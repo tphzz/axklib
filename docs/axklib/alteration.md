@@ -9,8 +9,8 @@ Supported operations are:
 
 - insert and delete volume;
 - insert, delete, and rename waveform;
-- insert, delete, and rename sample bank (`SBNK`);
-- insert, delete, and rename sample-bank group (`SBAC`);
+- insert, delete, and rename Sample (`SBNK`);
+- insert, delete, and rename Sample Bank (`SBAC`);
 - insert and delete Program.
 
 Waveform insertion uses the same WAV, FLAC, and AIFF conversion pipeline as fresh
@@ -19,7 +19,7 @@ reference the newly inserted waveform name. Stereo sources become two physical
 mono waveform records when two `waveform_names` are supplied.
 
 Deletion is conservative. A sample bank cannot be deleted while a Program or
-sample-bank group references it. A waveform can be deleted only when exact
+Sample Bank references it. Wave Data can be deleted only when exact
 current-format ownership classifies it as known and unreferenced. Program and
 sample-bank-group operations require their raw assignments, group flags, Program
 bitmaps, and decoded relationships to agree.

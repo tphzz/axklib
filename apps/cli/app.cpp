@@ -167,15 +167,15 @@ int axk::cli::run(int argc, char **argv) {
     axk::cli::CorpusAuditRequest corpus_request;
     auto *corpus = app.add_subcommand("corpus", "run corpus-level workflows");
     auto *corpus_audit =
-        corpus->add_subcommand("audit", "run inventory, validation, relationship, and waveform smoke checks");
+        corpus->add_subcommand("audit", "run inventory, validation, relationship, and Wave Data smoke checks");
     corpus_audit->add_option("paths", corpus_request.paths, "input files or directories")->required()->expected(1, -1);
     corpus_audit->add_option("-o,--output-dir", corpus_request.output_directory, "directory for corpus audit reports")
         ->required();
     corpus_audit->add_option("--policy", corpus_request.policy, "validation policy")
         ->check(CLI::IsMember({"normal", "strict", "salvage-aware"}));
     corpus_audit->add_option("--wave-smoke-limit", corpus_request.wave_smoke_limit,
-                             "maximum decoded waveforms counted per container");
-    corpus_audit->add_flag("--skip-wave-smoke", corpus_request.skip_wave_smoke, "skip waveform decode checks");
+                             "maximum decoded Wave Data objects counted per container");
+    corpus_audit->add_flag("--skip-wave-smoke", corpus_request.skip_wave_smoke, "skip Wave Data decode checks");
     corpus_audit->add_flag("--overwrite", corpus_request.overwrite, "allow writing into a non-empty output directory");
 
     axk::cli::ExtractRequest extract_wav_request;
@@ -252,7 +252,7 @@ int axk::cli::run(int argc, char **argv) {
                              "atomically replace an existing output image");
 
     axk::cli::OrphansRequest orphans_request;
-    auto *orphans = app.add_subcommand("orphans", "classify physical waveform ownership as JSON");
+    auto *orphans = app.add_subcommand("orphans", "classify Wave Data (SMPL) ownership as JSON");
     orphans->add_option("paths", orphans_request.paths, "input HDS image paths")->required()->expected(1, -1);
     orphans->add_option("-o,--output-dir", orphans_request.output_directory, "directory for orphan reports")
         ->required();
