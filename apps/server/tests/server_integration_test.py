@@ -1327,6 +1327,31 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 port, "GET", f"/api/v1/images/{image_id}/relationships?limit=2"
             )
             assert status == 200 and relationships["data"]["items"], relationships
+            assert all(
+                "receiveChannelDisplay" in item
+                for item in relationships["data"]["items"]
+            ), relationships
+            first_relationship = relationships["data"]["items"][0]
+            relationship_query = urlencode(
+                {
+                    "limit": 100,
+                    "sourceObjectId": first_relationship["sourceObjectId"],
+                    "type": first_relationship["type"],
+                }
+            )
+            status, filtered_relationships = http_request(
+                port,
+                "GET",
+                f"/api/v1/images/{image_id}/relationships?{relationship_query}",
+            )
+            assert status == 200 and filtered_relationships["data"]["items"], (
+                filtered_relationships
+            )
+            assert all(
+                item["sourceObjectId"] == first_relationship["sourceObjectId"]
+                and item["type"] == first_relationship["type"]
+                for item in filtered_relationships["data"]["items"]
+            ), filtered_relationships
             status, validation = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/validation/issues?limit=2"
             )

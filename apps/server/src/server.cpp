@@ -1210,10 +1210,19 @@ class ServerApplication {
     }
 
     crow::response image_relationships_response(const crow::request &request, const std::string &image_id) {
+        axk::app::ImageRelationshipFilter filter;
+        if (const auto *value = request.url_params.get("scopeId"); value != nullptr && *value != '\0')
+            filter.content_scope_id = value;
+        if (const auto *value = request.url_params.get("sourceObjectId"); value != nullptr && *value != '\0')
+            filter.source_object_id = value;
+        if (const auto *value = request.url_params.get("targetObjectId"); value != nullptr && *value != '\0')
+            filter.target_object_id = value;
+        if (const auto *value = request.url_params.get("type"); value != nullptr && *value != '\0')
+            filter.relationship_type = value;
         return image_page_response<axk::app::ImageRelationshipItem>(
             request, image_id,
-            [this](auto id, auto owner, auto limit, auto cursor) {
-                return images_.relationships(id, owner, limit, cursor);
+            [this, filter](auto id, auto owner, auto limit, auto cursor) {
+                return images_.relationships(id, owner, limit, cursor, filter);
             },
             [](const axk::app::ImageRelationshipItem &item) {
                 return Json{{"id", item.id},
@@ -1226,7 +1235,8 @@ class ServerApplication {
                             {"notes", item.notes},
                             {"assignmentIndex", item.assignment_index ? Json(*item.assignment_index) : Json{}},
                             {"assignmentName", item.assignment_name},
-                            {"assignmentState", item.assignment_state}};
+                            {"assignmentState", item.assignment_state},
+                            {"receiveChannelDisplay", item.receive_channel_display}};
             });
     }
 

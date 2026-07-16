@@ -88,6 +88,14 @@ struct ImageRelationshipItem {
     std::optional<std::size_t> assignment_index;
     std::string assignment_name;
     std::string assignment_state;
+    std::string receive_channel_display;
+};
+
+struct ImageRelationshipFilter {
+    std::optional<std::string_view> content_scope_id;
+    std::optional<std::string_view> source_object_id;
+    std::optional<std::string_view> target_object_id;
+    std::optional<std::string_view> relationship_type;
 };
 
 struct ImageValidationItem {
@@ -144,7 +152,7 @@ class ImageSessionManager {
             std::optional<std::string_view> content_scope_id = std::nullopt);
     [[nodiscard]] Result<ImagePage<ImageRelationshipItem>>
     relationships(std::string_view image_id, std::string_view owner_id, std::size_t limit,
-                  std::optional<std::string_view> cursor = std::nullopt);
+                  std::optional<std::string_view> cursor = std::nullopt, ImageRelationshipFilter filter = {});
     [[nodiscard]] Result<ImagePage<ImageValidationItem>>
     validation_issues(std::string_view image_id, std::string_view owner_id, std::size_t limit,
                       std::optional<std::string_view> cursor = std::nullopt);

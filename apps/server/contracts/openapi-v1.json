@@ -1489,6 +1489,123 @@
         ],
         "type": "object"
       },
+      "ImageRelationshipItem": {
+        "additionalProperties": false,
+        "properties": {
+          "assignmentIndex": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "assignmentName": {
+            "type": "string"
+          },
+          "assignmentState": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string"
+          },
+          "candidateObjectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "receiveChannelDisplay": {
+            "type": "string"
+          },
+          "sourceObjectId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "targetObjectId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sourceObjectId",
+          "targetObjectId",
+          "candidateObjectIds",
+          "type",
+          "quality",
+          "basis",
+          "notes",
+          "assignmentIndex",
+          "assignmentName",
+          "assignmentState",
+          "receiveChannelDisplay"
+        ],
+        "type": "object"
+      },
+      "ImageRelationshipPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImageRelationshipItem"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalCount": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "totalCount",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "ImageRelationshipPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImageRelationshipPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "type": "object"
+      },
       "InfoRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6956,6 +7073,13 @@
         "operationId": "images.relationships",
         "responses": {
           "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageRelationshipPageResponse"
+                }
+              }
+            },
             "description": "Bounded relationship page using session-local object IDs",
             "headers": {
               "X-Request-Id": {
@@ -6971,6 +7095,43 @@
           "name": "imageId",
           "required": true,
           "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Semantic content node whose descendant objects define the query scope.",
+          "in": "query",
+          "name": "scopeId",
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "description": "Session-local source object identifier.",
+          "in": "query",
+          "name": "sourceObjectId",
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "description": "Session-local resolved target object identifier.",
+          "in": "query",
+          "name": "targetObjectId",
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "description": "Exact relationship type.",
+          "in": "query",
+          "name": "type",
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
             "type": "string"
           }
         },

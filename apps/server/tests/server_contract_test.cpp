@@ -102,6 +102,29 @@ TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
     EXPECT_EQ(content_response, "#/components/schemas/ImageContentPageResponse");
 }
 
+TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelMetadata) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    const auto &path = document.at("paths").at("/images/{imageId}/relationships");
+    const auto &parameters = path.at("parameters");
+    for (const auto name : {"scopeId", "sourceObjectId", "targetObjectId", "type"}) {
+        const auto parameter = std::ranges::find_if(parameters, [name](const auto &candidate) {
+            return candidate.is_object() && candidate.value("name", "") == name;
+        });
+        ASSERT_NE(parameter, parameters.end()) << name;
+        EXPECT_EQ(parameter->at("in"), "query");
+        EXPECT_FALSE(parameter->value("required", false));
+        EXPECT_EQ(parameter->at("schema").at("type"), "string");
+    }
+
+    const auto &response =
+        path.at("get").at("responses").at("200").at("content").at("application/json").at("schema").at("$ref");
+    EXPECT_EQ(response, "#/components/schemas/ImageRelationshipPageResponse");
+    const auto &item = document.at("components").at("schemas").at("ImageRelationshipItem");
+    EXPECT_TRUE(std::ranges::contains(item.at("required"), "receiveChannelDisplay"));
+    EXPECT_EQ(item.at("properties").at("receiveChannelDisplay").at("type"), "string");
+}
+
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();

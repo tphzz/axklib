@@ -222,10 +222,22 @@
     "/images/{imageId}/relationships": {
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "scopeId", "in": "query", "description": "Semantic content node whose descendant objects define the query scope.", "schema": {"type": "string", "minLength": 1}},
+        {"name": "sourceObjectId", "in": "query", "description": "Session-local source object identifier.", "schema": {"type": "string", "minLength": 1}},
+        {"name": "targetObjectId", "in": "query", "description": "Session-local resolved target object identifier.", "schema": {"type": "string", "minLength": 1}},
+        {"name": "type", "in": "query", "description": "Exact relationship type.", "schema": {"type": "string", "minLength": 1, "maxLength": 64}},
         {"$ref": "#/components/parameters/PageLimit"},
         {"$ref": "#/components/parameters/PageCursor"}
       ],
-      "get": {"operationId": "images.relationships", "responses": {"200": {"description": "Bounded relationship page using session-local object IDs"}}}
+      "get": {
+        "operationId": "images.relationships",
+        "responses": {
+          "200": {
+            "description": "Bounded relationship page using session-local object IDs",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageRelationshipPageResponse"}}}
+          }
+        }
+      }
     },
     "/images/{imageId}/validation/issues": {
       "parameters": [
@@ -437,6 +449,44 @@
         "required": ["data", "meta"],
         "properties": {
           "data": {"$ref": "#/components/schemas/ImageObjectPage"},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "ImageRelationshipItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "sourceObjectId", "targetObjectId", "candidateObjectIds", "type", "quality", "basis", "notes", "assignmentIndex", "assignmentName", "assignmentState", "receiveChannelDisplay"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "sourceObjectId": {"type": "string", "minLength": 1},
+          "targetObjectId": {"type": ["string", "null"]},
+          "candidateObjectIds": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "type": {"type": "string", "minLength": 1, "maxLength": 64},
+          "quality": {"type": "string"},
+          "basis": {"type": "string"},
+          "notes": {"type": "array", "items": {"type": "string"}},
+          "assignmentIndex": {"type": ["integer", "null"], "minimum": 0},
+          "assignmentName": {"type": "string"},
+          "assignmentState": {"type": "string"},
+          "receiveChannelDisplay": {"type": "string"}
+        }
+      },
+      "ImageRelationshipPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "totalCount", "nextCursor"],
+        "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/ImageRelationshipItem"}},
+          "totalCount": {"type": "integer", "minimum": 0},
+          "nextCursor": {"type": ["string", "null"]}
+        }
+      },
+      "ImageRelationshipPageResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/ImageRelationshipPage"},
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },

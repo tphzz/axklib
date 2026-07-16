@@ -184,6 +184,60 @@ TEST_F(ImageSessionTest, FiltersObjectsByContentScopeAndBindsCursorsToTheScope) 
     EXPECT_EQ(wrong_scope.error().code, "invalid_cursor");
 }
 
+TEST_F(ImageSessionTest, FiltersRelationshipsByVolumeObjectAndTypeAndBindsCursorsToTheFilter) {
+    axk::app::ImageSessionManager sessions{*sandbox_, 4U, 100U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    const auto roots = sessions.content(opened->image_id, "owner-a", 1U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes) << volumes.error().message;
+    const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(volume, volumes->items.end());
+
+    const auto scoped = sessions.relationships(opened->image_id, "owner-a", 1U, std::nullopt,
+                                               {.content_scope_id = volume->id,
+                                                .source_object_id = std::nullopt,
+                                                .target_object_id = std::nullopt,
+                                                .relationship_type = std::nullopt});
+    ASSERT_TRUE(scoped) << scoped.error().message;
+    ASSERT_FALSE(scoped->items.empty());
+    const auto &first = scoped->items.front();
+
+    const auto combined = sessions.relationships(
+        opened->image_id, "owner-a", 100U, std::nullopt,
+        {.content_scope_id = volume->id,
+         .source_object_id = first.source_object_id,
+         .target_object_id =
+             first.target_object_id ? std::optional<std::string_view>{*first.target_object_id} : std::nullopt,
+         .relationship_type = first.type});
+    ASSERT_TRUE(combined) << combined.error().message;
+    ASSERT_FALSE(combined->items.empty());
+    EXPECT_TRUE(std::ranges::all_of(combined->items, [&](const auto &item) {
+        return item.source_object_id == first.source_object_id && item.target_object_id == first.target_object_id &&
+               item.type == first.type;
+    }));
+
+    if (scoped->next_cursor) {
+        const auto wrong_filter = sessions.relationships(opened->image_id, "owner-a", 1U, *scoped->next_cursor,
+                                                         {.content_scope_id = volume->id,
+                                                          .source_object_id = std::nullopt,
+                                                          .target_object_id = std::nullopt,
+                                                          .relationship_type = first.type});
+        ASSERT_FALSE(wrong_filter);
+        EXPECT_EQ(wrong_filter.error().code, "invalid_cursor");
+    }
+
+    const auto missing = sessions.relationships(opened->image_id, "owner-a", 1U, std::nullopt,
+                                                {.content_scope_id = "content-missing",
+                                                 .source_object_id = std::nullopt,
+                                                 .target_object_id = std::nullopt,
+                                                 .relationship_type = std::nullopt});
+    ASSERT_FALSE(missing);
+    EXPECT_EQ(missing.error().code, "content_not_found");
+}
+
 TEST_F(ImageSessionTest, PagesContentByParentAndBindsCursorsToThatParent) {
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 2U};
     const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");

@@ -295,6 +295,7 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
         item.assignment_index = relationship.assignment_index;
         item.assignment_name = relationship.assignment_name;
         item.assignment_state = axk::assignment_state_name(relationship.assignment_state);
+        item.receive_channel_display = relationship.receive_channel_display;
         session->relationships.push_back(std::move(item));
     }
 
@@ -487,11 +488,46 @@ axk::app::Result<axk::app::ImagePage<axk::app::ImageObjectItem>> axk::app::Image
 
 axk::app::Result<axk::app::ImagePage<axk::app::ImageRelationshipItem>>
 axk::app::ImageSessionManager::relationships(std::string_view image_id, std::string_view owner_id, std::size_t limit,
-                                             std::optional<std::string_view> cursor) {
+                                             std::optional<std::string_view> cursor, ImageRelationshipFilter filter) {
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
-    return implementation_->page((*session)->relationships, (*session)->relationship_cursors, limit, cursor);
+    if (!filter.content_scope_id && !filter.source_object_id && !filter.target_object_id && !filter.relationship_type)
+        return implementation_->page((*session)->relationships, (*session)->relationship_cursors, limit, cursor);
+
+    const auto scope = "content:" + std::string{filter.content_scope_id.value_or("")} +
+                       "\nsource:" + std::string{filter.source_object_id.value_or("")} +
+                       "\ntarget:" + std::string{filter.target_object_id.value_or("")} +
+                       "\ntype:" + std::string{filter.relationship_type.value_or("")};
+    const std::vector<std::size_t> *content_indices = nullptr;
+    if (filter.content_scope_id) {
+        const auto found = (*session)->object_indices_by_content_scope.find(std::string{*filter.content_scope_id});
+        if (found == (*session)->object_indices_by_content_scope.end())
+            return std::unexpected(session_error("content_not_found", "content scope does not exist"));
+        content_indices = &found->second;
+    }
+
+    std::vector<std::size_t> indices;
+    indices.reserve((*session)->relationships.size());
+    for (std::size_t index = 0U; index < (*session)->relationships.size(); ++index) {
+        const auto &item = (*session)->relationships[index];
+        if (filter.source_object_id && item.source_object_id != *filter.source_object_id)
+            continue;
+        if (filter.target_object_id && (!item.target_object_id || *item.target_object_id != *filter.target_object_id))
+            continue;
+        if (filter.relationship_type && item.type != *filter.relationship_type)
+            continue;
+        if (content_indices != nullptr) {
+            const auto source = (*session)->object_indices_by_id.find(item.source_object_id);
+            if (source == (*session)->object_indices_by_id.end() ||
+                !std::ranges::binary_search(*content_indices, source->second)) {
+                continue;
+            }
+        }
+        indices.push_back(index);
+    }
+    return implementation_->page((*session)->relationships, (*session)->relationship_cursors, limit, cursor, scope,
+                                 &indices);
 }
 
 axk::app::Result<axk::app::ImagePage<axk::app::ImageValidationItem>>
