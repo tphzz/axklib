@@ -219,8 +219,18 @@ Result<std::vector<std::byte>> IsoImage::read_file(const IsoFile &file, const Ca
 
 Result<std::vector<std::byte>> IsoImage::read_file_prefix(const IsoFile &file, std::size_t maximum_bytes,
                                                           const CancellationToken &cancellation) const {
-    return detail::read_bytes(*reader_, static_cast<std::uint64_t>(file.extent_sector) * detail::iso_sector_size,
-                              std::min<std::size_t>(file.size, maximum_bytes), cancellation);
+    return read_file_range(file, 0U, std::min<std::size_t>(file.size, maximum_bytes), cancellation);
+}
+
+Result<std::vector<std::byte>> IsoImage::read_file_range(const IsoFile &file, std::uint64_t offset, std::size_t size,
+                                                         const CancellationToken &cancellation) const {
+    if (file.is_directory || offset > file.size || size > file.size - offset) {
+        return std::unexpected{detail::media_error(
+            ErrorCode::out_of_bounds, std::format("ISO file range exceeds '{}'", file.path), source_name_)};
+    }
+    return detail::read_bytes(*reader_,
+                              static_cast<std::uint64_t>(file.extent_sector) * detail::iso_sector_size + offset, size,
+                              cancellation);
 }
 
 } // namespace axk

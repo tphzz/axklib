@@ -24,18 +24,23 @@ class TemporaryDirectory {
     std::filesystem::path path_;
 };
 
-TEST(ApplicationOperations, ComposesEveryRegisteredDomainOperationWithoutTransportKnowledge) {
+TEST(ApplicationOperations, ComposesStatelessOperationsAndLeavesInteractiveSessionsToTheServer) {
     TemporaryDirectory temporary;
     const auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", temporary.path(), true}});
     ASSERT_TRUE(sandbox) << sandbox.error().message;
     axk::app::UploadStore uploads{temporary.path() / "uploads", 1024U, 1024U, 4U, 256U, std::chrono::seconds{30}};
     const auto registry = axk::app::make_application_registry(*sandbox, uploads);
     ASSERT_TRUE(registry) << registry.error().message;
-    for (const auto &entry : registry->entries())
+    for (const auto &entry : registry->entries()) {
+        if (entry.descriptor.id == "auditions.prepare") {
+            EXPECT_FALSE(entry.implemented);
+            continue;
+        }
         EXPECT_TRUE(entry.implemented) << entry.descriptor.id;
+    }
 }
 
-TEST(ApplicationOperations, ProducesTheSameCallableInventoryForEveryTransportRegistry) {
+TEST(ApplicationOperations, ProducesTheSameStatelessCallableInventoryForEveryTransportRegistry) {
     TemporaryDirectory temporary;
     const auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", temporary.path(), true}});
     ASSERT_TRUE(sandbox) << sandbox.error().message;
@@ -54,9 +59,13 @@ TEST(ApplicationOperations, ProducesTheSameCallableInventoryForEveryTransportReg
     ASSERT_EQ(first_entries.size(), second_entries.size());
     for (std::size_t index = 0; index < first_entries.size(); ++index) {
         EXPECT_EQ(first_entries[index].descriptor.id, second_entries[index].descriptor.id);
-        EXPECT_TRUE(first_entries[index].implemented) << first_entries[index].descriptor.id;
-        EXPECT_TRUE(second_entries[index].implemented) << second_entries[index].descriptor.id;
-        EXPECT_NE(first_entries[index].handler_type_hash, 0U) << first_entries[index].descriptor.id;
+        const auto interactive_session_operation = first_entries[index].descriptor.id == "auditions.prepare";
+        EXPECT_EQ(first_entries[index].implemented, !interactive_session_operation)
+            << first_entries[index].descriptor.id;
+        EXPECT_EQ(second_entries[index].implemented, !interactive_session_operation)
+            << second_entries[index].descriptor.id;
+        EXPECT_EQ(first_entries[index].handler_type_hash != 0U, !interactive_session_operation)
+            << first_entries[index].descriptor.id;
         EXPECT_EQ(first_entries[index].handler_type_hash, second_entries[index].handler_type_hash)
             << first_entries[index].descriptor.id;
     }

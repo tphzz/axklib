@@ -278,6 +278,52 @@ Result<std::vector<std::byte>> read_logical_prefix(const RandomAccessReader &ima
     return result;
 }
 
+Result<std::vector<std::byte>> read_logical_range(const RandomAccessReader &image, const Partition &partition,
+                                                  std::uint32_t sector_size, const IndexRecord &record,
+                                                  std::uint64_t requested_offset, std::size_t requested_size,
+                                                  const OpenOptions &options) {
+    if (requested_offset > record.data_size || requested_size > record.data_size - requested_offset) {
+        return std::unexpected{make_error(ErrorCode::out_of_bounds, ErrorCategory::object,
+                                          "logical SFS record range exceeds its declared size")};
+    }
+    std::vector<std::byte> result;
+    result.reserve(requested_size);
+    std::uint64_t logical_offset{};
+    for (const auto &extent : record.extents) {
+        const auto capacity = checked_multiply(extent.cluster_count,
+                                               static_cast<std::uint64_t>(sector_size) * partition.sectors_per_cluster);
+        if (!capacity || extent.byte_count > *capacity || extent.cluster_offset >= partition.cluster_count ||
+            extent.cluster_count > partition.cluster_count - extent.cluster_offset) {
+            return std::unexpected{make_error(ErrorCode::allocation_invalid_extent, ErrorCategory::allocation,
+                                              "data extent exceeds its allocation or partition")};
+        }
+        const auto extent_end = logical_offset + extent.byte_count;
+        if (requested_offset < extent_end && result.size() < requested_size) {
+            const auto within_extent = requested_offset > logical_offset ? requested_offset - logical_offset : 0U;
+            const auto available = extent.byte_count - within_extent;
+            const auto count =
+                static_cast<std::size_t>(std::min<std::uint64_t>(available, requested_size - result.size()));
+            const auto physical = cluster_offset(partition.start_sector, sector_size, partition.sectors_per_cluster,
+                                                 extent.cluster_offset);
+            if (!physical)
+                return std::unexpected{physical.error()};
+            auto part = read_bytes(image, *physical + within_extent, count, options.cancellation);
+            if (!part)
+                return std::unexpected{part.error()};
+            result.insert(result.end(), part->begin(), part->end());
+            requested_offset += count;
+        }
+        logical_offset = extent_end;
+        if (result.size() == requested_size)
+            break;
+    }
+    if (result.size() != requested_size) {
+        return std::unexpected{
+            make_error(ErrorCode::io_short_read, ErrorCategory::io, "logical SFS record range is truncated")};
+    }
+    return result;
+}
+
 std::vector<DirectoryEntry> parse_directory_entries(std::span<const std::byte> payload) {
     std::vector<DirectoryEntry> result;
     const ByteReader reader{payload};
@@ -701,6 +747,36 @@ Result<std::vector<std::byte>> Container::read_record_data(PartitionIndex partit
                                           "logical SFS record read did not produce its declared size")};
     }
     return std::move(*data);
+}
+
+Result<std::vector<std::byte>> Container::read_record_range(PartitionIndex partition_index, SfsId record_id,
+                                                            std::uint64_t offset, std::size_t size,
+                                                            const CancellationToken &cancellation) const {
+    const auto partition = std::find_if(partitions_.begin(), partitions_.end(),
+                                        [&](const Partition &item) { return item.index == partition_index; });
+    if (partition == partitions_.end()) {
+        return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                          "partition is not available in the open image")};
+    }
+    const auto record = std::find_if(partition->records.begin(), partition->records.end(),
+                                     [&](const IndexRecord &item) { return item.sfs_id == record_id; });
+    if (record == partition->records.end()) {
+        return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                          "SFS record is not available in the partition")};
+    }
+    OpenOptions options;
+    options.cancellation = cancellation;
+    auto result =
+        read_logical_range(*reader_, *partition, superblock_.sector_size_bytes, *record, offset, size, options);
+    if (!result) {
+        auto error = result.error();
+        error.context.partition_index = partition_index.value;
+        error.context.object_type = record->object_type;
+        error.context.object_name = record->object_name;
+        error.context.raw_offset = record->record_offset.value;
+        return std::unexpected{std::move(error)};
+    }
+    return result;
 }
 
 Result<SfsFreeSpace> calculate_sfs_free_space(std::uint32_t cluster_count, std::uint32_t first_payload_cluster,

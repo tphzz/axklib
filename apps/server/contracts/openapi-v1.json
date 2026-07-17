@@ -338,6 +338,96 @@
         ],
         "type": "object"
       },
+      "Audition": {
+        "additionalProperties": false,
+        "properties": {
+          "auditionId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "channels": {
+            "maximum": 2,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "frameCount": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "loopLengthFrames": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loopMode": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loopModeLabel": {
+            "type": "string"
+          },
+          "loopStartFrame": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "objectId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sampleRate": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sampleWidthBytes": {
+            "maximum": 2,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "wavSizeBytes": {
+            "minimum": 45,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "auditionId",
+          "objectId",
+          "sampleRate",
+          "channels",
+          "sampleWidthBytes",
+          "frameCount",
+          "wavSizeBytes",
+          "loopMode",
+          "loopModeLabel",
+          "loopStartFrame",
+          "loopLengthFrames",
+          "warnings"
+        ],
+        "type": "object"
+      },
+      "AuditionPrepareRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "objectId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "imageId",
+          "objectId"
+        ],
+        "type": "object"
+      },
       "Capabilities": {
         "additionalProperties": false,
         "properties": {
@@ -491,6 +581,49 @@
       "CoverageRequest": {
         "$ref": "#/components/schemas/ReportRequest"
       },
+      "CreateDirectoryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parent": {
+            "$ref": "#/components/schemas/DirectoryRef"
+          }
+        },
+        "required": [
+          "parent",
+          "name"
+        ],
+        "type": "object"
+      },
+      "DeleteEntryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "deleted": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "deleted"
+            ],
+            "type": "object"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "type": "object"
+      },
       "DirectoryRef": {
         "additionalProperties": false,
         "properties": {
@@ -511,6 +644,74 @@
       "EmptyRequest": {
         "additionalProperties": false,
         "maxProperties": 0,
+        "type": "object"
+      },
+      "EntryMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "file or directory",
+            "type": "string"
+          },
+          "relativePath": {
+            "type": "string"
+          },
+          "rootId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "writable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rootId",
+          "relativePath",
+          "kind",
+          "size",
+          "writable"
+        ],
+        "type": "object"
+      },
+      "EntryMetadataResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EntryMetadata"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "type": "object"
+      },
+      "EntryRef": {
+        "additionalProperties": false,
+        "properties": {
+          "relativePath": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rootId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "rootId",
+          "relativePath"
+        ],
         "type": "object"
       },
       "Error": {
@@ -3347,6 +3548,24 @@
         ],
         "type": "object"
       },
+      "RenameEntryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "entry": {
+            "$ref": "#/components/schemas/EntryRef"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry",
+          "name"
+        ],
+        "type": "object"
+      },
       "ReportRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4088,6 +4307,456 @@
           "alter.manifest"
         ]
       }
+    },
+    "/auditions": {
+      "post": {
+        "operationId": "auditions.prepare",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "imageId": "x",
+                    "objectId": "x"
+                  }
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/AuditionPrepareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1"
+                      }
+                    }
+                  },
+                  "warning": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1",
+                        "warnings": [
+                          {
+                            "code": "example_warning",
+                            "context": {},
+                            "message": "operation completed with a warning"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Job accepted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed or schema-invalid request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authenticated caller is not authorized",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Referenced resource does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request conflicts with current state",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Configured request limit exceeded",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported or invalid domain request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Transient server capacity exhausted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Contained internal failure",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "x-axklib-operation-descriptors": [
+          {
+            "cliCommand": null,
+            "cliParity": false,
+            "id": "auditions.prepare",
+            "mode": "job",
+            "operationClass": "read",
+            "requestSchema": "AuditionPrepareRequest",
+            "requiresIdempotency": false,
+            "resultSchema": "Audition",
+            "variant": null
+          }
+        ],
+        "x-axklib-operation-ids": [
+          "auditions.prepare"
+        ]
+      }
+    },
+    "/auditions/{auditionId}": {
+      "delete": {
+        "operationId": "auditions.delete",
+        "responses": {
+          "204": {
+            "description": "Audition released",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "auditionId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/auditions/{auditionId}/audio": {
+      "get": {
+        "operationId": "auditions.audio",
+        "responses": {
+          "200": {
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "contentEncoding": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Complete bounded virtual WAV",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "206": {
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "contentEncoding": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Virtual WAV byte range",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "416": {
+            "description": "Invalid, oversized, or missing required range",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "auditionId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "in": "header",
+          "name": "Range",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
     },
     "/corpus-audits": {
       "post": {
@@ -5227,6 +5896,110 @@
         "responses": {
           "200": {
             "description": "Sandbox entry metadata",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/filesystem/directories": {
+      "post": {
+        "operationId": "filesystem.directory.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDirectoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntryMetadataResponse"
+                }
+              }
+            },
+            "description": "Directory created without replacing an existing entry",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/filesystem/entries": {
+      "delete": {
+        "operationId": "filesystem.entry.delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "rootId",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "relativePath",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteEntryResponse"
+                }
+              }
+            },
+            "description": "Regular file or empty directory permanently deleted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "filesystem.entry.rename",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameEntryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntryMetadataResponse"
+                }
+              }
+            },
+            "description": "Entry renamed within its current directory",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"

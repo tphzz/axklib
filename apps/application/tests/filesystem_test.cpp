@@ -206,6 +206,58 @@ TEST_F(SandboxTest, RejectsSymlinksEvenWhenTheirCurrentTargetRemainsInsideTheRoo
     EXPECT_FALSE(value.resolve_output_file({"workspace", "linked-images/new.hds"}, false));
 }
 
+TEST_F(SandboxTest, CreatesRenamesAndDeletesWritableEntriesWithoutOverwriting) {
+    const auto value = sandbox();
+
+    const auto created = value.create_directory({"workspace", "images"}, "New Folder");
+    ASSERT_TRUE(created) << created.error().message;
+    EXPECT_EQ(created->relative_path, "images/New Folder");
+    EXPECT_EQ(created->kind, axk::app::DirectoryEntryKind::directory);
+    EXPECT_TRUE(std::filesystem::is_directory(root_ / "images" / "New Folder"));
+
+    const auto renamed = value.rename_entry({"workspace", "images/New Folder"}, "Renamed Folder");
+    ASSERT_TRUE(renamed) << renamed.error().message;
+    EXPECT_EQ(renamed->relative_path, "images/Renamed Folder");
+    EXPECT_FALSE(std::filesystem::exists(root_ / "images" / "New Folder"));
+    EXPECT_TRUE(std::filesystem::is_directory(root_ / "images" / "Renamed Folder"));
+
+    ASSERT_TRUE(value.delete_entry({"workspace", "images/Renamed Folder"}));
+    EXPECT_FALSE(std::filesystem::exists(root_ / "images" / "Renamed Folder"));
+    ASSERT_TRUE(value.delete_entry({"workspace", "images/alpha.hds"}));
+    EXPECT_FALSE(std::filesystem::exists(root_ / "images" / "alpha.hds"));
+}
+
+TEST_F(SandboxTest, RejectsUnsafeEntryMutationsAndPreservesExistingData) {
+    const auto value = sandbox();
+    std::ofstream(root_ / "images" / "folder" / "keep.txt") << "keep";
+
+    for (const auto &name : {"", ".", "..", "nested/name", "nested\\name", "CON", "trailing."}) {
+        const auto created = value.create_directory({"workspace", "images"}, name);
+        EXPECT_FALSE(created) << name;
+        EXPECT_EQ(created.error().code, "invalid_file_reference");
+    }
+
+    const auto collision = value.rename_entry({"workspace", "images/alpha.hds"}, "disk.hds");
+    ASSERT_FALSE(collision);
+    EXPECT_EQ(collision.error().code, "output_exists");
+    EXPECT_TRUE(std::filesystem::exists(root_ / "images" / "alpha.hds"));
+    EXPECT_EQ(std::filesystem::file_size(root_ / "images" / "disk.hds"), 5U);
+
+    const auto nonempty = value.delete_entry({"workspace", "images/folder"});
+    ASSERT_FALSE(nonempty);
+    EXPECT_EQ(nonempty.error().code, "directory_not_empty");
+    EXPECT_TRUE(std::filesystem::exists(root_ / "images" / "folder" / "keep.txt"));
+
+    EXPECT_FALSE(value.rename_entry({"workspace", ""}, "renamed-root"));
+    EXPECT_FALSE(value.delete_entry({"workspace", ""}));
+
+    const auto read_only = axk::app::Sandbox::create({{"workspace", "Workspace", root_, false}});
+    ASSERT_TRUE(read_only) << read_only.error().message;
+    EXPECT_EQ(read_only->create_directory({"workspace", "images"}, "blocked").error().code, "read_only_root");
+    EXPECT_EQ(read_only->rename_entry({"workspace", "images/alpha.hds"}, "blocked.hds").error().code, "read_only_root");
+    EXPECT_EQ(read_only->delete_entry({"workspace", "images/alpha.hds"}).error().code, "read_only_root");
+}
+
 TEST_F(SandboxTest, RequiresUniqueValidExistingDirectoryRoots) {
     auto duplicate =
         axk::app::Sandbox::create({{"workspace", "First", root_, true}, {"workspace", "Second", outside_, true}});

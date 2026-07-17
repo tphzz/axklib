@@ -955,6 +955,67 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 {"rootId": "workspace", "relativePath": "download.bin"},
             )
             assert status == 200 and metadata["data"]["size"] == 6
+            status, created_directory = http_request(
+                port,
+                "POST",
+                "/api/v1/filesystem/directories",
+                {
+                    "parent": {"rootId": "workspace", "relativePath": ""},
+                    "name": "managed",
+                },
+            )
+            assert status == 201, created_directory
+            assert created_directory["data"] == {
+                "rootId": "workspace",
+                "relativePath": "managed",
+                "kind": "directory",
+                "size": None,
+                "writable": True,
+            }
+            managed_file = root_path / "managed" / "before.txt"
+            managed_file.write_text("managed", encoding="utf-8")
+            status, renamed_entry = http_request(
+                port,
+                "PATCH",
+                "/api/v1/filesystem/entries",
+                {
+                    "entry": {
+                        "rootId": "workspace",
+                        "relativePath": "managed/before.txt",
+                    },
+                    "name": "after.txt",
+                },
+            )
+            assert status == 200, renamed_entry
+            assert renamed_entry["data"]["relativePath"] == "managed/after.txt"
+            assert not managed_file.exists()
+            assert (root_path / "managed" / "after.txt").read_text(
+                encoding="utf-8"
+            ) == "managed"
+            delete_query = urlencode(
+                {"rootId": "workspace", "relativePath": "managed"}
+            )
+            status, nonempty = http_request(
+                port, "DELETE", f"/api/v1/filesystem/entries?{delete_query}"
+            )
+            assert status == 409, nonempty
+            assert nonempty["error"]["code"] == "directory_not_empty"
+            delete_query = urlencode(
+                {"rootId": "workspace", "relativePath": "managed/after.txt"}
+            )
+            status, deleted_file = http_request(
+                port, "DELETE", f"/api/v1/filesystem/entries?{delete_query}"
+            )
+            assert status == 200 and deleted_file["data"]["deleted"] is True
+            delete_query = urlencode(
+                {"rootId": "workspace", "relativePath": "managed"}
+            )
+            status, deleted_directory = http_request(
+                port, "DELETE", f"/api/v1/filesystem/entries?{delete_query}"
+            )
+            assert (
+                status == 200 and deleted_directory["data"]["deleted"] is True
+            )
             for traversal in (
                 "../download.bin",
                 "%2e%2e/download.bin",
@@ -1258,6 +1319,14 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert status == 201, opened
             image_id = str(opened["data"]["imageId"])
+            fixture_query = urlencode(
+                {"rootId": "workspace", "relativePath": "fixture.hds"}
+            )
+            status, in_use = http_request(
+                port, "DELETE", f"/api/v1/filesystem/entries?{fixture_query}"
+            )
+            assert status == 409, in_use
+            assert in_use["error"]["code"] == "entry_in_use"
             assert opened["data"]["format"] == "sfs"
             assert opened["data"]["availableOperations"] == [
                 "images.content",
@@ -1265,6 +1334,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.relationships",
                 "images.validation.issues",
                 "images.preview",
+                "auditions.prepare",
             ]
             assert opened["data"]["objectCount"] > 0
             status, objects = http_request(
@@ -1301,6 +1371,41 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 port, "GET", f"/api/v1/images/{image_id}/preview?{preview_query}"
             )
             assert status == 200 and len(preview["data"]["bins"]) == 16, preview
+            status, submitted = http_request(
+                port,
+                "POST",
+                "/api/v1/auditions",
+                {"imageId": image_id, "objectId": waveform["id"]},
+            )
+            assert status == 202, submitted
+            audition_job = wait_for_job(
+                port, str(submitted["data"]["jobId"]), process
+            )
+            assert audition_job["state"] == "COMPLETED", audition_job
+            audition = audition_job["result"]
+            audition_id = str(audition["auditionId"])
+            assert audition["objectId"] == waveform["id"]
+            status, wav_header, headers = raw_http_request(
+                port,
+                "GET",
+                f"/api/v1/auditions/{audition_id}/audio",
+                headers={"Range": "bytes=0-43"},
+            )
+            assert status == 206 and len(wav_header) == 44, (status, headers)
+            assert wav_header[:4] == b"RIFF" and wav_header[8:12] == b"WAVE"
+            assert headers["accept-ranges"] == "bytes"
+            assert headers["content-range"].startswith("bytes 0-43/")
+            status, _, _ = raw_http_request(
+                port, "DELETE", f"/api/v1/auditions/{audition_id}"
+            )
+            assert status == 204
+            status, _, _ = raw_http_request(
+                port,
+                "GET",
+                f"/api/v1/auditions/{audition_id}/audio",
+                headers={"Range": "bytes=0-43"},
+            )
+            assert status == 404
             status, content_page = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/content?limit=2"
             )
@@ -2685,6 +2790,13 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 entry["path"] == "/api/v1/system/metrics" for entry in request_logs
             )
             assert all("?" not in entry["path"] for entry in request_logs)
+            preflight_logs = [
+                entry for entry in request_logs if entry["method"] == "OPTIONS"
+            ]
+            assert preflight_logs
+            assert all(
+                0 <= entry["durationMs"] < 10_000 for entry in preflight_logs
+            ), preflight_logs
             audit_logs = [
                 json.loads(line)
                 for line in server_output.splitlines()

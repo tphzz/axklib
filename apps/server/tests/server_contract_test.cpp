@@ -51,24 +51,32 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("paths").contains("/system/shutdown"));
     EXPECT_TRUE(document.at("paths").contains("/roots"));
     EXPECT_TRUE(document.at("paths").contains("/files/list"));
+    EXPECT_TRUE(document.at("paths").contains("/filesystem/directories"));
+    EXPECT_TRUE(document.at("paths").contains("/filesystem/entries"));
     EXPECT_TRUE(document.at("paths").contains("/images"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/content"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/objects"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/relationships"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/validation/issues"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/preview"));
+    EXPECT_TRUE(document.at("paths").contains("/auditions/{auditionId}"));
+    EXPECT_TRUE(document.at("paths").contains("/auditions/{auditionId}/audio"));
     EXPECT_TRUE(document.at("paths").contains("/jobs/{jobId}"));
     EXPECT_TRUE(document.at("paths").contains("/jobs/{jobId}/events"));
     EXPECT_TRUE(document.at("paths").contains("/event-tickets"));
     EXPECT_TRUE(document.at("paths").contains("/events"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("FileRef"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("DirectoryRef"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("EntryRef"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("EntryMetadata"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("UploadRef"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ErrorResponse"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("Job"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("JobEvent"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentItem"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentPageResponse"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionPrepareRequest"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("Audition"));
     const auto &policy = document.at("info").at("x-axklib-deprecation-policy");
     EXPECT_EQ(policy.at("minimumNoticeDays"), 180);
     EXPECT_TRUE(policy.at("removalRequiresNewApiMajor"));
@@ -128,7 +136,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 24U);
+    EXPECT_EQ(entries.size(), 25U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }

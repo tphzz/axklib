@@ -87,6 +87,7 @@ class JobManager {
                                                        std::uint64_t after_sequence) const;
     [[nodiscard]] JobRuntimeMetrics metrics() const noexcept;
     [[nodiscard]] bool root_in_use(std::string_view root_id) const;
+    [[nodiscard]] bool path_in_use(const FileRef &reference) const;
 
     [[nodiscard]] SubscriptionId subscribe(EventSink sink);
     void unsubscribe(SubscriptionId subscription_id) noexcept;

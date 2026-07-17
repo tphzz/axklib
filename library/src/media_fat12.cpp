@@ -301,19 +301,32 @@ Result<std::vector<std::byte>> FatImage::read_file(const FatFile &file, const Ca
 
 Result<std::vector<std::byte>> FatImage::read_file_prefix(const FatFile &file, std::size_t maximum_bytes,
                                                           const CancellationToken &cancellation) const {
+    return read_file_range(file, 0U, std::min<std::size_t>(file.size, maximum_bytes), cancellation);
+}
+
+Result<std::vector<std::byte>> FatImage::read_file_range(const FatFile &file, std::uint64_t offset, std::size_t size,
+                                                         const CancellationToken &cancellation) const {
+    if (offset > file.size || size > file.size - offset) {
+        return std::unexpected{detail::media_error(
+            ErrorCode::out_of_bounds, std::format("FAT file range exceeds '{}'", file.path), source_name_)};
+    }
     std::vector<std::byte> result;
-    const auto requested = std::min<std::size_t>(file.size, maximum_bytes);
-    result.reserve(requested);
-    auto remaining = requested;
-    for (const auto cluster : file.clusters) {
-        const auto take = std::min<std::size_t>(remaining, geometry_.cluster_size());
-        const auto bytes = detail::read_bytes(*reader_, fat_cluster_offset(geometry_, cluster), take, cancellation);
+    result.reserve(size);
+    auto remaining = size;
+    const auto cluster_size = geometry_.cluster_size();
+    auto cluster_index = static_cast<std::size_t>(offset / cluster_size);
+    auto within_cluster = static_cast<std::size_t>(offset % cluster_size);
+    while (remaining > 0U && cluster_index < file.clusters.size()) {
+        const auto cluster = file.clusters[cluster_index];
+        const auto take = std::min<std::size_t>(remaining, cluster_size - within_cluster);
+        const auto bytes =
+            detail::read_bytes(*reader_, fat_cluster_offset(geometry_, cluster) + within_cluster, take, cancellation);
         if (!bytes)
             return std::unexpected{bytes.error()};
         result.insert(result.end(), bytes->begin(), bytes->end());
         remaining -= take;
-        if (remaining == 0U)
-            break;
+        ++cluster_index;
+        within_cluster = 0U;
     }
     if (remaining != 0U) {
         return std::unexpected{detail::media_error(ErrorCode::container_truncated,

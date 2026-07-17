@@ -135,10 +135,14 @@ TEST(JobManager, TracksWorkspaceReferencesOnlyWhileJobsAreActive) {
         {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
     ASSERT_TRUE(submitted) << submitted.error().message;
     EXPECT_TRUE(jobs.root_in_use("workspace"));
+    EXPECT_TRUE(jobs.path_in_use({"workspace", "fixture.hds"}));
+    EXPECT_TRUE(jobs.path_in_use({"workspace", ""}));
+    EXPECT_FALSE(jobs.path_in_use({"workspace", "other.hds"}));
     EXPECT_FALSE(jobs.root_in_use("other"));
     release.store(true);
     EXPECT_EQ(wait_terminal(jobs, submitted->job_id).state, axk::app::JobState::completed);
     EXPECT_FALSE(jobs.root_in_use("workspace"));
+    EXPECT_FALSE(jobs.path_in_use({"workspace", "fixture.hds"}));
 }
 
 TEST(JobManager, RejectsQueueOverflowAndNonJobOperations) {

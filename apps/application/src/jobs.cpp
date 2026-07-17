@@ -114,6 +114,31 @@ bool references_root(const nlohmann::json &value, std::string_view root_id) {
     return false;
 }
 
+bool paths_overlap(std::string_view left, std::string_view right) {
+    const auto contains = [](std::string_view parent, std::string_view child) {
+        return parent.empty() || child == parent ||
+               (child.starts_with(parent) && child.size() > parent.size() && child[parent.size()] == '/');
+    };
+    return contains(left, right) || contains(right, left);
+}
+
+bool references_path(const nlohmann::json &value, const axk::app::FileRef &reference) {
+    if (value.is_object()) {
+        const auto root = value.find("rootId");
+        const auto path = value.find("relativePath");
+        if (root != value.end() && path != value.end() && root->is_string() && path->is_string() &&
+            root->get_ref<const std::string &>() == reference.root_id &&
+            paths_overlap(path->get_ref<const std::string &>(), reference.relative_path)) {
+            return true;
+        }
+        return std::ranges::any_of(value.items(),
+                                   [&](const auto &item) { return references_path(item.value(), reference); });
+    }
+    if (value.is_array())
+        return std::ranges::any_of(value, [&](const auto &item) { return references_path(item, reference); });
+    return false;
+}
+
 } // namespace
 
 struct axk::app::JobManager::Impl {
@@ -674,6 +699,14 @@ bool axk::app::JobManager::root_in_use(std::string_view root_id) const {
     return std::ranges::any_of(impl_->jobs, [&](const auto &entry) {
         const std::scoped_lock record_lock{entry.second->mutex};
         return !is_terminal(entry.second->state) && references_root(entry.second->request, root_id);
+    });
+}
+
+bool axk::app::JobManager::path_in_use(const FileRef &reference) const {
+    const std::scoped_lock lock{impl_->mutex};
+    return std::ranges::any_of(impl_->jobs, [&](const auto &entry) {
+        const std::scoped_lock record_lock{entry.second->mutex};
+        return !is_terminal(entry.second->state) && references_path(entry.second->request, reference);
     });
 }
 

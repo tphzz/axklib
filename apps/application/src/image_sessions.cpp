@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <limits>
 #include <mutex>
 #include <ranges>
 #include <unordered_map>
@@ -72,6 +73,14 @@ std::optional<std::string> mapped_id(const std::unordered_map<std::string, std::
     return std::nullopt;
 }
 
+bool paths_overlap(std::string_view left, std::string_view right) {
+    const auto contains = [](std::string_view parent, std::string_view child) {
+        return parent.empty() || child == parent ||
+               (child.starts_with(parent) && child.size() > parent.size() && child[parent.size()] == '/');
+    };
+    return contains(left, right) || contains(right, left);
+}
+
 } // namespace
 
 struct axk::app::ImageSessionManager::Implementation {
@@ -84,6 +93,30 @@ struct axk::app::ImageSessionManager::Implementation {
         std::mutex mutex;
         std::unordered_map<std::string, Position> positions;
         std::unordered_map<std::string, std::string> cursors;
+    };
+
+    struct PcmMember {
+        std::string object_id;
+        bool alternating_byte{};
+        std::uint16_t output_width{};
+        std::uint64_t frame_count{};
+    };
+
+    struct PcmSource {
+        std::vector<PcmMember> members;
+        std::uint32_t sample_rate{};
+        std::uint16_t sample_width{};
+        std::uint64_t frame_count{};
+        std::uint8_t loop_mode{};
+        std::string loop_mode_label;
+        std::uint64_t loop_start{};
+        std::uint64_t loop_length{};
+    };
+
+    struct AuditionEntry {
+        ImageAudition descriptor;
+        PcmSource source;
+        std::chrono::steady_clock::time_point last_access;
     };
 
     struct Session {
@@ -101,6 +134,8 @@ struct axk::app::ImageSessionManager::Implementation {
         std::vector<ImageValidationItem> validation;
         std::optional<MediaContainer> media;
         std::unordered_map<std::string, MediaObjectDescriptor> descriptors_by_id;
+        std::unordered_map<std::string, ObjectSnapshot> snapshots_by_id;
+        std::unordered_map<std::string, AuditionEntry> auditions;
         std::size_t root_count{};
         std::mutex access_mutex;
         std::chrono::steady_clock::time_point last_access;
@@ -145,6 +180,193 @@ struct axk::app::ImageSessionManager::Implementation {
         {
             const std::scoped_lock lock{result->access_mutex};
             result->last_access = clock();
+        }
+        return result;
+    }
+
+    Result<std::vector<std::byte>> read_object_range(const Session &session, std::string_view object_id,
+                                                     std::uint64_t offset, std::size_t size,
+                                                     const CancellationToken &cancellation) const {
+        const auto snapshot = session.snapshots_by_id.find(std::string{object_id});
+        const auto descriptor = session.descriptors_by_id.find(std::string{object_id});
+        if (snapshot == session.snapshots_by_id.end() || descriptor == session.descriptors_by_id.end())
+            return std::unexpected(session_error("object_not_found", "image object does not exist"));
+        if (offset > descriptor->second.size || size > descriptor->second.size - offset)
+            return std::unexpected(session_error("invalid_audio_range", "audio source range exceeds the object"));
+        if (const auto *sfs = std::get_if<Container>(&session.media->storage())) {
+            auto bytes =
+                sfs->read_record_range(snapshot->second.partition, snapshot->second.sfs_id, offset, size, cancellation);
+            if (!bytes)
+                return std::unexpected(core_error(bytes.error(), session.source));
+            return std::move(*bytes);
+        }
+        if (const auto *fat = std::get_if<FatImage>(&session.media->storage())) {
+            const auto file = std::ranges::find(fat->files(), descriptor->second.logical_path, &FatFile::path);
+            if (file == fat->files().end())
+                return std::unexpected(session_error("object_not_found", "FAT12 object file does not exist"));
+            auto bytes = fat->read_file_range(*file, offset, size, cancellation);
+            if (!bytes)
+                return std::unexpected(core_error(bytes.error(), session.source));
+            return std::move(*bytes);
+        }
+        if (const auto *iso = std::get_if<IsoImage>(&session.media->storage())) {
+            const auto file = std::ranges::find(iso->files(), descriptor->second.logical_path, &IsoFile::path);
+            if (file == iso->files().end())
+                return std::unexpected(session_error("object_not_found", "ISO object file does not exist"));
+            auto bytes = iso->read_file_range(*file, offset, size, cancellation);
+            if (!bytes)
+                return std::unexpected(core_error(bytes.error(), session.source));
+            return std::move(*bytes);
+        }
+        const auto &payload = snapshot->second.raw_payload;
+        if (offset > payload.size() || size > payload.size() - offset)
+            return std::unexpected(session_error("invalid_audio_range", "standalone object range is invalid"));
+        return std::vector<std::byte>{payload.begin() + static_cast<std::ptrdiff_t>(offset),
+                                      payload.begin() + static_cast<std::ptrdiff_t>(offset + size)};
+    }
+
+    Result<PcmMember> prepare_member(Session &session, std::string object_id,
+                                     const CancellationToken &cancellation) const {
+        const auto snapshot = session.snapshots_by_id.find(object_id);
+        if (snapshot == session.snapshots_by_id.end())
+            return std::unexpected(session_error("object_not_found", "Wave Data object does not exist"));
+        const auto *smpl = std::get_if<CurrentSmpl>(&snapshot->second.object.payload);
+        if (smpl == nullptr)
+            return std::unexpected(session_error("audition_unsupported", "audition requires SMPL Wave Data"));
+        if (smpl->sample_rate.value == 0U || smpl->stored_pcm_bytes == 0U)
+            return std::unexpected(session_error("audition_unsupported", "Wave Data contains no playable PCM"));
+        if (smpl->stored_sample_width_bytes.value != 1U && smpl->stored_sample_width_bytes.value != 2U)
+            return std::unexpected(session_error("audition_unsupported", "Wave Data sample width is unsupported"));
+        bool alternating = smpl->stored_sample_width_bytes.value == 2U && smpl->stored_pcm_bytes >= 2U;
+        constexpr std::size_t chunk_size = 64U * 1024U;
+        for (std::uint64_t offset = 0U; alternating && offset < smpl->stored_pcm_bytes; offset += chunk_size) {
+            const auto count =
+                static_cast<std::size_t>(std::min<std::uint64_t>(chunk_size, smpl->stored_pcm_bytes - offset));
+            auto bytes = read_object_range(session, object_id, smpl->stored_pcm_offset + offset, count, cancellation);
+            if (!bytes)
+                return std::unexpected(bytes.error());
+            for (std::size_t index = 1U; index < bytes->size(); index += 2U) {
+                const auto absolute = offset + index;
+                const auto expected = absolute % 4U == 1U ? 0x55U : 0xaaU;
+                if (std::to_integer<std::uint8_t>((*bytes)[index]) != expected) {
+                    alternating = false;
+                    break;
+                }
+            }
+        }
+        const auto output_width = static_cast<std::uint16_t>(alternating ? 1U : smpl->stored_sample_width_bytes.value);
+        return PcmMember{std::move(object_id), alternating, output_width,
+                         smpl->stored_pcm_bytes / smpl->stored_sample_width_bytes.value};
+    }
+
+    Result<PcmSource> prepare_source(Session &session, std::string_view object_id,
+                                     const CancellationToken &cancellation) const {
+        const auto snapshot = session.snapshots_by_id.find(std::string{object_id});
+        if (snapshot == session.snapshots_by_id.end())
+            return std::unexpected(session_error("object_not_found", "image object does not exist"));
+        std::vector<std::string> member_ids;
+        if (std::holds_alternative<CurrentSmpl>(snapshot->second.object.payload)) {
+            member_ids.emplace_back(object_id);
+        } else if (std::holds_alternative<CurrentSbnk>(snapshot->second.object.payload)) {
+            for (const auto relationship_type : {"SBNK_LEFT_MEMBER_TO_SMPL", "SBNK_RIGHT_MEMBER_TO_SMPL"}) {
+                for (const auto &relationship : session.relationships) {
+                    if (relationship.source_object_id != object_id || relationship.type != relationship_type ||
+                        !relationship.target_object_id || relationship.quality != "Known") {
+                        continue;
+                    }
+                    const auto target = session.snapshots_by_id.find(*relationship.target_object_id);
+                    if (target != session.snapshots_by_id.end() &&
+                        std::holds_alternative<CurrentSmpl>(target->second.object.payload) &&
+                        !std::ranges::contains(member_ids, *relationship.target_object_id)) {
+                        member_ids.push_back(*relationship.target_object_id);
+                    }
+                }
+            }
+            if (member_ids.empty() || member_ids.size() > 2U) {
+                return std::unexpected(
+                    session_error("audition_relationship_ambiguous",
+                                  "Sample audition requires one or two confirmed linked SMPL Wave Data objects"));
+            }
+        } else {
+            return std::unexpected(session_error("audition_unsupported", "audition requires SMPL or SBNK content"));
+        }
+
+        PcmSource source;
+        for (auto &member_id : member_ids) {
+            auto member = prepare_member(session, std::move(member_id), cancellation);
+            if (!member)
+                return std::unexpected(member.error());
+            const auto &member_snapshot = session.snapshots_by_id.at(member->object_id);
+            const auto &smpl = std::get<CurrentSmpl>(member_snapshot.object.payload);
+            if (source.members.empty()) {
+                source.sample_rate = smpl.sample_rate.value;
+                source.sample_width = member->output_width;
+                source.loop_mode = smpl.loop_mode.value;
+                source.loop_mode_label = smpl.loop_mode_label;
+                source.loop_start = smpl.loop_start_frame.value;
+                source.loop_length = smpl.loop_length_frames.value;
+            } else if (source.sample_rate != smpl.sample_rate.value || source.sample_width != member->output_width) {
+                return std::unexpected(
+                    session_error("audition_stereo_incompatible",
+                                  "linked Wave Data must have matching sample rates and decoded sample widths"));
+            }
+            source.frame_count = std::max(source.frame_count, member->frame_count);
+            source.members.push_back(std::move(*member));
+        }
+        return source;
+    }
+
+    Result<std::vector<std::byte>> read_member_pcm(Session &session, const PcmMember &member, std::uint64_t first_frame,
+                                                   std::size_t frame_count,
+                                                   const CancellationToken &cancellation) const {
+        const auto &snapshot = session.snapshots_by_id.at(member.object_id);
+        const auto &smpl = std::get<CurrentSmpl>(snapshot.object.payload);
+        if (first_frame >= member.frame_count)
+            return std::vector<std::byte>{};
+        frame_count = static_cast<std::size_t>(std::min<std::uint64_t>(frame_count, member.frame_count - first_frame));
+        const auto stored_width = smpl.stored_sample_width_bytes.value;
+        auto stored = read_object_range(session, member.object_id, smpl.stored_pcm_offset + first_frame * stored_width,
+                                        frame_count * stored_width, cancellation);
+        if (!stored)
+            return std::unexpected(stored.error());
+        if (member.alternating_byte) {
+            std::vector<std::byte> result;
+            result.reserve(frame_count);
+            for (std::size_t offset = 0U; offset < stored->size(); offset += 2U) {
+                result.push_back(
+                    static_cast<std::byte>((std::to_integer<std::uint8_t>((*stored)[offset]) + 128U) & 0xffU));
+            }
+            return result;
+        }
+        if (stored_width == 2U) {
+            for (std::size_t offset = 0U; offset < stored->size(); offset += 2U)
+                std::swap((*stored)[offset], (*stored)[offset + 1U]);
+        }
+        return stored;
+    }
+
+    Result<std::vector<std::byte>> read_pcm(Session &session, const PcmSource &source, std::uint64_t first_frame,
+                                            std::size_t frame_count, const CancellationToken &cancellation) const {
+        std::vector<std::vector<std::byte>> members;
+        members.reserve(source.members.size());
+        for (const auto &member : source.members) {
+            auto pcm = read_member_pcm(session, member, first_frame, frame_count, cancellation);
+            if (!pcm)
+                return std::unexpected(pcm.error());
+            members.push_back(std::move(*pcm));
+        }
+        const auto channels = source.members.size();
+        const auto block = channels * source.sample_width;
+        std::vector<std::byte> result(frame_count * block, source.sample_width == 1U ? std::byte{0x80} : std::byte{0});
+        for (std::size_t frame = 0U; frame < frame_count; ++frame) {
+            for (std::size_t channel = 0U; channel < channels; ++channel) {
+                const auto source_offset = frame * source.sample_width;
+                if (source_offset + source.sample_width > members[channel].size())
+                    continue;
+                const auto destination = (frame * channels + channel) * source.sample_width;
+                std::ranges::copy_n(members[channel].begin() + static_cast<std::ptrdiff_t>(source_offset),
+                                    source.sample_width, result.begin() + static_cast<std::ptrdiff_t>(destination));
+            }
         }
         return result;
     }
@@ -381,6 +603,10 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
                               issue.object_key.empty() ? std::nullopt : mapped_id(object_ids, issue.object_key));
         }
     }
+    for (auto &object : inventory->catalog.objects) {
+        const auto identifier = object_ids.at(object.key);
+        session->snapshots_by_id.emplace(identifier, std::move(object));
+    }
     session->media.emplace(std::move(*media));
 
     do {
@@ -419,7 +645,8 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
                                .source = (*session)->source,
                                .format = (*session)->format,
                                .available_operations = {"images.content", "images.objects", "images.relationships",
-                                                        "images.validation.issues", "images.preview"},
+                                                        "images.validation.issues", "images.preview",
+                                                        "auditions.prepare"},
                                .root_count = (*session)->root_count,
                                .object_count = (*session)->objects.size(),
                                .relationship_count = (*session)->relationships.size(),
@@ -551,29 +778,194 @@ bool axk::app::ImageSessionManager::root_in_use(std::string_view root_id) {
                                [&](const auto &entry) { return entry.second->source.root_id == root_id; });
 }
 
+bool axk::app::ImageSessionManager::path_in_use(const FileRef &reference) {
+    const std::scoped_lock lock{implementation_->mutex};
+    implementation_->cleanup_locked();
+    return std::ranges::any_of(implementation_->sessions, [&](const auto &entry) {
+        return entry.second->source.root_id == reference.root_id &&
+               paths_overlap(entry.second->source.relative_path, reference.relative_path);
+    });
+}
+
 axk::app::Result<axk::app::ImageWaveformPreview>
 axk::app::ImageSessionManager::preview(std::string_view image_id, std::string_view owner_id, std::string_view object_id,
                                        std::size_t bin_count, const CancellationToken &cancellation) {
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
-    if (bin_count == 0U || bin_count > implementation_->maximum_page_size)
+    if (bin_count == 0U || bin_count > 4096U)
         return std::unexpected(session_error("invalid_preview", "preview bin count is outside the configured range"));
-    const auto descriptor = (*session)->descriptors_by_id.find(std::string{object_id});
-    if (descriptor == (*session)->descriptors_by_id.end())
-        return std::unexpected(session_error("object_not_found", "image object does not exist"));
-    const auto loaded = load_media_object(*(*session)->media, descriptor->second, 64U * 1024U * 1024U, cancellation);
-    if (!loaded)
-        return std::unexpected(core_error(loaded.error(), (*session)->source));
-    const auto waveform = decode_waveform(*loaded);
-    if (!waveform)
-        return std::unexpected(core_error(waveform.error(), (*session)->source));
-    const auto envelope = build_preview_envelope(*waveform, bin_count);
-    if (!envelope)
-        return std::unexpected(core_error(envelope.error(), (*session)->source));
-    ImageWaveformPreview result{.object_id = std::string{object_id}, .frame_count = envelope->frame_count, .bins = {}};
-    result.bins.reserve(envelope->bins.size());
-    for (const auto &bin : envelope->bins)
-        result.bins.push_back({bin.minimum, bin.maximum});
+    auto source = implementation_->prepare_source(**session, object_id, cancellation);
+    if (!source)
+        return std::unexpected(source.error());
+    const auto used_bins = static_cast<std::size_t>(std::min<std::uint64_t>(bin_count, source->frame_count));
+    ImageWaveformPreview result{.object_id = std::string{object_id}, .frame_count = source->frame_count, .bins = {}};
+    result.bins.assign(used_bins, {std::numeric_limits<std::int32_t>::max(), std::numeric_limits<std::int32_t>::min()});
+    constexpr std::size_t chunk_frames = 16U * 1024U;
+    const auto channels = source->members.size();
+    for (std::uint64_t first = 0U; first < source->frame_count; first += chunk_frames) {
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(chunk_frames, source->frame_count - first));
+        auto pcm = implementation_->read_pcm(**session, *source, first, count, cancellation);
+        if (!pcm)
+            return std::unexpected(pcm.error());
+        for (std::size_t frame = 0U; frame < count; ++frame) {
+            const auto absolute_frame = first + frame;
+            const auto bin = static_cast<std::size_t>(absolute_frame * used_bins / source->frame_count);
+            for (std::size_t channel = 0U; channel < channels; ++channel) {
+                const auto offset = (frame * channels + channel) * source->sample_width;
+                std::int32_t value{};
+                if (source->sample_width == 1U) {
+                    value = std::to_integer<std::uint8_t>((*pcm)[offset]) - 128;
+                } else {
+                    const auto low = std::to_integer<std::uint8_t>((*pcm)[offset]);
+                    const auto high = std::to_integer<std::uint8_t>((*pcm)[offset + 1U]);
+                    value = static_cast<std::int16_t>(static_cast<std::uint16_t>(low | (high << 8U)));
+                }
+                result.bins[bin].minimum = std::min(result.bins[bin].minimum, value);
+                result.bins[bin].maximum = std::max(result.bins[bin].maximum, value);
+            }
+        }
+    }
     return result;
+}
+
+axk::app::Result<axk::app::ImageAudition>
+axk::app::ImageSessionManager::prepare_audition(std::string_view image_id, std::string_view owner_id,
+                                                std::string_view object_id, const CancellationToken &cancellation) {
+    const auto session = implementation_->owned(image_id, owner_id);
+    if (!session)
+        return std::unexpected(session.error());
+    auto source = implementation_->prepare_source(**session, object_id, cancellation);
+    if (!source)
+        return std::unexpected(source.error());
+    const auto data_size = source->frame_count * source->members.size() * source->sample_width;
+    if (data_size > std::numeric_limits<std::uint32_t>::max() - 36U)
+        return std::unexpected(session_error("audition_unsupported", "audition exceeds the RIFF/WAVE size limit"));
+    auto audition_id = random_identifier("audition-");
+    if (!audition_id)
+        return std::unexpected(audition_id.error());
+    ImageAudition descriptor{.audition_id = *audition_id,
+                             .object_id = std::string{object_id},
+                             .sample_rate = source->sample_rate,
+                             .channels = static_cast<std::uint16_t>(source->members.size()),
+                             .sample_width_bytes = source->sample_width,
+                             .frame_count = source->frame_count,
+                             .wav_size_bytes = 44U + data_size,
+                             .loop_mode = source->loop_mode,
+                             .loop_mode_label = source->loop_mode_label,
+                             .loop_start_frame = source->loop_start,
+                             .loop_length_frames = source->loop_length,
+                             .warnings = {}};
+    if ((source->loop_mode == 1U || source->loop_mode == 2U) &&
+        (source->loop_length == 0U || source->loop_start >= source->frame_count ||
+         source->loop_length > source->frame_count - source->loop_start)) {
+        descriptor.warnings.emplace_back("Invalid loop bounds; playback will use one-shot mode");
+    }
+    const std::scoped_lock lock{(*session)->access_mutex};
+    const auto now = implementation_->clock();
+    std::erase_if((*session)->auditions,
+                  [&](const auto &entry) { return entry.second.last_access + std::chrono::minutes{10} <= now; });
+    if ((*session)->auditions.size() >= 256U)
+        return std::unexpected(session_error("audition_capacity_exhausted", "audition capacity is exhausted", true));
+    (*session)->auditions.emplace(*audition_id, Implementation::AuditionEntry{descriptor, std::move(*source), now});
+    return descriptor;
+}
+
+axk::app::Result<axk::app::ImageAuditionRange>
+axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std::string_view owner_id,
+                                              std::uint64_t offset, std::size_t size,
+                                              const CancellationToken &cancellation) {
+    std::shared_ptr<Implementation::Session> session;
+    {
+        const std::scoped_lock lock{implementation_->mutex};
+        implementation_->cleanup_locked();
+        for (const auto &[unused, candidate] : implementation_->sessions) {
+            static_cast<void>(unused);
+            if (candidate->owner_id != owner_id)
+                continue;
+            const std::scoped_lock access_lock{candidate->access_mutex};
+            const auto found = candidate->auditions.find(std::string{audition_id});
+            if (found != candidate->auditions.end()) {
+                session = candidate;
+                break;
+            }
+        }
+    }
+    if (!session)
+        return std::unexpected(session_error("audition_not_found", "audition does not exist"));
+    const std::scoped_lock access_lock{session->access_mutex};
+    const auto found = session->auditions.find(std::string{audition_id});
+    if (found == session->auditions.end())
+        return std::unexpected(session_error("audition_not_found", "audition does not exist"));
+    auto &entry = found->second;
+    session->last_access = implementation_->clock();
+    entry.last_access = session->last_access;
+    const auto total_size = entry.descriptor.wav_size_bytes;
+    if (offset > total_size || size > total_size - offset)
+        return std::unexpected(session_error("invalid_audio_range", "audio byte range exceeds the audition"));
+
+    std::array<std::byte, 44> header{};
+    const auto write_tag = [&](std::size_t at, std::string_view text) {
+        std::ranges::transform(text, header.begin() + static_cast<std::ptrdiff_t>(at),
+                               [](char value) { return static_cast<std::byte>(value); });
+    };
+    const auto le16 = [&](std::size_t at, std::uint16_t value) {
+        header[at] = static_cast<std::byte>(value & 0xffU);
+        header[at + 1U] = static_cast<std::byte>(value >> 8U);
+    };
+    const auto le32 = [&](std::size_t at, std::uint32_t value) {
+        for (std::size_t index = 0U; index < 4U; ++index)
+            header[at + index] = static_cast<std::byte>((value >> (index * 8U)) & 0xffU);
+    };
+    const auto data_size = static_cast<std::uint32_t>(total_size - header.size());
+    const auto block = static_cast<std::uint16_t>(entry.descriptor.channels * entry.descriptor.sample_width_bytes);
+    write_tag(0U, "RIFF");
+    le32(4U, data_size + 36U);
+    write_tag(8U, "WAVEfmt ");
+    le32(16U, 16U);
+    le16(20U, 1U);
+    le16(22U, entry.descriptor.channels);
+    le32(24U, entry.descriptor.sample_rate);
+    le32(28U, entry.descriptor.sample_rate * block);
+    le16(32U, block);
+    le16(34U, static_cast<std::uint16_t>(entry.descriptor.sample_width_bytes * 8U));
+    write_tag(36U, "data");
+    le32(40U, data_size);
+
+    ImageAuditionRange result{.total_size = total_size, .bytes = {}};
+    result.bytes.reserve(size);
+    const auto header_count =
+        offset < header.size() ? static_cast<std::size_t>(std::min<std::uint64_t>(size, header.size() - offset)) : 0U;
+    if (header_count > 0U) {
+        result.bytes.insert(result.bytes.end(), header.begin() + static_cast<std::ptrdiff_t>(offset),
+                            header.begin() + static_cast<std::ptrdiff_t>(offset + header_count));
+    }
+    if (result.bytes.size() < size) {
+        const auto data_offset = offset + result.bytes.size() - header.size();
+        const auto data_count = size - result.bytes.size();
+        const auto first_frame = data_offset / block;
+        const auto first_byte = static_cast<std::size_t>(data_offset % block);
+        const auto frame_count = (first_byte + data_count + block - 1U) / block;
+        auto pcm = implementation_->read_pcm(*session, entry.source, first_frame, frame_count, cancellation);
+        if (!pcm)
+            return std::unexpected(pcm.error());
+        result.bytes.insert(result.bytes.end(), pcm->begin() + static_cast<std::ptrdiff_t>(first_byte),
+                            pcm->begin() + static_cast<std::ptrdiff_t>(first_byte + data_count));
+    }
+    return result;
+}
+
+axk::app::Result<void> axk::app::ImageSessionManager::delete_audition(std::string_view audition_id,
+                                                                      std::string_view owner_id) {
+    const std::scoped_lock lock{implementation_->mutex};
+    implementation_->cleanup_locked();
+    for (const auto &[unused, session] : implementation_->sessions) {
+        static_cast<void>(unused);
+        if (session->owner_id != owner_id)
+            continue;
+        const std::scoped_lock access_lock{session->access_mutex};
+        if (session->auditions.erase(std::string{audition_id}) != 0U)
+            return {};
+    }
+    return {};
 }

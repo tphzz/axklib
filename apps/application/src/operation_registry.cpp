@@ -191,6 +191,17 @@ const std::array descriptors{
                         {},
                         "AlterationManifestTemplateRequest",
                         "ManifestTemplateResult"},
+    OperationDescriptor{"auditions.prepare",
+                        {},
+                        HttpMethod::post,
+                        "/api/v1/auditions",
+                        ExecutionMode::job,
+                        {},
+                        "AuditionPrepareRequest",
+                        "Audition",
+                        OperationClass::read,
+                        false,
+                        false},
 };
 
 axk::app::Error registry_error(std::string code, std::string message) { return {std::move(code), std::move(message)}; }

@@ -323,12 +323,14 @@ std::string request_id(const crow::request &request) {
 struct RequestTelemetryMiddleware {
     struct context {
         std::chrono::steady_clock::time_point started;
+        bool begun{};
     };
 
     axk::server::RequestTelemetry *telemetry{};
 
     void before_handle(crow::request &, crow::response &, context &request_context) const {
         request_context.started = std::chrono::steady_clock::now();
+        request_context.begun = true;
         if (telemetry != nullptr)
             telemetry->begin_request();
     }
@@ -336,6 +338,11 @@ struct RequestTelemetryMiddleware {
     void after_handle(crow::request &request, crow::response &response, context &request_context) const {
         if (telemetry == nullptr)
             return;
+        if (!request_context.begun) {
+            request_context.started = std::chrono::steady_clock::now();
+            request_context.begun = true;
+            telemetry->begin_request();
+        }
         const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
                                                                                     request_context.started);
         telemetry->complete_request(response.code, duration);
@@ -405,7 +412,7 @@ int status_for_error(const axk::app::Error &error, int fallback = 422) {
         return 404;
     if (error.code == "upload_not_found")
         return 404;
-    if (error.code == "image_not_found")
+    if (error.code == "image_not_found" || error.code == "audition_not_found")
         return 404;
     if (error.code == "job_event_replay_expired")
         return 409;
@@ -434,6 +441,14 @@ int status_for_error(const axk::app::Error &error, int fallback = 422) {
         return 409;
     if (error.code == "output_exists")
         return 409;
+    if (error.code == "entry_not_found")
+        return 404;
+    if (error.code == "read_only_root")
+        return 403;
+    if (error.code == "directory_not_empty" || error.code == "entry_in_use")
+        return 409;
+    if (error.code == "entry_mutation_failed")
+        return 500;
     if (error.code == "operation_not_implemented")
         return 501;
     if (error.code == "invalid_request" || error.code == "invalid_page" || error.code == "invalid_cursor" ||
@@ -544,11 +559,11 @@ class ServerApplication {
           download_archives_(download_archive_directory(), config_.maximum_download_archive_total_bytes,
                              config_.maximum_download_archive_bytes, config_.maximum_download_archive_entries,
                              std::chrono::seconds{config_.download_archive_retention_seconds}),
-          registry_(prepare_registry(std::move(registry), sandbox_, uploads_)),
-          openapi_document_(axk::server::build_openapi_document(axk::server::embedded_openapi(), registry_)),
-          openapi_validator_(openapi_document_),
           images_(sandbox_, config_.maximum_image_sessions, config_.maximum_page_size,
                   std::chrono::seconds{config_.image_idle_seconds}),
+          registry_(prepare_registry(std::move(registry), sandbox_, uploads_, images_)),
+          openapi_document_(axk::server::build_openapi_document(axk::server::embedded_openapi(), registry_)),
+          openapi_validator_(openapi_document_),
           jobs_(registry_, config_.job_worker_threads, config_.write_job_worker_threads, config_.maximum_queued_jobs,
                 config_.replay_events_per_job, config_.maximum_retained_jobs,
                 std::chrono::seconds{config_.job_retention_seconds}),
@@ -641,9 +656,44 @@ class ServerApplication {
   private:
     static axk::app::OperationRegistry prepare_registry(axk::app::OperationRegistry registry,
                                                         const axk::app::Sandbox &sandbox,
-                                                        axk::app::UploadStore &uploads) {
+                                                        axk::app::UploadStore &uploads,
+                                                        axk::app::ImageSessionManager &images) {
         auto prepared = axk::app::make_application_registry(sandbox, uploads, std::move(registry));
         if (!prepared)
+            std::terminate();
+        const auto bound = prepared->bind(
+            "auditions.prepare",
+            [&images](const Json &request, const axk::app::OperationContext &context) -> axk::app::Result<Json> {
+                const auto image = request.find("imageId");
+                const auto object = request.find("objectId");
+                if (image == request.end() || object == request.end() || !image->is_string() || !object->is_string()) {
+                    return std::unexpected(axk::app::Error{"invalid_request", "imageId and objectId are required"});
+                }
+                if (context.progress != nullptr) {
+                    context.progress->report(
+                        {axk::ProgressPhase::reading, 0U, 1U, "Preparing bounded audio source", std::nullopt});
+                }
+                auto audition = images.prepare_audition(image->get_ref<const std::string &>(), context.owner_id,
+                                                        object->get_ref<const std::string &>(), context.cancellation);
+                if (!audition)
+                    return std::unexpected(audition.error());
+                if (context.progress != nullptr) {
+                    context.progress->report({axk::ProgressPhase::reading, 1U, 1U, "Audio source ready", std::nullopt});
+                }
+                return Json{{"auditionId", audition->audition_id},
+                            {"objectId", audition->object_id},
+                            {"sampleRate", audition->sample_rate},
+                            {"channels", audition->channels},
+                            {"sampleWidthBytes", audition->sample_width_bytes},
+                            {"frameCount", audition->frame_count},
+                            {"wavSizeBytes", audition->wav_size_bytes},
+                            {"loopMode", audition->loop_mode},
+                            {"loopModeLabel", audition->loop_mode_label},
+                            {"loopStartFrame", audition->loop_start_frame},
+                            {"loopLengthFrames", audition->loop_length_frames},
+                            {"warnings", audition->warnings}};
+            });
+        if (!bound)
             std::terminate();
         return std::move(*prepared);
     }
@@ -1056,6 +1106,89 @@ class ServerApplication {
                              id);
     }
 
+    Json entry_metadata_json(const axk::app::EntryMetadata &metadata) const {
+        return {{"rootId", metadata.root_id},
+                {"relativePath", metadata.relative_path},
+                {"kind", axk::app::directory_entry_kind_name(metadata.kind)},
+                {"size", metadata.size ? Json(*metadata.size) : Json{}},
+                {"writable", metadata.writable}};
+    }
+
+    bool entry_in_use(const axk::app::FileRef &reference) {
+        return images_.path_in_use(reference) || jobs_.path_in_use(reference);
+    }
+
+    crow::response create_directory_response(const crow::request &request) {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        const auto parsed = parse_json_body(request, config_);
+        if (!parsed)
+            return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
+        axk::app::DirectoryRef parent;
+        std::string name;
+        try {
+            const auto &reference = parsed->at("parent");
+            parent = {reference.at("rootId").get<std::string>(), reference.at("relativePath").get<std::string>()};
+            name = parsed->at("name").get<std::string>();
+        } catch (const Json::exception &) {
+            return error_response(400, {"invalid_request", "parent and name do not match the schema"}, id);
+        }
+        const auto relative_path = parent.relative_path.empty() ? name : parent.relative_path + '/' + name;
+        if (entry_in_use({parent.root_id, relative_path}))
+            return error_response(409, {"entry_in_use", "wait for active image and file operations to finish"}, id);
+        const auto created = sandbox_.create_directory(parent, name);
+        if (!created)
+            return error_response(status_for_error(created.error()), created.error(), id);
+        return json_response(201, {{"data", entry_metadata_json(*created)}, {"meta", {{"requestId", id}}}}, id);
+    }
+
+    crow::response rename_entry_response(const crow::request &request) {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        const auto parsed = parse_json_body(request, config_);
+        if (!parsed)
+            return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
+        axk::app::FileRef entry;
+        std::string name;
+        try {
+            const auto &reference = parsed->at("entry");
+            entry = {reference.at("rootId").get<std::string>(), reference.at("relativePath").get<std::string>()};
+            name = parsed->at("name").get<std::string>();
+        } catch (const Json::exception &) {
+            return error_response(400, {"invalid_request", "entry and name do not match the schema"}, id);
+        }
+        const auto parent = std::filesystem::path{entry.relative_path}.parent_path().generic_string();
+        const axk::app::FileRef destination{entry.root_id, parent.empty() ? name : parent + '/' + name};
+        if (entry_in_use(entry) || entry_in_use(destination))
+            return error_response(409, {"entry_in_use", "close open images and wait for active jobs before renaming"},
+                                  id);
+        const auto renamed = sandbox_.rename_entry(entry, name);
+        if (!renamed)
+            return error_response(status_for_error(renamed.error()), renamed.error(), id);
+        return json_response(200, {{"data", entry_metadata_json(*renamed)}, {"meta", {{"requestId", id}}}}, id);
+    }
+
+    crow::response delete_entry_response(const crow::request &request) {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        const auto *root_id = request.url_params.get("rootId");
+        const auto *relative_path = request.url_params.get("relativePath");
+        if (root_id == nullptr || relative_path == nullptr)
+            return error_response(400, {"invalid_request", "rootId and relativePath query parameters are required"},
+                                  id);
+        const axk::app::FileRef entry{root_id, relative_path};
+        if (entry_in_use(entry))
+            return error_response(409, {"entry_in_use", "close open images and wait for active jobs before deleting"},
+                                  id);
+        const auto deleted = sandbox_.delete_entry(entry);
+        if (!deleted)
+            return error_response(status_for_error(deleted.error()), deleted.error(), id);
+        return json_response(200, {{"data", {{"deleted", true}}}, {"meta", {{"requestId", id}}}}, id);
+    }
+
     Json image_summary_json(const axk::app::ImageSessionSummary &summary) const {
         return {{"imageId", summary.image_id},
                 {"source", {{"rootId", summary.source.root_id}, {"relativePath", summary.source.relative_path}}},
@@ -1277,6 +1410,63 @@ class ServerApplication {
               {{"objectId", preview->object_id}, {"frameCount", preview->frame_count}, {"bins", std::move(values)}}},
              {"meta", {{"requestId", id}}}},
             id);
+    }
+
+    crow::response audition_audio_response(const crow::request &request, const std::string &audition_id) {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        const auto metadata = images_.audition_range(audition_id, request_owner(request), 0U, 0U);
+        if (!metadata)
+            return error_response(status_for_error(metadata.error()), metadata.error(), id);
+        const auto total = metadata->total_size;
+        crow::response response;
+        const auto range_header = request.get_header_value("Range");
+        std::optional<ByteRange> range;
+        if (range_header.empty()) {
+            if (total > config_.maximum_download_range_bytes) {
+                response = error_response(
+                    416, {"range_required", "large audition audio must be requested with a bounded byte range"}, id);
+                response.set_header("Content-Range", "bytes */" + std::to_string(total));
+                return response;
+            }
+            range = ByteRange{0U, total};
+        } else {
+            range = parse_byte_range(range_header, total, config_.maximum_download_range_bytes);
+        }
+        if (!range) {
+            response = error_response(416, {"invalid_range", "requested audio range is invalid or too large"}, id);
+            response.set_header("Content-Range", "bytes */" + std::to_string(total));
+            return response;
+        }
+        auto bytes = images_.audition_range(audition_id, request_owner(request), range->offset,
+                                            static_cast<std::size_t>(range->length));
+        if (!bytes)
+            return error_response(status_for_error(bytes.error()), bytes.error(), id);
+        response.code = range_header.empty() ? 200 : 206;
+        response.body.assign(reinterpret_cast<const char *>(bytes->bytes.data()), bytes->bytes.size());
+        if (!range_header.empty()) {
+            response.set_header("Content-Range", "bytes " + std::to_string(range->offset) + "-" +
+                                                     std::to_string(range->offset + range->length - 1U) + "/" +
+                                                     std::to_string(total));
+        }
+        response.set_header("Content-Type", "audio/wav");
+        response.set_header("Accept-Ranges", "bytes");
+        response.set_header("Cache-Control", "no-store");
+        response.set_header("X-Request-Id", id);
+        return response;
+    }
+
+    crow::response audition_delete_response(const crow::request &request, const std::string &audition_id) {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        const auto deleted = images_.delete_audition(audition_id, request_owner(request));
+        if (!deleted)
+            return error_response(status_for_error(deleted.error()), deleted.error(), id);
+        crow::response response{204};
+        response.set_header("X-Request-Id", id);
+        return response;
     }
 
     crow::response create_upload_response(const crow::request &request) {
@@ -1779,6 +1969,14 @@ class ServerApplication {
         app_.route_dynamic("/api/v1/files/metadata")
             .methods(crow::HTTPMethod::Post)(
                 [this](const crow::request &request) { return metadata_response(request); });
+        app_.route_dynamic("/api/v1/filesystem/directories")
+            .methods(crow::HTTPMethod::Post)(
+                [this](const crow::request &request) { return create_directory_response(request); });
+        app_.route_dynamic("/api/v1/filesystem/entries")
+            .methods(crow::HTTPMethod::Patch, crow::HTTPMethod::Delete)([this](const crow::request &request) {
+                return request.method == crow::HTTPMethod::Patch ? rename_entry_response(request)
+                                                                 : delete_entry_response(request);
+            });
         app_.route_dynamic("/api/v1/files/content")(
             [this](const crow::request &request) { return download_response(request); });
         app_.route_dynamic("/api/v1/files/archive")
@@ -1816,6 +2014,14 @@ class ServerApplication {
         app_.route_dynamic("/api/v1/images/<string>/preview")(
             [this](const crow::request &request, std::string image_id) {
                 return image_preview_response(request, image_id);
+            });
+        app_.route_dynamic("/api/v1/auditions/<string>/audio")
+            .methods(crow::HTTPMethod::Get)([this](const crow::request &request, std::string audition_id) {
+                return audition_audio_response(request, audition_id);
+            });
+        app_.route_dynamic("/api/v1/auditions/<string>")
+            .methods(crow::HTTPMethod::Delete)([this](const crow::request &request, std::string audition_id) {
+                return audition_delete_response(request, audition_id);
             });
         app_.route_dynamic("/api/v1/uploads")
             .methods(crow::HTTPMethod::Post, crow::HTTPMethod::Options)([this](const crow::request &request) {
@@ -1938,10 +2144,10 @@ class ServerApplication {
     axk::app::Sandbox sandbox_;
     axk::app::UploadStore uploads_;
     axk::app::DownloadArchiveStore download_archives_;
+    axk::app::ImageSessionManager images_;
     axk::app::OperationRegistry registry_;
     Json openapi_document_;
     axk::server::OpenApiValidator openapi_validator_;
-    axk::app::ImageSessionManager images_;
     axk::app::JobManager jobs_;
     axk::server::EventTicketStore event_tickets_;
     axk::server::EventDispatcher event_dispatcher_;
@@ -1949,7 +2155,7 @@ class ServerApplication {
     std::mutex event_clients_mutex_;
     std::vector<EventClientHandle> event_clients_;
     axk::app::JobManager::SubscriptionId job_subscription_{};
-    crow::App<CorsMiddleware, RequestTelemetryMiddleware> app_;
+    crow::App<RequestTelemetryMiddleware, CorsMiddleware> app_;
     std::atomic_bool shutdown_requested_{};
     std::atomic<std::uint64_t> websocket_clients_evicted_{};
     bool state_storage_ready_{};

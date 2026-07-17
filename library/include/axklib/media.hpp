@@ -128,6 +128,9 @@ class AXK_API FatImage {
                                                            const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::vector<std::byte>> read_file_prefix(const FatFile &file, std::size_t maximum_bytes,
                                                                   const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<std::byte>> read_file_range(const FatFile &file, std::uint64_t offset,
+                                                                 std::size_t size,
+                                                                 const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::vector<MediaObject>> objects(std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                            const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::vector<MediaObject>> objects(MediaObjectReadMode mode,
@@ -162,6 +165,9 @@ class AXK_API IsoImage {
                                                            const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::vector<std::byte>> read_file_prefix(const IsoFile &file, std::size_t maximum_bytes,
                                                                   const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<std::byte>> read_file_range(const IsoFile &file, std::uint64_t offset,
+                                                                 std::size_t size,
+                                                                 const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::vector<MediaObject>> objects(std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                            const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::vector<MediaObject>> objects(MediaObjectReadMode mode,

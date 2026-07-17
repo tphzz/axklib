@@ -131,6 +131,9 @@ class AXK_API Container {
     [[nodiscard]] Result<std::vector<std::byte>> read_record_data(PartitionIndex partition, SfsId record,
                                                                   std::size_t maximum_bytes,
                                                                   const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<std::byte>> read_record_range(PartitionIndex partition, SfsId record,
+                                                                   std::uint64_t offset, std::size_t size,
+                                                                   const CancellationToken &cancellation = {}) const;
 
   private:
     std::filesystem::path source_path_;

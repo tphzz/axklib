@@ -125,6 +125,49 @@
         "responses": {"200": {"description": "Sandbox entry metadata"}}
       }
     },
+    "/filesystem/directories": {
+      "post": {
+        "operationId": "filesystem.directory.create",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateDirectoryRequest"}}}
+        },
+        "responses": {
+          "201": {
+            "description": "Directory created without replacing an existing entry",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EntryMetadataResponse"}}}
+          }
+        }
+      }
+    },
+    "/filesystem/entries": {
+      "patch": {
+        "operationId": "filesystem.entry.rename",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RenameEntryRequest"}}}
+        },
+        "responses": {
+          "200": {
+            "description": "Entry renamed within its current directory",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EntryMetadataResponse"}}}
+          }
+        }
+      },
+      "delete": {
+        "operationId": "filesystem.entry.delete",
+        "parameters": [
+          {"name": "rootId", "in": "query", "required": true, "schema": {"type": "string", "minLength": 1}},
+          {"name": "relativePath", "in": "query", "required": true, "schema": {"type": "string", "minLength": 1}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Regular file or empty directory permanently deleted",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeleteEntryResponse"}}}
+          }
+        }
+      }
+    },
     "/files/content": {
       "get": {
         "operationId": "filesystem.download",
@@ -254,6 +297,26 @@
         {"name": "bins", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1}}
       ],
       "get": {"operationId": "images.preview", "responses": {"200": {"description": "Bounded waveform min/max envelope"}}}
+    },
+    "/auditions/{auditionId}": {
+      "parameters": [
+        {"name": "auditionId", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}}
+      ],
+      "delete": {"operationId": "auditions.delete", "responses": {"204": {"description": "Audition released"}}}
+    },
+    "/auditions/{auditionId}/audio": {
+      "parameters": [
+        {"name": "auditionId", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
+        {"name": "Range", "in": "header", "schema": {"type": "string"}}
+      ],
+      "get": {
+        "operationId": "auditions.audio",
+        "responses": {
+          "200": {"description": "Complete bounded virtual WAV", "content": {"audio/wav": {"schema": {"type": "string", "contentEncoding": "binary"}}}},
+          "206": {"description": "Virtual WAV byte range", "content": {"audio/wav": {"schema": {"type": "string", "contentEncoding": "binary"}}}},
+          "416": {"description": "Invalid, oversized, or missing required range"}
+        }
+      }
     },
     "/uploads": {
       "post": {
@@ -399,6 +462,68 @@
           "relativePath": {"type": "string"}
         }
       },
+      "EntryRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rootId", "relativePath"],
+        "properties": {
+          "rootId": {"type": "string", "minLength": 1},
+          "relativePath": {"type": "string", "minLength": 1}
+        }
+      },
+      "EntryMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rootId", "relativePath", "kind", "size", "writable"],
+        "properties": {
+          "rootId": {"type": "string", "minLength": 1},
+          "relativePath": {"type": "string"},
+          "kind": {"type": "string", "description": "file or directory"},
+          "size": {"type": ["integer", "null"], "minimum": 0},
+          "writable": {"type": "boolean"}
+        }
+      },
+      "CreateDirectoryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["parent", "name"],
+        "properties": {
+          "parent": {"$ref": "#/components/schemas/DirectoryRef"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 255}
+        }
+      },
+      "RenameEntryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entry", "name"],
+        "properties": {
+          "entry": {"$ref": "#/components/schemas/EntryRef"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 255}
+        }
+      },
+      "EntryMetadataResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/EntryMetadata"},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "DeleteEntryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["deleted"],
+            "properties": {"deleted": {"type": "boolean"}}
+          },
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
       "WaveDataMetadata": {
         "type": "object",
         "additionalProperties": false,
@@ -526,6 +651,34 @@
         "properties": {
           "data": {"$ref": "#/components/schemas/ImageContentPage"},
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "AuditionPrepareRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "objectId"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "objectId": {"type": "string", "minLength": 1}
+        }
+      },
+      "Audition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["auditionId", "objectId", "sampleRate", "channels", "sampleWidthBytes", "frameCount", "wavSizeBytes", "loopMode", "loopModeLabel", "loopStartFrame", "loopLengthFrames", "warnings"],
+        "properties": {
+          "auditionId": {"type": "string", "minLength": 1},
+          "objectId": {"type": "string", "minLength": 1},
+          "sampleRate": {"type": "integer", "minimum": 1},
+          "channels": {"type": "integer", "minimum": 1, "maximum": 2},
+          "sampleWidthBytes": {"type": "integer", "minimum": 1, "maximum": 2},
+          "frameCount": {"type": "integer", "minimum": 1},
+          "wavSizeBytes": {"type": "integer", "minimum": 45},
+          "loopMode": {"type": "integer", "minimum": 0, "maximum": 255},
+          "loopModeLabel": {"type": "string"},
+          "loopStartFrame": {"type": "integer", "minimum": 0},
+          "loopLengthFrames": {"type": "integer", "minimum": 0},
+          "warnings": {"type": "array", "items": {"type": "string"}}
         }
       },
       "UploadRef": {

@@ -55,6 +55,20 @@ TEST(Iso9660Reader, LoadsYamahaScopeLabelsObjectsAndStructuredPaths) {
     EXPECT_EQ(catalog->objects.front().raw_payload, object.raw_payload);
 }
 
+TEST(Iso9660Reader, ReadsBoundedFileRanges) {
+    const auto image = axk::IsoImage::open(std::make_shared<axk::MemoryReader>(iso_fixture()), "range.iso");
+    ASSERT_TRUE(image) << image.error().message;
+    const auto file = std::ranges::find(image->files(), "GROUP/F001/F000", &axk::IsoFile::path);
+    ASSERT_NE(file, image->files().end());
+
+    const auto range = image->read_file_range(*file, 0xacU, 4U);
+    ASSERT_TRUE(range) << range.error().message;
+    EXPECT_EQ(*range, (std::vector<std::byte>{std::byte{0x12}, std::byte{0x34}, std::byte{0x56}, std::byte{0x78}}));
+    const auto invalid = image->read_file_range(*file, file->size - 2U, 4U);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, axk::ErrorCode::out_of_bounds);
+}
+
 TEST(Iso9660Reader, MetadataInventorySkipsPcmAndMatchesCompleteCatalog) {
     constexpr std::size_t object_size = 1024U * 1024U;
     auto reader = std::make_shared<CountingReader>(iso_fixture_with_large_smpl(object_size));

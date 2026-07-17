@@ -117,6 +117,26 @@ struct ImageWaveformPreview {
     std::vector<ImagePreviewBin> bins;
 };
 
+struct ImageAudition {
+    std::string audition_id;
+    std::string object_id;
+    std::uint32_t sample_rate{};
+    std::uint16_t channels{};
+    std::uint16_t sample_width_bytes{};
+    std::uint64_t frame_count{};
+    std::uint64_t wav_size_bytes{};
+    std::uint8_t loop_mode{};
+    std::string loop_mode_label;
+    std::uint64_t loop_start_frame{};
+    std::uint64_t loop_length_frames{};
+    std::vector<std::string> warnings;
+};
+
+struct ImageAuditionRange {
+    std::uint64_t total_size{};
+    std::vector<std::byte> bytes;
+};
+
 template <typename Item> struct ImagePage {
     std::vector<Item> items;
     std::size_t total_count{};
@@ -159,8 +179,16 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageWaveformPreview> preview(std::string_view image_id, std::string_view owner_id,
                                                        std::string_view object_id, std::size_t bin_count,
                                                        const CancellationToken &cancellation = {});
+    [[nodiscard]] Result<ImageAudition> prepare_audition(std::string_view image_id, std::string_view owner_id,
+                                                         std::string_view object_id,
+                                                         const CancellationToken &cancellation = {});
+    [[nodiscard]] Result<ImageAuditionRange> audition_range(std::string_view audition_id, std::string_view owner_id,
+                                                            std::uint64_t offset, std::size_t size,
+                                                            const CancellationToken &cancellation = {});
+    [[nodiscard]] Result<void> delete_audition(std::string_view audition_id, std::string_view owner_id);
     void cleanup();
     [[nodiscard]] bool root_in_use(std::string_view root_id);
+    [[nodiscard]] bool path_in_use(const FileRef &reference);
 
   private:
     struct Implementation;

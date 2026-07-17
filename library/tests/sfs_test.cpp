@@ -377,6 +377,16 @@ TEST(SfsReader, ResolvesFragmentedFortyEightExtentDirectoryAndListAllocation) {
     EXPECT_EQ(partition.allocation.reconstructed_used_cluster_count, 49U);
     EXPECT_TRUE(partition.allocation.stored_not_reconstructed.empty());
     EXPECT_TRUE(partition.allocation.reconstructed_not_stored.empty());
+
+    const auto complete = result->read_record_data(partition.index, record.sfs_id, record.data_size);
+    ASSERT_TRUE(complete) << complete.error().message;
+    const auto range = result->read_record_range(partition.index, record.sfs_id, 1U, 7U);
+    ASSERT_TRUE(range) << range.error().message;
+    ASSERT_EQ(range->size(), 7U);
+    EXPECT_TRUE(std::ranges::equal(*range, std::span{*complete}.subspan(1U, 7U)));
+    const auto invalid = result->read_record_range(partition.index, record.sfs_id, record.data_size - 2U, 4U);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, axk::ErrorCode::out_of_bounds);
 }
 
 TEST(SfsReader, ReportsContinuationCycleAndBitmapMismatchWithoutRepair) {

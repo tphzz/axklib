@@ -53,6 +53,34 @@ TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
     EXPECT_EQ(tree.issues.front().severity, "warning");
 }
 
+TEST(Fat12Reader, ReadsRangesAcrossClusterBoundaries) {
+    auto fixture = fat_fixture();
+    constexpr std::size_t object_size = 700U;
+    constexpr std::size_t root_offset = 3U * 512U;
+    constexpr std::size_t first_cluster_offset = 4U * 512U;
+    for (const auto fat_offset : {512U, 1024U}) {
+        auto fat = std::span{fixture}.subspan(fat_offset, 512U);
+        set_fat12(fat, 2U, 3U);
+        set_fat12(fat, 3U, 0xfffU);
+    }
+    le32(fixture, root_offset + 0x1cU, object_size);
+    for (std::size_t index = 0U; index < object_size; ++index)
+        fixture[first_cluster_offset + index] = static_cast<std::byte>(index & 0xffU);
+
+    const auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(fixture)), "range.ima");
+    ASSERT_TRUE(image) << image.error().message;
+    ASSERT_EQ(image->files().size(), 1U);
+
+    const auto range = image->read_file_range(image->files().front(), 508U, 12U);
+    ASSERT_TRUE(range) << range.error().message;
+    ASSERT_EQ(range->size(), 12U);
+    for (std::size_t index = 0U; index < range->size(); ++index)
+        EXPECT_EQ((*range)[index], static_cast<std::byte>((508U + index) & 0xffU));
+    const auto invalid = image->read_file_range(image->files().front(), object_size - 4U, 8U);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, axk::ErrorCode::out_of_bounds);
+}
+
 TEST(Fat12Reader, RetainsHeaderInventoryWhenOneObjectPayloadIsMalformed) {
     auto image = fat_fixture();
     be32(image, 4U * 512U + 0x1cU, 0xffffffffU);

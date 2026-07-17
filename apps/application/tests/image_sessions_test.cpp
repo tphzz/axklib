@@ -46,7 +46,7 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     EXPECT_EQ(opened->format, "sfs");
     EXPECT_EQ(opened->available_operations,
               (std::vector<std::string>{"images.content", "images.objects", "images.relationships",
-                                        "images.validation.issues", "images.preview"}));
+                                        "images.validation.issues", "images.preview", "auditions.prepare"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
@@ -99,6 +99,20 @@ TEST_F(ImageSessionTest, TracksWorkspaceUseUntilTheLastSessionCloses) {
     EXPECT_FALSE(sessions.root_in_use("other"));
     EXPECT_TRUE(sessions.close(opened->image_id, "owner-a"));
     EXPECT_FALSE(sessions.root_in_use("workspace"));
+}
+
+TEST_F(ImageSessionTest, TracksExactAndAncestorPathsUsedByOpenImages) {
+    axk::app::ImageSessionManager sessions{*sandbox_};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    EXPECT_TRUE(sessions.path_in_use({"workspace", "fixture.hds"}));
+    EXPECT_TRUE(sessions.path_in_use({"workspace", ""}));
+    EXPECT_FALSE(sessions.path_in_use({"workspace", "other.hds"}));
+    EXPECT_FALSE(sessions.path_in_use({"other", "fixture.hds"}));
+
+    EXPECT_TRUE(sessions.close(opened->image_id, "owner-a"));
+    EXPECT_FALSE(sessions.path_in_use({"workspace", "fixture.hds"}));
 }
 
 TEST_F(ImageSessionTest, PagesDeterministicallyAndRejectsForeignOrInvalidCursors) {
@@ -308,8 +322,75 @@ TEST_F(ImageSessionTest, BuildsBoundedPreviewForOpaqueWaveformIdentifier) {
     EXPECT_EQ(preview->object_id, waveform->id);
     EXPECT_EQ(preview->bins.size(), 32U);
     EXPECT_GT(preview->frame_count, 0U);
-    EXPECT_FALSE(sessions.preview(opened->image_id, "owner-a", waveform->id, 65U));
+    EXPECT_TRUE(sessions.preview(opened->image_id, "owner-a", waveform->id, 1024U));
+    EXPECT_FALSE(sessions.preview(opened->image_id, "owner-a", waveform->id, 4097U));
     EXPECT_FALSE(sessions.preview(opened->image_id, "owner-a", "object-unknown", 32U));
+}
+
+TEST_F(ImageSessionTest, PreparesOwnerBoundRangeReadableWavAndInvalidatesItWithTheImage) {
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(objects);
+    ASSERT_FALSE(objects->items.empty());
+
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    ASSERT_TRUE(audition) << audition.error().message;
+    EXPECT_EQ(audition->channels, 1U);
+    EXPECT_GT(audition->sample_rate, 0U);
+    EXPECT_GT(audition->frame_count, 0U);
+    EXPECT_GT(audition->wav_size_bytes, 44U);
+
+    const auto header = sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U);
+    ASSERT_TRUE(header) << header.error().message;
+    EXPECT_EQ(header->total_size, audition->wav_size_bytes);
+    ASSERT_EQ(header->bytes.size(), 44U);
+    EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data()), 4U), "RIFF");
+    EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
+
+    const auto crossing = sessions.audition_range(audition->audition_id, "owner-a", 40U, 16U);
+    ASSERT_TRUE(crossing) << crossing.error().message;
+    EXPECT_EQ(crossing->bytes.size(), 16U);
+    EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner-b", 0U, 1U));
+    EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner-a", audition->wav_size_bytes, 1U));
+
+    ASSERT_TRUE(sessions.close(opened->image_id, "owner-a"));
+    EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner-a", 0U, 1U));
+}
+
+TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(objects);
+    ASSERT_FALSE(objects->items.empty());
+
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    ASSERT_TRUE(audition) << audition.error().message;
+    EXPECT_EQ(audition->channels, 1U);
+    EXPECT_GT(audition->frame_count, 0U);
+    const auto header = sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U);
+    ASSERT_TRUE(header) << header.error().message;
+    EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
+}
+
+TEST_F(ImageSessionTest, ActiveAuditionRangesKeepTheOwningImageSessionAlive) {
+    auto now = std::chrono::steady_clock::now();
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U, std::chrono::seconds{5}, [&] { return now; }};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(objects);
+    ASSERT_FALSE(objects->items.empty());
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    ASSERT_TRUE(audition) << audition.error().message;
+
+    now += std::chrono::seconds{4};
+    ASSERT_TRUE(sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U));
+    now += std::chrono::seconds{4};
+    EXPECT_TRUE(sessions.inspect(opened->image_id, "owner-a"));
 }
 
 } // namespace

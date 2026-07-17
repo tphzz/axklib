@@ -39,6 +39,13 @@ axk::app::Error output_exists_error(std::string message, std::string_view relati
     return {"output_exists", std::move(message), std::move(context)};
 }
 
+axk::app::Error entry_error(std::string code, std::string message, std::string_view relative_path) {
+    axk::app::ErrorContext context;
+    if (!relative_path.empty())
+        context.relative_path = relative_path;
+    return {std::move(code), std::move(message), std::move(context)};
+}
+
 bool valid_root_id(std::string_view value) {
     return !value.empty() && value.size() <= 64U && std::ranges::all_of(value, [](unsigned char character) {
         return std::isalnum(character) != 0 || character == '-' || character == '_' || character == '.';
@@ -222,6 +229,15 @@ axk::app::Result<std::filesystem::path> relative_path_from_utf8(std::string_view
     return *path;
 }
 
+axk::app::Result<std::filesystem::path> entry_name_from_utf8(std::string_view value) {
+    auto name = relative_path_from_utf8(value);
+    if (!name)
+        return std::unexpected(name.error());
+    if (name->empty() || name->has_parent_path() || name->filename() != *name)
+        return std::unexpected(reference_error("entry name must be one portable path component", value));
+    return name;
+}
+
 } // namespace
 
 axk::app::Result<std::vector<axk::app::Sandbox::Root>>
@@ -293,7 +309,7 @@ axk::app::Result<std::filesystem::path> axk::app::Sandbox::resolve_existing(std:
     std::error_code error;
     const auto candidate = std::filesystem::weakly_canonical(root->canonical_path / *relative, error);
     if (error || !std::filesystem::exists(candidate, error) || error)
-        return std::unexpected(reference_error("sandbox entry does not exist", relative_path));
+        return std::unexpected(entry_error("entry_not_found", "sandbox entry does not exist", relative_path));
     if (!within(root->canonical_path, candidate))
         return std::unexpected(reference_error("sandbox entry escapes its configured root", relative_path));
     return candidate;
@@ -492,6 +508,97 @@ axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t lim
         result.next_cursor = encode_cursor(entry_key(result.entries.back()));
     }
     return result;
+}
+
+axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::create_directory(const DirectoryRef &parent,
+                                                                              std::string_view name) const {
+    const std::scoped_lock mutation_lock{state_->mutation_mutex};
+    const auto root = find_root(parent.root_id);
+    if (!root)
+        return std::unexpected(reference_error("sandbox root does not exist", parent.relative_path));
+    if (!root->info.writable)
+        return std::unexpected(entry_error("read_only_root", "sandbox root is read-only", parent.relative_path));
+    auto directory = resolve_directory(parent);
+    if (!directory)
+        return std::unexpected(directory.error());
+    auto filename = entry_name_from_utf8(name);
+    if (!filename)
+        return std::unexpected(filename.error());
+
+    const auto relative_path =
+        parent.relative_path.empty() ? std::string{name} : parent.relative_path + '/' + std::string{name};
+    const auto candidate = *directory / *filename;
+    std::error_code error;
+    const auto created = std::filesystem::create_directory(candidate, error);
+    if (error)
+        return std::unexpected(entry_error("entry_mutation_failed", "directory could not be created", relative_path));
+    if (!created)
+        return std::unexpected(output_exists_error("sandbox entry already exists", relative_path));
+    return metadata(parent.root_id, relative_path);
+}
+
+axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::rename_entry(const FileRef &reference,
+                                                                          std::string_view name) const {
+    const std::scoped_lock mutation_lock{state_->mutation_mutex};
+    const auto root = find_root(reference.root_id);
+    if (!root)
+        return std::unexpected(reference_error("sandbox root does not exist", reference.relative_path));
+    if (!root->info.writable)
+        return std::unexpected(entry_error("read_only_root", "sandbox root is read-only", reference.relative_path));
+    if (reference.relative_path.empty())
+        return std::unexpected(reference_error("sandbox roots cannot be renamed", reference.relative_path));
+    auto source = resolve_existing(reference.root_id, reference.relative_path);
+    if (!source)
+        return std::unexpected(source.error());
+    auto filename = entry_name_from_utf8(name);
+    if (!filename)
+        return std::unexpected(filename.error());
+
+    const auto parent = source->parent_path();
+    const auto destination = parent / *filename;
+    const auto parent_relative = std::filesystem::path{reference.relative_path}.parent_path().generic_string();
+    const auto relative_path = parent_relative.empty() ? std::string{name} : parent_relative + '/' + std::string{name};
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(destination, error);
+    if (error && error != std::errc::no_such_file_or_directory)
+        return std::unexpected(
+            entry_error("entry_mutation_failed", "rename target cannot be inspected", relative_path));
+    if (!error && std::filesystem::exists(status))
+        return std::unexpected(output_exists_error("sandbox entry already exists", relative_path));
+    std::filesystem::rename(*source, destination, error);
+    if (error)
+        return std::unexpected(
+            entry_error("entry_mutation_failed", "sandbox entry could not be renamed", reference.relative_path));
+    return metadata(reference.root_id, relative_path);
+}
+
+axk::app::Result<void> axk::app::Sandbox::delete_entry(const FileRef &reference) const {
+    const std::scoped_lock mutation_lock{state_->mutation_mutex};
+    const auto root = find_root(reference.root_id);
+    if (!root)
+        return std::unexpected(reference_error("sandbox root does not exist", reference.relative_path));
+    if (!root->info.writable)
+        return std::unexpected(entry_error("read_only_root", "sandbox root is read-only", reference.relative_path));
+    if (reference.relative_path.empty())
+        return std::unexpected(reference_error("sandbox roots cannot be deleted", reference.relative_path));
+    auto path = resolve_existing(reference.root_id, reference.relative_path);
+    if (!path)
+        return std::unexpected(path.error());
+
+    std::error_code error;
+    if (std::filesystem::is_directory(*path, error)) {
+        if (error)
+            return std::unexpected(
+                entry_error("entry_mutation_failed", "sandbox directory cannot be inspected", reference.relative_path));
+        if (!std::filesystem::is_empty(*path, error) || error)
+            return std::unexpected(
+                entry_error("directory_not_empty", "only empty directories can be deleted", reference.relative_path));
+    }
+    const auto removed = std::filesystem::remove(*path, error);
+    if (error || !removed)
+        return std::unexpected(
+            entry_error("entry_mutation_failed", "sandbox entry could not be deleted", reference.relative_path));
+    return {};
 }
 
 axk::app::Result<void> axk::app::Sandbox::require_distinct(const FileRef &source, const FileRef &destination) const {
