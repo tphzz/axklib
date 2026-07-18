@@ -274,6 +274,58 @@ TEST_F(WriteOperationsTest, StarterManifestsAreInlineAndHdsStarterBuildsPersiste
         registry_.invoke("create.hds", {{"planToken", planned->at("planToken").get<std::string>()}}, context()));
 }
 
+TEST_F(WriteOperationsTest, PublishesTypedHardDiskCreationProfiles) {
+    const auto result = registry_.invoke("create.hds.profiles", nlohmann::json::object(), context());
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(result->at("schemaVersion"), "1.0");
+    const auto &profiles = result->at("profiles");
+    ASSERT_EQ(profiles.size(), 5U);
+    EXPECT_EQ(profiles[0].at("profileId"), "FLOPPY_SCALE");
+    EXPECT_EQ(profiles[0].at("sizeBytes"), 1'474'560U);
+    EXPECT_EQ(profiles[0].at("defaultPartitionCount"), 1U);
+    EXPECT_EQ(profiles[0].at("partitionOptions").size(), 1U);
+    EXPECT_EQ(profiles[4].at("profileId"), "HDS_2_GIB");
+    EXPECT_EQ(profiles[4].at("defaultPartitionCount"), 2U);
+    EXPECT_EQ(profiles[4].at("partitionOptions").size(), 7U);
+}
+
+TEST_F(WriteOperationsTest, TypedHardDiskPlanUsesTheExistingAtomicBuildLifecycle) {
+    const auto planned = registry_.invoke(
+        "create.hds.plan", {{"profileId", "FLOPPY_SCALE"}, {"partitionCount", 1U}, {"output", file_ref("quick.hds")}},
+        context());
+    ASSERT_TRUE(planned) << planned.error().message;
+    EXPECT_EQ(planned->at("kind"), "HDS");
+    EXPECT_EQ(planned->at("summary").at("sizeBytes"), 1'474'560U);
+    EXPECT_EQ(planned->at("summary").at("partitionCount"), 1U);
+
+    const auto applied =
+        registry_.invoke("create.hds", {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_TRUE(std::filesystem::is_regular_file(root_ / "quick.hds"));
+    const auto reopened = axk::open_image(root_ / "quick.hds");
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    ASSERT_EQ(reopened->partitions().size(), 1U);
+    EXPECT_EQ(reopened->partitions()[0].name, "PARTITION 1");
+
+    const auto rejected = registry_.invoke(
+        "create.hds.plan", {{"profileId", "HDS_2_GIB"}, {"partitionCount", 1U}, {"output", file_ref("wasteful.hds")}},
+        context());
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, "image_operation_failed");
+    EXPECT_FALSE(std::filesystem::exists(root_ / "wasteful.hds"));
+}
+
+TEST_F(WriteOperationsTest, TypedHardDiskPlanRemainsValidAfterRegistryMove) {
+    auto moved_registry = std::move(registry_);
+    const auto planned = moved_registry.invoke(
+        "create.hds.plan", {{"profileId", "CD_R_700"}, {"partitionCount", 1U}, {"output", file_ref("moved.hds")}},
+        context());
+
+    ASSERT_TRUE(planned) << planned.error().message;
+    EXPECT_EQ(planned->at("summary").at("sizeBytes"), 737'280'000U);
+    EXPECT_EQ(planned->at("summary").at("partitionCount"), 1U);
+}
+
 TEST_F(WriteOperationsTest, StarterManifestsDescribeAndBuildEverySupportedImageKind) {
     write_tone(root_ / "tone.wav");
 

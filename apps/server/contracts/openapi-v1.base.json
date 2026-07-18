@@ -1411,6 +1411,57 @@
           "valid": {"const": true}
         }
       },
+      "HardDiskCreationPartitionOption": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partitionCount", "partitionSizeBytes", "unusedTailBytes"],
+        "properties": {
+          "partitionCount": {"type": "integer", "minimum": 1, "maximum": 8},
+          "partitionSizeBytes": {"type": "integer", "minimum": 1048576},
+          "unusedTailBytes": {"type": "integer", "minimum": 0}
+        }
+      },
+      "HardDiskCreationProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["profileId", "sizeBytes", "defaultPartitionCount", "partitionOptions"],
+        "properties": {
+          "profileId": {"enum": ["FLOPPY_SCALE", "CD_R_650", "CD_R_700", "HDS_1_GIB", "HDS_2_GIB"]},
+          "sizeBytes": {"type": "integer", "minimum": 1048576, "maximum": 2147483648},
+          "defaultPartitionCount": {"type": "integer", "minimum": 1, "maximum": 8},
+          "partitionOptions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {"$ref": "#/components/schemas/HardDiskCreationPartitionOption"}
+          }
+        }
+      },
+      "HardDiskCreationProfiles": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "profiles"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "profiles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {"$ref": "#/components/schemas/HardDiskCreationProfile"}
+          }
+        }
+      },
+      "HardDiskCreationPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["profileId", "partitionCount", "output"],
+        "properties": {
+          "profileId": {"enum": ["FLOPPY_SCALE", "CD_R_650", "CD_R_700", "HDS_1_GIB", "HDS_2_GIB"]},
+          "partitionCount": {"type": "integer", "minimum": 1, "maximum": 8},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "overwrite": {"type": "boolean", "default": false}
+        }
+      },
       "ImageBuildRequest": {"$ref": "#/components/schemas/PlanTokenRequest"},
       "ImageBuildSummary": {
         "type": "object",

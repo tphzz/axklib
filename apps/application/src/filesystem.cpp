@@ -531,7 +531,8 @@ axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::create_directory(co
     std::error_code error;
     const auto created = std::filesystem::create_directory(candidate, error);
     if (error)
-        return std::unexpected(entry_error("entry_mutation_failed", "directory could not be created", relative_path));
+        return std::unexpected(
+            entry_error("entry_mutation_failed", "Directory could not be created: " + error.message(), relative_path));
     if (!created)
         return std::unexpected(output_exists_error("sandbox entry already exists", relative_path));
     return metadata(parent.root_id, relative_path);

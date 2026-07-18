@@ -73,6 +73,42 @@ axklib info HD00_512_generated.hds
 axklib validate HD00_512_generated.hds --output-dir validation/hds
 ```
 
+## Quick Empty HDS Profiles
+
+Applications that need an empty import target do not have to duplicate HDS
+geometry rules or synthesize a manifest. `hds_creation_profiles()` publishes
+the currently admitted capacities and partition counts, and
+`plan_hds_creation()` turns one of those selections into the same validated
+`HdsBuildManifest` used by the regular writer:
+
+| Profile ID | Image size | Default partitions | Available partitions |
+| --- | ---: | ---: | --- |
+| `floppy-scale` | 1,474,560 bytes | 1 | 1 |
+| `cd-r-650` | 681,984,000 bytes | 1 | 1 through 8 |
+| `cd-r-700` | 737,280,000 bytes | 1 | 1 through 8 |
+| `hds-1-gib` | 1,073,741,824 bytes | 1 | 1 through 8 |
+| `hds-2-gib` | 2,147,483,648 bytes | 2 | 2 through 8 |
+
+Every partition starts with one empty `NEW VOLUME` volume. The 2 GiB profile
+does not offer one partition because one SFS partition cannot represent that
+capacity. Callers must use the published options instead of inferring valid
+partition counts from the total byte size.
+
+`axklib-server` exposes the same data through
+`GET /api/v1/hard-disk-creation-profiles`. A client submits the chosen profile,
+partition count, and sandboxed output file to
+`POST /api/v1/hard-disk-build-plans`, then applies the returned plan token with
+the regular image-build operation. Planning reserves and validates the output;
+publication remains atomic. The HTTP contract expresses profile IDs as wire
+enums such as `FLOPPY_SCALE` and `CD_R_700`.
+
+The floppy-scale and CD-R-scale choices are still HDS containers. They are
+useful small or removable-media-sized workspaces that can later receive
+packages and be converted through a supported transfer workflow. They are not
+empty FAT12 floppy images or ISO9660 disc images. Those media require Yamaha
+catalog/object content, so axklib does not advertise unsupported empty-media
+profiles.
+
 Generate an alteration starter separately:
 
 ```bash

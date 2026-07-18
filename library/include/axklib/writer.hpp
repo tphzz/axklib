@@ -158,6 +158,33 @@ struct HdsBuildPlanSummary {
     std::vector<PartitionGeometry> partitions;
 };
 
+enum class HdsCreationProfileId : std::uint8_t { floppy_scale, cd_r_650, cd_r_700, hds_1_gib, hds_2_gib };
+
+struct HdsCreationPartitionOption {
+    std::uint8_t partition_count{};
+    std::vector<PartitionGeometry> partitions;
+    std::uint64_t unused_tail_sectors{};
+};
+
+struct HdsCreationProfile {
+    HdsCreationProfileId id{HdsCreationProfileId::floppy_scale};
+    std::uint64_t size_bytes{};
+    std::uint8_t default_partition_count{};
+    std::vector<HdsCreationPartitionOption> partition_options;
+};
+
+struct HdsCreationRequest {
+    HdsCreationProfileId profile_id{HdsCreationProfileId::floppy_scale};
+    std::uint8_t partition_count{};
+};
+
+struct HdsCreationPlan {
+    HdsCreationProfileId profile_id{HdsCreationProfileId::floppy_scale};
+    HdsBuildManifest manifest;
+    HdsBuildPlanSummary summary;
+    std::uint64_t unused_tail_sectors{};
+};
+
 struct MediaBuildPlanSummary {
     MediaImageFormat format{MediaImageFormat::fat12_floppy};
     std::size_t object_count{};
@@ -173,6 +200,11 @@ AXK_AUDIO_API Result<std::string> serialize_build_manifest_template(BuildManifes
 AXK_AUDIO_API Result<void>
 write_build_manifest_template(BuildManifestKind kind, const std::filesystem::path &output_path, bool overwrite = false);
 AXK_AUDIO_API Result<std::vector<PartitionGeometry>> plan_hds_geometry(const HdsBuildManifest &manifest);
+AXK_AUDIO_API std::string_view hds_creation_profile_id(HdsCreationProfileId id);
+AXK_AUDIO_API Result<HdsCreationProfileId> parse_hds_creation_profile_id(std::string_view id);
+AXK_AUDIO_API const std::vector<HdsCreationProfile> &hds_creation_profiles();
+AXK_AUDIO_API Result<HdsCreationPlan> plan_hds_creation(const HdsCreationRequest &request,
+                                                        const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<HdsBuildPlanSummary> plan_hds_build(const HdsBuildManifest &manifest,
                                                          const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildManifest &manifest,

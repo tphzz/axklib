@@ -63,6 +63,18 @@ TEST_F(WorkspaceStoreTest, PersistsStableIdsAndRevalidatesUnavailableDirectories
     EXPECT_TRUE(reopened->sandbox().roots().empty());
 }
 
+TEST_F(WorkspaceStoreTest, WritableInspectionLeavesNoCheckArtifacts) {
+    auto store = axk::server::WorkspaceStore::open(store_path_);
+    ASSERT_TRUE(store) << store.error().message;
+    auto added = store->add("Samples", base_ / "one", true, 0U);
+    ASSERT_TRUE(added) << added.error().message;
+    EXPECT_TRUE(added->effective_writable);
+
+    for (const auto &entry : std::filesystem::directory_iterator(base_ / "one")) {
+        EXPECT_FALSE(entry.path().filename().string().starts_with(".axkdeck-write-check-"));
+    }
+}
+
 TEST_F(WorkspaceStoreTest, RejectsStaleMutationsAndKeepsInvalidUpdatesVisible) {
     auto store = axk::server::WorkspaceStore::open(store_path_);
     ASSERT_TRUE(store) << store.error().message;

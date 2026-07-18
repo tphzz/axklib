@@ -150,6 +150,30 @@ WritePlanKind write_plan_kind(axk::BuildManifestKind kind) {
     return WritePlanKind::hds;
 }
 
+std::string_view hds_creation_profile_wire_id(axk::HdsCreationProfileId id) {
+    switch (id) {
+    case axk::HdsCreationProfileId::floppy_scale:
+        return "FLOPPY_SCALE";
+    case axk::HdsCreationProfileId::cd_r_650:
+        return "CD_R_650";
+    case axk::HdsCreationProfileId::cd_r_700:
+        return "CD_R_700";
+    case axk::HdsCreationProfileId::hds_1_gib:
+        return "HDS_1_GIB";
+    case axk::HdsCreationProfileId::hds_2_gib:
+        return "HDS_2_GIB";
+    }
+    return {};
+}
+
+std::optional<axk::HdsCreationProfileId> parse_hds_creation_profile_wire_id(std::string_view id) {
+    for (const auto &profile : axk::hds_creation_profiles()) {
+        if (hds_creation_profile_wire_id(profile.id) == id)
+            return profile.id;
+    }
+    return std::nullopt;
+}
+
 std::string normalized_path(const std::filesystem::path &path) {
     std::error_code error;
     const auto canonical = std::filesystem::weakly_canonical(path, error);
@@ -786,119 +810,187 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
 
     auto state = std::make_shared<WriteOperationState>();
 
+    OperationRegistry::Handler create_plan_handler = [state, &sandbox, &uploads](const Json &input,
+                                                                                 const OperationContext &context) {
+        std::string kind_text;
+        try {
+            kind_text = input.at("kind").get<std::string>();
+        } catch (const Json::exception &) {
+            return Result<Json>{std::unexpected(operation_error("invalid_request", "kind is required"))};
+        }
+        auto manifest_kind = parse_build_kind(kind_text);
+        if (!manifest_kind)
+            return Result<Json>{std::unexpected(manifest_kind.error())};
+        auto output = parse_file_ref(input, "output");
+        if (!output)
+            return Result<Json>{std::unexpected(output.error())};
+        const auto overwrite = input.value("overwrite", false);
+        auto output_path = sandbox.resolve_output_file(*output, overwrite);
+        if (!output_path)
+            return Result<Json>{std::unexpected(output_path.error())};
+        auto document = load_manifest(input, context, sandbox, uploads);
+        if (!document)
+            return Result<Json>{std::unexpected(document.error())};
+
+        const auto serialized = document->json.dump();
+        Json summary;
+        std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest, axk::AlterationManifest> manifest;
+        std::vector<std::filesystem::path> required_paths;
+        if (*manifest_kind == axk::BuildManifestKind::hds) {
+            auto parsed = axk::parse_hds_build_manifest(serialized);
+            if (!parsed)
+                return Result<Json>{std::unexpected(core_error(parsed.error()))};
+            required_paths = external_paths(*parsed);
+            if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
+                return Result<Json>{std::unexpected(admitted.error())};
+            auto planned = axk::plan_hds_build(*parsed, context.cancellation);
+            if (!planned)
+                return Result<Json>{std::unexpected(core_error(planned.error()))};
+            summary = {{"format", "HDS"},
+                       {"sizeBytes", planned->size_bytes},
+                       {"partitionCount", planned->partition_count},
+                       {"objectCount", planned->object_count}};
+            manifest = std::move(*parsed);
+        } else {
+            auto parsed = axk::parse_media_build_manifest(serialized);
+            if (!parsed)
+                return Result<Json>{std::unexpected(core_error(parsed.error()))};
+            const auto expected_format = *manifest_kind == axk::BuildManifestKind::fat12_floppy
+                                             ? axk::MediaImageFormat::fat12_floppy
+                                             : axk::MediaImageFormat::iso9660;
+            if (parsed->format != expected_format) {
+                return Result<Json>{std::unexpected(
+                    operation_error("manifest_kind_mismatch", "manifest format does not match image build"))};
+            }
+            if (parsed->transfer && contains_path(document->upload_input_paths, parsed->transfer->source_path)) {
+                return Result<Json>{std::unexpected(operation_error(
+                    "whole_source_requires_file_ref", "whole-source transfer input must be a persistent FileRef"))};
+            }
+            required_paths = external_paths(*parsed);
+            if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
+                return Result<Json>{std::unexpected(admitted.error())};
+            auto planned = axk::plan_media_build(*parsed, context.cancellation);
+            if (!planned)
+                return Result<Json>{std::unexpected(core_error(planned.error()))};
+            summary = {{"format", write_plan_kind_name(write_plan_kind(*manifest_kind))},
+                       {"objectCount", planned->object_count}};
+            manifest = std::move(*parsed);
+        }
+
+        auto fingerprint_paths = document->observed_paths;
+        fingerprint_paths.insert(fingerprint_paths.end(), required_paths.begin(), required_paths.end());
+        auto fingerprints = fingerprint_files(fingerprint_paths, context.cancellation);
+        if (!fingerprints)
+            return Result<Json>{std::unexpected(fingerprints.error())};
+        std::error_code filesystem_error;
+        const auto output_existed = std::filesystem::exists(*output_path, filesystem_error);
+        if (filesystem_error) {
+            return Result<Json>{
+                std::unexpected(operation_error("output_read_failed", "could not inspect build destination"))};
+        }
+        std::optional<std::string> output_digest;
+        if (output_existed) {
+            auto digest = file_sha256(*output_path, context.cancellation);
+            if (!digest)
+                return Result<Json>{std::unexpected(digest.error())};
+            output_digest = std::move(*digest);
+        }
+        const auto build = axk::current_build_info();
+        const auto now = Clock::now();
+        auto token = axk::app::secure_random_hex(24U);
+        if (!token)
+            return Result<Json>{std::unexpected(token.error())};
+        auto record = std::make_shared<WritePlanRecord>(WritePlanRecord{std::move(*token),
+                                                                        context.owner_id,
+                                                                        now + state->retention,
+                                                                        write_plan_kind(*manifest_kind),
+                                                                        *output,
+                                                                        *output_path,
+                                                                        overwrite,
+                                                                        output_existed,
+                                                                        std::move(output_digest),
+                                                                        {},
+                                                                        {},
+                                                                        std::move(*fingerprints),
+                                                                        std::move(document->logical_input_paths),
+                                                                        std::move(document->leases),
+                                                                        std::move(manifest),
+                                                                        std::move(summary),
+                                                                        std::string{axk::version()},
+                                                                        build.source_identity,
+                                                                        false});
+        if (auto registered = register_plan(state, record); !registered)
+            return Result<Json>{std::unexpected(registered.error())};
+        return Result<Json>{write_plan_json(*record, static_cast<std::uint64_t>(state->retention.count() * 60))};
+    };
+
     if (!registry.is_implemented("create.plan")) {
-        auto bound = registry.bind("create.plan", [state, &sandbox, &uploads](const Json &input,
-                                                                              const OperationContext &context) {
-            std::string kind_text;
+        auto bound = registry.bind("create.plan", create_plan_handler);
+        if (!bound)
+            return bound;
+    }
+
+    if (!registry.is_implemented("create.hds.profiles")) {
+        auto bound = registry.bind("create.hds.profiles", [](const Json &, const OperationContext &) {
+            auto profiles = Json::array();
+            for (const auto &profile : axk::hds_creation_profiles()) {
+                auto options = Json::array();
+                for (const auto &option : profile.partition_options) {
+                    options.push_back({{"partitionCount", option.partition_count},
+                                       {"partitionSizeBytes", option.partitions.front().filesystem_sector_count * 512U},
+                                       {"unusedTailBytes", option.unused_tail_sectors * 512U}});
+                }
+                profiles.push_back({{"profileId", hds_creation_profile_wire_id(profile.id)},
+                                    {"sizeBytes", profile.size_bytes},
+                                    {"defaultPartitionCount", profile.default_partition_count},
+                                    {"partitionOptions", std::move(options)}});
+            }
+            return Result<Json>{Json{{"schemaVersion", "1.0"}, {"profiles", std::move(profiles)}}};
+        });
+        if (!bound)
+            return bound;
+    }
+
+    if (!registry.is_implemented("create.hds.plan")) {
+        auto bound = registry.bind("create.hds.plan", [create_plan_handler](const Json &input,
+                                                                            const OperationContext &context) {
+            std::string profile_text;
+            std::uint8_t partition_count{};
             try {
-                kind_text = input.at("kind").get<std::string>();
+                profile_text = input.at("profileId").get<std::string>();
+                partition_count = input.at("partitionCount").get<std::uint8_t>();
             } catch (const Json::exception &) {
-                return Result<Json>{std::unexpected(operation_error("invalid_request", "kind is required"))};
-            }
-            auto manifest_kind = parse_build_kind(kind_text);
-            if (!manifest_kind)
-                return Result<Json>{std::unexpected(manifest_kind.error())};
-            auto output = parse_file_ref(input, "output");
-            if (!output)
-                return Result<Json>{std::unexpected(output.error())};
-            const auto overwrite = input.value("overwrite", false);
-            auto output_path = sandbox.resolve_output_file(*output, overwrite);
-            if (!output_path)
-                return Result<Json>{std::unexpected(output_path.error())};
-            auto document = load_manifest(input, context, sandbox, uploads);
-            if (!document)
-                return Result<Json>{std::unexpected(document.error())};
-
-            const auto serialized = document->json.dump();
-            Json summary;
-            std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest, axk::AlterationManifest> manifest;
-            std::vector<std::filesystem::path> required_paths;
-            if (*manifest_kind == axk::BuildManifestKind::hds) {
-                auto parsed = axk::parse_hds_build_manifest(serialized);
-                if (!parsed)
-                    return Result<Json>{std::unexpected(core_error(parsed.error()))};
-                required_paths = external_paths(*parsed);
-                if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
-                    return Result<Json>{std::unexpected(admitted.error())};
-                auto planned = axk::plan_hds_build(*parsed, context.cancellation);
-                if (!planned)
-                    return Result<Json>{std::unexpected(core_error(planned.error()))};
-                summary = {{"format", "HDS"},
-                           {"sizeBytes", planned->size_bytes},
-                           {"partitionCount", planned->partition_count},
-                           {"objectCount", planned->object_count}};
-                manifest = std::move(*parsed);
-            } else {
-                auto parsed = axk::parse_media_build_manifest(serialized);
-                if (!parsed)
-                    return Result<Json>{std::unexpected(core_error(parsed.error()))};
-                const auto expected_format = *manifest_kind == axk::BuildManifestKind::fat12_floppy
-                                                 ? axk::MediaImageFormat::fat12_floppy
-                                                 : axk::MediaImageFormat::iso9660;
-                if (parsed->format != expected_format) {
-                    return Result<Json>{std::unexpected(
-                        operation_error("manifest_kind_mismatch", "manifest format does not match image build"))};
-                }
-                if (parsed->transfer && contains_path(document->upload_input_paths, parsed->transfer->source_path)) {
-                    return Result<Json>{std::unexpected(operation_error(
-                        "whole_source_requires_file_ref", "whole-source transfer input must be a persistent FileRef"))};
-                }
-                required_paths = external_paths(*parsed);
-                if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
-                    return Result<Json>{std::unexpected(admitted.error())};
-                auto planned = axk::plan_media_build(*parsed, context.cancellation);
-                if (!planned)
-                    return Result<Json>{std::unexpected(core_error(planned.error()))};
-                summary = {{"format", write_plan_kind_name(write_plan_kind(*manifest_kind))},
-                           {"objectCount", planned->object_count}};
-                manifest = std::move(*parsed);
-            }
-
-            auto fingerprint_paths = document->observed_paths;
-            fingerprint_paths.insert(fingerprint_paths.end(), required_paths.begin(), required_paths.end());
-            auto fingerprints = fingerprint_files(fingerprint_paths, context.cancellation);
-            if (!fingerprints)
-                return Result<Json>{std::unexpected(fingerprints.error())};
-            std::error_code filesystem_error;
-            const auto output_existed = std::filesystem::exists(*output_path, filesystem_error);
-            if (filesystem_error) {
                 return Result<Json>{
-                    std::unexpected(operation_error("output_read_failed", "could not inspect build destination"))};
+                    std::unexpected(operation_error("invalid_request", "profileId and partitionCount are required"))};
             }
-            std::optional<std::string> output_digest;
-            if (output_existed) {
-                auto digest = file_sha256(*output_path, context.cancellation);
-                if (!digest)
-                    return Result<Json>{std::unexpected(digest.error())};
-                output_digest = std::move(*digest);
+            const auto profile = parse_hds_creation_profile_wire_id(profile_text);
+            if (!profile) {
+                return Result<Json>{
+                    std::unexpected(operation_error("invalid_request", "profileId is not a supported HDS profile"))};
             }
-            const auto build = axk::current_build_info();
-            const auto now = Clock::now();
-            auto token = axk::app::secure_random_hex(24U);
-            if (!token)
-                return Result<Json>{std::unexpected(token.error())};
-            auto record = std::make_shared<WritePlanRecord>(WritePlanRecord{std::move(*token),
-                                                                            context.owner_id,
-                                                                            now + state->retention,
-                                                                            write_plan_kind(*manifest_kind),
-                                                                            *output,
-                                                                            *output_path,
-                                                                            overwrite,
-                                                                            output_existed,
-                                                                            std::move(output_digest),
-                                                                            {},
-                                                                            {},
-                                                                            std::move(*fingerprints),
-                                                                            std::move(document->logical_input_paths),
-                                                                            std::move(document->leases),
-                                                                            std::move(manifest),
-                                                                            std::move(summary),
-                                                                            std::string{axk::version()},
-                                                                            build.source_identity,
-                                                                            false});
-            if (auto registered = register_plan(state, record); !registered)
-                return Result<Json>{std::unexpected(registered.error())};
-            return Result<Json>{write_plan_json(*record, static_cast<std::uint64_t>(state->retention.count() * 60))};
+            auto planned = axk::plan_hds_creation({*profile, partition_count}, context.cancellation);
+            if (!planned)
+                return Result<Json>{std::unexpected(core_error(planned.error()))};
+            if (!input.contains("output")) {
+                return Result<Json>{std::unexpected(operation_error("invalid_request", "output is required"))};
+            }
+
+            auto partitions = Json::array();
+            for (const auto &partition : planned->manifest.partitions) {
+                partitions.push_back({{"name", partition.name},
+                                      {"volumes", Json::array({{{"name", partition.volumes.front().name},
+                                                                {"waveforms", Json::array()},
+                                                                {"sample_banks", Json::array()}}})}});
+            }
+            Json generic_request{{"kind", "HDS"},
+                                 {"manifest",
+                                  {{"inline",
+                                    {{"schema_version", "1.0"},
+                                     {"size_bytes", planned->manifest.size_bytes},
+                                     {"partitions", std::move(partitions)}}}}},
+                                 {"output", input.at("output")},
+                                 {"overwrite", input.value("overwrite", false)}};
+            return create_plan_handler(generic_request, context);
         });
         if (!bound)
             return bound;

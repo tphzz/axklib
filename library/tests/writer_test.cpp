@@ -150,6 +150,68 @@ TEST(HdsGeometry, CoversEveryPartitionCountAtOneAndTwoGiBBoundaries) {
     }
 }
 
+TEST(HdsCreationProfiles, PublishExactCapacitiesDefaultsAndAdmittedPartitionCounts) {
+    const auto &profiles = axk::hds_creation_profiles();
+    ASSERT_EQ(profiles.size(), 5U);
+    EXPECT_EQ(axk::hds_creation_profile_id(profiles[0].id), "floppy-scale");
+    EXPECT_EQ(profiles[0].size_bytes, 1'474'560U);
+    EXPECT_EQ(profiles[0].default_partition_count, 1U);
+    ASSERT_EQ(profiles[0].partition_options.size(), 1U);
+    EXPECT_EQ(profiles[0].partition_options[0].partition_count, 1U);
+
+    EXPECT_EQ(axk::hds_creation_profile_id(profiles[1].id), "cd-r-650");
+    EXPECT_EQ(profiles[1].size_bytes, 681'984'000U);
+    EXPECT_EQ(axk::hds_creation_profile_id(profiles[2].id), "cd-r-700");
+    EXPECT_EQ(profiles[2].size_bytes, 737'280'000U);
+    EXPECT_EQ(axk::hds_creation_profile_id(profiles[3].id), "hds-1-gib");
+    EXPECT_EQ(profiles[3].size_bytes, 1'073'741'824U);
+    for (std::size_t index = 1; index <= 3; ++index) {
+        EXPECT_EQ(profiles[index].default_partition_count, 1U);
+        ASSERT_EQ(profiles[index].partition_options.size(), 8U);
+        for (std::size_t option = 0; option < 8U; ++option)
+            EXPECT_EQ(profiles[index].partition_options[option].partition_count, option + 1U);
+    }
+
+    EXPECT_EQ(axk::hds_creation_profile_id(profiles[4].id), "hds-2-gib");
+    EXPECT_EQ(profiles[4].size_bytes, 2'147'483'648U);
+    EXPECT_EQ(profiles[4].default_partition_count, 2U);
+    ASSERT_EQ(profiles[4].partition_options.size(), 7U);
+    for (std::size_t option = 0; option < 7U; ++option)
+        EXPECT_EQ(profiles[4].partition_options[option].partition_count, option + 2U);
+
+    for (const auto &profile : profiles) {
+        const auto parsed = axk::parse_hds_creation_profile_id(axk::hds_creation_profile_id(profile.id));
+        ASSERT_TRUE(parsed);
+        EXPECT_EQ(*parsed, profile.id);
+    }
+    EXPECT_FALSE(axk::parse_hds_creation_profile_id("unknown"));
+}
+
+TEST(HdsCreationProfiles, PlanCanonicalEmptyPartitionsThroughTheRegularWriterPlanner) {
+    const auto planned = axk::plan_hds_creation({axk::HdsCreationProfileId::cd_r_700, 3U});
+    ASSERT_TRUE(planned) << planned.error().message;
+    EXPECT_EQ(planned->manifest.size_bytes, 737'280'000U);
+    ASSERT_EQ(planned->manifest.partitions.size(), 3U);
+    ASSERT_EQ(planned->summary.partitions.size(), 3U);
+    EXPECT_EQ(planned->summary.object_count, 0U);
+    EXPECT_EQ(planned->summary.size_bytes, planned->manifest.size_bytes);
+    for (std::size_t index = 0; index < planned->manifest.partitions.size(); ++index) {
+        const auto &partition = planned->manifest.partitions[index];
+        EXPECT_EQ(partition.name, "PARTITION " + std::to_string(index + 1U));
+        ASSERT_EQ(partition.volumes.size(), 1U);
+        EXPECT_EQ(partition.volumes[0].name, "NEW VOLUME");
+        EXPECT_TRUE(partition.volumes[0].waveforms.empty());
+        EXPECT_TRUE(partition.volumes[0].sample_banks.empty());
+        EXPECT_TRUE(partition.volumes[0].sample_bank_groups.empty());
+        EXPECT_TRUE(partition.volumes[0].programs.empty());
+    }
+
+    EXPECT_FALSE(axk::plan_hds_creation({axk::HdsCreationProfileId::floppy_scale, 2U}));
+    EXPECT_FALSE(axk::plan_hds_creation({axk::HdsCreationProfileId::hds_2_gib, 1U}));
+    EXPECT_TRUE(axk::plan_hds_creation({axk::HdsCreationProfileId::hds_2_gib, 2U}));
+    EXPECT_FALSE(axk::plan_hds_creation({static_cast<axk::HdsCreationProfileId>(255U), 1U}));
+}
+
 TEST(AudioImport, PreservesNativePcm16AndChoosesOnlyHardwareRates) {
     axk::Waveform source;
     source.format = {1, 2, 48000};

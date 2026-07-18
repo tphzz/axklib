@@ -2,10 +2,13 @@
 
 #include "axklib/utf8.hpp"
 
+#include <algorithm>
+#include <array>
 #include <fstream>
 #include <limits>
 #include <set>
 #include <sstream>
+#include <tuple>
 
 #include <nlohmann/json.hpp>
 
@@ -644,6 +647,85 @@ Result<std::vector<PartitionGeometry>> plan_hds_geometry(const HdsBuildManifest 
                           bitmap_count, directory, directory + 358U});
     }
     return result;
+}
+
+std::string_view hds_creation_profile_id(HdsCreationProfileId id) {
+    switch (id) {
+    case HdsCreationProfileId::floppy_scale:
+        return "floppy-scale";
+    case HdsCreationProfileId::cd_r_650:
+        return "cd-r-650";
+    case HdsCreationProfileId::cd_r_700:
+        return "cd-r-700";
+    case HdsCreationProfileId::hds_1_gib:
+        return "hds-1-gib";
+    case HdsCreationProfileId::hds_2_gib:
+        return "hds-2-gib";
+    }
+    return {};
+}
+
+Result<HdsCreationProfileId> parse_hds_creation_profile_id(std::string_view id) {
+    constexpr std::array ids{HdsCreationProfileId::floppy_scale, HdsCreationProfileId::cd_r_650,
+                             HdsCreationProfileId::cd_r_700, HdsCreationProfileId::hds_1_gib,
+                             HdsCreationProfileId::hds_2_gib};
+    const auto found = std::ranges::find(ids, id, hds_creation_profile_id);
+    if (found == ids.end())
+        return std::unexpected{manifest_error("unknown HDS creation profile")};
+    return *found;
+}
+
+const std::vector<HdsCreationProfile> &hds_creation_profiles() {
+    static const auto profiles = [] {
+        constexpr std::array definitions{
+            std::tuple{HdsCreationProfileId::floppy_scale, 1'474'560ULL, std::uint8_t{1}},
+            std::tuple{HdsCreationProfileId::cd_r_650, 333'000ULL * 2'048ULL, std::uint8_t{1}},
+            std::tuple{HdsCreationProfileId::cd_r_700, 360'000ULL * 2'048ULL, std::uint8_t{1}},
+            std::tuple{HdsCreationProfileId::hds_1_gib, 1'073'741'824ULL, std::uint8_t{1}},
+            std::tuple{HdsCreationProfileId::hds_2_gib, 2'147'483'648ULL, std::uint8_t{2}},
+        };
+        std::vector<HdsCreationProfile> result;
+        for (const auto &[id, size_bytes, default_partition_count] : definitions) {
+            HdsCreationProfile profile{id, size_bytes, default_partition_count, {}};
+            for (std::uint8_t count = 1; count <= 8; ++count) {
+                HdsBuildManifest manifest{"1.0", size_bytes, {}};
+                for (std::uint8_t index = 0; index < count; ++index)
+                    manifest.partitions.push_back(
+                        {"PARTITION " + std::to_string(index + 1U), {VolumeSpec{"NEW VOLUME", {}, {}, {}, {}}}});
+                auto geometry = plan_hds_geometry(manifest);
+                if (!geometry)
+                    continue;
+                const auto &last = geometry->back();
+                const auto unused_tail_sectors = size_bytes / 512U - (last.start_sector + last.filesystem_sector_count);
+                if (unused_tail_sectors >= last.slot_sector_count)
+                    continue;
+                profile.partition_options.push_back({count, std::move(*geometry), unused_tail_sectors});
+            }
+            result.push_back(std::move(profile));
+        }
+        return result;
+    }();
+    return profiles;
+}
+
+Result<HdsCreationPlan> plan_hds_creation(const HdsCreationRequest &request, const CancellationToken &cancellation) {
+    const auto &profiles = hds_creation_profiles();
+    const auto profile = std::ranges::find(profiles, request.profile_id, &HdsCreationProfile::id);
+    if (profile == profiles.end())
+        return std::unexpected{manifest_error("unknown HDS creation profile")};
+    const auto option = std::ranges::find(profile->partition_options, request.partition_count,
+                                          &HdsCreationPartitionOption::partition_count);
+    if (option == profile->partition_options.end())
+        return std::unexpected{manifest_error("partition count is not available for the HDS creation profile")};
+
+    HdsBuildManifest manifest{"1.0", profile->size_bytes, {}};
+    for (std::uint8_t index = 0; index < request.partition_count; ++index)
+        manifest.partitions.push_back(
+            {"PARTITION " + std::to_string(index + 1U), {VolumeSpec{"NEW VOLUME", {}, {}, {}, {}}}});
+    auto summary = plan_hds_build(manifest, cancellation);
+    if (!summary)
+        return std::unexpected{summary.error()};
+    return HdsCreationPlan{request.profile_id, std::move(manifest), std::move(*summary), option->unused_tail_sectors};
 }
 
 } // namespace axk

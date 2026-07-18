@@ -15,8 +15,6 @@
 #if defined(_WIN32)
 #define NOMINMAX
 #include <windows.h>
-#else
-#include <unistd.h>
 #endif
 
 namespace {
@@ -26,11 +24,25 @@ using Json = nlohmann::json;
 axk::app::Error workspace_error(std::string code, std::string message) { return {std::move(code), std::move(message)}; }
 
 bool can_write(const std::filesystem::path &path) {
-#if defined(_WIN32)
-    return _waccess(path.c_str(), 2) == 0;
-#else
-    return ::access(path.c_str(), W_OK) == 0;
-#endif
+    auto suffix = axk::app::secure_random_hex(16U);
+    if (!suffix)
+        return false;
+    const auto check_path = path / (".axkdeck-write-check-" + *suffix);
+    {
+        std::ofstream output{check_path, std::ios::binary | std::ios::trunc};
+        if (!output)
+            return false;
+        output.put('\0');
+        output.flush();
+        output.close();
+        if (!output) {
+            std::error_code cleanup_error;
+            std::filesystem::remove(check_path, cleanup_error);
+            return false;
+        }
+    }
+    std::error_code error;
+    return std::filesystem::remove(check_path, error) && !error;
 }
 
 axk::server::WorkspaceInfo inspect(const axk::server::WorkspaceDefinition &definition) {
