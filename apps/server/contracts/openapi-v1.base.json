@@ -778,6 +778,30 @@
           {"type": "object", "additionalProperties": false, "required": ["uploadRef"], "properties": {"uploadRef": {"$ref": "#/components/schemas/UploadRef"}}}
         ]
       },
+      "AudioInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source"],
+        "properties": {
+          "source": {"$ref": "#/components/schemas/InputRef"}
+        }
+      },
+      "AudioSourceInfo": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sourceFormat", "sourceSubtype", "channels", "frameCount", "sourceSampleRate", "outputSampleRate", "durationSeconds", "resampled", "quantized"],
+        "properties": {
+          "sourceFormat": {"type": "string", "minLength": 1},
+          "sourceSubtype": {"type": "string", "minLength": 1},
+          "channels": {"type": "integer", "minimum": 1, "maximum": 2},
+          "frameCount": {"type": "integer", "minimum": 1},
+          "sourceSampleRate": {"type": "integer", "minimum": 1},
+          "outputSampleRate": {"type": "integer", "minimum": 1},
+          "durationSeconds": {"type": "number", "minimum": 0},
+          "resampled": {"type": "boolean"},
+          "quantized": {"type": "boolean"}
+        }
+      },
       "ManifestInput": {
         "oneOf": [
           {"type": "object", "additionalProperties": false, "required": ["inline"], "properties": {"inline": {"type": "object"}}},

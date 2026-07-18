@@ -78,12 +78,14 @@ Result<SndfileHandle> open_verified(const std::filesystem::path &path, const Sou
 
 } // namespace
 
-Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path, std::size_t expected_channels) {
+Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path,
+                                        std::optional<std::size_t> expected_channels) {
     SF_INFO info{};
     auto source = open_sndfile(path, info);
     if (!source)
         return std::unexpected{source.error()};
-    if (info.channels < 1 || info.channels > 2 || static_cast<std::size_t>(info.channels) != expected_channels) {
+    if (info.channels < 1 || info.channels > 2 ||
+        (expected_channels && static_cast<std::size_t>(info.channels) != *expected_channels)) {
         return std::unexpected{audio_error("audio source channel count does not match the import")};
     }
     if (info.frames <= 0 || info.samplerate <= 0) {

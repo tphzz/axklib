@@ -29,6 +29,27 @@ Result<std::uint32_t> choose_sampler_sample_rate(std::uint32_t source_rate,
     return std::ranges::contains(rates, source_rate) ? source_rate : 44'100U;
 }
 
+Result<AudioSourceInfo> inspect_sampler_audio(const std::filesystem::path &path,
+                                              std::optional<std::uint32_t> target_sample_rate) {
+    const auto source = audio_import_detail::inspect_sndfile(path);
+    if (!source)
+        return std::unexpected{source.error()};
+    const auto output_rate = choose_sampler_sample_rate(source->sample_rate, target_sample_rate);
+    if (!output_rate)
+        return std::unexpected{output_rate.error()};
+    const bool resampled = *output_rate != source->sample_rate;
+    return AudioSourceInfo{
+        .source_format = source->format,
+        .source_subtype = source->subtype,
+        .channels = static_cast<std::uint8_t>(source->channels),
+        .frame_count = source->frames,
+        .source_sample_rate = source->sample_rate,
+        .output_sample_rate = *output_rate,
+        .resampled = resampled,
+        .quantized = !source->is_pcm16 || resampled,
+    };
+}
+
 Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path, const AudioImportOptions &options) {
     if (options.expected_channels != 1U && options.expected_channels != 2U) {
         return std::unexpected{audio_import_error("expected channel count must be one or two")};

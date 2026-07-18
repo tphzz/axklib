@@ -99,6 +99,17 @@ struct AudioImportOptions {
     std::optional<std::uint32_t> target_sample_rate;
 };
 
+struct AudioSourceInfo {
+    std::string source_format;
+    std::string source_subtype;
+    std::uint8_t channels{};
+    std::uint64_t frame_count{};
+    std::uint32_t source_sample_rate{};
+    std::uint32_t output_sample_rate{};
+    bool resampled{};
+    bool quantized{};
+};
+
 struct ImportedAudio {
     std::filesystem::path source_path;
     std::string source_format;
@@ -211,6 +222,8 @@ AXK_AUDIO_API Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildMan
                                                              const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<std::uint32_t> choose_sampler_sample_rate(std::uint32_t source_rate,
                                                                std::optional<std::uint32_t> target_sample_rate = {});
+AXK_AUDIO_API Result<AudioSourceInfo> inspect_sampler_audio(const std::filesystem::path &path,
+                                                            std::optional<std::uint32_t> target_sample_rate = {});
 AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path,
                                                          const AudioImportOptions &options);
 AXK_AUDIO_API Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest,

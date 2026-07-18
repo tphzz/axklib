@@ -77,6 +77,7 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentPageResponse"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionPrepareRequest"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("Audition"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("AudioSourceInfo"));
     const auto &policy = document.at("info").at("x-axklib-deprecation-policy");
     EXPECT_EQ(policy.at("minimumNoticeDays"), 180);
     EXPECT_TRUE(policy.at("removalRequiresNewApiMajor"));
@@ -136,7 +137,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 27U);
+    EXPECT_EQ(entries.size(), 28U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }

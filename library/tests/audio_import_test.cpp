@@ -214,6 +214,44 @@ TEST(AudioImport, DecodesPcm24AiffFlacAndFloatWaveWithStablePolicyMetadata) {
     }
 }
 
+TEST(AudioImport, InspectsMonoAndStereoWithoutDecodingPcm) {
+    const auto mono_path = std::filesystem::temp_directory_path() / "axklib-audio-inspect-mono.wav";
+    const auto stereo_path = std::filesystem::temp_directory_path() / "axklib-audio-inspect-stereo.flac";
+    std::error_code error;
+    std::filesystem::remove(mono_path, error);
+    std::filesystem::remove(stereo_path, error);
+
+    ASSERT_TRUE(
+        write_sndfile(mono_path, SF_FORMAT_WAV | SF_FORMAT_PCM_16, 44'100U, 1U, deterministic_signal(441U, 1U)));
+    ASSERT_TRUE(
+        write_sndfile(stereo_path, SF_FORMAT_FLAC | SF_FORMAT_PCM_24, 96'000U, 2U, deterministic_signal(960U, 2U)));
+
+    const auto mono = axk::inspect_sampler_audio(mono_path);
+    ASSERT_TRUE(mono) << mono.error().message;
+    EXPECT_EQ(mono->source_format, "WAV");
+    EXPECT_EQ(mono->source_subtype, "PCM_16");
+    EXPECT_EQ(mono->channels, 1U);
+    EXPECT_EQ(mono->frame_count, 441U);
+    EXPECT_EQ(mono->source_sample_rate, 44'100U);
+    EXPECT_EQ(mono->output_sample_rate, 44'100U);
+    EXPECT_FALSE(mono->resampled);
+    EXPECT_FALSE(mono->quantized);
+
+    const auto stereo = axk::inspect_sampler_audio(stereo_path);
+    ASSERT_TRUE(stereo) << stereo.error().message;
+    EXPECT_EQ(stereo->source_format, "FLAC");
+    EXPECT_EQ(stereo->source_subtype, "PCM_24");
+    EXPECT_EQ(stereo->channels, 2U);
+    EXPECT_EQ(stereo->frame_count, 960U);
+    EXPECT_EQ(stereo->source_sample_rate, 96'000U);
+    EXPECT_EQ(stereo->output_sample_rate, 44'100U);
+    EXPECT_TRUE(stereo->resampled);
+    EXPECT_TRUE(stereo->quantized);
+
+    std::filesystem::remove(mono_path, error);
+    std::filesystem::remove(stereo_path, error);
+}
+
 TEST(AudioImport, RejectsEmptyChannelMismatchAndSurroundSources) {
     const auto mono_path = std::filesystem::temp_directory_path() / "axklib-audio-import-mono.wav";
     const auto surround_path = std::filesystem::temp_directory_path() / "axklib-audio-import-surround.wav";

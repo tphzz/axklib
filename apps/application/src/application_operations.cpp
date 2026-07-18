@@ -1,5 +1,6 @@
 #include "axklib/application/application_operations.hpp"
 
+#include "axklib/application/audio_operations.hpp"
 #include "axklib/application/extraction_operations.hpp"
 #include "axklib/application/file_operations.hpp"
 #include "axklib/application/package_operations.hpp"
@@ -9,6 +10,8 @@
 axk::app::Result<void> axk::app::bind_application_operations(OperationRegistry &registry, const Sandbox &sandbox,
                                                              UploadStore &uploads) {
     if (auto bound = bind_file_operations(registry, sandbox); !bound)
+        return bound;
+    if (auto bound = bind_audio_operations(registry, sandbox, uploads); !bound)
         return bound;
     if (auto bound = bind_validation_operations(registry, sandbox); !bound)
         return bound;

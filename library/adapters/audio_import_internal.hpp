@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -29,7 +30,8 @@ struct SourceAudioInfo {
     bool reduces_precision{};
 };
 
-Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path, std::size_t expected_channels);
+Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path,
+                                        std::optional<std::size_t> expected_channels = {});
 
 Result<std::vector<std::int16_t>> decode_sndfile_pcm16(const std::filesystem::path &path, const SourceAudioInfo &info);
 
