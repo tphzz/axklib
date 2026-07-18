@@ -604,7 +604,7 @@ TEST(Cli11Adapter, CreateFloppyAndIsoInvokeSharedPlanAndMatchDirectWriter) {
     std::filesystem::remove_all(root, error);
 }
 
-TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedPlanAndMatchDirectTransaction) {
+TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedInspectionAndDirectAlteration) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-cli-alter-hds-parity-test";
     const auto source_path = root / "source.hds";
     const auto manifest_path = root / "alteration.json";
@@ -624,7 +624,7 @@ TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedPlanAndMatchDirectTransacti
     std::ofstream{manifest_path, std::ios::binary} << alteration_text;
     const auto manifest = axk::parse_alteration_manifest(alteration_text);
     ASSERT_TRUE(manifest) << axk::render_error(manifest.error());
-    const auto direct_dry = axk::alter_hds(source_path, *manifest);
+    const auto direct_dry = axk::inspect_hds_alteration(source_path, *manifest);
     ASSERT_TRUE(direct_dry) << axk::render_error(direct_dry.error());
 
     testing::internal::CaptureStdout();

@@ -1,8 +1,11 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
 #include <mutex>
+#include <span>
 #include <stdexcept>
+#include <string>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -120,6 +123,58 @@ TEST(JobManager, CancelsQueuedWorkAndEnforcesOwnership) {
     }
     condition.notify_all();
     EXPECT_EQ(wait_terminal(jobs, first->job_id).state, axk::app::JobState::completed);
+}
+
+TEST(JobManager, RetainsReferencedUploadsWhileWorkWaitsInTheQueue) {
+    const auto directory = std::filesystem::temp_directory_path() / "axklib-job-upload-lease-test";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    std::filesystem::create_directories(directory);
+
+    auto upload_now = std::chrono::steady_clock::now();
+    axk::app::UploadStore uploads{directory, 32U, 16U, 2U, 16U, 5s, [&] { return upload_now; }};
+    const std::string manifest{"{}"};
+    const auto created = uploads.create({.owner_id = "owner",
+                                         .filename = "manifest.json",
+                                         .kind = axk::app::UploadKind::manifest,
+                                         .media_type = "application/json",
+                                         .declared_size = manifest.size(),
+                                         .sha256 = std::nullopt});
+    ASSERT_TRUE(created) << created.error().message;
+    ASSERT_TRUE(uploads.append(created->reference, "owner", 0U, std::as_bytes(std::span{manifest})));
+    ASSERT_TRUE(uploads.complete(created->reference, "owner"));
+
+    std::atomic_bool first_running{};
+    std::atomic_bool release_first{};
+    auto registry = test_registry([&](const nlohmann::json &request, const axk::app::OperationContext &) {
+        if (request.value("block", false)) {
+            first_running = true;
+            while (!release_first.load())
+                std::this_thread::sleep_for(1ms);
+        }
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::JobManager jobs{registry, 1U, 1U, 2U, 8U, 2048U, 15min, [] { return axk::app::JobManager::Clock::now(); },
+                              &uploads};
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const auto first = jobs.submit("test.job", {{"block", true}}, context);
+    ASSERT_TRUE(first);
+    while (!first_running.load())
+        std::this_thread::sleep_for(1ms);
+
+    const auto queued =
+        jobs.submit("test.job", {{"manifest", {{"uploadRef", {{"uploadId", created->reference.upload_id}}}}}}, context);
+    ASSERT_TRUE(queued) << queued.error().message;
+    upload_now += 6s;
+    uploads.cleanup();
+    EXPECT_TRUE(uploads.inspect(created->reference, "owner"));
+
+    release_first = true;
+    EXPECT_EQ(wait_terminal(jobs, first->job_id).state, axk::app::JobState::completed);
+    EXPECT_EQ(wait_terminal(jobs, queued->job_id).state, axk::app::JobState::completed);
+    jobs.shutdown();
+    std::filesystem::remove_all(directory, error);
 }
 
 TEST(JobManager, TracksWorkspaceReferencesOnlyWhileJobsAreActive) {

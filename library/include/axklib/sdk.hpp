@@ -53,7 +53,7 @@ class AXK_SDK_API operation_context final {
     friend class build_plan;
     friend class portable_package;
     friend class package_import_plan;
-    friend class transaction;
+    friend class alteration;
 };
 
 struct content_node {
@@ -409,23 +409,13 @@ class AXK_SDK_API build_plan final {
     std::unique_ptr<impl> impl_;
 };
 
-class AXK_SDK_API transaction final {
+class AXK_SDK_API alteration final {
   public:
-    transaction();
-    ~transaction();
-    transaction(transaction &&) noexcept;
-    transaction &operator=(transaction &&) noexcept;
-    transaction(const transaction &) = delete;
-    transaction &operator=(const transaction &) = delete;
-
-    static result<transaction> from_manifest(const std::string &utf8_source_path, const std::string &utf8_manifest_path,
-                                             operation_context &context);
-    plan_summary summary() const noexcept;
-    result<void> apply(const std::string &utf8_output_path, const write_options &options, operation_context &context);
-
-  private:
-    struct impl;
-    std::unique_ptr<impl> impl_;
+    static result<plan_summary> inspect(const std::string &utf8_source_path, const std::string &utf8_manifest_path,
+                                        operation_context &context);
+    static result<void> apply(const std::string &utf8_source_path, const std::string &utf8_manifest_path,
+                              const std::string &utf8_output_path, const write_options &options,
+                              operation_context &context);
 };
 
 AXK_SDK_API std::string sdk_version();

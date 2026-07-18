@@ -1513,17 +1513,14 @@
           }
         }
       },
-      "ImageAlterationPlanRequest": {
+      "ImageAlterationInspectionRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["source", "manifest", "output"],
+        "required": ["source", "manifest"],
         "properties": {
           "source": {"$ref": "#/components/schemas/FileRef"},
           "manifest": {"$ref": "#/components/schemas/ManifestInput"},
-          "inputBindings": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/components/schemas/InputBinding"}},
-          "output": {"$ref": "#/components/schemas/FileRef"},
-          "replaceSource": {"type": "boolean", "default": false},
-          "overwrite": {"type": "boolean", "default": false}
+          "inputBindings": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/components/schemas/InputBinding"}}
         }
       },
       "AlterationAudioImportSummary": {
@@ -1590,18 +1587,13 @@
           "allocatedClusters": {"type": "integer", "minimum": 0}
         }
       },
-      "ImageAlterationPlan": {
+      "ImageAlterationInspection": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planToken", "expiresInSeconds", "kind", "output", "overwrite", "summary", "semanticVersion", "sourceIdentity", "valid", "warnings", "validation", "operations"],
+        "required": ["schemaVersion", "kind", "summary", "semanticVersion", "sourceIdentity", "valid", "warnings", "validation", "operations"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
-          "planToken": {"type": "string", "minLength": 1},
-          "expiresInSeconds": {"type": "integer", "minimum": 1},
           "kind": {"const": "ALTERATION"},
-          "output": {"$ref": "#/components/schemas/FileRef"},
-          "overwrite": {"type": "boolean"},
-          "replaceSource": {"type": "boolean"},
           "summary": {"$ref": "#/components/schemas/AlterationSummary"},
           "semanticVersion": {"type": "string"},
           "sourceIdentity": {"type": "string"},
@@ -1611,7 +1603,19 @@
           "operations": {"type": "array", "items": {"$ref": "#/components/schemas/AlterationOperationReport"}}
         }
       },
-      "ImageAlterationRequest": {"$ref": "#/components/schemas/PlanTokenRequest"},
+      "ImageAlterationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "manifest", "output"],
+        "properties": {
+          "source": {"$ref": "#/components/schemas/FileRef"},
+          "manifest": {"$ref": "#/components/schemas/ManifestInput"},
+          "inputBindings": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/components/schemas/InputBinding"}},
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "replaceSource": {"type": "boolean", "default": false},
+          "overwrite": {"type": "boolean", "default": false}
+        }
+      },
       "ImageAlterationResult": {
         "type": "object",
         "additionalProperties": false,

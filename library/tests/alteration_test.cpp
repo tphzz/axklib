@@ -283,13 +283,13 @@ TEST(Alteration, DeleteVolumeDryRunMatchesApplyAndPreservesSource) {
     const auto manifest = axk::parse_alteration_manifest(
         R"({"schema_version":"1.0","operations":[{"id":"remove","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
     ASSERT_TRUE(manifest);
-    const auto planned = axk::alter_hds(source, *manifest);
-    ASSERT_TRUE(planned);
-    ASSERT_EQ(planned->operations.size(), 1U);
-    EXPECT_EQ(planned->operations[0].freed_clusters, 12U);
+    const auto inspected = axk::inspect_hds_alteration(source, *manifest);
+    ASSERT_TRUE(inspected);
+    ASSERT_EQ(inspected->operations.size(), 1U);
+    EXPECT_EQ(inspected->operations[0].freed_clusters, 12U);
     const auto applied = axk::alter_hds(source, *manifest, output);
     ASSERT_TRUE(applied);
-    EXPECT_EQ(applied->operations[0].removed_sfs_ids, planned->operations[0].removed_sfs_ids);
+    EXPECT_EQ(applied->operations[0].removed_sfs_ids, inspected->operations[0].removed_sfs_ids);
     EXPECT_EQ(bytes(source), source_before);
     const auto reopened = axk::open_image(output);
     ASSERT_TRUE(reopened);
@@ -525,7 +525,7 @@ TEST(Alteration, RejectsSharedGroupMemberAndNonzeroRenameHandle) {
        "sample_bank_group":{"name":"Other Group","member_sample_banks":["Grouped"]}}
     ]})");
     ASSERT_TRUE(shared);
-    EXPECT_FALSE(axk::alter_hds(source, *shared));
+    EXPECT_FALSE(axk::inspect_hds_alteration(source, *shared));
 
     const auto opened = axk::open_image(source);
     ASSERT_TRUE(opened);
@@ -541,7 +541,7 @@ TEST(Alteration, RejectsSharedGroupMemberAndNonzeroRenameHandle) {
        "sample_bank_group_name":"Group","new_sample_bank_group_name":"Renamed"}
     ]})");
     ASSERT_TRUE(rename);
-    EXPECT_FALSE(axk::alter_hds(source, *rename));
+    EXPECT_FALSE(axk::inspect_hds_alteration(source, *rename));
     std::filesystem::remove_all(root, error);
 }
 
@@ -681,7 +681,7 @@ TEST(Alteration, WaveformDeletionRequiresPriorSampleBankDeletion) {
        "volume_name":"Banks","waveform_name":"Wave"}
     ]})");
     ASSERT_TRUE(rejected);
-    EXPECT_FALSE(axk::alter_hds(source, *rejected));
+    EXPECT_FALSE(axk::inspect_hds_alteration(source, *rejected));
     const auto accepted = axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
       {"id":"bank","type":"delete_sbnk","partition_index":0,
@@ -798,7 +798,7 @@ TEST(Alteration, VolumeDeletionRejectsKnownCrossVolumeWaveformDependency) {
        "volume_name":"Volume A"}
     ]})");
     ASSERT_TRUE(delete_owner);
-    const auto rejected = axk::alter_hds(shared, *delete_owner);
+    const auto rejected = axk::inspect_hds_alteration(shared, *delete_owner);
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().message, "a known object relationship crosses the volume closure");
     std::filesystem::remove_all(root, error);

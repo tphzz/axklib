@@ -1018,68 +1018,50 @@ result<void> build_plan::apply(const std::string &utf8_output_path, const write_
     });
 }
 
-struct transaction::impl {
-    std::filesystem::path source;
-    AlterationManifest manifest;
-    TransactionPlan plan;
-    std::thread::id owner;
-};
-
-transaction::transaction() = default;
-transaction::~transaction() = default;
-transaction::transaction(transaction &&) noexcept = default;
-transaction &transaction::operator=(transaction &&) noexcept = default;
-
-result<transaction> transaction::from_manifest(const std::string &utf8_source_path,
-                                               const std::string &utf8_manifest_path, operation_context &context) {
-    return protect<transaction>([&]() -> result<transaction> {
+result<plan_summary> alteration::inspect(const std::string &utf8_source_path, const std::string &utf8_manifest_path,
+                                         operation_context &context) {
+    return protect<plan_summary>([&]() -> result<plan_summary> {
         if (!context.impl_)
             return invalid_argument("operation context is not initialized");
         auto source = checked_path(utf8_source_path, "source image path");
         if (!source)
             return source.error();
-        auto manifest_path = checked_path(utf8_manifest_path, "transaction manifest path");
+        auto manifest_path = checked_path(utf8_manifest_path, "alteration manifest path");
         if (!manifest_path)
             return manifest_path.error();
         auto manifest = load_alteration_manifest(*manifest_path);
         if (!manifest)
             return public_error(manifest.error());
-        auto plan = plan_hds_alteration(*source, *manifest, context.impl_->cancellation.token(), context.impl_.get());
-        if (!plan)
-            return public_error(plan.error());
-        transaction output;
-        output.impl_ = std::make_unique<impl>(impl{
-            std::move(*source),
-            std::move(*manifest),
-            std::move(*plan),
-            std::this_thread::get_id(),
-        });
-        return output;
+        auto inspection =
+            inspect_hds_alteration(*source, *manifest, context.impl_->cancellation.token(), context.impl_.get());
+        if (!inspection)
+            return public_error(inspection.error());
+        return plan_summary{0U, inspection->operations.size(), 0U, !inspection->operations.empty()};
     });
 }
 
-plan_summary transaction::summary() const noexcept {
-    if (!impl_)
-        return {};
-    return {0U, impl_->plan.operations.size(), 0U, !impl_->plan.operations.empty()};
-}
-
-result<void> transaction::apply(const std::string &utf8_output_path, const write_options &options,
-                                operation_context &context) {
+result<void> alteration::apply(const std::string &utf8_source_path, const std::string &utf8_manifest_path,
+                               const std::string &utf8_output_path, const write_options &options,
+                               operation_context &context) {
     return protect<void>([&]() -> result<void> {
-        if (!impl_)
-            return invalid_argument("transaction is not initialized");
         if (!context.impl_)
             return invalid_argument("operation context is not initialized");
-        if (impl_->owner != std::this_thread::get_id())
-            return invalid_argument("transaction used from a different thread");
+        auto source = checked_path(utf8_source_path, "source image path");
+        if (!source)
+            return source.error();
+        auto manifest_path = checked_path(utf8_manifest_path, "alteration manifest path");
+        if (!manifest_path)
+            return manifest_path.error();
+        auto manifest = load_alteration_manifest(*manifest_path);
+        if (!manifest)
+            return public_error(manifest.error());
         auto output = checked_path(utf8_output_path, "output image path");
         if (!output)
             return output.error();
         if (!options.overwrite && std::filesystem::exists(*output))
             return error{error_code::io_open_failed, error_category::io, "output image already exists", {}};
-        auto altered = alter_hds(impl_->source, impl_->manifest, *output, context.impl_->cancellation.token(),
-                                 context.impl_.get(), options.overwrite);
+        auto altered = alter_hds(*source, *manifest, *output, context.impl_->cancellation.token(), context.impl_.get(),
+                                 options.overwrite);
         if (!altered)
             return public_error(altered.error());
         return {};

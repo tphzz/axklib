@@ -574,8 +574,10 @@ Existing-image alteration performs relationship, capacity, name, and
 operation-order checks before applying an ordered transaction. Application uses
 a temporary destination and validates the completed image before replacement.
 The server application API normally requires a distinct output file. Trusted
-clients may instead set `replaceSource` to `true` on `alter.plan`, set `output`
+clients may instead set `replaceSource` to `true` on `alter.hds`, set `output`
 to the same `FileRef` as `source`, and close every open session for that image
 first. The operation then
 builds and validates a temporary sibling before atomically replacing the source
-path; `overwrite` must be omitted in this mode.
+path; `overwrite` must be omitted in this mode. `alter.inspect` provides a
+write-free advisory validation response. It does not issue a token or authorize
+a later apply request; `alter.hds` receives and revalidates the complete request.

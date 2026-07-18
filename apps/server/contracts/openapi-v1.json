@@ -1182,13 +1182,9 @@
         ],
         "type": "object"
       },
-      "ImageAlterationPlan": {
+      "ImageAlterationInspection": {
         "additionalProperties": false,
         "properties": {
-          "expiresInSeconds": {
-            "minimum": 1,
-            "type": "integer"
-          },
           "kind": {
             "const": "ALTERATION"
           },
@@ -1197,19 +1193,6 @@
               "$ref": "#/components/schemas/AlterationOperationReport"
             },
             "type": "array"
-          },
-          "output": {
-            "$ref": "#/components/schemas/FileRef"
-          },
-          "overwrite": {
-            "type": "boolean"
-          },
-          "planToken": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "replaceSource": {
-            "type": "boolean"
           },
           "schemaVersion": {
             "const": "1.0"
@@ -1238,11 +1221,7 @@
         },
         "required": [
           "schemaVersion",
-          "planToken",
-          "expiresInSeconds",
           "kind",
-          "output",
-          "overwrite",
           "summary",
           "semanticVersion",
           "sourceIdentity",
@@ -1253,7 +1232,30 @@
         ],
         "type": "object"
       },
-      "ImageAlterationPlanRequest": {
+      "ImageAlterationInspectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "inputBindings": {
+            "items": {
+              "$ref": "#/components/schemas/InputBinding"
+            },
+            "maxItems": 1024,
+            "type": "array"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/ManifestInput"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FileRef"
+          }
+        },
+        "required": [
+          "source",
+          "manifest"
+        ],
+        "type": "object"
+      },
+      "ImageAlterationRequest": {
         "additionalProperties": false,
         "properties": {
           "inputBindings": {
@@ -1287,9 +1289,6 @@
           "output"
         ],
         "type": "object"
-      },
-      "ImageAlterationRequest": {
-        "$ref": "#/components/schemas/PlanTokenRequest"
       },
       "ImageAlterationResult": {
         "additionalProperties": false,
@@ -6919,9 +6918,9 @@
         }
       }
     },
-    "/image-alteration-plans": {
+    "/image-alteration-inspections": {
       "post": {
-        "operationId": "alter.plan",
+        "operationId": "alter.inspect",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6931,10 +6930,6 @@
                     "manifest": {
                       "inline": {}
                     },
-                    "output": {
-                      "relativePath": "x",
-                      "rootId": "x"
-                    },
                     "source": {
                       "relativePath": "x",
                       "rootId": "x"
@@ -6943,7 +6938,7 @@
                 }
               },
               "schema": {
-                "$ref": "#/components/schemas/ImageAlterationPlanRequest"
+                "$ref": "#/components/schemas/ImageAlterationInspectionRequest"
               }
             }
           },
@@ -6957,15 +6952,8 @@
                   "success": {
                     "value": {
                       "data": {
-                        "expiresInSeconds": 1,
                         "kind": "ALTERATION",
                         "operations": [],
-                        "output": {
-                          "relativePath": "x",
-                          "rootId": "x"
-                        },
-                        "overwrite": false,
-                        "planToken": "x",
                         "schemaVersion": "1.0",
                         "semanticVersion": "x",
                         "sourceIdentity": "x",
@@ -6989,15 +6977,8 @@
                   "warning": {
                     "value": {
                       "data": {
-                        "expiresInSeconds": 1,
                         "kind": "ALTERATION",
                         "operations": [],
-                        "output": {
-                          "relativePath": "x",
-                          "rootId": "x"
-                        },
-                        "overwrite": false,
-                        "planToken": "x",
                         "schemaVersion": "1.0",
                         "semanticVersion": "x",
                         "sourceIdentity": "x",
@@ -7030,7 +7011,7 @@
                   "additionalProperties": false,
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/ImageAlterationPlan"
+                      "$ref": "#/components/schemas/ImageAlterationInspection"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -7308,17 +7289,17 @@
           {
             "cliCommand": null,
             "cliParity": false,
-            "id": "alter.plan",
+            "id": "alter.inspect",
             "mode": "request",
             "operationClass": "read",
-            "requestSchema": "ImageAlterationPlanRequest",
+            "requestSchema": "ImageAlterationInspectionRequest",
             "requiresIdempotency": false,
-            "resultSchema": "ImageAlterationPlan",
+            "resultSchema": "ImageAlterationInspection",
             "variant": null
           }
         ],
         "x-axklib-operation-ids": [
-          "alter.plan"
+          "alter.inspect"
         ]
       }
     },
@@ -7331,7 +7312,17 @@
               "examples": {
                 "default": {
                   "value": {
-                    "planToken": "x"
+                    "manifest": {
+                      "inline": {}
+                    },
+                    "output": {
+                      "relativePath": "x",
+                      "rootId": "x"
+                    },
+                    "source": {
+                      "relativePath": "x",
+                      "rootId": "x"
+                    }
                   }
                 }
               },

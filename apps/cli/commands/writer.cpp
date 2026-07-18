@@ -126,10 +126,6 @@ axk::app::Result<nlohmann::json> invoke_alteration(const std::filesystem::path &
     auto source = (*runtime)->file_ref(source_path);
     if (!source)
         return std::unexpected(source.error());
-    auto output = output_path ? (*runtime)->file_ref(*output_path)
-                              : axk::app::Result<axk::app::FileRef>{(*runtime)->scratch_file_ref("dry-run.hds")};
-    if (!output)
-        return std::unexpected(output.error());
     auto bindings = nlohmann::json::array();
     for (const auto &binding : prepared->bindings) {
         auto input = (*runtime)->file_ref(binding.input_path);
@@ -139,14 +135,11 @@ axk::app::Result<nlohmann::json> invoke_alteration(const std::filesystem::path &
             {{"manifestPath", binding.manifest_path},
              {"input", {{"fileRef", {{"rootId", input->root_id}, {"relativePath", input->relative_path}}}}}});
     }
-    auto plan = (*runtime)->invoke("alter.plan",
-                                   {{"source", {{"rootId", source->root_id}, {"relativePath", source->relative_path}}},
-                                    {"manifest", {{"inline", std::move(prepared->manifest)}}},
-                                    {"inputBindings", std::move(bindings)},
-                                    {"output", {{"rootId", output->root_id}, {"relativePath", output->relative_path}}},
-                                    {"overwrite", false}});
-    if (!plan)
-        return std::unexpected(plan.error());
+    nlohmann::json request = {
+        {"source", {{"rootId", source->root_id}, {"relativePath", source->relative_path}}},
+        {"manifest", {{"inline", std::move(prepared->manifest)}}},
+        {"inputBindings", std::move(bindings)},
+    };
     const auto restore_local_audio_paths = [&](nlohmann::json &result) {
         for (auto &operation : result.at("operations")) {
             auto &audio = operation.at("audioImport");
@@ -160,11 +153,19 @@ axk::app::Result<nlohmann::json> invoke_alteration(const std::filesystem::path &
         }
     };
     if (!output_path) {
-        (*plan)["applied"] = false;
-        restore_local_audio_paths(*plan);
-        return plan;
+        auto inspection = (*runtime)->invoke("alter.inspect", request);
+        if (inspection) {
+            (*inspection)["applied"] = false;
+            restore_local_audio_paths(*inspection);
+        }
+        return inspection;
     }
-    auto result = (*runtime)->invoke("alter.hds", {{"planToken", plan->at("planToken")}});
+    auto output = (*runtime)->file_ref(*output_path);
+    if (!output)
+        return std::unexpected(output.error());
+    request["output"] = {{"rootId", output->root_id}, {"relativePath", output->relative_path}};
+    request["overwrite"] = false;
+    auto result = (*runtime)->invoke("alter.hds", request);
     if (result)
         restore_local_audio_paths(*result);
     return result;

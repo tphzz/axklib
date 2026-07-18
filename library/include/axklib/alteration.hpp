@@ -168,7 +168,7 @@ struct AlterationResult {
     std::vector<OperationReport> operations;
 };
 
-struct TransactionPlan {
+struct AlterationInspection {
     std::filesystem::path source_path;
     std::vector<OperationReport> operations;
 };
@@ -178,12 +178,12 @@ AXK_AUDIO_API Result<AlterationManifest> parse_alteration_manifest(std::string_v
 AXK_AUDIO_API Result<AlterationManifest> load_alteration_manifest(const std::filesystem::path &path);
 AXK_AUDIO_API Result<AlterationResult> alter_hds(const std::filesystem::path &source_path,
                                                  const AlterationManifest &manifest,
-                                                 const std::optional<std::filesystem::path> &output_path = {},
+                                                 const std::filesystem::path &output_path,
                                                  const CancellationToken &cancellation = {},
                                                  ProgressSink *progress = nullptr, bool overwrite = false);
-AXK_AUDIO_API Result<TransactionPlan> plan_hds_alteration(const std::filesystem::path &source_path,
-                                                          const AlterationManifest &manifest,
-                                                          const CancellationToken &cancellation = {},
-                                                          ProgressSink *progress = nullptr);
+AXK_AUDIO_API Result<AlterationInspection> inspect_hds_alteration(const std::filesystem::path &source_path,
+                                                                  const AlterationManifest &manifest,
+                                                                  const CancellationToken &cancellation = {},
+                                                                  ProgressSink *progress = nullptr);
 
 } // namespace axk

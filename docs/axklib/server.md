@@ -177,11 +177,13 @@ than assuming compiled defaults.
 
 Existing HDS images are normally altered into a distinct output file. A trusted
 workspace client that needs to update the selected image may submit
-`replaceSource: true` to `alter.plan` and set `output` to the same `FileRef` as
-`source`. It must close active
-image sessions first. The application writes and validates a temporary sibling
-before atomically replacing the source; this mode does not permit a separate
-`overwrite` request.
+`replaceSource: true` to `alter.hds` and set `output` to the same `FileRef` as
+`source`. It must close active image sessions first. The application writes and
+validates a temporary sibling before atomically replacing the source; this mode
+does not permit a separate `overwrite` request. Clients may call
+`alter.inspect` first for advisory validation, but the inspection does not
+create an apply token or reserve the destination. Every `alter.hds` job request
+contains the complete source, manifest, input bindings, and output.
 
 ## Low-Concurrency Deployment Profile
 

@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/operation_registry.hpp"
+#include "axklib/application/uploads.hpp"
 
 namespace axk::app {
 
@@ -71,7 +72,8 @@ class JobManager {
     JobManager(
         const OperationRegistry &registry, std::size_t read_worker_count, std::size_t write_worker_count,
         std::size_t maximum_queued_jobs, std::size_t replay_events_per_job, std::size_t maximum_retained_jobs = 2048U,
-        std::chrono::seconds retention = std::chrono::minutes{15}, Now now = [] { return Clock::now(); });
+        std::chrono::seconds retention = std::chrono::minutes{15}, Now now = [] { return Clock::now(); },
+        UploadStore *uploads = nullptr);
     ~JobManager();
 
     JobManager(const JobManager &) = delete;

@@ -39,7 +39,6 @@ TEST(Sdk, PublicFacadeOwnsVersionResultAndMoveOnlySessions) {
     static_assert(sizeof(axk::build_plan) <= sizeof(void *) * 2U);
     static_assert(sizeof(axk::portable_package) <= sizeof(void *) * 2U);
     static_assert(sizeof(axk::package_import_plan) <= sizeof(void *) * 2U);
-    static_assert(sizeof(axk::transaction) <= sizeof(void *) * 2U);
     EXPECT_EQ(axk::sdk_version(), axk::version_string);
     EXPECT_EQ(axk::sdk_version(), axk::version());
     const auto sdk_build = axk::sdk_build_info();
@@ -175,7 +174,7 @@ class ThrowingProgressSink final : public axk::progress_sink {
     std::uint64_t calls{};
 };
 
-TEST(Sdk, BuildAndTransactionPlansApplyThroughTheFacade) {
+TEST(Sdk, BuildAndAlterationInspectionApplyThroughTheFacade) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-sdk-plans";
     const auto build_manifest = root / "build.json";
     const auto alteration_manifest = root / "alteration.json";
@@ -199,21 +198,23 @@ TEST(Sdk, BuildAndTransactionPlansApplyThroughTheFacade) {
     ASSERT_TRUE(build->apply(source.string(), {}, context));
     EXPECT_TRUE(std::filesystem::exists(source));
 
-    auto alteration = axk::transaction::from_manifest(source.string(), alteration_manifest.string(), context);
-    ASSERT_TRUE(alteration);
-    EXPECT_EQ(alteration->summary().operation_count, 1U);
-    ASSERT_TRUE(alteration->apply(output.string(), {}, context));
+    auto inspection = axk::alteration::inspect(source.string(), alteration_manifest.string(), context);
+    ASSERT_TRUE(inspection);
+    EXPECT_EQ(inspection->operation_count, 1U);
+    ASSERT_TRUE(axk::alteration::apply(source.string(), alteration_manifest.string(), output.string(), {}, context));
     EXPECT_TRUE(std::filesystem::exists(output));
 
     std::ofstream{output, std::ios::binary | std::ios::trunc} << "occupied";
-    const auto rejected = alteration->apply(output.string(), {}, context);
+    const auto rejected =
+        axk::alteration::apply(source.string(), alteration_manifest.string(), output.string(), {}, context);
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().message, "output image already exists");
     EXPECT_EQ(std::filesystem::file_size(output), 8U);
 
     axk::write_options overwrite;
     overwrite.overwrite = true;
-    ASSERT_TRUE(alteration->apply(output.string(), overwrite, context));
+    ASSERT_TRUE(
+        axk::alteration::apply(source.string(), alteration_manifest.string(), output.string(), overwrite, context));
     auto reopened = axk::image::open(output.string(), context);
     ASSERT_TRUE(reopened) << reopened.error().message;
     EXPECT_GT(progress.calls, 0U);

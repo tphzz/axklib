@@ -2293,7 +2293,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "manifest",
                 (root_path / "all-actions.json").read_bytes(),
             )
-            alteration_plan_request = {
+            alteration_inspection_request = {
                 "source": {
                     "rootId": "workspace",
                     "relativePath": "all-actions-source.hds",
@@ -2305,25 +2305,21 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                         "input": {"uploadRef": {"uploadId": tone_upload}},
                     }
                 ],
-                "output": {
-                    "rootId": "workspace",
-                    "relativePath": "builds/server/all-actions.hds",
-                },
             }
             status, response = http_request(
                 port,
                 "POST",
-                "/api/v1/image-alteration-plans",
-                alteration_plan_request,
+                "/api/v1/image-alteration-inspections",
+                alteration_inspection_request,
             )
             assert status == 200, response
-            alteration_plan = response["data"]
-            assert alteration_plan["valid"] is True
-            assert alteration_plan["kind"] == "ALTERATION"
-            assert alteration_plan["summary"]["operationCount"] == 13
-            assert alteration_plan.get("warnings") == [], alteration_plan
-            assert alteration_plan["validation"]["valid"] is True
-            assert str(root_path) not in json.dumps(alteration_plan)
+            alteration_inspection = response["data"]
+            assert alteration_inspection["valid"] is True
+            assert alteration_inspection["kind"] == "ALTERATION"
+            assert alteration_inspection["summary"]["operationCount"] == 13
+            assert alteration_inspection.get("warnings") == [], alteration_inspection
+            assert alteration_inspection["validation"]["valid"] is True
+            assert str(root_path) not in json.dumps(alteration_inspection)
             expected_types = {
                 "delete_volume",
                 "insert_volume",
@@ -2341,11 +2337,11 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             }
             assert {
                 str(operation["type"]).lower()
-                for operation in alteration_plan["operations"]
+                for operation in alteration_inspection["operations"]
             } == expected_types
             assert [
                 canonical_alteration_operation(operation)
-                for operation in alteration_plan["operations"]
+                for operation in alteration_inspection["operations"]
             ] == [
                 canonical_alteration_operation(operation)
                 for operation in cli_dry["operations"]
@@ -2355,7 +2351,13 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 port,
                 "POST",
                 "/api/v1/image-alterations",
-                {"planToken": alteration_plan["planToken"]},
+                {
+                    **alteration_inspection_request,
+                    "output": {
+                        "rootId": "workspace",
+                        "relativePath": "builds/server/all-actions.hds",
+                    },
+                },
                 {"Idempotency-Key": "all-action-alteration"},
             )
             assert status == 202, submitted
@@ -2365,8 +2367,8 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert altered["schemaVersion"] == "1.0"
             assert altered["kind"] == "ALTERATION"
             assert altered["applied"] is True
-            assert altered["operations"] == alteration_plan["operations"]
-            assert altered["summary"] == alteration_plan["summary"]
+            assert altered["operations"] == alteration_inspection["operations"]
+            assert altered["summary"] == alteration_inspection["summary"]
             assert altered["warnings"] == []
             assert altered["validation"]["valid"] is True
             assert [
@@ -2388,26 +2390,29 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 == source_before
             )
 
+            direct_request = {
+                **alteration_inspection_request,
+                "output": {
+                    "rootId": "workspace",
+                    "relativePath": "builds/server/all-actions.hds",
+                },
+            }
             status, refused = http_request(
                 port,
                 "POST",
-                "/api/v1/image-alteration-plans",
-                alteration_plan_request,
+                "/api/v1/image-alterations",
+                direct_request,
+                {"Idempotency-Key": "all-action-alteration-refused"},
             )
-            assert status == 409, refused
-            overwrite_request = {**alteration_plan_request, "overwrite": True}
-            status, response = http_request(
-                port,
-                "POST",
-                "/api/v1/image-alteration-plans",
-                overwrite_request,
-            )
-            assert status == 200, response
+            assert status == 202, refused
+            refused_job = wait_for_job(port, str(refused["data"]["jobId"]), process)
+            assert refused_job["state"] == "FAILED", refused_job
+            assert refused_job["error"]["code"] == "output_exists", refused_job
             status, submitted = http_request(
                 port,
                 "POST",
                 "/api/v1/image-alterations",
-                {"planToken": response["data"]["planToken"]},
+                {**direct_request, "overwrite": True},
                 {"Idempotency-Key": "all-action-alteration-overwrite"},
             )
             assert status == 202, submitted

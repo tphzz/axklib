@@ -50,6 +50,7 @@ struct AlterationOutput {
 };
 
 AlterationOutput project_alteration(const AlterationResult &altered);
+AlterationOutput project_alteration(const AlterationInspection &inspection);
 Result<std::string> serialize(const AlterationOutput &output, bool pretty);
 
 } // namespace axk::cli::schema::operations_v1

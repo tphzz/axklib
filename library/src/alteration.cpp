@@ -3065,6 +3065,39 @@ Result<std::string> file_snapshot_id(const std::filesystem::path &path, const Ca
     return package_internal::hex_digest(*digest);
 }
 
+Result<TransactionState> prepare_alteration(const std::filesystem::path &source_path,
+                                            const AlterationManifest &manifest, const CancellationToken &cancellation,
+                                            ProgressSink *progress, std::string_view initial_message,
+                                            std::optional<std::string> progress_path = std::nullopt) {
+    auto opened = open_transaction_state(source_path, cancellation, progress, requires_object_graph(manifest));
+    if (!opened)
+        return std::unexpected{opened.error()};
+    auto state = std::move(*opened);
+    if (progress) {
+        progress->report(
+            {ProgressPhase::allocating, 0U, manifest.operations.size(), std::string{initial_message}, progress_path});
+    }
+    using OperationHandler =
+        Result<OperationReport> (*)(TransactionState &, const OperationView &, const CancellationToken &);
+    constexpr std::array<OperationHandler, std::variant_size_v<AlterationOperationData>> handlers{
+        delete_volume, insert_volume, delete_sbnk, insert_sbnk, insert_waveform, delete_waveform, rename_waveform,
+        rename_sbnk,   delete_sbac,   insert_sbac, rename_sbac, delete_program,  insert_program,  rename_volume,
+    };
+    for (std::size_t operation_index = 0; operation_index < manifest.operations.size(); ++operation_index) {
+        const auto &typed_operation = manifest.operations[operation_index];
+        const auto operation = operation_view(typed_operation);
+        auto report = handlers[typed_operation.data.index()](state, operation, cancellation);
+        if (!report)
+            return std::unexpected{report.error()};
+        state.reports.push_back(std::move(*report));
+        if (progress) {
+            progress->report({ProgressPhase::allocating, operation_index + 1U, manifest.operations.size(),
+                              operation.type, progress_path});
+        }
+    }
+    return state;
+}
+
 } // namespace
 
 std::string_view operation_type_name(const AlterationOperationData &operation) noexcept {
@@ -3578,51 +3611,30 @@ Result<AlterationManifest> load_alteration_manifest(const std::filesystem::path 
 }
 
 Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, const AlterationManifest &manifest,
-                                   const std::optional<std::filesystem::path> &output_path,
-                                   const CancellationToken &cancellation, ProgressSink *progress, bool overwrite) {
-    if (output_path && std::filesystem::absolute(source_path).lexically_normal() ==
-                           std::filesystem::absolute(*output_path).lexically_normal()) {
+                                   const std::filesystem::path &output_path, const CancellationToken &cancellation,
+                                   ProgressSink *progress, bool overwrite) {
+    if (std::filesystem::absolute(source_path).lexically_normal() ==
+        std::filesystem::absolute(output_path).lexically_normal()) {
         return std::unexpected{transaction_error("alteration output must differ from source")};
     }
-    auto opened = open_transaction_state(source_path, cancellation, progress, requires_object_graph(manifest));
-    if (!opened)
-        return std::unexpected{opened.error()};
-    auto state = std::move(*opened);
-    if (progress)
-        progress->report({ProgressPhase::allocating, 0U, manifest.operations.size(), "planning alteration", {}});
-    using OperationHandler =
-        Result<OperationReport> (*)(TransactionState &, const OperationView &, const CancellationToken &);
-    constexpr std::array<OperationHandler, std::variant_size_v<AlterationOperationData>> handlers{
-        delete_volume, insert_volume, delete_sbnk, insert_sbnk, insert_waveform, delete_waveform, rename_waveform,
-        rename_sbnk,   delete_sbac,   insert_sbac, rename_sbac, delete_program,  insert_program,  rename_volume,
-    };
-    for (std::size_t operation_index = 0; operation_index < manifest.operations.size(); ++operation_index) {
-        const auto &typed_operation = manifest.operations[operation_index];
-        const auto operation = operation_view(typed_operation);
-        auto report = handlers[typed_operation.data.index()](state, operation, cancellation);
-        if (!report)
-            return std::unexpected{report.error()};
-        state.reports.push_back(std::move(*report));
-        if (progress)
-            progress->report(
-                {ProgressPhase::allocating, operation_index + 1U, manifest.operations.size(), operation.type,
-                 output_path ? std::optional{text::path_to_utf8(*output_path)} : std::optional<std::string>{}});
-    }
-    if (output_path) {
-        auto applied = publish(state, *output_path, cancellation, overwrite, {}, progress);
-        if (!applied)
-            return std::unexpected{applied.error()};
-    }
-    return AlterationResult{source_path, output_path, output_path.has_value(), std::move(state.reports)};
+    auto prepared = prepare_alteration(source_path, manifest, cancellation, progress, "planning alteration",
+                                       text::path_to_utf8(output_path));
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    auto state = std::move(*prepared);
+    auto applied = publish(state, output_path, cancellation, overwrite, {}, progress);
+    if (!applied)
+        return std::unexpected{applied.error()};
+    return AlterationResult{source_path, output_path, true, std::move(state.reports)};
 }
 
-Result<TransactionPlan> plan_hds_alteration(const std::filesystem::path &source_path,
-                                            const AlterationManifest &manifest, const CancellationToken &cancellation,
-                                            ProgressSink *progress) {
-    auto result = alter_hds(source_path, manifest, {}, cancellation, progress);
-    if (!result)
-        return std::unexpected{result.error()};
-    return TransactionPlan{result->source_path, std::move(result->operations)};
+Result<AlterationInspection> inspect_hds_alteration(const std::filesystem::path &source_path,
+                                                    const AlterationManifest &manifest,
+                                                    const CancellationToken &cancellation, ProgressSink *progress) {
+    auto prepared = prepare_alteration(source_path, manifest, cancellation, progress, "inspecting alteration");
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    return AlterationInspection{source_path, std::move(prepared->reports)};
 }
 
 Result<PackageImportReport> apply_package_import(const std::filesystem::path &target_path,

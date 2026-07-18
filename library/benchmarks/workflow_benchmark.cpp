@@ -106,7 +106,7 @@ int main(int argc, char **argv) try {
             R"({"schema_version":"1.0","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"New Volume"}]})"),
         "alteration manifest");
     measurements.push_back(measure("alteration_plan", [&] {
-        static_cast<void>(require(axk::plan_hds_alteration(source, alteration), "alteration plan"));
+        static_cast<void>(require(axk::inspect_hds_alteration(source, alteration), "alteration inspection"));
     }));
     measurements.push_back(measure("alteration_apply", [&] {
         static_cast<void>(require(axk::alter_hds(source, alteration, scratch / "altered.hds"), "alteration apply"));

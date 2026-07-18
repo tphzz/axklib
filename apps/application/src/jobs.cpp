@@ -139,6 +139,24 @@ bool references_path(const nlohmann::json &value, const axk::app::FileRef &refer
     return false;
 }
 
+void collect_upload_ids(const Json &value, std::vector<std::string> &result) {
+    if (value.is_object()) {
+        if (const auto reference = value.find("uploadRef"); reference != value.end() && reference->is_object()) {
+            const auto upload_id = reference->find("uploadId");
+            if (upload_id != reference->end() && upload_id->is_string()) {
+                const auto &id = upload_id->get_ref<const std::string &>();
+                if (std::ranges::find(result, id) == result.end())
+                    result.push_back(id);
+            }
+        }
+        for (const auto &item : value.items())
+            collect_upload_ids(item.value(), result);
+    } else if (value.is_array()) {
+        for (const auto &item : value)
+            collect_upload_ids(item, result);
+    }
+}
+
 } // namespace
 
 struct axk::app::JobManager::Impl {
@@ -164,6 +182,7 @@ struct axk::app::JobManager::Impl {
         std::optional<Clock::time_point> running_at;
         std::optional<Clock::time_point> phase_started_at;
         std::optional<Clock::time_point> cancellation_requested_at;
+        std::vector<UploadLease> upload_leases;
     };
 
     struct IdempotentSubmission {
@@ -195,11 +214,11 @@ struct axk::app::JobManager::Impl {
 
     Impl(const OperationRegistry &operation_registry, std::size_t read_worker_count, std::size_t write_worker_count,
          std::size_t maximum_queued_jobs, std::size_t replay_events_per_job, std::size_t maximum_retained_jobs,
-         std::chrono::seconds retention, Now now_function)
+         std::chrono::seconds retention, Now now_function, UploadStore *upload_store)
         : registry(operation_registry), maximum_queue(std::max<std::size_t>(maximum_queued_jobs, 1U)),
           maximum_replay(std::max<std::size_t>(replay_events_per_job, 1U)),
           maximum_jobs(std::max<std::size_t>(maximum_retained_jobs, 1U)), retention(retention),
-          now(std::move(now_function)) {
+          now(std::move(now_function)), uploads(upload_store) {
         const auto readers = std::max<std::size_t>(read_worker_count, 1U);
         const auto writers = std::max<std::size_t>(write_worker_count, 1U);
         workers.reserve(readers + writers);
@@ -457,6 +476,7 @@ struct axk::app::JobManager::Impl {
     const std::size_t maximum_jobs;
     const std::chrono::seconds retention;
     Now now;
+    UploadStore *uploads{};
     mutable std::mutex mutex;
     std::condition_variable condition;
     std::unordered_map<std::string, std::shared_ptr<Record>> jobs;
@@ -486,9 +506,9 @@ struct axk::app::JobManager::Impl {
 axk::app::JobManager::JobManager(const OperationRegistry &registry, std::size_t read_worker_count,
                                  std::size_t write_worker_count, std::size_t maximum_queued_jobs,
                                  std::size_t replay_events_per_job, std::size_t maximum_retained_jobs,
-                                 std::chrono::seconds retention, Now now)
+                                 std::chrono::seconds retention, Now now, UploadStore *uploads)
     : impl_(std::make_unique<Impl>(registry, read_worker_count, write_worker_count, maximum_queued_jobs,
-                                   replay_events_per_job, maximum_retained_jobs, retention, std::move(now))) {}
+                                   replay_events_per_job, maximum_retained_jobs, retention, std::move(now), uploads)) {}
 
 axk::app::JobManager::~JobManager() = default;
 
@@ -514,6 +534,17 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
     record->operation_class = descriptor->operation_class;
     record->request = std::move(request);
     record->context = std::move(context);
+    if (impl_->uploads != nullptr) {
+        std::vector<std::string> upload_ids;
+        collect_upload_ids(record->request, upload_ids);
+        record->upload_leases.reserve(upload_ids.size());
+        for (const auto &upload_id : upload_ids) {
+            auto lease = impl_->uploads->lease(UploadRef{upload_id}, record->context.owner_id);
+            if (!lease)
+                return std::unexpected(lease.error());
+            record->upload_leases.push_back(std::move(*lease));
+        }
+    }
     if (record->operation_class == OperationClass::write)
         record->destination_keys = destination_keys(record->request);
     const auto request_fingerprint = record->request.dump();

@@ -52,7 +52,7 @@ struct ManifestDocument {
     std::map<std::string, std::string> logical_input_paths;
 };
 
-enum class WritePlanKind : std::uint8_t { hds, floppy, iso, alteration };
+enum class WritePlanKind : std::uint8_t { hds, floppy, iso };
 
 struct FileFingerprint {
     std::filesystem::path path;
@@ -71,12 +71,10 @@ struct WritePlanRecord {
     bool overwrite{};
     bool output_existed{};
     std::optional<std::string> output_sha256;
-    std::optional<axk::app::FileRef> source;
-    std::optional<std::filesystem::path> source_path;
     std::vector<FileFingerprint> inputs;
     std::map<std::string, std::string> logical_input_paths;
     std::vector<axk::app::UploadLease> leases;
-    std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest, axk::AlterationManifest> manifest;
+    std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest> manifest;
     Json summary;
     std::string semantic_version;
     std::string source_identity;
@@ -136,8 +134,6 @@ std::string write_plan_kind_name(WritePlanKind kind) {
         return "FLOPPY";
     case WritePlanKind::iso:
         return "ISO";
-    case WritePlanKind::alteration:
-        return "ALTERATION";
     }
     return "HDS";
 }
@@ -568,6 +564,37 @@ axk::app::Result<void> verify_plan_state(const WritePlanRecord &record, const ax
     return {};
 }
 
+axk::app::Result<void> verify_alteration_state(std::span<const FileFingerprint> inputs,
+                                               const std::filesystem::path &output_path, bool output_existed,
+                                               const std::optional<std::string> &output_sha256,
+                                               const axk::CancellationToken &cancellation) {
+    for (const auto &input : inputs) {
+        auto state = file_state(input.path);
+        if (!state || state->first != input.size || state->second != input.last_write_time)
+            return std::unexpected(operation_error("input_changed", "an alteration input changed during execution"));
+        auto digest = file_sha256(input.path, cancellation);
+        if (!digest || *digest != input.sha256)
+            return std::unexpected(operation_error("input_changed", "an alteration input changed during execution"));
+    }
+    std::error_code error;
+    const auto exists = std::filesystem::exists(output_path, error);
+    if (error || exists != output_existed)
+        return std::unexpected(
+            operation_error("destination_changed", "alteration destination changed during execution"));
+    if (output_sha256) {
+        const auto known = std::ranges::find_if(inputs, [&](const FileFingerprint &fingerprint) {
+            return normalized_path(fingerprint.path) == normalized_path(output_path);
+        });
+        if (known == inputs.end()) {
+            auto digest = file_sha256(output_path, cancellation);
+            if (!digest || *digest != *output_sha256)
+                return std::unexpected(
+                    operation_error("destination_changed", "alteration destination changed during execution"));
+        }
+    }
+    return {};
+}
+
 axk::app::Result<void> register_plan(const std::shared_ptr<WriteOperationState> &state,
                                      const std::shared_ptr<WritePlanRecord> &record) {
     std::lock_guard lock{state->mutex};
@@ -587,21 +614,16 @@ axk::app::Result<void> register_plan(const std::shared_ptr<WriteOperationState> 
 }
 
 Json write_plan_json(const WritePlanRecord &record, std::uint64_t expires_in_seconds) {
-    const auto replaces_source =
-        record.source_path && normalized_path(*record.source_path) == normalized_path(record.output_path);
-    Json result = {{"schemaVersion", "1.0"},
-                   {"planToken", record.token},
-                   {"expiresInSeconds", expires_in_seconds},
-                   {"kind", write_plan_kind_name(record.kind)},
-                   {"output", file_ref_json(record.output)},
-                   {"overwrite", record.overwrite},
-                   {"semanticVersion", record.semantic_version},
-                   {"sourceIdentity", record.source_identity},
-                   {"summary", record.summary},
-                   {"valid", true}};
-    if (record.kind == WritePlanKind::alteration)
-        result["replaceSource"] = replaces_source;
-    return result;
+    return {{"schemaVersion", "1.0"},
+            {"planToken", record.token},
+            {"expiresInSeconds", expires_in_seconds},
+            {"kind", write_plan_kind_name(record.kind)},
+            {"output", file_ref_json(record.output)},
+            {"overwrite", record.overwrite},
+            {"semanticVersion", record.semantic_version},
+            {"sourceIdentity", record.source_identity},
+            {"summary", record.summary},
+            {"valid", true}};
 }
 
 Json manifest_choices(axk::BuildManifestKind kind) {
@@ -908,7 +930,7 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
 
         const auto serialized = document->json.dump();
         Json summary;
-        std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest, axk::AlterationManifest> manifest;
+        std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest> manifest;
         std::vector<std::filesystem::path> required_paths;
         if (*manifest_kind == axk::BuildManifestKind::hds) {
             auto parsed = axk::parse_hds_build_manifest(serialized);
@@ -977,25 +999,11 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
         auto token = axk::app::secure_random_hex(24U);
         if (!token)
             return Result<Json>{std::unexpected(token.error())};
-        auto record = std::make_shared<WritePlanRecord>(WritePlanRecord{std::move(*token),
-                                                                        context.owner_id,
-                                                                        now + state->retention,
-                                                                        write_plan_kind(*manifest_kind),
-                                                                        *output,
-                                                                        *output_path,
-                                                                        overwrite,
-                                                                        output_existed,
-                                                                        std::move(output_digest),
-                                                                        {},
-                                                                        {},
-                                                                        std::move(*fingerprints),
-                                                                        std::move(document->logical_input_paths),
-                                                                        std::move(document->leases),
-                                                                        std::move(manifest),
-                                                                        std::move(summary),
-                                                                        std::string{axk::version()},
-                                                                        build.source_identity,
-                                                                        false});
+        auto record = std::make_shared<WritePlanRecord>(WritePlanRecord{
+            std::move(*token), context.owner_id, now + state->retention, write_plan_kind(*manifest_kind), *output,
+            *output_path, overwrite, output_existed, std::move(output_digest), std::move(*fingerprints),
+            std::move(document->logical_input_paths), std::move(document->leases), std::move(manifest),
+            std::move(summary), std::string{axk::version()}, build.source_identity, false});
         if (auto registered = register_plan(state, record); !registered)
             return Result<Json>{std::unexpected(registered.error())};
         return Result<Json>{write_plan_json(*record, static_cast<std::uint64_t>(state->retention.count() * 60))};
@@ -1139,9 +1147,51 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
     if (auto bound = bind_create("create.iso", axk::BuildManifestKind::iso9660); !bound)
         return bound;
 
-    if (!registry.is_implemented("alter.plan")) {
-        auto bound = registry.bind("alter.plan", [state, &sandbox, &uploads](const Json &input,
-                                                                             const OperationContext &context) {
+    if (!registry.is_implemented("alter.inspect")) {
+        auto bound =
+            registry.bind("alter.inspect", [&sandbox, &uploads](const Json &input, const OperationContext &context) {
+                auto source = parse_file_ref(input, "source");
+                if (!source)
+                    return Result<Json>{std::unexpected(source.error())};
+                auto source_path = sandbox.resolve_file(*source);
+                if (!source_path)
+                    return Result<Json>{std::unexpected(source_path.error())};
+                auto document = load_manifest(input, context, sandbox, uploads);
+                if (!document)
+                    return Result<Json>{std::unexpected(document.error())};
+                auto manifest = axk::parse_alteration_manifest(document->json.dump());
+                if (!manifest)
+                    return Result<Json>{std::unexpected(core_error(manifest.error()))};
+                const auto required_paths = external_paths(*manifest);
+                if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
+                    return Result<Json>{std::unexpected(admitted.error())};
+                auto inspection =
+                    axk::inspect_hds_alteration(*source_path, *manifest, context.cancellation, context.progress);
+                if (!inspection)
+                    return Result<Json>{std::unexpected(core_error(inspection.error(), source->relative_path))};
+
+                auto operations = Json::array();
+                for (const auto &operation : inspection->operations)
+                    operations.push_back(operation_report_json(operation, document->logical_input_paths));
+                const auto build = axk::current_build_info();
+                Json result = {{"schemaVersion", "1.0"},
+                               {"kind", "ALTERATION"},
+                               {"semanticVersion", axk::version()},
+                               {"sourceIdentity", build.source_identity},
+                               {"summary", alteration_summary(inspection->operations)},
+                               {"valid", true},
+                               {"operations", std::move(operations)},
+                               {"warnings", Json::array()},
+                               {"validation", {{"valid", true}, {"issueCount", 0U}}}};
+                return Result<Json>{std::move(result)};
+            });
+        if (!bound)
+            return bound;
+    }
+
+    if (!registry.is_implemented("alter.hds")) {
+        auto bound = registry.bind("alter.hds", [&sandbox, &uploads](const Json &input,
+                                                                     const OperationContext &context) {
             auto source = parse_file_ref(input, "source");
             if (!source)
                 return Result<Json>{std::unexpected(source.error())};
@@ -1157,16 +1207,15 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                     operation_error("invalid_request", "overwrite must be omitted when replaceSource is true"))};
             }
             if (replace_source) {
-                const auto output_identity = sandbox.resolve_file(*output);
+                auto output_identity = sandbox.resolve_file(*output);
                 if (!output_identity)
                     return Result<Json>{std::unexpected(output_identity.error())};
-                if (*source_path != *output_identity) {
+                if (normalized_path(*source_path) != normalized_path(*output_identity)) {
                     return Result<Json>{std::unexpected(
                         operation_error("invalid_request", "output must match source when replaceSource is true"))};
                 }
-            } else {
-                if (const auto distinct = sandbox.require_distinct(*source, *output); !distinct)
-                    return Result<Json>{std::unexpected(distinct.error())};
+            } else if (const auto distinct = sandbox.require_distinct(*source, *output); !distinct) {
+                return Result<Json>{std::unexpected(distinct.error())};
             }
             const auto overwrite = replace_source ? true : input.value("overwrite", false);
             auto output_path = sandbox.resolve_output_file(*output, overwrite);
@@ -1181,13 +1230,6 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             const auto required_paths = external_paths(*manifest);
             if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
                 return Result<Json>{std::unexpected(admitted.error())};
-            auto plan = axk::plan_hds_alteration(*source_path, *manifest, context.cancellation, context.progress);
-            if (!plan)
-                return Result<Json>{std::unexpected(core_error(plan.error(), source->relative_path))};
-
-            auto operations = Json::array();
-            for (const auto &operation : plan->operations)
-                operations.push_back(operation_report_json(operation, document->logical_input_paths));
             auto fingerprint_paths = document->observed_paths;
             fingerprint_paths.push_back(*source_path);
             fingerprint_paths.insert(fingerprint_paths.end(), required_paths.begin(), required_paths.end());
@@ -1210,84 +1252,32 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                     output_digest = std::move(*digest);
                 }
             }
-            const auto build = axk::current_build_info();
-            const auto now = Clock::now();
-            auto token = axk::app::secure_random_hex(24U);
-            if (!token)
-                return Result<Json>{std::unexpected(token.error())};
-            auto record = std::make_shared<WritePlanRecord>(
-                WritePlanRecord{std::move(*token), context.owner_id, now + state->retention, WritePlanKind::alteration,
-                                *output, *output_path, overwrite, output_existed, std::move(output_digest), *source,
-                                *source_path, std::move(*fingerprints), std::move(document->logical_input_paths),
-                                std::move(document->leases), std::move(*manifest), alteration_summary(plan->operations),
-                                std::string{axk::version()}, build.source_identity, false});
-            if (auto registered = register_plan(state, record); !registered)
-                return Result<Json>{std::unexpected(registered.error())};
-            auto result = write_plan_json(*record, static_cast<std::uint64_t>(state->retention.count() * 60));
-            result["operations"] = std::move(operations);
-            result["warnings"] = Json::array();
-            result["validation"] = {{"valid", true}, {"issueCount", 0U}};
-            return Result<Json>{std::move(result)};
-        });
-        if (!bound)
-            return bound;
-    }
-
-    if (!registry.is_implemented("alter.hds")) {
-        auto bound = registry.bind("alter.hds", [state, &sandbox](const Json &input, const OperationContext &context) {
-            std::string token;
-            try {
-                token = input.at("planToken").get<std::string>();
-            } catch (const Json::exception &) {
-                return Result<Json>{std::unexpected(operation_error("invalid_request", "planToken is required"))};
-            }
-            auto claim = claim_plan(state, token, context.owner_id, WritePlanKind::alteration);
-            if (!claim)
-                return Result<Json>{std::unexpected(claim.error())};
-            const auto &record = *claim->record();
-            if (auto verified = verify_plan_state(record, context.cancellation); !verified) {
-                claim->consume();
-                return Result<Json>{std::unexpected(verified.error())};
-            }
-            if (!record.source || !record.source_path)
-                return Result<Json>{std::unexpected(operation_error("write_plan_invalid", "source is absent"))};
-            auto source_path = sandbox.resolve_file(*record.source);
-            if (!source_path)
-                return Result<Json>{std::unexpected(source_path.error())};
-            auto output_path = sandbox.resolve_output_file(record.output, record.overwrite);
-            if (!output_path)
-                return Result<Json>{std::unexpected(output_path.error())};
-            if (normalized_path(*source_path) != normalized_path(*record.source_path) ||
-                normalized_path(*output_path) != normalized_path(record.output_path)) {
-                return Result<Json>{std::unexpected(
-                    operation_error("write_plan_stale", "source or destination identity changed after planning"))};
-            }
             auto staging = axk::text::temporary_sibling(*output_path);
             if (!staging) {
                 return Result<Json>{std::unexpected(
                     operation_error("alteration_write_failed", "could not name alteration staging output"))};
             }
             TemporaryFileCleanup cleanup{*staging};
-            const auto &manifest = std::get<axk::AlterationManifest>(record.manifest);
             auto altered =
-                axk::alter_hds(*source_path, manifest, *staging, context.cancellation, context.progress, false);
+                axk::alter_hds(*source_path, *manifest, *staging, context.cancellation, context.progress, false);
             if (!altered)
-                return Result<Json>{std::unexpected(core_error(altered.error(), record.output.relative_path))};
+                return Result<Json>{std::unexpected(core_error(altered.error(), output->relative_path))};
             if (context.progress) {
                 context.progress->report(
                     {axk::ProgressPhase::validating, 0U, 1U, "validating alteration image", std::nullopt});
             }
             if (const auto checked = context.cancellation.check(); !checked)
-                return Result<Json>{std::unexpected(core_error(checked.error(), record.output.relative_path))};
-            auto validation = validate_written_image(*staging, record.output, context);
+                return Result<Json>{std::unexpected(core_error(checked.error(), output->relative_path))};
+            auto validation = validate_written_image(*staging, *output, context);
             if (!validation)
                 return Result<Json>{std::unexpected(validation.error())};
             if (context.progress) {
                 context.progress->report(
                     {axk::ProgressPhase::validating, 1U, 1U, "validated alteration image", std::nullopt});
             }
-            if (auto verified = verify_plan_state(record, context.cancellation); !verified) {
-                claim->consume();
+            if (auto verified = verify_alteration_state(*fingerprints, *output_path, output_existed, output_digest,
+                                                        context.cancellation);
+                !verified) {
                 return Result<Json>{std::unexpected(verified.error())};
             }
             if (context.progress) {
@@ -1295,10 +1285,9 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                     {axk::ProgressPhase::publishing, 0U, 1U, "publishing alteration image", std::nullopt});
             }
             if (const auto checked = context.cancellation.check(); !checked)
-                return Result<Json>{std::unexpected(core_error(checked.error(), record.output.relative_path))};
-            if (auto published = axk::detail::publish_temporary_file(*staging, *output_path, record.overwrite);
-                !published) {
-                return Result<Json>{std::unexpected(core_error(published.error(), record.output.relative_path))};
+                return Result<Json>{std::unexpected(core_error(checked.error(), output->relative_path))};
+            if (auto published = axk::detail::publish_temporary_file(*staging, *output_path, overwrite); !published) {
+                return Result<Json>{std::unexpected(core_error(published.error(), output->relative_path))};
             }
             cleanup.release();
             if (context.progress) {
@@ -1307,14 +1296,13 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             }
             auto operations = Json::array();
             for (const auto &operation : altered->operations)
-                operations.push_back(operation_report_json(operation, record.logical_input_paths));
+                operations.push_back(operation_report_json(operation, document->logical_input_paths));
             (*validation)["operations"] = std::move(operations);
             (*validation)["applied"] = altered->applied;
             (*validation)["schemaVersion"] = "1.0";
             (*validation)["kind"] = "ALTERATION";
             (*validation)["summary"] = alteration_summary(altered->operations);
             (*validation)["warnings"] = Json::array();
-            claim->consume();
             return validation;
         });
         if (!bound)

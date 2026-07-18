@@ -620,24 +620,26 @@ TEST_F(WriteOperationsTest, AlterationRequiresExplicitAtomicSourceReplacement) {
     auto alteration_manifest = starter->at("manifest");
     alteration_manifest["operations"] = nlohmann::json::array(
         {{{"id", "remove"}, {"type", "delete_volume"}, {"partition_index", 0U}, {"volume_name", "Second Volume"}}});
-    const auto alteration_plan =
-        registry_.invoke("alter.plan",
-                         {{"source", {{"rootId", "workspace"}, {"relativePath", "source.hds"}}},
-                          {"manifest", {{"inline", alteration_manifest}}},
-                          {"output", {{"rootId", "workspace"}, {"relativePath", "altered.hds"}}}},
-                         context());
-    ASSERT_TRUE(alteration_plan) << alteration_plan.error().message;
-    ASSERT_EQ(alteration_plan->at("operations").size(), 1U);
-    EXPECT_EQ(alteration_plan->at("schemaVersion"), "1.0");
-    EXPECT_EQ(alteration_plan->at("kind"), "ALTERATION");
-    EXPECT_EQ(alteration_plan->at("summary").at("operationCount"), 1U);
-    EXPECT_TRUE(alteration_plan->at("summary").contains("freedClusters"));
-    EXPECT_TRUE(alteration_plan->at("summary").contains("allocatedClusters"));
-    EXPECT_TRUE(alteration_plan->at("warnings").empty());
-    EXPECT_TRUE(alteration_plan->at("validation").at("valid").get<bool>());
-    EXPECT_EQ(alteration_plan->dump().find(root_.string()), std::string::npos);
-    const auto altered =
-        registry_.invoke("alter.hds", {{"planToken", alteration_plan->at("planToken").get<std::string>()}}, context());
+    const nlohmann::json inspection_request = {
+        {"source", file_ref("source.hds")},
+        {"manifest", {{"inline", alteration_manifest}}},
+    };
+    const auto inspection = registry_.invoke("alter.inspect", inspection_request, context());
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    ASSERT_EQ(inspection->at("operations").size(), 1U);
+    EXPECT_EQ(inspection->at("schemaVersion"), "1.0");
+    EXPECT_EQ(inspection->at("kind"), "ALTERATION");
+    EXPECT_EQ(inspection->at("summary").at("operationCount"), 1U);
+    EXPECT_TRUE(inspection->at("summary").contains("freedClusters"));
+    EXPECT_TRUE(inspection->at("summary").contains("allocatedClusters"));
+    EXPECT_TRUE(inspection->at("warnings").empty());
+    EXPECT_TRUE(inspection->at("validation").at("valid").get<bool>());
+    EXPECT_FALSE(inspection->contains("planToken"));
+    EXPECT_FALSE(inspection->contains("output"));
+    EXPECT_EQ(inspection->dump().find(root_.string()), std::string::npos);
+    auto alteration_request = inspection_request;
+    alteration_request["output"] = file_ref("altered.hds");
+    const auto altered = registry_.invoke("alter.hds", alteration_request, context());
     ASSERT_TRUE(altered) << altered.error().message;
     EXPECT_TRUE(altered->at("applied").get<bool>());
     EXPECT_EQ(altered->at("schemaVersion"), "1.0");
@@ -647,7 +649,7 @@ TEST_F(WriteOperationsTest, AlterationRequiresExplicitAtomicSourceReplacement) {
     EXPECT_EQ(altered->dump().find(root_.string()), std::string::npos);
     EXPECT_TRUE(std::filesystem::is_regular_file(root_ / "altered.hds"));
 
-    const auto aliased = registry_.invoke("alter.plan",
+    const auto aliased = registry_.invoke("alter.hds",
                                           {{"source", {{"rootId", "workspace"}, {"relativePath", "source.hds"}}},
                                            {"manifest", {{"inline", alteration_manifest}}},
                                            {"output", {{"rootId", "workspace"}, {"relativePath", "source.hds"}}},
@@ -655,7 +657,7 @@ TEST_F(WriteOperationsTest, AlterationRequiresExplicitAtomicSourceReplacement) {
                                           context());
     EXPECT_FALSE(aliased);
 
-    const auto ambiguous = registry_.invoke("alter.plan",
+    const auto ambiguous = registry_.invoke("alter.hds",
                                             {{"source", file_ref("source.hds")},
                                              {"manifest", {{"inline", alteration_manifest}}},
                                              {"output", file_ref("other.hds")},
@@ -663,20 +665,14 @@ TEST_F(WriteOperationsTest, AlterationRequiresExplicitAtomicSourceReplacement) {
                                             context());
     EXPECT_FALSE(ambiguous);
 
-    const auto replacement = registry_.invoke("alter.plan",
+    const auto source_before = read_bytes(root_ / "source.hds");
+    const auto replacement = registry_.invoke("alter.hds",
                                               {{"source", file_ref("source.hds")},
                                                {"manifest", {{"inline", alteration_manifest}}},
                                                {"output", file_ref("source.hds")},
                                                {"replaceSource", true}},
                                               context());
     ASSERT_TRUE(replacement) << replacement.error().message;
-    EXPECT_TRUE(replacement->at("replaceSource").get<bool>());
-    EXPECT_TRUE(replacement->at("overwrite").get<bool>());
-    EXPECT_EQ(replacement->at("output"), file_ref("source.hds"));
-    const auto source_before = read_bytes(root_ / "source.hds");
-    const auto replaced =
-        registry_.invoke("alter.hds", {{"planToken", replacement->at("planToken").get<std::string>()}}, context());
-    ASSERT_TRUE(replaced) << replaced.error().message;
     EXPECT_NE(read_bytes(root_ / "source.hds"), source_before);
     const auto reopened = axk::open_image(root_ / "source.hds");
     ASSERT_TRUE(reopened) << reopened.error().message;
@@ -685,63 +681,20 @@ TEST_F(WriteOperationsTest, AlterationRequiresExplicitAtomicSourceReplacement) {
     EXPECT_FALSE(std::ranges::contains(root_record.directory_entries, "Second Volume", &axk::DirectoryEntry::name));
 }
 
-TEST_F(WriteOperationsTest, PlanTokensAreOwnerBoundAndRejectStaleAlterationSources) {
+TEST_F(WriteOperationsTest, AlterationInspectionCreatesNoApplyAuthority) {
     const auto starter = registry_.invoke("alter.manifest", nlohmann::json::object(), context());
     ASSERT_TRUE(starter) << starter.error().message;
     auto manifest = starter->at("manifest");
     manifest["operations"] = nlohmann::json::array(
         {{{"id", "remove"}, {"type", "delete_volume"}, {"partition_index", 0U}, {"volume_name", "New Volume"}}});
-    const auto planned = registry_.invoke("alter.plan",
-                                          {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}},
-                                           {"manifest", {{"inline", manifest}}},
-                                           {"output", {{"rootId", "workspace"}, {"relativePath", "stale.hds"}}}},
-                                          context());
-    ASSERT_TRUE(planned) << planned.error().message;
-    const auto token = planned->at("planToken").get<std::string>();
-
-    auto other = context();
-    other.owner_id = "other";
-    const auto denied = registry_.invoke("alter.hds", {{"planToken", token}}, other);
-    ASSERT_FALSE(denied);
-    EXPECT_EQ(denied.error().code, "write_plan_not_found");
-
-    std::ofstream{root_ / "fixture.hds", std::ios::binary | std::ios::app} << "changed";
-    const auto stale = registry_.invoke("alter.hds", {{"planToken", token}}, context());
-    ASSERT_FALSE(stale);
-    EXPECT_EQ(stale.error().code, "write_plan_stale");
+    const auto inspection = registry_.invoke(
+        "alter.inspect", {{"source", file_ref("fixture.hds")}, {"manifest", {{"inline", manifest}}}}, context());
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    EXPECT_FALSE(inspection->contains("planToken"));
+    const auto incomplete = registry_.invoke("alter.hds", {{"source", file_ref("fixture.hds")}}, context());
+    ASSERT_FALSE(incomplete);
+    EXPECT_EQ(incomplete.error().code, "invalid_request");
     EXPECT_FALSE(std::filesystem::exists(root_ / "stale.hds"));
-}
-
-TEST_F(WriteOperationsTest, AlterationRejectsSameSizeSourceChanges) {
-    const auto starter = registry_.invoke("alter.manifest", nlohmann::json::object(), context());
-    ASSERT_TRUE(starter) << starter.error().message;
-    auto manifest = starter->at("manifest");
-    manifest["operations"] = nlohmann::json::array(
-        {{{"id", "remove"}, {"type", "delete_volume"}, {"partition_index", 0U}, {"volume_name", "New Volume"}}});
-    const auto planned = registry_.invoke("alter.plan",
-                                          {{"source", file_ref("fixture.hds")},
-                                           {"manifest", {{"inline", manifest}}},
-                                           {"output", file_ref("same-size-stale.hds")}},
-                                          context());
-    ASSERT_TRUE(planned) << planned.error().message;
-
-    const auto source = root_ / "fixture.hds";
-    std::error_code error;
-    const auto original_time = std::filesystem::last_write_time(source, error);
-    ASSERT_FALSE(error);
-    std::fstream stream{source, std::ios::binary | std::ios::in | std::ios::out};
-    ASSERT_TRUE(stream);
-    stream.seekp(0);
-    stream.put('\1');
-    stream.close();
-    std::filesystem::last_write_time(source, original_time + std::chrono::seconds{1}, error);
-    ASSERT_FALSE(error);
-
-    const auto stale =
-        registry_.invoke("alter.hds", {{"planToken", planned->at("planToken").get<std::string>()}}, context());
-    ASSERT_FALSE(stale);
-    EXPECT_EQ(stale.error().code, "write_plan_stale");
-    EXPECT_FALSE(std::filesystem::exists(root_ / "same-size-stale.hds"));
 }
 
 TEST_F(WriteOperationsTest, AlterationRechecksInputsBeforePublishing) {
@@ -750,21 +703,17 @@ TEST_F(WriteOperationsTest, AlterationRechecksInputsBeforePublishing) {
     auto manifest = starter->at("manifest");
     manifest["operations"] = nlohmann::json::array(
         {{{"id", "remove"}, {"type", "delete_volume"}, {"partition_index", 0U}, {"volume_name", "New Volume"}}});
-    const auto planned = registry_.invoke("alter.plan",
-                                          {{"source", file_ref("fixture.hds")},
-                                           {"manifest", {{"inline", manifest}}},
-                                           {"output", file_ref("changed-during-apply.hds")}},
-                                          context());
-    ASSERT_TRUE(planned) << planned.error().message;
+    const nlohmann::json request = {{"source", file_ref("fixture.hds")},
+                                    {"manifest", {{"inline", manifest}}},
+                                    {"output", file_ref("changed-during-apply.hds")}};
 
     MutateSourceOnCompletedWrite progress{root_ / "fixture.hds"};
     auto apply_context = context();
     apply_context.progress = &progress;
-    const auto applied =
-        registry_.invoke("alter.hds", {{"planToken", planned->at("planToken").get<std::string>()}}, apply_context);
+    const auto applied = registry_.invoke("alter.hds", request, apply_context);
 
     ASSERT_FALSE(applied);
-    EXPECT_EQ(applied.error().code, "write_plan_stale");
+    EXPECT_EQ(applied.error().code, "input_changed");
     EXPECT_FALSE(std::filesystem::exists(root_ / "changed-during-apply.hds"));
     EXPECT_FALSE(has_publication_temporary(root_));
 }
@@ -778,19 +727,15 @@ TEST_F(WriteOperationsTest, AlterationCancellationAtEveryMutationPhasePublishesN
     for (const auto phase : {axk::ProgressPhase::allocating, axk::ProgressPhase::writing,
                              axk::ProgressPhase::validating, axk::ProgressPhase::publishing}) {
         const auto output = std::format("cancelled-{}.hds", static_cast<unsigned int>(phase));
-        const auto planned = registry_.invoke(
-            "alter.plan",
-            {{"source", file_ref("fixture.hds")}, {"manifest", {{"inline", manifest}}}, {"output", file_ref(output)}},
-            context());
-        ASSERT_TRUE(planned) << planned.error().message;
+        const nlohmann::json request = {
+            {"source", file_ref("fixture.hds")}, {"manifest", {{"inline", manifest}}}, {"output", file_ref(output)}};
 
         axk::CancellationSource cancellation;
         CancelOnPhase progress{cancellation, phase};
         auto apply_context = context();
         apply_context.cancellation = cancellation.token();
         apply_context.progress = &progress;
-        const auto applied =
-            registry_.invoke("alter.hds", {{"planToken", planned->at("planToken").get<std::string>()}}, apply_context);
+        const auto applied = registry_.invoke("alter.hds", request, apply_context);
 
         ASSERT_FALSE(applied) << static_cast<unsigned int>(phase);
         EXPECT_EQ(applied.error().code, "operation_cancelled") << static_cast<unsigned int>(phase);
@@ -799,30 +744,30 @@ TEST_F(WriteOperationsTest, AlterationCancellationAtEveryMutationPhasePublishesN
     }
 }
 
-TEST_F(WriteOperationsTest, AlterationPlansAndAppliesEveryMaintainedAction) {
+TEST_F(WriteOperationsTest, AlterationInspectsAndAppliesEveryMaintainedAction) {
     write_tone(root_ / "insert.wav");
     const auto written =
         axk::write_hds_image(all_action_source_manifest(root_ / "insert.wav"), root_ / "all-actions.hds");
     ASSERT_TRUE(written) << written.error().message;
     const auto source_before = read_bytes(root_ / "all-actions.hds");
     const auto manifest = all_action_alteration_manifest();
-    const auto planned = registry_.invoke(
-        "alter.plan",
-        {{"source", file_ref("all-actions.hds")},
-         {"manifest", {{"inline", manifest}}},
-         {"inputBindings", {{{"manifestPath", "insert.wav"}, {"input", {{"fileRef", file_ref("insert.wav")}}}}}},
-         {"output", file_ref("all-actions-altered.hds")}},
-        context());
-    ASSERT_TRUE(planned) << planned.error().message;
-    ASSERT_EQ(planned->at("operations").size(), 13U);
-    EXPECT_EQ(planned->at("summary").at("operationCount"), 13U);
-    EXPECT_EQ(planned->at("operations")[4].at("audioImport").at("sourcePath"), "insert.wav");
+    const nlohmann::json inspection_request = {
+        {"source", file_ref("all-actions.hds")},
+        {"manifest", {{"inline", manifest}}},
+        {"inputBindings", {{{"manifestPath", "insert.wav"}, {"input", {{"fileRef", file_ref("insert.wav")}}}}}},
+    };
+    const auto inspected = registry_.invoke("alter.inspect", inspection_request, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    ASSERT_EQ(inspected->at("operations").size(), 13U);
+    EXPECT_EQ(inspected->at("summary").at("operationCount"), 13U);
+    EXPECT_EQ(inspected->at("operations")[4].at("audioImport").at("sourcePath"), "insert.wav");
 
-    const auto applied =
-        registry_.invoke("alter.hds", {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    auto alteration_request = inspection_request;
+    alteration_request["output"] = file_ref("all-actions-altered.hds");
+    const auto applied = registry_.invoke("alter.hds", alteration_request, context());
     ASSERT_TRUE(applied) << applied.error().message;
-    EXPECT_EQ(applied->at("operations"), planned->at("operations"));
-    EXPECT_EQ(applied->at("summary"), planned->at("summary"));
+    EXPECT_EQ(applied->at("operations"), inspected->at("operations"));
+    EXPECT_EQ(applied->at("summary"), inspected->at("summary"));
     EXPECT_TRUE(applied->at("validation").at("valid").get<bool>());
     EXPECT_EQ(read_bytes(root_ / "all-actions.hds"), source_before);
     EXPECT_EQ(applied->dump().find(root_.string()), std::string::npos);
@@ -858,7 +803,7 @@ TEST_F(WriteOperationsTest, AlterationPlansAndAppliesEveryMaintainedAction) {
     EXPECT_EQ(decoded->pcm, expected_pcm);
 }
 
-TEST_F(WriteOperationsTest, AlterationRejectsMissingChangedManifestAndChangedAudioInputs) {
+TEST_F(WriteOperationsTest, AlterationRejectsMissingInputBindings) {
     write_tone(root_ / "insert.wav");
     const auto written =
         axk::write_hds_image(all_action_source_manifest(root_ / "insert.wav"), root_ / "bound-inputs.hds");
@@ -874,34 +819,19 @@ TEST_F(WriteOperationsTest, AlterationRejectsMissingChangedManifestAndChangedAud
 
     auto missing_binding = request;
     missing_binding.erase("inputBindings");
-    const auto missing = registry_.invoke("alter.plan", missing_binding, context());
+    const auto missing = registry_.invoke("alter.hds", missing_binding, context());
     ASSERT_FALSE(missing);
     EXPECT_EQ(missing.error().code, "missing_input_binding");
 
-    const auto manifest_plan = registry_.invoke("alter.plan", request, context());
-    ASSERT_TRUE(manifest_plan) << manifest_plan.error().message;
-    std::ofstream{root_ / "alteration.json", std::ios::binary | std::ios::app} << '\n';
-    const auto stale_manifest =
-        registry_.invoke("alter.hds", {{"planToken", manifest_plan->at("planToken").get<std::string>()}}, context());
-    ASSERT_FALSE(stale_manifest);
-    EXPECT_EQ(stale_manifest.error().code, "write_plan_stale");
-    EXPECT_FALSE(std::filesystem::exists(root_ / "stale-manifest.hds"));
-
-    std::ofstream{root_ / "alteration.json", std::ios::binary | std::ios::trunc} << manifest.dump();
-    auto audio_request = request;
-    audio_request["output"] = file_ref("stale-audio.hds");
-    const auto audio_plan = registry_.invoke("alter.plan", audio_request, context());
-    ASSERT_TRUE(audio_plan) << audio_plan.error().message;
-    std::ofstream{root_ / "insert.wav", std::ios::binary | std::ios::app} << "changed";
-    const auto stale_audio =
-        registry_.invoke("alter.hds", {{"planToken", audio_plan->at("planToken").get<std::string>()}}, context());
-    ASSERT_FALSE(stale_audio);
-    EXPECT_EQ(stale_audio.error().code, "write_plan_stale");
-    EXPECT_FALSE(std::filesystem::exists(root_ / "stale-audio.hds"));
+    const auto inspected = registry_.invoke("alter.inspect", request, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    const auto applied = registry_.invoke("alter.hds", request, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_TRUE(std::filesystem::exists(root_ / "stale-manifest.hds"));
     EXPECT_FALSE(has_publication_temporary(root_));
 }
 
-TEST_F(WriteOperationsTest, AlterationPlanRetainsLeasedUploadsUntilApplyCompletes) {
+TEST_F(WriteOperationsTest, AlterationConsumesUploadedManifestAndAudioDirectly) {
     write_tone(root_ / "insert.wav");
     const auto written =
         axk::write_hds_image(all_action_source_manifest(root_ / "insert.wav"), root_ / "upload-source.hds");
@@ -935,15 +865,7 @@ TEST_F(WriteOperationsTest, AlterationPlanRetainsLeasedUploadsUntilApplyComplete
          {{{"manifestPath", "insert.wav"}, {"input", {{"uploadRef", {{"uploadId", audio->reference.upload_id}}}}}}}},
         {"output", file_ref("upload-altered.hds")},
     };
-    const auto planned = registry_.invoke("alter.plan", request, context());
-    ASSERT_TRUE(planned) << planned.error().message;
-    now_ += std::chrono::seconds{6};
-    uploads_->cleanup();
-    EXPECT_TRUE(uploads_->inspect(audio->reference, "owner"));
-    EXPECT_TRUE(uploads_->inspect(manifest->reference, "owner"));
-
-    const auto applied =
-        registry_.invoke("alter.hds", {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    const auto applied = registry_.invoke("alter.hds", request, context());
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_TRUE(std::filesystem::is_regular_file(root_ / "upload-altered.hds"));
     EXPECT_TRUE(uploads_->inspect(audio->reference, "owner"));
@@ -959,7 +881,7 @@ TEST_F(WriteOperationsTest, AlterationPlanRetainsLeasedUploadsUntilApplyComplete
     EXPECT_EQ(expired_manifest.error().code, "upload_not_found");
 }
 
-TEST_F(WriteOperationsTest, AlterationPlansReserveAndReleaseTheirDestination) {
+TEST_F(WriteOperationsTest, AlterationInspectionsDoNotReserveDestinations) {
     const auto starter = registry_.invoke("alter.manifest", nlohmann::json::object(), context());
     ASSERT_TRUE(starter) << starter.error().message;
     auto manifest = starter->at("manifest");
@@ -970,18 +892,15 @@ TEST_F(WriteOperationsTest, AlterationPlansReserveAndReleaseTheirDestination) {
         {"manifest", {{"inline", manifest}}},
         {"output", file_ref("reserved-alteration.hds")},
     };
-    const auto first = registry_.invoke("alter.plan", request, context());
+    auto inspection_request = request;
+    inspection_request.erase("output");
+    const auto first = registry_.invoke("alter.inspect", inspection_request, context());
     ASSERT_TRUE(first) << first.error().message;
-    const auto reserved = registry_.invoke("alter.plan", request, context());
-    ASSERT_FALSE(reserved);
-    EXPECT_EQ(reserved.error().code, "destination_reserved");
-
-    const auto applied =
-        registry_.invoke("alter.hds", {{"planToken", first->at("planToken").get<std::string>()}}, context());
+    const auto second = registry_.invoke("alter.inspect", inspection_request, context());
+    ASSERT_TRUE(second) << second.error().message;
+    const auto applied = registry_.invoke("alter.hds", request, context());
     ASSERT_TRUE(applied) << applied.error().message;
-    std::filesystem::remove(root_ / "reserved-alteration.hds");
-    const auto released = registry_.invoke("alter.plan", request, context());
-    ASSERT_TRUE(released) << released.error().message;
+    EXPECT_TRUE(std::filesystem::exists(root_ / "reserved-alteration.hds"));
 }
 
 TEST_F(WriteOperationsTest, PlansReserveDestinationsAndReleaseThemWhenTheyBecomeStale) {

@@ -1,7 +1,7 @@
-# Existing Image Transactions
+# Existing Image Alteration
 
-The native transaction API alters an existing HDS image by writing a new image.
-It never edits the source path in place. A transaction is a strictly ordered list
+The native alteration API alters an existing HDS image by writing a new image.
+It never edits the source path in place. An alteration is a strictly ordered list
 of typed operations; an `operation_ref` partition selector may refer only to an
 earlier row and carries that row's resolved partition into the next operation.
 
@@ -27,9 +27,9 @@ bitmaps, and decoded relationships to agree.
 ## Native API
 
 `AlterationManifest` stores `AlterationOperationData`, a `std::variant` with one
-public type per operation. `plan_hds_alteration()` validates and executes the
+public type per operation. `inspect_hds_alteration()` validates and executes the
 complete queue against an in-memory mutable snapshot without writing output.
-`alter_hds()` uses the same planning path and optionally publishes the result.
+`alter_hds()` performs the alteration and requires an output path.
 
 ```cpp
 auto manifest = axk::load_alteration_manifest("transaction.json");
@@ -37,9 +37,9 @@ if (!manifest) {
   return report(manifest.error());
 }
 
-auto plan = axk::plan_hds_alteration("source.hds", *manifest);
-if (!plan) {
-  return report(plan.error());
+auto inspection = axk::inspect_hds_alteration("source.hds", *manifest);
+if (!inspection) {
+  return report(inspection.error());
 }
 
 auto result = axk::alter_hds(
@@ -51,7 +51,8 @@ if (!result) {
 
 Use an `operation_context` for cancellation and progress during long-running
 jobs. Cancellation before publication removes the temporary output. The SDK's
-owned `transaction` value provides the plan/apply split.
+stateless `alteration::inspect()` and `alteration::apply()` methods expose the
+same inspection and direct-apply operations through the C++17 facade.
 
 ## Publication guarantees
 
