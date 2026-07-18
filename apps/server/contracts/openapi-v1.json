@@ -180,7 +180,8 @@
               "INSERT_SBAC",
               "RENAME_SBAC",
               "DELETE_PROGRAM",
-              "INSERT_PROGRAM"
+              "INSERT_PROGRAM",
+              "RENAME_VOLUME"
             ],
             "x-axklib-application-enum": {
               "DELETE_PROGRAM": "delete_program",
@@ -195,6 +196,7 @@
               "INSERT_WAVEFORM": "insert_waveform",
               "RENAME_SBAC": "rename_sbac",
               "RENAME_SBNK": "rename_sbnk",
+              "RENAME_VOLUME": "rename_volume",
               "RENAME_WAVEFORM": "rename_waveform"
             }
           },
@@ -1206,6 +1208,9 @@
             "minLength": 1,
             "type": "string"
           },
+          "replaceSource": {
+            "type": "boolean"
+          },
           "schemaVersion": {
             "const": "1.0"
           },
@@ -1265,6 +1270,10 @@
             "$ref": "#/components/schemas/FileRef"
           },
           "overwrite": {
+            "default": false,
+            "type": "boolean"
+          },
+          "replaceSource": {
             "default": false,
             "type": "boolean"
           },
@@ -1631,6 +1640,14 @@
               "null"
             ]
           },
+          "partitionIndex": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "quality": {
             "type": "string"
           }
@@ -1639,6 +1656,7 @@
           "id",
           "parentId",
           "depth",
+          "partitionIndex",
           "kind",
           "displayName",
           "childCount",

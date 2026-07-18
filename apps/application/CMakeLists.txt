@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.28)
 get_filename_component(AXK_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(unofficial-hash-library CONFIG REQUIRED)
 
 add_library(axk_application STATIC src/application_operations.cpp src/content_id.cpp src/download_archives.cpp
@@ -21,7 +22,7 @@ target_include_directories(
 target_link_libraries(
   axk_application
   PUBLIC axklib::audio nlohmann_json::nlohmann_json
-  PRIVATE unofficial::hash-library
+  PRIVATE OpenSSL::Crypto unofficial::hash-library
 )
 if(WIN32)
   target_link_libraries(axk_application PRIVATE bcrypt)

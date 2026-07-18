@@ -1291,6 +1291,7 @@ class ServerApplication {
                 return Json{{"id", item.id},
                             {"parentId", item.parent_id ? Json(*item.parent_id) : Json{}},
                             {"depth", item.depth},
+                            {"partitionIndex", item.partition_index ? Json(*item.partition_index) : Json{}},
                             {"kind", item.kind},
                             {"displayName", item.display_name},
                             {"childCount", item.child_count},

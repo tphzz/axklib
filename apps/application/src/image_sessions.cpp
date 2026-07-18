@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <format>
 #include <limits>
 #include <mutex>
@@ -71,6 +72,22 @@ std::optional<std::string> mapped_id(const std::unordered_map<std::string, std::
     if (const auto found = ids.find(key); found != ids.end())
         return found->second;
     return std::nullopt;
+}
+
+std::optional<std::uint8_t> partition_index_from_node_id(std::string_view node_id) {
+    constexpr std::string_view prefix = "partition:";
+    if (!node_id.starts_with(prefix))
+        return std::nullopt;
+    node_id.remove_prefix(prefix.size());
+    const auto separator = node_id.find(':');
+    const auto value_text = node_id.substr(0U, separator);
+    unsigned int value{};
+    const auto parsed = std::from_chars(value_text.data(), value_text.data() + value_text.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != value_text.data() + value_text.size() ||
+        value > std::numeric_limits<std::uint8_t>::max()) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint8_t>(value);
 }
 
 bool paths_overlap(std::string_view left, std::string_view right) {
@@ -521,16 +538,20 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
         session->relationships.push_back(std::move(item));
     }
 
-    const auto append_content = [&](const auto &self, const axk::ContentNode &node,
-                                    const std::optional<std::string> &parent_id,
-                                    std::size_t depth) -> axk::app::Result<std::vector<std::size_t>> {
+    const auto append_content =
+        [&](const auto &self, const axk::ContentNode &node, const std::optional<std::string> &parent_id,
+            std::size_t depth,
+            std::optional<std::uint8_t> inherited_partition_index) -> axk::app::Result<std::vector<std::size_t>> {
         auto generated_id = random_identifier("content-");
         if (!generated_id)
             return std::unexpected(generated_id.error());
         const auto id = std::move(*generated_id);
+        const auto partition_index =
+            node.node_type == "partition" ? partition_index_from_node_id(node.node_id) : inherited_partition_index;
         ImageContentItem item{.id = id,
                               .parent_id = parent_id,
                               .depth = depth,
+                              .partition_index = partition_index,
                               .kind = node.node_type,
                               .display_name = node.display_name,
                               .child_count = node.children.size(),
@@ -556,7 +577,7 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
             }
         }
         for (const auto &child : node.children) {
-            auto appended = self(self, child, id, depth + 1U);
+            auto appended = self(self, child, id, depth + 1U, partition_index);
             if (!appended)
                 return std::unexpected(appended.error());
             scoped_indices.insert(scoped_indices.end(), appended->begin(), appended->end());
@@ -569,7 +590,7 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
     };
     session->content_children.try_emplace("");
     for (const auto &root : tree.roots) {
-        if (auto appended = append_content(append_content, root, std::nullopt, 0U); !appended)
+        if (auto appended = append_content(append_content, root, std::nullopt, 0U, std::nullopt); !appended)
             return std::unexpected(appended.error());
     }
 
@@ -641,12 +662,16 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
         else
             ++validation.info_count;
     }
+    std::vector<std::string> available_operations{"images.content",           "images.objects", "images.relationships",
+                                                  "images.validation.issues", "images.preview", "auditions.prepare"};
+    const auto source_metadata =
+        implementation_->sandbox.metadata((*session)->source.root_id, (*session)->source.relative_path);
+    if ((*session)->format == "sfs" && source_metadata && source_metadata->writable)
+        available_operations.emplace_back("images.alter.volumes");
     return ImageSessionSummary{.image_id = (*session)->image_id,
                                .source = (*session)->source,
                                .format = (*session)->format,
-                               .available_operations = {"images.content", "images.objects", "images.relationships",
-                                                        "images.validation.issues", "images.preview",
-                                                        "auditions.prepare"},
+                               .available_operations = std::move(available_operations),
                                .root_count = (*session)->root_count,
                                .object_count = (*session)->objects.size(),
                                .relationship_count = (*session)->relationships.size(),

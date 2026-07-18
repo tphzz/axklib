@@ -1,6 +1,7 @@
 #include "axklib/application/write_operations.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
@@ -26,6 +27,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <openssl/evp.h>
 
 #include "axklib/alteration.hpp"
 #include "axklib/application/secure_random.hpp"
@@ -55,6 +57,8 @@ enum class WritePlanKind : std::uint8_t { hds, floppy, iso, alteration };
 struct FileFingerprint {
     std::filesystem::path path;
     std::string sha256;
+    std::uintmax_t size{};
+    std::filesystem::file_time_type last_write_time;
 };
 
 struct WritePlanRecord {
@@ -386,10 +390,48 @@ axk::app::Result<std::string> file_sha256(const std::filesystem::path &path,
     auto reader = axk::FileReader::open(path);
     if (!reader)
         return std::unexpected(core_error(reader.error()));
-    auto digest = axk::package_internal::sha256_reader(**reader, cancellation);
-    if (!digest)
-        return std::unexpected(core_error(digest.error()));
-    return axk::package_internal::hex_digest(*digest);
+    constexpr std::size_t chunk_size = 1024U * 1024U;
+    std::vector<std::byte> buffer(chunk_size);
+    const auto destroy_context = [](EVP_MD_CTX *context) { EVP_MD_CTX_free(context); };
+    std::unique_ptr<EVP_MD_CTX, decltype(destroy_context)> digest{EVP_MD_CTX_new(), destroy_context};
+    if (!digest || EVP_DigestInit_ex(digest.get(), EVP_sha256(), nullptr) != 1) {
+        return std::unexpected(operation_error("hash_failed", "could not initialize SHA-256"));
+    }
+    for (std::uint64_t offset = 0U; offset < (*reader)->size();) {
+        if (const auto checked = cancellation.check(); !checked)
+            return std::unexpected(core_error(checked.error()));
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), (*reader)->size() - offset));
+        const auto chunk = std::span<std::byte>{buffer}.first(count);
+        if (const auto read = (*reader)->read_exact_at(offset, chunk); !read)
+            return std::unexpected(core_error(read.error()));
+        if (EVP_DigestUpdate(digest.get(), chunk.data(), chunk.size()) != 1)
+            return std::unexpected(operation_error("hash_failed", "could not update SHA-256"));
+        offset += count;
+    }
+    std::array<unsigned char, EVP_MAX_MD_SIZE> bytes{};
+    unsigned int size{};
+    if (EVP_DigestFinal_ex(digest.get(), bytes.data(), &size) != 1 || size != 32U)
+        return std::unexpected(operation_error("hash_failed", "could not finish SHA-256"));
+    constexpr std::string_view alphabet = "0123456789abcdef";
+    std::string result;
+    result.reserve(static_cast<std::size_t>(size) * 2U);
+    for (std::size_t index = 0; index < size; ++index) {
+        result.push_back(alphabet[bytes[index] >> 4U]);
+        result.push_back(alphabet[bytes[index] & 0x0fU]);
+    }
+    return result;
+}
+
+axk::app::Result<std::pair<std::uintmax_t, std::filesystem::file_time_type>>
+file_state(const std::filesystem::path &path) {
+    std::error_code error;
+    const auto size = std::filesystem::file_size(path, error);
+    if (error)
+        return std::unexpected(operation_error("input_read_failed", "could not inspect input file size"));
+    const auto last_write_time = std::filesystem::last_write_time(path, error);
+    if (error)
+        return std::unexpected(operation_error("input_read_failed", "could not inspect input modification time"));
+    return std::pair{size, last_write_time};
 }
 
 void append_volume_paths(const axk::VolumeSpec &volume, std::vector<std::filesystem::path> &paths) {
@@ -467,12 +509,31 @@ axk::app::Result<std::vector<FileFingerprint>> fingerprint_files(std::span<const
     result.reserve(unique.size());
     for (const auto &[normalized, path] : unique) {
         static_cast<void>(normalized);
+        auto before = file_state(path);
+        if (!before)
+            return std::unexpected(before.error());
         auto digest = file_sha256(path, cancellation);
         if (!digest)
             return std::unexpected(digest.error());
-        result.push_back({path, std::move(*digest)});
+        auto after = file_state(path);
+        if (!after)
+            return std::unexpected(after.error());
+        if (*before != *after) {
+            return std::unexpected(
+                operation_error("input_changed", "an input changed while the write plan was being prepared"));
+        }
+        result.push_back({path, std::move(*digest), after->first, after->second});
     }
     return result;
+}
+
+std::optional<std::string> known_fingerprint(std::span<const FileFingerprint> fingerprints,
+                                             const std::filesystem::path &path) {
+    const auto identity = normalized_path(path);
+    const auto found = std::ranges::find_if(fingerprints, [&](const FileFingerprint &fingerprint) {
+        return normalized_path(fingerprint.path) == identity;
+    });
+    return found == fingerprints.end() ? std::nullopt : std::optional{found->sha256};
 }
 
 axk::app::Result<void> verify_plan_state(const WritePlanRecord &record, const axk::CancellationToken &cancellation) {
@@ -481,19 +542,27 @@ axk::app::Result<void> verify_plan_state(const WritePlanRecord &record, const ax
         return std::unexpected(operation_error("write_plan_stale", "server build identity changed after planning"));
     }
     for (const auto &input : record.inputs) {
-        auto digest = file_sha256(input.path, cancellation);
-        if (!digest || *digest != input.sha256) {
+        auto state = file_state(input.path);
+        if (!state || state->first != input.size || state->second != input.last_write_time) {
             return std::unexpected(operation_error("write_plan_stale", "an input changed after planning"));
         }
+        auto digest = file_sha256(input.path, cancellation);
+        if (!digest || *digest != input.sha256)
+            return std::unexpected(operation_error("write_plan_stale", "an input changed after planning"));
     }
     std::error_code error;
     const auto output_exists = std::filesystem::exists(record.output_path, error);
     if (error || output_exists != record.output_existed)
         return std::unexpected(operation_error("write_plan_stale", "destination state changed after planning"));
     if (record.output_sha256) {
-        auto digest = file_sha256(record.output_path, cancellation);
-        if (!digest || *digest != *record.output_sha256) {
-            return std::unexpected(operation_error("write_plan_stale", "destination changed after planning"));
+        const auto known = std::ranges::find_if(record.inputs, [&](const FileFingerprint &fingerprint) {
+            return normalized_path(fingerprint.path) == normalized_path(record.output_path);
+        });
+        if (known == record.inputs.end()) {
+            auto digest = file_sha256(record.output_path, cancellation);
+            if (!digest || *digest != *record.output_sha256) {
+                return std::unexpected(operation_error("write_plan_stale", "destination changed after planning"));
+            }
         }
     }
     return {};
@@ -518,16 +587,21 @@ axk::app::Result<void> register_plan(const std::shared_ptr<WriteOperationState> 
 }
 
 Json write_plan_json(const WritePlanRecord &record, std::uint64_t expires_in_seconds) {
-    return {{"schemaVersion", "1.0"},
-            {"planToken", record.token},
-            {"expiresInSeconds", expires_in_seconds},
-            {"kind", write_plan_kind_name(record.kind)},
-            {"output", file_ref_json(record.output)},
-            {"overwrite", record.overwrite},
-            {"semanticVersion", record.semantic_version},
-            {"sourceIdentity", record.source_identity},
-            {"summary", record.summary},
-            {"valid", true}};
+    const auto replaces_source =
+        record.source_path && normalized_path(*record.source_path) == normalized_path(record.output_path);
+    Json result = {{"schemaVersion", "1.0"},
+                   {"planToken", record.token},
+                   {"expiresInSeconds", expires_in_seconds},
+                   {"kind", write_plan_kind_name(record.kind)},
+                   {"output", file_ref_json(record.output)},
+                   {"overwrite", record.overwrite},
+                   {"semanticVersion", record.semantic_version},
+                   {"sourceIdentity", record.source_identity},
+                   {"summary", record.summary},
+                   {"valid", true}};
+    if (record.kind == WritePlanKind::alteration)
+        result["replaceSource"] = replaces_source;
+    return result;
 }
 
 Json manifest_choices(axk::BuildManifestKind kind) {
@@ -890,10 +964,13 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
         }
         std::optional<std::string> output_digest;
         if (output_existed) {
-            auto digest = file_sha256(*output_path, context.cancellation);
-            if (!digest)
-                return Result<Json>{std::unexpected(digest.error())};
-            output_digest = std::move(*digest);
+            output_digest = known_fingerprint(*fingerprints, *output_path);
+            if (!output_digest) {
+                auto digest = file_sha256(*output_path, context.cancellation);
+                if (!digest)
+                    return Result<Json>{std::unexpected(digest.error())};
+                output_digest = std::move(*digest);
+            }
         }
         const auto build = axk::current_build_info();
         const auto now = Clock::now();
@@ -977,10 +1054,7 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
 
             auto partitions = Json::array();
             for (const auto &partition : planned->manifest.partitions) {
-                partitions.push_back({{"name", partition.name},
-                                      {"volumes", Json::array({{{"name", partition.volumes.front().name},
-                                                                {"waveforms", Json::array()},
-                                                                {"sample_banks", Json::array()}}})}});
+                partitions.push_back({{"name", partition.name}, {"volumes", Json::array()}});
             }
             Json generic_request{{"kind", "HDS"},
                                  {"manifest",
@@ -1069,17 +1143,32 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
         auto bound = registry.bind("alter.plan", [state, &sandbox, &uploads](const Json &input,
                                                                              const OperationContext &context) {
             auto source = parse_file_ref(input, "source");
-            auto output = parse_file_ref(input, "output");
             if (!source)
                 return Result<Json>{std::unexpected(source.error())};
-            if (!output)
-                return Result<Json>{std::unexpected(output.error())};
-            if (const auto distinct = sandbox.require_distinct(*source, *output); !distinct)
-                return Result<Json>{std::unexpected(distinct.error())};
             auto source_path = sandbox.resolve_file(*source);
             if (!source_path)
                 return Result<Json>{std::unexpected(source_path.error())};
-            const auto overwrite = input.value("overwrite", false);
+            const auto replace_source = input.value("replaceSource", false);
+            auto output = parse_file_ref(input, "output");
+            if (!output)
+                return Result<Json>{std::unexpected(output.error())};
+            if (replace_source && input.value("overwrite", false)) {
+                return Result<Json>{std::unexpected(
+                    operation_error("invalid_request", "overwrite must be omitted when replaceSource is true"))};
+            }
+            if (replace_source) {
+                const auto output_identity = sandbox.resolve_file(*output);
+                if (!output_identity)
+                    return Result<Json>{std::unexpected(output_identity.error())};
+                if (*source_path != *output_identity) {
+                    return Result<Json>{std::unexpected(
+                        operation_error("invalid_request", "output must match source when replaceSource is true"))};
+                }
+            } else {
+                if (const auto distinct = sandbox.require_distinct(*source, *output); !distinct)
+                    return Result<Json>{std::unexpected(distinct.error())};
+            }
+            const auto overwrite = replace_source ? true : input.value("overwrite", false);
             auto output_path = sandbox.resolve_output_file(*output, overwrite);
             if (!output_path)
                 return Result<Json>{std::unexpected(output_path.error())};
@@ -1113,10 +1202,13 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             }
             std::optional<std::string> output_digest;
             if (output_existed) {
-                auto digest = file_sha256(*output_path, context.cancellation);
-                if (!digest)
-                    return Result<Json>{std::unexpected(digest.error())};
-                output_digest = std::move(*digest);
+                output_digest = known_fingerprint(*fingerprints, *output_path);
+                if (!output_digest) {
+                    auto digest = file_sha256(*output_path, context.cancellation);
+                    if (!digest)
+                        return Result<Json>{std::unexpected(digest.error())};
+                    output_digest = std::move(*digest);
+                }
             }
             const auto build = axk::current_build_info();
             const auto now = Clock::now();

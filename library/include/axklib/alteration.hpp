@@ -105,11 +105,17 @@ struct InsertProgramOperation {
     ProgramSpec program;
 };
 
+struct RenameVolumeOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string new_volume_name;
+};
+
 using AlterationOperationData =
     std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleBankOperation, InsertSampleBankOperation,
                  InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleBankOperation,
                  DeleteSampleBankGroupOperation, InsertSampleBankGroupOperation, RenameSampleBankGroupOperation,
-                 DeleteProgramOperation, InsertProgramOperation>;
+                 DeleteProgramOperation, InsertProgramOperation, RenameVolumeOperation>;
 
 struct AlterationOperation {
     std::string id;

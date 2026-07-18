@@ -109,7 +109,9 @@ Generate the starter:
 axklib create manifest hds -o image.json
 ```
 
-The starter creates a 512 MiB image with one partition and one empty volume.
+The starter creates a 512 MiB image with one partition and no volumes. Import a
+complete volume package or add an authored volume before adding sampler
+objects.
 Add authored Wave Data in `waveforms`, Samples in `sample_banks`, optional
 Sample Banks in `sample_bank_groups`, and
 optional `programs` using the common schema in [Writer And

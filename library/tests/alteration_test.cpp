@@ -240,7 +240,7 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
         std::string_view{"insert_sbnk"},     std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
         std::string_view{"rename_waveform"}, std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
         std::string_view{"insert_sbac"},     std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
-        std::string_view{"insert_program"},
+        std::string_view{"insert_program"},  std::string_view{"rename_volume"},
     };
     ASSERT_EQ(parsed->operations.size(), expected.size());
     for (std::size_t index = 0; index < expected.size(); ++index) {
@@ -250,6 +250,25 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
     const auto *deleted = std::get_if<axk::DeleteProgramOperation>(&parsed->operations[11].data);
     ASSERT_NE(deleted, nullptr);
     EXPECT_EQ(deleted->program_number, 128U);
+}
+
+TEST(AlterationManifest, ParsesStrictVolumeRename) {
+    const auto parsed = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_volume","partition_index":0,
+         "volume_name":"Retained","new_volume_name":"Renamed"}
+      ]})");
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto *rename = std::get_if<axk::RenameVolumeOperation>(&parsed->operations.front().data);
+    ASSERT_NE(rename, nullptr);
+    EXPECT_EQ(rename->volume_name, "Retained");
+    EXPECT_EQ(rename->new_volume_name, "Renamed");
+
+    EXPECT_FALSE(axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_volume","partition_index":0,
+         "volume_name":"Retained","new_volume_name":"Renamed","extra":true}
+      ]})"));
 }
 
 TEST(Alteration, DeleteVolumeDryRunMatchesApplyAndPreservesSource) {
@@ -281,6 +300,124 @@ TEST(Alteration, DeleteVolumeDryRunMatchesApplyAndPreservesSource) {
     EXPECT_FALSE(
         std::ranges::any_of(root_record.directory_entries, [](const auto &entry) { return entry.name == "Removed"; }));
     EXPECT_FALSE(axk::alter_hds(source, *manifest, output));
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, InsertsFirstVolumeIntoEmptyPartition) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-insert-first-volume";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    axk::HdsBuildManifest source_spec{"1.0", 4U * 1024U * 1024U, {}};
+    source_spec.partitions.push_back({"hd1", {}});
+    ASSERT_TRUE(axk::write_hds_image(source_spec, source));
+
+    const auto manifest = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"insert","type":"insert_volume","partition_index":0,
+         "volume":{"name":"First Volume","waveforms":[],"sample_banks":[]}}
+      ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto applied = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+    ASSERT_EQ(applied->operations.size(), 1U);
+    EXPECT_FALSE(applied->operations.front().inserted_sfs_ids.empty());
+
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto &root_record =
+        *std::ranges::find(reopened->partitions().front().records, axk::SfsId{1}, &axk::IndexRecord::sfs_id);
+    const auto inserted = std::ranges::find(root_record.directory_entries, "First Volume", &axk::DirectoryEntry::name);
+    ASSERT_NE(inserted, root_record.directory_entries.end());
+    EXPECT_TRUE(std::ranges::any_of(applied->operations.front().inserted_sfs_ids,
+                                    [&](const auto id) { return id.value == inserted->link_id.value; }));
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-rename-volume";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(chain_source_manifest(audio), source));
+    const auto before = axk::open_image(source);
+    ASSERT_TRUE(before) << before.error().message;
+    const auto &before_partition = before->partitions().front();
+    const auto &before_root = *std::ranges::find(before_partition.records, axk::SfsId{1}, &axk::IndexRecord::sfs_id);
+    const auto before_entry = std::ranges::find(before_root.directory_entries, "Chain", &axk::DirectoryEntry::name);
+    ASSERT_NE(before_entry, before_root.directory_entries.end());
+    const auto before_catalog = axk::build_object_catalog(*before);
+    ASSERT_TRUE(before_catalog) << before_catalog.error().message;
+    const auto before_wave = std::ranges::find_if(
+        before_catalog->objects, [](const auto &object) { return object.object.header.type == axk::ObjectType::smpl; });
+    ASSERT_NE(before_wave, before_catalog->objects.end());
+    const auto before_pcm = axk::decode_waveform(*before, *before_wave);
+    ASSERT_TRUE(before_pcm) << before_pcm.error().message;
+
+    const auto manifest = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_volume","partition_index":0,
+         "volume_name":"Chain","new_volume_name":"Renamed"}
+      ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto applied = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+    ASSERT_EQ(applied->operations.size(), 1U);
+    EXPECT_TRUE(applied->operations.front().removed_sfs_ids.empty());
+    EXPECT_TRUE(applied->operations.front().inserted_sfs_ids.empty());
+    EXPECT_EQ(applied->operations.front().freed_clusters, 0U);
+    EXPECT_EQ(applied->operations.front().allocated_clusters, 0U);
+
+    const auto after = axk::open_image(output);
+    ASSERT_TRUE(after) << after.error().message;
+    const auto &after_partition = after->partitions().front();
+    EXPECT_EQ(after_partition.allocation.stored_used_cluster_count,
+              before_partition.allocation.stored_used_cluster_count);
+    EXPECT_EQ(after_partition.allocation.reconstructed_used_cluster_count,
+              before_partition.allocation.reconstructed_used_cluster_count);
+    EXPECT_TRUE(before_partition.allocation.stored_not_reconstructed.empty());
+    EXPECT_TRUE(after_partition.allocation.stored_not_reconstructed.empty());
+    EXPECT_TRUE(before_partition.allocation.reconstructed_not_stored.empty());
+    EXPECT_TRUE(after_partition.allocation.reconstructed_not_stored.empty());
+    const auto &after_root = *std::ranges::find(after_partition.records, axk::SfsId{1}, &axk::IndexRecord::sfs_id);
+    EXPECT_EQ(std::ranges::count(after_root.directory_entries, "Chain", &axk::DirectoryEntry::name), 0U);
+    const auto after_entry = std::ranges::find(after_root.directory_entries, "Renamed", &axk::DirectoryEntry::name);
+    ASSERT_NE(after_entry, after_root.directory_entries.end());
+    EXPECT_EQ(after_entry->link_id, before_entry->link_id);
+    const auto after_catalog = axk::build_object_catalog(*after);
+    ASSERT_TRUE(after_catalog) << after_catalog.error().message;
+    ASSERT_EQ(after_catalog->objects.size(), before_catalog->objects.size());
+    for (const auto &object : before_catalog->objects) {
+        const auto match = std::ranges::find(after_catalog->objects, object.sfs_id, &axk::ObjectSnapshot::sfs_id);
+        ASSERT_NE(match, after_catalog->objects.end());
+        EXPECT_EQ(match->object.header.type, object.object.header.type);
+        EXPECT_EQ(match->object.header.name, object.object.header.name);
+    }
+    const auto after_wave =
+        std::ranges::find(after_catalog->objects, before_wave->sfs_id, &axk::ObjectSnapshot::sfs_id);
+    ASSERT_NE(after_wave, after_catalog->objects.end());
+    const auto after_pcm = axk::decode_waveform(*after, *after_wave);
+    ASSERT_TRUE(after_pcm) << after_pcm.error().message;
+    EXPECT_EQ(after_pcm->pcm, before_pcm->pcm);
+
+    const auto duplicate = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_volume","partition_index":0,
+         "volume_name":"Chain","new_volume_name":"Chain"}
+      ]})");
+    EXPECT_FALSE(duplicate);
+    const auto too_long = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_volume","partition_index":0,
+         "volume_name":"Chain","new_volume_name":"This name is too long"}
+      ]})");
+    EXPECT_FALSE(too_long);
     std::filesystem::remove_all(root, error);
 }
 

@@ -175,6 +175,14 @@ The capabilities response also reports the active JSON, upload, download,
 queue, image-session, and page limits. Clients should honor those values rather
 than assuming compiled defaults.
 
+Existing HDS images are normally altered into a distinct output file. A trusted
+workspace client that needs to update the selected image may submit
+`replaceSource: true` to `alter.plan` and set `output` to the same `FileRef` as
+`source`. It must close active
+image sessions first. The application writes and validates a temporary sibling
+before atomically replacing the source; this mode does not permit a separate
+`overwrite` request.
+
 ## Low-Concurrency Deployment Profile
 
 For a 64-bit Raspberry Pi 4 or newer with at least 4 GiB of memory, start with

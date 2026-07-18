@@ -75,11 +75,19 @@ struct TransactionState {
     std::vector<OperationReport> reports;
 };
 
+bool requires_object_graph(const AlterationManifest &manifest) {
+    return std::ranges::any_of(manifest.operations, [](const AlterationOperation &operation) {
+        return !std::holds_alternative<InsertVolumeOperation>(operation.data) &&
+               !std::holds_alternative<RenameVolumeOperation>(operation.data);
+    });
+}
+
 struct OperationView {
     std::string id;
     std::string type;
     PartitionSelector partition;
     std::string volume_name;
+    std::string new_volume_name;
     std::optional<VolumeSpec> volume;
     std::string sample_bank_name;
     std::optional<SampleBankSpec> sample_bank;
@@ -107,6 +115,9 @@ OperationView operation_view(const AlterationOperation &operation) {
             } else if constexpr (std::same_as<T, InsertVolumeOperation>) {
                 result.volume_name = value.volume.name;
                 result.volume = value.volume;
+            } else if constexpr (std::same_as<T, RenameVolumeOperation>) {
+                result.volume_name = value.volume_name;
+                result.new_volume_name = value.new_volume_name;
             } else if constexpr (std::same_as<T, DeleteSampleBankOperation>) {
                 result.volume_name = value.volume_name;
                 result.sample_bank_name = value.sample_bank_name;
@@ -158,6 +169,9 @@ AlterationOperation typed_operation(OperationView value) {
         data = DeleteVolumeOperation{std::move(value.partition), std::move(value.volume_name)};
     } else if (value.type == "insert_volume") {
         data = InsertVolumeOperation{std::move(value.partition), std::move(*value.volume)};
+    } else if (value.type == "rename_volume") {
+        data = RenameVolumeOperation{std::move(value.partition), std::move(value.volume_name),
+                                     std::move(value.new_volume_name)};
     } else if (value.type == "delete_sbnk") {
         data = DeleteSampleBankOperation{std::move(value.partition), std::move(value.volume_name),
                                          std::move(value.sample_bank_name)};
@@ -910,6 +924,10 @@ Result<void> append_directory_entry(TransactionState &state, MutablePartition &p
 Result<void> rename_directory_entry(TransactionState &state, MutablePartition &partition, SfsId directory, SfsId child,
                                     std::string_view old_name, std::string_view new_name,
                                     const CancellationToken &cancellation) {
+    if (new_name.empty() || new_name.size() > 16U ||
+        !std::ranges::all_of(new_name, [](unsigned char value) { return value < 0x80U; })) {
+        return std::unexpected{transaction_error("SFS object name must fit 16 ASCII bytes")};
+    }
     auto payload = current_payload(state, partition, directory, cancellation);
     if (!payload)
         return std::unexpected{payload.error()};
@@ -1085,6 +1103,40 @@ Result<OperationReport> insert_volume(TransactionState &state, const OperationVi
     report.volume_name = operation.volume->name;
     report.inserted_sfs_ids = ids;
     report.allocated_clusters = allocated;
+    return report;
+}
+
+Result<OperationReport> rename_volume(TransactionState &state, const OperationView &operation,
+                                      const CancellationToken &cancellation) {
+    if (operation.volume_name == operation.new_volume_name)
+        return std::unexpected{transaction_error("new_volume_name must differ")};
+    auto partition_index = resolve_partition(state, operation.partition);
+    if (!partition_index)
+        return std::unexpected{partition_index.error()};
+    const auto found = state.partitions.find(partition_index->value);
+    if (found == state.partitions.end())
+        return std::unexpected{transaction_error("partition index does not exist")};
+    auto &partition = found->second;
+    auto payload = current_root_payload(state, partition, cancellation);
+    if (!payload)
+        return std::unexpected{payload.error()};
+    auto entries = parse_directory(*payload, SfsId{1});
+    if (!entries)
+        return std::unexpected{entries.error()};
+    const auto matches = std::ranges::count(*entries, operation.volume_name, &ParsedDirectoryEntry::name);
+    if (matches != 1U)
+        return std::unexpected{transaction_error("volume name is not unique in the selected partition")};
+    const auto source = std::ranges::find(*entries, operation.volume_name, &ParsedDirectoryEntry::name);
+    if (auto renamed = rename_directory_entry(state, partition, SfsId{1}, source->id, operation.volume_name,
+                                              operation.new_volume_name, cancellation);
+        !renamed) {
+        return std::unexpected{renamed.error()};
+    }
+    OperationReport report;
+    report.id = operation.id;
+    report.type = operation.type;
+    report.partition = *partition_index;
+    report.volume_name = operation.new_volume_name;
     return report;
 }
 
@@ -2268,18 +2320,22 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
 }
 
 Result<TransactionState> open_transaction_state(const std::filesystem::path &source_path,
-                                                const CancellationToken &cancellation, ProgressSink *progress) {
+                                                const CancellationToken &cancellation, ProgressSink *progress,
+                                                bool include_object_graph) {
     OpenOptions options;
     options.cancellation = cancellation;
     options.progress = progress;
     auto container = open_image(source_path, options);
     if (!container)
         return std::unexpected{container.error()};
-    auto catalog = build_object_catalog(*container, 64U * 1024U * 1024U, cancellation);
-    if (!catalog)
-        return std::unexpected{catalog.error()};
-    auto graph = build_relationship_graph(*catalog);
-    TransactionState state{std::move(*container), std::move(*catalog), std::move(graph), {}, {}, {}};
+    TransactionState state{std::move(*container), {}, {}, {}, {}, {}};
+    if (include_object_graph) {
+        auto catalog = build_object_catalog(state.container, 64U * 1024U * 1024U, cancellation);
+        if (!catalog)
+            return std::unexpected{catalog.error()};
+        state.catalog = std::move(*catalog);
+        state.graph = build_relationship_graph(state.catalog);
+    }
     std::map<std::string, std::pair<PartitionIndex, SfsId>> object_ids;
     for (const auto &object : state.catalog.objects)
         object_ids.emplace(object.key, std::pair{object.partition, object.sfs_id});
@@ -3017,7 +3073,7 @@ std::string_view operation_type_name(const AlterationOperationData &operation) n
         std::string_view{"insert_sbnk"},     std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
         std::string_view{"rename_waveform"}, std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
         std::string_view{"insert_sbac"},     std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
-        std::string_view{"insert_program"},
+        std::string_view{"insert_program"},  std::string_view{"rename_volume"},
     };
     return names[operation.index()];
 }
@@ -3118,7 +3174,7 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 *type != "insert_sbnk" && *type != "insert_waveform" && *type != "delete_waveform" &&
                 *type != "delete_program" && *type != "insert_program" && *type != "delete_sbac" &&
                 *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
-                *type != "rename_sbac") {
+                *type != "rename_sbac" && *type != "rename_volume") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
             }
@@ -3149,6 +3205,22 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (!volume)
                     return std::unexpected{volume.error()};
                 operation.volume_name = *volume;
+            } else if (*type == "rename_volume") {
+                if (auto valid =
+                        exact_fields(row, {"id", "type", "partition_index", "volume_name", "new_volume_name"}, context);
+                    !valid) {
+                    return std::unexpected{valid.error()};
+                }
+                auto volume = object_name(row, "volume_name", context);
+                auto new_volume = object_name(row, "new_volume_name", context);
+                if (!volume)
+                    return std::unexpected{volume.error()};
+                if (!new_volume)
+                    return std::unexpected{new_volume.error()};
+                if (*volume == *new_volume)
+                    return std::unexpected{transaction_error("new_volume_name must differ")};
+                operation.volume_name = std::move(*volume);
+                operation.new_volume_name = std::move(*new_volume);
             } else if (*type == "insert_volume") {
                 if (auto valid = exact_fields(row, {"id", "type", "partition_index", "volume"}, context); !valid)
                     return std::unexpected{valid.error()};
@@ -3512,7 +3584,7 @@ Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, con
                            std::filesystem::absolute(*output_path).lexically_normal()) {
         return std::unexpected{transaction_error("alteration output must differ from source")};
     }
-    auto opened = open_transaction_state(source_path, cancellation, progress);
+    auto opened = open_transaction_state(source_path, cancellation, progress, requires_object_graph(manifest));
     if (!opened)
         return std::unexpected{opened.error()};
     auto state = std::move(*opened);
@@ -3522,7 +3594,7 @@ Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, con
         Result<OperationReport> (*)(TransactionState &, const OperationView &, const CancellationToken &);
     constexpr std::array<OperationHandler, std::variant_size_v<AlterationOperationData>> handlers{
         delete_volume, insert_volume, delete_sbnk, insert_sbnk, insert_waveform, delete_waveform, rename_waveform,
-        rename_sbnk,   delete_sbac,   insert_sbac, rename_sbac, delete_program,  insert_program,
+        rename_sbnk,   delete_sbac,   insert_sbac, rename_sbac, delete_program,  insert_program,  rename_volume,
     };
     for (std::size_t operation_index = 0; operation_index < manifest.operations.size(); ++operation_index) {
         const auto &typed_operation = manifest.operations[operation_index];
@@ -3599,7 +3671,7 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
                                                 progress);
         }
 
-        auto opened = open_transaction_state(target_path, cancellation, progress);
+        auto opened = open_transaction_state(target_path, cancellation, progress, true);
         if (!opened)
             return std::unexpected{opened.error()};
         auto state = std::move(*opened);

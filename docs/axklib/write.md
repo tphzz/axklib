@@ -33,8 +33,8 @@ unless `--overwrite` is supplied. The generated documents have deliberately
 different starting content:
 
 - `hds` is an immediately buildable 512 MiB image definition with one empty
-  partition and one empty volume. It is suitable as a target for
-  `axklib package import` or as the start of a hand-authored manifest.
+  partition and no volumes. Add authored volume entries to the manifest or
+  insert/import volumes after creation.
 - `floppy` contains one waveform and Sample Bank skeleton referring to
   `tone.wav`. Replace that path and the sampler-facing names as needed. A
   Yamaha FAT12 image with no Yamaha objects is not a valid writer target, so
@@ -53,13 +53,7 @@ The generated HDS document is:
   "partitions": [
     {
       "name": "New Partition",
-      "volumes": [
-        {
-          "name": "New Volume",
-          "waveforms": [],
-          "sample_banks": []
-        }
-      ]
+      "volumes": []
     }
   ]
 }
@@ -89,10 +83,11 @@ the currently admitted capacities and partition counts, and
 | `hds-1-gib` | 1,073,741,824 bytes | 1 | 1 through 8 |
 | `hds-2-gib` | 2,147,483,648 bytes | 2 | 2 through 8 |
 
-Every partition starts with one empty `NEW VOLUME` volume. The 2 GiB profile
-does not offer one partition because one SFS partition cannot represent that
-capacity. Callers must use the published options instead of inferring valid
-partition counts from the total byte size.
+Every partition starts without volumes. The 2 GiB profile does not offer one
+partition because one SFS partition cannot represent that capacity. Callers
+must use the published options instead of inferring valid partition counts
+from the total byte size. Add a named volume explicitly before authoring or
+importing sampler objects.
 
 `axklib-server` exposes the same data through
 `GET /api/v1/hard-disk-creation-profiles`. A client submits the chosen profile,
@@ -401,7 +396,7 @@ HDS partition and volume fields:
 | Field | Rule |
 | --- | --- |
 | partition `name` | Required non-empty sampler-facing partition name. |
-| partition `volumes` | Required non-empty array of volume objects. |
+| partition `volumes` | Required array of volume objects; it may be empty. |
 | volume `name` | Required non-empty sampler-facing volume name. |
 | volume `waveforms` | Required array; it may be empty. |
 | volume `sample_banks` | Required array; it may be empty. |
@@ -517,6 +512,7 @@ Supported operation types:
 | --- | --- |
 | `delete_volume` | `volume_name` |
 | `insert_volume` | `volume` using the common authored-volume schema |
+| `rename_volume` | `volume_name`, `new_volume_name` |
 | `delete_waveform` | `volume_name`, `waveform_name` |
 | `insert_waveform` | `volume_name`, `audio` |
 | `rename_waveform` | `volume_name`, `waveform_name`, `new_waveform_name` |
@@ -577,3 +573,9 @@ verified in the intended workflow.
 Existing-image alteration performs relationship, capacity, name, and
 operation-order checks before applying an ordered transaction. Application uses
 a temporary destination and validates the completed image before replacement.
+The server application API normally requires a distinct output file. Trusted
+clients may instead set `replaceSource` to `true` on `alter.plan`, set `output`
+to the same `FileRef` as `source`, and close every open session for that image
+first. The operation then
+builds and validates a temporary sibling before atomically replacing the source
+path; `overwrite` must be omitted in this mode.

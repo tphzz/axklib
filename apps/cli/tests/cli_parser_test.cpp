@@ -240,7 +240,7 @@ TEST(Cli11Adapter, WritesStarterBuildManifestsWithoutSilentReplacement) {
     const auto parsed = nlohmann::json::parse(read_bytes(output));
     EXPECT_EQ(parsed.at("schema_version"), "1.0");
     EXPECT_EQ(parsed.at("size_bytes"), 536'870'912U);
-    EXPECT_TRUE(parsed.at("partitions").at(0).at("volumes").at(0).at("waveforms").empty());
+    EXPECT_TRUE(parsed.at("partitions").at(0).at("volumes").empty());
 
     testing::internal::CaptureStderr();
     EXPECT_EQ(run_cli({"axklib", "create", "manifest", "iso", "-o", output.string()}), 2);

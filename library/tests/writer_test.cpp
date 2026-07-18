@@ -72,6 +72,18 @@ TEST(HdsManifest, ParsesStrictSchemaAndResolvesRelativeAudioPaths) {
     EXPECT_EQ((*geometry)[0].first_payload_cluster, 488U);
 }
 
+TEST(HdsManifest, AcceptsPartitionsWithoutVolumes) {
+    constexpr std::string_view empty = R"json({
+      "schema_version":"1.0",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[]}]
+    })json";
+    const auto parsed = axk::parse_hds_build_manifest(empty);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    ASSERT_EQ(parsed->partitions.size(), 1U);
+    EXPECT_TRUE(parsed->partitions.front().volumes.empty());
+}
+
 TEST(HdsManifest, RejectsUnknownFieldsReferencesAndInvalidGeometry) {
     auto unknown = std::string{manifest};
     unknown.replace(unknown.find("\"size_bytes\""), 12, "\"unknown\"");
@@ -92,10 +104,8 @@ TEST(BuildManifestTemplate, EmitsParseableHdsFloppyAndIsoStarters) {
     const auto parsed_hds = axk::parse_hds_build_manifest(*hds);
     ASSERT_TRUE(parsed_hds) << parsed_hds.error().message;
     ASSERT_EQ(parsed_hds->partitions.size(), 1U);
-    ASSERT_EQ(parsed_hds->partitions.front().volumes.size(), 1U);
+    EXPECT_TRUE(parsed_hds->partitions.front().volumes.empty());
     EXPECT_EQ(parsed_hds->size_bytes, 536'870'912U);
-    EXPECT_TRUE(parsed_hds->partitions.front().volumes.front().waveforms.empty());
-    EXPECT_TRUE(parsed_hds->partitions.front().volumes.front().sample_banks.empty());
 
     const auto floppy = axk::serialize_build_manifest_template(axk::BuildManifestKind::fat12_floppy);
     ASSERT_TRUE(floppy) << floppy.error().message;
@@ -198,12 +208,7 @@ TEST(HdsCreationProfiles, PlanCanonicalEmptyPartitionsThroughTheRegularWriterPla
     for (std::size_t index = 0; index < planned->manifest.partitions.size(); ++index) {
         const auto &partition = planned->manifest.partitions[index];
         EXPECT_EQ(partition.name, "PARTITION " + std::to_string(index + 1U));
-        ASSERT_EQ(partition.volumes.size(), 1U);
-        EXPECT_EQ(partition.volumes[0].name, "NEW VOLUME");
-        EXPECT_TRUE(partition.volumes[0].waveforms.empty());
-        EXPECT_TRUE(partition.volumes[0].sample_banks.empty());
-        EXPECT_TRUE(partition.volumes[0].sample_bank_groups.empty());
-        EXPECT_TRUE(partition.volumes[0].programs.empty());
+        EXPECT_TRUE(partition.volumes.empty());
     }
 
     EXPECT_FALSE(axk::plan_hds_creation({axk::HdsCreationProfileId::floppy_scale, 2U}));
@@ -252,6 +257,26 @@ TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {
     ASSERT_TRUE(reopened) << reopened.error().message;
     ASSERT_EQ(reopened->partitions().size(), 1U);
     EXPECT_EQ(reopened->partitions()[0].name, "hd1");
+    std::filesystem::remove(path, error);
+}
+
+TEST(HdsWriter, AtomicallyWritesAndReopensPartitionWithoutVolumes) {
+    axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {{"hd1", {}}}};
+    const auto path = std::filesystem::temp_directory_path() / "axklib-native-empty-partition.hds";
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    const auto written = axk::write_hds_image(manifest_value, path);
+    ASSERT_TRUE(written) << written.error().message;
+    const auto reopened = axk::open_image(path);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    ASSERT_EQ(reopened->partitions().size(), 1U);
+    const auto &root = *std::ranges::find(reopened->partitions()[0].records, axk::SfsId{1}, &axk::IndexRecord::sfs_id);
+    EXPECT_EQ(std::ranges::count_if(root.directory_entries,
+                                    [](const auto &entry) {
+                                        return entry.name != "." && entry.name != ".." && entry.name != "sfserrlog" &&
+                                               entry.name != "sfserram";
+                                    }),
+              0U);
     std::filesystem::remove(path, error);
 }
 

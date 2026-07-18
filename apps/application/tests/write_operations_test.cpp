@@ -596,14 +596,16 @@ TEST_F(WriteOperationsTest, BuildOverwritePolicyAndCancellationPublishAtomically
     EXPECT_FALSE(std::filesystem::exists(root_ / "cancelled.hds"));
 }
 
-TEST_F(WriteOperationsTest, AlterationAppliesWithoutAllowingInPlaceMutation) {
+TEST_F(WriteOperationsTest, AlterationRequiresExplicitAtomicSourceReplacement) {
     const auto build_starter = registry_.invoke("create.manifest", {{"kind", "HDS"}}, context());
     ASSERT_TRUE(build_starter) << build_starter.error().message;
     auto build_manifest = build_starter->at("manifest");
     build_manifest["size_bytes"] = 4U * 1024U * 1024U;
-    auto second_volume = build_manifest["partitions"][0]["volumes"][0];
-    second_volume["name"] = "Second Volume";
-    build_manifest["partitions"][0]["volumes"].push_back(std::move(second_volume));
+    build_manifest["partitions"][0]["volumes"] = nlohmann::json::array(
+        {{{"name", "First Volume"}, {"waveforms", nlohmann::json::array()}, {"sample_banks", nlohmann::json::array()}},
+         {{"name", "Second Volume"},
+          {"waveforms", nlohmann::json::array()},
+          {"sample_banks", nlohmann::json::array()}}});
     const auto build_plan = registry_.invoke("create.plan",
                                              {{"kind", "HDS"},
                                               {"manifest", {{"inline", build_manifest}}},
@@ -652,6 +654,35 @@ TEST_F(WriteOperationsTest, AlterationAppliesWithoutAllowingInPlaceMutation) {
                                            {"overwrite", true}},
                                           context());
     EXPECT_FALSE(aliased);
+
+    const auto ambiguous = registry_.invoke("alter.plan",
+                                            {{"source", file_ref("source.hds")},
+                                             {"manifest", {{"inline", alteration_manifest}}},
+                                             {"output", file_ref("other.hds")},
+                                             {"replaceSource", true}},
+                                            context());
+    EXPECT_FALSE(ambiguous);
+
+    const auto replacement = registry_.invoke("alter.plan",
+                                              {{"source", file_ref("source.hds")},
+                                               {"manifest", {{"inline", alteration_manifest}}},
+                                               {"output", file_ref("source.hds")},
+                                               {"replaceSource", true}},
+                                              context());
+    ASSERT_TRUE(replacement) << replacement.error().message;
+    EXPECT_TRUE(replacement->at("replaceSource").get<bool>());
+    EXPECT_TRUE(replacement->at("overwrite").get<bool>());
+    EXPECT_EQ(replacement->at("output"), file_ref("source.hds"));
+    const auto source_before = read_bytes(root_ / "source.hds");
+    const auto replaced =
+        registry_.invoke("alter.hds", {{"planToken", replacement->at("planToken").get<std::string>()}}, context());
+    ASSERT_TRUE(replaced) << replaced.error().message;
+    EXPECT_NE(read_bytes(root_ / "source.hds"), source_before);
+    const auto reopened = axk::open_image(root_ / "source.hds");
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto &root_record =
+        *std::ranges::find(reopened->partitions().front().records, axk::SfsId{1}, &axk::IndexRecord::sfs_id);
+    EXPECT_FALSE(std::ranges::contains(root_record.directory_entries, "Second Volume", &axk::DirectoryEntry::name));
 }
 
 TEST_F(WriteOperationsTest, PlanTokensAreOwnerBoundAndRejectStaleAlterationSources) {
@@ -679,6 +710,38 @@ TEST_F(WriteOperationsTest, PlanTokensAreOwnerBoundAndRejectStaleAlterationSourc
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "write_plan_stale");
     EXPECT_FALSE(std::filesystem::exists(root_ / "stale.hds"));
+}
+
+TEST_F(WriteOperationsTest, AlterationRejectsSameSizeSourceChanges) {
+    const auto starter = registry_.invoke("alter.manifest", nlohmann::json::object(), context());
+    ASSERT_TRUE(starter) << starter.error().message;
+    auto manifest = starter->at("manifest");
+    manifest["operations"] = nlohmann::json::array(
+        {{{"id", "remove"}, {"type", "delete_volume"}, {"partition_index", 0U}, {"volume_name", "New Volume"}}});
+    const auto planned = registry_.invoke("alter.plan",
+                                          {{"source", file_ref("fixture.hds")},
+                                           {"manifest", {{"inline", manifest}}},
+                                           {"output", file_ref("same-size-stale.hds")}},
+                                          context());
+    ASSERT_TRUE(planned) << planned.error().message;
+
+    const auto source = root_ / "fixture.hds";
+    std::error_code error;
+    const auto original_time = std::filesystem::last_write_time(source, error);
+    ASSERT_FALSE(error);
+    std::fstream stream{source, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(stream);
+    stream.seekp(0);
+    stream.put('\1');
+    stream.close();
+    std::filesystem::last_write_time(source, original_time + std::chrono::seconds{1}, error);
+    ASSERT_FALSE(error);
+
+    const auto stale =
+        registry_.invoke("alter.hds", {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, "write_plan_stale");
+    EXPECT_FALSE(std::filesystem::exists(root_ / "same-size-stale.hds"));
 }
 
 TEST_F(WriteOperationsTest, AlterationRechecksInputsBeforePublishing) {

@@ -618,11 +618,12 @@
       "ImageContentItem": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "parentId", "depth", "kind", "displayName", "childCount", "objectId", "objectType", "quality", "basis", "notes", "details"],
+        "required": ["id", "parentId", "depth", "partitionIndex", "kind", "displayName", "childCount", "objectId", "objectType", "quality", "basis", "notes", "details"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "parentId": {"type": ["string", "null"]},
           "depth": {"type": "integer", "minimum": 0},
+          "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
           "kind": {"type": "string", "minLength": 1},
           "displayName": {"type": "string"},
           "childCount": {"type": "integer", "minimum": 0},
@@ -1521,6 +1522,7 @@
           "manifest": {"$ref": "#/components/schemas/ManifestInput"},
           "inputBindings": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/components/schemas/InputBinding"}},
           "output": {"$ref": "#/components/schemas/FileRef"},
+          "replaceSource": {"type": "boolean", "default": false},
           "overwrite": {"type": "boolean", "default": false}
         }
       },
@@ -1550,7 +1552,7 @@
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "type": {
-            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM"],
+            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_VOLUME"],
             "x-axklib-application-enum": {
               "DELETE_VOLUME": "delete_volume",
               "INSERT_VOLUME": "insert_volume",
@@ -1564,7 +1566,8 @@
               "INSERT_SBAC": "insert_sbac",
               "RENAME_SBAC": "rename_sbac",
               "DELETE_PROGRAM": "delete_program",
-              "INSERT_PROGRAM": "insert_program"
+              "INSERT_PROGRAM": "insert_program",
+              "RENAME_VOLUME": "rename_volume"
             }
           },
           "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
@@ -1598,6 +1601,7 @@
           "kind": {"const": "ALTERATION"},
           "output": {"$ref": "#/components/schemas/FileRef"},
           "overwrite": {"type": "boolean"},
+          "replaceSource": {"type": "boolean"},
           "summary": {"$ref": "#/components/schemas/AlterationSummary"},
           "semanticVersion": {"type": "string"},
           "sourceIdentity": {"type": "string"},

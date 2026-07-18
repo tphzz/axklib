@@ -52,7 +52,7 @@ Result<OrderedJson> manifest_template(BuildManifestKind kind) {
         result["size_bytes"] = 536'870'912;
         OrderedJson partition = OrderedJson::object();
         partition["name"] = "New Partition";
-        partition["volumes"] = OrderedJson::array({empty_volume("New Volume")});
+        partition["volumes"] = OrderedJson::array();
         result["partitions"] = OrderedJson::array({std::move(partition)});
         return result;
     }
@@ -400,8 +400,8 @@ Result<HdsBuildManifest> parse(const Json &root, const std::filesystem::path &ba
         auto name = text(row["name"], context + ".name");
         if (!name)
             return std::unexpected{name.error()};
-        if (!row["volumes"].is_array() || row["volumes"].empty())
-            return std::unexpected{manifest_error(context + ".volumes must be a non-empty array")};
+        if (!row["volumes"].is_array())
+            return std::unexpected{manifest_error(context + ".volumes must be an array")};
         PartitionSpec partition{*name, {}};
         for (std::size_t volume_index = 0; volume_index < row["volumes"].size(); ++volume_index) {
             auto parsed =
@@ -690,8 +690,7 @@ const std::vector<HdsCreationProfile> &hds_creation_profiles() {
             for (std::uint8_t count = 1; count <= 8; ++count) {
                 HdsBuildManifest manifest{"1.0", size_bytes, {}};
                 for (std::uint8_t index = 0; index < count; ++index)
-                    manifest.partitions.push_back(
-                        {"PARTITION " + std::to_string(index + 1U), {VolumeSpec{"NEW VOLUME", {}, {}, {}, {}}}});
+                    manifest.partitions.push_back({"PARTITION " + std::to_string(index + 1U), {}});
                 auto geometry = plan_hds_geometry(manifest);
                 if (!geometry)
                     continue;
@@ -720,8 +719,7 @@ Result<HdsCreationPlan> plan_hds_creation(const HdsCreationRequest &request, con
 
     HdsBuildManifest manifest{"1.0", profile->size_bytes, {}};
     for (std::uint8_t index = 0; index < request.partition_count; ++index)
-        manifest.partitions.push_back(
-            {"PARTITION " + std::to_string(index + 1U), {VolumeSpec{"NEW VOLUME", {}, {}, {}, {}}}});
+        manifest.partitions.push_back({"PARTITION " + std::to_string(index + 1U), {}});
     auto summary = plan_hds_build(manifest, cancellation);
     if (!summary)
         return std::unexpected{summary.error()};
