@@ -93,6 +93,12 @@ TEST_F(AudioOperationsTest, InspectsOwnedAudioUploadsWithSamplerConversionMetada
     EXPECT_EQ(result->at("sourceSampleRate"), 96'000U);
     EXPECT_EQ(result->at("outputSampleRate"), 44'100U);
     EXPECT_TRUE(result->at("resampled").get<bool>());
+    EXPECT_EQ(result->at("projectedOutputFrameCount"), 2U);
+    EXPECT_EQ(result->at("projectedOutputBytesPerChannel"), 4U);
+    EXPECT_EQ(result->at("projectedOutputBytesTotal"), 4U);
+    EXPECT_EQ(result->at("maximumOutputBytesPerChannel"), 32U * 1024U * 1024U);
+    EXPECT_TRUE(result->at("valid").get<bool>());
+    EXPECT_TRUE(result->at("issues").empty());
 }
 
 TEST_F(AudioOperationsTest, InspectsSandboxAudioFiles) {

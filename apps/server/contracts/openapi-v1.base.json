@@ -790,7 +790,7 @@
       "AudioSourceInfo": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["sourceFormat", "sourceSubtype", "channels", "frameCount", "sourceSampleRate", "outputSampleRate", "durationSeconds", "resampled", "quantized"],
+        "required": ["sourceFormat", "sourceSubtype", "channels", "frameCount", "sourceSampleRate", "outputSampleRate", "durationSeconds", "resampled", "quantized", "projectedOutputFrameCount", "projectedOutputBytesPerChannel", "projectedOutputBytesTotal", "maximumOutputBytesPerChannel", "valid", "issues"],
         "properties": {
           "sourceFormat": {"type": "string", "minLength": 1},
           "sourceSubtype": {"type": "string", "minLength": 1},
@@ -800,7 +800,13 @@
           "outputSampleRate": {"type": "integer", "minimum": 1},
           "durationSeconds": {"type": "number", "minimum": 0},
           "resampled": {"type": "boolean"},
-          "quantized": {"type": "boolean"}
+          "quantized": {"type": "boolean"},
+          "projectedOutputFrameCount": {"type": "integer", "minimum": 1},
+          "projectedOutputBytesPerChannel": {"type": "integer", "minimum": 2},
+          "projectedOutputBytesTotal": {"type": "integer", "minimum": 2},
+          "maximumOutputBytesPerChannel": {"type": "integer", "minimum": 1},
+          "valid": {"type": "boolean"},
+          "issues": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}}
         }
       },
       "ManifestInput": {

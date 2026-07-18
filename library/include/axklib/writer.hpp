@@ -14,6 +14,9 @@ namespace axk {
 
 inline constexpr std::uint64_t minimum_hds_size = 1'048'576;
 inline constexpr std::uint64_t maximum_hds_size = 2'147'483'648;
+inline constexpr std::uint64_t maximum_wave_data_frames_per_channel = 1ULL << 24U;
+inline constexpr std::uint64_t maximum_wave_data_pcm16_bytes_per_channel =
+    maximum_wave_data_frames_per_channel * sizeof(std::int16_t);
 
 struct WaveformSpec {
     std::string id;
@@ -99,6 +102,12 @@ struct AudioImportOptions {
     std::optional<std::uint32_t> target_sample_rate;
 };
 
+struct AudioImportIssue {
+    std::string code;
+    std::string message;
+    bool fatal{true};
+};
+
 struct AudioSourceInfo {
     std::string source_format;
     std::string source_subtype;
@@ -108,6 +117,12 @@ struct AudioSourceInfo {
     std::uint32_t output_sample_rate{};
     bool resampled{};
     bool quantized{};
+    std::uint64_t projected_output_frame_count{};
+    std::uint64_t projected_output_bytes_per_channel{};
+    std::uint64_t projected_output_bytes_total{};
+    std::uint64_t maximum_output_bytes_per_channel{maximum_wave_data_pcm16_bytes_per_channel};
+    bool valid{true};
+    std::vector<AudioImportIssue> issues;
 };
 
 struct ImportedAudio {

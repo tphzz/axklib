@@ -46,6 +46,7 @@ enum class error_code : std::uint32_t {
     relationship_ambiguous = 501,
     relationship_cycle = 502,
     audio_unsupported_format = 600,
+    audio_wave_data_too_large = 601,
     manifest_invalid = 700,
     transaction_rejected = 750,
     unsupported_profile = 800,

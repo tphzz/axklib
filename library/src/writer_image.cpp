@@ -132,7 +132,13 @@ std::uint16_t pitch_word(std::uint8_t root_key, std::uint32_t sample_rate) {
 
 Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const ImportedAudio &audio,
                                               std::uint32_t link_id) {
-    if (audio.pcm_channels.size() != 1U || audio.pcm_channels[0].size() % 2U != 0U ||
+    const auto pcm_bytes = audio.pcm_channels.size() == 1U ? audio.pcm_channels[0].size() : 0U;
+    if (audio.output_frames > maximum_wave_data_frames_per_channel ||
+        pcm_bytes > maximum_wave_data_pcm16_bytes_per_channel) {
+        return std::unexpected{make_error(ErrorCode::audio_wave_data_too_large, ErrorCategory::audio,
+                                          "Wave Data exceeds the 32 MiB per-channel A-series limit")};
+    }
+    if (audio.pcm_channels.size() != 1U || pcm_bytes % 2U != 0U || pcm_bytes / 2U != audio.output_frames ||
         audio.output_frames > std::numeric_limits<std::uint32_t>::max()) {
         return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
                                           "SMPL writer requires bounded mono 16-bit PCM")};
@@ -190,6 +196,11 @@ struct LoadedWaveform {
 Result<std::vector<std::byte>> serialize_sbnk(const SampleBankSpec &bank, const LoadedWaveform &left,
                                               const LoadedWaveform *right, bool grouped,
                                               const std::vector<std::uint8_t> &linked_programs) {
+    if (left.audio.output_frames > maximum_wave_data_frames_per_channel ||
+        (right != nullptr && right->audio.output_frames > maximum_wave_data_frames_per_channel)) {
+        return std::unexpected{make_error(ErrorCode::audio_wave_data_too_large, ErrorCategory::audio,
+                                          "Sample references Wave Data beyond the A-series per-channel limit")};
+    }
     std::vector<std::byte> result(0x188);
     const auto put_text = [&](std::size_t offset, std::string_view value, std::size_t width) -> Result<void> {
         auto bytes = ascii(value, width);

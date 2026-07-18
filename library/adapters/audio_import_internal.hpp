@@ -30,6 +30,16 @@ struct SourceAudioInfo {
     bool reduces_precision{};
 };
 
+struct ProjectedAudioSize {
+    std::uint64_t output_frames{};
+    std::uint64_t bytes_per_channel{};
+    std::uint64_t total_bytes{};
+    bool valid{};
+};
+
+Result<ProjectedAudioSize> project_sampler_audio_size(std::uint64_t source_frames, std::size_t channels,
+                                                      std::uint32_t source_rate, std::uint32_t output_rate);
+
 Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path,
                                         std::optional<std::size_t> expected_channels = {});
 

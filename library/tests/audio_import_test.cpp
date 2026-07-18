@@ -147,6 +147,29 @@ TEST(AudioResampler, CoversIntegerNonIntegerShortAndLongRatiosDeterministically)
     }
 }
 
+TEST(AudioImportLimits, ProjectsConvertedPcm16PerPhysicalChannelAtExactBoundaries) {
+    const auto exact =
+        detail::project_sampler_audio_size(axk::maximum_wave_data_frames_per_channel, 2U, 44'100U, 44'100U);
+    ASSERT_TRUE(exact) << exact.error().message;
+    EXPECT_EQ(exact->output_frames, axk::maximum_wave_data_frames_per_channel);
+    EXPECT_EQ(exact->bytes_per_channel, axk::maximum_wave_data_pcm16_bytes_per_channel);
+    EXPECT_EQ(exact->total_bytes, 2U * axk::maximum_wave_data_pcm16_bytes_per_channel);
+    EXPECT_TRUE(exact->valid);
+
+    const auto over =
+        detail::project_sampler_audio_size(axk::maximum_wave_data_frames_per_channel + 1U, 1U, 44'100U, 44'100U);
+    ASSERT_TRUE(over) << over.error().message;
+    EXPECT_EQ(over->output_frames, axk::maximum_wave_data_frames_per_channel + 1U);
+    EXPECT_EQ(over->bytes_per_channel, axk::maximum_wave_data_pcm16_bytes_per_channel + 2U);
+    EXPECT_FALSE(over->valid);
+
+    const auto resampled =
+        detail::project_sampler_audio_size(axk::maximum_wave_data_frames_per_channel / 2U + 1U, 1U, 22'050U, 44'100U);
+    ASSERT_TRUE(resampled) << resampled.error().message;
+    EXPECT_EQ(resampled->output_frames, axk::maximum_wave_data_frames_per_channel + 2U);
+    EXPECT_FALSE(resampled->valid);
+}
+
 TEST(AudioImport, PreservesPcm16AtEverySupportedSamplerRate) {
     constexpr std::array rates{4'000U,  5'512U,  6'000U,  8'000U,  11'025U, 12'000U,
                                16'000U, 22'050U, 24'000U, 32'000U, 44'100U, 48'000U};
@@ -236,6 +259,12 @@ TEST(AudioImport, InspectsMonoAndStereoWithoutDecodingPcm) {
     EXPECT_EQ(mono->output_sample_rate, 44'100U);
     EXPECT_FALSE(mono->resampled);
     EXPECT_FALSE(mono->quantized);
+    EXPECT_EQ(mono->projected_output_frame_count, 441U);
+    EXPECT_EQ(mono->projected_output_bytes_per_channel, 882U);
+    EXPECT_EQ(mono->projected_output_bytes_total, 882U);
+    EXPECT_EQ(mono->maximum_output_bytes_per_channel, axk::maximum_wave_data_pcm16_bytes_per_channel);
+    EXPECT_TRUE(mono->valid);
+    EXPECT_TRUE(mono->issues.empty());
 
     const auto stereo = axk::inspect_sampler_audio(stereo_path);
     ASSERT_TRUE(stereo) << stereo.error().message;
@@ -247,6 +276,11 @@ TEST(AudioImport, InspectsMonoAndStereoWithoutDecodingPcm) {
     EXPECT_EQ(stereo->output_sample_rate, 44'100U);
     EXPECT_TRUE(stereo->resampled);
     EXPECT_TRUE(stereo->quantized);
+    EXPECT_EQ(stereo->projected_output_frame_count, 441U);
+    EXPECT_EQ(stereo->projected_output_bytes_per_channel, 882U);
+    EXPECT_EQ(stereo->projected_output_bytes_total, 1'764U);
+    EXPECT_TRUE(stereo->valid);
+    EXPECT_TRUE(stereo->issues.empty());
 
     std::filesystem::remove(mono_path, error);
     std::filesystem::remove(stereo_path, error);

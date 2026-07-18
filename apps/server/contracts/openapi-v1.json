@@ -370,7 +370,29 @@
             "minimum": 1,
             "type": "integer"
           },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/Issue"
+            },
+            "type": "array"
+          },
+          "maximumOutputBytesPerChannel": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "outputSampleRate": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "projectedOutputBytesPerChannel": {
+            "minimum": 2,
+            "type": "integer"
+          },
+          "projectedOutputBytesTotal": {
+            "minimum": 2,
+            "type": "integer"
+          },
+          "projectedOutputFrameCount": {
             "minimum": 1,
             "type": "integer"
           },
@@ -391,6 +413,9 @@
           "sourceSubtype": {
             "minLength": 1,
             "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -402,7 +427,13 @@
           "outputSampleRate",
           "durationSeconds",
           "resampled",
-          "quantized"
+          "quantized",
+          "projectedOutputFrameCount",
+          "projectedOutputBytesPerChannel",
+          "projectedOutputBytesTotal",
+          "maximumOutputBytesPerChannel",
+          "valid",
+          "issues"
         ],
         "type": "object"
       },
@@ -4546,12 +4577,18 @@
                         "channels": 1,
                         "durationSeconds": 0,
                         "frameCount": 1,
+                        "issues": [],
+                        "maximumOutputBytesPerChannel": 1,
                         "outputSampleRate": 1,
+                        "projectedOutputBytesPerChannel": 2,
+                        "projectedOutputBytesTotal": 2,
+                        "projectedOutputFrameCount": 1,
                         "quantized": false,
                         "resampled": false,
                         "sourceFormat": "x",
                         "sourceSampleRate": 1,
-                        "sourceSubtype": "x"
+                        "sourceSubtype": "x",
+                        "valid": false
                       },
                       "meta": {
                         "requestId": "request-1"
@@ -4564,12 +4601,18 @@
                         "channels": 1,
                         "durationSeconds": 0,
                         "frameCount": 1,
+                        "issues": [],
+                        "maximumOutputBytesPerChannel": 1,
                         "outputSampleRate": 1,
+                        "projectedOutputBytesPerChannel": 2,
+                        "projectedOutputBytesTotal": 2,
+                        "projectedOutputFrameCount": 1,
                         "quantized": false,
                         "resampled": false,
                         "sourceFormat": "x",
                         "sourceSampleRate": 1,
-                        "sourceSubtype": "x"
+                        "sourceSubtype": "x",
+                        "valid": false
                       },
                       "meta": {
                         "requestId": "request-1",

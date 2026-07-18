@@ -74,6 +74,9 @@ axk::app::Result<Json> inspect_audio(const Json &input, const axk::app::Operatio
     const auto duration = inspected->source_sample_rate == 0U ? 0.0
                                                               : static_cast<double>(inspected->frame_count) /
                                                                     static_cast<double>(inspected->source_sample_rate);
+    auto issues = Json::array();
+    for (const auto &issue : inspected->issues)
+        issues.push_back({{"code", issue.code}, {"message", issue.message}, {"fatal", issue.fatal}});
     return Json{{"sourceFormat", inspected->source_format},
                 {"sourceSubtype", inspected->source_subtype},
                 {"channels", inspected->channels},
@@ -82,7 +85,13 @@ axk::app::Result<Json> inspect_audio(const Json &input, const axk::app::Operatio
                 {"outputSampleRate", inspected->output_sample_rate},
                 {"durationSeconds", duration},
                 {"resampled", inspected->resampled},
-                {"quantized", inspected->quantized}};
+                {"quantized", inspected->quantized},
+                {"projectedOutputFrameCount", inspected->projected_output_frame_count},
+                {"projectedOutputBytesPerChannel", inspected->projected_output_bytes_per_channel},
+                {"projectedOutputBytesTotal", inspected->projected_output_bytes_total},
+                {"maximumOutputBytesPerChannel", inspected->maximum_output_bytes_per_channel},
+                {"valid", inspected->valid},
+                {"issues", std::move(issues)}};
 }
 
 } // namespace

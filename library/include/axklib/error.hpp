@@ -54,6 +54,7 @@ enum class ErrorCode : std::uint32_t {
     relationship_cycle = 502,
     // Audio errors: 600-699.
     audio_unsupported_format = 600,
+    audio_wave_data_too_large = 601,
     // Manifest and transaction errors: 700-799.
     manifest_invalid = 700,
     transaction_rejected = 750,

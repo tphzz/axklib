@@ -158,6 +158,22 @@ Names written into Yamaha object and menu fields must be ASCII and at most 16
 bytes. Manifest IDs such as waveform `id` are manifest-local references and do
 not become sampler-facing names.
 
+### Wave Data Size Limit
+
+Each physical `SMPL` Wave Data channel may contain at most 16,777,216 logical
+PCM16 frames, or 32 MiB after conversion. A mono Sample may reference one such
+channel. A stereo Sample may reference two channels, for at most 64 MiB total,
+but its maximum duration is unchanged because each channel is checked
+separately.
+
+The limit applies to the converted sampler data, not the source file size.
+Resampling can therefore move a source across the boundary. Audio inspection
+reports `projectedOutputFrameCount`, `projectedOutputBytesPerChannel`,
+`projectedOutputBytesTotal`, `maximumOutputBytesPerChannel`, `valid`, and
+structured `issues` before an import is applied. Creation and alteration reject
+oversized audio before decoding its full payload, and the low-level writer
+rechecks the limit before serializing an `SMPL` object.
+
 !!! warning "Current loop policy"
 
     Authored Wave Data entries currently use forward loop mode over the complete

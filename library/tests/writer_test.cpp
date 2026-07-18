@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include "../src/writer_internal.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
@@ -239,6 +240,26 @@ TEST(AudioImport, PreservesNativePcm16AndChoosesOnlyHardwareRates) {
     EXPECT_EQ(*axk::choose_sampler_sample_rate(96000), 44100U);
     EXPECT_FALSE(axk::choose_sampler_sample_rate(48000, 47999));
     std::filesystem::remove(path, error);
+}
+
+TEST(AudioImport, SmplSerializationRejectsWaveDataPastTheHardwareAddressLimit) {
+    axk::ImportedAudio audio;
+    audio.output_sample_rate = 44'100U;
+    audio.output_frames = axk::maximum_wave_data_frames_per_channel + 1U;
+    audio.pcm_channels = {{std::byte{}, std::byte{}}};
+    axk::WaveformSpec waveform;
+    waveform.name = "Too Large";
+
+    const auto payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    ASSERT_FALSE(payload);
+    EXPECT_EQ(payload.error().code, axk::ErrorCode::audio_wave_data_too_large);
+
+    audio.output_frames = 1U;
+    audio.pcm_channels = {
+        std::vector<std::byte>(static_cast<std::size_t>(axk::maximum_wave_data_pcm16_bytes_per_channel + 2U))};
+    const auto oversized_pcm = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    ASSERT_FALSE(oversized_pcm);
+    EXPECT_EQ(oversized_pcm.error().code, axk::ErrorCode::audio_wave_data_too_large);
 }
 
 TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {
