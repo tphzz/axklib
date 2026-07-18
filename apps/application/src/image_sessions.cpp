@@ -460,6 +460,12 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
         return std::unexpected(core_error(inventory.error(), source));
     auto graph = axk::build_relationship_graph(inventory->catalog);
     auto tree = axk::build_content_tree(*media, inventory->catalog, graph);
+    std::unordered_map<std::uint8_t, std::string> partition_names;
+    if (const auto *sfs = std::get_if<axk::Container>(&media->storage())) {
+        partition_names.reserve(sfs->partitions().size());
+        for (const auto &partition : sfs->partitions())
+            partition_names.emplace(partition.index.value, partition.name);
+    }
 
     auto session = std::make_shared<Implementation::Session>();
     session->owner_id = std::move(owner_id);
@@ -548,11 +554,19 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
         const auto id = std::move(*generated_id);
         const auto partition_index =
             node.node_type == "partition" ? partition_index_from_node_id(node.node_id) : inherited_partition_index;
+        const auto canonical_name = [&]() -> std::string {
+            if (node.node_type == "partition" && partition_index) {
+                if (const auto found = partition_names.find(*partition_index); found != partition_names.end())
+                    return found->second;
+            }
+            return node.display_name;
+        }();
         ImageContentItem item{.id = id,
                               .parent_id = parent_id,
                               .depth = depth,
                               .partition_index = partition_index,
                               .kind = node.node_type,
+                              .name = canonical_name,
                               .display_name = node.display_name,
                               .child_count = node.children.size(),
                               .object_id = std::nullopt,
@@ -666,8 +680,10 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
                                                   "images.validation.issues", "images.preview", "auditions.prepare"};
     const auto source_metadata =
         implementation_->sandbox.metadata((*session)->source.root_id, (*session)->source.relative_path);
-    if ((*session)->format == "sfs" && source_metadata && source_metadata->writable)
+    if ((*session)->format == "sfs" && source_metadata && source_metadata->writable) {
         available_operations.emplace_back("images.alter.volumes");
+        available_operations.emplace_back("images.alter.partitions");
+    }
     return ImageSessionSummary{.image_id = (*session)->image_id,
                                .source = (*session)->source,
                                .format = (*session)->format,

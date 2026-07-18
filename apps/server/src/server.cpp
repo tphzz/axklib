@@ -1295,6 +1295,7 @@ class ServerApplication {
                             {"depth", item.depth},
                             {"partitionIndex", item.partition_index ? Json(*item.partition_index) : Json{}},
                             {"kind", item.kind},
+                            {"name", item.name},
                             {"displayName", item.display_name},
                             {"childCount", item.child_count},
                             {"objectId", item.object_id ? Json(*item.object_id) : Json{}},

@@ -513,6 +513,7 @@ Supported operation types:
 | `delete_volume` | `volume_name` |
 | `insert_volume` | `volume` using the common authored-volume schema |
 | `rename_volume` | `volume_name`, `new_volume_name` |
+| `rename_partition` | `partition_name`, `new_partition_name` |
 | `delete_waveform` | `volume_name`, `waveform_name` |
 | `insert_waveform` | `volume_name`, `audio` |
 | `rename_waveform` | `volume_name`, `waveform_name`, `new_waveform_name` |

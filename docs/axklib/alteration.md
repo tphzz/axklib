@@ -7,7 +7,8 @@ earlier row and carries that row's resolved partition into the next operation.
 
 Supported operations are:
 
-- insert and delete volume;
+- rename partition;
+- insert, delete, and rename volume;
 - insert, delete, and rename waveform;
 - insert, delete, and rename Sample (`SBNK`);
 - insert, delete, and rename Sample Bank (`SBAC`);

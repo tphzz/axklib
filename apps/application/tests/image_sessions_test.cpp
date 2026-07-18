@@ -47,7 +47,7 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     EXPECT_EQ(opened->available_operations,
               (std::vector<std::string>{"images.content", "images.objects", "images.relationships",
                                         "images.validation.issues", "images.preview", "auditions.prepare",
-                                        "images.alter.volumes"}));
+                                        "images.alter.volumes", "images.alter.partitions"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
@@ -63,6 +63,13 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     ASSERT_FALSE(content->items.empty());
     EXPECT_EQ(content->items.front().kind, "partition");
     EXPECT_EQ(content->items.front().partition_index, 0U);
+    const auto media = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    EXPECT_EQ(content->items.front().name, sfs->partitions().front().name);
+    EXPECT_NE(content->items.front().display_name, content->items.front().name);
     for (const auto &item : content->items) {
         EXPECT_TRUE(item.id.starts_with("content-"));
         if (item.object_id) {

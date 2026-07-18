@@ -14,6 +14,7 @@
     {"id":"rename-group","type":"rename_sbac","partition_index":0,"volume_name":"Volume","sample_bank_group_name":"Old Group","new_sample_bank_group_name":"New Group"},
     {"id":"delete-program","type":"delete_program","partition_index":0,"volume_name":"Volume","program_number":128},
     {"id":"insert-program","type":"insert_program","partition_index":{"operation_ref":"delete-program"},"volume_name":"Volume","program":{"number":128,"assignments":[{"sample_bank_group":"Group","receive_channel":1},{"sample_bank":"Direct Bank","receive_channel":2}]}},
-    {"id":"rename-volume","type":"rename_volume","partition_index":0,"volume_name":"Old Volume","new_volume_name":"New Volume"}
+    {"id":"rename-volume","type":"rename_volume","partition_index":0,"volume_name":"Old Volume","new_volume_name":"New Volume"},
+    {"id":"rename-partition","type":"rename_partition","partition_index":0,"partition_name":"Old Partition","new_partition_name":"New Partition"}
   ]
 }

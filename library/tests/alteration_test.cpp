@@ -240,7 +240,7 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
         std::string_view{"insert_sbnk"},     std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
         std::string_view{"rename_waveform"}, std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
         std::string_view{"insert_sbac"},     std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
-        std::string_view{"insert_program"},  std::string_view{"rename_volume"},
+        std::string_view{"insert_program"},  std::string_view{"rename_volume"},   std::string_view{"rename_partition"},
     };
     ASSERT_EQ(parsed->operations.size(), expected.size());
     for (std::size_t index = 0; index < expected.size(); ++index) {
@@ -268,6 +268,30 @@ TEST(AlterationManifest, ParsesStrictVolumeRename) {
       "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_volume","partition_index":0,
          "volume_name":"Retained","new_volume_name":"Renamed","extra":true}
+      ]})"));
+}
+
+TEST(AlterationManifest, ParsesStrictPartitionRename) {
+    const auto parsed = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_partition","partition_index":1,
+         "partition_name":"PARTITION 2","new_partition_name":"Samples"}
+      ]})");
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto *rename = std::get_if<axk::RenamePartitionOperation>(&parsed->operations.front().data);
+    ASSERT_NE(rename, nullptr);
+    EXPECT_EQ(rename->partition_name, "PARTITION 2");
+    EXPECT_EQ(rename->new_partition_name, "Samples");
+
+    EXPECT_FALSE(axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_partition","partition_index":1,
+         "partition_name":"PARTITION 2","new_partition_name":"Samples","extra":true}
+      ]})"));
+    EXPECT_FALSE(axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_partition","partition_index":1,
+         "partition_name":"PARTITION 2","new_partition_name":"PARTITION 2"}
       ]})"));
 }
 
@@ -418,6 +442,61 @@ TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
          "volume_name":"Chain","new_volume_name":"This name is too long"}
       ]})");
     EXPECT_FALSE(too_long);
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, RenamePartitionChangesOnlySelectedMirroredHeaderName) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-rename-partition";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+
+    axk::HdsBuildManifest manifest{"1.0", 8U * 1024U * 1024U, {}};
+    manifest.partitions.push_back({"PARTITION 1", {}});
+    manifest.partitions.push_back({"PARTITION 2", {}});
+    ASSERT_TRUE(axk::write_hds_image(manifest, source));
+    const auto before_image = axk::open_image(source);
+    ASSERT_TRUE(before_image) << before_image.error().message;
+    ASSERT_EQ(before_image->partitions().size(), 2U);
+    const auto before_bytes = bytes(source);
+
+    const auto alteration = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_partition","partition_index":1,
+         "partition_name":"PARTITION 2    1","new_partition_name":"Samples"}
+      ]})");
+    ASSERT_TRUE(alteration) << alteration.error().message;
+    const auto applied = axk::alter_hds(source, *alteration, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto after_image = axk::open_image(output);
+    ASSERT_TRUE(after_image) << after_image.error().message;
+    ASSERT_EQ(after_image->partitions().size(), 2U);
+    EXPECT_EQ(after_image->partitions()[0].name, "PARTITION 1");
+    EXPECT_EQ(after_image->partitions()[1].name, "Samples");
+    EXPECT_TRUE(after_image->partitions()[1].backup_header_matches);
+
+    const auto after_bytes = bytes(output);
+    ASSERT_EQ(after_bytes.size(), before_bytes.size());
+    const auto partition_start = static_cast<std::size_t>(before_image->partitions()[1].start_sector) * 512U;
+    for (std::size_t index = 0; index < before_bytes.size(); ++index) {
+        const auto in_primary_name = index >= partition_start + 0x40U && index < partition_start + 0x50U;
+        const auto in_backup_name = index >= partition_start + 1024U + 0x40U && index < partition_start + 1024U + 0x50U;
+        if (!in_primary_name && !in_backup_name) {
+            EXPECT_EQ(after_bytes[index], before_bytes[index]) << "unexpected byte change at " << index;
+        }
+    }
+
+    const auto stale = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_partition","partition_index":1,
+         "partition_name":"Wrong","new_partition_name":"Other"}
+      ]})");
+    ASSERT_TRUE(stale);
+    EXPECT_FALSE(axk::alter_hds(source, *stale, root / "stale.hds"));
+    EXPECT_FALSE(std::filesystem::exists(root / "stale.hds"));
     std::filesystem::remove_all(root, error);
 }
 

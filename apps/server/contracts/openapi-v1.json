@@ -181,7 +181,8 @@
               "RENAME_SBAC",
               "DELETE_PROGRAM",
               "INSERT_PROGRAM",
-              "RENAME_VOLUME"
+              "RENAME_VOLUME",
+              "RENAME_PARTITION"
             ],
             "x-axklib-application-enum": {
               "DELETE_PROGRAM": "delete_program",
@@ -194,6 +195,7 @@
               "INSERT_SBNK": "insert_sbnk",
               "INSERT_VOLUME": "insert_volume",
               "INSERT_WAVEFORM": "insert_waveform",
+              "RENAME_PARTITION": "rename_partition",
               "RENAME_SBAC": "rename_sbac",
               "RENAME_SBNK": "rename_sbnk",
               "RENAME_VOLUME": "rename_volume",
@@ -1677,6 +1679,9 @@
           },
           "kind": {
             "minLength": 1,
+            "type": "string"
+          },
+          "name": {
             "type": "string"
           },
           "notes": {

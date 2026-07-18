@@ -41,6 +41,7 @@ struct ImageContentItem {
     std::size_t depth{};
     std::optional<std::uint8_t> partition_index;
     std::string kind;
+    std::string name;
     std::string display_name;
     std::size_t child_count{};
     std::optional<std::string> object_id;

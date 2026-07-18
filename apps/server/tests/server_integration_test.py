@@ -1336,6 +1336,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.preview",
                 "auditions.prepare",
                 "images.alter.volumes",
+                "images.alter.partitions",
             ]
             assert opened["data"]["objectCount"] > 0
             status, objects = http_request(
@@ -1417,6 +1418,11 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert all(
                 item["parentId"] is None for item in content_page["data"]["items"]
             ), content_page
+            partition_item = content_page["data"]["items"][0]
+            assert partition_item["name"], partition_item
+            assert partition_item["displayName"].endswith(
+                f": {partition_item['name']}"
+            ), partition_item
             parent_id = content_page["data"]["items"][0]["id"]
             child_query = urlencode({"limit": 100, "parentId": parent_id})
             status, child_page = http_request(

@@ -50,6 +50,7 @@ Error transaction_error(std::string message) {
 
 struct MutablePartition {
     const Partition *source{};
+    std::optional<std::string> renamed_name;
     std::vector<std::byte> bitmap;
     std::set<SfsId> deleted;
     std::optional<std::vector<std::byte>> root_payload;
@@ -78,7 +79,8 @@ struct TransactionState {
 bool requires_object_graph(const AlterationManifest &manifest) {
     return std::ranges::any_of(manifest.operations, [](const AlterationOperation &operation) {
         return !std::holds_alternative<InsertVolumeOperation>(operation.data) &&
-               !std::holds_alternative<RenameVolumeOperation>(operation.data);
+               !std::holds_alternative<RenameVolumeOperation>(operation.data) &&
+               !std::holds_alternative<RenamePartitionOperation>(operation.data);
     });
 }
 
@@ -88,6 +90,8 @@ struct OperationView {
     PartitionSelector partition;
     std::string volume_name;
     std::string new_volume_name;
+    std::string partition_name;
+    std::string new_partition_name;
     std::optional<VolumeSpec> volume;
     std::string sample_bank_name;
     std::optional<SampleBankSpec> sample_bank;
@@ -118,6 +122,9 @@ OperationView operation_view(const AlterationOperation &operation) {
             } else if constexpr (std::same_as<T, RenameVolumeOperation>) {
                 result.volume_name = value.volume_name;
                 result.new_volume_name = value.new_volume_name;
+            } else if constexpr (std::same_as<T, RenamePartitionOperation>) {
+                result.partition_name = value.partition_name;
+                result.new_partition_name = value.new_partition_name;
             } else if constexpr (std::same_as<T, DeleteSampleBankOperation>) {
                 result.volume_name = value.volume_name;
                 result.sample_bank_name = value.sample_bank_name;
@@ -172,6 +179,9 @@ AlterationOperation typed_operation(OperationView value) {
     } else if (value.type == "rename_volume") {
         data = RenameVolumeOperation{std::move(value.partition), std::move(value.volume_name),
                                      std::move(value.new_volume_name)};
+    } else if (value.type == "rename_partition") {
+        data = RenamePartitionOperation{std::move(value.partition), std::move(value.partition_name),
+                                        std::move(value.new_partition_name)};
     } else if (value.type == "delete_sbnk") {
         data = DeleteSampleBankOperation{std::move(value.partition), std::move(value.volume_name),
                                          std::move(value.sample_bank_name)};
@@ -268,6 +278,19 @@ Result<std::string> object_name(const Json &row, std::string_view field, std::st
     if (result->size() > 16U || !std::ranges::all_of(*result, [](unsigned char value) { return value < 0x80U; })) {
         return std::unexpected{
             transaction_error(std::string{context} + "." + std::string{field} + " must fit 16 ASCII bytes")};
+    }
+    return result;
+}
+
+Result<std::string> partition_name(const Json &row, std::string_view field, std::string_view context) {
+    auto result = required_text(row, field, context);
+    if (!result)
+        return std::unexpected{result.error()};
+    const auto printable =
+        std::ranges::all_of(*result, [](unsigned char value) { return value >= 0x20U && value <= 0x7eU; });
+    if (result->size() > 16U || !printable || result->front() == ' ' || result->back() == ' ') {
+        return std::unexpected{transaction_error(std::string{context} + "." + std::string{field} +
+                                                 " must be 1..16 printable ASCII characters without outer spaces")};
     }
     return result;
 }
@@ -1137,6 +1160,30 @@ Result<OperationReport> rename_volume(TransactionState &state, const OperationVi
     report.type = operation.type;
     report.partition = *partition_index;
     report.volume_name = operation.new_volume_name;
+    return report;
+}
+
+Result<OperationReport> rename_partition(TransactionState &state, const OperationView &operation,
+                                         const CancellationToken &cancellation) {
+    if (const auto checked = cancellation.check(); !checked)
+        return std::unexpected{checked.error()};
+    if (operation.partition_name == operation.new_partition_name)
+        return std::unexpected{transaction_error("new_partition_name must differ")};
+    auto partition_index = resolve_partition(state, operation.partition);
+    if (!partition_index)
+        return std::unexpected{partition_index.error()};
+    const auto found = state.partitions.find(partition_index->value);
+    if (found == state.partitions.end())
+        return std::unexpected{transaction_error("partition index does not exist")};
+    auto &partition = found->second;
+    const auto &current_name = partition.renamed_name ? *partition.renamed_name : partition.source->name;
+    if (current_name != operation.partition_name)
+        return std::unexpected{transaction_error("partition name changed since the alteration was prepared")};
+    partition.renamed_name = operation.new_partition_name;
+    OperationReport report;
+    report.id = operation.id;
+    report.type = operation.type;
+    report.partition = *partition_index;
     return report;
 }
 
@@ -2268,6 +2315,9 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
         const auto partition = std::ranges::find(actual->partitions(), PartitionIndex{index}, &Partition::index);
         if (partition == actual->partitions().end())
             return std::unexpected{transaction_error("post-write validation lost a planned partition")};
+        if (expected.renamed_name && (partition->name != *expected.renamed_name || !partition->backup_header_matches)) {
+            return std::unexpected{transaction_error("post-write partition name differs from the transaction plan")};
+        }
         std::set<SfsId> expected_ids;
         for (const auto &source_record : expected.source->records) {
             if (!expected.deleted.contains(source_record.sfs_id))
@@ -2408,6 +2458,23 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
             return std::unexpected{check.error()};
         }
         const auto &partition = *item.source;
+        if (item.renamed_name) {
+            std::array<std::byte, 16> encoded_name{};
+            std::ranges::fill(encoded_name, std::byte{' '});
+            for (std::size_t name_index = 0; name_index < item.renamed_name->size(); ++name_index)
+                encoded_name[name_index] = static_cast<std::byte>((*item.renamed_name)[name_index]);
+            const auto header_offset = static_cast<std::uint64_t>(partition.start_sector) * 512U + 0x40U;
+            if (auto written = write_bytes(output, header_offset, encoded_name); !written) {
+                output.close();
+                cleanup();
+                return written;
+            }
+            if (auto written = write_bytes(output, header_offset + 1024U, encoded_name); !written) {
+                output.close();
+                cleanup();
+                return written;
+            }
+        }
         for (const auto id : item.deleted) {
             const auto *source_record = record(partition, id);
             if (source_record == nullptr)
@@ -3080,8 +3147,9 @@ Result<TransactionState> prepare_alteration(const std::filesystem::path &source_
     using OperationHandler =
         Result<OperationReport> (*)(TransactionState &, const OperationView &, const CancellationToken &);
     constexpr std::array<OperationHandler, std::variant_size_v<AlterationOperationData>> handlers{
-        delete_volume, insert_volume, delete_sbnk, insert_sbnk, insert_waveform, delete_waveform, rename_waveform,
-        rename_sbnk,   delete_sbac,   insert_sbac, rename_sbac, delete_program,  insert_program,  rename_volume,
+        delete_volume,   insert_volume,   delete_sbnk,    insert_sbnk,   insert_waveform,
+        delete_waveform, rename_waveform, rename_sbnk,    delete_sbac,   insert_sbac,
+        rename_sbac,     delete_program,  insert_program, rename_volume, rename_partition,
     };
     for (std::size_t operation_index = 0; operation_index < manifest.operations.size(); ++operation_index) {
         const auto &typed_operation = manifest.operations[operation_index];
@@ -3106,7 +3174,7 @@ std::string_view operation_type_name(const AlterationOperationData &operation) n
         std::string_view{"insert_sbnk"},     std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
         std::string_view{"rename_waveform"}, std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
         std::string_view{"insert_sbac"},     std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
-        std::string_view{"insert_program"},  std::string_view{"rename_volume"},
+        std::string_view{"insert_program"},  std::string_view{"rename_volume"},   std::string_view{"rename_partition"},
     };
     return names[operation.index()];
 }
@@ -3207,7 +3275,7 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 *type != "insert_sbnk" && *type != "insert_waveform" && *type != "delete_waveform" &&
                 *type != "delete_program" && *type != "insert_program" && *type != "delete_sbac" &&
                 *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
-                *type != "rename_sbac" && *type != "rename_volume") {
+                *type != "rename_sbac" && *type != "rename_volume" && *type != "rename_partition") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
             }
@@ -3254,6 +3322,22 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{transaction_error("new_volume_name must differ")};
                 operation.volume_name = std::move(*volume);
                 operation.new_volume_name = std::move(*new_volume);
+            } else if (*type == "rename_partition") {
+                if (auto valid = exact_fields(
+                        row, {"id", "type", "partition_index", "partition_name", "new_partition_name"}, context);
+                    !valid) {
+                    return std::unexpected{valid.error()};
+                }
+                auto old_name = partition_name(row, "partition_name", context);
+                auto new_name = partition_name(row, "new_partition_name", context);
+                if (!old_name)
+                    return std::unexpected{old_name.error()};
+                if (!new_name)
+                    return std::unexpected{new_name.error()};
+                if (*old_name == *new_name)
+                    return std::unexpected{transaction_error("new_partition_name must differ")};
+                operation.partition_name = std::move(*old_name);
+                operation.new_partition_name = std::move(*new_name);
             } else if (*type == "insert_volume") {
                 if (auto valid = exact_fields(row, {"id", "type", "partition_index", "volume"}, context); !valid)
                     return std::unexpected{valid.error()};
