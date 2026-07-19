@@ -10,8 +10,11 @@
 
 #if defined(_WIN32)
 #define NOMINMAX
-#include <bcrypt.h>
+// bcrypt.h depends on Windows SDK types declared by windows.h.
+// clang-format off
 #include <windows.h>
+#include <bcrypt.h>
+// clang-format on
 #elif defined(__linux__)
 #include <sys/random.h>
 #elif defined(__APPLE__)
