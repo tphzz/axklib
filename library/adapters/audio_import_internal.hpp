@@ -26,6 +26,8 @@ struct SourceAudioInfo {
     std::size_t channels{};
     std::size_t frames{};
     std::uint32_t sample_rate{};
+    std::uint8_t sample_width_bits{};
+    bool is_pcm8{};
     bool is_pcm16{};
     bool reduces_precision{};
 };
@@ -38,7 +40,8 @@ struct ProjectedAudioSize {
 };
 
 Result<ProjectedAudioSize> project_sampler_audio_size(std::uint64_t source_frames, std::size_t channels,
-                                                      std::uint32_t source_rate, std::uint32_t output_rate);
+                                                      std::uint32_t source_rate, std::uint32_t output_rate,
+                                                      std::uint8_t output_sample_width_bytes = 2U);
 
 Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path,
                                         std::optional<std::size_t> expected_channels = {});

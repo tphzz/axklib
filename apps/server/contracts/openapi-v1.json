@@ -70,10 +70,19 @@
             "minimum": 1,
             "type": "integer"
           },
+          "outputSampleWidthBits": {
+            "enum": [
+              16
+            ],
+            "type": "integer"
+          },
           "quantized": {
             "type": "boolean"
           },
           "resampled": {
+            "type": "boolean"
+          },
+          "sampleWidthConverted": {
             "type": "boolean"
           },
           "sourceChannels": {
@@ -89,6 +98,16 @@
           },
           "sourceSampleRate": {
             "minimum": 1,
+            "type": "integer"
+          },
+          "sourceSampleWidthBits": {
+            "enum": [
+              8,
+              16,
+              24,
+              32,
+              64
+            ],
             "type": "integer"
           },
           "sourceSubtype": {
@@ -342,11 +361,57 @@
         ],
         "type": "object"
       },
+      "AudioImportCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "defaultUnsupportedSampleRate": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sampleWidthPolicy": {
+            "enum": [
+              "PRESERVE_PCM16_EXPAND_PCM8"
+            ]
+          },
+          "supportedOutputSampleWidthsBits": {
+            "items": {
+              "enum": [
+                8,
+                16
+              ],
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "supportedSampleRates": {
+            "items": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "supportedSampleRates",
+          "defaultUnsupportedSampleRate",
+          "supportedOutputSampleWidthsBits",
+          "sampleWidthPolicy"
+        ],
+        "type": "object"
+      },
       "AudioInspectionRequest": {
         "additionalProperties": false,
         "properties": {
           "source": {
             "$ref": "#/components/schemas/InputRef"
+          },
+          "targetSampleRate": {
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
@@ -361,6 +426,9 @@
             "maximum": 2,
             "minimum": 1,
             "type": "integer"
+          },
+          "ditherAlgorithm": {
+            "type": "string"
           },
           "durationSeconds": {
             "minimum": 0,
@@ -380,8 +448,18 @@
             "minimum": 1,
             "type": "integer"
           },
+          "maximumOutputFrameCountPerChannel": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "outputSampleRate": {
             "minimum": 1,
+            "type": "integer"
+          },
+          "outputSampleWidthBits": {
+            "enum": [
+              16
+            ],
             "type": "integer"
           },
           "projectedOutputBytesPerChannel": {
@@ -402,12 +480,25 @@
           "resampled": {
             "type": "boolean"
           },
+          "sampleWidthConverted": {
+            "type": "boolean"
+          },
           "sourceFormat": {
             "minLength": 1,
             "type": "string"
           },
           "sourceSampleRate": {
             "minimum": 1,
+            "type": "integer"
+          },
+          "sourceSampleWidthBits": {
+            "enum": [
+              8,
+              16,
+              24,
+              32,
+              64
+            ],
             "type": "integer"
           },
           "sourceSubtype": {
@@ -425,12 +516,17 @@
           "frameCount",
           "sourceSampleRate",
           "outputSampleRate",
+          "sourceSampleWidthBits",
+          "outputSampleWidthBits",
           "durationSeconds",
           "resampled",
           "quantized",
+          "sampleWidthConverted",
+          "ditherAlgorithm",
           "projectedOutputFrameCount",
           "projectedOutputBytesPerChannel",
           "projectedOutputBytesTotal",
+          "maximumOutputFrameCountPerChannel",
           "maximumOutputBytesPerChannel",
           "valid",
           "issues"
@@ -532,6 +628,9 @@
         "properties": {
           "apiVersion": {
             "const": "v1"
+          },
+          "audioImport": {
+            "$ref": "#/components/schemas/AudioImportCapabilities"
           },
           "limits": {
             "$ref": "#/components/schemas/ApiLimits"
@@ -4575,18 +4674,23 @@
                     "value": {
                       "data": {
                         "channels": 1,
+                        "ditherAlgorithm": "x",
                         "durationSeconds": 0,
                         "frameCount": 1,
                         "issues": [],
                         "maximumOutputBytesPerChannel": 1,
+                        "maximumOutputFrameCountPerChannel": 1,
                         "outputSampleRate": 1,
+                        "outputSampleWidthBits": 16,
                         "projectedOutputBytesPerChannel": 2,
                         "projectedOutputBytesTotal": 2,
                         "projectedOutputFrameCount": 1,
                         "quantized": false,
                         "resampled": false,
+                        "sampleWidthConverted": false,
                         "sourceFormat": "x",
                         "sourceSampleRate": 1,
+                        "sourceSampleWidthBits": 8,
                         "sourceSubtype": "x",
                         "valid": false
                       },
@@ -4599,18 +4703,23 @@
                     "value": {
                       "data": {
                         "channels": 1,
+                        "ditherAlgorithm": "x",
                         "durationSeconds": 0,
                         "frameCount": 1,
                         "issues": [],
                         "maximumOutputBytesPerChannel": 1,
+                        "maximumOutputFrameCountPerChannel": 1,
                         "outputSampleRate": 1,
+                        "outputSampleWidthBits": 16,
                         "projectedOutputBytesPerChannel": 2,
                         "projectedOutputBytesTotal": 2,
                         "projectedOutputFrameCount": 1,
                         "quantized": false,
                         "resampled": false,
+                        "sampleWidthConverted": false,
                         "sourceFormat": "x",
                         "sourceSampleRate": 1,
+                        "sourceSampleWidthBits": 8,
                         "sourceSubtype": "x",
                         "valid": false
                       },

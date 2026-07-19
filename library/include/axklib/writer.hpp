@@ -1,10 +1,12 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "axklib/error.hpp"
@@ -17,6 +19,13 @@ inline constexpr std::uint64_t maximum_hds_size = 2'147'483'648;
 inline constexpr std::uint64_t maximum_wave_data_frames_per_channel = 1ULL << 24U;
 inline constexpr std::uint64_t maximum_wave_data_pcm16_bytes_per_channel =
     maximum_wave_data_frames_per_channel * sizeof(std::int16_t);
+inline constexpr std::array<std::uint32_t, 12> supported_sampler_sample_rates{
+    4'000U, 5'512U, 6'000U, 8'000U, 11'025U, 12'000U, 16'000U, 22'050U, 24'000U, 32'000U, 44'100U, 48'000U};
+inline constexpr std::uint32_t default_sampler_sample_rate = 44'100U;
+inline constexpr std::uint8_t sampler_output_sample_width_bits = 16U;
+inline constexpr std::array<std::uint8_t, 1> supported_sampler_output_sample_widths_bits{
+    sampler_output_sample_width_bits};
+inline constexpr std::string_view sampler_sample_width_policy = "PRESERVE_PCM16_EXPAND_PCM8";
 
 struct WaveformSpec {
     std::string id;
@@ -115,11 +124,16 @@ struct AudioSourceInfo {
     std::uint64_t frame_count{};
     std::uint32_t source_sample_rate{};
     std::uint32_t output_sample_rate{};
+    std::uint8_t source_sample_width_bits{};
+    std::uint8_t output_sample_width_bits{sampler_output_sample_width_bits};
     bool resampled{};
     bool quantized{};
+    bool sample_width_converted{};
+    std::string dither_algorithm;
     std::uint64_t projected_output_frame_count{};
     std::uint64_t projected_output_bytes_per_channel{};
     std::uint64_t projected_output_bytes_total{};
+    std::uint64_t maximum_output_frame_count_per_channel{maximum_wave_data_frames_per_channel};
     std::uint64_t maximum_output_bytes_per_channel{maximum_wave_data_pcm16_bytes_per_channel};
     bool valid{true};
     std::vector<AudioImportIssue> issues;
@@ -132,12 +146,15 @@ struct ImportedAudio {
     std::uint8_t source_channels{};
     std::uint32_t source_sample_rate{};
     std::uint32_t output_sample_rate{};
+    std::uint8_t source_sample_width_bits{};
+    std::uint8_t output_sample_width_bits{sampler_output_sample_width_bits};
     std::uint64_t output_frames{};
     std::vector<std::vector<std::byte>> pcm_channels;
     bool resampled{};
     bool quantized{};
-    // Empty for exact PCM16 imports; otherwise identifies the reproducible
-    // policy used.
+    bool sample_width_converted{};
+    // Empty for exact PCM16 imports and exact PCM8 expansion; otherwise
+    // identifies the reproducible policy used.
     std::string dither_algorithm;
     std::uint64_t clipped_samples{};
 };

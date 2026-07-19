@@ -138,7 +138,8 @@ Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const Im
         return std::unexpected{make_error(ErrorCode::audio_wave_data_too_large, ErrorCategory::audio,
                                           "Wave Data exceeds the 32 MiB per-channel A-series limit")};
     }
-    if (audio.pcm_channels.size() != 1U || pcm_bytes % 2U != 0U || pcm_bytes / 2U != audio.output_frames ||
+    if (audio.output_sample_width_bits != sampler_output_sample_width_bits || audio.pcm_channels.size() != 1U ||
+        pcm_bytes % 2U != 0U || pcm_bytes / 2U != audio.output_frames ||
         audio.output_frames > std::numeric_limits<std::uint32_t>::max()) {
         return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
                                           "SMPL writer requires bounded mono 16-bit PCM")};

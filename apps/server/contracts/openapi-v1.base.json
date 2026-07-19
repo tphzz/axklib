@@ -761,7 +761,19 @@
         "properties": {
           "apiVersion": {"const": "v1"},
           "operations": {"type": "array", "items": {"$ref": "#/components/schemas/OperationCapability"}},
-          "limits": {"$ref": "#/components/schemas/ApiLimits"}
+          "limits": {"$ref": "#/components/schemas/ApiLimits"},
+          "audioImport": {"$ref": "#/components/schemas/AudioImportCapabilities"}
+        }
+      },
+      "AudioImportCapabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["supportedSampleRates", "defaultUnsupportedSampleRate", "supportedOutputSampleWidthsBits", "sampleWidthPolicy"],
+        "properties": {
+          "supportedSampleRates": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+          "defaultUnsupportedSampleRate": {"type": "integer", "minimum": 1},
+          "supportedOutputSampleWidthsBits": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "enum": [8, 16]}},
+          "sampleWidthPolicy": {"enum": ["PRESERVE_PCM16_EXPAND_PCM8"]}
         }
       },
       "CapabilitiesResponse": {
@@ -784,13 +796,14 @@
         "additionalProperties": false,
         "required": ["source"],
         "properties": {
-          "source": {"$ref": "#/components/schemas/InputRef"}
+          "source": {"$ref": "#/components/schemas/InputRef"},
+          "targetSampleRate": {"type": "integer", "minimum": 1}
         }
       },
       "AudioSourceInfo": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["sourceFormat", "sourceSubtype", "channels", "frameCount", "sourceSampleRate", "outputSampleRate", "durationSeconds", "resampled", "quantized", "projectedOutputFrameCount", "projectedOutputBytesPerChannel", "projectedOutputBytesTotal", "maximumOutputBytesPerChannel", "valid", "issues"],
+        "required": ["sourceFormat", "sourceSubtype", "channels", "frameCount", "sourceSampleRate", "outputSampleRate", "sourceSampleWidthBits", "outputSampleWidthBits", "durationSeconds", "resampled", "quantized", "sampleWidthConverted", "ditherAlgorithm", "projectedOutputFrameCount", "projectedOutputBytesPerChannel", "projectedOutputBytesTotal", "maximumOutputFrameCountPerChannel", "maximumOutputBytesPerChannel", "valid", "issues"],
         "properties": {
           "sourceFormat": {"type": "string", "minLength": 1},
           "sourceSubtype": {"type": "string", "minLength": 1},
@@ -798,12 +811,17 @@
           "frameCount": {"type": "integer", "minimum": 1},
           "sourceSampleRate": {"type": "integer", "minimum": 1},
           "outputSampleRate": {"type": "integer", "minimum": 1},
+          "sourceSampleWidthBits": {"type": "integer", "enum": [8, 16, 24, 32, 64]},
+          "outputSampleWidthBits": {"type": "integer", "enum": [16]},
           "durationSeconds": {"type": "number", "minimum": 0},
           "resampled": {"type": "boolean"},
           "quantized": {"type": "boolean"},
+          "sampleWidthConverted": {"type": "boolean"},
+          "ditherAlgorithm": {"type": "string"},
           "projectedOutputFrameCount": {"type": "integer", "minimum": 1},
           "projectedOutputBytesPerChannel": {"type": "integer", "minimum": 2},
           "projectedOutputBytesTotal": {"type": "integer", "minimum": 2},
+          "maximumOutputFrameCountPerChannel": {"type": "integer", "minimum": 1},
           "maximumOutputBytesPerChannel": {"type": "integer", "minimum": 1},
           "valid": {"type": "boolean"},
           "issues": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}}
@@ -1565,9 +1583,12 @@
           "sourceChannels": {"type": "integer", "minimum": 1},
           "sourceSampleRate": {"type": "integer", "minimum": 1},
           "outputSampleRate": {"type": "integer", "minimum": 1},
+          "sourceSampleWidthBits": {"type": "integer", "enum": [8, 16, 24, 32, 64]},
+          "outputSampleWidthBits": {"type": "integer", "enum": [16]},
           "outputFrames": {"type": "integer", "minimum": 0},
           "resampled": {"type": "boolean"},
           "quantized": {"type": "boolean"},
+          "sampleWidthConverted": {"type": "boolean"},
           "ditherAlgorithm": {"type": "string"},
           "splitStereo": {"type": "boolean"},
           "clippedSamples": {"type": "integer", "minimum": 0}

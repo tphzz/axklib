@@ -146,11 +146,20 @@ Wave Data object (`SMPL`) and one Sample (`SBNK`) that references it:
 ```
 
 Native PCM16 at a supported sampler rate preserves its exact PCM sample
-sequence without resampling or requantization. The source container and byte
-order still change when those samples are serialized as a Yamaha `SMPL` object.
-WAV, FLAC, and AIFF input is accepted. Unsupported rates are converted with
-pinned libsoxr VHQ processing; higher-precision input is converted to PCM16
-with the versioned `axk-tpdf-pcg32-v1` dither policy. See
+sequence without resampling or requantization. Linear PCM8 is expanded exactly
+to PCM16 without dither; current writer profiles do not emit one-byte `SMPL`
+Wave Data. The source container and byte order still change when samples are
+serialized as a Yamaha `SMPL` object.
+
+WAV, FLAC, and AIFF input is accepted when it contains linear 8-, 16-, 24-, or
+32-bit integer PCM, or 32-/64-bit floating-point PCM. Compressed and unknown
+subtypes are rejected. Higher-precision input is reduced to PCM16 with the
+versioned `axk-tpdf-pcg32-v1` dither policy. The supported output rates are
+4,000, 5,512, 6,000, 8,000, 11,025, 12,000, 16,000, 22,050, 24,000, 32,000,
+44,100, and 48,000 Hz. A supported source rate is preserved by default; an
+unsupported source rate defaults to 44,100 Hz. Explicit conversion to any
+supported rate uses pinned libsoxr VHQ processing and the same deterministic
+dither policy. See
 [Sampler Data Structures](sampler-data.md) for the generated object fields and
 stored PCM representation.
 
@@ -168,11 +177,13 @@ separately.
 
 The limit applies to the converted sampler data, not the source file size.
 Resampling can therefore move a source across the boundary. Audio inspection
-reports `projectedOutputFrameCount`, `projectedOutputBytesPerChannel`,
-`projectedOutputBytesTotal`, `maximumOutputBytesPerChannel`, `valid`, and
-structured `issues` before an import is applied. Creation and alteration reject
-oversized audio before decoding its full payload, and the low-level writer
-rechecks the limit before serializing an `SMPL` object.
+reports source/output widths, the selected output rate, dither policy,
+`projectedOutputFrameCount`, `projectedOutputBytesPerChannel`,
+`projectedOutputBytesTotal`, `maximumOutputFrameCountPerChannel`,
+`maximumOutputBytesPerChannel`, `valid`, and structured `issues` before an
+import is applied. Creation and alteration reject oversized audio before
+decoding its full payload, and the low-level writer rechecks the limit before
+serializing an `SMPL` object.
 
 !!! warning "Current loop policy"
 

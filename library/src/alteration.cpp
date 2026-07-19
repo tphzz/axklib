@@ -1433,10 +1433,21 @@ Result<OperationReport> insert_waveform(TransactionState &state, const Operation
     }
     report.inserted_sfs_ids = std::move(inserted);
     report.allocated_clusters = allocated_clusters;
-    report.audio_import = AudioImportSummary{
-        audio->source_path,        audio->source_format,         audio->source_subtype,   audio->source_channels,
-        audio->source_sample_rate, audio->output_sample_rate,    audio->output_frames,    audio->resampled,
-        audio->quantized,          audio->source_channels == 2U, audio->dither_algorithm, audio->clipped_samples};
+    report.audio_import = AudioImportSummary{audio->source_path,
+                                             audio->source_format,
+                                             audio->source_subtype,
+                                             audio->source_channels,
+                                             audio->source_sample_rate,
+                                             audio->output_sample_rate,
+                                             audio->source_sample_width_bits,
+                                             audio->output_sample_width_bits,
+                                             audio->output_frames,
+                                             audio->resampled,
+                                             audio->quantized,
+                                             audio->sample_width_converted,
+                                             audio->source_channels == 2U,
+                                             audio->dither_algorithm,
+                                             audio->clipped_samples};
     return report;
 }
 

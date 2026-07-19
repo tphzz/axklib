@@ -48,6 +48,25 @@ std::string subtype_name(int format) {
     }
 }
 
+std::uint8_t sample_width_bits(int subtype) {
+    switch (subtype) {
+    case SF_FORMAT_PCM_U8:
+    case SF_FORMAT_PCM_S8:
+        return 8U;
+    case SF_FORMAT_PCM_16:
+        return 16U;
+    case SF_FORMAT_PCM_24:
+        return 24U;
+    case SF_FORMAT_PCM_32:
+    case SF_FORMAT_FLOAT:
+        return 32U;
+    case SF_FORMAT_DOUBLE:
+        return 64U;
+    default:
+        return 0U;
+    }
+}
+
 using SndfileHandle = std::unique_ptr<SNDFILE, decltype(&sf_close)>;
 
 Result<SndfileHandle> open_sndfile(const std::filesystem::path &path, SF_INFO &info) {
@@ -96,12 +115,21 @@ Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path,
         return std::unexpected{audio_error("audio source is too large")};
     }
     const auto subtype = info.format & SF_FORMAT_SUBMASK;
+    const auto format = format_name(info.format);
+    const auto subtype_text = subtype_name(info.format);
+    const auto width_bits = sample_width_bits(subtype);
+    if (format == "UNKNOWN" || subtype_text == "UNKNOWN" || width_bits == 0U) {
+        return std::unexpected{
+            audio_error("audio source uses a compressed or unsupported container or sample encoding")};
+    }
     return SourceAudioInfo{
-        .format = format_name(info.format),
-        .subtype = subtype_name(info.format),
+        .format = format,
+        .subtype = subtype_text,
         .channels = channels,
         .frames = static_cast<std::size_t>(info.frames),
         .sample_rate = static_cast<std::uint32_t>(info.samplerate),
+        .sample_width_bits = width_bits,
+        .is_pcm8 = subtype == SF_FORMAT_PCM_U8 || subtype == SF_FORMAT_PCM_S8,
         .is_pcm16 = subtype == SF_FORMAT_PCM_16,
         .reduces_precision = subtype != SF_FORMAT_PCM_U8 && subtype != SF_FORMAT_PCM_S8 && subtype != SF_FORMAT_PCM_16,
     };

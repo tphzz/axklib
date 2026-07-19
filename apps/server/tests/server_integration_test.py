@@ -339,6 +339,15 @@ def canonical_alteration_operation(value: dict[str, Any]) -> dict[str, Any]:
             "outputSampleRate": field_from(
                 raw_audio, "outputSampleRate", "output_sample_rate"
             ),
+            "sourceSampleWidthBits": field_from(
+                raw_audio, "sourceSampleWidthBits", "source_sample_width_bits"
+            ),
+            "outputSampleWidthBits": field_from(
+                raw_audio, "outputSampleWidthBits", "output_sample_width_bits"
+            ),
+            "sampleWidthConverted": field_from(
+                raw_audio, "sampleWidthConverted", "sample_width_converted"
+            ),
             "outputFrames": field_from(raw_audio, "outputFrames", "output_frames"),
             "resampled": raw_audio["resampled"],
             "quantized": raw_audio["quantized"],
@@ -1082,6 +1091,25 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert status == 200
             assert capabilities["meta"]["requestId"]
+            assert capabilities["data"]["audioImport"] == {
+                "supportedSampleRates": [
+                    4000,
+                    5512,
+                    6000,
+                    8000,
+                    11025,
+                    12000,
+                    16000,
+                    22050,
+                    24000,
+                    32000,
+                    44100,
+                    48000,
+                ],
+                "defaultUnsupportedSampleRate": 44100,
+                "supportedOutputSampleWidthsBits": [16],
+                "sampleWidthPolicy": "PRESERVE_PCM16_EXPAND_PCM8",
+            }
             assert capabilities["data"]["limits"] == {
                 "maximumJsonBytes": 1024 * 1024,
                 "maximumJsonDepth": 32,

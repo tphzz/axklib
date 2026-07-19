@@ -46,6 +46,7 @@
 #include "axklib/server/workspaces.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
+#include "axklib/writer.hpp"
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -810,11 +811,24 @@ class ServerApplication {
                           {"maximumQueuedJobs", config_.maximum_queued_jobs},
                           {"maximumImageSessions", config_.maximum_image_sessions},
                           {"maximumPageSize", config_.maximum_page_size}};
-        return json_response(
-            200,
-            {{"data", {{"apiVersion", "v1"}, {"operations", std::move(operations)}, {"limits", limits}}},
-             {"meta", {{"requestId", id}}}},
-            id);
+        Json sample_rates = Json::array();
+        for (const auto rate : axk::supported_sampler_sample_rates)
+            sample_rates.push_back(rate);
+        Json sample_widths = Json::array();
+        for (const auto width : axk::supported_sampler_output_sample_widths_bits)
+            sample_widths.push_back(width);
+        const Json audio_import{{"supportedSampleRates", std::move(sample_rates)},
+                                {"defaultUnsupportedSampleRate", axk::default_sampler_sample_rate},
+                                {"supportedOutputSampleWidthsBits", std::move(sample_widths)},
+                                {"sampleWidthPolicy", axk::sampler_sample_width_policy}};
+        return json_response(200,
+                             {{"data",
+                               {{"apiVersion", "v1"},
+                                {"operations", std::move(operations)},
+                                {"limits", limits},
+                                {"audioImport", audio_import}}},
+                              {"meta", {{"requestId", id}}}},
+                             id);
     }
 
     const Json &openapi_document() const noexcept { return openapi_document_; }

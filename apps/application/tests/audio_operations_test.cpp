@@ -85,17 +85,24 @@ TEST_F(AudioOperationsTest, InspectsOwnedAudioUploadsWithSamplerConversionMetada
     const auto snapshot = upload("source.wav", axk::app::UploadKind::audio);
     ASSERT_TRUE(snapshot) << snapshot.error().message;
     const auto result = registry_.invoke(
-        "audio.inspect", {{"source", {{"uploadRef", {{"uploadId", snapshot->reference.upload_id}}}}}}, context());
+        "audio.inspect",
+        {{"source", {{"uploadRef", {{"uploadId", snapshot->reference.upload_id}}}}}, {"targetSampleRate", 22'050U}},
+        context());
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(result->at("sourceFormat"), "WAV");
     EXPECT_EQ(result->at("channels"), 1U);
     EXPECT_EQ(result->at("frameCount"), 3U);
     EXPECT_EQ(result->at("sourceSampleRate"), 96'000U);
-    EXPECT_EQ(result->at("outputSampleRate"), 44'100U);
+    EXPECT_EQ(result->at("outputSampleRate"), 22'050U);
     EXPECT_TRUE(result->at("resampled").get<bool>());
-    EXPECT_EQ(result->at("projectedOutputFrameCount"), 2U);
-    EXPECT_EQ(result->at("projectedOutputBytesPerChannel"), 4U);
-    EXPECT_EQ(result->at("projectedOutputBytesTotal"), 4U);
+    EXPECT_EQ(result->at("sourceSampleWidthBits"), 16U);
+    EXPECT_EQ(result->at("outputSampleWidthBits"), 16U);
+    EXPECT_FALSE(result->at("sampleWidthConverted").get<bool>());
+    EXPECT_EQ(result->at("ditherAlgorithm"), "axk-tpdf-pcg32-v1");
+    EXPECT_EQ(result->at("projectedOutputFrameCount"), 1U);
+    EXPECT_EQ(result->at("projectedOutputBytesPerChannel"), 2U);
+    EXPECT_EQ(result->at("projectedOutputBytesTotal"), 2U);
+    EXPECT_EQ(result->at("maximumOutputFrameCountPerChannel"), 1U << 24U);
     EXPECT_EQ(result->at("maximumOutputBytesPerChannel"), 32U * 1024U * 1024U);
     EXPECT_TRUE(result->at("valid").get<bool>());
     EXPECT_TRUE(result->at("issues").empty());

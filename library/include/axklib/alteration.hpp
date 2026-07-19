@@ -146,9 +146,12 @@ struct AudioImportSummary {
     std::uint8_t source_channels{};
     std::uint32_t source_sample_rate{};
     std::uint32_t output_sample_rate{};
+    std::uint8_t source_sample_width_bits{};
+    std::uint8_t output_sample_width_bits{};
     std::uint64_t output_frames{};
     bool resampled{};
     bool quantized{};
+    bool sample_width_converted{};
     bool split_stereo{};
     std::string dither_algorithm;
     std::uint64_t clipped_samples{};

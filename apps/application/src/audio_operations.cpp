@@ -68,7 +68,14 @@ axk::app::Result<Json> inspect_audio(const Json &input, const axk::app::Operatio
     auto resolved = resolve_audio(input, context.owner_id, sandbox, uploads);
     if (!resolved)
         return std::unexpected(resolved.error());
-    auto inspected = axk::inspect_sampler_audio(resolved->path);
+    std::optional<std::uint32_t> target_sample_rate;
+    try {
+        if (input.contains("targetSampleRate"))
+            target_sample_rate = input.at("targetSampleRate").get<std::uint32_t>();
+    } catch (const Json::exception &) {
+        return std::unexpected(operation_error("invalid_request", "target sample rate must be a positive integer"));
+    }
+    auto inspected = axk::inspect_sampler_audio(resolved->path, target_sample_rate);
     if (!inspected)
         return std::unexpected(core_error(inspected.error()));
     const auto duration = inspected->source_sample_rate == 0U ? 0.0
@@ -83,12 +90,17 @@ axk::app::Result<Json> inspect_audio(const Json &input, const axk::app::Operatio
                 {"frameCount", inspected->frame_count},
                 {"sourceSampleRate", inspected->source_sample_rate},
                 {"outputSampleRate", inspected->output_sample_rate},
+                {"sourceSampleWidthBits", inspected->source_sample_width_bits},
+                {"outputSampleWidthBits", inspected->output_sample_width_bits},
                 {"durationSeconds", duration},
                 {"resampled", inspected->resampled},
                 {"quantized", inspected->quantized},
+                {"sampleWidthConverted", inspected->sample_width_converted},
+                {"ditherAlgorithm", inspected->dither_algorithm},
                 {"projectedOutputFrameCount", inspected->projected_output_frame_count},
                 {"projectedOutputBytesPerChannel", inspected->projected_output_bytes_per_channel},
                 {"projectedOutputBytesTotal", inspected->projected_output_bytes_total},
+                {"maximumOutputFrameCountPerChannel", inspected->maximum_output_frame_count_per_channel},
                 {"maximumOutputBytesPerChannel", inspected->maximum_output_bytes_per_channel},
                 {"valid", inspected->valid},
                 {"issues", std::move(issues)}};
