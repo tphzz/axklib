@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/secure_random.hpp"
+#include "environment.hpp"
 
 namespace {
 
@@ -163,10 +164,10 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
 }
 
 template <typename Value> axk::app::Result<void> apply_integer_environment(std::string_view name, Value &target) {
-    const auto *raw = std::getenv(std::string{name}.c_str());
-    if (raw == nullptr)
+    const auto raw = axk::server::detail::environment_variable(name);
+    if (!raw)
         return {};
-    auto parsed = parse_integer<Value>(raw, name);
+    auto parsed = parse_integer<Value>(*raw, name);
     if (!parsed)
         return std::unexpected(parsed.error());
     target = *parsed;
@@ -175,8 +176,8 @@ template <typename Value> axk::app::Result<void> apply_integer_environment(std::
 
 axk::app::Result<void> apply_environment(axk::server::Config &config) {
     const auto assign_text = [](const char *name, auto &target) {
-        if (const auto *value = std::getenv(name); value != nullptr)
-            target = value;
+        if (const auto value = axk::server::detail::environment_variable(name))
+            target = *value;
     };
     assign_text("AXKLIB_SERVER_BIND", config.bind_address);
     assign_text("AXKLIB_SERVER_TOKEN", config.bearer_token);
@@ -216,8 +217,8 @@ axk::app::Result<axk::server::CommandLine> axk::server::parse_command_line(int a
     }
     if (!informational) {
         if (!sidecar_mode_requested && !config_path) {
-            if (const auto *configured = std::getenv("AXKLIB_SERVER_CONFIG"); configured != nullptr)
-                config_path = std::filesystem::path{configured};
+            if (const auto configured = detail::environment_variable("AXKLIB_SERVER_CONFIG"))
+                config_path = std::filesystem::path{*configured};
         }
         if (config_path) {
             if (auto loaded = apply_config_file(command_line.config, *config_path); !loaded)

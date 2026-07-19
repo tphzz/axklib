@@ -11,6 +11,7 @@
 
 #include "axklib/application/secure_random.hpp"
 #include "axklib/utf8.hpp"
+#include "environment.hpp"
 
 #if defined(_WIN32)
 #define NOMINMAX
@@ -173,22 +174,22 @@ std::string_view axk::server::workspace_configuration_state_name(WorkspaceConfig
 
 axk::app::Result<std::filesystem::path> axk::server::WorkspaceStore::default_path() {
 #if defined(_WIN32)
-    const auto *base = std::getenv("APPDATA");
-    if (base == nullptr || *base == '\0')
+    const auto base = detail::environment_variable("APPDATA");
+    if (!base || base->empty())
         return std::unexpected(workspace_error("workspace_store_unavailable", "APPDATA is not available"));
-    return std::filesystem::path{base} / "axkdeck" / "workspaces.json";
+    return std::filesystem::path{*base} / "axkdeck" / "workspaces.json";
 #elif defined(__APPLE__)
-    const auto *home = std::getenv("HOME");
-    if (home == nullptr || *home == '\0')
+    const auto home = detail::environment_variable("HOME");
+    if (!home || home->empty())
         return std::unexpected(workspace_error("workspace_store_unavailable", "HOME is not available"));
-    return std::filesystem::path{home} / "Library" / "Application Support" / "axkdeck" / "workspaces.json";
+    return std::filesystem::path{*home} / "Library" / "Application Support" / "axkdeck" / "workspaces.json";
 #else
-    if (const auto *base = std::getenv("XDG_CONFIG_HOME"); base != nullptr && *base != '\0')
-        return std::filesystem::path{base} / "axkdeck" / "workspaces.json";
-    const auto *home = std::getenv("HOME");
-    if (home == nullptr || *home == '\0')
+    if (const auto base = detail::environment_variable("XDG_CONFIG_HOME"); base && !base->empty())
+        return std::filesystem::path{*base} / "axkdeck" / "workspaces.json";
+    const auto home = detail::environment_variable("HOME");
+    if (!home || home->empty())
         return std::unexpected(workspace_error("workspace_store_unavailable", "HOME is not available"));
-    return std::filesystem::path{home} / ".config" / "axkdeck" / "workspaces.json";
+    return std::filesystem::path{*home} / ".config" / "axkdeck" / "workspaces.json";
 #endif
 }
 

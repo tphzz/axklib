@@ -166,6 +166,7 @@ if(BUILD_TESTING)
     axk_server_tests
     PRIVATE axk_server_adapter GTest::gtest_main
   )
+  target_include_directories(axk_server_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
   axk_set_project_warnings(axk_server_tests)
   axk_enable_sanitizers(axk_server_tests)
   axk_enable_coverage(axk_server_tests)

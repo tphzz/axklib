@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/server/config.hpp"
+#include "environment.hpp"
 
 namespace {
 
@@ -34,8 +35,7 @@ class TemporaryConfigFile {
 class ScopedEnvironment {
   public:
     ScopedEnvironment(std::string name, std::string value) : name_(std::move(name)) {
-        if (const auto *existing = std::getenv(name_.c_str()); existing != nullptr)
-            previous_ = existing;
+        previous_ = axk::server::detail::environment_variable(name_);
         set(value);
     }
 
