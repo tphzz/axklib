@@ -921,7 +921,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 {"path": str(root_path), "limit": 10},
             )
             assert status == 200
-            assert host_listing["data"]["path"] == str(root_path.resolve())
+            assert host_listing["data"]["path"] == root_path.resolve().as_posix()
             secondary_workspace = root_path / "secondary-workspace"
             secondary_workspace.mkdir()
             status, added_workspace = http_request(
