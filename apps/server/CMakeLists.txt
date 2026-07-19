@@ -98,6 +98,7 @@ target_link_libraries(
   PRIVATE Crow::Crow nlohmann_json::nlohmann_json
 )
 if(WIN32)
+  target_compile_definitions(axk_server_adapter PRIVATE NOMINMAX _WIN32_WINNT=0x0A00)
   target_link_libraries(axk_server_adapter PRIVATE advapi32)
 endif()
 axk_set_project_warnings(axk_server_adapter)

@@ -48,7 +48,9 @@
 #include "axklib/writer.hpp"
 
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <aclapi.h>
 #include <process.h>
 #include <windows.h>
