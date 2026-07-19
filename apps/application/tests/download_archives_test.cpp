@@ -108,7 +108,7 @@ TEST_F(DownloadArchiveStoreTest, ConcurrentReservationsCannotExceedTheArchiveQuo
     std::barrier start{static_cast<std::ptrdiff_t>(contenders)};
     std::atomic<std::size_t> accepted{};
     std::atomic<std::size_t> rejected{};
-    std::vector<std::jthread> threads;
+    std::vector<std::thread> threads;
     threads.reserve(contenders);
     for (std::size_t index = 0; index < contenders; ++index) {
         threads.emplace_back([&, index] {
@@ -121,7 +121,9 @@ TEST_F(DownloadArchiveStoreTest, ConcurrentReservationsCannotExceedTheArchiveQuo
             }
         });
     }
-    threads.clear();
+    for (auto &thread : threads) {
+        thread.join();
+    }
 
     EXPECT_EQ(accepted, 1U);
     EXPECT_EQ(rejected, contenders - 1U);
