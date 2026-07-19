@@ -1,5 +1,8 @@
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <ranges>
 #include <string>
 #include <vector>
@@ -185,6 +188,16 @@ TEST(ServerContract, CompleteDocumentDerivesEveryDomainRouteAndSchemaFromRegistr
             EXPECT_EQ(response.at("headers").at("X-Request-Id").at("$ref"), "#/components/headers/XRequestId");
         }
     }
+}
+
+TEST(ServerContract, CheckedInCompleteDocumentMatchesRegistry) {
+    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "apps/server/contracts/openapi-v1.json";
+    std::ifstream input{path, std::ios::binary};
+    ASSERT_TRUE(input) << path;
+    const std::string checked_in{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    EXPECT_EQ(checked_in, document.dump(2) + '\n');
 }
 
 TEST(ServerContract, EveryOpenApiOperationIdIsUnique) {

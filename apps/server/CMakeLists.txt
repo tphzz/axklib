@@ -52,7 +52,7 @@ axk_set_project_warnings(axk_server_contract)
 axk_enable_sanitizers(axk_server_contract)
 axk_enable_coverage(axk_server_contract)
 
-add_executable(axk_server_contract_generator src/contract_generator.cpp)
+add_executable(axk_server_contract_generator EXCLUDE_FROM_ALL src/contract_generator.cpp)
 target_compile_features(axk_server_contract_generator PRIVATE cxx_std_23)
 target_link_libraries(axk_server_contract_generator PRIVATE axk_server_contract)
 axk_set_project_warnings(axk_server_contract_generator)
@@ -68,7 +68,7 @@ add_custom_command(
   COMMENT "Generating complete axklib-server OpenAPI contract from the operation registry"
   VERBATIM
 )
-add_custom_target(axk_server_openapi ALL DEPENDS "${AXK_SERVER_GENERATED_OPENAPI_PATH}")
+add_custom_target(axk_server_openapi DEPENDS "${AXK_SERVER_GENERATED_OPENAPI_PATH}")
 
 add_library(
   axk_server_adapter
@@ -139,7 +139,6 @@ add_executable(axk_server ALIAS axklib_server)
 set_target_properties(axklib_server PROPERTIES OUTPUT_NAME axklib-server CXX_EXTENSIONS OFF)
 target_compile_features(axklib_server PRIVATE cxx_std_23)
 target_link_libraries(axklib_server PRIVATE axk_server_adapter)
-add_dependencies(axklib_server axk_server_openapi)
 axk_set_project_warnings(axklib_server)
 axk_enable_sanitizers(axklib_server)
 axk_enable_coverage(axklib_server)
@@ -170,7 +169,6 @@ if(BUILD_TESTING)
   axk_set_project_warnings(axk_server_tests)
   axk_enable_sanitizers(axk_server_tests)
   axk_enable_coverage(axk_server_tests)
-  add_dependencies(axk_server_tests axk_server_openapi)
   gtest_discover_tests(axk_server_tests PROPERTIES LABELS server)
   add_executable(axk_server_fixture tests/server_fixture.cpp)
   target_compile_features(axk_server_fixture PRIVATE cxx_std_23)
@@ -220,7 +218,7 @@ if(BUILD_TESTING)
     COMMAND
       "${Python3_EXECUTABLE}" "${AXK_REPOSITORY_ROOT}/tools/python/openapi_compat.py" check
       --baseline "${AXK_SERVER_OPENAPI_COMPATIBILITY_BASELINE}" --candidate
-      "${AXK_SERVER_GENERATED_OPENAPI_PATH}"
+      "${AXK_SERVER_OPENAPI_PATH}"
   )
   set_tests_properties(Server.OpenApiCompatibility PROPERTIES LABELS server)
   add_test(
@@ -243,7 +241,7 @@ foreach(package crow asio json-schema-validator hash-library nlohmann-json libsn
     OPTIONAL
   )
 endforeach()
-install(FILES "${AXK_SERVER_GENERATED_OPENAPI_PATH}"
+install(FILES "${AXK_SERVER_OPENAPI_PATH}"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/axklib/server" COMPONENT server)
 install(FILES "${AXK_REPOSITORY_ROOT}/docs/axklib/server.md"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/axklib" COMPONENT server)
