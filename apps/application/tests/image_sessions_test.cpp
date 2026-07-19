@@ -101,29 +101,25 @@ TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {
     EXPECT_EQ(object->stored_size_bytes, descriptor->size);
 }
 
-TEST_F(ImageSessionTest, TracksWorkspaceUseUntilTheLastSessionCloses) {
-    axk::app::ImageSessionManager sessions{*sandbox_};
-    EXPECT_FALSE(sessions.root_in_use("workspace"));
+TEST_F(ImageSessionTest, HoldsPathReservationFromBeforeOpenUntilClose) {
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::ImageSessionManager sessions{
+        *sandbox_, 4U, 100U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
+    auto mutation = reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::exclusive});
+    ASSERT_TRUE(mutation) << mutation.error().message;
+    const auto blocked = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_FALSE(blocked);
+    EXPECT_EQ(blocked.error().code, "entry_in_use");
+    mutation = {};
+
     const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    EXPECT_TRUE(sessions.root_in_use("workspace"));
-    EXPECT_FALSE(sessions.root_in_use("other"));
-    EXPECT_TRUE(sessions.close(opened->image_id, "owner-a"));
-    EXPECT_FALSE(sessions.root_in_use("workspace"));
-}
-
-TEST_F(ImageSessionTest, TracksExactAndAncestorPathsUsedByOpenImages) {
-    axk::app::ImageSessionManager sessions{*sandbox_};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
-    ASSERT_TRUE(opened) << opened.error().message;
-
-    EXPECT_TRUE(sessions.path_in_use({"workspace", "fixture.hds"}));
-    EXPECT_TRUE(sessions.path_in_use({"workspace", ""}));
-    EXPECT_FALSE(sessions.path_in_use({"workspace", "other.hds"}));
-    EXPECT_FALSE(sessions.path_in_use({"other", "fixture.hds"}));
-
-    EXPECT_TRUE(sessions.close(opened->image_id, "owner-a"));
-    EXPECT_FALSE(sessions.path_in_use({"workspace", "fixture.hds"}));
+    EXPECT_FALSE(
+        reservations.try_acquire(axk::app::PathAccess{{"workspace", ""}, axk::app::PathAccessMode::exclusive}));
+    ASSERT_TRUE(sessions.close(opened->image_id, "owner-a"));
+    EXPECT_TRUE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::exclusive}));
 }
 
 TEST_F(ImageSessionTest, PagesDeterministicallyAndRejectsForeignOrInvalidCursors) {

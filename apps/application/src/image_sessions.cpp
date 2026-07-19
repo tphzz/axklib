@@ -90,14 +90,6 @@ std::optional<std::uint8_t> partition_index_from_node_id(std::string_view node_i
     return static_cast<std::uint8_t>(value);
 }
 
-bool paths_overlap(std::string_view left, std::string_view right) {
-    const auto contains = [](std::string_view parent, std::string_view child) {
-        return parent.empty() || child == parent ||
-               (child.starts_with(parent) && child.size() > parent.size() && child[parent.size()] == '/');
-    };
-    return contains(left, right) || contains(right, left);
-}
-
 } // namespace
 
 struct axk::app::ImageSessionManager::Implementation {
@@ -160,6 +152,7 @@ struct axk::app::ImageSessionManager::Implementation {
         CursorSet object_cursors;
         CursorSet relationship_cursors;
         CursorSet validation_cursors;
+        PathReservationCoordinator::Lease path_lease;
     };
 
     const Sandbox &sandbox;
@@ -167,13 +160,15 @@ struct axk::app::ImageSessionManager::Implementation {
     std::size_t maximum_page_size;
     std::chrono::seconds idle_retention;
     Clock clock;
+    PathReservationCoordinator *path_reservations;
     std::mutex mutex;
     std::unordered_map<std::string, std::shared_ptr<Session>> sessions;
 
     Implementation(const Sandbox &sandbox_value, std::size_t session_count, std::size_t page_size,
-                   std::chrono::seconds retention, Clock now)
+                   std::chrono::seconds retention, Clock now, PathReservationCoordinator *reservations)
         : sandbox(sandbox_value), maximum_sessions(std::max<std::size_t>(session_count, 1U)),
-          maximum_page_size(std::max<std::size_t>(page_size, 1U)), idle_retention(retention), clock(std::move(now)) {}
+          maximum_page_size(std::max<std::size_t>(page_size, 1U)), idle_retention(retention), clock(std::move(now)),
+          path_reservations(reservations) {}
 
     void cleanup_locked() {
         const auto now = clock();
@@ -435,9 +430,9 @@ struct axk::app::ImageSessionManager::Implementation {
 
 axk::app::ImageSessionManager::ImageSessionManager(const Sandbox &sandbox, std::size_t maximum_sessions,
                                                    std::size_t maximum_page_size, std::chrono::seconds idle_retention,
-                                                   Clock clock)
+                                                   Clock clock, PathReservationCoordinator *path_reservations)
     : implementation_(std::make_unique<Implementation>(sandbox, maximum_sessions, maximum_page_size, idle_retention,
-                                                       std::move(clock))) {}
+                                                       std::move(clock), path_reservations)) {}
 
 axk::app::ImageSessionManager::~ImageSessionManager() = default;
 axk::app::ImageSessionManager::ImageSessionManager(ImageSessionManager &&) noexcept = default;
@@ -448,6 +443,13 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
                                     const CancellationToken &cancellation) {
     if (owner_id.empty())
         return std::unexpected(session_error("invalid_owner", "image session owner is required"));
+    PathReservationCoordinator::Lease path_lease;
+    if (implementation_->path_reservations != nullptr) {
+        auto acquired = implementation_->path_reservations->try_acquire({source, PathAccessMode::shared});
+        if (!acquired)
+            return std::unexpected(acquired.error());
+        path_lease = std::move(*acquired);
+    }
     const auto path = implementation_->sandbox.resolve_file(source);
     if (!path)
         return std::unexpected(path.error());
@@ -473,6 +475,7 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
     session->format = media_kind_name(media->kind());
     session->root_count = tree.roots.size();
     session->last_access = implementation_->clock();
+    session->path_lease = std::move(path_lease);
 
     std::unordered_map<std::string, std::string> object_ids;
     object_ids.reserve(inventory->catalog.objects.size());
@@ -810,22 +813,6 @@ axk::app::ImageSessionManager::validation_issues(std::string_view image_id, std:
 void axk::app::ImageSessionManager::cleanup() {
     const std::scoped_lock lock{implementation_->mutex};
     implementation_->cleanup_locked();
-}
-
-bool axk::app::ImageSessionManager::root_in_use(std::string_view root_id) {
-    const std::scoped_lock lock{implementation_->mutex};
-    implementation_->cleanup_locked();
-    return std::ranges::any_of(implementation_->sessions,
-                               [&](const auto &entry) { return entry.second->source.root_id == root_id; });
-}
-
-bool axk::app::ImageSessionManager::path_in_use(const FileRef &reference) {
-    const std::scoped_lock lock{implementation_->mutex};
-    implementation_->cleanup_locked();
-    return std::ranges::any_of(implementation_->sessions, [&](const auto &entry) {
-        return entry.second->source.root_id == reference.root_id &&
-               paths_overlap(entry.second->source.relative_path, reference.relative_path);
-    });
 }
 
 axk::app::Result<axk::app::ImageWaveformPreview>

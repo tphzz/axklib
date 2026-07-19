@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <fstream>
+#include <thread>
 
 #if defined(_WIN32)
 #include <process.h>
@@ -206,6 +207,34 @@ TEST_F(SandboxTest, RejectsSymlinksEvenWhenTheirCurrentTargetRemainsInsideTheRoo
     EXPECT_FALSE(value.resolve_output_file({"workspace", "linked-images/new.hds"}, false));
 }
 
+TEST_F(SandboxTest, RejectsMutationsAfterAValidatedParentIsReplacedByALink) {
+    const auto value = sandbox();
+    const auto parent = root_ / "images" / "folder";
+    const auto parked = root_ / "images" / "folder-parked";
+    std::error_code error;
+    std::filesystem::rename(parent, parked, error);
+    ASSERT_FALSE(error) << error.message();
+    std::filesystem::create_directory_symlink(outside_, parent, error);
+    if (error) {
+        const auto link_error = error;
+        error.clear();
+        std::filesystem::rename(parked, parent, error);
+        ASSERT_FALSE(error) << error.message();
+        GTEST_SKIP() << "directory links are unavailable: " << link_error.message();
+    }
+
+    EXPECT_FALSE(value.create_directory({"workspace", "images/folder"}, "escaped"));
+    EXPECT_FALSE(value.rename_entry({"workspace", "images/folder/secret.hds"}, "renamed.hds"));
+    EXPECT_FALSE(value.delete_entry({"workspace", "images/folder/secret.hds"}));
+    EXPECT_EQ(std::filesystem::file_size(outside_ / "secret.hds"), 6U);
+    EXPECT_FALSE(std::filesystem::exists(outside_ / "escaped"));
+    EXPECT_FALSE(std::filesystem::exists(outside_ / "renamed.hds"));
+
+    std::filesystem::remove(parent, error);
+    std::filesystem::rename(parked, parent, error);
+    ASSERT_FALSE(error) << error.message();
+}
+
 TEST_F(SandboxTest, CreatesRenamesAndDeletesWritableEntriesWithoutOverwriting) {
     const auto value = sandbox();
 
@@ -257,6 +286,49 @@ TEST_F(SandboxTest, RejectsUnsafeEntryMutationsAndPreservesExistingData) {
     EXPECT_EQ(read_only->rename_entry({"workspace", "images/alpha.hds"}, "blocked.hds").error().code, "read_only_root");
     EXPECT_EQ(read_only->delete_entry({"workspace", "images/alpha.hds"}).error().code, "read_only_root");
 }
+
+#if !defined(_WIN32)
+TEST_F(SandboxTest, ParentSwapCannotRedirectMutationsOutsideTheRoot) {
+    const auto value = sandbox();
+    const auto parent = root_ / "images" / "folder";
+    const auto parked = root_ / "images" / "folder-parked";
+    std::ofstream(parent / "rename-source.hds") << "inside";
+    std::ofstream(outside_ / "rename-source.hds") << "outside";
+    std::jthread attacker{[&](const std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            std::error_code error;
+            std::filesystem::rename(parent, parked, error);
+            if (error)
+                continue;
+            std::filesystem::create_directory_symlink(outside_, parent, error);
+            if (!error)
+                std::this_thread::yield();
+            std::filesystem::remove(parent, error);
+            std::filesystem::rename(parked, parent, error);
+        }
+    }};
+
+    for (std::size_t attempt = 0; attempt < 2000U; ++attempt) {
+        const auto created = value.create_directory({"workspace", "images/folder"}, "escaped");
+        if (created)
+            static_cast<void>(value.delete_entry({"workspace", "images/folder/escaped"}));
+        const auto renamed = value.rename_entry({"workspace", "images/folder/rename-source.hds"}, "renamed.hds");
+        if (renamed)
+            static_cast<void>(value.rename_entry({"workspace", "images/folder/renamed.hds"}, "rename-source.hds"));
+        if (std::filesystem::exists(parent / "renamed.hds")) {
+            std::error_code error;
+            std::filesystem::rename(parent / "renamed.hds", parent / "rename-source.hds", error);
+        }
+        EXPECT_FALSE(std::filesystem::exists(outside_ / "escaped"));
+        EXPECT_FALSE(std::filesystem::exists(outside_ / "renamed.hds"));
+        std::ifstream outside_source{outside_ / "rename-source.hds"};
+        EXPECT_EQ(std::string(std::istreambuf_iterator<char>{outside_source}, {}), "outside");
+    }
+    attacker.request_stop();
+    attacker.join();
+    EXPECT_FALSE(std::filesystem::exists(outside_ / "escaped"));
+}
+#endif
 
 TEST_F(SandboxTest, RequiresUniqueValidExistingDirectoryRoots) {
     auto duplicate =

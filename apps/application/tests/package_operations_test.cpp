@@ -132,6 +132,14 @@ TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegis
     const auto planned = registry_.invoke("package.plan_import", import_request, context());
     ASSERT_TRUE(planned) << planned.error().message;
     ASSERT_TRUE(planned->at("valid").get<bool>());
+    const auto accesses = registry_.path_accesses(
+        "package.import", {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    ASSERT_TRUE(accesses) << accesses.error().message;
+    ASSERT_EQ(accesses->size(), 2U);
+    EXPECT_EQ((*accesses)[0].reference, (axk::app::FileRef{"workspace", "target.hds"}));
+    EXPECT_EQ((*accesses)[0].mode, axk::app::PathAccessMode::shared);
+    EXPECT_EQ((*accesses)[1].reference, (axk::app::FileRef{"workspace", "imported.hds"}));
+    EXPECT_EQ((*accesses)[1].mode, axk::app::PathAccessMode::exclusive);
     const auto reserved = registry_.invoke("package.plan_import", import_request, context());
     ASSERT_FALSE(reserved);
     EXPECT_EQ(reserved.error().code, "destination_reserved");

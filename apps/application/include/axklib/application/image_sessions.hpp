@@ -11,6 +11,7 @@
 
 #include "axklib/application/contracts.hpp"
 #include "axklib/application/filesystem.hpp"
+#include "axklib/application/path_reservations.hpp"
 #include "axklib/export.hpp"
 #include "axklib/io.hpp"
 
@@ -152,7 +153,8 @@ class ImageSessionManager {
     ImageSessionManager(const Sandbox &sandbox, std::size_t maximum_sessions = 32U,
                         std::size_t maximum_page_size = 500U,
                         std::chrono::seconds idle_retention = std::chrono::minutes{15},
-                        Clock clock = std::chrono::steady_clock::now);
+                        Clock clock = std::chrono::steady_clock::now,
+                        PathReservationCoordinator *path_reservations = nullptr);
     ~ImageSessionManager();
     ImageSessionManager(ImageSessionManager &&) noexcept;
     ImageSessionManager &operator=(ImageSessionManager &&) noexcept;
@@ -189,8 +191,6 @@ class ImageSessionManager {
                                                             const CancellationToken &cancellation = {});
     [[nodiscard]] Result<void> delete_audition(std::string_view audition_id, std::string_view owner_id);
     void cleanup();
-    [[nodiscard]] bool root_in_use(std::string_view root_id);
-    [[nodiscard]] bool path_in_use(const FileRef &reference);
 
   private:
     struct Implementation;

@@ -3,6 +3,7 @@
 #include "axklib/server/contract.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <charconv>
@@ -567,7 +568,8 @@ class ServerApplication {
                              config_.maximum_download_archive_bytes, config_.maximum_download_archive_entries,
                              std::chrono::seconds{config_.download_archive_retention_seconds}),
           images_(sandbox_, config_.maximum_image_sessions, config_.maximum_page_size,
-                  std::chrono::seconds{config_.image_idle_seconds}),
+                  std::chrono::seconds{config_.image_idle_seconds}, std::chrono::steady_clock::now,
+                  &path_reservations_),
           registry_(prepare_registry(std::move(registry), sandbox_, uploads_, images_)),
           openapi_document_(axk::server::build_openapi_document(axk::server::embedded_openapi(), registry_)),
           openapi_validator_(openapi_document_),
@@ -575,7 +577,7 @@ class ServerApplication {
               registry_, config_.job_worker_threads, config_.write_job_worker_threads, config_.maximum_queued_jobs,
               config_.replay_events_per_job, config_.maximum_retained_jobs,
               std::chrono::seconds{config_.job_retention_seconds}, [] { return axk::app::JobManager::Clock::now(); },
-              &uploads_),
+              &uploads_, &path_reservations_),
           event_tickets_(std::chrono::seconds{config_.event_ticket_ttl_seconds}, config_.maximum_event_tickets),
           event_dispatcher_(config_.maximum_websocket_delivery_events,
                             [this](const axk::app::JobEvent &event) { broadcast(event); }) {
@@ -889,6 +891,12 @@ class ServerApplication {
             auto path = axk::text::path_from_utf8(parsed->at("path").get<std::string>());
             if (!path)
                 return error_response(400, {"invalid_request", "workspace path is not valid UTF-8"}, id);
+            auto reservation = path_reservations_.try_acquire(
+                axk::app::PathAccess{.reference = {}, .mode = axk::app::PathAccessMode::exclusive, .all_roots = true});
+            if (!reservation) {
+                return error_response(
+                    409, {"workspace_in_use", "close images and wait for active jobs before adding a workspace"}, id);
+            }
             auto added = workspaces_.add(parsed->at("displayName").get<std::string>(), std::move(*path),
                                          parsed->value("writable", true), parsed->at("revision").get<std::uint64_t>());
             if (!added)
@@ -910,7 +918,9 @@ class ServerApplication {
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         try {
             const auto revision = parsed->at("revision").get<std::uint64_t>();
-            if (images_.root_in_use(workspace_id) || jobs_.root_in_use(workspace_id)) {
+            auto reservation = path_reservations_.try_acquire(
+                axk::app::PathAccess{{workspace_id, ""}, axk::app::PathAccessMode::exclusive});
+            if (!reservation) {
                 return error_response(
                     409, {"workspace_in_use", "close images and wait for active jobs before changing this workspace"},
                     id);
@@ -952,6 +962,12 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
+        auto reservation = path_reservations_.try_acquire(
+            axk::app::PathAccess{.reference = {}, .mode = axk::app::PathAccessMode::exclusive, .all_roots = true});
+        if (!reservation) {
+            return error_response(
+                409, {"workspace_in_use", "close images and wait for active jobs before resetting workspaces"}, id);
+        }
         auto reset = workspaces_.archive_and_reset();
         if (!reset)
             return error_response(500, reset.error(), id);
@@ -1135,10 +1151,6 @@ class ServerApplication {
                 {"writable", metadata.writable}};
     }
 
-    bool entry_in_use(const axk::app::FileRef &reference) {
-        return images_.path_in_use(reference) || jobs_.path_in_use(reference);
-    }
-
     crow::response create_directory_response(const crow::request &request) {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
@@ -1156,7 +1168,9 @@ class ServerApplication {
             return error_response(400, {"invalid_request", "parent and name do not match the schema"}, id);
         }
         const auto relative_path = parent.relative_path.empty() ? name : parent.relative_path + '/' + name;
-        if (entry_in_use({parent.root_id, relative_path}))
+        auto reservation = path_reservations_.try_acquire(
+            axk::app::PathAccess{{parent.root_id, relative_path}, axk::app::PathAccessMode::exclusive});
+        if (!reservation)
             return error_response(409, {"entry_in_use", "wait for active image and file operations to finish"}, id);
         const auto created = sandbox_.create_directory(parent, name);
         if (!created)
@@ -1182,7 +1196,12 @@ class ServerApplication {
         }
         const auto parent = std::filesystem::path{entry.relative_path}.parent_path().generic_string();
         const axk::app::FileRef destination{entry.root_id, parent.empty() ? name : parent + '/' + name};
-        if (entry_in_use(entry) || entry_in_use(destination))
+        const std::array accesses{
+            axk::app::PathAccess{entry, axk::app::PathAccessMode::exclusive},
+            axk::app::PathAccess{destination, axk::app::PathAccessMode::exclusive},
+        };
+        auto reservation = path_reservations_.try_acquire(accesses);
+        if (!reservation)
             return error_response(409, {"entry_in_use", "close open images and wait for active jobs before renaming"},
                                   id);
         const auto renamed = sandbox_.rename_entry(entry, name);
@@ -1201,7 +1220,9 @@ class ServerApplication {
             return error_response(400, {"invalid_request", "rootId and relativePath query parameters are required"},
                                   id);
         const axk::app::FileRef entry{root_id, relative_path};
-        if (entry_in_use(entry))
+        auto reservation =
+            path_reservations_.try_acquire(axk::app::PathAccess{entry, axk::app::PathAccessMode::exclusive});
+        if (!reservation)
             return error_response(409, {"entry_in_use", "close open images and wait for active jobs before deleting"},
                                   id);
         const auto deleted = sandbox_.delete_entry(entry);
@@ -1597,6 +1618,10 @@ class ServerApplication {
         } catch (const Json::exception &) {
             return error_response(400, {"invalid_request", "destination must be one sandbox FileRef"}, id);
         }
+        auto reservation =
+            path_reservations_.try_acquire(axk::app::PathAccess{destination, axk::app::PathAccessMode::exclusive});
+        if (!reservation)
+            return error_response(409, reservation.error(), id);
         const auto materialized =
             uploads_.materialize({upload_id}, request_owner(request), sandbox_, destination, overwrite);
         if (!materialized) {
@@ -1675,6 +1700,10 @@ class ServerApplication {
         } catch (const Json::exception &) {
             return error_response(400, {"invalid_request", "directory must be one sandbox DirectoryRef"}, id);
         }
+        auto reservation = path_reservations_.try_acquire(
+            axk::app::PathAccess{{directory.root_id, directory.relative_path}, axk::app::PathAccessMode::shared});
+        if (!reservation)
+            return error_response(409, reservation.error(), id);
         const auto archive = download_archives_.create(request_owner(request), sandbox_, directory);
         if (!archive) {
             audit(id, "archive_create", "denied", request_owner(request), "root", directory.root_id);
@@ -1812,6 +1841,12 @@ class ServerApplication {
                                                  .cancellation = {},
                                                  .progress = nullptr,
                                                  .display_path = {}};
+        const auto accesses = registry_.path_accesses(selected, input, context);
+        if (!accesses)
+            return error_response(status_for_error(accesses.error(), 400), accesses.error(), id);
+        auto reservation = path_reservations_.try_acquire(*accesses);
+        if (!reservation)
+            return error_response(409, reservation.error(), id);
         const auto result = registry_.invoke(selected, input, context);
         if (!result) {
             return error_response(status_for_error(result.error()), result.error(), id);
@@ -2173,6 +2208,7 @@ class ServerApplication {
     axk::server::Config config_;
     axk::server::WorkspaceStore workspaces_;
     axk::app::Sandbox sandbox_;
+    axk::app::PathReservationCoordinator path_reservations_;
     axk::app::UploadStore uploads_;
     axk::app::DownloadArchiveStore download_archives_;
     axk::app::ImageSessionManager images_;

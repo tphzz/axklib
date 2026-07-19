@@ -49,6 +49,7 @@ struct ManifestDocument {
     std::vector<std::filesystem::path> observed_paths;
     std::vector<std::filesystem::path> bound_input_paths;
     std::vector<std::filesystem::path> upload_input_paths;
+    std::vector<axk::app::FileRef> file_inputs;
     std::map<std::string, std::string> logical_input_paths;
 };
 
@@ -72,6 +73,7 @@ struct WritePlanRecord {
     bool output_existed{};
     std::optional<std::string> output_sha256;
     std::vector<FileFingerprint> inputs;
+    std::vector<axk::app::FileRef> input_refs;
     std::map<std::string, std::string> logical_input_paths;
     std::vector<axk::app::UploadLease> leases;
     std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest> manifest;
@@ -329,6 +331,18 @@ void replace_logical_path(Json &value, std::string_view logical, const std::stri
     }
 }
 
+std::optional<axk::app::FileRef> persistent_file_ref(const Json &input) {
+    try {
+        if (!input.is_object() || !input.contains("fileRef") || input.contains("uploadRef"))
+            return std::nullopt;
+        const auto &reference = input.at("fileRef");
+        return axk::app::FileRef{reference.at("rootId").get<std::string>(),
+                                 reference.at("relativePath").get<std::string>()};
+    } catch (const Json::exception &) {
+        return std::nullopt;
+    }
+}
+
 axk::app::Result<ManifestDocument> load_manifest(const Json &input, const axk::app::OperationContext &context,
                                                  const axk::app::Sandbox &sandbox, axk::app::UploadStore &uploads) {
     ManifestDocument result;
@@ -337,6 +351,8 @@ axk::app::Result<ManifestDocument> load_manifest(const Json &input, const axk::a
         if (manifest.contains("inline") && !manifest.contains("fileRef") && !manifest.contains("uploadRef")) {
             result.json = manifest.at("inline");
         } else {
+            if (auto reference = persistent_file_ref(manifest))
+                result.file_inputs.push_back(std::move(*reference));
             auto resolved = resolve_input(manifest, context.owner_id, sandbox, uploads, true);
             if (!resolved)
                 return std::unexpected(resolved.error());
@@ -362,7 +378,10 @@ axk::app::Result<ManifestDocument> load_manifest(const Json &input, const axk::a
                     return std::unexpected(operation_error(
                         "invalid_binding_path", "logical input paths must be unique, relative, and contained"));
                 }
-                auto resolved = resolve_input(binding.at("input"), context.owner_id, sandbox, uploads, false);
+                const auto &binding_input = binding.at("input");
+                if (auto reference = persistent_file_ref(binding_input))
+                    result.file_inputs.push_back(std::move(*reference));
+                auto resolved = resolve_input(binding_input, context.owner_id, sandbox, uploads, false);
                 if (!resolved)
                     return std::unexpected(resolved.error());
                 result.logical_input_paths.emplace(normalized_path(resolved->first), logical);
@@ -1005,8 +1024,8 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
         auto record = std::make_shared<WritePlanRecord>(WritePlanRecord{
             std::move(*token), context.owner_id, now + state->retention, write_plan_kind(*manifest_kind), *output,
             *output_path, overwrite, output_existed, std::move(output_digest), std::move(*fingerprints),
-            std::move(document->logical_input_paths), std::move(document->leases), std::move(manifest),
-            std::move(summary), std::string{axk::version()}, build.source_identity, false});
+            std::move(document->file_inputs), std::move(document->logical_input_paths), std::move(document->leases),
+            std::move(manifest), std::move(summary), std::string{axk::version()}, build.source_identity, false});
         if (auto registered = register_plan(state, record); !registered)
             return Result<Json>{std::unexpected(registered.error())};
         return Result<Json>{write_plan_json(*record, static_cast<std::uint64_t>(state->retention.count() * 60))};
@@ -1084,8 +1103,8 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
     const auto bind_create = [&](std::string_view operation_id, axk::BuildManifestKind expected_kind) -> Result<void> {
         if (registry.is_implemented(operation_id))
             return {};
-        return registry.bind(operation_id, [state, expected_kind, &sandbox](const Json &input,
-                                                                            const OperationContext &context) {
+        auto bound = registry.bind(operation_id, [state, expected_kind, &sandbox](const Json &input,
+                                                                                  const OperationContext &context) {
             std::string token;
             try {
                 token = input.at("planToken").get<std::string>();
@@ -1142,6 +1161,32 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             claim->consume();
             return result;
         });
+        if (!bound)
+            return bound;
+        return registry.bind_path_accesses(
+            operation_id,
+            [state, expected_kind](const Json &input,
+                                   const OperationContext &context) -> Result<std::vector<PathAccess>> {
+                std::string token;
+                try {
+                    token = input.at("planToken").get<std::string>();
+                } catch (const Json::exception &) {
+                    return std::unexpected(operation_error("invalid_request", "planToken is required"));
+                }
+                std::lock_guard lock{state->mutex};
+                cleanup_plans(*state, Clock::now());
+                const auto found = state->plans.find(token);
+                if (found == state->plans.end() || found->second->owner_id != context.owner_id ||
+                    found->second->kind != write_plan_kind(expected_kind) || found->second->claimed) {
+                    return std::unexpected(operation_error("write_plan_not_found", "write plan is expired or unknown"));
+                }
+                std::vector<PathAccess> accesses;
+                accesses.reserve(found->second->input_refs.size() + 1U);
+                for (const auto &source : found->second->input_refs)
+                    accesses.push_back({source, PathAccessMode::shared});
+                accesses.push_back({found->second->output, PathAccessMode::exclusive});
+                return accesses;
+            });
     };
     if (auto bound = bind_create("create.hds", axk::BuildManifestKind::hds); !bound)
         return bound;

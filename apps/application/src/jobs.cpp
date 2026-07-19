@@ -100,45 +100,6 @@ bool destinations_overlap(std::string_view left, std::string_view right) {
     return is_parent(left, right) || is_parent(right, left);
 }
 
-bool references_root(const nlohmann::json &value, std::string_view root_id) {
-    if (value.is_object()) {
-        if (const auto found = value.find("rootId");
-            found != value.end() && found->is_string() && found->get_ref<const std::string &>() == root_id) {
-            return true;
-        }
-        return std::ranges::any_of(value.items(),
-                                   [&](const auto &item) { return references_root(item.value(), root_id); });
-    }
-    if (value.is_array())
-        return std::ranges::any_of(value, [&](const auto &item) { return references_root(item, root_id); });
-    return false;
-}
-
-bool paths_overlap(std::string_view left, std::string_view right) {
-    const auto contains = [](std::string_view parent, std::string_view child) {
-        return parent.empty() || child == parent ||
-               (child.starts_with(parent) && child.size() > parent.size() && child[parent.size()] == '/');
-    };
-    return contains(left, right) || contains(right, left);
-}
-
-bool references_path(const nlohmann::json &value, const axk::app::FileRef &reference) {
-    if (value.is_object()) {
-        const auto root = value.find("rootId");
-        const auto path = value.find("relativePath");
-        if (root != value.end() && path != value.end() && root->is_string() && path->is_string() &&
-            root->get_ref<const std::string &>() == reference.root_id &&
-            paths_overlap(path->get_ref<const std::string &>(), reference.relative_path)) {
-            return true;
-        }
-        return std::ranges::any_of(value.items(),
-                                   [&](const auto &item) { return references_path(item.value(), reference); });
-    }
-    if (value.is_array())
-        return std::ranges::any_of(value, [&](const auto &item) { return references_path(item, reference); });
-    return false;
-}
-
 void collect_upload_ids(const Json &value, std::vector<std::string> &result) {
     if (value.is_object()) {
         if (const auto reference = value.find("uploadRef"); reference != value.end() && reference->is_object()) {
@@ -183,6 +144,7 @@ struct axk::app::JobManager::Impl {
         std::optional<Clock::time_point> phase_started_at;
         std::optional<Clock::time_point> cancellation_requested_at;
         std::vector<UploadLease> upload_leases;
+        PathReservationCoordinator::Lease path_lease;
     };
 
     struct IdempotentSubmission {
@@ -214,11 +176,12 @@ struct axk::app::JobManager::Impl {
 
     Impl(const OperationRegistry &operation_registry, std::size_t read_worker_count, std::size_t write_worker_count,
          std::size_t maximum_queued_jobs, std::size_t replay_events_per_job, std::size_t maximum_retained_jobs,
-         std::chrono::seconds retention, Now now_function, UploadStore *upload_store)
+         std::chrono::seconds retention, Now now_function, UploadStore *upload_store,
+         PathReservationCoordinator *reservations)
         : registry(operation_registry), maximum_queue(std::max<std::size_t>(maximum_queued_jobs, 1U)),
           maximum_replay(std::max<std::size_t>(replay_events_per_job, 1U)),
           maximum_jobs(std::max<std::size_t>(maximum_retained_jobs, 1U)), retention(retention),
-          now(std::move(now_function)), uploads(upload_store) {
+          now(std::move(now_function)), uploads(upload_store), path_reservations(reservations) {
         const auto readers = std::max<std::size_t>(read_worker_count, 1U);
         const auto writers = std::max<std::size_t>(write_worker_count, 1U);
         workers.reserve(readers + writers);
@@ -325,6 +288,7 @@ struct axk::app::JobManager::Impl {
     void transition(const std::shared_ptr<Record> &record, JobState state, std::string type,
                     std::optional<Json> result = std::nullopt, std::optional<Error> error = std::nullopt) {
         std::optional<JobEvent> event;
+        PathReservationCoordinator::Lease completed_lease;
         {
             const std::scoped_lock lock{record->mutex};
             if (is_terminal(record->state))
@@ -335,6 +299,8 @@ struct axk::app::JobManager::Impl {
             record->error = std::move(error);
             record_transition_locked(*record, previous, state);
             event = append_event_locked(*record, std::move(type), record->progress);
+            if (is_terminal(state))
+                completed_lease = std::move(record->path_lease);
         }
         if (is_terminal(state))
             retain_terminal(record);
@@ -477,6 +443,8 @@ struct axk::app::JobManager::Impl {
     const std::chrono::seconds retention;
     Now now;
     UploadStore *uploads{};
+    PathReservationCoordinator *path_reservations{};
+    std::mutex submission_mutex;
     mutable std::mutex mutex;
     std::condition_variable condition;
     std::unordered_map<std::string, std::shared_ptr<Record>> jobs;
@@ -506,9 +474,11 @@ struct axk::app::JobManager::Impl {
 axk::app::JobManager::JobManager(const OperationRegistry &registry, std::size_t read_worker_count,
                                  std::size_t write_worker_count, std::size_t maximum_queued_jobs,
                                  std::size_t replay_events_per_job, std::size_t maximum_retained_jobs,
-                                 std::chrono::seconds retention, Now now, UploadStore *uploads)
+                                 std::chrono::seconds retention, Now now, UploadStore *uploads,
+                                 PathReservationCoordinator *path_reservations)
     : impl_(std::make_unique<Impl>(registry, read_worker_count, write_worker_count, maximum_queued_jobs,
-                                   replay_events_per_job, maximum_retained_jobs, retention, std::move(now), uploads)) {}
+                                   replay_events_per_job, maximum_retained_jobs, retention, std::move(now), uploads,
+                                   path_reservations)) {}
 
 axk::app::JobManager::~JobManager() = default;
 
@@ -529,11 +499,54 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
     if (idempotency_key && (idempotency_key->empty() || idempotency_key->size() > 128U))
         return std::unexpected(job_error("invalid_idempotency_key", "idempotency key must contain 1 to 128 bytes"));
 
+    const std::scoped_lock submission_lock{impl_->submission_mutex};
+    const auto request_fingerprint = request.dump();
+    const auto idempotency_index =
+        idempotency_key ? std::optional<std::string>{context.owner_id + '\0' + *idempotency_key} : std::nullopt;
+    if (idempotency_index) {
+        std::shared_ptr<Impl::Record> replayed;
+        {
+            const std::scoped_lock lock{impl_->mutex};
+            impl_->cleanup_expired_locked();
+            const auto found = impl_->idempotent_submissions.find(*idempotency_index);
+            if (found != impl_->idempotent_submissions.end()) {
+                if (found->second.operation_id != operation_id ||
+                    found->second.request_fingerprint != request_fingerprint) {
+                    return std::unexpected(
+                        job_error("idempotency_conflict", "idempotency key was already used for another request"));
+                }
+                const auto job = impl_->jobs.find(found->second.job_id);
+                if (job != impl_->jobs.end())
+                    replayed = job->second;
+            }
+        }
+        if (replayed)
+            return impl_->snapshot(replayed);
+    }
+
+    PathReservationCoordinator::Lease path_lease;
+    if (impl_->path_reservations != nullptr) {
+        auto resolved_accesses = impl_->registry.path_accesses(operation_id, request, context);
+        if (!resolved_accesses)
+            return std::unexpected(resolved_accesses.error());
+        auto acquired = impl_->path_reservations->try_acquire(*resolved_accesses);
+        if (!acquired) {
+            const auto has_destination = std::ranges::any_of(
+                *resolved_accesses, [](const PathAccess &access) { return access.mode == PathAccessMode::exclusive; });
+            if (has_destination)
+                return std::unexpected(
+                    job_error("destination_reserved", "destination is reserved by another active operation", true));
+            return std::unexpected(acquired.error());
+        }
+        path_lease = std::move(*acquired);
+    }
+
     auto record = std::make_shared<Impl::Record>();
     record->operation_id = std::move(operation_id);
     record->operation_class = descriptor->operation_class;
     record->request = std::move(request);
     record->context = std::move(context);
+    record->path_lease = std::move(path_lease);
     if (impl_->uploads != nullptr) {
         std::vector<std::string> upload_ids;
         collect_upload_ids(record->request, upload_ids);
@@ -547,9 +560,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
     }
     if (record->operation_class == OperationClass::write)
         record->destination_keys = destination_keys(record->request);
-    const auto request_fingerprint = record->request.dump();
-    if (idempotency_key)
-        record->idempotency_index = record->context.owner_id + '\0' + *idempotency_key;
+    record->idempotency_index = idempotency_index;
     JobEvent queued_event;
     JobSnapshot initial_snapshot;
     std::shared_ptr<Impl::Record> replayed_record;
@@ -664,6 +675,7 @@ axk::app::Result<void> axk::app::JobManager::cancel(std::string_view job_id, std
     }
 
     std::optional<JobEvent> event;
+    PathReservationCoordinator::Lease completed_lease;
     {
         const std::scoped_lock lock{record->mutex};
         if (is_terminal(record->state) || record->cancellation_requested)
@@ -676,6 +688,7 @@ axk::app::Result<void> axk::app::JobManager::cancel(std::string_view job_id, std
             record->state = JobState::cancelled;
             impl_->record_transition_locked(*record, previous, record->state);
             event = impl_->append_event_locked(*record, "cancelled");
+            completed_lease = std::move(record->path_lease);
         } else {
             event = impl_->append_event_locked(*record, "cancellation_requested", record->progress);
         }
@@ -723,22 +736,6 @@ axk::app::JobRuntimeMetrics axk::app::JobManager::metrics() const noexcept {
             .total_execution_ms = impl_->total_execution_ms.load(std::memory_order_relaxed),
             .total_phase_duration_ms = impl_->total_phase_duration_ms.load(std::memory_order_relaxed),
             .total_cancellation_latency_ms = impl_->total_cancellation_latency_ms.load(std::memory_order_relaxed)};
-}
-
-bool axk::app::JobManager::root_in_use(std::string_view root_id) const {
-    const std::scoped_lock lock{impl_->mutex};
-    return std::ranges::any_of(impl_->jobs, [&](const auto &entry) {
-        const std::scoped_lock record_lock{entry.second->mutex};
-        return !is_terminal(entry.second->state) && references_root(entry.second->request, root_id);
-    });
-}
-
-bool axk::app::JobManager::path_in_use(const FileRef &reference) const {
-    const std::scoped_lock lock{impl_->mutex};
-    return std::ranges::any_of(impl_->jobs, [&](const auto &entry) {
-        const std::scoped_lock record_lock{entry.second->mutex};
-        return !is_terminal(entry.second->state) && references_path(entry.second->request, reference);
-    });
 }
 
 axk::app::JobManager::SubscriptionId axk::app::JobManager::subscribe(EventSink sink) {

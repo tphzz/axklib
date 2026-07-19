@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/operation_registry.hpp"
+#include "axklib/application/path_reservations.hpp"
 #include "axklib/application/uploads.hpp"
 
 namespace axk::app {
@@ -73,7 +74,7 @@ class JobManager {
         const OperationRegistry &registry, std::size_t read_worker_count, std::size_t write_worker_count,
         std::size_t maximum_queued_jobs, std::size_t replay_events_per_job, std::size_t maximum_retained_jobs = 2048U,
         std::chrono::seconds retention = std::chrono::minutes{15}, Now now = [] { return Clock::now(); },
-        UploadStore *uploads = nullptr);
+        UploadStore *uploads = nullptr, PathReservationCoordinator *path_reservations = nullptr);
     ~JobManager();
 
     JobManager(const JobManager &) = delete;
@@ -88,8 +89,6 @@ class JobManager {
     [[nodiscard]] Result<std::vector<JobEvent>> replay(std::string_view job_id, std::string_view owner_id,
                                                        std::uint64_t after_sequence) const;
     [[nodiscard]] JobRuntimeMetrics metrics() const noexcept;
-    [[nodiscard]] bool root_in_use(std::string_view root_id) const;
-    [[nodiscard]] bool path_in_use(const FileRef &reference) const;
 
     [[nodiscard]] SubscriptionId subscribe(EventSink sink);
     void unsubscribe(SubscriptionId subscription_id) noexcept;

@@ -32,6 +32,23 @@ axk::app::OperationRegistry test_registry(
                                   operation_class,
                                   requires_idempotency}));
     EXPECT_TRUE(registry.bind("test.job", std::move(handler)));
+    EXPECT_TRUE(registry.bind_path_accesses(
+        "test.job",
+        [](const nlohmann::json &request,
+           const axk::app::OperationContext &) -> axk::app::Result<std::vector<axk::app::PathAccess>> {
+            std::vector<axk::app::PathAccess> result;
+            if (const auto source = request.find("source"); source != request.end() && source->is_object()) {
+                result.push_back(
+                    {{source->at("rootId").get<std::string>(), source->at("relativePath").get<std::string>()},
+                     axk::app::PathAccessMode::shared});
+            }
+            if (const auto output = request.find("output"); output != request.end() && output->is_object()) {
+                result.push_back(
+                    {{output->at("rootId").get<std::string>(), output->at("relativePath").get<std::string>()},
+                     axk::app::PathAccessMode::exclusive});
+            }
+            return result;
+        }));
     return registry;
 }
 
@@ -178,27 +195,111 @@ TEST(JobManager, RetainsReferencedUploadsWhileWorkWaitsInTheQueue) {
     std::filesystem::remove_all(directory, error);
 }
 
-TEST(JobManager, TracksWorkspaceReferencesOnlyWhileJobsAreActive) {
+TEST(JobManager, PathReservationLinearizesAdmissionWithMutationsInBothOrders) {
+    std::atomic_bool running{};
     std::atomic_bool release{};
     auto registry = test_registry([&](const nlohmann::json &, const axk::app::OperationContext &context) {
+        running = true;
         while (!release.load() && !context.cancellation.is_cancelled())
             std::this_thread::sleep_for(1ms);
         return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
     });
-    axk::app::JobManager jobs{registry, 1U, 1U, 2U, 8U};
-    auto submitted = jobs.submit(
-        "test.job", {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
-        {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::JobManager jobs{registry, 1U,           1U,    2U,
+                              8U,       2048U,        15min, [] { return axk::app::JobManager::Clock::now(); },
+                              nullptr,  &reservations};
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+
+    auto mutation = reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::exclusive});
+    ASSERT_TRUE(mutation) << mutation.error().message;
+    const auto blocked =
+        jobs.submit("test.job", {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}}, context);
+    ASSERT_FALSE(blocked);
+    EXPECT_EQ(blocked.error().code, "entry_in_use");
+    mutation = {};
+
+    const auto submitted =
+        jobs.submit("test.job", {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}}, context);
     ASSERT_TRUE(submitted) << submitted.error().message;
-    EXPECT_TRUE(jobs.root_in_use("workspace"));
-    EXPECT_TRUE(jobs.path_in_use({"workspace", "fixture.hds"}));
-    EXPECT_TRUE(jobs.path_in_use({"workspace", ""}));
-    EXPECT_FALSE(jobs.path_in_use({"workspace", "other.hds"}));
-    EXPECT_FALSE(jobs.root_in_use("other"));
-    release.store(true);
+    while (!running.load())
+        std::this_thread::sleep_for(1ms);
+    EXPECT_FALSE(
+        reservations.try_acquire(axk::app::PathAccess{{"workspace", ""}, axk::app::PathAccessMode::exclusive}));
+    release = true;
     EXPECT_EQ(wait_terminal(jobs, submitted->job_id).state, axk::app::JobState::completed);
-    EXPECT_FALSE(jobs.root_in_use("workspace"));
-    EXPECT_FALSE(jobs.path_in_use({"workspace", "fixture.hds"}));
+    EXPECT_TRUE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::exclusive}));
+}
+
+TEST(JobManager, QueuedCancellationReleasesItsPathReservation) {
+    std::atomic_bool first_running{};
+    std::atomic_bool release_first{};
+    auto registry = test_registry([&](const nlohmann::json &request, const axk::app::OperationContext &context) {
+        if (request.value("block", false)) {
+            first_running = true;
+            while (!release_first.load() && !context.cancellation.is_cancelled())
+                std::this_thread::sleep_for(1ms);
+        }
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::JobManager jobs{registry, 1U,           1U,    2U,
+                              8U,       2048U,        15min, [] { return axk::app::JobManager::Clock::now(); },
+                              nullptr,  &reservations};
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const auto first = jobs.submit(
+        "test.job", {{"block", true}, {"source", {{"rootId", "workspace"}, {"relativePath", "first.hds"}}}}, context);
+    ASSERT_TRUE(first) << first.error().message;
+    while (!first_running.load())
+        std::this_thread::sleep_for(1ms);
+
+    const auto queued =
+        jobs.submit("test.job", {{"source", {{"rootId", "workspace"}, {"relativePath", "second.hds"}}}}, context);
+    ASSERT_TRUE(queued) << queued.error().message;
+    EXPECT_FALSE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "second.hds"}, axk::app::PathAccessMode::exclusive}));
+    ASSERT_TRUE(jobs.cancel(queued->job_id, "owner"));
+    EXPECT_EQ(wait_terminal(jobs, queued->job_id).state, axk::app::JobState::cancelled);
+    EXPECT_TRUE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "second.hds"}, axk::app::PathAccessMode::exclusive}));
+
+    release_first = true;
+    EXPECT_EQ(wait_terminal(jobs, first->job_id).state, axk::app::JobState::completed);
+}
+
+TEST(JobManager, IdempotentReplayDoesNotReacquireAnActiveExclusiveReservation) {
+    std::atomic_bool running{};
+    std::atomic_bool release{};
+    auto registry = test_registry(
+        [&](const nlohmann::json &request, const axk::app::OperationContext &context) {
+            running = true;
+            while (!release.load() && !context.cancellation.is_cancelled())
+                std::this_thread::sleep_for(1ms);
+            return axk::app::Result<nlohmann::json>{request};
+        },
+        axk::app::OperationClass::write, true);
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::JobManager jobs{registry, 1U,           1U,    2U,
+                              8U,       2048U,        15min, [] { return axk::app::JobManager::Clock::now(); },
+                              nullptr,  &reservations};
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const auto request = nlohmann::json{{"output", {{"rootId", "workspace"}, {"relativePath", "result.hds"}}}};
+    const auto first = jobs.submit("test.job", request, context, "same-request");
+    ASSERT_TRUE(first) << first.error().message;
+    while (!running.load())
+        std::this_thread::sleep_for(1ms);
+
+    const auto replay = jobs.submit("test.job", request, context, "same-request");
+    ASSERT_TRUE(replay) << replay.error().message;
+    EXPECT_EQ(replay->job_id, first->job_id);
+    EXPECT_FALSE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "result.hds"}, axk::app::PathAccessMode::exclusive}));
+    release = true;
+    EXPECT_EQ(wait_terminal(jobs, first->job_id).state, axk::app::JobState::completed);
 }
 
 TEST(JobManager, RejectsQueueOverflowAndNonJobOperations) {

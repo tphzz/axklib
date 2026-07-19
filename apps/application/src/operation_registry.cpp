@@ -258,7 +258,23 @@ axk::app::Result<void> axk::app::OperationRegistry::declare(OperationDescriptor 
         return std::unexpected(registry_error("duplicate_operation", "CLI command path is already registered"));
     }
     by_id_.emplace(descriptor.id, operations_.size());
-    operations_.push_back({std::move(descriptor), {}, 0U});
+    operations_.push_back({std::move(descriptor), {}, {}, 0U});
+    return {};
+}
+
+axk::app::Result<void> axk::app::OperationRegistry::bind_path_accesses(std::string_view operation_id,
+                                                                       PathAccessResolver resolver) {
+    const auto found = by_id_.find(std::string{operation_id});
+    if (found == by_id_.end())
+        return std::unexpected(registry_error("unknown_operation", "operation is not registered"));
+    if (!resolver)
+        return std::unexpected(registry_error("invalid_path_access_resolver", "path access resolver is empty"));
+    auto &operation = operations_[found->second];
+    if (operation.path_access_resolver) {
+        return std::unexpected(
+            registry_error("duplicate_path_access_resolver", "operation already has a path access resolver"));
+    }
+    operation.path_access_resolver = std::move(resolver);
     return {};
 }
 
@@ -288,6 +304,18 @@ axk::app::OperationRegistry::invoke(std::string_view operation_id, const Json &i
             registry_error("operation_not_implemented", "operation is registered but not implemented"));
     }
     return operation.handler(input, context);
+}
+
+axk::app::Result<std::vector<axk::app::PathAccess>>
+axk::app::OperationRegistry::path_accesses(std::string_view operation_id, const Json &input,
+                                           const OperationContext &context) const {
+    const auto found = by_id_.find(std::string{operation_id});
+    if (found == by_id_.end())
+        return std::unexpected(registry_error("unknown_operation", "operation is not registered"));
+    const auto &operation = operations_[found->second];
+    if (!operation.path_access_resolver)
+        return std::vector<PathAccess>{};
+    return operation.path_access_resolver(input, context);
 }
 
 std::vector<axk::app::OperationEntry> axk::app::OperationRegistry::entries() const {

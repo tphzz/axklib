@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/contracts.hpp"
+#include "axklib/application/path_reservations.hpp"
 #include "axklib/io.hpp"
 
 namespace axk::app {
@@ -50,9 +51,11 @@ class OperationRegistry {
   public:
     using Json = nlohmann::json;
     using Handler = std::function<Result<Json>(const Json &, const OperationContext &)>;
+    using PathAccessResolver = std::function<Result<std::vector<PathAccess>>(const Json &, const OperationContext &)>;
 
     Result<void> declare(OperationDescriptor descriptor);
     Result<void> bind(std::string_view operation_id, Handler handler);
+    Result<void> bind_path_accesses(std::string_view operation_id, PathAccessResolver resolver);
 
     template <typename Request, typename Response, typename Callable>
     Result<void> bind_typed(std::string_view operation_id, Callable handler) {
@@ -74,6 +77,8 @@ class OperationRegistry {
 
     [[nodiscard]] Result<Json> invoke(std::string_view operation_id, const Json &input,
                                       const OperationContext &context) const;
+    [[nodiscard]] Result<std::vector<PathAccess>> path_accesses(std::string_view operation_id, const Json &input,
+                                                                const OperationContext &context) const;
     [[nodiscard]] std::vector<OperationEntry> entries() const;
     [[nodiscard]] const OperationDescriptor *find(std::string_view operation_id) const noexcept;
     [[nodiscard]] bool is_implemented(std::string_view operation_id) const noexcept;
@@ -82,6 +87,7 @@ class OperationRegistry {
     struct RegisteredOperation {
         OperationDescriptor descriptor;
         Handler handler;
+        PathAccessResolver path_access_resolver;
         std::size_t handler_type_hash{};
     };
 

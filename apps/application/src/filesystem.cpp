@@ -10,12 +10,21 @@
 #include <unordered_set>
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
+#include <winternl.h>
 #else
 #include <cerrno>
 #include <csignal>
 #include <fcntl.h>
+#include <sys/stat.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#elif defined(__APPLE__)
+#include <stdio.h>
+#endif
 #include <unistd.h>
 #endif
 
@@ -238,7 +247,129 @@ axk::app::Result<std::filesystem::path> entry_name_from_utf8(std::string_view va
     return name;
 }
 
+#if defined(_WIN32)
+
+struct NativeHandleCloser {
+    void operator()(void *handle) const noexcept {
+        if (handle != nullptr && handle != INVALID_HANDLE_VALUE)
+            CloseHandle(handle);
+    }
+};
+using NativeHandle = std::unique_ptr<void, NativeHandleCloser>;
+
+axk::app::Result<NativeHandle> open_relative(HANDLE parent, const std::filesystem::path &name, ACCESS_MASK access,
+                                             ULONG disposition, ULONG options, std::string_view relative_path) {
+    auto text = name.native();
+    if (text.size() > std::numeric_limits<USHORT>::max() / sizeof(wchar_t))
+        return std::unexpected(reference_error("sandbox path component is too long", relative_path));
+    UNICODE_STRING unicode{.Length = static_cast<USHORT>(text.size() * sizeof(wchar_t)),
+                           .MaximumLength = static_cast<USHORT>(text.size() * sizeof(wchar_t)),
+                           .Buffer = text.data()};
+    OBJECT_ATTRIBUTES attributes;
+    InitializeObjectAttributes(&attributes, &unicode, OBJ_CASE_INSENSITIVE, parent, nullptr);
+    IO_STATUS_BLOCK status{};
+    HANDLE opened{};
+    const auto result = NtCreateFile(&opened, access | SYNCHRONIZE, &attributes, &status, nullptr, 0U,
+                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, disposition,
+                                     options | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT, nullptr, 0U);
+    if (result < 0)
+        return std::unexpected(
+            entry_error("entry_mutation_failed", "sandbox entry could not be opened safely", relative_path));
+    FILE_ATTRIBUTE_TAG_INFO tag{};
+    if (GetFileInformationByHandleEx(opened, FileAttributeTagInfo, &tag, sizeof(tag)) == 0 ||
+        (tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U) {
+        CloseHandle(opened);
+        return std::unexpected(reference_error("sandbox path contains a link component", relative_path));
+    }
+    return NativeHandle{opened};
+}
+
+axk::app::Result<NativeHandle> open_parent(HANDLE root, const std::filesystem::path &relative,
+                                           std::string_view relative_path) {
+    HANDLE current = root;
+    NativeHandle owned;
+    for (const auto &component : relative) {
+        auto next = open_relative(current, component, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_OPEN,
+                                  FILE_DIRECTORY_FILE, relative_path);
+        if (!next)
+            return std::unexpected(next.error());
+        owned = std::move(*next);
+        current = owned.get();
+    }
+    if (!owned) {
+        if (DuplicateHandle(GetCurrentProcess(), root, GetCurrentProcess(), &current, 0U, FALSE,
+                            DUPLICATE_SAME_ACCESS) == 0) {
+            return std::unexpected(reference_error("sandbox root handle could not be duplicated", relative_path));
+        }
+        owned.reset(current);
+    }
+    return owned;
+}
+
+#else
+
+struct DescriptorCloser {
+    void operator()(int *descriptor) const noexcept {
+        if (descriptor != nullptr) {
+            ::close(*descriptor);
+            delete descriptor;
+        }
+    }
+};
+using NativeHandle = std::unique_ptr<int, DescriptorCloser>;
+
+NativeHandle descriptor_handle(int descriptor) { return NativeHandle{new int{descriptor}}; }
+
+axk::app::Result<NativeHandle> open_parent(int root, const std::filesystem::path &relative,
+                                           std::string_view relative_path) {
+    auto descriptor = ::dup(root);
+    if (descriptor < 0)
+        return std::unexpected(reference_error("sandbox root handle could not be duplicated", relative_path));
+    auto current = descriptor_handle(descriptor);
+    for (const auto &component : relative) {
+        const auto next = ::openat(*current, component.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if (next < 0)
+            return std::unexpected(
+                reference_error("sandbox path contains a link or inaccessible component", relative_path));
+        current = descriptor_handle(next);
+    }
+    return current;
+}
+
+int rename_no_replace(int source_parent, const char *source_name, int destination_parent,
+                      const char *destination_name) {
+#if defined(__linux__)
+    constexpr unsigned int no_replace = 1U;
+    return static_cast<int>(
+        ::syscall(SYS_renameat2, source_parent, source_name, destination_parent, destination_name, no_replace));
+#elif defined(__APPLE__)
+    return ::renameatx_np(source_parent, source_name, destination_parent, destination_name, RENAME_EXCL);
+#else
+#error "Atomic no-replace rename is required for this platform"
+#endif
+}
+
+#endif
+
 } // namespace
+
+struct axk::app::Sandbox::NativeRoot {
+#if defined(_WIN32)
+    explicit NativeRoot(HANDLE value) : handle(value) {}
+    ~NativeRoot() {
+        if (handle != INVALID_HANDLE_VALUE)
+            CloseHandle(handle);
+    }
+    HANDLE handle{INVALID_HANDLE_VALUE};
+#else
+    explicit NativeRoot(int value) : descriptor(value) {}
+    ~NativeRoot() {
+        if (descriptor >= 0)
+            ::close(descriptor);
+    }
+    int descriptor{-1};
+#endif
+};
 
 axk::app::Result<std::vector<axk::app::Sandbox::Root>>
 axk::app::Sandbox::validate_roots(std::vector<RootDefinition> definitions) {
@@ -257,8 +388,28 @@ axk::app::Sandbox::validate_roots(std::vector<RootDefinition> definitions) {
         const auto canonical = std::filesystem::canonical(definition.path, error);
         if (error || !std::filesystem::is_directory(canonical, error) || error)
             return std::unexpected(root_error("sandbox root must name an existing directory"));
-        roots.push_back(
-            {{std::move(definition.id), std::move(definition.display_name), definition.writable}, canonical});
+#if defined(_WIN32)
+        const auto handle = CreateFileW(canonical.c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+                                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (handle == INVALID_HANDLE_VALUE)
+            return std::unexpected(root_error("sandbox root cannot be opened safely"));
+        FILE_ATTRIBUTE_TAG_INFO tag{};
+        if (GetFileInformationByHandleEx(handle, FileAttributeTagInfo, &tag, sizeof(tag)) == 0 ||
+            (tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U) {
+            CloseHandle(handle);
+            return std::unexpected(root_error("sandbox root must not be a reparse point"));
+        }
+        auto native = std::make_shared<NativeRoot>(handle);
+#else
+        const auto descriptor = ::open(canonical.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if (descriptor < 0)
+            return std::unexpected(root_error("sandbox root cannot be opened safely"));
+        auto native = std::make_shared<NativeRoot>(descriptor);
+#endif
+        roots.push_back({{std::move(definition.id), std::move(definition.display_name), definition.writable},
+                         canonical,
+                         std::move(native)});
     }
     return roots;
 }
@@ -518,24 +669,43 @@ axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::create_directory(co
         return std::unexpected(reference_error("sandbox root does not exist", parent.relative_path));
     if (!root->info.writable)
         return std::unexpected(entry_error("read_only_root", "sandbox root is read-only", parent.relative_path));
-    auto directory = resolve_directory(parent);
-    if (!directory)
-        return std::unexpected(directory.error());
+    auto relative_parent = relative_path_from_utf8(parent.relative_path);
+    if (!relative_parent)
+        return std::unexpected(relative_parent.error());
     auto filename = entry_name_from_utf8(name);
     if (!filename)
         return std::unexpected(filename.error());
 
     const auto relative_path =
         parent.relative_path.empty() ? std::string{name} : parent.relative_path + '/' + std::string{name};
-    const auto candidate = *directory / *filename;
-    std::error_code error;
-    const auto created = std::filesystem::create_directory(candidate, error);
-    if (error)
+#if defined(_WIN32)
+    auto directory = open_parent(root->native->handle, *relative_parent, parent.relative_path);
+    if (!directory)
+        return std::unexpected(directory.error());
+    auto created = open_relative(directory->get(), *filename, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | DELETE,
+                                 FILE_CREATE, FILE_DIRECTORY_FILE, relative_path);
+    if (!created) {
+        auto existing = open_relative(directory->get(), *filename, FILE_READ_ATTRIBUTES, FILE_OPEN, 0U, relative_path);
+        if (existing)
+            return std::unexpected(output_exists_error("sandbox entry already exists", relative_path));
+        return std::unexpected(created.error());
+    }
+#else
+    auto directory = open_parent(root->native->descriptor, *relative_parent, parent.relative_path);
+    if (!directory)
+        return std::unexpected(directory.error());
+    if (::mkdirat(**directory, filename->c_str(), 0777) != 0) {
+        if (errno == EEXIST)
+            return std::unexpected(output_exists_error("sandbox entry already exists", relative_path));
         return std::unexpected(
-            entry_error("entry_mutation_failed", "Directory could not be created: " + error.message(), relative_path));
-    if (!created)
-        return std::unexpected(output_exists_error("sandbox entry already exists", relative_path));
-    return metadata(parent.root_id, relative_path);
+            entry_error("entry_mutation_failed", "sandbox directory could not be created", relative_path));
+    }
+#endif
+    return EntryMetadata{.root_id = parent.root_id,
+                         .relative_path = relative_path,
+                         .kind = DirectoryEntryKind::directory,
+                         .size = std::nullopt,
+                         .writable = true};
 }
 
 axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::rename_entry(const FileRef &reference,
@@ -548,29 +718,84 @@ axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::rename_entry(const 
         return std::unexpected(entry_error("read_only_root", "sandbox root is read-only", reference.relative_path));
     if (reference.relative_path.empty())
         return std::unexpected(reference_error("sandbox roots cannot be renamed", reference.relative_path));
-    auto source = resolve_existing(reference.root_id, reference.relative_path);
-    if (!source)
-        return std::unexpected(source.error());
+    auto relative = relative_path_from_utf8(reference.relative_path);
+    if (!relative)
+        return std::unexpected(relative.error());
     auto filename = entry_name_from_utf8(name);
     if (!filename)
         return std::unexpected(filename.error());
 
-    const auto parent = source->parent_path();
-    const auto destination = parent / *filename;
-    const auto parent_relative = std::filesystem::path{reference.relative_path}.parent_path().generic_string();
+    const auto parent_relative = relative->parent_path().generic_string();
     const auto relative_path = parent_relative.empty() ? std::string{name} : parent_relative + '/' + std::string{name};
-    std::error_code error;
-    const auto status = std::filesystem::symlink_status(destination, error);
-    if (error && error != std::errc::no_such_file_or_directory)
-        return std::unexpected(
-            entry_error("entry_mutation_failed", "rename target cannot be inspected", relative_path));
-    if (!error && std::filesystem::exists(status))
+#if defined(_WIN32)
+    auto directory = open_parent(root->native->handle, relative->parent_path(), reference.relative_path);
+    if (!directory)
+        return std::unexpected(directory.error());
+    auto destination = open_relative(directory->get(), *filename, FILE_READ_ATTRIBUTES, FILE_OPEN, 0U, relative_path);
+    if (destination)
         return std::unexpected(output_exists_error("sandbox entry already exists", relative_path));
-    std::filesystem::rename(*source, destination, error);
-    if (error)
+    auto source = open_relative(directory->get(), relative->filename(), DELETE | FILE_READ_ATTRIBUTES, FILE_OPEN, 0U,
+                                reference.relative_path);
+    if (!source)
+        return std::unexpected(source.error());
+    FILE_STANDARD_INFO source_information{};
+    if (GetFileInformationByHandleEx(source->get(), FileStandardInfo, &source_information,
+                                     sizeof(source_information)) == 0) {
+        return std::unexpected(reference_error("sandbox entry cannot be inspected", reference.relative_path));
+    }
+    auto result = EntryMetadata{
+        .root_id = reference.root_id,
+        .relative_path = relative_path,
+        .kind = source_information.Directory ? DirectoryEntryKind::directory : DirectoryEntryKind::file,
+        .size = source_information.Directory
+                    ? std::nullopt
+                    : std::optional<std::uintmax_t>{static_cast<std::uintmax_t>(source_information.EndOfFile.QuadPart)},
+        .writable = true};
+    const auto destination_name = filename->native();
+    const auto bytes = sizeof(FILE_RENAME_INFO) + destination_name.size() * sizeof(wchar_t);
+    std::vector<std::byte> storage(bytes);
+    auto *rename = reinterpret_cast<FILE_RENAME_INFO *>(storage.data());
+    rename->ReplaceIfExists = FALSE;
+    rename->RootDirectory = directory->get();
+    rename->FileNameLength = static_cast<DWORD>(destination_name.size() * sizeof(wchar_t));
+    std::copy(destination_name.begin(), destination_name.end(), rename->FileName);
+    if (SetFileInformationByHandle(source->get(), FileRenameInfo, rename, static_cast<DWORD>(bytes)) == 0)
         return std::unexpected(
             entry_error("entry_mutation_failed", "sandbox entry could not be renamed", reference.relative_path));
-    return metadata(reference.root_id, relative_path);
+#else
+    auto directory = open_parent(root->native->descriptor, relative->parent_path(), reference.relative_path);
+    if (!directory)
+        return std::unexpected(directory.error());
+    struct stat source_status{};
+    if (::fstatat(**directory, relative->filename().c_str(), &source_status, AT_SYMLINK_NOFOLLOW) != 0 ||
+        S_ISLNK(source_status.st_mode)) {
+        return std::unexpected(
+            reference_error("sandbox entry is a link or cannot be inspected", reference.relative_path));
+    }
+    if (!S_ISDIR(source_status.st_mode) && !S_ISREG(source_status.st_mode))
+        return std::unexpected(reference_error("sandbox entry type is unsupported", reference.relative_path));
+    auto result =
+        EntryMetadata{.root_id = reference.root_id,
+                      .relative_path = relative_path,
+                      .kind = S_ISDIR(source_status.st_mode) ? DirectoryEntryKind::directory : DirectoryEntryKind::file,
+                      .size = S_ISREG(source_status.st_mode)
+                                  ? std::optional<std::uintmax_t>{static_cast<std::uintmax_t>(source_status.st_size)}
+                                  : std::nullopt,
+                      .writable = true};
+    struct stat destination_status{};
+    if (::fstatat(**directory, filename->c_str(), &destination_status, AT_SYMLINK_NOFOLLOW) == 0)
+        return std::unexpected(output_exists_error("sandbox entry already exists", relative_path));
+    if (errno != ENOENT)
+        return std::unexpected(
+            entry_error("entry_mutation_failed", "rename target cannot be inspected", relative_path));
+    if (rename_no_replace(**directory, relative->filename().c_str(), **directory, filename->c_str()) != 0) {
+        if (errno == EEXIST)
+            return std::unexpected(output_exists_error("sandbox entry already exists", relative_path));
+        return std::unexpected(
+            entry_error("entry_mutation_failed", "sandbox entry could not be renamed", reference.relative_path));
+    }
+#endif
+    return result;
 }
 
 axk::app::Result<void> axk::app::Sandbox::delete_entry(const FileRef &reference) const {
@@ -582,23 +807,45 @@ axk::app::Result<void> axk::app::Sandbox::delete_entry(const FileRef &reference)
         return std::unexpected(entry_error("read_only_root", "sandbox root is read-only", reference.relative_path));
     if (reference.relative_path.empty())
         return std::unexpected(reference_error("sandbox roots cannot be deleted", reference.relative_path));
-    auto path = resolve_existing(reference.root_id, reference.relative_path);
-    if (!path)
-        return std::unexpected(path.error());
-
-    std::error_code error;
-    if (std::filesystem::is_directory(*path, error)) {
-        if (error)
-            return std::unexpected(
-                entry_error("entry_mutation_failed", "sandbox directory cannot be inspected", reference.relative_path));
-        if (!std::filesystem::is_empty(*path, error) || error)
+    auto relative = relative_path_from_utf8(reference.relative_path);
+    if (!relative)
+        return std::unexpected(relative.error());
+#if defined(_WIN32)
+    auto directory = open_parent(root->native->handle, relative->parent_path(), reference.relative_path);
+    if (!directory)
+        return std::unexpected(directory.error());
+    auto entry = open_relative(directory->get(), relative->filename(), DELETE | FILE_READ_ATTRIBUTES, FILE_OPEN, 0U,
+                               reference.relative_path);
+    if (!entry)
+        return std::unexpected(entry.error());
+    FILE_DISPOSITION_INFO disposition{.DeleteFile = TRUE};
+    if (SetFileInformationByHandle(entry->get(), FileDispositionInfo, &disposition, sizeof(disposition)) == 0) {
+        const auto error = GetLastError();
+        if (error == ERROR_DIR_NOT_EMPTY)
             return std::unexpected(
                 entry_error("directory_not_empty", "only empty directories can be deleted", reference.relative_path));
-    }
-    const auto removed = std::filesystem::remove(*path, error);
-    if (error || !removed)
         return std::unexpected(
             entry_error("entry_mutation_failed", "sandbox entry could not be deleted", reference.relative_path));
+    }
+#else
+    auto directory = open_parent(root->native->descriptor, relative->parent_path(), reference.relative_path);
+    if (!directory)
+        return std::unexpected(directory.error());
+    struct stat status{};
+    if (::fstatat(**directory, relative->filename().c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0 ||
+        S_ISLNK(status.st_mode)) {
+        return std::unexpected(
+            reference_error("sandbox entry is a link or cannot be inspected", reference.relative_path));
+    }
+    const auto flags = S_ISDIR(status.st_mode) ? AT_REMOVEDIR : 0;
+    if (::unlinkat(**directory, relative->filename().c_str(), flags) != 0) {
+        if (errno == ENOTEMPTY || errno == EEXIST)
+            return std::unexpected(
+                entry_error("directory_not_empty", "only empty directories can be deleted", reference.relative_path));
+        return std::unexpected(
+            entry_error("entry_mutation_failed", "sandbox entry could not be deleted", reference.relative_path));
+    }
+#endif
     return {};
 }
 

@@ -692,5 +692,32 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
         if (!bound)
             return bound;
     }
+    auto accesses_bound = registry.bind_path_accesses(
+        "package.import",
+        [state](const Json &input, const OperationContext &context) -> Result<std::vector<PathAccess>> {
+            std::string token;
+            try {
+                token = input.at("planToken").get<std::string>();
+            } catch (const Json::exception &) {
+                return std::unexpected(operation_error("invalid_request", "planToken is required"));
+            }
+            std::lock_guard lock{state->mutex};
+            cleanup_plans(*state, Clock::now());
+            const auto found = state->plans.find(token);
+            if (found == state->plans.end() || found->second->owner_id != context.owner_id || found->second->claimed) {
+                return std::unexpected(
+                    operation_error("package_plan_not_found", "package import plan is expired or unknown"));
+            }
+            std::vector<PathAccess> accesses{{found->second->target, PathAccessMode::shared}};
+            accesses.reserve(found->second->inputs.size() + 2U);
+            for (const auto &input_reference : found->second->inputs) {
+                if (const auto *file = std::get_if<FileRef>(&input_reference.reference))
+                    accesses.push_back({*file, PathAccessMode::shared});
+            }
+            accesses.push_back({found->second->output, PathAccessMode::exclusive});
+            return accesses;
+        });
+    if (!accesses_bound)
+        return accesses_bound;
     return {};
 }

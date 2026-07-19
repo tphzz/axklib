@@ -255,6 +255,12 @@ TEST_F(WriteOperationsTest, StarterManifestsAreInlineAndHdsStarterBuildsPersiste
     ASSERT_TRUE(planned) << planned.error().message;
     EXPECT_EQ(planned->at("kind"), "HDS");
     EXPECT_EQ(planned->at("summary").at("sizeBytes"), 1'048'576U);
+    const auto accesses =
+        registry_.path_accesses("create.hds", {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    ASSERT_TRUE(accesses) << accesses.error().message;
+    ASSERT_EQ(accesses->size(), 1U);
+    EXPECT_EQ(accesses->front().reference, (axk::app::FileRef{"workspace", "created.hds"}));
+    EXPECT_EQ(accesses->front().mode, axk::app::PathAccessMode::exclusive);
 
     const auto raw_apply = registry_.invoke(
         "create.hds",

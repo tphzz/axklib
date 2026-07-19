@@ -72,9 +72,12 @@ class Sandbox {
     [[nodiscard]] Result<std::size_t> cleanup_abandoned_publications() const;
 
   private:
+    struct NativeRoot;
+
     struct Root {
         RootInfo info;
         std::filesystem::path canonical_path;
+        std::shared_ptr<NativeRoot> native;
     };
 
     struct State {
