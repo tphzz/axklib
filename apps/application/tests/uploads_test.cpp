@@ -127,7 +127,7 @@ TEST_F(UploadStoreTest, ConcurrentReservationsCannotExceedTheWorkspaceQuota) {
     std::atomic<std::size_t> rejected{};
     std::mutex reference_mutex;
     std::optional<axk::app::UploadRef> accepted_reference;
-    std::vector<std::jthread> threads;
+    std::vector<std::thread> threads;
     threads.reserve(contenders);
     for (std::size_t index = 0; index < contenders; ++index) {
         threads.emplace_back([&, index] {
@@ -147,7 +147,9 @@ TEST_F(UploadStoreTest, ConcurrentReservationsCannotExceedTheWorkspaceQuota) {
             }
         });
     }
-    threads.clear();
+    for (auto &thread : threads) {
+        thread.join();
+    }
 
     EXPECT_EQ(accepted, 1U);
     EXPECT_EQ(rejected, contenders - 1U);

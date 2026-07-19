@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -452,11 +453,13 @@ TEST(JobManager, ConcurrentCancellationOfRunningWorkPublishesOneImmutableTermina
     while (!entered.load())
         std::this_thread::sleep_for(1ms);
 
-    std::vector<std::jthread> callers;
+    std::vector<std::thread> callers;
     for (std::size_t index = 0; index < 16U; ++index) {
         callers.emplace_back([&] { EXPECT_TRUE(jobs.cancel(submitted->job_id, "owner")); });
     }
-    callers.clear();
+    for (auto &caller : callers) {
+        caller.join();
+    }
     const auto terminal = wait_terminal(jobs, submitted->job_id);
     ASSERT_EQ(terminal.state, axk::app::JobState::cancelled);
     const auto replay = jobs.replay(submitted->job_id, "owner", 0U);
