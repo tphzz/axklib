@@ -38,7 +38,7 @@ int main() {
         return 4;
 
     axk::package_root_selector selector;
-    selector.kind = axk::package_root_kind::sample;
+    selector.kind = axk::package_root_kind::wave_data;
     selector.partition_index = waveform->partition_index;
     selector.group_name = waveform->partition_name;
     selector.volume_name = waveform->volume_name;

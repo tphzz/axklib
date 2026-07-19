@@ -228,6 +228,47 @@ TEST(Cli11Adapter, HidesUnavailablePortablePackageChoices) {
     EXPECT_NE(error.find("package root kind must be"), std::string::npos);
 }
 
+TEST(Cli11Adapter, UsesCanonicalSampleAndWaveDataPackageSelectors) {
+    const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images" /
+                         "sampler-authored/HD00_512_single_sbnk_authored.hds";
+    const auto root = std::filesystem::temp_directory_path() / "axklib-cli-package-terminology";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+
+    testing::internal::CaptureStdout();
+    ASSERT_EQ(run_cli({"axklib", "package", "export", fixture.string(), "--root", "sample=sine wave", "--partition",
+                       "0", "--volume", "New Volume", "-o", (root / "sample").string(), "--format", "json"}),
+              0);
+    const auto sample_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(sample_output.at("package_kind"), "sbnk");
+
+    testing::internal::CaptureStdout();
+    ASSERT_EQ(run_cli({"axklib", "package", "export", fixture.string(), "--root", "wave-data=sine wave", "--partition",
+                       "0", "--volume", "New Volume", "-o", (root / "wave-data").string(), "--format", "json"}),
+              0);
+    const auto wave_data_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(wave_data_output.at("package_kind"), "smpl");
+
+    testing::internal::CaptureStdout();
+    ASSERT_EQ(
+        run_cli({"axklib", "package", "export", fixture.string(), "--root", "sample-bank=sine wave", "--partition", "0",
+                 "--volume", "New Volume", "-o", (root / "sample-bank").string(), "--format", "json"}),
+        0);
+    const auto legacy_sample_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(legacy_sample_output.at("package_kind"), "sbnk");
+
+    testing::internal::CaptureStdout();
+    ASSERT_EQ(
+        run_cli({"axklib", "package", "export", fixture.string(), "--root", "bank-group=New SmpBank", "--partition",
+                 "0", "--volume", "New Volume", "-o", (root / "bank-group").string(), "--format", "json"}),
+        0);
+    const auto bank_group_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(bank_group_output.at("package_kind"), "sbac");
+
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(Cli11Adapter, WritesStarterBuildManifestsWithoutSilentReplacement) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-cli-manifest-template";
     const auto output = root / "nested" / "image.json";
@@ -329,7 +370,7 @@ TEST(Cli11Adapter, PortablePackageRoundTripPlansAndImportsAtomically) {
     const auto cli_export_json = nlohmann::json::parse(export_output);
     axk::operation_context sdk_context;
     axk::package_root_selector sdk_selector;
-    sdk_selector.kind = axk::package_root_kind::sample_bank;
+    sdk_selector.kind = axk::package_root_kind::sample;
     sdk_selector.partition_index = 0U;
     sdk_selector.group_name = "New Partition";
     sdk_selector.volume_name = "New Volume";

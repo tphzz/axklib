@@ -198,6 +198,17 @@ axk::Result<void> retarget_export_plan(axk::ExportPlan &plan, const std::filesys
             }
         }
     }
+    for (auto &scope : plan.unresolved_wave_data) {
+        scope.relative_root = selection_root / scope.relative_root;
+        for (auto &waveform : scope.waveforms) {
+            auto pooled = pooled_paths.allocate(scope.relative_root, "physical",
+                                                safe_display_path_name(waveform.display_name, "wave-data"),
+                                                axk::audio_internal::WavSource::from_physical(waveform.waveform));
+            if (!pooled)
+                return std::unexpected{pooled.error()};
+            waveform.relative_wav_path = std::move(*pooled);
+        }
+    }
     return {};
 }
 
@@ -323,6 +334,15 @@ Json artifact_owner(const axk::app::FileRef &source, const axk::VolumeExport &vo
             {"objectName", std::move(object_name)}};
 }
 
+Json artifact_owner(const axk::app::FileRef &source, const axk::UnresolvedWaveDataExport &scope,
+                    std::string object_type, std::string object_name) {
+    return {{"source", {{"rootId", source.root_id}, {"relativePath", source.relative_path}}},
+            {"partitionIndex", scope.partition.value},
+            {"volumeName", "Unresolved Wave Data"},
+            {"objectType", std::move(object_type)},
+            {"objectName", std::move(object_name)}};
+}
+
 void add_artifact_owner(ArtifactOwners &owners, std::filesystem::path path, Json owner) {
     auto &entries = owners[path.lexically_normal()];
     if (!entries.is_array())
@@ -409,6 +429,7 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
 
     axk::ExportPlan combined;
     std::map<std::filesystem::path, std::string> volume_graphs;
+    std::map<std::filesystem::path, std::string> unresolved_graphs;
     Json warnings = Json::array();
     ArtifactOwners artifact_owners;
     std::vector<Json> combined_volume_owners;
@@ -508,8 +529,30 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
                 }
                 volume_graphs.emplace(graph_path, std::move(*serialized));
             }
+            for (const auto &scope : plan->unresolved_wave_data) {
+                const auto graph_path = scope.relative_root / "unresolved.axklib.json";
+                add_artifact_owner(artifact_owners, graph_path,
+                                   artifact_owner(source, scope, "SMPL", "Unresolved Wave Data"));
+                for (const auto &waveform : scope.waveforms) {
+                    add_artifact_owner(artifact_owners, scope.relative_root / waveform.relative_wav_path,
+                                       artifact_owner(source, scope, "SMPL", waveform.display_name));
+                }
+                auto serialized = axk::app::serialize_unresolved_wave_data_graph(
+                    scope, std::filesystem::path{source_display}, media_kind_text(media->kind()));
+                if (!serialized)
+                    return std::unexpected(core_error(serialized.error(), source_display));
+                if (const auto existing = unresolved_graphs.find(graph_path); existing != unresolved_graphs.end()) {
+                    if (existing->second == *serialized)
+                        continue;
+                    return std::unexpected(operation_error("artifact_collision",
+                                                           "distinct unresolved Wave Data graphs share output path: " +
+                                                               axk::text::path_to_utf8(graph_path)));
+                }
+                unresolved_graphs.emplace(graph_path, std::move(*serialized));
+            }
             std::ranges::move(plan->decode_errors, std::back_inserter(combined.decode_errors));
             std::ranges::move(plan->volumes, std::back_inserter(combined.volumes));
+            std::ranges::move(plan->unresolved_wave_data, std::back_inserter(combined.unresolved_wave_data));
         }
     }
     for (std::size_t index = 0; index < selectors.size(); ++index) {
@@ -568,6 +611,12 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
             return std::unexpected(saved.error());
         written.push_back(std::move(graph_path));
     }
+    for (const auto &[relative, graph] : unresolved_graphs) {
+        auto graph_path = staging / relative;
+        if (auto saved = write_text(graph_path, graph + "\n"); !saved)
+            return std::unexpected(saved.error());
+        written.push_back(std::move(graph_path));
+    }
     for (const auto &decode_error : combined.decode_errors)
         warnings.push_back({{"code", "waveform_skipped"}, {"message", decode_error}});
 
@@ -602,14 +651,17 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
     const auto waveform_count =
         std::accumulate(combined.volumes.begin(), combined.volumes.end(), std::size_t{},
                         [](std::size_t count, const auto &volume) { return count + volume.waveforms.size(); });
+    const auto unresolved_waveform_count =
+        std::accumulate(combined.unresolved_wave_data.begin(), combined.unresolved_wave_data.end(), std::size_t{},
+                        [](std::size_t count, const auto &scope) { return count + scope.waveforms.size(); });
     return Json{{"schemaVersion", "1.0"},
                 {"mode", sfz ? "SFZ" : "WAV"},
                 {"destination",
                  {{"rootId", request->destination.root_id}, {"relativePath", request->destination.relative_path}}},
                 {"artifactCount", artifacts.size()},
-                {"waveformCount", waveform_count},
+                {"waveformCount", waveform_count + unresolved_waveform_count},
                 {"writtenFileCount", written.size()},
-                {"selectionGraphCount", volume_graphs.size()},
+                {"selectionGraphCount", volume_graphs.size() + unresolved_graphs.size()},
                 {"sfzFileCount", sfz_count},
                 {"decodeErrorCount", combined.decode_errors.size()},
                 {"loadErrorCount", load_error_count},

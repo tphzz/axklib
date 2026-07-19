@@ -246,6 +246,8 @@ Typical whole-input export layout:
         volume/
           volume.axklib.json
           Instrument.sfz
+        Unresolved Wave Data/
+          unresolved.axklib.json
 ```
 
 Typical scoped Program export layout:
@@ -272,6 +274,7 @@ Rules:
 | `file/<source>/.../` | Whole-input selection hierarchy, retaining the source name and decoded volume placement. |
 | `<scope>/<selector>/` | Narrow selected scope folder. |
 | `volume.axklib.json` | Per-volume object and relationship graph written by both WAV and SFZ extraction. |
+| `Unresolved Wave Data/unresolved.axklib.json` | Partition-scoped graph for decodable physical `SMPL` objects without one authoritative volume placement. It records missing or ambiguous placement, every candidate, the resolution basis, and the exact WAV reference. |
 
 Physical WAV names come from `SMPL` storage names plus a short content hash so
 several selections can share one pool without collisions. They stay
@@ -281,6 +284,14 @@ sampler-visible Samples (`SBNK`), the graph records those Sample names in the
 `user_facing_aliases` field on the `SMPL` object. Display-oriented consumers
 should use the first alias when present and fall back to the physical `SMPL`
 display name only when no alias is known.
+
+Whole-input exact exports retain every decodable physical Wave Data object. A
+Wave Data object with no placement candidate, or with several candidates, is
+not assigned to an arbitrary volume and is not hidden. Its WAV remains in the
+shared physical pool and its resolution metadata is recorded under the partition's
+`Unresolved Wave Data` scope. A volume-scoped export excludes unresolved
+objects. Program, Sample Bank, and Sample scopes include one only when a
+known selected Sample-to-Wave-Data relationship requires it.
 
 The suffix is the first 12 lowercase hexadecimal characters of SHA-1 over the
 complete emitted WAV container bytes. This 48-bit suffix is retained as an

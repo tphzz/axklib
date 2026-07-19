@@ -203,12 +203,13 @@ axk::app::Result<axk::PackageRootKind> parse_root_kind(std::string_view value) {
         return axk::PackageRootKind::prog;
     if (value == "sbac" || value == "bank-group")
         return axk::PackageRootKind::sbac;
-    if (value == "sbnk" || value == "sample-bank")
+    if (value == "sbnk" || value == "sample" || value == "sample-bank")
         return axk::PackageRootKind::sbnk;
-    if (value == "smpl" || value == "sample")
+    if (value == "smpl" || value == "wave-data")
         return axk::PackageRootKind::smpl;
-    return std::unexpected(
-        operation_error("unsupported_package_root", "package root kind must be volume, program, sbac, sbnk, or smpl"));
+    return std::unexpected(operation_error("unsupported_package_root",
+                                           "package root kind must be volume, program, bank-group, sample, "
+                                           "wave-data, sbac, sbnk, or smpl"));
 }
 
 axk::app::Result<std::vector<axk::PackageRootSelector>> parse_roots(const Json &input) {

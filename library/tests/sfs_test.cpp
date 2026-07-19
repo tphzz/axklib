@@ -81,6 +81,65 @@ std::vector<std::byte> image_fixture() {
     return bytes;
 }
 
+std::vector<std::byte> deep_directory_fixture(std::size_t directory_count) {
+    constexpr std::size_t sectors = 4096U;
+    constexpr std::uint32_t cluster_count = 2046U;
+    constexpr std::uint32_t index_cluster = 4U;
+    constexpr std::size_t records_per_block = 14U;
+    constexpr std::size_t record_size = 72U;
+    constexpr std::size_t index_block_size = 1024U;
+    const auto index_blocks = (directory_count + records_per_block - 1U) / records_per_block;
+    const auto first_payload_cluster = index_cluster + static_cast<std::uint32_t>(index_blocks) + 1U;
+    EXPECT_LT(first_payload_cluster + directory_count, cluster_count);
+
+    std::vector<std::byte> bytes(sectors * sector_size);
+    axk::ByteWriter writer{bytes};
+    for (const std::size_t sector : {0U, 1U}) {
+        const auto base = sector * sector_size;
+        write_magic(bytes, base);
+        EXPECT_TRUE(writer.write_be32(base + 0x9c, sector_size));
+        EXPECT_TRUE(writer.write_be32(base + 0xa0, sectors));
+        EXPECT_TRUE(writer.write_be32(base + 0xa8, 3));
+        EXPECT_TRUE(writer.write_be32(base + 0xac, sectors - 3));
+    }
+
+    const auto partition = 3U * sector_size;
+    write_magic(bytes, partition);
+    write_ascii(bytes, partition + 0x40, "Deep Chain");
+    EXPECT_TRUE(writer.write_be32(partition + 0x90, cluster_count));
+    EXPECT_TRUE(writer.write_be32(partition + 0x94, 2));
+    EXPECT_TRUE(writer.write_be32(partition + 0x9c, 3));
+    EXPECT_TRUE(writer.write_be32(partition + 0xa4, index_cluster));
+    EXPECT_TRUE(writer.write_be32(partition + 0xa8, static_cast<std::uint32_t>(index_blocks)));
+    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(partition), 1024,
+                bytes.begin() + static_cast<std::ptrdiff_t>(partition + 1024));
+
+    const auto index = (3U + index_cluster * 2U) * sector_size;
+    for (std::size_t directory = 0; directory < directory_count; ++directory) {
+        const auto record =
+            index + (directory / records_per_block) * index_block_size + (directory % records_per_block) * record_size;
+        const auto payload_cluster = first_payload_cluster + static_cast<std::uint32_t>(directory);
+        EXPECT_TRUE(writer.write_be16(record, 1));
+        EXPECT_TRUE(writer.write_be16(record + 4U, 1));
+        EXPECT_TRUE(writer.write_be32(record + 6U, 96));
+        EXPECT_TRUE(writer.write_be32(record + 0x0aU, payload_cluster));
+        EXPECT_TRUE(writer.write_be32(record + 0x0eU, 1));
+        EXPECT_TRUE(writer.write_be32(record + 0x12U, 96));
+
+        const auto payload = (3U + payload_cluster * 2U) * sector_size;
+        const auto directory_id = static_cast<std::uint32_t>(directory + 1U);
+        const auto parent_id = directory == 0U ? directory_id : directory_id - 1U;
+        write_directory_entry(writer, bytes, payload, ".", directory_id);
+        write_directory_entry(writer, bytes, payload + 32U, "..", parent_id);
+        if (directory + 1U < directory_count)
+            write_directory_entry(writer, bytes, payload + 64U, "child", directory_id + 1U);
+
+        const auto bitmap = (3U + 3U * 2U) * sector_size;
+        bytes[bitmap + payload_cluster / 8U] |= static_cast<std::byte>(0x80U >> (payload_cluster & 7U));
+    }
+    return bytes;
+}
+
 std::vector<std::byte> large_object_fixture() {
     auto bytes = image_fixture();
     axk::ByteWriter writer{bytes};
@@ -297,6 +356,69 @@ TEST(SfsReader, ParsesDuplicatedGeometryDirectoriesAllocationAndFreeSpace) {
     ASSERT_TRUE(partition.allocation.free_space);
     EXPECT_EQ(partition.allocation.free_space->reserved_cluster_count, 6U);
     EXPECT_EQ(partition.allocation.free_space->free_cluster_count, 1015U);
+}
+
+TEST(SfsReader, RejectsHeaderClusterCountBeyondPhysicalPartitionCapacity) {
+    auto bytes = image_fixture();
+    axk::ByteWriter writer{bytes};
+    constexpr auto primary_partition_header = 3U * sector_size;
+    constexpr auto backup_partition_header = primary_partition_header + 1024U;
+    ASSERT_TRUE(writer.write_be32(primary_partition_header + 0x90U, std::numeric_limits<std::uint32_t>::max()));
+    ASSERT_TRUE(writer.write_be32(backup_partition_header + 0x90U, std::numeric_limits<std::uint32_t>::max()));
+
+    auto reader = std::make_shared<axk::MemoryReader>(std::move(bytes));
+    const auto result = axk::open_image(reader, "oversized-cluster-count.hds");
+    ASSERT_TRUE(result);
+    EXPECT_TRUE(result->partitions().empty());
+    EXPECT_TRUE(std::ranges::any_of(result->diagnostics(), [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::container_invalid_geometry &&
+               error.message.find("physical sector capacity") != std::string::npos;
+    }));
+}
+
+TEST(SfsReader, AppliesConfiguredDirectoryRecordAndDepthBounds) {
+    axk::OpenOptions record_options;
+    record_options.max_directory_records = 0;
+    auto record_reader = std::make_shared<axk::MemoryReader>(image_fixture());
+    const auto record_result = axk::open_image(record_reader, "directory-record-limit.hds", record_options);
+    ASSERT_TRUE(record_result);
+    EXPECT_TRUE(std::ranges::any_of(record_result->partitions()[0].diagnostics, [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::object_malformed &&
+               error.message.find("directory record count") != std::string::npos;
+    }));
+
+    auto deep_bytes = deep_directory_fixture(1'500U);
+    auto depth_reader = std::make_shared<axk::MemoryReader>(deep_bytes);
+    const auto depth_result = axk::open_image(depth_reader, "deep-directory-chain.hds");
+    ASSERT_TRUE(depth_result);
+    ASSERT_EQ(depth_result->partitions().size(), 1U);
+    EXPECT_TRUE(std::ranges::any_of(depth_result->partitions()[0].diagnostics, [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::object_malformed &&
+               error.message.find("directory depth") != std::string::npos;
+    }));
+
+    axk::OpenOptions expanded_options;
+    expanded_options.max_directory_depth = 2'000U;
+    auto expanded_reader = std::make_shared<axk::MemoryReader>(std::move(deep_bytes));
+    const auto expanded_result = axk::open_image(expanded_reader, "allowed-deep-directory-chain.hds", expanded_options);
+    ASSERT_TRUE(expanded_result);
+    ASSERT_EQ(expanded_result->partitions().size(), 1U);
+    EXPECT_FALSE(std::ranges::any_of(expanded_result->partitions()[0].diagnostics, [](const axk::Error &error) {
+        return error.message.find("directory depth") != std::string::npos;
+    }));
+}
+
+TEST(SfsReader, AppliesConfiguredAllocationBitmapMemoryBound) {
+    axk::OpenOptions options;
+    options.max_allocation_bitmap_bytes = 1U;
+    auto reader = std::make_shared<axk::MemoryReader>(image_fixture());
+    const auto result = axk::open_image(reader, "bitmap-memory-limit.hds", options);
+    ASSERT_TRUE(result);
+    EXPECT_TRUE(result->partitions().empty());
+    EXPECT_TRUE(std::ranges::any_of(result->diagnostics(), [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::container_invalid_geometry &&
+               error.message.find("configured memory bound") != std::string::npos;
+    }));
 }
 
 TEST(SfsReader, KeepsBackupDisagreementAsDiagnostic) {

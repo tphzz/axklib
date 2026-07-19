@@ -764,7 +764,7 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
     if (filesystem_error)
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create HDS output directory")};
-    const auto temporary = text::temporary_sibling(output_path);
+    const auto temporary = detail::reserve_temporary_file(output_path);
     if (!temporary)
         return std::unexpected{temporary.error()};
     TemporaryFileCleanup cleanup{*temporary};

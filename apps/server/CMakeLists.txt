@@ -206,6 +206,12 @@ if(BUILD_TESTING)
   )
   set_tests_properties(Server.ParentProcessLifetime PROPERTIES TIMEOUT 15 LABELS server)
   add_test(
+    NAME Server.StartupFailure
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_startup_failure_test.py"
+            --server "$<TARGET_FILE:axk_server_fixture>"
+  )
+  set_tests_properties(Server.StartupFailure PROPERTIES TIMEOUT 25 LABELS server)
+  add_test(
     NAME Server.PerformanceProfile
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_performance_test.py"
             --server "$<TARGET_FILE:axk_server_fixture>" --direct-benchmark

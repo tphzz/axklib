@@ -10,6 +10,8 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/extraction_operations.hpp"
+#include "axklib/application/extraction_selection.hpp"
+#include "axklib/application/volume_graph.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/writer.hpp"
 
@@ -105,6 +107,63 @@ class ExtractionOperationsTest : public testing::Test {
     std::unique_ptr<axk::app::Sandbox> sandbox_;
     axk::app::OperationRegistry registry_;
 };
+
+TEST(ExtractionSelection, RetainsUnresolvedWaveDataOnlyForWholeImageOrConfirmedDependency) {
+    axk::ExportPlan source;
+    axk::UnresolvedWaveDataExport unresolved;
+    unresolved.partition = axk::PartitionIndex{0};
+    unresolved.relative_root = "partition_00_Test/Unresolved Wave Data";
+    unresolved.waveforms.push_back({"wave", "Wave", "SMPL/Wave.wav", {}});
+    source.unresolved_wave_data.push_back(std::move(unresolved));
+
+    axk::RelationshipGraph graph;
+    axk::Relationship relationship;
+    relationship.source_key = "bank";
+    relationship.target_key = "wave";
+    relationship.type = "SBNK_LEFT_MEMBER_TO_SMPL";
+    relationship.quality = axk::RelationshipQuality::known;
+    graph.relationships.push_back(std::move(relationship));
+
+    auto selected = source;
+    axk::app::filter_export_plan(selected, graph, "sbnk", "Bank", "bank");
+    ASSERT_EQ(selected.unresolved_wave_data.size(), 1U);
+    EXPECT_EQ(selected.unresolved_wave_data.front().waveforms.size(), 1U);
+
+    graph.relationships.front().quality = axk::RelationshipQuality::likely;
+    selected = source;
+    axk::app::filter_export_plan(selected, graph, "sbnk", "Bank", "bank");
+    EXPECT_TRUE(selected.unresolved_wave_data.empty());
+
+    selected = source;
+    axk::app::filter_export_plan(selected, graph, "volume", "partition_00_Test/Volume", "volume");
+    EXPECT_TRUE(selected.unresolved_wave_data.empty());
+}
+
+TEST(VolumeGraph, SerializesUnresolvedPlacementCandidatesAndResolutionQuality) {
+    axk::UnresolvedWaveDataExport scope;
+    scope.partition = axk::PartitionIndex{2};
+    scope.partition_name = "Disk 3";
+    scope.relative_root = "partition_02_Disk_3/Unresolved Wave Data";
+    axk::PhysicalWaveformExport waveform;
+    waveform.object_key = "p2:sfs9";
+    waveform.display_name = "Hidden Wave";
+    waveform.relative_wav_path = "SMPL/Hidden Wave.wav";
+    waveform.placement_resolution = axk::PlacementResolution::ambiguous;
+    waveform.placement_candidates.push_back(
+        {axk::PartitionIndex{2}, "Disk 3", axk::SfsId{4}, "Vol A", "SMPL", "Hidden Wave", {}});
+    waveform.placement_candidates.push_back(
+        {axk::PartitionIndex{2}, "Disk 3", axk::SfsId{5}, "Vol B", "SMPL", "Hidden Wave", {}});
+    scope.waveforms.push_back(std::move(waveform));
+
+    const auto serialized = axk::app::serialize_unresolved_wave_data_graph(scope, "fixture.hds");
+    ASSERT_TRUE(serialized) << serialized.error().message;
+    const auto json = nlohmann::json::parse(*serialized);
+    EXPECT_EQ(json.at("schema"), "axklib.unresolved_wave_data.v1");
+    const auto &placement = json.at("objects").at("smpl").at(0).at("placement");
+    EXPECT_EQ(placement.at("resolution"), "ambiguous");
+    EXPECT_EQ(placement.at("quality"), "unresolved");
+    EXPECT_EQ(placement.at("candidates").size(), 2U);
+}
 
 TEST_F(ExtractionOperationsTest, SfzPublishesPersistentCollectionAndContentAddressedResult) {
     const auto extracted = registry_.invoke("extract.sfz",

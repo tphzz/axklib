@@ -46,6 +46,9 @@ TEST(ObjectCatalog, DerivesExactVolumeAndCategoryPlacementFromDirectories) {
     EXPECT_EQ(sample->placement->volume_name, "New Volume");
     EXPECT_EQ(sample->placement->category_name, "SMPL");
     EXPECT_EQ(sample->placement->entry_name, "sine wave");
+    EXPECT_EQ(sample->placement_resolution, axk::PlacementResolution::exact);
+    ASSERT_EQ(sample->placement_candidates.size(), 1U);
+    EXPECT_EQ(sample->placement_candidates.front().volume_name, sample->placement->volume_name);
     const auto source_payload = container->read_record_data(sample->partition, sample->sfs_id, 64U * 1024U * 1024U);
     ASSERT_TRUE(source_payload) << source_payload.error().message;
     EXPECT_EQ(sample->raw_payload, *source_payload);

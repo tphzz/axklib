@@ -10,6 +10,7 @@
 #include <tuple>
 #include <unordered_map>
 
+#include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/wav_stream.hpp"
@@ -155,25 +156,14 @@ Result<void> write_text_atomic(const std::filesystem::path &path, std::string_vi
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create SFZ output directory")};
     }
-    const auto temporary = text::temporary_sibling(path);
+    const auto temporary = detail::write_temporary_file(path, [&](const detail::TemporaryFileSink &sink) {
+        return sink(std::as_bytes(std::span{text.data(), text.size()}));
+    });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    {
-        std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
-        output.write(text.data(), static_cast<std::streamsize>(text.size()));
-        if (!output) {
-            std::filesystem::remove(*temporary, error);
-            return std::unexpected{
-                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary SFZ")};
-        }
-    }
-    if (overwrite)
-        std::filesystem::remove(path, error);
-    std::filesystem::rename(*temporary, path, error);
-    if (error) {
+    if (const auto published = detail::publish_temporary_file(*temporary, path, overwrite); !published) {
         std::filesystem::remove(*temporary, error);
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not publish SFZ atomically")};
+        return std::unexpected{published.error()};
     }
     return {};
 }
@@ -182,6 +172,26 @@ using VolumeKey = std::pair<std::uint8_t, std::uint32_t>;
 
 VolumeKey object_volume_key(const ObjectSnapshot &item) {
     return {item.partition.value, item.placement->volume_directory.value};
+}
+
+std::string unresolved_partition_name(const ObjectSnapshot &item, std::string fallback) {
+    if (!item.placement_candidates.empty() && !item.placement_candidates.front().partition_name.empty())
+        return item.placement_candidates.front().partition_name;
+    return fallback.empty() ? std::string{"partition"} : fallback;
+}
+
+UnresolvedWaveDataExport &unresolved_scope(ExportPlan &plan, PartitionIndex partition, std::string partition_name) {
+    const auto found = std::ranges::find(plan.unresolved_wave_data, partition, &UnresolvedWaveDataExport::partition);
+    if (found != plan.unresolved_wave_data.end())
+        return *found;
+    UnresolvedWaveDataExport scope;
+    scope.partition = partition;
+    scope.partition_name = std::move(partition_name);
+    scope.relative_root = std::filesystem::path{std::format("partition_{:02}_{}", partition.value,
+                                                            underscore_name(scope.partition_name, "partition"))} /
+                          "Unresolved Wave Data";
+    plan.unresolved_wave_data.push_back(std::move(scope));
+    return plan.unresolved_wave_data.back();
 }
 
 void populate_logical_exports(const ObjectCatalog &catalog, const RelationshipGraph &graph,
@@ -384,6 +394,25 @@ Result<ExportPlan> build_export_plan(const Container &container, const ObjectCat
             waveform_volume_keys[item.key] = key;
         }
     }
+    for (const auto &item : catalog.objects) {
+        if (item.placement || item.object.header.type != ObjectType::smpl)
+            continue;
+        if (const auto check = cancellation.check(); !check)
+            return std::unexpected{check.error()};
+        const auto partition = std::ranges::find(container.partitions(), item.partition, &Partition::index);
+        const auto partition_name = unresolved_partition_name(
+            item, partition == container.partitions().end() ? std::string{} : partition->name);
+        auto waveform = decode_waveform(container, item, cancellation);
+        if (!waveform)
+            return std::unexpected{waveform.error()};
+        auto &scope = unresolved_scope(result, item.partition, partition_name);
+        std::set<std::string> used;
+        for (const auto &existing : scope.waveforms)
+            used.insert(existing.relative_wav_path.filename().string());
+        scope.waveforms.push_back({item.key, item.object.header.name,
+                                   std::filesystem::path{"SMPL"} / unique_wav_name(item.object.header.name, used),
+                                   std::move(*waveform), item.placement_resolution, item.placement_candidates});
+    }
     populate_logical_exports(catalog, graph, volumes, physical_by_key, waveform_volume_keys, rendered_names);
     for (auto &[key, volume] : volumes) {
         static_cast<void>(key);
@@ -461,6 +490,30 @@ Result<ExportPlan> build_export_plan(const MediaContainer &container, const Obje
             waveform_volume_keys[item.key] = key;
         }
     }
+    for (const auto &item : catalog.objects) {
+        if (item.placement || item.object.header.type != ObjectType::smpl)
+            continue;
+        if (const auto check = cancellation.check(); !check)
+            return std::unexpected{check.error()};
+        const auto source = media_by_key.find(item.key);
+        if (source == media_by_key.end()) {
+            return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                              "media object disappeared while building export plan")};
+        }
+        auto waveform = decode_waveform(*source->second);
+        if (!waveform) {
+            result.decode_errors.push_back(
+                std::format("{} ({}): {}", item.object.header.name, item.key, waveform.error().message));
+            continue;
+        }
+        auto &scope = unresolved_scope(result, item.partition, unresolved_partition_name(item, "partition"));
+        std::set<std::string> used;
+        for (const auto &existing : scope.waveforms)
+            used.insert(existing.relative_wav_path.filename().string());
+        scope.waveforms.push_back({item.key, item.object.header.name,
+                                   std::filesystem::path{"SMPL"} / unique_wav_name(item.object.header.name, used),
+                                   std::move(*waveform), item.placement_resolution, item.placement_candidates});
+    }
     populate_logical_exports(catalog, graph, volumes, physical_by_key, waveform_volume_keys, rendered_names);
     for (auto &[key, volume] : volumes) {
         static_cast<void>(key);
@@ -506,6 +559,14 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
             const auto path = (output_directory / volume.relative_root / *bank.rendered_wav_path).lexically_normal();
             if (auto registered =
                     register_target(path, audio_internal::WavSource::from_stereo(left->waveform, right->waveform));
+                !registered)
+                return std::unexpected{registered.error()};
+        }
+    }
+    for (const auto &scope : plan.unresolved_wave_data) {
+        for (const auto &waveform : scope.waveforms) {
+            const auto path = (output_directory / scope.relative_root / waveform.relative_wav_path).lexically_normal();
+            if (auto registered = register_target(path, audio_internal::WavSource::from_physical(waveform.waveform));
                 !registered)
                 return std::unexpected{registered.error()};
         }

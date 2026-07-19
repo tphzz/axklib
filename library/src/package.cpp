@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <cerrno>
 #include <cstdio>
 #include <format>
 #include <fstream>
@@ -19,17 +18,8 @@
 
 #include <nlohmann/json.hpp>
 
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#else
-#include <fcntl.h>
-#include <unistd.h>
-#endif
-
 #include "axklib/audio.hpp"
+#include "axklib/file_publication.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/package_relocation.hpp"
 #include "axklib/relationship.hpp"
@@ -1107,89 +1097,14 @@ class TemporaryPackageCleanup {
 };
 
 Result<std::filesystem::path> reserve_unique_temporary(const std::filesystem::path &output) {
-    for (std::size_t attempt = 0; attempt < 64U; ++attempt) {
-        auto temporary = text::temporary_sibling(output);
-        if (!temporary)
-            return std::unexpected{temporary.error()};
-#if defined(_WIN32)
-        const auto handle =
-            CreateFileW(temporary->c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (handle != INVALID_HANDLE_VALUE) {
-            CloseHandle(handle);
-            return *temporary;
-        }
-        if (GetLastError() != ERROR_FILE_EXISTS && GetLastError() != ERROR_ALREADY_EXISTS) {
-            return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                              "could not reserve a package temporary sibling")};
-        }
-#else
-        const auto descriptor = ::open(temporary->c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
-        if (descriptor >= 0) {
-            ::close(descriptor);
-            return *temporary;
-        }
-        if (errno != EEXIST) {
-            return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                              "could not reserve a package temporary sibling")};
-        }
-#endif
-    }
-    return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                      "could not reserve a unique package temporary sibling")};
+    return detail::reserve_temporary_file(output);
 }
 
-Result<void> flush_package_file(const std::filesystem::path &path) {
-#if defined(_WIN32)
-    const auto handle = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                                    FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (handle == INVALID_HANDLE_VALUE)
-        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                          "could not open temporary package for durable flush")};
-    const auto flushed = FlushFileBuffers(handle) != 0;
-    CloseHandle(handle);
-#else
-    const auto descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
-    if (descriptor < 0)
-        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                          "could not open temporary package for durable flush")};
-    const auto flushed = ::fsync(descriptor) == 0;
-    ::close(descriptor);
-#endif
-    if (!flushed) {
-        return std::unexpected{
-            make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not durably flush temporary package")};
-    }
-    return {};
-}
+Result<void> flush_package_file(const std::filesystem::path &path) { return detail::flush_file_to_disk(path); }
 
 Result<void> publish_temporary_package(const std::filesystem::path &temporary, const std::filesystem::path &output,
                                        bool overwrite) {
-#if defined(_WIN32)
-    DWORD flags = MOVEFILE_WRITE_THROUGH;
-    if (overwrite)
-        flags |= MOVEFILE_REPLACE_EXISTING;
-    if (MoveFileExW(temporary.c_str(), output.c_str(), flags) == 0) {
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not atomically publish package output")};
-    }
-#else
-    if (overwrite) {
-        if (::rename(temporary.c_str(), output.c_str()) != 0) {
-            return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                              "could not atomically replace package output")};
-        }
-    } else {
-        if (::link(temporary.c_str(), output.c_str()) != 0) {
-            return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                              "could not atomically publish package output")};
-        }
-        if (::unlink(temporary.c_str()) != 0) {
-            return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
-                                              "package was published but temporary cleanup failed")};
-        }
-    }
-#endif
-    return {};
+    return detail::publish_temporary_file(temporary, output, overwrite);
 }
 
 Result<std::vector<std::byte>> read_package_file(const std::filesystem::path &path,

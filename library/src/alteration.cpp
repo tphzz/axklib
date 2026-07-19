@@ -30,6 +30,7 @@
 #endif
 
 #include "axklib/catalog.hpp"
+#include "axklib/file_publication.hpp"
 #include "axklib/object.hpp"
 #include "axklib/package.hpp"
 #include "axklib/package_archive.hpp"
@@ -3231,25 +3232,14 @@ Result<void> write_alteration_manifest_template(const std::filesystem::path &out
         return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                           "could not create alteration manifest output directory")};
     }
-    auto temporary = text::temporary_sibling(output_path);
+    auto temporary = detail::write_temporary_file(output_path, [&](const detail::TemporaryFileSink &sink) {
+        return sink(std::as_bytes(std::span{serialized->data(), serialized->size()}));
+    });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    {
-        std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
-        output.write(serialized->data(), static_cast<std::streamsize>(serialized->size()));
-        if (!output) {
-            std::filesystem::remove(*temporary, filesystem_error);
-            return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
-                                              "could not write temporary alteration manifest")};
-        }
-    }
-    if (overwrite)
-        std::filesystem::remove(output_path, filesystem_error);
-    std::filesystem::rename(*temporary, output_path, filesystem_error);
-    if (filesystem_error) {
+    if (const auto published = detail::publish_temporary_file(*temporary, output_path, overwrite); !published) {
         std::filesystem::remove(*temporary, filesystem_error);
-        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                          "could not publish alteration manifest atomically")};
+        return std::unexpected{published.error()};
     }
     return {};
 }

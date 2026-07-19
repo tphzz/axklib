@@ -48,22 +48,11 @@ axk::Result<void> publish_manifest(const std::filesystem::path &output_path, std
         return std::unexpected{axk::make_error(axk::ErrorCode::io_open_failed, axk::ErrorCategory::io,
                                                "could not create manifest output directory")};
     }
-    auto temporary = axk::text::temporary_sibling(output_path);
+    auto temporary = axk::detail::write_temporary_file(output_path, [&](const axk::detail::TemporaryFileSink &sink) {
+        return sink(std::as_bytes(std::span{contents.data(), contents.size()}));
+    });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    {
-        std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
-        output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-        if (!output) {
-            std::filesystem::remove(*temporary, filesystem_error);
-            return std::unexpected{axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
-                                                   "could not write temporary manifest")};
-        }
-    }
-    if (auto flushed = axk::detail::flush_file_to_disk(*temporary); !flushed) {
-        std::filesystem::remove(*temporary, filesystem_error);
-        return flushed;
-    }
     if (auto published = axk::detail::publish_temporary_file(*temporary, output_path, overwrite); !published) {
         std::filesystem::remove(*temporary, filesystem_error);
         return published;

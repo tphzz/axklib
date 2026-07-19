@@ -151,7 +151,14 @@ struct plan_summary {
     bool applies_changes{};
 };
 
-enum class package_root_kind : std::uint8_t { volume, program, bank_group, sample_bank, sample };
+enum class package_root_kind : std::uint8_t {
+    volume = 0,
+    program = 1,
+    bank_group = 2,
+    sample = 3,
+    wave_data = 4,
+    sample_bank [[deprecated("use sample")]] = sample,
+};
 
 struct package_root_selector {
     package_root_kind kind{package_root_kind::volume};

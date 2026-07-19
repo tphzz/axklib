@@ -10,6 +10,7 @@ below. Human renderers consume the same service results without parsing JSON.
 | `info --format json` | `compat-v1` (wire shape has no version field) | `cli/schema/info_v1.*` |
 | `alter hds` stdout | `compat-v1` (wire shape has no version field) | `cli/schema/operations_v1.*` |
 | `volume.axklib.json` | `axklib.volume_graph.v1` | `cli/schema/export_v1.*` |
+| `unresolved.axklib.json` | `axklib.unresolved_wave_data.v1` | Application exact-export serializer |
 | Inventory, validation, coverage, orphan, relationship, and corpus report JSON | Per-file schema sidecar | Typed `ReportRow` projection and `axklib/report.*` |
 
 Missing fields, JSON null, empty strings, and empty arrays are distinct schema

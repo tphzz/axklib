@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <functional>
 #include <limits>
 #include <span>
 #include <string_view>
@@ -118,13 +117,18 @@ std::uint32_t count_bitmap_bits(std::span<const std::byte> bitmap, std::uint32_t
 }
 
 bool bitmap_test(std::span<const std::byte> bitmap, std::uint32_t cluster) {
-    return (std::to_integer<std::uint8_t>(bitmap[cluster / 8U]) & static_cast<std::uint8_t>(0x80U >> (cluster & 7U))) !=
-           0;
+    const auto index = static_cast<std::size_t>(cluster / 8U);
+    return index < bitmap.size() &&
+           (std::to_integer<std::uint8_t>(bitmap[index]) & static_cast<std::uint8_t>(0x80U >> (cluster & 7U))) != 0;
 }
 
-void bitmap_set(std::span<std::byte> bitmap, std::uint32_t cluster) {
-    const auto index = cluster / 8U;
+bool bitmap_set(std::span<std::byte> bitmap, std::uint32_t cluster) {
+    const auto index = static_cast<std::size_t>(cluster / 8U);
+    if (index >= bitmap.size()) {
+        return false;
+    }
     bitmap[index] |= static_cast<std::byte>(0x80U >> (cluster & 7U));
+    return true;
 }
 
 std::vector<AllocationMismatchRange> mismatch_ranges(std::span<const std::byte> left, std::span<const std::byte> right,
@@ -398,7 +402,7 @@ void classify_record(IndexRecord &record, std::span<const std::byte> payload) {
     }
 }
 
-void validate_directory_graph(Partition &partition, const OpenOptions &options) {
+Result<void> validate_directory_graph(Partition &partition, const OpenOptions &options) {
     std::unordered_map<std::uint32_t, const IndexRecord *> records_by_id;
     std::unordered_map<std::uint32_t, const IndexRecord *> directories_by_id;
     for (const auto &record : partition.records) {
@@ -425,6 +429,15 @@ void validate_directory_graph(Partition &partition, const OpenOptions &options) 
         }
     }
 
+    if (directories_by_id.size() > options.max_directory_records) {
+        ErrorContext context;
+        context.partition_index = partition.index.value;
+        partition.diagnostics.push_back(make_error(ErrorCode::object_malformed, ErrorCategory::object,
+                                                   "directory record count exceeds the configured traversal bound",
+                                                   std::move(context)));
+        return {};
+    }
+
     for (const auto &[directory_id, directory] : directories_by_id) {
         static_cast<void>(directory_id);
         for (const auto &entry : directory->directory_entries) {
@@ -444,16 +457,69 @@ void validate_directory_graph(Partition &partition, const OpenOptions &options) 
         }
     }
 
+    struct VisitFrame {
+        std::uint32_t directory_id{};
+        std::size_t next_entry{};
+        std::size_t depth{};
+    };
     std::unordered_map<std::uint32_t, std::uint8_t> colors;
-    std::function<void(std::uint32_t)> visit = [&](std::uint32_t directory_id) {
-        colors[directory_id] = 1;
-        const auto found = directories_by_id.find(directory_id);
-        if (found == directories_by_id.end()) {
-            colors[directory_id] = 2;
-            return;
+    std::vector<VisitFrame> stack;
+    std::vector<std::uint32_t> traversal_order;
+    std::unordered_set<std::uint32_t> scheduled;
+    traversal_order.reserve(directories_by_id.size());
+    scheduled.reserve(directories_by_id.size());
+    for (const auto &[directory_id, directory] : directories_by_id) {
+        if (!directory->parent_directory_id || directory->parent_directory_id->value == directory_id ||
+            !directories_by_id.contains(directory->parent_directory_id->value)) {
+            traversal_order.push_back(directory_id);
+            scheduled.insert(directory_id);
         }
-        for (const auto &entry : found->second->directory_entries) {
+    }
+    for (const auto &[directory_id, directory] : directories_by_id) {
+        static_cast<void>(directory);
+        if (scheduled.insert(directory_id).second)
+            traversal_order.push_back(directory_id);
+    }
+    for (const auto directory_id : traversal_order) {
+        if (colors[directory_id] != 0) {
+            continue;
+        }
+        if (options.max_directory_depth == 0) {
+            ErrorContext context;
+            context.partition_index = partition.index.value;
+            context.raw_offset = directories_by_id.at(directory_id)->record_offset.value;
+            partition.diagnostics.push_back(make_error(ErrorCode::object_malformed, ErrorCategory::object,
+                                                       "directory depth exceeds the configured traversal bound",
+                                                       std::move(context)));
+            continue;
+        }
+        stack.push_back({directory_id, 0U, 1U});
+        colors[directory_id] = 1;
+        while (!stack.empty()) {
+            if (const auto check = options.cancellation.check(); !check) {
+                return std::unexpected{check.error()};
+            }
+            auto &frame = stack.back();
+            const auto found = directories_by_id.find(frame.directory_id);
+            if (found == directories_by_id.end() || frame.next_entry >= found->second->directory_entries.size()) {
+                colors[frame.directory_id] = 2;
+                stack.pop_back();
+                continue;
+            }
+            const auto &entry = found->second->directory_entries[frame.next_entry++];
             if (entry.name == "." || entry.name == ".." || !directories_by_id.contains(entry.link_id.value)) {
+                continue;
+            }
+            const auto child_depth = frame.depth + 1U;
+            if (child_depth > options.max_directory_depth) {
+                ErrorContext context;
+                context.partition_index = partition.index.value;
+                context.object_type = "directory-entry";
+                context.object_name = entry.name;
+                context.raw_offset = found->second->record_offset.value + entry.payload_relative_offset;
+                partition.diagnostics.push_back(make_error(ErrorCode::object_malformed, ErrorCategory::object,
+                                                           "directory depth exceeds the configured traversal bound",
+                                                           std::move(context)));
                 continue;
             }
             const auto color = colors[entry.link_id.value];
@@ -467,17 +533,12 @@ void validate_directory_graph(Partition &partition, const OpenOptions &options) 
                                                            "directory child links contain a cycle",
                                                            std::move(context)));
             } else if (color == 0) {
-                visit(entry.link_id.value);
+                colors[entry.link_id.value] = 1;
+                stack.push_back({entry.link_id.value, 0U, child_depth});
             }
         }
-        colors[directory_id] = 2;
-    };
-    for (const auto &item : directories_by_id) {
-        const auto directory_id = item.first;
-        if (colors[directory_id] == 0) {
-            visit(directory_id);
-        }
     }
+    return {};
 }
 
 Result<Partition> parse_partition(const RandomAccessReader &image, const PartitionEntry &table_entry,
@@ -536,6 +597,13 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
     result.directory_index_span_clusters = *index_span;
     std::copy_n(header->begin() + 0xac, result.unresolved_header_tail.size(), result.unresolved_header_tail.begin());
 
+    const auto physical_cluster_capacity = static_cast<std::uint64_t>(result.sector_count) / result.sectors_per_cluster;
+    if (result.cluster_count > physical_cluster_capacity) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition cluster count exceeds its physical sector capacity",
+                                               result.index, *start + 0x90U)};
+    }
+
     const auto cluster_bytes = checked_multiply(sector_size, result.sectors_per_cluster);
     const auto raw_index_bytes = cluster_bytes ? checked_multiply(*cluster_bytes, result.directory_index_span_clusters)
                                                : Result<std::uint64_t>{std::unexpected{cluster_bytes.error()}};
@@ -556,7 +624,13 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
         return std::unexpected{index_data.error()};
     }
 
-    std::vector<std::byte> reconstructed((result.cluster_count + 7U) / 8U);
+    const auto bitmap_bytes_u64 = (static_cast<std::uint64_t>(result.cluster_count) + 7U) / 8U;
+    if (bitmap_bytes_u64 > std::numeric_limits<std::size_t>::max() ||
+        bitmap_bytes_u64 > options.max_allocation_bitmap_bytes) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition bitmap exceeds the configured memory bound", result.index)};
+    }
+    std::vector<std::byte> reconstructed(static_cast<std::size_t>(bitmap_bytes_u64));
     for (std::size_t block = 0; block + index_block_size <= index_data->size(); block += index_block_size) {
         if (const auto check = options.cancellation.check(); !check) {
             return std::unexpected{check.error()};
@@ -607,7 +681,11 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
             std::uint64_t extent_cluster_sum{};
             for (const auto list_cluster : record.continuation_clusters) {
                 if (list_cluster < result.cluster_count) {
-                    bitmap_set(reconstructed, list_cluster);
+                    if (!bitmap_set(reconstructed, list_cluster)) {
+                        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                                               "continuation cluster exceeds the partition bitmap",
+                                                               result.index, record.record_offset.value)};
+                    }
                 }
             }
             for (const auto &extent : record.extents) {
@@ -622,7 +700,11 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
                 }
                 for (std::uint32_t cluster = extent.cluster_offset;
                      cluster < extent.cluster_offset + extent.cluster_count; ++cluster) {
-                    bitmap_set(reconstructed, cluster);
+                    if (!bitmap_set(reconstructed, cluster)) {
+                        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                                               "data cluster exceeds the partition bitmap",
+                                                               result.index, record.record_offset.value)};
+                    }
                 }
             }
             if (extent_cluster_sum != record.cluster_count) {
@@ -654,12 +736,8 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
         }
     }
 
-    validate_directory_graph(result, options);
-
-    const auto bitmap_bytes_u64 = (static_cast<std::uint64_t>(result.cluster_count) + 7U) / 8U;
-    if (bitmap_bytes_u64 > std::numeric_limits<std::size_t>::max()) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition bitmap exceeds the supported memory range", result.index)};
+    if (const auto directories = validate_directory_graph(result, options); !directories) {
+        return std::unexpected{directories.error()};
     }
     const auto bitmap_offset =
         cluster_offset(result.start_sector, sector_size, result.sectors_per_cluster, result.bitmap_cluster);

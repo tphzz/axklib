@@ -188,6 +188,33 @@ TEST_F(PackageOperationsTest, RejectsSequenceRootsAndUploadOwnershipMismatch) {
     EXPECT_EQ(denied.error().code, "upload_not_found");
 }
 
+TEST_F(PackageOperationsTest, MapsCanonicalAndDeprecatedFriendlyRootNamesToRawObjectKinds) {
+    const auto export_kind = [&](std::string_view kind, std::string_view name, std::string_view output) {
+        return registry_.invoke(
+            "package.export",
+            {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}},
+             {"output", {{"rootId", "workspace"}, {"relativePath", output}}},
+             {"roots", {{{"kind", kind}, {"partitionIndex", 0U}, {"volumeName", "New Volume"}, {"objectName", name}}}}},
+            context());
+    };
+
+    const auto bank_group = export_kind("bank-group", "New SmpBank", "bank-group");
+    ASSERT_TRUE(bank_group) << bank_group.error().message;
+    EXPECT_EQ(bank_group->at("packageKind"), "sbac");
+
+    const auto sample = export_kind("sample", "sine wave", "sample");
+    ASSERT_TRUE(sample) << sample.error().message;
+    EXPECT_EQ(sample->at("packageKind"), "sbnk");
+
+    const auto deprecated_sample_bank = export_kind("sample-bank", "sine wave", "sample-bank");
+    ASSERT_TRUE(deprecated_sample_bank) << deprecated_sample_bank.error().message;
+    EXPECT_EQ(deprecated_sample_bank->at("packageKind"), "sbnk");
+
+    const auto wave_data = export_kind("wave-data", "sine wave", "wave-data");
+    ASSERT_TRUE(wave_data) << wave_data.error().message;
+    EXPECT_EQ(wave_data->at("packageKind"), "smpl");
+}
+
 TEST_F(PackageOperationsTest, PlanTokenRejectsChangedPackageAndTargetFilesWithoutPublication) {
     const auto export_package = [&](std::string_view name, std::string_view output) {
         return registry_.invoke(

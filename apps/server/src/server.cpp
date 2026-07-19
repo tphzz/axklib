@@ -611,57 +611,79 @@ class ServerApplication {
     }
 
     axk::app::Result<int> run() {
-        app_.bindaddr(config_.bind_address)
-            .port(config_.port)
-            .concurrency(config_.worker_threads)
-            .stream_threshold(config_.stream_threshold_bytes)
-            .websocket_max_payload(config_.maximum_websocket_payload_bytes)
-            .server_name("axklib-server");
-
-        auto server = app_.run_async();
-        if (app_.wait_for_server_start(std::chrono::seconds{5}) == std::cv_status::timeout) {
-            app_.stop();
-            server.wait();
-            return std::unexpected(axk::app::Error{"server_start_failed", "Crow did not bind the configured endpoint"});
-        }
-
-        ScopedConnectionFile connection_file{config_.connection_file};
-        if (!config_.connection_file.empty()) {
-            const auto port = app_.port();
-            const auto build = axk::current_build_info();
-            const auto published = connection_file.publish(
-                {{"schemaVersion", 1},
-                 {"apiVersion", "v1"},
-                 {"pid", process_id()},
-                 {"baseUrl", "http://" + config_.bind_address + ":" + std::to_string(port) + "/api/v1"},
-                 {"websocketUrl", "ws://" + config_.bind_address + ":" + std::to_string(port) + "/api/v1/events"},
-                 {"bearerToken", config_.bearer_token},
-                 {"semanticVersion", axk::version()},
-                 {"sourceIdentity", build.source_identity}});
-            if (!published) {
+        std::future<void> server;
+        const auto stop_server = [&]() noexcept {
+            try {
                 app_.stop();
-                server.wait();
-                return std::unexpected(published.error());
+            } catch (...) {
             }
-        }
-        auto next_parent_check = std::chrono::steady_clock::now();
-        while (server.wait_for(std::chrono::milliseconds{25}) != std::future_status::ready) {
-            if (config_.parent_process_id != 0U && std::chrono::steady_clock::now() >= next_parent_check) {
-                next_parent_check = std::chrono::steady_clock::now() + std::chrono::milliseconds{250};
-                if (!axk::server::process_is_running(config_.parent_process_id)) {
-                    std::clog << "axklib-server: owning desktop process exited; stopping\n";
-                    app_.stop();
-                    break;
+            if (server.valid()) {
+                try {
+                    server.wait();
+                } catch (...) {
                 }
             }
-            if (!shutdown_requested_.load(std::memory_order_acquire))
-                continue;
-            std::this_thread::sleep_for(std::chrono::milliseconds{25});
-            app_.stop();
-            break;
+        };
+        try {
+            app_.bindaddr(config_.bind_address)
+                .port(config_.port)
+                .concurrency(config_.worker_threads)
+                .stream_threshold(config_.stream_threshold_bytes)
+                .websocket_max_payload(config_.maximum_websocket_payload_bytes)
+                .server_name("axklib-server");
+
+            server = app_.run_async();
+            const auto start_status = app_.wait_for_server_start(std::chrono::seconds{5});
+            if (start_status == std::cv_status::timeout || !app_.is_bound()) {
+                stop_server();
+                return std::unexpected(
+                    axk::app::Error{"server_start_failed", "Crow could not bind the configured endpoint"});
+            }
+
+            ScopedConnectionFile connection_file{config_.connection_file};
+            if (!config_.connection_file.empty()) {
+                const auto port = app_.port();
+                const auto build = axk::current_build_info();
+                const auto published = connection_file.publish(
+                    {{"schemaVersion", 1},
+                     {"apiVersion", "v1"},
+                     {"pid", process_id()},
+                     {"baseUrl", "http://" + config_.bind_address + ":" + std::to_string(port) + "/api/v1"},
+                     {"websocketUrl", "ws://" + config_.bind_address + ":" + std::to_string(port) + "/api/v1/events"},
+                     {"bearerToken", config_.bearer_token},
+                     {"semanticVersion", axk::version()},
+                     {"sourceIdentity", build.source_identity}});
+                if (!published) {
+                    stop_server();
+                    return std::unexpected(published.error());
+                }
+            }
+            auto next_parent_check = std::chrono::steady_clock::now();
+            while (server.wait_for(std::chrono::milliseconds{25}) != std::future_status::ready) {
+                if (config_.parent_process_id != 0U && std::chrono::steady_clock::now() >= next_parent_check) {
+                    next_parent_check = std::chrono::steady_clock::now() + std::chrono::milliseconds{250};
+                    if (!axk::server::process_is_running(config_.parent_process_id)) {
+                        std::clog << "axklib-server: owning desktop process exited; stopping\n";
+                        app_.stop();
+                        break;
+                    }
+                }
+                if (!shutdown_requested_.load(std::memory_order_acquire))
+                    continue;
+                std::this_thread::sleep_for(std::chrono::milliseconds{25});
+                app_.stop();
+                break;
+            }
+            server.get();
+            return 0;
+        } catch (const std::exception &error) {
+            stop_server();
+            return std::unexpected(
+                axk::app::Error{"server_start_failed", "server transport failed: " + std::string{error.what()}});
+        } catch (...) {
+            stop_server();
+            return std::unexpected(axk::app::Error{"server_start_failed", "server transport failed"});
         }
-        server.get();
-        return 0;
     }
 
   private:
@@ -2232,11 +2254,18 @@ class ServerApplication {
 } // namespace
 
 axk::app::Result<int> axk::server::run(const Config &config, app::OperationRegistry registry) {
-    if (const auto valid = validate_config(config); !valid)
-        return std::unexpected(valid.error());
-    auto workspaces = WorkspaceStore::open(config.workspace_store);
-    if (!workspaces)
-        return std::unexpected(workspaces.error());
-    ServerApplication application{config, std::move(registry), std::move(*workspaces)};
-    return application.run();
+    try {
+        if (const auto valid = validate_config(config); !valid)
+            return std::unexpected(valid.error());
+        auto workspaces = WorkspaceStore::open(config.workspace_store);
+        if (!workspaces)
+            return std::unexpected(workspaces.error());
+        ServerApplication application{config, std::move(registry), std::move(*workspaces)};
+        return application.run();
+    } catch (const std::exception &error) {
+        return std::unexpected(
+            app::Error{"server_start_failed", "server initialization failed: " + std::string{error.what()}});
+    } catch (...) {
+        return std::unexpected(app::Error{"server_start_failed", "server initialization failed"});
+    }
 }

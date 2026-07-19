@@ -48,16 +48,19 @@ The suffix-free output becomes `Stage Piano.axkprg`. Root grammar is:
 ```text
 volume
 program=NAME
-sbac=NAME
-sbnk=NAME
-smpl=NAME
+bank-group=NAME
+sample=NAME
+wave-data=NAME
 ```
 
-`prog` and `sample` are accepted aliases. `--partition`, `--group`, and
-`--volume` constrain all roots in one export command. Repeat `--root` to create
-a multi-root `.axkpkg`. A selector must resolve exactly once and every required
-active relationship must be known and unambiguous; otherwise no archive is
-published. Ambiguous inactive Program diagnostic rows are not package content.
+The raw object selectors `sbac`, `sbnk`, and `smpl` remain supported. `prog` is
+an alias for `program`. The former `sample-bank` spelling is deprecated and is
+accepted as a compatibility alias for `sample`; it will be removed in a future
+major release. `--partition`, `--group`, and `--volume` constrain all roots in
+one export command. Repeat `--root` to create a multi-root `.axkpkg`.
+A selector must resolve exactly once and every required active relationship
+must be known and unambiguous; otherwise no archive is published. Ambiguous
+inactive Program diagnostic rows are not package content.
 
 Inspection validates the archive profile, canonical manifest, graph, declared
 entry sizes, and package ID while reading only bounded metadata and the

@@ -110,9 +110,9 @@ PackageRootKind internal_root_kind(package_root_kind kind) {
         return PackageRootKind::prog;
     case package_root_kind::bank_group:
         return PackageRootKind::sbac;
-    case package_root_kind::sample_bank:
-        return PackageRootKind::sbnk;
     case package_root_kind::sample:
+        return PackageRootKind::sbnk;
+    case package_root_kind::wave_data:
         return PackageRootKind::smpl;
     }
     return PackageRootKind::volume;

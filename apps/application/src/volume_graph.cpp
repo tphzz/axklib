@@ -261,4 +261,65 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
     }
 }
 
+axk::Result<std::string> serialize_unresolved_wave_data_graph(const UnresolvedWaveDataExport &scope,
+                                                              const std::filesystem::path &source_path,
+                                                              std::string_view container_kind) {
+    try {
+        OrderedJson waveforms = OrderedJson::array();
+        for (const auto &waveform : scope.waveforms) {
+            OrderedJson candidates = OrderedJson::array();
+            for (const auto &candidate : waveform.placement_candidates) {
+                candidates.push_back({
+                    {"partition_index", candidate.partition.value},
+                    {"partition_name", candidate.partition_name},
+                    {"volume_directory_sfs_id", candidate.volume_directory.value},
+                    {"volume_name", candidate.volume_name},
+                    {"category_name", candidate.category_name},
+                    {"entry_name", candidate.entry_name},
+                    {"container_directory", candidate.container_directory},
+                });
+            }
+            const auto &audio = waveform.waveform;
+            waveforms.push_back({
+                {"id", waveform.object_key},
+                {"object_key", waveform.object_key},
+                {"display_name", waveform.display_name},
+                {"wav_path", text::path_to_utf8(waveform.relative_wav_path)},
+                {"placement",
+                 {{"resolution", placement_resolution_name(waveform.placement_resolution)},
+                  {"quality",
+                   waveform.placement_resolution == PlacementResolution::exact ? "authoritative" : "unresolved"},
+                  {"basis", waveform.placement_resolution == PlacementResolution::ambiguous
+                                ? "multiple directory placement candidates"
+                                : "no authoritative directory placement"},
+                  {"candidates", std::move(candidates)}}},
+                {"audio",
+                 {{"channels", audio.format.channels},
+                  {"sample_rate", audio.format.sample_rate},
+                  {"sample_width_bytes", audio.format.sample_width_bytes},
+                  {"frames", audio.frame_count},
+                  {"stored_payload_size", audio.stored_payload_size},
+                  {"decoded_pcm_size", audio.pcm.size()},
+                  {"exactness_status", audio.alternating_byte_payload_detected ? "alternating-byte-compatibility-export"
+                                                                               : "exact-current-mono"}}},
+            });
+        }
+        return OrderedJson{
+            {"schema", unresolved_wave_data_schema_version},
+            {"source", {{"container", text::path_to_utf8(source_path)}, {"container_kind", container_kind}}},
+            {"scope",
+             {{"kind", "unresolved_physical_wave_data"},
+              {"path", text::path_to_utf8(scope.relative_root)},
+              {"partition_index", scope.partition.value},
+              {"partition_name", scope.partition_name}}},
+            {"objects", {{"smpl", std::move(waveforms)}}},
+        }
+            .dump(2);
+    } catch (const nlohmann::json::exception &error) {
+        return std::unexpected{
+            make_error(ErrorCode::invalid_argument, ErrorCategory::internal,
+                       std::string{"could not serialize unresolved Wave Data JSON: "} + error.what())};
+    }
+}
+
 } // namespace axk::app

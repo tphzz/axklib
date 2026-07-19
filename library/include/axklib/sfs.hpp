@@ -22,6 +22,9 @@ inline constexpr std::size_t sfs_partition_limit = 8;
 struct OpenOptions {
     std::size_t max_index_bytes{4U * 1024U * 1024U};
     std::size_t max_directory_bytes{64U * 1024U};
+    std::size_t max_directory_records{65'536U};
+    std::size_t max_directory_depth{1'024U};
+    std::size_t max_allocation_bitmap_bytes{64U * 1024U * 1024U};
     std::size_t max_mismatch_ranges{512};
     CancellationToken cancellation;
     ProgressSink *progress{};

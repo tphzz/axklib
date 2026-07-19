@@ -245,6 +245,9 @@ TEST(Sdk, MediaBuildPlanCreatesAFat12Image) {
 }
 
 TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
+    static_assert(static_cast<std::uint8_t>(axk::package_root_kind::bank_group) == 2U);
+    static_assert(static_cast<std::uint8_t>(axk::package_root_kind::sample) == 3U);
+    static_assert(static_cast<std::uint8_t>(axk::package_root_kind::wave_data) == 4U);
     const auto root = std::filesystem::temp_directory_path() / "axklib-sdk-package";
     const auto package_stem = root / "waveform";
     const auto target_manifest = root / "target.json";
@@ -266,7 +269,7 @@ TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
     ASSERT_NE(waveform, objects->items.end());
 
     axk::package_root_selector selector;
-    selector.kind = axk::package_root_kind::sample;
+    selector.kind = axk::package_root_kind::wave_data;
     selector.partition_index = waveform->partition_index;
     selector.group_name = waveform->partition_name;
     selector.volume_name = waveform->volume_name;

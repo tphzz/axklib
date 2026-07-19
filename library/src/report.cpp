@@ -10,6 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/file_publication.hpp"
 #include "axklib/utf8.hpp"
 
 namespace axk {
@@ -151,25 +152,14 @@ Result<void> write_atomic(const std::filesystem::path &path, std::string_view te
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create report output directory")};
     }
-    const auto temporary = text::temporary_sibling(path);
+    const auto temporary = detail::write_temporary_file(path, [&](const detail::TemporaryFileSink &sink) {
+        return sink(std::as_bytes(std::span{text.data(), text.size()}));
+    });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    {
-        std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
-        output.write(text.data(), static_cast<std::streamsize>(text.size()));
-        if (!output) {
-            std::filesystem::remove(*temporary, error);
-            return std::unexpected{
-                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary report")};
-        }
-    }
-    if (overwrite)
-        std::filesystem::remove(path, error);
-    std::filesystem::rename(*temporary, path, error);
-    if (error) {
+    if (const auto published = detail::publish_temporary_file(*temporary, path, overwrite); !published) {
         std::filesystem::remove(*temporary, error);
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not publish report atomically")};
+        return std::unexpected{published.error()};
     }
     return {};
 }

@@ -254,7 +254,7 @@ detail::write_prepared_media_image(const PreparedMediaImage &prepared, const std
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create media output directory")};
     }
-    auto temporary = text::temporary_sibling(output_path);
+    auto temporary = detail::reserve_temporary_file(output_path);
     if (!temporary)
         return std::unexpected{temporary.error()};
     TemporaryFileCleanup cleanup{*temporary};

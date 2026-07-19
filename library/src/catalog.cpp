@@ -110,9 +110,13 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
                     matching.push_back(candidate.placement);
             }
             std::optional<ObjectPlacement> placement;
+            auto resolution = PlacementResolution::missing;
             if (matching.size() == 1) {
-                placement = std::move(matching.front());
+                placement = matching.front();
+                resolution = PlacementResolution::exact;
             } else {
+                if (!matching.empty())
+                    resolution = PlacementResolution::ambiguous;
                 result.issues.push_back({
                     matching.empty() ? "CATALOG_OBJECT_PLACEMENT_MISSING" : "CATALOG_OBJECT_PLACEMENT_AMBIGUOUS",
                     matching.empty() ? "object has no exact volume/category "
@@ -125,8 +129,8 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
             }
             auto raw_payload = retain_raw_payloads ? std::move(*bytes) : std::vector<std::byte>{};
             result.objects.push_back({object_key(partition.index, record.sfs_id), partition.index, record.sfs_id,
-                                      std::format("partition:{}", partition.index.value), std::move(*decoded),
-                                      std::move(placement), std::move(raw_payload)});
+                                      std::format("partition:{}", partition.index.value), *decoded,
+                                      std::move(placement), std::move(raw_payload), std::move(matching), resolution});
         }
     }
     std::ranges::sort(result.objects, {},
@@ -137,6 +141,18 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
 Result<ObjectCatalog> build_object_catalog(const Container &container, std::size_t maximum_object_bytes,
                                            const CancellationToken &cancellation) {
     return detail::build_object_catalog(container, maximum_object_bytes, cancellation, true);
+}
+
+std::string_view placement_resolution_name(PlacementResolution resolution) noexcept {
+    switch (resolution) {
+    case PlacementResolution::exact:
+        return "exact";
+    case PlacementResolution::missing:
+        return "missing";
+    case PlacementResolution::ambiguous:
+        return "ambiguous";
+    }
+    return "missing";
 }
 
 } // namespace axk

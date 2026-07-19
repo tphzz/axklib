@@ -102,6 +102,7 @@ void axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &gra
     if (scope == "volume") {
         std::erase_if(plan.volumes,
                       [&](const auto &volume) { return text::path_to_utf8(volume.relative_root) != selector_path; });
+        plan.unresolved_wave_data.clear();
         return;
     }
     std::set<std::string> programs;
@@ -133,6 +134,13 @@ void axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &gra
             }
         }
     }
+    std::set<std::string> confirmed_waveforms;
+    for (const auto &row : graph.relationships) {
+        if (!row.target_key || !banks.contains(row.source_key) || row.quality != RelationshipQuality::known)
+            continue;
+        if (row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL")
+            confirmed_waveforms.insert(*row.target_key);
+    }
     for (auto &volume : plan.volumes) {
         std::erase_if(volume.sample_banks, [&](const auto &bank) { return !banks.contains(bank.object_key); });
         std::set<std::string> waveforms;
@@ -150,4 +158,9 @@ void axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &gra
     }
     std::erase_if(plan.volumes,
                   [](const auto &volume) { return volume.waveforms.empty() && volume.sample_banks.empty(); });
+    for (auto &scope : plan.unresolved_wave_data) {
+        std::erase_if(scope.waveforms,
+                      [&](const auto &waveform) { return !confirmed_waveforms.contains(waveform.object_key); });
+    }
+    std::erase_if(plan.unresolved_wave_data, [](const auto &scope) { return scope.waveforms.empty(); });
 }

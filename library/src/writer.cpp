@@ -12,6 +12,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/file_publication.hpp"
+
 namespace axk {
 namespace {
 
@@ -603,25 +605,14 @@ Result<void> write_build_manifest_template(BuildManifestKind kind, const std::fi
         return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                           "could not create build manifest output directory")};
     }
-    auto temporary = text::temporary_sibling(output_path);
+    auto temporary = detail::write_temporary_file(output_path, [&](const detail::TemporaryFileSink &sink) {
+        return sink(std::as_bytes(std::span{serialized->data(), serialized->size()}));
+    });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    {
-        std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
-        output.write(serialized->data(), static_cast<std::streamsize>(serialized->size()));
-        if (!output) {
-            std::filesystem::remove(*temporary, filesystem_error);
-            return std::unexpected{
-                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary build manifest")};
-        }
-    }
-    if (overwrite)
-        std::filesystem::remove(output_path, filesystem_error);
-    std::filesystem::rename(*temporary, output_path, filesystem_error);
-    if (filesystem_error) {
+    if (const auto published = detail::publish_temporary_file(*temporary, output_path, overwrite); !published) {
         std::filesystem::remove(*temporary, filesystem_error);
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not publish build manifest atomically")};
+        return std::unexpected{published.error()};
     }
     return {};
 }

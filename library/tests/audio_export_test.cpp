@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <ranges>
 
 #include <gtest/gtest.h>
 
@@ -53,6 +54,53 @@ TEST(AudioExport, BuildsExactVolumeOwnershipAndWritesEveryPhysicalWaveform) {
     ASSERT_TRUE(sfz);
     EXPECT_EQ(sfz->written_files.size(), 8U);
     EXPECT_FALSE(std::filesystem::is_regular_file(output / volume.relative_root / "B New SmpBank.sfz"));
+    std::filesystem::remove_all(output, error);
+}
+
+TEST(AudioExport, WritesMissingAndAmbiguousWaveDataIntoExplicitUnresolvedScope) {
+    const auto container = axk::open_image(fixture());
+    ASSERT_TRUE(container);
+    auto catalog = axk::build_object_catalog(*container);
+    ASSERT_TRUE(catalog);
+    auto wave_data = catalog->objects | std::views::filter([](const auto &item) {
+                         return item.object.header.type == axk::ObjectType::smpl;
+                     });
+    auto first = wave_data.begin();
+    ASSERT_NE(first, wave_data.end());
+    first->placement.reset();
+    first->placement_candidates.clear();
+    first->placement_resolution = axk::PlacementResolution::missing;
+    ++first;
+    ASSERT_NE(first, wave_data.end());
+    ASSERT_TRUE(first->placement);
+    auto alternate = *first->placement;
+    alternate.volume_name = "Other candidate";
+    first->placement.reset();
+    first->placement_candidates.push_back(std::move(alternate));
+    first->placement_resolution = axk::PlacementResolution::ambiguous;
+
+    const auto graph = axk::build_relationship_graph(*catalog);
+    const auto plan = axk::build_export_plan(*container, *catalog, graph);
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->volumes.size(), 1U);
+    EXPECT_EQ(plan->volumes.front().waveforms.size(), 6U);
+    ASSERT_EQ(plan->unresolved_wave_data.size(), 1U);
+    const auto &unresolved = plan->unresolved_wave_data.front();
+    EXPECT_EQ(unresolved.relative_root, "partition_00_New_Partition/Unresolved Wave Data");
+    ASSERT_EQ(unresolved.waveforms.size(), 2U);
+    EXPECT_EQ(unresolved.waveforms[0].placement_resolution, axk::PlacementResolution::missing);
+    EXPECT_TRUE(unresolved.waveforms[0].placement_candidates.empty());
+    EXPECT_EQ(unresolved.waveforms[1].placement_resolution, axk::PlacementResolution::ambiguous);
+    EXPECT_EQ(unresolved.waveforms[1].placement_candidates.size(), 2U);
+
+    const auto output = std::filesystem::temp_directory_path() / "axklib-cpp-unresolved-export-test";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto exported = axk::write_export_audio(*plan, output);
+    ASSERT_TRUE(exported) << exported.error().message;
+    EXPECT_EQ(exported->written_files.size(), 8U);
+    EXPECT_TRUE(std::filesystem::is_regular_file(output / unresolved.relative_root /
+                                                 unresolved.waveforms.front().relative_wav_path));
     std::filesystem::remove_all(output, error);
 }
 
