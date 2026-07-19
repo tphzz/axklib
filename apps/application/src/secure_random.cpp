@@ -11,6 +11,7 @@
 #if defined(_WIN32)
 #define NOMINMAX
 #include <bcrypt.h>
+#include <windows.h>
 #elif defined(__linux__)
 #include <sys/random.h>
 #elif defined(__APPLE__)

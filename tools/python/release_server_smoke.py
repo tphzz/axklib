@@ -79,14 +79,32 @@ def exercise(server: Path, fixture: Path) -> None:
         fixture_name = "fixture.hds"
         shutil.copyfile(fixture, workspace / fixture_name)
         state = workspace / "state"
+        workspace_store = workspace / "workspaces.json"
         connection_file = state / "connection.json"
+        workspace_store.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "revision": 1,
+                    "workspaces": [
+                        {
+                            "id": "workspace",
+                            "displayName": "Workspace",
+                            "path": str(workspace.resolve()),
+                            "writable": True,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
         process = subprocess.Popen(
             [
                 str(server),
                 "--port",
                 "0",
-                "--root",
-                f"workspace={workspace}",
+                "--workspace-store",
+                str(workspace_store),
                 "--state-directory",
                 str(state),
                 "--connection-file",

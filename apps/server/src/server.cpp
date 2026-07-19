@@ -21,7 +21,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <syncstream>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -66,6 +65,12 @@ using Json = nlohmann::json;
 constexpr std::size_t maximum_cursor_length = 512U;
 
 constexpr std::string_view event_subprotocol{"axklib.events.v1"};
+
+void write_structured_log(std::string line) {
+    static std::mutex mutex;
+    const std::scoped_lock lock{mutex};
+    std::clog << line << '\n';
+}
 
 std::uint64_t process_id() {
 #ifdef _WIN32
@@ -352,9 +357,8 @@ struct RequestTelemetryMiddleware {
             id = request_id(request);
             response.set_header("X-Request-Id", id);
         }
-        std::osyncstream{std::clog} << axk::server::structured_request_log(id, crow::method_name(request.method),
-                                                                           request.url, response.code, duration)
-                                    << '\n';
+        write_structured_log(axk::server::structured_request_log(id, crow::method_name(request.method), request.url,
+                                                                 response.code, duration));
     }
 };
 
@@ -751,9 +755,8 @@ class ServerApplication {
     void audit(std::string_view id, std::string_view action, std::string_view outcome,
                std::string_view principal_id = {}, std::string_view resource_type = {},
                std::string_view resource_id = {}) const {
-        std::osyncstream{std::clog} << axk::server::structured_audit_log(id, action, outcome, principal_id,
-                                                                         resource_type, resource_id)
-                                    << '\n';
+        write_structured_log(
+            axk::server::structured_audit_log(id, action, outcome, principal_id, resource_type, resource_id));
     }
 
     std::optional<crow::response> guard(const crow::request &request, std::string_view id) const {
