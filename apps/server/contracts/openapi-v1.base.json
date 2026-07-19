@@ -14,7 +14,7 @@
     "/system/version": {
       "get": {
         "operationId": "system.version",
-        "responses": {"200": {"description": "Version and source identity"}}
+        "responses": {"200": {"description": "Version and source identity", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/VersionResponse"}}}}}
       }
     },
     "/system/capabilities": {
@@ -50,8 +50,8 @@
       "get": {
         "operationId": "system.health.ready",
         "responses": {
-          "200": {"description": "Configuration, workspace state, sandbox, state storage, startup cleanup, and executor admission are ready"},
-          "503": {"description": "One or more required readiness checks failed"}
+          "200": {"description": "Configuration, workspace state, sandbox, state storage, startup cleanup, and executor admission are ready", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReadinessResponse"}}}},
+          "503": {"description": "One or more required readiness checks failed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReadinessResponse"}}}}
         }
       }
     },
@@ -69,60 +69,66 @@
     "/roots": {
       "get": {
         "operationId": "filesystem.roots",
-        "responses": {"200": {"description": "Currently available workspace roots"}}
+        "responses": {"200": {"description": "Currently available workspace roots", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RootsResponse"}}}}}
       }
     },
     "/workspaces": {
       "get": {
         "operationId": "workspaces.list",
-        "responses": {"200": {"description": "Persisted workspaces and their current availability"}}
+        "responses": {"200": {"description": "Persisted workspaces and their current availability", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceSnapshotResponse"}}}}}
       },
       "post": {
         "operationId": "workspaces.create",
-        "responses": {"201": {"description": "Workspace persisted and activated"}, "409": {"description": "Revision conflict"}}
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceCreateRequest"}}}},
+        "responses": {"201": {"description": "Workspace persisted and activated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceResponse"}}}}, "409": {"description": "Revision conflict"}}
       }
     },
     "/workspaces/{workspaceId}": {
       "parameters": [{"name": "workspaceId", "in": "path", "required": true, "schema": {"type": "string"}}],
       "patch": {
         "operationId": "workspaces.update",
-        "responses": {"200": {"description": "Workspace updated"}, "409": {"description": "Revision conflict"}}
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceUpdateRequest"}}}},
+        "responses": {"200": {"description": "Workspace updated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceResponse"}}}}, "409": {"description": "Revision conflict"}}
       },
       "delete": {
         "operationId": "workspaces.delete",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RevisionRequest"}}}},
         "responses": {"204": {"description": "Workspace removed"}, "409": {"description": "Revision conflict"}}
       }
     },
     "/workspaces/recovery/reset": {
       "post": {
         "operationId": "workspaces.recovery.reset",
-        "responses": {"200": {"description": "Existing store archived and empty store created"}}
+        "responses": {"200": {"description": "Existing store archived and empty store created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceResetResponse"}}}}}
       }
     },
     "/host-directories/roots": {
       "get": {
         "operationId": "hostDirectories.roots",
         "description": "Authenticated setup-only host directory roots. This route does not expose files.",
-        "responses": {"200": {"description": "Host directory browser roots"}}
+        "responses": {"200": {"description": "Host directory browser roots", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HostDirectoryRootsResponse"}}}}}
       }
     },
     "/host-directories/list": {
       "post": {
         "operationId": "hostDirectories.list",
         "description": "Authenticated setup-only directory listing. Symlinks and non-directory entries are excluded.",
-        "responses": {"200": {"description": "Bounded host directory listing"}}
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HostDirectoryListRequest"}}}},
+        "responses": {"200": {"description": "Bounded host directory listing", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HostDirectoryListResponse"}}}}}
       }
     },
     "/files/list": {
       "post": {
         "operationId": "filesystem.list",
-        "responses": {"200": {"description": "Bounded sandbox directory listing"}}
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DirectoryListRequest"}}}},
+        "responses": {"200": {"description": "Bounded sandbox directory listing", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DirectoryListResponse"}}}}}
       }
     },
     "/files/metadata": {
       "post": {
         "operationId": "filesystem.metadata",
-        "responses": {"200": {"description": "Sandbox entry metadata"}}
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EntryRef"}}}},
+        "responses": {"200": {"description": "Sandbox entry metadata", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EntryMetadataResponse"}}}}}
       }
     },
     "/filesystem/directories": {
@@ -188,10 +194,10 @@
         "operationId": "filesystem.archive.create",
         "requestBody": {
           "required": true,
-          "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["directory"], "properties": {"directory": {"$ref": "#/components/schemas/DirectoryRef"}}}}}
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DirectoryArchiveRequest"}}}
         },
         "responses": {
-          "201": {"description": "Bounded temporary TAR archive created"},
+          "201": {"description": "Bounded temporary TAR archive created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DownloadArchiveResponse"}}}},
           "413": {"description": "Requested archive exceeds configured limits"},
           "429": {"description": "Archive staging quota exhausted", "headers": {"Retry-After": {"schema": {"type": "integer", "minimum": 1}, "description": "Minimum retry delay in seconds"}}}
         }
@@ -215,17 +221,17 @@
         "operationId": "images.open",
         "requestBody": {
           "required": true,
-          "content": {"application/json": {"schema": {"type": "object", "required": ["source"], "properties": {"source": {"$ref": "#/components/schemas/FileRef"}}}}}
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageOpenRequest"}}}
         },
-        "responses": {"201": {"description": "Immutable metadata-only image session opened"}}
+        "responses": {"201": {"description": "Immutable metadata-only image session opened", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageSessionResponse"}}}}}
       }
     },
     "/images/{imageId}": {
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}}
       ],
-      "get": {"operationId": "images.status", "responses": {"200": {"description": "Image session summary"}}},
-      "delete": {"operationId": "images.close", "responses": {"200": {"description": "Image session closed idempotently"}}}
+      "get": {"operationId": "images.status", "responses": {"200": {"description": "Image session summary", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageSessionResponse"}}}}}},
+      "delete": {"operationId": "images.close", "responses": {"200": {"description": "Image session closed idempotently", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageCloseResponse"}}}}}}
     },
     "/images/{imageId}/content": {
       "parameters": [
@@ -288,7 +294,7 @@
         {"$ref": "#/components/parameters/PageLimit"},
         {"$ref": "#/components/parameters/PageCursor"}
       ],
-      "get": {"operationId": "images.validation.issues", "responses": {"200": {"description": "Bounded validation issue page"}}}
+      "get": {"operationId": "images.validation.issues", "responses": {"200": {"description": "Bounded validation issue page", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageValidationPageResponse"}}}}}}
     },
     "/images/{imageId}/preview": {
       "parameters": [
@@ -296,7 +302,7 @@
         {"name": "objectId", "in": "query", "required": true, "schema": {"type": "string"}},
         {"name": "bins", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1}}
       ],
-      "get": {"operationId": "images.preview", "responses": {"200": {"description": "Bounded waveform min/max envelope"}}}
+      "get": {"operationId": "images.preview", "responses": {"200": {"description": "Bounded waveform min/max envelope", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImagePreviewResponse"}}}}}}
     },
     "/auditions/{auditionId}": {
       "parameters": [
@@ -321,20 +327,22 @@
     "/uploads": {
       "post": {
         "operationId": "uploads.create",
-        "responses": {"201": {"description": "Temporary upload initiated"}}
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UploadCreateRequest"}}}},
+        "responses": {"201": {"description": "Temporary upload initiated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UploadResponse"}}}}}
       }
     },
     "/uploads/{uploadId}": {
       "parameters": [
         {"name": "uploadId", "in": "path", "required": true, "schema": {"type": "string"}}
       ],
-      "get": {"operationId": "uploads.status", "responses": {"200": {"description": "Upload status"}}},
+      "get": {"operationId": "uploads.status", "responses": {"200": {"description": "Upload status", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UploadResponse"}}}}}},
       "put": {
         "operationId": "uploads.append",
         "parameters": [
           {"name": "Upload-Offset", "in": "header", "required": true, "schema": {"type": "integer", "minimum": 0}}
         ],
-        "responses": {"200": {"description": "Bounded upload chunk stored"}}
+        "requestBody": {"required": true, "content": {"application/octet-stream": {"schema": {"type": "string", "contentEncoding": "binary"}}}},
+        "responses": {"200": {"description": "Bounded upload chunk stored", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UploadResponse"}}}}}
       },
       "delete": {"operationId": "uploads.delete", "responses": {"204": {"description": "Upload deleted"}}}
     },
@@ -344,7 +352,7 @@
       ],
       "post": {
         "operationId": "uploads.complete",
-        "responses": {"200": {"description": "Upload size and optional SHA-256 verified"}}
+        "responses": {"200": {"description": "Upload size and optional SHA-256 verified", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UploadResponse"}}}}}
       }
     },
     "/uploads/{uploadId}/materialize": {
@@ -353,7 +361,8 @@
       ],
       "post": {
         "operationId": "uploads.materialize",
-        "responses": {"201": {"description": "Upload atomically copied to a persistent sandbox FileRef"}}
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/UploadMaterializeRequest"}}}},
+        "responses": {"201": {"description": "Upload atomically copied to a persistent sandbox FileRef", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MaterializedFileResponse"}}}}}
       }
     },
     "/jobs/{jobId}": {
@@ -521,6 +530,341 @@
             "required": ["deleted"],
             "properties": {"deleted": {"type": "boolean"}}
           },
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "RootInfo": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "displayName", "writable"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "displayName": {"type": "string", "minLength": 1},
+          "writable": {"type": "boolean"}
+        }
+      },
+      "RootsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"type": "object", "additionalProperties": false, "required": ["roots"], "properties": {"roots": {"type": "array", "items": {"$ref": "#/components/schemas/RootInfo"}}}},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "Workspace": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "displayName", "path", "writable", "effectiveWritable", "status", "issue"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "displayName": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "writable": {"type": "boolean"},
+          "effectiveWritable": {"type": "boolean"},
+          "status": {"enum": ["AVAILABLE", "READ_ONLY", "MISSING", "NOT_DIRECTORY", "PERMISSION_DENIED"]},
+          "issue": {"type": ["string", "null"]}
+        }
+      },
+      "WorkspaceResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {"data": {"$ref": "#/components/schemas/Workspace"}, "meta": {"$ref": "#/components/schemas/ResponseMeta"}}
+      },
+      "WorkspaceSnapshotResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["state", "revision", "workspaces", "configurationIssue"],
+            "properties": {
+              "state": {"enum": ["READY", "NO_AVAILABLE_WORKSPACE", "CONFIGURATION_ERROR"]},
+              "revision": {"type": "integer", "minimum": 0},
+              "workspaces": {"type": "array", "items": {"$ref": "#/components/schemas/Workspace"}},
+              "configurationIssue": {"type": ["string", "null"]}
+            }
+          },
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "WorkspaceResetResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"type": "object", "additionalProperties": false, "required": ["archivedPath", "revision"], "properties": {"archivedPath": {"type": ["string", "null"]}, "revision": {"type": "integer", "minimum": 0}}},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "WorkspaceCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["displayName", "path", "revision"],
+        "properties": {
+          "displayName": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "writable": {"type": "boolean", "default": true},
+          "revision": {"type": "integer", "minimum": 0}
+        }
+      },
+      "WorkspaceUpdateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revision"],
+        "properties": {
+          "displayName": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "writable": {"type": "boolean"},
+          "revision": {"type": "integer", "minimum": 0}
+        }
+      },
+      "RevisionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revision"],
+        "properties": {"revision": {"type": "integer", "minimum": 0}}
+      },
+      "HostDirectoryEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "path"],
+        "properties": {"name": {"type": "string"}, "path": {"type": "string", "minLength": 1}}
+      },
+      "HostDirectoryRootsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"type": "object", "additionalProperties": false, "required": ["roots"], "properties": {"roots": {"type": "array", "items": {"$ref": "#/components/schemas/HostDirectoryEntry"}}}},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "HostDirectoryListRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 200},
+          "cursor": {"type": "string"}
+        }
+      },
+      "HostDirectoryListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "parentPath", "entries", "nextCursor"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "parentPath": {"type": ["string", "null"]},
+              "entries": {"type": "array", "items": {"$ref": "#/components/schemas/HostDirectoryEntry"}},
+              "nextCursor": {"type": ["string", "null"]}
+            }
+          },
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "DirectoryListRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["directory"],
+        "properties": {
+          "directory": {"$ref": "#/components/schemas/DirectoryRef"},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 5000, "default": 200},
+          "cursor": {"type": ["string", "null"], "minLength": 1, "maxLength": 512}
+        }
+      },
+      "DirectoryArchiveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["directory"],
+        "properties": {"directory": {"$ref": "#/components/schemas/DirectoryRef"}}
+      },
+      "DirectoryListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["directory", "entries", "truncated", "nextCursor"],
+            "properties": {
+              "directory": {"$ref": "#/components/schemas/DirectoryRef"},
+              "entries": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "relativePath", "kind", "size"], "properties": {"name": {"type": "string"}, "relativePath": {"type": "string"}, "kind": {"enum": ["file", "directory"], "x-axklib-wire-enum-style": "legacy-lowercase"}, "size": {"type": ["integer", "null"], "minimum": 0}}}},
+              "truncated": {"type": "boolean"},
+              "nextCursor": {"type": ["string", "null"]}
+            }
+          },
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "UploadCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["filename", "kind", "mediaType", "size"],
+        "properties": {
+          "filename": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["audio", "package", "manifest"], "x-axklib-wire-enum-style": "legacy-lowercase"},
+          "mediaType": {"type": "string", "minLength": 1},
+          "size": {"type": "integer", "minimum": 0},
+          "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+        }
+      },
+      "Upload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uploadId", "filename", "kind", "mediaType", "declaredSize", "receivedSize", "state", "expiresInSeconds"],
+        "properties": {
+          "uploadId": {"type": "string", "minLength": 1},
+          "filename": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["audio", "package", "manifest"], "x-axklib-wire-enum-style": "legacy-lowercase"},
+          "mediaType": {"type": "string", "minLength": 1},
+          "declaredSize": {"type": "integer", "minimum": 0},
+          "receivedSize": {"type": "integer", "minimum": 0},
+          "state": {"enum": ["receiving", "ready"], "x-axklib-wire-enum-style": "legacy-lowercase"},
+          "expiresInSeconds": {"type": "integer", "minimum": 0}
+        }
+      },
+      "UploadResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {"data": {"$ref": "#/components/schemas/Upload"}, "meta": {"$ref": "#/components/schemas/ResponseMeta"}}
+      },
+      "UploadMaterializeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["destination"],
+        "properties": {"destination": {"$ref": "#/components/schemas/FileRef"}, "overwrite": {"type": "boolean", "default": false}}
+      },
+      "MaterializedFileResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"type": "object", "additionalProperties": false, "required": ["file"], "properties": {"file": {"$ref": "#/components/schemas/FileRef"}}},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "DownloadArchiveResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["archiveId", "filename", "sizeBytes", "entryCount", "expiresInSeconds", "contentPath"],
+            "properties": {
+              "archiveId": {"type": "string", "minLength": 1},
+              "filename": {"type": "string", "minLength": 1},
+              "sizeBytes": {"type": "integer", "minimum": 0},
+              "entryCount": {"type": "integer", "minimum": 0},
+              "expiresInSeconds": {"type": "integer", "minimum": 0},
+              "contentPath": {"type": "string", "minLength": 1}
+            }
+          },
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "ReadinessResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ready", "checks"],
+            "properties": {
+              "ready": {"type": "boolean"},
+              "checks": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["configuration", "sandbox", "workspaceConfiguration", "stateStorage", "startupCleanup", "executorAdmission"],
+                "properties": {
+                  "configuration": {"const": "READY"},
+                  "sandbox": {"const": "READY"},
+                  "workspaceConfiguration": {"enum": ["READY", "NO_AVAILABLE_WORKSPACE", "CONFIGURATION_ERROR"]},
+                  "stateStorage": {"enum": ["READY", "NOT_READY"]},
+                  "startupCleanup": {"enum": ["READY", "NOT_READY"]},
+                  "executorAdmission": {"enum": ["READY", "NOT_READY"]}
+                }
+              }
+            }
+          }
+        }
+      },
+      "ImageOpenRequest": {
+        "type": "object",
+        "required": ["source"],
+        "properties": {"source": {"$ref": "#/components/schemas/FileRef"}}
+      },
+      "ImageSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "source", "format", "availableOperations", "rootCount", "objectCount", "relationshipCount", "validation"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "source": {"$ref": "#/components/schemas/FileRef"},
+          "format": {"type": "string", "minLength": 1},
+          "availableOperations": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "rootCount": {"type": "integer", "minimum": 0},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "relationshipCount": {"type": "integer", "minimum": 0},
+          "validation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["valid", "infoCount", "warningCount", "errorCount"],
+            "properties": {"valid": {"type": "boolean"}, "infoCount": {"type": "integer", "minimum": 0}, "warningCount": {"type": "integer", "minimum": 0}, "errorCount": {"type": "integer", "minimum": 0}}
+          }
+        }
+      },
+      "ImageSessionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {"data": {"$ref": "#/components/schemas/ImageSession"}, "meta": {"$ref": "#/components/schemas/ResponseMeta"}}
+      },
+      "ImageCloseResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"type": "object", "additionalProperties": false, "required": ["closed"], "properties": {"closed": {"type": "boolean"}}},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "ImageValidationItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "severity", "message", "samplerPath", "objectId"],
+        "properties": {"code": {"type": "string"}, "severity": {"type": "string"}, "message": {"type": "string"}, "samplerPath": {"type": "string"}, "objectId": {"type": ["string", "null"]}}
+      },
+      "ImageValidationPageResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"type": "object", "additionalProperties": false, "required": ["items", "totalCount", "nextCursor"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/ImageValidationItem"}}, "totalCount": {"type": "integer", "minimum": 0}, "nextCursor": {"type": ["string", "null"]}}},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "ImagePreviewResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"type": "object", "additionalProperties": false, "required": ["objectId", "frameCount", "bins"], "properties": {"objectId": {"type": "string", "minLength": 1}, "frameCount": {"type": "integer", "minimum": 0}, "bins": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["minimum", "maximum"], "properties": {"minimum": {"type": "integer"}, "maximum": {"type": "integer"}}}}}},
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },

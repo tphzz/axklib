@@ -220,6 +220,9 @@ class AXK_API MediaContainer {
 
 AXK_API Result<MediaContainer> open_media(const std::filesystem::path &path,
                                           const CancellationToken &cancellation = {});
+AXK_API Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> reader,
+                                          std::filesystem::path source_path,
+                                          const CancellationToken &cancellation = {});
 AXK_API Result<ObjectCatalog> build_object_catalog(const MediaContainer &container,
                                                    std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                    const CancellationToken &cancellation = {});

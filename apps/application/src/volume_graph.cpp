@@ -36,11 +36,20 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
         OrderedJson smpl = OrderedJson::array();
         for (const auto &waveform : volume.waveforms) {
             const auto &audio = waveform.waveform;
+            OrderedJson aliases = OrderedJson::array();
+            for (const auto &alias : waveform.user_facing_aliases) {
+                aliases.push_back({
+                    {"sample_object_key", alias.sample_object_key},
+                    {"display_name", alias.display_name},
+                    {"relationship_quality", axk::relationship_quality_name(alias.relationship_quality)},
+                });
+            }
             smpl.push_back({
                 {"id", waveform.object_key},
                 {"object_key", waveform.object_key},
                 {"display_name", waveform.display_name},
                 {"wav_path", axk::text::path_to_utf8(waveform.relative_wav_path)},
+                {"user_facing_aliases", std::move(aliases)},
                 {"audio",
                  {{"channels", audio.format.channels},
                   {"sample_rate", audio.format.sample_rate},
@@ -280,11 +289,20 @@ axk::Result<std::string> serialize_unresolved_wave_data_graph(const UnresolvedWa
                 });
             }
             const auto &audio = waveform.waveform;
+            OrderedJson aliases = OrderedJson::array();
+            for (const auto &alias : waveform.user_facing_aliases) {
+                aliases.push_back({
+                    {"sample_object_key", alias.sample_object_key},
+                    {"display_name", alias.display_name},
+                    {"relationship_quality", axk::relationship_quality_name(alias.relationship_quality)},
+                });
+            }
             waveforms.push_back({
                 {"id", waveform.object_key},
                 {"object_key", waveform.object_key},
                 {"display_name", waveform.display_name},
                 {"wav_path", text::path_to_utf8(waveform.relative_wav_path)},
+                {"user_facing_aliases", std::move(aliases)},
                 {"placement",
                  {{"resolution", placement_resolution_name(waveform.placement_resolution)},
                   {"quality",

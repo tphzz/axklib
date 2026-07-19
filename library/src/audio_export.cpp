@@ -343,6 +343,57 @@ void populate_logical_exports(const ObjectCatalog &catalog, const RelationshipGr
     }
 }
 
+int relationship_quality_rank(RelationshipQuality quality) {
+    switch (quality) {
+    case RelationshipQuality::known:
+        return 0;
+    case RelationshipQuality::likely:
+        return 1;
+    case RelationshipQuality::tentative:
+        return 2;
+    case RelationshipQuality::unknown:
+        return 3;
+    }
+    return 3;
+}
+
+void populate_waveform_aliases(const ObjectCatalog &catalog, const RelationshipGraph &graph, ExportPlan &plan) {
+    std::unordered_map<std::string, PhysicalWaveformExport *> waveforms;
+    for (auto &volume : plan.volumes) {
+        for (auto &waveform : volume.waveforms)
+            waveforms.emplace(waveform.object_key, &waveform);
+    }
+    for (auto &scope : plan.unresolved_wave_data) {
+        for (auto &waveform : scope.waveforms)
+            waveforms.emplace(waveform.object_key, &waveform);
+    }
+
+    for (const auto &relation : graph.relationships) {
+        if (!relation.target_key ||
+            (relation.type != "SBNK_LEFT_MEMBER_TO_SMPL" && relation.type != "SBNK_RIGHT_MEMBER_TO_SMPL")) {
+            continue;
+        }
+        const auto waveform = waveforms.find(*relation.target_key);
+        const auto *sample = object(catalog, relation.source_key);
+        if (waveform == waveforms.end() || sample == nullptr ||
+            !std::holds_alternative<CurrentSbnk>(sample->object.payload)) {
+            continue;
+        }
+        auto &aliases = waveform->second->user_facing_aliases;
+        const auto existing = std::ranges::find(aliases, sample->key, &WaveformUserFacingAlias::sample_object_key);
+        if (existing == aliases.end()) {
+            aliases.push_back({sample->key, sample->object.header.name, relation.quality});
+        } else if (relationship_quality_rank(relation.quality) <
+                   relationship_quality_rank(existing->relationship_quality)) {
+            existing->relationship_quality = relation.quality;
+        }
+    }
+    for (auto &[key, waveform] : waveforms) {
+        static_cast<void>(key);
+        std::ranges::sort(waveform->user_facing_aliases, {}, &WaveformUserFacingAlias::sample_object_key);
+    }
+}
+
 } // namespace
 
 Result<ExportPlan> build_export_plan(const Container &container, const ObjectCatalog &catalog,
@@ -418,6 +469,7 @@ Result<ExportPlan> build_export_plan(const Container &container, const ObjectCat
         static_cast<void>(key);
         result.volumes.push_back(std::move(volume));
     }
+    populate_waveform_aliases(catalog, graph, result);
     return result;
 }
 
@@ -519,6 +571,7 @@ Result<ExportPlan> build_export_plan(const MediaContainer &container, const Obje
         static_cast<void>(key);
         result.volumes.push_back(std::move(volume));
     }
+    populate_waveform_aliases(catalog, graph, result);
     return result;
 }
 

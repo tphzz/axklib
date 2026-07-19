@@ -8,13 +8,6 @@
 #include <unordered_map>
 #include <utility>
 
-#if defined(_WIN32)
-#define NOMINMAX
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-
 #include "axklib/application/secure_random.hpp"
 #include "axklib/io.hpp"
 #include "axklib/package_archive.hpp"
@@ -65,29 +58,6 @@ bool valid_media_type(axk::app::UploadKind kind, std::string_view value) {
         return value == "application/json";
     }
     return false;
-}
-
-axk::app::Result<void> publish_materialized_file(const std::filesystem::path &temporary,
-                                                 const std::filesystem::path &destination, bool overwrite) {
-#if defined(_WIN32)
-    const auto flags = overwrite ? MOVEFILE_REPLACE_EXISTING : 0U;
-    if (MoveFileExW(temporary.c_str(), destination.c_str(), flags) == 0)
-        return std::unexpected(upload_error("upload_materialization_failed", "upload output cannot be published"));
-#else
-    if (overwrite) {
-        if (::rename(temporary.c_str(), destination.c_str()) != 0)
-            return std::unexpected(
-                upload_error("upload_materialization_failed", "upload output cannot be replaced atomically"));
-    } else {
-        if (::link(temporary.c_str(), destination.c_str()) != 0)
-            return std::unexpected(
-                upload_error("upload_materialization_failed", "upload output cannot be published atomically"));
-        if (::unlink(temporary.c_str()) != 0)
-            return std::unexpected(upload_error("upload_materialization_failed",
-                                                "upload output was published but temporary cleanup failed"));
-    }
-#endif
-    return {};
 }
 
 } // namespace
@@ -333,20 +303,11 @@ axk::app::Result<axk::app::FileRef> axk::app::UploadStore::materialize(const Upl
     auto retained = lease(reference, owner_id);
     if (!retained)
         return std::unexpected(retained.error());
-    const auto output = sandbox.resolve_output_file(destination, overwrite);
-    if (!output)
-        return std::unexpected(output.error());
-    auto temporary = text::temporary_sibling(*output);
-    if (!temporary)
-        return std::unexpected(upload_error("upload_materialization_failed", "temporary output name is invalid"));
-    std::error_code error;
-    if (!std::filesystem::copy_file(retained->path(), *temporary, std::filesystem::copy_options::none, error))
-        return std::unexpected(upload_error("upload_materialization_failed", "upload cannot be copied to output"));
-    const auto published = publish_materialized_file(*temporary, *output, overwrite);
-    if (!published) {
-        std::filesystem::remove(*temporary, error);
+    const auto input = axk::FileReader::open(retained->path());
+    if (!input)
+        return std::unexpected(upload_error("upload_materialization_failed", input.error().message));
+    if (const auto published = sandbox.publish_file(destination, overwrite, **input); !published)
         return std::unexpected(published.error());
-    }
     return destination;
 }
 

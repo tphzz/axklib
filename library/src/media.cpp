@@ -167,12 +167,21 @@ Result<MediaContainer> open_media(const std::filesystem::path &path, const Cance
     auto reader = FileReader::open(path);
     if (!reader)
         return std::unexpected{reader.error()};
-    const auto prefix_size = static_cast<std::size_t>(std::min<std::uint64_t>((*reader)->size(), 0x9000U));
-    auto prefix = detail::read_bytes(**reader, 0, prefix_size, cancellation);
+    return open_media(std::move(*reader), path, cancellation);
+}
+
+Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> reader, std::filesystem::path source_path,
+                                  const CancellationToken &cancellation) {
+    if (!reader) {
+        return std::unexpected{detail::media_error(ErrorCode::invalid_argument, "media reader is required",
+                                                   text::path_to_utf8(source_path), std::nullopt)};
+    }
+    const auto prefix_size = static_cast<std::size_t>(std::min<std::uint64_t>(reader->size(), 0x9000U));
+    auto prefix = detail::read_bytes(*reader, 0, prefix_size, cancellation);
     if (!prefix)
         return std::unexpected{prefix.error()};
     if (detail::object_prefix(*prefix)) {
-        auto object = StandaloneObject::open(std::move(*reader), text::path_to_utf8(path));
+        auto object = StandaloneObject::open(std::move(reader), text::path_to_utf8(source_path));
         if (!object)
             return std::unexpected{object.error()};
         return MediaContainer{std::move(*object)};
@@ -181,21 +190,21 @@ Result<MediaContainer> open_media(const std::filesystem::path &path, const Cance
         std::to_integer<std::uint8_t>((*prefix)[detail::iso_pvd_sector * detail::iso_sector_size]) == 1U &&
         detail::clean_ascii(std::span{*prefix}.subspan(detail::iso_pvd_sector * detail::iso_sector_size + 1U, 5)) ==
             "CD001") {
-        auto iso = IsoImage::open(std::move(*reader), text::path_to_utf8(path), cancellation);
+        auto iso = IsoImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
         if (!iso)
             return std::unexpected{iso.error()};
         return MediaContainer{std::move(*iso)};
     }
     if (prefix->size() >= 512U && detail::le16(*prefix, 0x0b) >= 512U &&
         std::to_integer<std::uint8_t>((*prefix)[0x0d]) != 0U) {
-        auto fat = FatImage::open(std::move(*reader), text::path_to_utf8(path), cancellation);
+        auto fat = FatImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
         if (!fat)
             return std::unexpected{fat.error()};
         return MediaContainer{std::move(*fat)};
     }
     OpenOptions options;
     options.cancellation = cancellation;
-    auto sfs = open_image(path, options);
+    auto sfs = open_image(std::move(reader), std::move(source_path), options);
     if (!sfs)
         return std::unexpected{sfs.error()};
     return MediaContainer{std::move(*sfs)};

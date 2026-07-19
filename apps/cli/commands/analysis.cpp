@@ -67,7 +67,8 @@ int run_relationships_request(const axk::cli::RelationshipsRequest &request) {
     std::cout << "relationships=" << result->at("rowCount").get<std::size_t>()
               << " ambiguous=" << result->at("ambiguousCount").get<std::size_t>()
               << " load_errors=" << result->at("failedCount").get<std::size_t>() << '\n';
-    return result->at("failedCount").get<std::size_t>() == 0U ? 0 : 3;
+    return exit_code(result->at("failedCount").get<std::size_t>() == 0U ? ExitStatus::success
+                                                                        : ExitStatus::diagnostics);
 }
 
 int run_coverage_request(const axk::cli::CoverageRequest &request) {
@@ -96,7 +97,8 @@ int run_coverage_request(const axk::cli::CoverageRequest &request) {
         return axk::cli::report_application_failure(result.error());
     std::cout << "relationships=" << result->at("rowCount").get<std::size_t>()
               << " load_errors=" << result->at("failedCount").get<std::size_t>() << '\n';
-    return result->at("failedCount").get<std::size_t>() == 0U ? 0 : 3;
+    return exit_code(result->at("failedCount").get<std::size_t>() == 0U ? ExitStatus::success
+                                                                        : ExitStatus::diagnostics);
 }
 
 axk::cli::schema::info_v1::NodeOutput info_node_output(const nlohmann::json &node) {
@@ -223,7 +225,7 @@ int run_info_request(const axk::cli::InfoRequest &request) {
     if (paths.empty()) {
         if (request.format == "json")
             std::cout << "{\n  \"trees\": [],\n  \"load_errors\": []\n}\n";
-        return 0;
+        return exit_code(ExitStatus::success);
     }
     auto runtime = axk::cli::LocalOperationRuntime::create(paths);
     if (!runtime)
@@ -247,7 +249,7 @@ int run_info_request(const axk::cli::InfoRequest &request) {
         if (!serialized)
             return report_failure(serialized.error());
         std::cout << *serialized << '\n';
-        return output.load_errors.empty() ? 0 : 1;
+        return exit_code(output.load_errors.empty() ? ExitStatus::success : ExitStatus::diagnostics);
     }
     for (const auto &error : output.load_errors) {
         std::cout << error.path_utf8 << "\tERROR\tAXKLIB_CONTAINER_OPEN_FAILED\t" << error.message << '\n';
@@ -259,7 +261,7 @@ int run_info_request(const axk::cli::InfoRequest &request) {
                 std::cout << ' ' << type << '=' << count;
             std::cout << "\trecovery=" << tree.recovery.value_or("-") << '\n';
         }
-        return output.load_errors.empty() ? 0 : 1;
+        return exit_code(output.load_errors.empty() ? ExitStatus::success : ExitStatus::diagnostics);
     }
     for (const auto &tree : output.trees) {
         if (request.format == "paths")
@@ -275,7 +277,7 @@ int run_info_request(const axk::cli::InfoRequest &request) {
                 render_tree_text(root, 1U, {}, index + 1U == tree.roots.size(), request);
         }
     }
-    return output.load_errors.empty() ? 0 : 1;
+    return exit_code(output.load_errors.empty() ? ExitStatus::success : ExitStatus::diagnostics);
 }
 
 } // namespace axk::cli::commands

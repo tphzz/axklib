@@ -289,6 +289,9 @@ AXK_API Result<PackagePublication> export_portable_package(const MediaContainer 
 AXK_API Result<PortablePackage> open_portable_package(std::span<const std::byte> archive,
                                                       std::string_view filename = {});
 
+AXK_API Result<PortablePackage> open_portable_package(const RandomAccessReader &reader, std::string_view filename,
+                                                      const CancellationToken &cancellation = {});
+
 AXK_API Result<PortablePackage> open_portable_package(const std::filesystem::path &path,
                                                       const CancellationToken &cancellation = {});
 
@@ -299,6 +302,9 @@ AXK_API Result<PortablePackage> inspect_portable_package(const std::filesystem::
                                                          const CancellationToken &cancellation = {});
 
 AXK_API Result<PortablePackage> inspect_portable_package(const std::filesystem::path &path, std::string_view filename,
+                                                         const CancellationToken &cancellation = {});
+
+AXK_API Result<PortablePackage> inspect_portable_package(const RandomAccessReader &reader, std::string_view filename,
                                                          const CancellationToken &cancellation = {});
 
 AXK_API Result<PackageImportPlan> plan_package_import(const std::filesystem::path &target_path,

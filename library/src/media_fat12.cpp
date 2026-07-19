@@ -24,8 +24,15 @@ std::string decode_fat_name(std::span<const std::byte> entry) {
     return extension.empty() ? stem : std::format("{}.{}", stem, extension);
 }
 
-std::uint16_t fat12_entry(std::span<const std::byte> fat, std::uint16_t cluster) {
-    const auto offset = static_cast<std::size_t>(cluster) + cluster / 2U;
+Result<std::uint16_t> fat12_entry(std::span<const std::byte> fat, std::uint16_t cluster, std::string_view source) {
+    const auto wide_cluster = static_cast<std::uint64_t>(cluster);
+    const auto wide_offset = wide_cluster + wide_cluster / 2U;
+    if (wide_offset > fat.size() || fat.size() - static_cast<std::size_t>(wide_offset) < 2U) {
+        return std::unexpected{detail::media_error(
+            ErrorCode::container_invalid_geometry,
+            std::format("FAT cannot address cluster {} with {} table bytes", cluster, fat.size()), source)};
+    }
+    const auto offset = static_cast<std::size_t>(wide_offset);
     const auto pair = static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(fat[offset])) |
                       static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(fat[offset + 1])) << 8U;
     const auto wide_pair = static_cast<std::uint32_t>(pair);
@@ -58,20 +65,22 @@ Result<std::vector<std::uint16_t>> fat_chain(std::span<const std::byte> fat, con
         }
         result.push_back(cluster);
         capacity += geometry.cluster_size();
-        const auto next = fat12_entry(fat, cluster);
-        if (next >= 0xff8U)
+        const auto next = fat12_entry(fat, cluster, source);
+        if (!next)
+            return std::unexpected{next.error()};
+        if (*next >= 0xff8U)
             break;
-        if (next == 0xff7U) {
+        if (*next == 0xff7U) {
             return std::unexpected{
                 detail::media_error(ErrorCode::allocation_invalid_extent,
                                     std::format("FAT chain for '{}' reaches bad cluster marker", name), source)};
         }
-        if (next == 0U || next == 1U || (next >= 0xff0U && next <= 0xff6U)) {
+        if (*next == 0U || *next == 1U || (*next >= 0xff0U && *next <= 0xff6U)) {
             return std::unexpected{detail::media_error(
                 ErrorCode::allocation_invalid_extent,
-                std::format("FAT chain for '{}' has invalid successor 0x{:03x}", name, next), source)};
+                std::format("FAT chain for '{}' has invalid successor 0x{:03x}", name, *next), source)};
         }
-        cluster = next;
+        cluster = *next;
         if (result.size() > geometry.data_cluster_count) {
             return std::unexpected{
                 detail::media_error(ErrorCode::allocation_cycle,
@@ -231,6 +240,19 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
         geometry.bytes_per_sector;
     geometry.data_offset = geometry.root_offset + static_cast<std::uint64_t>(root_sectors) * geometry.bytes_per_sector;
     const auto fat_size = static_cast<std::size_t>(geometry.sectors_per_fat) * geometry.bytes_per_sector;
+    constexpr std::uint64_t fat12_entry_count = 4096U;
+    constexpr std::uint64_t fat12_table_bytes = fat12_entry_count * 3U / 2U;
+    const auto maximum_fat_bytes =
+        ((fat12_table_bytes + geometry.bytes_per_sector - 1U) / geometry.bytes_per_sector) * geometry.bytes_per_sector;
+    const auto highest_data_cluster = static_cast<std::uint64_t>(geometry.data_cluster_count) + 1U;
+    const auto highest_entry_offset = highest_data_cluster + highest_data_cluster / 2U;
+    if (fat_size > maximum_fat_bytes || highest_entry_offset > fat_size || fat_size - highest_entry_offset < 2U) {
+        return std::unexpected{
+            detail::media_error(ErrorCode::container_invalid_geometry,
+                                std::format("FAT table with {} bytes cannot address {} data clusters", fat_size,
+                                            geometry.data_cluster_count),
+                                source_name)};
+    }
     const auto fat = detail::read_bytes(*reader, geometry.fat_offset, fat_size, cancellation);
     if (!fat)
         return std::unexpected{fat.error()};

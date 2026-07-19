@@ -26,6 +26,7 @@ axk::app::Error archive_error(std::string code, std::string message, bool retrya
 struct SourceEntry {
     std::string path;
     std::uint64_t size{};
+    std::shared_ptr<const axk::RandomAccessReader> reader;
 };
 
 bool split_tar_path(std::string_view path, std::string_view &name, std::string_view &prefix) {
@@ -210,40 +211,22 @@ axk::app::Result<axk::app::DownloadArchiveSnapshot>
 axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sandbox, const DirectoryRef &source) {
     if (owner_id.empty())
         return std::unexpected(archive_error("invalid_archive_request", "download archive owner is required"));
-    const auto root = sandbox.resolve_directory(source);
-    if (!root)
-        return std::unexpected(root.error());
-
     std::vector<SourceEntry> files;
     std::uint64_t archive_size = tar_block_size * 2U;
-    std::error_code error;
-    for (std::filesystem::recursive_directory_iterator iterator{*root, error}, end; iterator != end;
-         iterator.increment(error)) {
-        if (error)
-            return std::unexpected(archive_error("archive_source_unavailable", "directory cannot be enumerated"));
-        const auto status = iterator->symlink_status(error);
-        if (error || std::filesystem::is_symlink(status))
-            return std::unexpected(archive_error("archive_link_not_allowed", "directory archives do not follow links"));
-        if (std::filesystem::is_directory(status))
-            continue;
-        if (!std::filesystem::is_regular_file(status))
-            return std::unexpected(
-                archive_error("archive_entry_not_allowed", "directory contains a non-regular entry"));
-        auto relative = std::filesystem::relative(iterator->path(), *root, error);
-        if (error)
-            return std::unexpected(
-                archive_error("archive_source_unavailable", "directory entry path cannot be resolved"));
-        const auto relative_utf8 = text::path_to_utf8(relative);
+    auto opened =
+        sandbox.open_tree_files(source, implementation_->maximum_entries, implementation_->maximum_archive_bytes);
+    if (!opened)
+        return std::unexpected(opened.error());
+    for (auto &file : *opened) {
         std::string_view name;
         std::string_view prefix;
-        if (!split_tar_path(relative_utf8, name, prefix))
+        if (!split_tar_path(file.relative_path, name, prefix))
             return std::unexpected(
                 archive_error("archive_path_too_long", "directory entry does not fit the TAR path profile"));
-        const auto size = iterator->file_size(error);
-        if (error || size > std::numeric_limits<std::uint64_t>::max() - archive_size - tar_block_size)
+        if (file.size > std::numeric_limits<std::uint64_t>::max() - archive_size - tar_block_size)
             return std::unexpected(archive_error("archive_too_large", "directory archive size overflows"));
-        archive_size += tar_block_size + padded_size(size);
-        files.push_back({relative_utf8, size});
+        archive_size += tar_block_size + padded_size(file.size);
+        files.push_back({std::move(file.relative_path), file.size, std::move(file.reader)});
         if (files.size() > implementation_->maximum_entries || archive_size > implementation_->maximum_archive_bytes)
             return std::unexpected(
                 archive_error("download_archive_too_large", "directory archive exceeds configured limits"));
@@ -280,15 +263,8 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
         release_reservation();
         return std::unexpected(archive_error("archive_storage_unavailable", "download archive cannot be created"));
     }
-    std::vector<char> buffer(1024U * 1024U);
+    std::vector<std::byte> buffer(1024U * 1024U);
     for (const auto &file : files) {
-        const auto resolved = sandbox.resolve_file(
-            {source.root_id, source.relative_path.empty() ? file.path : source.relative_path + "/" + file.path});
-        if (!resolved || std::filesystem::file_size(*resolved, error) != file.size || error) {
-            output.close();
-            release_reservation();
-            return std::unexpected(archive_error("archive_source_changed", "directory changed while it was archived"));
-        }
         const auto header = tar_header(file);
         if (!header) {
             output.close();
@@ -296,19 +272,26 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
             return std::unexpected(header.error());
         }
         output.write(header->data(), static_cast<std::streamsize>(header->size()));
-        std::ifstream input{*resolved, std::ios::binary};
         std::uint64_t remaining = file.size;
+        std::uint64_t offset{};
         while (remaining != 0U) {
             const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.size()));
-            input.read(buffer.data(), static_cast<std::streamsize>(count));
-            output.write(buffer.data(), static_cast<std::streamsize>(count));
-            if (!input || !output) {
+            const auto read = file.reader->read_exact_at(offset, std::span{buffer}.first(count));
+            if (!read) {
                 output.close();
                 release_reservation();
                 return std::unexpected(
                     archive_error("archive_source_changed", "directory entry could not be archived"));
             }
+            output.write(reinterpret_cast<const char *>(buffer.data()), static_cast<std::streamsize>(count));
+            if (!output) {
+                output.close();
+                release_reservation();
+                return std::unexpected(
+                    archive_error("archive_storage_unavailable", "directory archive could not be written"));
+            }
             remaining -= count;
+            offset += count;
         }
         const std::array<char, tar_block_size> padding{};
         const auto padding_size = padded_size(file.size) - file.size;
@@ -321,6 +304,7 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
         release_reservation();
         return std::unexpected(archive_error("archive_storage_unavailable", "download archive could not be finalized"));
     }
+    std::error_code error;
     std::filesystem::rename(temporary_path, final_path, error);
     if (error) {
         release_reservation();
@@ -348,14 +332,18 @@ axk::app::DownloadArchiveStore::inspect(const DownloadArchiveRef &reference, std
     return implementation_->snapshot(reference.archive_id, (**found).second);
 }
 
-axk::app::Result<std::filesystem::path> axk::app::DownloadArchiveStore::resolve(const DownloadArchiveRef &reference,
-                                                                                std::string_view owner_id) {
+axk::app::Result<axk::app::DownloadArchiveContent>
+axk::app::DownloadArchiveStore::open(const DownloadArchiveRef &reference, std::string_view owner_id) {
     const std::scoped_lock lock{implementation_->mutex};
     auto found = implementation_->owned(reference, owner_id);
     if (!found)
         return std::unexpected(found.error());
     (**found).second.expires_at = implementation_->clock() + implementation_->retention;
-    return (**found).second.path;
+    auto reader = axk::FileReader::open((**found).second.path);
+    if (!reader)
+        return std::unexpected(archive_error("archive_storage_unavailable", reader.error().message));
+    return DownloadArchiveContent{implementation_->snapshot(reference.archive_id, (**found).second),
+                                  std::move(*reader)};
 }
 
 axk::app::Result<void> axk::app::DownloadArchiveStore::remove(const DownloadArchiveRef &reference,

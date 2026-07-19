@@ -27,7 +27,7 @@ namespace {
 
 int report_application_failure(const axk::app::Error &error) {
     std::cerr << error.code << ": " << error.message << '\n';
-    return 2;
+    return exit_code(ExitStatus::invalid_request);
 }
 
 axk::Result<void> publish_manifest(const std::filesystem::path &output_path, std::string_view contents, bool overwrite,
@@ -208,7 +208,7 @@ int run_create_hds(const std::filesystem::path &manifest_path, const std::filesy
     const auto written = invoke_create_image("HDS", manifest_path, output_path, overwrite);
     if (!written) {
         std::cerr << written.error().message << '\n';
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     }
     std::cout << "image=" << axk::text::path_to_utf8(output_path)
               << " size_bytes=" << written->at("sizeBytes").get<std::uint64_t>()
@@ -223,7 +223,7 @@ int run_create_hds(const std::filesystem::path &manifest_path, const std::filesy
                   << " cluster_count=" << partition.at("clusterCount").get<std::uint32_t>()
                   << " free_kib=" << partition.at("freeKiB").get<std::uint64_t>() << '\n';
     }
-    return 0;
+    return exit_code(ExitStatus::success);
 }
 
 int run_create_media(const std::filesystem::path &manifest_path, const std::filesystem::path &output_path,
@@ -233,12 +233,12 @@ int run_create_media(const std::filesystem::path &manifest_path, const std::file
     const auto written = invoke_create_image(service_kind, manifest_path, output_path, overwrite);
     if (!written) {
         std::cerr << written.error().message << '\n';
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     }
     std::cout << "image=" << axk::text::path_to_utf8(output_path) << " format=" << expected_format
               << " size_bytes=" << written->at("sizeBytes").get<std::uint64_t>()
               << " objects=" << written->at("objectCount").get<std::size_t>() << '\n';
-    return 0;
+    return exit_code(ExitStatus::success);
 }
 
 int run_create_manifest(const axk::app::OperationRegistry &registry, std::string_view kind,
@@ -252,7 +252,7 @@ int run_create_manifest(const axk::app::OperationRegistry &registry, std::string
         service_kind = "ISO";
     if (service_kind.empty()) {
         std::cerr << "manifest kind must be hds, floppy, or iso\n";
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     }
     const axk::app::OperationContext context{
         .owner_id = "cli", .request_id = "cli", .cancellation = {}, .progress = nullptr, .display_path = {}};
@@ -263,10 +263,10 @@ int run_create_manifest(const axk::app::OperationRegistry &registry, std::string
         publish_manifest(output_path, manifest->at("canonicalJson").get_ref<const std::string &>(), overwrite, "build");
     if (!written) {
         std::cerr << axk::render_error(written.error()) << '\n';
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     }
     std::cout << "manifest=" << axk::text::path_to_utf8(output_path) << " kind=" << kind << '\n';
-    return 0;
+    return exit_code(ExitStatus::success);
 }
 
 int run_alter_manifest(const axk::app::OperationRegistry &registry, const std::filesystem::path &output_path,
@@ -280,10 +280,10 @@ int run_alter_manifest(const axk::app::OperationRegistry &registry, const std::f
                                           overwrite, "alteration");
     if (!written) {
         std::cerr << axk::render_error(written.error()) << '\n';
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     }
     std::cout << "manifest=" << axk::text::path_to_utf8(output_path) << " kind=alteration\n";
-    return 0;
+    return exit_code(ExitStatus::success);
 }
 
 int run_alter_hds(const std::filesystem::path &source_path, const std::filesystem::path &manifest_path,
@@ -291,7 +291,7 @@ int run_alter_hds(const std::filesystem::path &source_path, const std::filesyste
     const auto altered = invoke_alteration(source_path, manifest_path, output_path);
     if (!altered) {
         std::cerr << altered.error().message << '\n';
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     }
     axk::cli::schema::operations_v1::AlterationOutput projected{
         .source_path_utf8 = axk::text::path_to_utf8(source_path),
@@ -304,10 +304,10 @@ int run_alter_hds(const std::filesystem::path &source_path, const std::filesyste
     const auto serialized = axk::cli::schema::operations_v1::serialize(projected, pretty);
     if (!serialized) {
         std::cerr << axk::render_error(serialized.error()) << '\n';
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     }
     std::cout << *serialized << '\n';
-    return 0;
+    return exit_code(ExitStatus::success);
 }
 
 } // namespace axk::cli::commands

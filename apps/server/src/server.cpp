@@ -1667,20 +1667,21 @@ class ServerApplication {
         if (root_id == nullptr || relative_path == nullptr)
             return error_response(400, {"invalid_request", "rootId and relativePath query parameters are required"},
                                   id);
-        const auto resolved = sandbox_.resolve_file({root_id, relative_path});
-        if (!resolved) {
+        const auto file = sandbox_.open_file({root_id, relative_path});
+        if (!file) {
             audit(id, "file_download", "denied", request_owner(request), "root", root_id);
-            return error_response(404, resolved.error(), id);
+            return error_response(404, file.error(), id);
         }
-        std::error_code error;
-        const auto size = std::filesystem::file_size(*resolved, error);
-        if (error)
-            return error_response(422, {"file_unavailable", "sandbox file size cannot be read"}, id);
+        const auto size = file->size;
 
         crow::response response;
         const auto range_header = request.get_header_value("Range");
+        std::uint64_t offset{};
+        auto length = size;
         if (range_header.empty()) {
-            response.set_static_file_info_unsafe(resolved->string());
+            if (size > config_.maximum_download_range_bytes)
+                return error_response(413, {"download_too_large", "file requires a bounded byte range"}, id);
+            response.code = 200;
         } else {
             const auto range = parse_byte_range(range_header, size, config_.maximum_download_range_bytes);
             if (!range) {
@@ -1688,22 +1689,22 @@ class ServerApplication {
                 response.set_header("Content-Range", "bytes */" + std::to_string(size));
                 return response;
             }
-            std::ifstream input{*resolved, std::ios::binary};
-            input.seekg(static_cast<std::streamoff>(range->offset));
-            response.body.resize(static_cast<std::size_t>(range->length));
-            input.read(response.body.data(), static_cast<std::streamsize>(range->length));
-            if (!input)
-                return error_response(422, {"file_unavailable", "sandbox byte range cannot be read"}, id);
+            offset = range->offset;
+            length = range->length;
             response.code = 206;
-            response.set_header("Content-Type", "application/octet-stream");
             response.set_header("Content-Range", "bytes " + std::to_string(range->offset) + "-" +
                                                      std::to_string(range->offset + range->length - 1U) + "/" +
                                                      std::to_string(size));
         }
+        std::vector<std::byte> bytes(static_cast<std::size_t>(length));
+        if (const auto read = file->reader->read_exact_at(offset, bytes); !read)
+            return error_response(422, {"file_unavailable", "sandbox file content cannot be read"}, id);
+        response.body.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        response.set_header("Content-Type", "application/octet-stream");
         response.set_header("X-Request-Id", id);
         response.set_header("Cache-Control", "no-store");
         response.set_header("Accept-Ranges", "bytes");
-        response.set_header("Content-Disposition", "attachment; filename=\"" + resolved->filename().string() + "\"");
+        response.set_header("Content-Disposition", "attachment; filename=\"" + file->filename + "\"");
         audit(id, "file_download", "allowed", request_owner(request), "root", root_id);
         return response;
     }
@@ -1769,18 +1770,21 @@ class ServerApplication {
             audit(id, "archive_delete", "allowed", request_owner(request), "archive", archive_id);
             return crow::response{204};
         }
-        const auto snapshot = download_archives_.inspect(reference, request_owner(request));
-        if (!snapshot)
-            return error_response(status_for_error(snapshot.error()), snapshot.error(), id);
-        const auto path = download_archives_.resolve(reference, request_owner(request));
-        if (!path)
-            return error_response(status_for_error(path.error()), path.error(), id);
+        const auto content = download_archives_.open(reference, request_owner(request));
+        if (!content)
+            return error_response(status_for_error(content.error()), content.error(), id);
+        if (content->reader->size() > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
+            return error_response(500, {"archive_storage_unavailable", "download archive is too large to serve"}, id);
+        std::vector<std::byte> bytes(static_cast<std::size_t>(content->reader->size()));
+        if (const auto read = content->reader->read_exact_at(0U, bytes); !read)
+            return error_response(500, {"archive_storage_unavailable", read.error().message}, id);
         crow::response response;
-        response.set_static_file_info_unsafe(path->string());
+        response.code = 200;
+        response.body.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
         response.set_header("X-Request-Id", id);
         response.set_header("Cache-Control", "no-store");
         response.set_header("Content-Type", "application/x-tar");
-        response.set_header("Content-Disposition", "attachment; filename=\"" + snapshot->filename + "\"");
+        response.set_header("Content-Disposition", "attachment; filename=\"" + content->snapshot.filename + "\"");
         audit(id, "archive_download", "allowed", request_owner(request), "archive", archive_id);
         return response;
     }

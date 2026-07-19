@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "axklib/application/contracts.hpp"
+#include "axklib/io.hpp"
 
 namespace axk::app {
 
@@ -51,12 +52,34 @@ struct EntryMetadata {
     bool writable{};
 };
 
+struct SandboxFile {
+    FileRef reference;
+    std::string filename;
+    std::uint64_t size{};
+    std::shared_ptr<const axk::RandomAccessReader> reader;
+};
+
+struct SandboxTreeFile {
+    std::string relative_path;
+    std::uint64_t size{};
+    std::shared_ptr<const axk::RandomAccessReader> reader;
+};
+
 class Sandbox {
   public:
     [[nodiscard]] static Result<Sandbox> create(std::vector<RootDefinition> roots);
     [[nodiscard]] Result<void> replace_roots(std::vector<RootDefinition> roots);
 
     [[nodiscard]] std::vector<RootInfo> roots() const;
+    [[nodiscard]] Result<SandboxFile> open_file(const FileRef &reference) const;
+    [[nodiscard]] Result<std::vector<SandboxTreeFile>> open_tree_files(const DirectoryRef &reference,
+                                                                       std::size_t maximum_entries,
+                                                                       std::uint64_t maximum_total_bytes) const;
+    [[nodiscard]] Result<void> publish_file(const FileRef &destination, bool overwrite,
+                                            const axk::RandomAccessReader &source) const;
+    [[nodiscard]] Result<std::filesystem::path> create_staging_directory(std::string_view purpose) const;
+    [[nodiscard]] Result<void> publish_directory(const DirectoryRef &destination, bool overwrite,
+                                                 const std::filesystem::path &staging) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_file(const FileRef &reference) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_directory(const DirectoryRef &reference) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_output_file(const FileRef &reference, bool overwrite) const;

@@ -450,10 +450,10 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
             return std::unexpected(acquired.error());
         path_lease = std::move(*acquired);
     }
-    const auto path = implementation_->sandbox.resolve_file(source);
-    if (!path)
-        return std::unexpected(path.error());
-    const auto media = axk::open_media(*path, cancellation);
+    const auto file = implementation_->sandbox.open_file(source);
+    if (!file)
+        return std::unexpected(file.error());
+    const auto media = axk::open_media(file->reader, std::filesystem::path{file->filename}, cancellation);
     if (!media)
         return std::unexpected(core_error(media.error(), source));
     auto inventory = axk::build_media_inventory(*media, axk::MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U,

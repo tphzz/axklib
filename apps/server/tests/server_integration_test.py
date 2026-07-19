@@ -1665,7 +1665,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 partial_exit_codes = {
                     "report.objects": 3,
                     "report.relationships": 3,
-                    "report.inventory": 1,
+                    "report.inventory": 3,
                     "report.coverage": 3,
                     "corpus.audit": 3,
                 }
@@ -1761,7 +1761,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 capture_output=True,
                 text=True,
             )
-            assert cli_info_result.returncode == 1, cli_info_result.stderr
+            assert cli_info_result.returncode == 3, cli_info_result.stderr
             cli_info = json.loads(cli_info_result.stdout)
             assert report_results["report.info"]["loadedCount"] == len(
                 cli_info["trees"]

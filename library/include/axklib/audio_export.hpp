@@ -17,6 +17,12 @@ namespace axk {
 
 class MediaContainer;
 
+struct WaveformUserFacingAlias {
+    std::string sample_object_key;
+    std::string display_name;
+    RelationshipQuality relationship_quality{RelationshipQuality::unknown};
+};
+
 struct PhysicalWaveformExport {
     PhysicalWaveformExport() = default;
     PhysicalWaveformExport(std::string object_key_value, std::string display_name_value,
@@ -34,6 +40,7 @@ struct PhysicalWaveformExport {
     Waveform waveform;
     PlacementResolution placement_resolution{PlacementResolution::exact};
     std::vector<ObjectPlacement> placement_candidates;
+    std::vector<WaveformUserFacingAlias> user_facing_aliases;
 };
 
 struct UnresolvedWaveDataExport {

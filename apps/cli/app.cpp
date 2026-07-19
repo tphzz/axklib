@@ -1,5 +1,7 @@
 #include "app.hpp"
 
+#include "exit_status.hpp"
+
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -100,7 +102,7 @@ int axk::cli::run(int argc, char **argv) {
     for (int index = 0; index < argc; ++index) {
         if (argv[index] == nullptr || !axk::text::is_valid_utf8(argv[index])) {
             std::cerr << "error: command-line argument is not valid UTF-8\n";
-            return 2;
+            return exit_code(ExitStatus::invalid_request);
         }
     }
     auto registry = axk::app::make_operation_registry();
@@ -274,13 +276,14 @@ int axk::cli::run(int argc, char **argv) {
 
     if (const auto mismatch = validate_cli_operation_catalogue(app, registry)) {
         std::cerr << "error: " << *mismatch << '\n';
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     }
 
     try {
         app.parse(argc, argv);
     } catch (const CLI::ParseError &error) {
-        return app.exit(error);
+        const auto parser_status = app.exit(error);
+        return exit_code(parser_status == 0 ? ExitStatus::success : ExitStatus::invalid_request);
     }
     if (*info) {
         return run_info_request(info_request);
@@ -342,5 +345,5 @@ int axk::cli::run(int argc, char **argv) {
                              writer_commands.alter_pretty);
     }
     std::cout << app.help();
-    return 0;
+    return exit_code(ExitStatus::success);
 }

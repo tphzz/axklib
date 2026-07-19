@@ -234,14 +234,15 @@ axk::app::Result<void> preflight_selection_roots(const ExtractionRequest &reques
     std::set<std::filesystem::path> roots;
     if (request.scope == "file") {
         for (const auto &source : request.sources) {
-            const auto path = sandbox.resolve_file(source);
-            if (!path) {
+            const auto file = sandbox.open_file(source);
+            if (!file) {
                 if (request.strict)
-                    return std::unexpected(path.error());
+                    return std::unexpected(file.error());
                 continue;
             }
             auto root =
-                std::filesystem::path{"file"} / safe_display_path_name(axk::text::path_to_utf8(path->stem()), "source");
+                std::filesystem::path{"file"} /
+                safe_display_path_name(axk::text::path_to_utf8(std::filesystem::path{file->filename}.stem()), "source");
             if (!roots.insert(std::move(root)).second) {
                 return std::unexpected(operation_error(
                     "artifact_collision",
@@ -369,62 +370,17 @@ Json object_owner(Json owner, std::string object_type, std::string object_name) 
     return owner;
 }
 
-axk::app::Result<void> publish_directory(const std::filesystem::path &staging, const std::filesystem::path &destination,
-                                         bool overwrite) {
-    std::error_code error;
-    if (!std::filesystem::exists(destination, error)) {
-        std::filesystem::rename(staging, destination, error);
-        if (!error)
-            return {};
-        return std::unexpected(operation_error("artifact_publish_failed", "could not publish extraction directory"));
-    }
-    if (!overwrite) {
-        if (!std::filesystem::is_empty(destination, error) || error)
-            return std::unexpected(operation_error("artifact_exists", "extraction destination already exists"));
-        std::filesystem::remove(destination, error);
-        if (error)
-            return std::unexpected(
-                operation_error("artifact_publish_failed", "could not reserve empty extraction destination"));
-        std::filesystem::rename(staging, destination, error);
-        if (!error)
-            return {};
-        return std::unexpected(operation_error("artifact_publish_failed", "could not publish extraction directory"));
-    }
-    const auto backup = axk::text::temporary_sibling(destination);
-    if (!backup)
-        return std::unexpected(operation_error("artifact_publish_failed", "could not name extraction backup"));
-    std::filesystem::rename(destination, *backup, error);
-    if (error)
-        return std::unexpected(operation_error("artifact_publish_failed", "could not reserve extraction destination"));
-    std::filesystem::rename(staging, destination, error);
-    if (error) {
-        std::error_code restore_error;
-        std::filesystem::rename(*backup, destination, restore_error);
-        return std::unexpected(operation_error("artifact_publish_failed", "could not publish extraction directory"));
-    }
-    std::filesystem::remove_all(*backup, error);
-    return {};
-}
-
 axk::app::Result<Json> extract(const Json &input, const axk::app::OperationContext &context,
                                const axk::app::Sandbox &sandbox, bool sfz) {
     auto request = parse_request(input);
     if (!request)
         return std::unexpected(request.error());
-    auto destination = sandbox.resolve_output_directory(request->destination, request->overwrite);
-    if (!destination)
-        return std::unexpected(destination.error());
     if (const auto preflight = preflight_selection_roots(*request, sandbox); !preflight)
         return std::unexpected(preflight.error());
-    const auto staging_result = axk::text::temporary_sibling(*destination);
+    const auto staging_result = sandbox.create_staging_directory("axklib-extraction");
     if (!staging_result)
         return std::unexpected(operation_error("artifact_write_failed", "could not name extraction staging"));
     const auto staging = *staging_result;
-    std::error_code error;
-    std::filesystem::create_directory(staging, error);
-    if (error)
-        return std::unexpected(
-            operation_error("artifact_write_failed", "could not create extraction staging directory"));
     DirectoryCleanup cleanup{staging};
 
     axk::ExportPlan combined;
@@ -444,17 +400,18 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
         }
         const auto &source = request->sources[source_index];
         const auto source_display = context.display_path ? context.display_path(source) : source.relative_path;
-        auto source_path = sandbox.resolve_file(source);
-        if (!source_path) {
+        auto source_file = sandbox.open_file(source);
+        if (!source_file) {
             if (request->strict)
-                return std::unexpected(source_path.error());
+                return std::unexpected(source_file.error());
             ++load_error_count;
-            warnings.push_back({{"code", source_path.error().code},
-                                {"message", source_path.error().message},
+            warnings.push_back({{"code", source_file.error().code},
+                                {"message", source_file.error().message},
                                 {"source", source_display}});
             continue;
         }
-        auto media = axk::open_media(*source_path, context.cancellation);
+        auto media =
+            axk::open_media(source_file->reader, std::filesystem::path{source_file->filename}, context.cancellation);
         if (!media) {
             if (request->strict)
                 return std::unexpected(core_error(media.error(), source_display));
@@ -495,7 +452,8 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
             }
             auto root = selection_root(request->scope, selector);
             if (request->scope == "file")
-                root /= safe_display_path_name(axk::text::path_to_utf8(source_path->stem()), "source");
+                root /= safe_display_path_name(
+                    axk::text::path_to_utf8(std::filesystem::path{source_file->filename}.stem()), "source");
             if (auto retargeted = retarget_export_plan(*plan, root, request->scope == "file", request->stereo == "auto",
                                                        pooled_paths);
                 !retargeted) {
@@ -623,6 +581,7 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
     std::ranges::sort(written, {},
                       [&](const auto &path) { return axk::text::path_to_utf8(path.lexically_relative(staging)); });
     auto artifacts = Json::array();
+    std::error_code error;
     for (const auto &path : written) {
         const auto relative = path.lexically_relative(staging);
         auto digest = sha256_file(path, context.cancellation);
@@ -645,7 +604,7 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
     }
     if (const auto checked = context.cancellation.check(); !checked)
         return std::unexpected(core_error(checked.error()));
-    if (auto published = publish_directory(staging, *destination, request->overwrite); !published)
+    if (auto published = sandbox.publish_directory(request->destination, request->overwrite, staging); !published)
         return std::unexpected(published.error());
     cleanup.release();
     const auto waveform_count =

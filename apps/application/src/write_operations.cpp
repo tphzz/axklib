@@ -50,7 +50,9 @@ struct ManifestDocument {
     std::vector<std::filesystem::path> bound_input_paths;
     std::vector<std::filesystem::path> upload_input_paths;
     std::vector<axk::app::FileRef> file_inputs;
+    std::vector<std::string> file_input_sha256;
     std::map<std::string, std::string> logical_input_paths;
+    std::vector<std::shared_ptr<class TemporaryDirectoryCleanup>> staging;
 };
 
 enum class WritePlanKind : std::uint8_t { hds, floppy, iso };
@@ -74,8 +76,10 @@ struct WritePlanRecord {
     std::optional<std::string> output_sha256;
     std::vector<FileFingerprint> inputs;
     std::vector<axk::app::FileRef> input_refs;
+    std::vector<std::string> input_ref_sha256;
     std::map<std::string, std::string> logical_input_paths;
     std::vector<axk::app::UploadLease> leases;
+    std::vector<std::shared_ptr<class TemporaryDirectoryCleanup>> staging;
     std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest> manifest;
     Json summary;
     std::string semantic_version;
@@ -91,23 +95,24 @@ struct WriteOperationState {
     std::size_t maximum_plans{128U};
 };
 
-class TemporaryFileCleanup {
+class TemporaryDirectoryCleanup {
   public:
-    explicit TemporaryFileCleanup(std::filesystem::path path) : path_{std::move(path)} {}
-    ~TemporaryFileCleanup() {
-        if (!active_)
-            return;
+    explicit TemporaryDirectoryCleanup(std::filesystem::path path) : path_{std::move(path)} {}
+    ~TemporaryDirectoryCleanup() {
         std::error_code error;
-        std::filesystem::remove(path_, error);
+        std::filesystem::remove_all(path_, error);
     }
-    TemporaryFileCleanup(const TemporaryFileCleanup &) = delete;
-    TemporaryFileCleanup &operator=(const TemporaryFileCleanup &) = delete;
-
-    void release() noexcept { active_ = false; }
+    TemporaryDirectoryCleanup(const TemporaryDirectoryCleanup &) = delete;
+    TemporaryDirectoryCleanup &operator=(const TemporaryDirectoryCleanup &) = delete;
 
   private:
     std::filesystem::path path_;
-    bool active_{true};
+};
+
+struct ResolvedInput {
+    std::filesystem::path path;
+    std::optional<axk::app::UploadLease> lease;
+    std::shared_ptr<TemporaryDirectoryCleanup> staging;
 };
 
 axk::app::Error operation_error(std::string code, std::string message,
@@ -282,18 +287,46 @@ axk::app::Result<std::string> read_text(const std::filesystem::path &path) {
     return std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
 }
 
-axk::app::Result<std::pair<std::filesystem::path, std::optional<axk::app::UploadLease>>>
-resolve_input(const Json &input, std::string_view owner_id, const axk::app::Sandbox &sandbox,
-              axk::app::UploadStore &uploads, bool require_manifest) {
+axk::app::Result<void> write_reader(const std::filesystem::path &path, const axk::RandomAccessReader &reader) {
+    std::ofstream output{path, std::ios::binary | std::ios::trunc};
+    if (!output)
+        return std::unexpected(operation_error("input_read_failed", "could not create retained input staging"));
+    std::vector<std::byte> buffer(
+        static_cast<std::size_t>(std::max<std::uint64_t>(1U, std::min<std::uint64_t>(1024U * 1024U, reader.size()))));
+    for (std::uint64_t offset = 0U; offset < reader.size();) {
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), reader.size() - offset));
+        if (const auto read = reader.read_exact_at(offset, std::span{buffer}.first(count)); !read)
+            return std::unexpected(core_error(read.error()));
+        output.write(reinterpret_cast<const char *>(buffer.data()), static_cast<std::streamsize>(count));
+        if (!output)
+            return std::unexpected(operation_error("input_read_failed", "could not write retained input staging"));
+        offset += count;
+    }
+    output.flush();
+    if (!output)
+        return std::unexpected(operation_error("input_read_failed", "could not flush retained input staging"));
+    return {};
+}
+
+axk::app::Result<ResolvedInput> resolve_input(const Json &input, std::string_view owner_id,
+                                              const axk::app::Sandbox &sandbox, axk::app::UploadStore &uploads,
+                                              bool require_manifest) {
     try {
         if (input.contains("fileRef") && !input.contains("uploadRef")) {
             const auto &value = input.at("fileRef");
             axk::app::FileRef reference{value.at("rootId").get<std::string>(),
                                         value.at("relativePath").get<std::string>()};
-            auto path = sandbox.resolve_file(reference);
-            if (!path)
-                return std::unexpected(path.error());
-            return std::pair{*path, std::optional<axk::app::UploadLease>{}};
+            auto file = sandbox.open_file(reference);
+            if (!file)
+                return std::unexpected(file.error());
+            auto staging = sandbox.create_staging_directory("axklib-write-input");
+            if (!staging)
+                return std::unexpected(staging.error());
+            auto cleanup = std::make_shared<TemporaryDirectoryCleanup>(*staging);
+            const auto path = *staging / file->filename;
+            if (auto written = write_reader(path, *file->reader); !written)
+                return std::unexpected(written.error());
+            return ResolvedInput{path, std::nullopt, std::move(cleanup)};
         }
         if (input.contains("uploadRef") && !input.contains("fileRef")) {
             const axk::app::UploadRef reference{input.at("uploadRef").at("uploadId").get<std::string>()};
@@ -310,7 +343,7 @@ resolve_input(const Json &input, std::string_view owner_id, const axk::app::Sand
             if (!lease)
                 return std::unexpected(lease.error());
             auto path = lease->path();
-            return std::pair{std::move(path), std::optional<axk::app::UploadLease>{std::move(*lease)}};
+            return ResolvedInput{std::move(path), std::optional<axk::app::UploadLease>{std::move(*lease)}, nullptr};
         }
     } catch (const Json::exception &) {
         return std::unexpected(operation_error("invalid_request", "input reference is malformed"));
@@ -343,6 +376,9 @@ std::optional<axk::app::FileRef> persistent_file_ref(const Json &input) {
     }
 }
 
+axk::app::Result<std::string> file_sha256(const std::filesystem::path &path,
+                                          const axk::CancellationToken &cancellation);
+
 axk::app::Result<ManifestDocument> load_manifest(const Json &input, const axk::app::OperationContext &context,
                                                  const axk::app::Sandbox &sandbox, axk::app::UploadStore &uploads) {
     ManifestDocument result;
@@ -351,18 +387,27 @@ axk::app::Result<ManifestDocument> load_manifest(const Json &input, const axk::a
         if (manifest.contains("inline") && !manifest.contains("fileRef") && !manifest.contains("uploadRef")) {
             result.json = manifest.at("inline");
         } else {
-            if (auto reference = persistent_file_ref(manifest))
-                result.file_inputs.push_back(std::move(*reference));
+            const auto persistent_reference = persistent_file_ref(manifest);
+            if (persistent_reference)
+                result.file_inputs.push_back(*persistent_reference);
             auto resolved = resolve_input(manifest, context.owner_id, sandbox, uploads, true);
             if (!resolved)
                 return std::unexpected(resolved.error());
-            auto text = read_text(resolved->first);
+            auto text = read_text(resolved->path);
             if (!text)
                 return std::unexpected(text.error());
             result.json = Json::parse(*text);
-            result.observed_paths.push_back(resolved->first);
-            if (resolved->second)
-                result.leases.push_back(std::move(*resolved->second));
+            result.observed_paths.push_back(resolved->path);
+            if (persistent_reference) {
+                auto digest = file_sha256(resolved->path, context.cancellation);
+                if (!digest)
+                    return std::unexpected(digest.error());
+                result.file_input_sha256.push_back(std::move(*digest));
+            }
+            if (resolved->lease)
+                result.leases.push_back(std::move(*resolved->lease));
+            if (resolved->staging)
+                result.staging.push_back(std::move(resolved->staging));
         }
         if (!result.json.is_object())
             return std::unexpected(operation_error("invalid_request", "manifest JSON must be an object"));
@@ -379,19 +424,28 @@ axk::app::Result<ManifestDocument> load_manifest(const Json &input, const axk::a
                         "invalid_binding_path", "logical input paths must be unique, relative, and contained"));
                 }
                 const auto &binding_input = binding.at("input");
-                if (auto reference = persistent_file_ref(binding_input))
-                    result.file_inputs.push_back(std::move(*reference));
+                const auto persistent_reference = persistent_file_ref(binding_input);
+                if (persistent_reference)
+                    result.file_inputs.push_back(*persistent_reference);
                 auto resolved = resolve_input(binding_input, context.owner_id, sandbox, uploads, false);
                 if (!resolved)
                     return std::unexpected(resolved.error());
-                result.logical_input_paths.emplace(normalized_path(resolved->first), logical);
-                replace_logical_path(result.json, logical, resolved->first.string());
-                result.observed_paths.push_back(resolved->first);
-                result.bound_input_paths.push_back(resolved->first);
-                if (resolved->second) {
-                    result.upload_input_paths.push_back(resolved->first);
-                    result.leases.push_back(std::move(*resolved->second));
+                result.logical_input_paths.emplace(normalized_path(resolved->path), logical);
+                replace_logical_path(result.json, logical, resolved->path.string());
+                result.observed_paths.push_back(resolved->path);
+                result.bound_input_paths.push_back(resolved->path);
+                if (persistent_reference) {
+                    auto digest = file_sha256(resolved->path, context.cancellation);
+                    if (!digest)
+                        return std::unexpected(digest.error());
+                    result.file_input_sha256.push_back(std::move(*digest));
                 }
+                if (resolved->lease) {
+                    result.upload_input_paths.push_back(resolved->path);
+                    result.leases.push_back(std::move(*resolved->lease));
+                }
+                if (resolved->staging)
+                    result.staging.push_back(std::move(resolved->staging));
             }
         }
         return result;
@@ -400,11 +454,8 @@ axk::app::Result<ManifestDocument> load_manifest(const Json &input, const axk::a
     }
 }
 
-axk::app::Result<std::string> file_sha256(const std::filesystem::path &path,
-                                          const axk::CancellationToken &cancellation) {
-    auto reader = axk::FileReader::open(path);
-    if (!reader)
-        return std::unexpected(core_error(reader.error()));
+axk::app::Result<std::string> reader_sha256(const axk::RandomAccessReader &reader,
+                                            const axk::CancellationToken &cancellation) {
     constexpr std::size_t chunk_size = 1024U * 1024U;
     std::vector<std::byte> buffer(chunk_size);
     const auto destroy_context = [](EVP_MD_CTX *context) { EVP_MD_CTX_free(context); };
@@ -412,12 +463,12 @@ axk::app::Result<std::string> file_sha256(const std::filesystem::path &path,
     if (!digest || EVP_DigestInit_ex(digest.get(), EVP_sha256(), nullptr) != 1) {
         return std::unexpected(operation_error("hash_failed", "could not initialize SHA-256"));
     }
-    for (std::uint64_t offset = 0U; offset < (*reader)->size();) {
+    for (std::uint64_t offset = 0U; offset < reader.size();) {
         if (const auto checked = cancellation.check(); !checked)
             return std::unexpected(core_error(checked.error()));
-        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), (*reader)->size() - offset));
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), reader.size() - offset));
         const auto chunk = std::span<std::byte>{buffer}.first(count);
-        if (const auto read = (*reader)->read_exact_at(offset, chunk); !read)
+        if (const auto read = reader.read_exact_at(offset, chunk); !read)
             return std::unexpected(core_error(read.error()));
         if (EVP_DigestUpdate(digest.get(), chunk.data(), chunk.size()) != 1)
             return std::unexpected(operation_error("hash_failed", "could not update SHA-256"));
@@ -435,6 +486,14 @@ axk::app::Result<std::string> file_sha256(const std::filesystem::path &path,
         result.push_back(alphabet[bytes[index] & 0x0fU]);
     }
     return result;
+}
+
+axk::app::Result<std::string> file_sha256(const std::filesystem::path &path,
+                                          const axk::CancellationToken &cancellation) {
+    auto reader = axk::FileReader::open(path);
+    if (!reader)
+        return std::unexpected(core_error(reader.error()));
+    return reader_sha256(**reader, cancellation);
 }
 
 axk::app::Result<std::pair<std::uintmax_t, std::filesystem::file_time_type>>
@@ -551,7 +610,8 @@ std::optional<std::string> known_fingerprint(std::span<const FileFingerprint> fi
     return found == fingerprints.end() ? std::nullopt : std::optional{found->sha256};
 }
 
-axk::app::Result<void> verify_plan_state(const WritePlanRecord &record, const axk::CancellationToken &cancellation) {
+axk::app::Result<void> verify_plan_state(const WritePlanRecord &record, const axk::app::Sandbox &sandbox,
+                                         const axk::CancellationToken &cancellation) {
     const auto build = axk::current_build_info();
     if (record.semantic_version != axk::version() || record.source_identity != build.source_identity) {
         return std::unexpected(operation_error("write_plan_stale", "server build identity changed after planning"));
@@ -563,6 +623,16 @@ axk::app::Result<void> verify_plan_state(const WritePlanRecord &record, const ax
         }
         auto digest = file_sha256(input.path, cancellation);
         if (!digest || *digest != input.sha256)
+            return std::unexpected(operation_error("write_plan_stale", "an input changed after planning"));
+    }
+    if (record.input_refs.size() != record.input_ref_sha256.size())
+        return std::unexpected(operation_error("write_plan_stale", "write plan input identity is incomplete"));
+    for (std::size_t index = 0U; index < record.input_refs.size(); ++index) {
+        auto input = sandbox.open_file(record.input_refs[index]);
+        if (!input)
+            return std::unexpected(operation_error("write_plan_stale", "an input changed after planning"));
+        auto digest = reader_sha256(*input->reader, cancellation);
+        if (!digest || *digest != record.input_ref_sha256[index])
             return std::unexpected(operation_error("write_plan_stale", "an input changed after planning"));
     }
     std::error_code error;
@@ -579,6 +649,23 @@ axk::app::Result<void> verify_plan_state(const WritePlanRecord &record, const ax
                 return std::unexpected(operation_error("write_plan_stale", "destination changed after planning"));
             }
         }
+    }
+    return {};
+}
+
+axk::app::Result<void> verify_sandbox_files(std::span<const axk::app::FileRef> references,
+                                            std::span<const std::string> expected_sha256,
+                                            const axk::app::Sandbox &sandbox,
+                                            const axk::CancellationToken &cancellation) {
+    if (references.size() != expected_sha256.size())
+        return std::unexpected(operation_error("input_changed", "input identity is incomplete"));
+    for (std::size_t index = 0U; index < references.size(); ++index) {
+        auto input = sandbox.open_file(references[index]);
+        if (!input)
+            return std::unexpected(operation_error("input_changed", "an input changed during execution"));
+        auto digest = reader_sha256(*input->reader, cancellation);
+        if (!digest || *digest != expected_sha256[index])
+            return std::unexpected(operation_error("input_changed", "an input changed during execution"));
     }
     return {};
 }
@@ -1021,11 +1108,26 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
         auto token = axk::app::secure_random_hex(24U);
         if (!token)
             return Result<Json>{std::unexpected(token.error())};
-        auto record = std::make_shared<WritePlanRecord>(WritePlanRecord{
-            std::move(*token), context.owner_id, now + state->retention, write_plan_kind(*manifest_kind), *output,
-            *output_path, overwrite, output_existed, std::move(output_digest), std::move(*fingerprints),
-            std::move(document->file_inputs), std::move(document->logical_input_paths), std::move(document->leases),
-            std::move(manifest), std::move(summary), std::string{axk::version()}, build.source_identity, false});
+        auto record = std::make_shared<WritePlanRecord>(WritePlanRecord{std::move(*token),
+                                                                        context.owner_id,
+                                                                        now + state->retention,
+                                                                        write_plan_kind(*manifest_kind),
+                                                                        *output,
+                                                                        *output_path,
+                                                                        overwrite,
+                                                                        output_existed,
+                                                                        std::move(output_digest),
+                                                                        std::move(*fingerprints),
+                                                                        std::move(document->file_inputs),
+                                                                        std::move(document->file_input_sha256),
+                                                                        std::move(document->logical_input_paths),
+                                                                        std::move(document->leases),
+                                                                        std::move(document->staging),
+                                                                        std::move(manifest),
+                                                                        std::move(summary),
+                                                                        std::string{axk::version()},
+                                                                        build.source_identity,
+                                                                        false});
         if (auto registered = register_plan(state, record); !registered)
             return Result<Json>{std::unexpected(registered.error())};
         return Result<Json>{write_plan_json(*record, static_cast<std::uint64_t>(state->retention.count() * 60))};
@@ -1103,64 +1205,79 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
     const auto bind_create = [&](std::string_view operation_id, axk::BuildManifestKind expected_kind) -> Result<void> {
         if (registry.is_implemented(operation_id))
             return {};
-        auto bound = registry.bind(operation_id, [state, expected_kind, &sandbox](const Json &input,
-                                                                                  const OperationContext &context) {
-            std::string token;
-            try {
-                token = input.at("planToken").get<std::string>();
-            } catch (const Json::exception &) {
-                return Result<Json>{std::unexpected(operation_error("invalid_request", "planToken is required"))};
-            }
-            auto claim = claim_plan(state, token, context.owner_id, write_plan_kind(expected_kind));
-            if (!claim)
-                return Result<Json>{std::unexpected(claim.error())};
-            const auto &record = *claim->record();
-            if (auto verified = verify_plan_state(record, context.cancellation); !verified) {
-                claim->consume();
-                return Result<Json>{std::unexpected(verified.error())};
-            }
-            auto output_path = sandbox.resolve_output_file(record.output, record.overwrite);
-            if (!output_path)
-                return Result<Json>{std::unexpected(output_path.error())};
-            if (normalized_path(*output_path) != normalized_path(record.output_path)) {
-                return Result<Json>{std::unexpected(
-                    operation_error("write_plan_stale", "destination identity changed after planning"))};
-            }
-            if (expected_kind == axk::BuildManifestKind::hds) {
-                const auto &manifest = std::get<axk::HdsBuildManifest>(record.manifest);
-                auto written = axk::write_hds_image(manifest, *output_path, record.overwrite, context.cancellation);
-                if (!written)
-                    return Result<Json>{std::unexpected(core_error(written.error(), record.output.relative_path))};
-                auto partitions = Json::array();
-                for (const auto &partition : written->partitions) {
-                    partitions.push_back({{"index", partition.geometry.index},
-                                          {"name", partition.name},
-                                          {"startSector", partition.geometry.start_sector},
-                                          {"sectorCount", partition.geometry.filesystem_sector_count},
-                                          {"clusterCount", partition.geometry.cluster_count},
-                                          {"freeKiB", partition.sampler_visible_free_kib}});
+        auto bound = registry.bind(
+            operation_id, [state, expected_kind, &sandbox](const Json &input, const OperationContext &context) {
+                std::string token;
+                try {
+                    token = input.at("planToken").get<std::string>();
+                } catch (const Json::exception &) {
+                    return Result<Json>{std::unexpected(operation_error("invalid_request", "planToken is required"))};
                 }
-                auto result = validate_written_image(*output_path, record.output, context);
+                auto claim = claim_plan(state, token, context.owner_id, write_plan_kind(expected_kind));
+                if (!claim)
+                    return Result<Json>{std::unexpected(claim.error())};
+                const auto &record = *claim->record();
+                if (auto verified = verify_plan_state(record, sandbox, context.cancellation); !verified) {
+                    claim->consume();
+                    return Result<Json>{std::unexpected(verified.error())};
+                }
+                auto output_path = sandbox.resolve_output_file(record.output, record.overwrite);
+                if (!output_path)
+                    return Result<Json>{std::unexpected(output_path.error())};
+                if (normalized_path(*output_path) != normalized_path(record.output_path)) {
+                    return Result<Json>{std::unexpected(
+                        operation_error("write_plan_stale", "destination identity changed after planning"))};
+                }
+                auto staging_directory = sandbox.create_staging_directory("axklib-image-build");
+                if (!staging_directory)
+                    return Result<Json>{std::unexpected(staging_directory.error())};
+                TemporaryDirectoryCleanup staging_cleanup{*staging_directory};
+                const auto staged_output = *staging_directory / record.output_path.filename();
+                const auto publish = [&]() -> Result<void> {
+                    auto reader = axk::FileReader::open(staged_output);
+                    if (!reader)
+                        return std::unexpected(core_error(reader.error(), record.output.relative_path));
+                    return sandbox.publish_file(record.output, record.overwrite, **reader);
+                };
+                if (expected_kind == axk::BuildManifestKind::hds) {
+                    const auto &manifest = std::get<axk::HdsBuildManifest>(record.manifest);
+                    auto written = axk::write_hds_image(manifest, staged_output, false, context.cancellation);
+                    if (!written)
+                        return Result<Json>{std::unexpected(core_error(written.error(), record.output.relative_path))};
+                    auto partitions = Json::array();
+                    for (const auto &partition : written->partitions) {
+                        partitions.push_back({{"index", partition.geometry.index},
+                                              {"name", partition.name},
+                                              {"startSector", partition.geometry.start_sector},
+                                              {"sectorCount", partition.geometry.filesystem_sector_count},
+                                              {"clusterCount", partition.geometry.cluster_count},
+                                              {"freeKiB", partition.sampler_visible_free_kib}});
+                    }
+                    auto result = validate_written_image(staged_output, record.output, context);
+                    if (!result)
+                        return Result<Json>{std::unexpected(result.error())};
+                    if (auto published = publish(); !published)
+                        return Result<Json>{std::unexpected(published.error())};
+                    decorate_build_result(*result, record);
+                    (*result)["partitions"] = std::move(partitions);
+                    (*result)["unusedTailSectors"] = written->unused_tail_sectors;
+                    claim->consume();
+                    return result;
+                } else {
+                    const auto &manifest = std::get<axk::MediaBuildManifest>(record.manifest);
+                    auto written = axk::write_media_image(manifest, staged_output, false, context.cancellation);
+                    if (!written)
+                        return Result<Json>{std::unexpected(core_error(written.error(), record.output.relative_path))};
+                }
+                auto result = validate_written_image(staged_output, record.output, context);
                 if (!result)
                     return Result<Json>{std::unexpected(result.error())};
+                if (auto published = publish(); !published)
+                    return Result<Json>{std::unexpected(published.error())};
                 decorate_build_result(*result, record);
-                (*result)["partitions"] = std::move(partitions);
-                (*result)["unusedTailSectors"] = written->unused_tail_sectors;
                 claim->consume();
                 return result;
-            } else {
-                const auto &manifest = std::get<axk::MediaBuildManifest>(record.manifest);
-                auto written = axk::write_media_image(manifest, *output_path, record.overwrite, context.cancellation);
-                if (!written)
-                    return Result<Json>{std::unexpected(core_error(written.error(), record.output.relative_path))};
-            }
-            auto result = validate_written_image(*output_path, record.output, context);
-            if (!result)
-                return Result<Json>{std::unexpected(result.error())};
-            decorate_build_result(*result, record);
-            claim->consume();
-            return result;
-        });
+            });
         if (!bound)
             return bound;
         return registry.bind_path_accesses(
@@ -1201,9 +1318,16 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                 auto source = parse_file_ref(input, "source");
                 if (!source)
                     return Result<Json>{std::unexpected(source.error())};
-                auto source_path = sandbox.resolve_file(*source);
-                if (!source_path)
-                    return Result<Json>{std::unexpected(source_path.error())};
+                auto source_file = sandbox.open_file(*source);
+                if (!source_file)
+                    return Result<Json>{std::unexpected(source_file.error())};
+                auto staging_directory = sandbox.create_staging_directory("axklib-alteration-inspection");
+                if (!staging_directory)
+                    return Result<Json>{std::unexpected(staging_directory.error())};
+                TemporaryDirectoryCleanup staging_cleanup{*staging_directory};
+                const auto source_path = *staging_directory / "source.hds";
+                if (auto staged = write_reader(source_path, *source_file->reader); !staged)
+                    return Result<Json>{std::unexpected(staged.error())};
                 auto document = load_manifest(input, context, sandbox, uploads);
                 if (!document)
                     return Result<Json>{std::unexpected(document.error())};
@@ -1214,7 +1338,7 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                 if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
                     return Result<Json>{std::unexpected(admitted.error())};
                 auto inspection =
-                    axk::inspect_hds_alteration(*source_path, *manifest, context.cancellation, context.progress);
+                    axk::inspect_hds_alteration(source_path, *manifest, context.cancellation, context.progress);
                 if (!inspection)
                     return Result<Json>{std::unexpected(core_error(inspection.error(), source->relative_path))};
 
@@ -1243,9 +1367,15 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             auto source = parse_file_ref(input, "source");
             if (!source)
                 return Result<Json>{std::unexpected(source.error())};
-            auto source_path = sandbox.resolve_file(*source);
-            if (!source_path)
-                return Result<Json>{std::unexpected(source_path.error())};
+            auto source_file = sandbox.open_file(*source);
+            if (!source_file)
+                return Result<Json>{std::unexpected(source_file.error())};
+            auto source_digest = reader_sha256(*source_file->reader, context.cancellation);
+            if (!source_digest)
+                return Result<Json>{std::unexpected(source_digest.error())};
+            auto source_identity_path = sandbox.resolve_file(*source);
+            if (!source_identity_path)
+                return Result<Json>{std::unexpected(source_identity_path.error())};
             const auto replace_source = input.value("replaceSource", false);
             auto output = parse_file_ref(input, "output");
             if (!output)
@@ -1258,7 +1388,7 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                 auto output_identity = sandbox.resolve_file(*output);
                 if (!output_identity)
                     return Result<Json>{std::unexpected(output_identity.error())};
-                if (normalized_path(*source_path) != normalized_path(*output_identity)) {
+                if (normalized_path(*source_identity_path) != normalized_path(*output_identity)) {
                     return Result<Json>{std::unexpected(
                         operation_error("invalid_request", "output must match source when replaceSource is true"))};
                 }
@@ -1269,6 +1399,13 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             auto output_path = sandbox.resolve_output_file(*output, overwrite);
             if (!output_path)
                 return Result<Json>{std::unexpected(output_path.error())};
+            auto staging_directory = sandbox.create_staging_directory("axklib-alteration");
+            if (!staging_directory)
+                return Result<Json>{std::unexpected(staging_directory.error())};
+            TemporaryDirectoryCleanup staging_cleanup{*staging_directory};
+            const auto source_path = *staging_directory / "source.hds";
+            if (auto staged = write_reader(source_path, *source_file->reader); !staged)
+                return Result<Json>{std::unexpected(staged.error())};
             auto document = load_manifest(input, context, sandbox, uploads);
             if (!document)
                 return Result<Json>{std::unexpected(document.error())};
@@ -1279,7 +1416,7 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
                 return Result<Json>{std::unexpected(admitted.error())};
             auto fingerprint_paths = document->observed_paths;
-            fingerprint_paths.push_back(*source_path);
+            fingerprint_paths.push_back(source_path);
             fingerprint_paths.insert(fingerprint_paths.end(), required_paths.begin(), required_paths.end());
             auto fingerprints = fingerprint_files(fingerprint_paths, context.cancellation);
             if (!fingerprints)
@@ -1300,14 +1437,9 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                     output_digest = std::move(*digest);
                 }
             }
-            auto staging = axk::text::temporary_sibling(*output_path);
-            if (!staging) {
-                return Result<Json>{std::unexpected(
-                    operation_error("alteration_write_failed", "could not name alteration staging output"))};
-            }
-            TemporaryFileCleanup cleanup{*staging};
+            const auto staging = *staging_directory / "output.hds";
             auto altered =
-                axk::alter_hds(*source_path, *manifest, *staging, context.cancellation, context.progress, false);
+                axk::alter_hds(source_path, *manifest, staging, context.cancellation, context.progress, false);
             if (!altered)
                 return Result<Json>{std::unexpected(core_error(altered.error(), output->relative_path))};
             if (context.progress) {
@@ -1316,7 +1448,7 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             }
             if (const auto checked = context.cancellation.check(); !checked)
                 return Result<Json>{std::unexpected(core_error(checked.error(), output->relative_path))};
-            auto validation = validate_written_image(*staging, *output, context);
+            auto validation = validate_written_image(staging, *output, context);
             if (!validation)
                 return Result<Json>{std::unexpected(validation.error())};
             if (context.progress) {
@@ -1328,16 +1460,28 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                 !verified) {
                 return Result<Json>{std::unexpected(verified.error())};
             }
+            const std::array source_reference{*source};
+            const std::array source_sha256{*source_digest};
+            if (auto verified = verify_sandbox_files(source_reference, source_sha256, sandbox, context.cancellation);
+                !verified) {
+                return Result<Json>{std::unexpected(verified.error())};
+            }
+            if (auto verified = verify_sandbox_files(document->file_inputs, document->file_input_sha256, sandbox,
+                                                     context.cancellation);
+                !verified) {
+                return Result<Json>{std::unexpected(verified.error())};
+            }
             if (context.progress) {
                 context.progress->report(
                     {axk::ProgressPhase::publishing, 0U, 1U, "publishing alteration image", std::nullopt});
             }
             if (const auto checked = context.cancellation.check(); !checked)
                 return Result<Json>{std::unexpected(core_error(checked.error(), output->relative_path))};
-            if (auto published = axk::detail::publish_temporary_file(*staging, *output_path, overwrite); !published) {
-                return Result<Json>{std::unexpected(core_error(published.error(), output->relative_path))};
-            }
-            cleanup.release();
+            auto staged_reader = axk::FileReader::open(staging);
+            if (!staged_reader)
+                return Result<Json>{std::unexpected(core_error(staged_reader.error(), output->relative_path))};
+            if (auto published = sandbox.publish_file(*output, overwrite, **staged_reader); !published)
+                return Result<Json>{std::unexpected(published.error())};
             if (context.progress) {
                 context.progress->report(
                     {axk::ProgressPhase::publishing, 1U, 1U, "published alteration image", std::nullopt});

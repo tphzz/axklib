@@ -49,6 +49,20 @@ struct ValidationSource {
     axk::RelationshipGraph graph;
 };
 
+struct DirectoryCleanup {
+    std::filesystem::path path;
+    bool active{true};
+
+    ~DirectoryCleanup() {
+        if (!active)
+            return;
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+    }
+
+    void release() noexcept { active = false; }
+};
+
 axk::app::Error operation_error(std::string code, std::string message,
                                 std::optional<std::string> relative_path = std::nullopt) {
     axk::app::ErrorContext context;
@@ -65,6 +79,28 @@ axk::app::Error core_error(const axk::Error &error, const axk::app::FileRef &sou
     context.relative_path = source.relative_path;
     return {error.code == axk::ErrorCode::operation_cancelled ? "operation_cancelled" : "validation_failed",
             error.message, std::move(context)};
+}
+
+axk::app::Result<void> write_reader(const std::filesystem::path &path, const axk::RandomAccessReader &reader) {
+    std::error_code error;
+    std::filesystem::create_directories(path.parent_path(), error);
+    if (error)
+        return std::unexpected(operation_error("validation_input_failed", "could not stage export directory"));
+    std::ofstream output{path, std::ios::binary | std::ios::trunc};
+    if (!output)
+        return std::unexpected(operation_error("validation_input_failed", "could not stage export file"));
+    std::vector<std::byte> buffer(
+        static_cast<std::size_t>(std::max<std::uint64_t>(1U, std::min<std::uint64_t>(1024U * 1024U, reader.size()))));
+    for (std::uint64_t offset = 0U; offset < reader.size();) {
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), reader.size() - offset));
+        if (const auto read = reader.read_exact_at(offset, std::span{buffer}.first(count)); !read)
+            return std::unexpected(operation_error("validation_input_failed", read.error().message));
+        output.write(reinterpret_cast<const char *>(buffer.data()), static_cast<std::streamsize>(count));
+        if (!output)
+            return std::unexpected(operation_error("validation_input_failed", "could not stage export file"));
+        offset += count;
+    }
+    return {};
 }
 
 axk::app::Result<ValidationRequest> parse_request(const Json &input) {
@@ -114,10 +150,10 @@ std::string display_path(const axk::app::FileRef &source, const axk::app::Operat
 
 axk::app::Result<ValidationSource> load_source(const axk::app::Sandbox &sandbox, const axk::app::FileRef &source,
                                                const axk::app::OperationContext &context) {
-    const auto path = sandbox.resolve_file(source);
-    if (!path)
-        return std::unexpected(path.error());
-    auto media = axk::open_media(*path, context.cancellation);
+    const auto file = sandbox.open_file(source);
+    if (!file)
+        return std::unexpected(file.error());
+    auto media = axk::open_media(file->reader, std::filesystem::path{file->filename}, context.cancellation);
     if (!media)
         return std::unexpected(core_error(media.error(), source));
     auto inventory = axk::build_media_inventory(*media, axk::MediaObjectReadMode::complete, 64U * 1024U * 1024U,
@@ -1000,9 +1036,10 @@ axk::app::Result<Json> execute_validation(const axk::app::Sandbox &sandbox, cons
     const auto request = parse_request(input);
     if (!request)
         return std::unexpected(request.error());
-    const auto destination = sandbox.resolve_output_directory(request->destination, request->overwrite);
+    const auto destination = sandbox.create_staging_directory("axklib-validation");
     if (!destination)
         return std::unexpected(destination.error());
+    DirectoryCleanup cleanup{*destination};
     std::error_code filesystem_error;
     std::filesystem::create_directories(*destination / "_schemas", filesystem_error);
     if (filesystem_error) {
@@ -1022,10 +1059,20 @@ axk::app::Result<Json> execute_validation(const axk::app::Sandbox &sandbox, cons
     std::vector<ValidationSource> loaded;
 
     if (request->exports) {
-        const auto exports = sandbox.resolve_directory(*request->exports);
-        if (!exports)
-            return std::unexpected(exports.error());
-        issues = validate_export_directory(*exports);
+        constexpr std::size_t maximum_export_files = 100'000U;
+        constexpr std::uint64_t maximum_export_bytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
+        auto export_files = sandbox.open_tree_files(*request->exports, maximum_export_files, maximum_export_bytes);
+        if (!export_files)
+            return std::unexpected(export_files.error());
+        auto export_staging = sandbox.create_staging_directory("axklib-validation-input");
+        if (!export_staging)
+            return std::unexpected(export_staging.error());
+        DirectoryCleanup export_cleanup{*export_staging};
+        for (const auto &file : *export_files) {
+            if (auto staged = write_reader(*export_staging / file.relative_path, *file.reader); !staged)
+                return std::unexpected(staged.error());
+        }
+        issues = validate_export_directory(*export_staging);
         for (const auto &issue : issues) {
             const auto code = std::ranges::find(issue, "code", &std::pair<std::string, axk::ReportValue>::first);
             if (code != issue.end())
@@ -1250,6 +1297,9 @@ axk::app::Result<Json> execute_validation(const axk::app::Sandbox &sandbox, cons
         context.progress->report({axk::ProgressPhase::writing, request->sources.size(), request->sources.size(),
                                   "validation", std::nullopt});
     }
+    if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
+        return std::unexpected(published.error());
+    cleanup.release();
     return Json{{"operationId", "report.validate"}, {"sourceCount", request->sources.size()},
                 {"issueCount", issues.size()},      {"failed", failed},
                 {"policy", request->policy},        {"artifacts", std::move(artifacts)}};

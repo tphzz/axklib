@@ -5,11 +5,13 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -34,7 +36,7 @@ struct PackageInput {
 };
 
 struct ResolvedPackage {
-    std::filesystem::path path;
+    std::shared_ptr<const axk::RandomAccessReader> reader;
     std::string filename;
     std::optional<axk::app::UploadLease> lease;
 };
@@ -60,6 +62,18 @@ struct PackageOperationState {
     std::unordered_map<std::string, std::string> destination_reservations;
     std::chrono::minutes retention{15};
     std::size_t maximum_plans{128U};
+};
+
+class TemporaryDirectoryCleanup {
+  public:
+    explicit TemporaryDirectoryCleanup(std::filesystem::path path) : path_{std::move(path)} {}
+    ~TemporaryDirectoryCleanup() {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+  private:
+    std::filesystem::path path_;
 };
 
 std::string normalized_path(const std::filesystem::path &path) {
@@ -92,6 +106,27 @@ axk::app::Error core_error(const axk::Error &error, std::optional<std::string> r
         code = "package_plan_stale";
     }
     return {std::move(code), error.message, std::move(context)};
+}
+
+axk::app::Result<void> write_reader(const std::filesystem::path &path, const axk::RandomAccessReader &reader) {
+    std::ofstream output{path, std::ios::binary | std::ios::trunc};
+    if (!output)
+        return std::unexpected(operation_error("package_read_failed", "could not create retained target staging"));
+    std::vector<std::byte> buffer(
+        static_cast<std::size_t>(std::max<std::uint64_t>(1U, std::min<std::uint64_t>(1024U * 1024U, reader.size()))));
+    for (std::uint64_t offset = 0U; offset < reader.size();) {
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), reader.size() - offset));
+        if (const auto read = reader.read_exact_at(offset, std::span{buffer}.first(count)); !read)
+            return std::unexpected(core_error(read.error()));
+        output.write(reinterpret_cast<const char *>(buffer.data()), static_cast<std::streamsize>(count));
+        if (!output)
+            return std::unexpected(operation_error("package_read_failed", "could not write retained target staging"));
+        offset += count;
+    }
+    output.flush();
+    if (!output)
+        return std::unexpected(operation_error("package_read_failed", "could not flush retained target staging"));
+    return {};
 }
 
 axk::app::Result<axk::app::FileRef> parse_file_ref(const Json &input, std::string_view field) {
@@ -130,10 +165,10 @@ axk::app::Result<PackageInput> parse_package_input(const Json &input) {
 axk::app::Result<ResolvedPackage> resolve_package(const PackageInput &input, std::string_view owner_id,
                                                   const axk::app::Sandbox &sandbox, axk::app::UploadStore &uploads) {
     if (const auto *file = std::get_if<axk::app::FileRef>(&input.reference)) {
-        auto path = sandbox.resolve_file(*file);
-        if (!path)
-            return std::unexpected(path.error());
-        return ResolvedPackage{*path, axk::text::path_to_utf8(path->filename()), std::nullopt};
+        auto opened = sandbox.open_file(*file);
+        if (!opened)
+            return std::unexpected(opened.error());
+        return ResolvedPackage{std::move(opened->reader), std::move(opened->filename), std::nullopt};
     }
     const auto &upload = std::get<axk::app::UploadRef>(input.reference);
     auto snapshot = uploads.inspect(upload, owner_id);
@@ -145,14 +180,16 @@ axk::app::Result<ResolvedPackage> resolve_package(const PackageInput &input, std
     auto lease = uploads.lease(upload, owner_id);
     if (!lease)
         return std::unexpected(lease.error());
-    auto path = lease->path();
-    return ResolvedPackage{std::move(path), snapshot->filename, std::move(*lease)};
+    auto reader = axk::FileReader::open(lease->path());
+    if (!reader)
+        return std::unexpected(operation_error("package_read_failed", reader.error().message));
+    return ResolvedPackage{std::move(*reader), snapshot->filename, std::move(*lease)};
 }
 
 axk::app::Result<axk::PortablePackage> read_package(const ResolvedPackage &resolved, bool verify,
                                                     const axk::app::OperationContext &context) {
-    auto package = verify ? axk::open_portable_package(resolved.path, resolved.filename, context.cancellation)
-                          : axk::inspect_portable_package(resolved.path, resolved.filename, context.cancellation);
+    auto package = verify ? axk::open_portable_package(*resolved.reader, resolved.filename, context.cancellation)
+                          : axk::inspect_portable_package(*resolved.reader, resolved.filename, context.cancellation);
     if (!package)
         return std::unexpected(core_error(package.error()));
     if (verify) {
@@ -500,10 +537,11 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
             const auto overwrite = input.value("overwrite", false);
             if (const auto distinct = sandbox.require_distinct(*source, *output); !distinct)
                 return Result<Json>{std::unexpected(distinct.error())};
-            auto source_path = sandbox.resolve_file(*source);
-            if (!source_path)
-                return Result<Json>{std::unexpected(source_path.error())};
-            auto media = axk::open_media(*source_path, context.cancellation);
+            auto source_file = sandbox.open_file(*source);
+            if (!source_file)
+                return Result<Json>{std::unexpected(source_file.error())};
+            auto media = axk::open_media(source_file->reader, std::filesystem::path{source_file->filename},
+                                         context.cancellation);
             if (!media)
                 return Result<Json>{std::unexpected(core_error(media.error(), source->relative_path))};
             auto build = axk::build_portable_package(*media, *roots, context.cancellation);
@@ -520,21 +558,19 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
                 }
                 effective_output.relative_path += required;
             }
-            auto output_path = sandbox.resolve_output_file(effective_output, overwrite);
-            if (!output_path)
-                return Result<Json>{std::unexpected(output_path.error())};
             if (context.progress)
                 context.progress->report(
                     {axk::ProgressPhase::exporting, 0U, 1U, "Publishing portable package", std::nullopt});
-            auto publication = axk::publish_portable_package(*build, *output_path, overwrite, context.cancellation);
-            if (!publication)
-                return Result<Json>{std::unexpected(core_error(publication.error(), effective_output.relative_path))};
+            const auto size_bytes = build->archive.size();
+            const axk::MemoryReader archive{std::move(build->archive)};
+            if (auto publication = sandbox.publish_file(effective_output, overwrite, archive); !publication)
+                return Result<Json>{std::unexpected(publication.error())};
             if (context.progress)
                 context.progress->report(
                     {axk::ProgressPhase::exporting, 1U, 1U, "Portable package published", std::nullopt});
             auto result = package_json(build->package);
             result["output"] = file_ref_json(effective_output);
-            result["sizeBytes"] = publication->size_bytes;
+            result["sizeBytes"] = size_bytes;
             return Result<Json>{std::move(result)};
         });
         if (!bound)
@@ -551,9 +587,16 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
                     return Result<Json>{std::unexpected(output.error())};
                 if (const auto distinct = sandbox.require_distinct(*target, *output); !distinct)
                     return Result<Json>{std::unexpected(distinct.error())};
-                auto target_path = sandbox.resolve_file(*target);
-                if (!target_path)
-                    return Result<Json>{std::unexpected(target_path.error())};
+                auto target_file = sandbox.open_file(*target);
+                if (!target_file)
+                    return Result<Json>{std::unexpected(target_file.error())};
+                auto target_staging = sandbox.create_staging_directory("axklib-package-plan");
+                if (!target_staging)
+                    return Result<Json>{std::unexpected(target_staging.error())};
+                TemporaryDirectoryCleanup target_cleanup{*target_staging};
+                const auto target_path = *target_staging / "target.img";
+                if (auto staged = write_reader(target_path, *target_file->reader); !staged)
+                    return Result<Json>{std::unexpected(staged.error())};
                 const auto overwrite = input.value("overwrite", false);
                 auto output_path = sandbox.resolve_output_file(*output, overwrite);
                 if (!output_path)
@@ -593,7 +636,7 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
                     resolved.push_back(std::move(*item));
                     packages.push_back(std::move(*package));
                 }
-                auto plan = axk::plan_package_import(*target_path, packages, *import_request, context.cancellation);
+                auto plan = axk::plan_package_import(target_path, packages, *import_request, context.cancellation);
                 if (!plan)
                     return Result<Json>{std::unexpected(core_error(plan.error(), target->relative_path))};
 
@@ -667,9 +710,9 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
                 current_inputs.push_back(std::move(*resolved));
                 packages.push_back(std::move(*package));
             }
-            auto target_path = sandbox.resolve_file(record->target);
-            if (!target_path)
-                return Result<Json>{std::unexpected(target_path.error())};
+            auto target_file = sandbox.open_file(record->target);
+            if (!target_file)
+                return Result<Json>{std::unexpected(target_file.error())};
             auto output_path = sandbox.resolve_output_file(record->output, record->overwrite);
             if (!output_path)
                 return Result<Json>{std::unexpected(output_path.error())};
@@ -678,10 +721,23 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
                 return Result<Json>{std::unexpected(
                     operation_error("package_plan_stale", "package import destination changed after planning"))};
             }
-            auto report = axk::apply_package_import(*target_path, packages, record->plan, *output_path,
-                                                    record->overwrite, context.cancellation, context.progress);
+            auto staging_directory = sandbox.create_staging_directory("axklib-package-import");
+            if (!staging_directory)
+                return Result<Json>{std::unexpected(staging_directory.error())};
+            TemporaryDirectoryCleanup staging_cleanup{*staging_directory};
+            const auto target_path = *staging_directory / "target.img";
+            if (auto staged = write_reader(target_path, *target_file->reader); !staged)
+                return Result<Json>{std::unexpected(staged.error())};
+            const auto staged_output = *staging_directory / output_path->filename();
+            auto report = axk::apply_package_import(target_path, packages, record->plan, staged_output, false,
+                                                    context.cancellation, context.progress);
             if (!report)
                 return Result<Json>{std::unexpected(core_error(report.error(), record->output.relative_path))};
+            auto staged_reader = axk::FileReader::open(staged_output);
+            if (!staged_reader)
+                return Result<Json>{std::unexpected(core_error(staged_reader.error(), record->output.relative_path))};
+            if (auto published = sandbox.publish_file(record->output, record->overwrite, **staged_reader); !published)
+                return Result<Json>{std::unexpected(published.error())};
             claim->consume();
             return Result<Json>{{{"schemaVersion", "1.0"},
                                  {"planId", report->plan_id},

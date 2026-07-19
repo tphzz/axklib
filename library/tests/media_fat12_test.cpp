@@ -188,6 +188,20 @@ TEST(Fat12Reader, RejectsLoopsBadClustersTruncationDuplicatesAndNonFat12) {
     EXPECT_EQ(result.error().code, axk::ErrorCode::container_invalid_geometry);
 }
 
+TEST(Fat12Reader, RejectsDataGeometryThatTheFatCannotAddress) {
+    auto undersized_fat = fat_fixture();
+    constexpr std::uint16_t total_sectors = 1000U;
+    le16(undersized_fat, 0x13U, total_sectors);
+    undersized_fat.resize(static_cast<std::size_t>(total_sectors) * 512U);
+
+    const auto result =
+        axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(undersized_fat)), "undersized-fat.ima");
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, axk::ErrorCode::container_invalid_geometry);
+    EXPECT_NE(result.error().message.find("cannot address"), std::string::npos);
+}
+
 TEST(Fat12Reader, IgnoresLongNamesAndRequiresMatchingFatCopies) {
     auto long_name = fat_fixture();
     constexpr std::size_t root = 3U * 512U;

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -32,7 +33,8 @@ bool is_upper_snake(std::string_view value) {
 
 void expect_upper_snake_enums(const nlohmann::json &value, std::string_view path = "$") {
     if (value.is_object()) {
-        if (const auto enumeration = value.find("enum"); enumeration != value.end()) {
+        const auto legacy_lowercase = value.value("x-axklib-wire-enum-style", "") == "legacy-lowercase";
+        if (const auto enumeration = value.find("enum"); enumeration != value.end() && !legacy_lowercase) {
             for (const auto &candidate : *enumeration) {
                 if (candidate.is_string()) {
                     EXPECT_TRUE(is_upper_snake(candidate.get_ref<const std::string &>())) << path << ": " << candidate;
@@ -188,6 +190,85 @@ TEST(ServerContract, CompleteDocumentDerivesEveryDomainRouteAndSchemaFromRegistr
         for (const auto &[status, response] : operation.at("responses").items()) {
             static_cast<void>(status);
             EXPECT_EQ(response.at("headers").at("X-Request-Id").at("$ref"), "#/components/headers/XRequestId");
+        }
+    }
+}
+
+TEST(ServerContract, InfrastructureJsonOperationsDeclareConcreteRequestAndResponseSchemas) {
+    struct Expectation {
+        std::string_view path;
+        std::string_view method;
+        std::string_view request_schema;
+        std::string_view status;
+        std::string_view response_schema;
+    };
+    constexpr std::array expectations{
+        Expectation{"/system/capabilities", "get", "", "200", "CapabilitiesResponse"},
+        Expectation{"/system/metrics", "get", "", "200", "MetricsResponse"},
+        Expectation{"/system/health/ready", "get", "", "200", "ReadinessResponse"},
+        Expectation{"/roots", "get", "", "200", "RootsResponse"},
+        Expectation{"/workspaces", "get", "", "200", "WorkspaceSnapshotResponse"},
+        Expectation{"/workspaces", "post", "WorkspaceCreateRequest", "201", "WorkspaceResponse"},
+        Expectation{"/workspaces/{workspaceId}", "patch", "WorkspaceUpdateRequest", "200", "WorkspaceResponse"},
+        Expectation{"/workspaces/recovery/reset", "post", "", "200", "WorkspaceResetResponse"},
+        Expectation{"/host-directories/roots", "get", "", "200", "HostDirectoryRootsResponse"},
+        Expectation{"/host-directories/list", "post", "HostDirectoryListRequest", "200", "HostDirectoryListResponse"},
+        Expectation{"/files/list", "post", "DirectoryListRequest", "200", "DirectoryListResponse"},
+        Expectation{"/files/metadata", "post", "EntryRef", "200", "EntryMetadataResponse"},
+        Expectation{"/filesystem/directories", "post", "CreateDirectoryRequest", "201", "EntryMetadataResponse"},
+        Expectation{"/filesystem/entries", "patch", "RenameEntryRequest", "200", "EntryMetadataResponse"},
+        Expectation{"/files/archive", "post", "DirectoryArchiveRequest", "201", "DownloadArchiveResponse"},
+        Expectation{"/images", "post", "ImageOpenRequest", "201", "ImageSessionResponse"},
+        Expectation{"/images/{imageId}", "get", "", "200", "ImageSessionResponse"},
+        Expectation{"/images/{imageId}", "delete", "", "200", "ImageCloseResponse"},
+        Expectation{"/images/{imageId}/content", "get", "", "200", "ImageContentPageResponse"},
+        Expectation{"/images/{imageId}/objects", "get", "", "200", "ImageObjectPageResponse"},
+        Expectation{"/images/{imageId}/relationships", "get", "", "200", "ImageRelationshipPageResponse"},
+        Expectation{"/images/{imageId}/validation/issues", "get", "", "200", "ImageValidationPageResponse"},
+        Expectation{"/images/{imageId}/preview", "get", "", "200", "ImagePreviewResponse"},
+        Expectation{"/uploads", "post", "UploadCreateRequest", "201", "UploadResponse"},
+        Expectation{"/uploads/{uploadId}", "get", "", "200", "UploadResponse"},
+        Expectation{"/uploads/{uploadId}", "put", "", "200", "UploadResponse"},
+        Expectation{"/uploads/{uploadId}/complete", "post", "", "200", "UploadResponse"},
+        Expectation{"/uploads/{uploadId}/materialize", "post", "UploadMaterializeRequest", "201",
+                    "MaterializedFileResponse"},
+    };
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    const auto &schemas = document.at("components").at("schemas");
+    for (const auto &expected : expectations) {
+        const auto &operation = document.at("paths").at(expected.path).at(expected.method);
+        if (!expected.request_schema.empty()) {
+            const auto reference = "#/components/schemas/" + std::string{expected.request_schema};
+            EXPECT_EQ(operation.at("requestBody").at("content").at("application/json").at("schema").at("$ref"),
+                      reference);
+            EXPECT_TRUE(schemas.contains(expected.request_schema));
+        }
+        const auto reference = "#/components/schemas/" + std::string{expected.response_schema};
+        EXPECT_EQ(
+            operation.at("responses").at(expected.status).at("content").at("application/json").at("schema").at("$ref"),
+            reference);
+        EXPECT_TRUE(schemas.contains(expected.response_schema));
+    }
+    for (const auto &[path, path_item] : document.at("paths").items()) {
+        for (const auto &[method, operation] : path_item.items()) {
+            if (!operation.is_object() || !operation.contains("responses") ||
+                operation.contains("x-axklib-operation-ids")) {
+                continue;
+            }
+            const auto &fallback = operation.at("responses").at("default");
+            EXPECT_EQ(fallback.at("content").at("application/json").at("schema").at("$ref"),
+                      "#/components/schemas/ErrorResponse")
+                << method << ' ' << path;
+            for (const auto &[status, response] : operation.at("responses").items()) {
+                if (status.size() != 3U || (status.front() != '4' && status.front() != '5') || status == "416" ||
+                    status == "503") {
+                    continue;
+                }
+                EXPECT_EQ(response.at("content").at("application/json").at("schema").at("$ref"),
+                          "#/components/schemas/ErrorResponse")
+                    << status << ' ' << method << ' ' << path;
+            }
         }
     }
 }

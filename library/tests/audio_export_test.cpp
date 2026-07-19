@@ -41,6 +41,12 @@ TEST(AudioExport, BuildsExactVolumeOwnershipAndWritesEveryPhysicalWaveform) {
         return bank.members.size() == 1U && !bank.rendered_wav_path && !bank.parameter_contexts.empty() &&
                bank.parameter_contexts.front().object_key == bank.object_key;
     }));
+    EXPECT_TRUE(std::ranges::all_of(volume.waveforms, [](const auto &waveform) {
+        return waveform.user_facing_aliases.size() == 1U &&
+               waveform.user_facing_aliases.front().relationship_quality == axk::RelationshipQuality::known &&
+               !waveform.user_facing_aliases.front().sample_object_key.empty() &&
+               !waveform.user_facing_aliases.front().display_name.empty();
+    }));
 
     const auto output = std::filesystem::temp_directory_path() / "axklib-cpp-export-test";
     std::error_code error;
@@ -90,8 +96,10 @@ TEST(AudioExport, WritesMissingAndAmbiguousWaveDataIntoExplicitUnresolvedScope) 
     ASSERT_EQ(unresolved.waveforms.size(), 2U);
     EXPECT_EQ(unresolved.waveforms[0].placement_resolution, axk::PlacementResolution::missing);
     EXPECT_TRUE(unresolved.waveforms[0].placement_candidates.empty());
+    EXPECT_EQ(unresolved.waveforms[0].user_facing_aliases.size(), 1U);
     EXPECT_EQ(unresolved.waveforms[1].placement_resolution, axk::PlacementResolution::ambiguous);
     EXPECT_EQ(unresolved.waveforms[1].placement_candidates.size(), 2U);
+    EXPECT_EQ(unresolved.waveforms[1].user_facing_aliases.size(), 1U);
 
     const auto output = std::filesystem::temp_directory_path() / "axklib-cpp-unresolved-export-test";
     std::error_code error;

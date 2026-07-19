@@ -256,7 +256,11 @@ AXK_AUDIO_API Result<std::uint32_t> choose_sampler_sample_rate(std::uint32_t sou
                                                                std::optional<std::uint32_t> target_sample_rate = {});
 AXK_AUDIO_API Result<AudioSourceInfo> inspect_sampler_audio(const std::filesystem::path &path,
                                                             std::optional<std::uint32_t> target_sample_rate = {});
+AXK_AUDIO_API Result<AudioSourceInfo> inspect_sampler_audio(const RandomAccessReader &reader,
+                                                            std::optional<std::uint32_t> target_sample_rate = {});
 AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path,
+                                                         const AudioImportOptions &options);
+AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const RandomAccessReader &reader,
                                                          const AudioImportOptions &options);
 AXK_AUDIO_API Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest,
                                                          const std::filesystem::path &output_path,

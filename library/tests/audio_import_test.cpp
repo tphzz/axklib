@@ -302,6 +302,14 @@ TEST(AudioImport, ExpandsNativePcm8ToPcm16ExactlyWithoutDither) {
     options.expected_channels = 1U;
     const auto imported = axk::import_sampler_audio(path, options);
     ASSERT_TRUE(imported) << imported.error().message;
+    const auto retained = axk::FileReader::open(path);
+    ASSERT_TRUE(retained) << retained.error().message;
+    const auto retained_inspection = axk::inspect_sampler_audio(**retained);
+    ASSERT_TRUE(retained_inspection) << retained_inspection.error().message;
+    EXPECT_EQ(retained_inspection->source_sample_width_bits, inspected->source_sample_width_bits);
+    const auto retained_import = axk::import_sampler_audio(**retained, options);
+    ASSERT_TRUE(retained_import) << retained_import.error().message;
+    EXPECT_EQ(retained_import->pcm_channels, imported->pcm_channels);
     EXPECT_EQ(imported->source_sample_width_bits, 8U);
     EXPECT_EQ(imported->output_sample_width_bits, 16U);
     EXPECT_TRUE(imported->sample_width_converted);

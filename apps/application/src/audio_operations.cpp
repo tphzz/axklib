@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <format>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -15,7 +16,7 @@ namespace {
 using Json = nlohmann::json;
 
 struct ResolvedAudio {
-    std::filesystem::path path;
+    std::shared_ptr<const axk::RandomAccessReader> reader;
     std::optional<axk::app::UploadLease> lease;
 };
 
@@ -38,11 +39,11 @@ axk::app::Result<ResolvedAudio> resolve_audio(const Json &input, std::string_vie
         }
         if (has_file) {
             const auto &reference = source.at("fileRef");
-            auto path = sandbox.resolve_file(
+            auto opened = sandbox.open_file(
                 {reference.at("rootId").get<std::string>(), reference.at("relativePath").get<std::string>()});
-            if (!path)
-                return std::unexpected(path.error());
-            return ResolvedAudio{std::move(*path), std::nullopt};
+            if (!opened)
+                return std::unexpected(opened.error());
+            return ResolvedAudio{std::move(opened->reader), std::nullopt};
         }
 
         const axk::app::UploadRef reference{source.at("uploadRef").at("uploadId").get<std::string>()};
@@ -54,8 +55,10 @@ axk::app::Result<ResolvedAudio> resolve_audio(const Json &input, std::string_vie
         auto lease = uploads.lease(reference, owner_id);
         if (!lease)
             return std::unexpected(lease.error());
-        auto path = lease->path();
-        return ResolvedAudio{std::move(path), std::move(*lease)};
+        auto reader = axk::FileReader::open(lease->path());
+        if (!reader)
+            return std::unexpected(operation_error("audio_inspection_failed", reader.error().message));
+        return ResolvedAudio{std::move(*reader), std::move(*lease)};
     } catch (const Json::exception &) {
         return std::unexpected(operation_error("invalid_request", "audio source reference is malformed"));
     }
@@ -75,7 +78,7 @@ axk::app::Result<Json> inspect_audio(const Json &input, const axk::app::Operatio
     } catch (const Json::exception &) {
         return std::unexpected(operation_error("invalid_request", "target sample rate must be a positive integer"));
     }
-    auto inspected = axk::inspect_sampler_audio(resolved->path, target_sample_rate);
+    auto inspected = axk::inspect_sampler_audio(*resolved->reader, target_sample_rate);
     if (!inspected)
         return std::unexpected(core_error(inspected.error()));
     const auto duration = inspected->source_sample_rate == 0U ? 0.0

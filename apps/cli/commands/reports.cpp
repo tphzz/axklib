@@ -18,7 +18,7 @@ using Json = nlohmann::json;
 
 int run_objects_request(const axk::cli::ObjectsRequest &request) {
     if (!request.output_directory)
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     const auto paths = expand_cli_paths(request.paths);
     auto runtime_paths = paths;
     runtime_paths.push_back(*request.output_directory);
@@ -49,7 +49,8 @@ int run_objects_request(const axk::cli::ObjectsRequest &request) {
     std::cout << "objects=" << result->at("rowCount").get<std::size_t>()
               << " load_errors=" << result->at("failedCount").get<std::size_t>() << '\n';
     std::cout << "reports written to " << axk::text::path_to_utf8(*request.output_directory) << '\n';
-    return result->at("failedCount").get<std::size_t>() == 0U ? 0 : 3;
+    return exit_code(result->at("failedCount").get<std::size_t>() == 0U ? ExitStatus::success
+                                                                        : ExitStatus::diagnostics);
 }
 
 int run_inventory_request(const axk::cli::InventoryRequest &request) {
@@ -81,7 +82,8 @@ int run_inventory_request(const axk::cli::InventoryRequest &request) {
               << " decode_issues=" << result->at("decodeIssueCount").get<std::size_t>()
               << " load_errors=" << result->at("failedCount").get<std::size_t>() << '\n';
     std::cout << "reports written to " << axk::text::path_to_utf8(request.output_directory) << '\n';
-    return result->at("failedCount").get<std::size_t>() == 0U ? 0 : 1;
+    return exit_code(result->at("failedCount").get<std::size_t>() == 0U ? ExitStatus::success
+                                                                        : ExitStatus::diagnostics);
 }
 
 int run_orphans_request(const axk::cli::OrphansRequest &request) {
@@ -116,13 +118,13 @@ int run_orphans_request(const axk::cli::OrphansRequest &request) {
                   << " ambiguous_or_unresolved=" << summary.at("ambiguousOrUnresolvedCount").get<std::size_t>() << '\n';
     }
     std::cout << "reports written to " << axk::text::path_to_utf8(request.output_directory) << '\n';
-    return 0;
+    return exit_code(ExitStatus::success);
 }
 
 int run_validate_request(const axk::cli::ValidateRequest &request) {
     if (!request.exports && request.paths.empty()) {
         std::cerr << "validate requires input paths unless --exports is supplied\n";
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     }
     const auto paths = request.exports ? std::vector<std::filesystem::path>{} : expand_cli_paths(request.paths);
     auto runtime_paths = paths;
@@ -159,7 +161,7 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
     std::cout << "issues=" << result->at("issueCount").get<std::size_t>() << " failed=" << (failed ? "True" : "False")
               << " policy=" << result->at("policy").get<std::string>() << '\n';
     std::cout << "reports written to " << axk::text::path_to_utf8(request.output_directory) << '\n';
-    return failed ? 1 : 0;
+    return exit_code(failed ? ExitStatus::diagnostics : ExitStatus::success);
 }
 
 int run_corpus_audit_request(const axk::cli::CorpusAuditRequest &request) {
@@ -197,8 +199,8 @@ int run_corpus_audit_request(const axk::cli::CorpusAuditRequest &request) {
               << result->at("waveSmokeErrorCount").get<std::size_t>() << '\n';
     std::cout << "reports written to " << axk::text::path_to_utf8(request.output_directory) << '\n';
     if (result->at("failedCount").get<std::size_t>() != 0U)
-        return 3;
-    return result->at("validationFailed").get<bool>() ? 1 : 0;
+        return exit_code(ExitStatus::diagnostics);
+    return exit_code(result->at("validationFailed").get<bool>() ? ExitStatus::diagnostics : ExitStatus::success);
 }
 
 } // namespace axk::cli::commands

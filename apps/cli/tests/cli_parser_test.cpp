@@ -15,6 +15,7 @@
 #include "app.hpp"
 #include "commands/package_projection.hpp"
 #include "content_id.hpp"
+#include "exit_status.hpp"
 #include "local_operations.hpp"
 #include "schema/operations_v1.hpp"
 #include "schema/package_v1.hpp"
@@ -135,6 +136,34 @@ TEST(Cli11Adapter, ReturnsParserExitCodesWithoutProcessExitMacros) {
 
     std::array invalid{const_cast<char *>("axklib"), const_cast<char *>("--not-an-option")};
     EXPECT_NE(axk::cli::run(static_cast<int>(invalid.size()), invalid.data()), 0);
+}
+
+TEST(Cli11Adapter, PublicExitCategoriesRemainCentralizedAndComplete) {
+    using axk::cli::ExitStatus;
+    EXPECT_EQ(axk::cli::exit_code(ExitStatus::success), 0);
+    EXPECT_EQ(axk::cli::exit_code(ExitStatus::operational_failure), 1);
+    EXPECT_EQ(axk::cli::exit_code(ExitStatus::invalid_request), 2);
+    EXPECT_EQ(axk::cli::exit_code(ExitStatus::diagnostics), 3);
+    EXPECT_EQ(axk::cli::application_error_status("invalid_request"), ExitStatus::invalid_request);
+    EXPECT_EQ(axk::cli::application_error_status("selector_not_found"), ExitStatus::invalid_request);
+    EXPECT_EQ(axk::cli::application_error_status("package_extension_mismatch"), ExitStatus::invalid_request);
+    EXPECT_EQ(axk::cli::application_error_status("write_plan_not_found"), ExitStatus::invalid_request);
+    EXPECT_EQ(axk::cli::application_error_status("operation_cancelled"), ExitStatus::operational_failure);
+    EXPECT_EQ(axk::cli::application_error_status("publication_failed"), ExitStatus::operational_failure);
+    EXPECT_EQ(axk::cli::core_error_status(
+                  axk::make_error(axk::ErrorCode::container_invalid_geometry, axk::ErrorCategory::container, "bad")),
+              ExitStatus::invalid_request);
+    EXPECT_EQ(axk::cli::core_error_status(
+                  axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io, "unreadable")),
+              ExitStatus::operational_failure);
+    EXPECT_EQ(axk::cli::core_error_status(
+                  axk::make_error(axk::ErrorCode::internal_invariant, axk::ErrorCategory::internal, "broken")),
+              ExitStatus::operational_failure);
+}
+
+TEST(Cli11Adapter, MissingExtractionSelectorUsesTheDocumentedInvalidRequestStatus) {
+    EXPECT_EQ(run_cli({"axklib", "extract", "wav", "--scope", "sbnk", "missing.hds", "-o", "out"}),
+              axk::cli::exit_code(axk::cli::ExitStatus::invalid_request));
 }
 
 TEST(Cli11Adapter, ReportsSemanticAndSourceVersionsSeparately) {

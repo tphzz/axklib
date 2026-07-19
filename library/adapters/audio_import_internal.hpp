@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "axklib/error.hpp"
+#include "axklib/io.hpp"
 
 namespace axk::audio_import_detail {
 
@@ -45,10 +46,14 @@ Result<ProjectedAudioSize> project_sampler_audio_size(std::uint64_t source_frame
 
 Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path,
                                         std::optional<std::size_t> expected_channels = {});
+Result<SourceAudioInfo> inspect_sndfile(const RandomAccessReader &reader,
+                                        std::optional<std::size_t> expected_channels = {});
 
 Result<std::vector<std::int16_t>> decode_sndfile_pcm16(const std::filesystem::path &path, const SourceAudioInfo &info);
+Result<std::vector<std::int16_t>> decode_sndfile_pcm16(const RandomAccessReader &reader, const SourceAudioInfo &info);
 
 Result<std::vector<double>> decode_sndfile_float64(const std::filesystem::path &path, const SourceAudioInfo &info);
+Result<std::vector<double>> decode_sndfile_float64(const RandomAccessReader &reader, const SourceAudioInfo &info);
 
 Result<std::vector<double>> resample_vhq(std::span<const double> samples, std::size_t channels,
                                          std::uint32_t source_rate, std::uint32_t output_rate);

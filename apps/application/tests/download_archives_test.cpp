@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -42,15 +43,17 @@ TEST_F(DownloadArchiveStoreTest, CreatesOwnerBoundDeterministicTarAndRemovesItEx
     EXPECT_EQ(created->entry_count, 2U);
     EXPECT_EQ(created->size_bytes, 3072U);
 
-    const auto denied = store.resolve(created->reference, "owner-b");
+    const auto denied = store.open(created->reference, "owner-b");
     ASSERT_FALSE(denied);
     EXPECT_EQ(denied.error().code, "download_archive_not_found");
 
-    const auto path = store.resolve(created->reference, "owner-a");
-    ASSERT_TRUE(path) << path.error().message;
-    std::ifstream input{*path, std::ios::binary};
-    std::vector<char> bytes{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
-    input.close();
+    std::vector<char> bytes;
+    {
+        const auto content = store.open(created->reference, "owner-a");
+        ASSERT_TRUE(content) << content.error().message;
+        bytes.resize(static_cast<std::size_t>(content->reader->size()));
+        ASSERT_TRUE(content->reader->read_exact_at(0U, std::as_writable_bytes(std::span{bytes})));
+    }
     ASSERT_EQ(bytes.size(), created->size_bytes);
     EXPECT_EQ(std::string(bytes.data(), 9U), "alpha.txt");
     EXPECT_EQ(std::string(bytes.data() + 512, 5U), "alpha");
@@ -58,7 +61,7 @@ TEST_F(DownloadArchiveStoreTest, CreatesOwnerBoundDeterministicTarAndRemovesItEx
     EXPECT_EQ(std::string(bytes.data() + 1536, 4U), "beta");
 
     ASSERT_TRUE(store.remove(created->reference, "owner-a"));
-    EXPECT_FALSE(std::filesystem::exists(*path));
+    EXPECT_FALSE(store.inspect(created->reference, "owner-a"));
 }
 
 TEST_F(DownloadArchiveStoreTest, EnforcesEntryByteAndRetentionLimitsWithoutLeavingStagingFiles) {
@@ -87,12 +90,15 @@ TEST_F(DownloadArchiveStoreTest, RetainsExpiredArchiveAndQuotaWhenRemovalFails) 
                                          [&] { return now; }};
     const auto created = store.create("owner", *sandbox_, {"workspace", "exports"});
     ASSERT_TRUE(created) << created.error().message;
-    const auto path = store.resolve(created->reference, "owner");
-    ASSERT_TRUE(path) << path.error().message;
+    {
+        const auto content = store.open(created->reference, "owner");
+        ASSERT_TRUE(content) << content.error().message;
+    }
+    const auto path = root_ / "locked" / (created->reference.archive_id + ".tar");
 
-    ASSERT_TRUE(std::filesystem::remove(*path));
-    ASSERT_TRUE(std::filesystem::create_directory(*path));
-    std::ofstream{*path / "transfer-open"} << "held";
+    ASSERT_TRUE(std::filesystem::remove(path));
+    ASSERT_TRUE(std::filesystem::create_directory(path));
+    std::ofstream{path / "transfer-open"} << "held";
     now += std::chrono::seconds{6};
     store.cleanup();
 

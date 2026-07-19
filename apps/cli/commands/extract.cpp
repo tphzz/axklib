@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "../exit_status.hpp"
 #include "handlers.hpp"
 #include "local_operations.hpp"
 #include "requests.hpp"
@@ -16,7 +17,7 @@ int run_extract_request(const axk::cli::ExtractRequest &request) {
         std::cerr << "extract " << request.scope
                   << " requires at least one --path from `axklib info --format "
                      "paths`\n";
-        return 4;
+        return axk::cli::exit_code(axk::cli::ExitStatus::invalid_request);
     }
     auto sources = expand_cli_paths(request.paths);
     std::vector<std::filesystem::path> runtime_paths = sources;
@@ -47,10 +48,10 @@ int run_extract_request(const axk::cli::ExtractRequest &request) {
     if (!result) {
         if (result.error().code == "selector_not_found" || result.error().code == "unsupported_selection_scope") {
             std::cerr << result.error().message << ". Run `axklib info --format paths` and copy the path column.\n";
-            return 4;
+            return axk::cli::exit_code(axk::cli::ExitStatus::invalid_request);
         }
         std::cerr << "error: " << result.error().message << '\n';
-        return 1;
+        return axk::cli::exit_code(axk::cli::ExitStatus::operational_failure);
     }
     for (const auto &warning : result->at("warnings")) {
         if (warning.at("code") == "waveform_skipped")
@@ -62,7 +63,9 @@ int run_extract_request(const axk::cli::ExtractRequest &request) {
               << " sfz_files=" << result->at("sfzFileCount").get<std::size_t>()
               << " decode_errors=" << result->at("decodeErrorCount").get<std::size_t>()
               << " load_errors=" << result->at("loadErrorCount").get<std::size_t>() << '\n';
-    return result->at("loadErrorCount").get<std::size_t>() == 0U ? 0 : 1;
+    return axk::cli::exit_code(result->at("loadErrorCount").get<std::size_t>() == 0U
+                                   ? axk::cli::ExitStatus::success
+                                   : axk::cli::ExitStatus::operational_failure);
 }
 
 } // namespace axk::cli::commands

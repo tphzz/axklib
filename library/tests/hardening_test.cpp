@@ -111,6 +111,8 @@ TEST(Hardening, EveryFocusedFuzzerSeedHasANormalTestReplay) {
                 auto envelope = axk::fuzz::fat_record_envelope(bytes);
                 static_cast<void>(
                     axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(envelope)), "seed.ima"));
+            } else if (target == "fat_image") {
+                static_cast<void>(axk::FatImage::open(std::make_shared<axk::MemoryReader>(bytes), "raw-seed.ima"));
             } else if (target == "iso_record") {
                 auto envelope = axk::fuzz::iso_record_envelope(bytes);
                 static_cast<void>(

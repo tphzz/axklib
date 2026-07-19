@@ -356,7 +356,12 @@ TEST_F(ExtractionOperationsTest, SbnkPathSelectionRetainsOnlyTheSelectedDependen
     EXPECT_EQ(graph.at("objects").at("sbnk").front().at("display_name"), "sine wave");
     EXPECT_EQ(graph.at("objects").at("sbac").size(), 0U);
     EXPECT_EQ(graph.at("objects").at("prog").size(), 0U);
-    EXPECT_EQ(graph.at("objects").at("smpl").size(), 1U);
+    ASSERT_EQ(graph.at("objects").at("smpl").size(), 1U);
+    const auto &aliases = graph.at("objects").at("smpl").front().at("user_facing_aliases");
+    ASSERT_EQ(aliases.size(), 1U);
+    EXPECT_EQ(aliases.front().at("display_name"), "sine wave");
+    EXPECT_EQ(aliases.front().at("relationship_quality"), "Known");
+    EXPECT_FALSE(aliases.front().at("sample_object_key").get<std::string>().empty());
 }
 
 TEST_F(ExtractionOperationsTest, SbacPathSelectionRetainsItsMemberBankAndWaveform) {

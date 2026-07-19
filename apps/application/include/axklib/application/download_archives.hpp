@@ -25,6 +25,11 @@ struct DownloadArchiveSnapshot {
     std::uint64_t expires_in_seconds{};
 };
 
+struct DownloadArchiveContent {
+    DownloadArchiveSnapshot snapshot;
+    std::shared_ptr<const axk::RandomAccessReader> reader;
+};
+
 class DownloadArchiveStore {
   public:
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
@@ -42,7 +47,7 @@ class DownloadArchiveStore {
                                                          const DirectoryRef &source);
     [[nodiscard]] Result<DownloadArchiveSnapshot> inspect(const DownloadArchiveRef &reference,
                                                           std::string_view owner_id);
-    [[nodiscard]] Result<std::filesystem::path> resolve(const DownloadArchiveRef &reference, std::string_view owner_id);
+    [[nodiscard]] Result<DownloadArchiveContent> open(const DownloadArchiveRef &reference, std::string_view owner_id);
     [[nodiscard]] Result<void> remove(const DownloadArchiveRef &reference, std::string_view owner_id);
     void cleanup();
 

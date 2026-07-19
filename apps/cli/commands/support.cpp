@@ -7,6 +7,8 @@
 
 #include "support.hpp"
 
+#include "../exit_status.hpp"
+
 #include "axklib/error.hpp"
 #include "axklib/utf8.hpp"
 
@@ -34,10 +36,7 @@ std::vector<std::filesystem::path> expand_cli_paths(const std::vector<std::files
 
 int report_failure(const axk::Error &error) {
     std::cerr << axk::render_error(error) << '\n';
-    if (error.message.starts_with("output directory is not empty") ||
-        error.message.starts_with("refusing to replace existing report"))
-        return 1;
-    return 2;
+    return axk::cli::exit_code(axk::cli::core_error_status(error));
 }
 
 } // namespace axk::cli::commands

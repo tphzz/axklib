@@ -1107,6 +1107,9 @@ Result<void> publish_temporary_package(const std::filesystem::path &temporary, c
     return detail::publish_temporary_file(temporary, output, overwrite);
 }
 
+Result<std::vector<std::byte>> read_package_reader(const RandomAccessReader &reader,
+                                                   const CancellationToken &cancellation);
+
 Result<std::vector<std::byte>> read_package_file(const std::filesystem::path &path,
                                                  const CancellationToken &cancellation) {
     if (const auto checked = cancellation.check(); !checked)
@@ -1114,13 +1117,20 @@ Result<std::vector<std::byte>> read_package_file(const std::filesystem::path &pa
     auto reader = FileReader::open(path);
     if (!reader)
         return std::unexpected{reader.error()};
-    if ((*reader)->size() > maximum_package_file_bytes ||
-        (*reader)->size() > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+    return read_package_reader(**reader, cancellation);
+}
+
+Result<std::vector<std::byte>> read_package_reader(const RandomAccessReader &reader,
+                                                   const CancellationToken &cancellation) {
+    if (reader.size() > maximum_package_file_bytes ||
+        reader.size() > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
         return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
                                           "package file exceeds the configured archive limit")};
     }
-    std::vector<std::byte> bytes(static_cast<std::size_t>((*reader)->size()));
-    if (const auto read = (*reader)->read_exact_at(0U, bytes, cancellation); !read)
+    std::vector<std::byte> bytes(static_cast<std::size_t>(reader.size()));
+    if (const auto checked = cancellation.check(); !checked)
+        return std::unexpected{checked.error()};
+    if (const auto read = reader.read_exact_at(0U, bytes); !read)
         return std::unexpected{read.error()};
     return bytes;
 }
@@ -1549,6 +1559,18 @@ Result<PortablePackage> open_portable_package(const std::filesystem::path &path,
     return open_portable_package(*archive, filename);
 }
 
+Result<PortablePackage> open_portable_package(const RandomAccessReader &reader, std::string_view filename,
+                                              const CancellationToken &cancellation) {
+    if (!text::is_valid_utf8(filename)) {
+        return std::unexpected{
+            make_error(ErrorCode::invalid_argument, ErrorCategory::io, "package input path is not valid UTF-8")};
+    }
+    auto archive = read_package_reader(reader, cancellation);
+    if (!archive)
+        return std::unexpected{archive.error()};
+    return open_portable_package(*archive, filename);
+}
+
 Result<PortablePackage> inspect_portable_package(const std::filesystem::path &path,
                                                  const CancellationToken &cancellation) {
     const auto filename = text::path_to_utf8(path.filename());
@@ -1565,6 +1587,21 @@ Result<PortablePackage> inspect_portable_package(const std::filesystem::path &pa
     if (!reader)
         return std::unexpected{reader.error()};
     auto inspected = package_internal::inspect_archive(**reader, cancellation);
+    if (!inspected)
+        return std::unexpected{inspected.error()};
+    std::map<std::string, ManifestArchiveEntry, std::less<>> descriptors;
+    for (const auto &entry : inspected->entries)
+        descriptors.emplace(entry.path, ManifestArchiveEntry{entry.size, nullptr});
+    return parse_package_manifest(inspected->manifest.bytes, descriptors, false, filename);
+}
+
+Result<PortablePackage> inspect_portable_package(const RandomAccessReader &reader, std::string_view filename,
+                                                 const CancellationToken &cancellation) {
+    if (!text::is_valid_utf8(filename)) {
+        return std::unexpected{
+            make_error(ErrorCode::invalid_argument, ErrorCategory::io, "package input path is not valid UTF-8")};
+    }
+    auto inspected = package_internal::inspect_archive(reader, cancellation);
     if (!inspected)
         return std::unexpected{inspected.error()};
     std::map<std::string, ManifestArchiveEntry, std::less<>> descriptors;

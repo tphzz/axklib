@@ -236,7 +236,7 @@ int run_package_export(const axk::cli::PackageExportRequest &request) {
     } else {
         print_package_summary(*projected, false);
     }
-    return 0;
+    return exit_code(ExitStatus::success);
 }
 
 int run_package_inspect(const axk::cli::PackageReadRequest &request, bool verify_only) {
@@ -263,7 +263,7 @@ int run_package_inspect(const axk::cli::PackageReadRequest &request, bool verify
     } else {
         print_package_summary(*projected, verify_only);
     }
-    return projected->valid ? 0 : 3;
+    return exit_code(projected->valid ? ExitStatus::success : ExitStatus::diagnostics);
 }
 
 int run_package_import(const axk::cli::PackageImportRequest &request) {
@@ -361,7 +361,7 @@ int run_package_import(const axk::cli::PackageImportRequest &request) {
     } else {
         print_plan_summary(*projected);
     }
-    return projected->valid ? 0 : 3;
+    return exit_code(projected->valid ? ExitStatus::success : ExitStatus::diagnostics);
 }
 
 } // namespace axk::cli::commands

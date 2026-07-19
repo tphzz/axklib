@@ -334,6 +334,28 @@ void add_request_id_headers(Json &document) {
     }
 }
 
+void add_infrastructure_error_responses(Json &document) {
+    for (auto &[path, path_item] : document["paths"].items()) {
+        static_cast<void>(path);
+        for (auto &[method, operation] : path_item.items()) {
+            static_cast<void>(method);
+            if (!operation.is_object() || !operation.contains("responses") ||
+                operation.contains("x-axklib-operation-ids")) {
+                continue;
+            }
+            operation["responses"]["default"] = error_response("Request could not be completed");
+            for (auto &[status, response] : operation["responses"].items()) {
+                if (status.size() != 3U || (status.front() != '4' && status.front() != '5') || status == "416" ||
+                    status == "503") {
+                    continue;
+                }
+                if (!response.contains("content"))
+                    response["content"] = error_response(response.value("description", "Request failed")).at("content");
+            }
+        }
+    }
+}
+
 } // namespace
 
 struct axk::server::OpenApiValidator::Impl {
@@ -446,6 +468,7 @@ nlohmann::json axk::server::build_openapi_document(std::string_view base_documen
             operation["responses"]["409"] = error_response("Request conflicts with current state");
         }
     }
+    add_infrastructure_error_responses(document);
     add_request_id_headers(document);
     return document;
 }

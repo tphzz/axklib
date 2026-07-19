@@ -9,6 +9,7 @@ installed with your version.
 | Exit | Meaning |
 | ---: | --- |
 | 0 | Operation completed. |
+| 1 | The request was valid, but an I/O, publication, runtime, or other operational failure prevented completion. |
 | 2 | Arguments, input data, or the requested operation are invalid. |
 | 3 | The command completed its scan or plan, but reported diagnostics or blocking conflicts. |
 

@@ -1,5 +1,7 @@
 #include "local_operations.hpp"
 
+#include "exit_status.hpp"
+
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -225,5 +227,5 @@ int axk::cli::report_application_failure(const app::Error &error) {
     if (error.context.relative_path)
         std::cerr << " [path=" << *error.context.relative_path << ']';
     std::cerr << '\n';
-    return 2;
+    return exit_code(application_error_status(error.code));
 }

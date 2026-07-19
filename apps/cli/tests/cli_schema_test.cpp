@@ -41,6 +41,8 @@ TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
     non_looping.loop_start = 66U;
     non_looping.loop_length = 0U;
     volume.waveforms.push_back({"waveform", "Waveform", "SMPL/Waveform.wav", non_looping});
+    volume.waveforms.back().user_facing_aliases.push_back(
+        {"sample", "Sampler-visible Sample", axk::RelationshipQuality::likely});
     auto wide_loop = non_looping;
     wide_loop.loop_start = 23'423U;
     wide_loop.loop_length = 4'294'967'293U;
@@ -66,6 +68,10 @@ TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
     ASSERT_TRUE(volume_graph);
     const auto parsed_graph = nlohmann::json::parse(*volume_graph);
     EXPECT_EQ(parsed_graph["source"]["container_kinds"][0], "iso");
+    ASSERT_EQ(parsed_graph["objects"]["smpl"][0]["user_facing_aliases"].size(), 1U);
+    EXPECT_EQ(parsed_graph["objects"]["smpl"][0]["user_facing_aliases"][0]["display_name"], "Sampler-visible Sample");
+    EXPECT_EQ(parsed_graph["objects"]["smpl"][0]["user_facing_aliases"][0]["relationship_quality"], "Likely");
+    EXPECT_TRUE(parsed_graph["objects"]["smpl"][1]["user_facing_aliases"].empty());
     EXPECT_TRUE(parsed_graph["objects"]["smpl"][0]["playback"]["loop_end_frame_a4000_ui"].is_null());
     EXPECT_EQ(parsed_graph["objects"]["smpl"][1]["playback"]["loop_end_frame_a4000_ui"], 4'294'990'716ULL);
     EXPECT_TRUE(std::ranges::any_of(parsed_graph["relationships"], [](const auto &row) {

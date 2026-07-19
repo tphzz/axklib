@@ -5,6 +5,7 @@
 #include <optional>
 #include <string_view>
 
+#include "../exit_status.hpp"
 #include "requests.hpp"
 
 namespace axk::app {

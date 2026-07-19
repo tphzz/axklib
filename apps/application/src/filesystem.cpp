@@ -1,8 +1,10 @@
 #include "axklib/application/filesystem.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <charconv>
+#include <format>
 #include <iterator>
 #include <limits>
 #include <mutex>
@@ -18,6 +20,7 @@
 #else
 #include <cerrno>
 #include <csignal>
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #if defined(__linux__)
@@ -46,6 +49,12 @@ axk::app::Error output_exists_error(std::string message, std::string_view relati
     if (!relative_path.empty())
         context.relative_path = relative_path;
     return {"output_exists", std::move(message), std::move(context)};
+}
+
+axk::app::Error publication_error(std::string message, std::string_view relative_path) {
+    axk::app::ErrorContext context;
+    context.relative_path = relative_path;
+    return {"output_publication_failed", std::move(message), std::move(context)};
 }
 
 axk::app::Error entry_error(std::string code, std::string message, std::string_view relative_path) {
@@ -349,6 +358,234 @@ int rename_no_replace(int source_parent, const char *source_name, int destinatio
 #endif
 }
 
+int rename_exchange(int parent, const char *first, const char *second) {
+#if defined(__linux__)
+    constexpr unsigned int exchange = 2U;
+    return static_cast<int>(::syscall(SYS_renameat2, parent, first, parent, second, exchange));
+#elif defined(__APPLE__)
+    return ::renameatx_np(parent, first, parent, second, RENAME_SWAP);
+#else
+#error "Atomic exchange rename is required for this platform"
+#endif
+}
+
+#endif
+
+class NativeFileReader final : public axk::RandomAccessReader {
+  public:
+    NativeFileReader(NativeHandle handle, std::uint64_t size, std::string source_name)
+        : handle_(std::move(handle)), size_(size), source_name_(std::move(source_name)) {}
+
+    [[nodiscard]] std::uint64_t size() const noexcept override { return size_; }
+
+    [[nodiscard]] axk::Result<void> read_exact_at(std::uint64_t offset,
+                                                  std::span<std::byte> destination) const override {
+        if (offset > size_ || destination.size() > size_ - offset) {
+            axk::ErrorContext context;
+            context.source_path = source_name_;
+            context.raw_offset = offset;
+            return std::unexpected{axk::make_error(axk::ErrorCode::io_short_read, axk::ErrorCategory::io,
+                                                   "sandbox file read exceeds available data", std::move(context))};
+        }
+        std::scoped_lock lock{mutex_};
+#if defined(_WIN32)
+        if (offset > static_cast<std::uint64_t>(std::numeric_limits<LONGLONG>::max())) {
+            return std::unexpected{axk::make_error(axk::ErrorCode::invalid_argument, axk::ErrorCategory::io,
+                                                   "sandbox file offset exceeds the platform range")};
+        }
+        LARGE_INTEGER position{};
+        position.QuadPart = static_cast<LONGLONG>(offset);
+        if (SetFilePointerEx(handle_.get(), position, nullptr, FILE_BEGIN) == 0) {
+            return std::unexpected{
+                axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io, "sandbox file seek failed")};
+        }
+        auto remaining = destination;
+        while (!remaining.empty()) {
+            const auto chunk =
+                static_cast<DWORD>(std::min<std::size_t>(remaining.size(), std::numeric_limits<DWORD>::max()));
+            DWORD read{};
+            if (ReadFile(handle_.get(), remaining.data(), chunk, &read, nullptr) == 0 || read == 0U) {
+                return std::unexpected{axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
+                                                       "sandbox file read failed")};
+            }
+            remaining = remaining.subspan(read);
+        }
+#else
+        if (offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+            return std::unexpected{axk::make_error(axk::ErrorCode::invalid_argument, axk::ErrorCategory::io,
+                                                   "sandbox file offset exceeds the platform range")};
+        }
+        auto remaining = destination;
+        auto position = static_cast<off_t>(offset);
+        while (!remaining.empty()) {
+            const auto read = ::pread(*handle_, remaining.data(), remaining.size(), position);
+            if (read < 0 && errno == EINTR)
+                continue;
+            if (read <= 0) {
+                return std::unexpected{axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
+                                                       "sandbox file read failed")};
+            }
+            const auto consumed = static_cast<std::size_t>(read);
+            remaining = remaining.subspan(consumed);
+            position += read;
+        }
+#endif
+        return {};
+    }
+
+  private:
+    NativeHandle handle_;
+    std::uint64_t size_{};
+    std::string source_name_;
+    mutable std::mutex mutex_;
+};
+
+std::filesystem::path temporary_entry_name(const std::filesystem::path &destination) {
+    static std::atomic<std::uint64_t> sequence{1U};
+#if defined(_WIN32)
+    const auto process = static_cast<std::uint64_t>(GetCurrentProcessId());
+#else
+    const auto process = static_cast<std::uint64_t>(::getpid());
+#endif
+    return std::filesystem::path{std::format("{}.axklib-publication.p{}.{}.tmp", axk::text::path_to_utf8(destination),
+                                             process, sequence.fetch_add(1U, std::memory_order_relaxed))};
+}
+
+#if defined(_WIN32)
+
+bool rename_open_entry(HANDLE entry, HANDLE parent, const std::filesystem::path &name, bool replace) {
+    const auto native = name.native();
+    const auto bytes = sizeof(FILE_RENAME_INFO) + native.size() * sizeof(wchar_t);
+    std::vector<std::byte> storage(bytes);
+    auto *rename = reinterpret_cast<FILE_RENAME_INFO *>(storage.data());
+    rename->ReplaceIfExists = replace ? TRUE : FALSE;
+    rename->RootDirectory = parent;
+    rename->FileNameLength = static_cast<DWORD>(native.size() * sizeof(wchar_t));
+    std::copy(native.begin(), native.end(), rename->FileName);
+    return SetFileInformationByHandle(entry, FileRenameInfo, rename, static_cast<DWORD>(bytes)) != 0;
+}
+
+bool delete_open_tree(HANDLE directory, std::string_view relative_path) {
+    std::vector<std::byte> buffer(64U * 1024U);
+    while (true) {
+        if (GetFileInformationByHandleEx(directory, FileIdBothDirectoryInfo, buffer.data(),
+                                         static_cast<DWORD>(buffer.size())) == 0) {
+            return GetLastError() == ERROR_NO_MORE_FILES;
+        }
+        auto *entry = reinterpret_cast<FILE_ID_BOTH_DIR_INFO *>(buffer.data());
+        while (entry != nullptr) {
+            const std::wstring_view name{entry->FileName, entry->FileNameLength / sizeof(wchar_t)};
+            if (name != L"." && name != L"..") {
+                const auto path = std::filesystem::path{name};
+                const auto directory_entry = (entry->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U;
+                auto child = open_relative(
+                    directory, path,
+                    DELETE | FILE_READ_ATTRIBUTES | (directory_entry ? FILE_LIST_DIRECTORY : FILE_READ_DATA), FILE_OPEN,
+                    directory_entry ? FILE_DIRECTORY_FILE : FILE_NON_DIRECTORY_FILE, relative_path);
+                if (!child || (directory_entry && !delete_open_tree(child->get(), relative_path)))
+                    return false;
+                FILE_DISPOSITION_INFO disposition{.DeleteFile = TRUE};
+                if (SetFileInformationByHandle(child->get(), FileDispositionInfo, &disposition, sizeof(disposition)) ==
+                    0) {
+                    return false;
+                }
+            }
+            if (entry->NextEntryOffset == 0U)
+                break;
+            entry = reinterpret_cast<FILE_ID_BOTH_DIR_INFO *>(reinterpret_cast<std::byte *>(entry) +
+                                                              entry->NextEntryOffset);
+        }
+    }
+}
+
+std::optional<bool> directory_is_empty(HANDLE directory) {
+    std::vector<std::byte> buffer(64U * 1024U);
+    while (true) {
+        if (GetFileInformationByHandleEx(directory, FileIdBothDirectoryInfo, buffer.data(),
+                                         static_cast<DWORD>(buffer.size())) == 0) {
+            return GetLastError() == ERROR_NO_MORE_FILES ? std::optional<bool>{true} : std::nullopt;
+        }
+        auto *entry = reinterpret_cast<FILE_ID_BOTH_DIR_INFO *>(buffer.data());
+        while (entry != nullptr) {
+            const std::wstring_view name{entry->FileName, entry->FileNameLength / sizeof(wchar_t)};
+            if (name != L"." && name != L"..")
+                return false;
+            if (entry->NextEntryOffset == 0U)
+                break;
+            entry = reinterpret_cast<FILE_ID_BOTH_DIR_INFO *>(reinterpret_cast<std::byte *>(entry) +
+                                                              entry->NextEntryOffset);
+        }
+    }
+}
+
+#else
+
+bool delete_tree_at(int parent, const std::filesystem::path &name) {
+    const auto descriptor = ::openat(parent, name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (descriptor < 0)
+        return false;
+    auto *directory = ::fdopendir(descriptor);
+    if (directory == nullptr) {
+        ::close(descriptor);
+        return false;
+    }
+    bool removed = true;
+    while (true) {
+        errno = 0;
+        const auto *entry = ::readdir(directory);
+        if (entry == nullptr)
+            break;
+        const std::string_view child_name{entry->d_name};
+        if (child_name == "." || child_name == "..")
+            continue;
+        struct stat status{};
+        if (::fstatat(descriptor, entry->d_name, &status, AT_SYMLINK_NOFOLLOW) != 0 || S_ISLNK(status.st_mode)) {
+            removed = false;
+            break;
+        }
+        if (S_ISDIR(status.st_mode)) {
+            if (!delete_tree_at(descriptor, entry->d_name)) {
+                removed = false;
+                break;
+            }
+        } else if (!S_ISREG(status.st_mode) || ::unlinkat(descriptor, entry->d_name, 0) != 0) {
+            removed = false;
+            break;
+        }
+    }
+    const auto enumeration_error = errno;
+    ::closedir(directory);
+    return removed && enumeration_error == 0 && ::unlinkat(parent, name.c_str(), AT_REMOVEDIR) == 0;
+}
+
+std::optional<bool> directory_empty_at(int parent, const std::filesystem::path &name) {
+    const auto descriptor = ::openat(parent, name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (descriptor < 0)
+        return std::nullopt;
+    auto *directory = ::fdopendir(descriptor);
+    if (directory == nullptr) {
+        ::close(descriptor);
+        return std::nullopt;
+    }
+    bool empty = true;
+    while (true) {
+        errno = 0;
+        const auto *entry = ::readdir(directory);
+        if (entry == nullptr)
+            break;
+        const std::string_view child_name{entry->d_name};
+        if (child_name != "." && child_name != "..") {
+            empty = false;
+            break;
+        }
+    }
+    const auto enumeration_error = errno;
+    ::closedir(directory);
+    if (enumeration_error != 0)
+        return std::nullopt;
+    return empty;
+}
+
 #endif
 
 } // namespace
@@ -444,6 +681,715 @@ std::optional<axk::app::Sandbox::Root> axk::app::Sandbox::find_root(std::string_
     const auto found =
         std::ranges::find(state_->roots, root_id, [](const Root &root) { return std::string_view{root.info.id}; });
     return found == state_->roots.end() ? std::nullopt : std::optional<Root>{*found};
+}
+
+axk::app::Result<axk::app::SandboxFile> axk::app::Sandbox::open_file(const FileRef &reference) const {
+    const auto root = find_root(reference.root_id);
+    if (!root)
+        return std::unexpected(reference_error("sandbox root does not exist", reference.relative_path));
+    if (reference.relative_path.empty())
+        return std::unexpected(reference_error("file reference requires a relative path", reference.relative_path));
+    auto relative = relative_path_from_utf8(reference.relative_path);
+    if (!relative)
+        return std::unexpected(relative.error());
+    auto parent =
+#if defined(_WIN32)
+        open_parent(root->native->handle, relative->parent_path(), reference.relative_path);
+#else
+        open_parent(root->native->descriptor, relative->parent_path(), reference.relative_path);
+#endif
+    if (!parent)
+        return std::unexpected(parent.error());
+
+#if defined(_WIN32)
+    auto handle = open_relative(parent->get(), relative->filename(), FILE_READ_DATA | FILE_READ_ATTRIBUTES, FILE_OPEN,
+                                FILE_NON_DIRECTORY_FILE, reference.relative_path);
+    if (!handle)
+        return std::unexpected(handle.error());
+    LARGE_INTEGER file_size{};
+    if (GetFileSizeEx(handle->get(), &file_size) == 0 || file_size.QuadPart < 0)
+        return std::unexpected(reference_error("sandbox file size cannot be inspected", reference.relative_path));
+    const auto size = static_cast<std::uint64_t>(file_size.QuadPart);
+#else
+    const auto descriptor =
+        ::openat(**parent, relative->filename().c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (descriptor < 0)
+        return std::unexpected(reference_error("sandbox file cannot be opened safely", reference.relative_path));
+    auto handle = descriptor_handle(descriptor);
+    struct stat status{};
+    if (::fstat(*handle, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size < 0) {
+        return std::unexpected(reference_error("file reference does not name a regular file", reference.relative_path));
+    }
+    const auto size = static_cast<std::uint64_t>(status.st_size);
+#endif
+    const auto filename = text::path_to_utf8(relative->filename());
+#if defined(_WIN32)
+    auto reader = std::make_shared<NativeFileReader>(std::move(*handle), size, reference.relative_path);
+#else
+    auto reader = std::make_shared<NativeFileReader>(std::move(handle), size, reference.relative_path);
+#endif
+    return SandboxFile{reference, filename, size, std::move(reader)};
+}
+
+axk::app::Result<std::vector<axk::app::SandboxTreeFile>>
+axk::app::Sandbox::open_tree_files(const DirectoryRef &reference, std::size_t maximum_entries,
+                                   std::uint64_t maximum_total_bytes) const {
+    if (maximum_entries == 0U || maximum_total_bytes == 0U)
+        return std::unexpected(reference_error("directory traversal limits must be positive", reference.relative_path));
+    const auto root = find_root(reference.root_id);
+    if (!root)
+        return std::unexpected(reference_error("sandbox root does not exist", reference.relative_path));
+    auto relative = relative_path_from_utf8(reference.relative_path);
+    if (!relative)
+        return std::unexpected(relative.error());
+#if defined(_WIN32)
+    auto opened_root = open_parent(root->native->handle, *relative, reference.relative_path);
+#else
+    auto opened_root = open_parent(root->native->descriptor, *relative, reference.relative_path);
+#endif
+    if (!opened_root)
+        return std::unexpected(opened_root.error());
+
+    struct PendingDirectory {
+        NativeHandle handle;
+        std::filesystem::path relative;
+    };
+    std::vector<PendingDirectory> pending;
+    pending.push_back({std::move(*opened_root), {}});
+    std::vector<SandboxTreeFile> result;
+    std::uint64_t total_bytes{};
+    while (!pending.empty()) {
+        auto current = std::move(pending.back());
+        pending.pop_back();
+#if defined(_WIN32)
+        alignas(FILE_ID_BOTH_DIR_INFO) std::array<std::byte, 64U * 1024U> buffer{};
+        for (;;) {
+            if (GetFileInformationByHandleEx(current.handle.get(), FileIdBothDirectoryInfo, buffer.data(),
+                                             static_cast<DWORD>(buffer.size())) == 0) {
+                if (GetLastError() == ERROR_NO_MORE_FILES)
+                    break;
+                return std::unexpected(
+                    reference_error("sandbox directory cannot be enumerated safely", reference.relative_path));
+            }
+            auto *entry = reinterpret_cast<FILE_ID_BOTH_DIR_INFO *>(buffer.data());
+            for (;;) {
+                const std::wstring_view native_name{entry->FileName, entry->FileNameLength / sizeof(wchar_t)};
+                if (native_name != L"." && native_name != L"..") {
+                    const std::filesystem::path name{native_name};
+                    const auto name_utf8 = text::path_to_utf8(name);
+                    if (!entry_name_from_utf8(name_utf8))
+                        return std::unexpected(
+                            reference_error("directory contains a non-portable entry name", reference.relative_path));
+                    if ((entry->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U)
+                        return std::unexpected(
+                            reference_error("directory archives do not follow links", reference.relative_path));
+                    const auto child_relative = current.relative / name;
+                    if ((entry->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U) {
+                        auto child =
+                            open_relative(current.handle.get(), name, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+                                          FILE_OPEN, FILE_DIRECTORY_FILE, reference.relative_path);
+                        if (!child)
+                            return std::unexpected(child.error());
+                        pending.push_back({std::move(*child), child_relative});
+                    } else {
+                        auto child = open_relative(current.handle.get(), name, FILE_READ_DATA | FILE_READ_ATTRIBUTES,
+                                                   FILE_OPEN, FILE_NON_DIRECTORY_FILE, reference.relative_path);
+                        if (!child)
+                            return std::unexpected(child.error());
+                        FILE_STANDARD_INFO information{};
+                        if (GetFileInformationByHandleEx(child->get(), FileStandardInfo, &information,
+                                                         sizeof(information)) == 0 ||
+                            information.Directory || information.EndOfFile.QuadPart < 0) {
+                            return std::unexpected(
+                                reference_error("directory contains an unsupported entry", reference.relative_path));
+                        }
+                        const auto size = static_cast<std::uint64_t>(information.EndOfFile.QuadPart);
+                        if (result.size() >= maximum_entries || size > maximum_total_bytes - total_bytes)
+                            return std::unexpected(entry_error("download_archive_too_large",
+                                                               "directory archive exceeds configured limits",
+                                                               reference.relative_path));
+                        total_bytes += size;
+                        auto reader = std::make_shared<NativeFileReader>(std::move(*child), size,
+                                                                         text::path_to_utf8(child_relative));
+                        result.push_back({text::path_to_utf8(child_relative), size, std::move(reader)});
+                    }
+                }
+                if (entry->NextEntryOffset == 0U)
+                    break;
+                entry = reinterpret_cast<FILE_ID_BOTH_DIR_INFO *>(reinterpret_cast<std::byte *>(entry) +
+                                                                  entry->NextEntryOffset);
+            }
+        }
+#else
+        const auto enumeration_descriptor = ::dup(*current.handle);
+        if (enumeration_descriptor < 0)
+            return std::unexpected(reference_error("sandbox directory cannot be duplicated", reference.relative_path));
+        auto *directory = ::fdopendir(enumeration_descriptor);
+        if (directory == nullptr) {
+            ::close(enumeration_descriptor);
+            return std::unexpected(
+                reference_error("sandbox directory cannot be enumerated safely", reference.relative_path));
+        }
+        errno = 0;
+        while (const auto *entry = ::readdir(directory)) {
+            const std::string_view native_name{entry->d_name};
+            if (native_name == "." || native_name == "..")
+                continue;
+            auto name = entry_name_from_utf8(native_name);
+            if (!name) {
+                ::closedir(directory);
+                return std::unexpected(
+                    reference_error("directory contains a non-portable entry name", reference.relative_path));
+            }
+            struct stat status{};
+            if (::fstatat(*current.handle, name->c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0) {
+                ::closedir(directory);
+                return std::unexpected(
+                    reference_error("directory changed while it was opened", reference.relative_path));
+            }
+            if (S_ISLNK(status.st_mode)) {
+                ::closedir(directory);
+                return std::unexpected(
+                    reference_error("directory archives do not follow links", reference.relative_path));
+            }
+            const auto child_relative = current.relative / *name;
+            if (S_ISDIR(status.st_mode)) {
+                const auto child_descriptor =
+                    ::openat(*current.handle, name->c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+                if (child_descriptor < 0) {
+                    ::closedir(directory);
+                    return std::unexpected(
+                        reference_error("directory changed while it was opened", reference.relative_path));
+                }
+                pending.push_back({descriptor_handle(child_descriptor), child_relative});
+            } else if (S_ISREG(status.st_mode)) {
+                const auto child_descriptor =
+                    ::openat(*current.handle, name->c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+                if (child_descriptor < 0) {
+                    ::closedir(directory);
+                    return std::unexpected(
+                        reference_error("directory changed while it was opened", reference.relative_path));
+                }
+                auto child = descriptor_handle(child_descriptor);
+                struct stat opened_status{};
+                if (::fstat(*child, &opened_status) != 0 || !S_ISREG(opened_status.st_mode) ||
+                    opened_status.st_size < 0) {
+                    ::closedir(directory);
+                    return std::unexpected(
+                        reference_error("directory contains an unsupported entry", reference.relative_path));
+                }
+                const auto size = static_cast<std::uint64_t>(opened_status.st_size);
+                if (result.size() >= maximum_entries || size > maximum_total_bytes - total_bytes) {
+                    ::closedir(directory);
+                    return std::unexpected(entry_error("download_archive_too_large",
+                                                       "directory archive exceeds configured limits",
+                                                       reference.relative_path));
+                }
+                total_bytes += size;
+                auto reader =
+                    std::make_shared<NativeFileReader>(std::move(child), size, text::path_to_utf8(child_relative));
+                result.push_back({text::path_to_utf8(child_relative), size, std::move(reader)});
+            } else {
+                ::closedir(directory);
+                return std::unexpected(
+                    reference_error("directory contains an unsupported entry", reference.relative_path));
+            }
+        }
+        const auto enumeration_error = errno;
+        ::closedir(directory);
+        if (enumeration_error != 0)
+            return std::unexpected(
+                reference_error("sandbox directory cannot be enumerated safely", reference.relative_path));
+#endif
+    }
+    std::ranges::sort(result, {}, &SandboxTreeFile::relative_path);
+    return result;
+}
+
+axk::app::Result<void> axk::app::Sandbox::publish_file(const FileRef &destination, bool overwrite,
+                                                       const axk::RandomAccessReader &source) const {
+    const std::scoped_lock mutation_lock{state_->mutation_mutex};
+    const auto root = find_root(destination.root_id);
+    if (!root)
+        return std::unexpected(reference_error("sandbox root does not exist", destination.relative_path));
+    if (!root->info.writable)
+        return std::unexpected(entry_error("read_only_root", "sandbox root is read-only", destination.relative_path));
+    auto relative = relative_path_from_utf8(destination.relative_path);
+    if (!relative || relative->filename().empty())
+        return std::unexpected(relative ? reference_error("output file requires a filename", destination.relative_path)
+                                        : relative.error());
+#if defined(_WIN32)
+    auto parent = open_parent(root->native->handle, relative->parent_path(), destination.relative_path);
+#else
+    auto parent = open_parent(root->native->descriptor, relative->parent_path(), destination.relative_path);
+#endif
+    if (!parent)
+        return std::unexpected(parent.error());
+
+    for (std::size_t attempt = 0U; attempt < 64U; ++attempt) {
+        const auto temporary = temporary_entry_name(relative->filename());
+#if defined(_WIN32)
+        auto output = open_relative(parent->get(), temporary, FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | DELETE,
+                                    FILE_CREATE, FILE_NON_DIRECTORY_FILE, destination.relative_path);
+        if (!output)
+            continue;
+        const auto cleanup = [&] {
+            FILE_DISPOSITION_INFO disposition{.DeleteFile = TRUE};
+            static_cast<void>(
+                SetFileInformationByHandle(output->get(), FileDispositionInfo, &disposition, sizeof(disposition)));
+        };
+        std::vector<std::byte> buffer(static_cast<std::size_t>(
+            std::max<std::uint64_t>(1U, std::min<std::uint64_t>(1024U * 1024U, source.size()))));
+        std::uint64_t offset{};
+        while (offset < source.size()) {
+            const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), source.size() - offset));
+            if (const auto read = source.read_exact_at(offset, std::span{buffer}.first(count)); !read) {
+                cleanup();
+                return std::unexpected(publication_error(read.error().message, destination.relative_path));
+            }
+            DWORD written{};
+            if (WriteFile(output->get(), buffer.data(), static_cast<DWORD>(count), &written, nullptr) == 0 ||
+                written != static_cast<DWORD>(count)) {
+                cleanup();
+                return std::unexpected(
+                    publication_error("temporary output could not be written", destination.relative_path));
+            }
+            offset += count;
+        }
+        if (FlushFileBuffers(output->get()) == 0) {
+            cleanup();
+            return std::unexpected(
+                publication_error("temporary output could not be flushed", destination.relative_path));
+        }
+        const auto destination_name = relative->filename().native();
+        const auto bytes = sizeof(FILE_RENAME_INFO) + destination_name.size() * sizeof(wchar_t);
+        std::vector<std::byte> storage(bytes);
+        auto *rename = reinterpret_cast<FILE_RENAME_INFO *>(storage.data());
+        rename->ReplaceIfExists = overwrite ? TRUE : FALSE;
+        rename->RootDirectory = parent->get();
+        rename->FileNameLength = static_cast<DWORD>(destination_name.size() * sizeof(wchar_t));
+        std::copy(destination_name.begin(), destination_name.end(), rename->FileName);
+        if (SetFileInformationByHandle(output->get(), FileRenameInfo, rename, static_cast<DWORD>(bytes)) == 0) {
+            const auto error = GetLastError();
+            cleanup();
+            if (!overwrite && (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS))
+                return std::unexpected(output_exists_error("output file already exists", destination.relative_path));
+            return std::unexpected(
+                publication_error("output could not be published atomically", destination.relative_path));
+        }
+#else
+        const auto descriptor =
+            ::openat(**parent, temporary.c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if (descriptor < 0) {
+            if (errno == EEXIST)
+                continue;
+            return std::unexpected(
+                publication_error("temporary output could not be created", destination.relative_path));
+        }
+        const auto cleanup = [&] { static_cast<void>(::unlinkat(**parent, temporary.c_str(), 0)); };
+        std::vector<std::byte> buffer(static_cast<std::size_t>(
+            std::max<std::uint64_t>(1U, std::min<std::uint64_t>(1024U * 1024U, source.size()))));
+        std::uint64_t offset{};
+        bool failed{};
+        while (offset < source.size() && !failed) {
+            const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), source.size() - offset));
+            if (const auto read = source.read_exact_at(offset, std::span{buffer}.first(count)); !read) {
+                ::close(descriptor);
+                cleanup();
+                return std::unexpected(publication_error(read.error().message, destination.relative_path));
+            }
+            auto remaining = std::span{buffer}.first(count);
+            while (!remaining.empty()) {
+                const auto written = ::write(descriptor, remaining.data(), remaining.size());
+                if (written < 0 && errno == EINTR)
+                    continue;
+                if (written <= 0) {
+                    failed = true;
+                    break;
+                }
+                remaining = remaining.subspan(static_cast<std::size_t>(written));
+            }
+            offset += count;
+        }
+        if (failed || ::fsync(descriptor) != 0) {
+            ::close(descriptor);
+            cleanup();
+            return std::unexpected(
+                publication_error("temporary output could not be written and flushed", destination.relative_path));
+        }
+        ::close(descriptor);
+        const auto published =
+            overwrite ? ::renameat(**parent, temporary.c_str(), **parent, relative->filename().c_str())
+                      : rename_no_replace(**parent, temporary.c_str(), **parent, relative->filename().c_str());
+        if (published != 0) {
+            const auto error = errno;
+            cleanup();
+            if (!overwrite && error == EEXIST)
+                return std::unexpected(output_exists_error("output file already exists", destination.relative_path));
+            return std::unexpected(
+                publication_error("output could not be published atomically", destination.relative_path));
+        }
+        if (::fsync(**parent) != 0)
+            return std::unexpected(
+                publication_error("published output directory could not be synchronized", destination.relative_path));
+#endif
+        return {};
+    }
+    return std::unexpected(
+        publication_error("a unique temporary output could not be reserved", destination.relative_path));
+}
+
+axk::app::Result<std::filesystem::path> axk::app::Sandbox::create_staging_directory(std::string_view purpose) const {
+    auto purpose_path = entry_name_from_utf8(purpose);
+    if (!purpose_path)
+        return std::unexpected(purpose_path.error());
+    std::error_code error;
+    const auto temporary_root = std::filesystem::temp_directory_path(error);
+    if (error)
+        return std::unexpected(publication_error("temporary directory is unavailable", purpose));
+    for (std::size_t attempt = 0U; attempt < 64U; ++attempt) {
+        const auto candidate = temporary_root / temporary_entry_name(*purpose_path);
+        if (!std::filesystem::create_directory(candidate, error)) {
+            if (!error)
+                continue;
+            return std::unexpected(publication_error("private staging directory could not be created", purpose));
+        }
+#if !defined(_WIN32)
+        std::filesystem::permissions(candidate, std::filesystem::perms::owner_all,
+                                     std::filesystem::perm_options::replace, error);
+        if (error) {
+            std::filesystem::remove(candidate, error);
+            return std::unexpected(publication_error("private staging directory could not be secured", purpose));
+        }
+#endif
+        return candidate;
+    }
+    return std::unexpected(publication_error("a unique private staging directory could not be reserved", purpose));
+}
+
+axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &destination, bool overwrite,
+                                                            const std::filesystem::path &staging) const {
+    struct StagedEntry {
+        std::filesystem::path source;
+        std::filesystem::path relative;
+        bool directory{};
+    };
+
+    std::error_code error;
+    const auto staging_status = std::filesystem::symlink_status(staging, error);
+    if (error || !std::filesystem::is_directory(staging_status) || std::filesystem::is_symlink(staging_status)) {
+        return std::unexpected(publication_error("staging directory is unavailable", destination.relative_path));
+    }
+    std::vector<StagedEntry> entries;
+    for (std::filesystem::recursive_directory_iterator iterator{staging, error}, end; iterator != end && !error;
+         iterator.increment(error)) {
+        const auto status = iterator->symlink_status(error);
+        if (error || std::filesystem::is_symlink(status) ||
+            (!std::filesystem::is_directory(status) && !std::filesystem::is_regular_file(status))) {
+            return std::unexpected(
+                publication_error("staging directory contains an unsupported entry", destination.relative_path));
+        }
+        const auto relative = iterator->path().lexically_relative(staging);
+        if (relative.empty() || relative.is_absolute() || *relative.begin() == "..") {
+            return std::unexpected(
+                publication_error("staging directory contains an invalid path", destination.relative_path));
+        }
+        entries.push_back({iterator->path(), relative, std::filesystem::is_directory(status)});
+    }
+    if (error)
+        return std::unexpected(
+            publication_error("staging directory could not be enumerated", destination.relative_path));
+    std::ranges::sort(entries, [](const auto &left, const auto &right) {
+        const auto left_depth = static_cast<std::size_t>(std::distance(left.relative.begin(), left.relative.end()));
+        const auto right_depth = static_cast<std::size_t>(std::distance(right.relative.begin(), right.relative.end()));
+        return std::tie(left_depth, left.relative) < std::tie(right_depth, right.relative);
+    });
+
+    const std::scoped_lock mutation_lock{state_->mutation_mutex};
+    const auto root = find_root(destination.root_id);
+    if (!root)
+        return std::unexpected(reference_error("sandbox root does not exist", destination.relative_path));
+    if (!root->info.writable)
+        return std::unexpected(entry_error("read_only_root", "sandbox root is read-only", destination.relative_path));
+    auto relative = relative_path_from_utf8(destination.relative_path);
+    if (!relative || relative->filename().empty()) {
+        return std::unexpected(relative ? reference_error("output directory requires a name", destination.relative_path)
+                                        : relative.error());
+    }
+#if defined(_WIN32)
+    auto parent = open_parent(root->native->handle, relative->parent_path(), destination.relative_path);
+#else
+    auto parent = open_parent(root->native->descriptor, relative->parent_path(), destination.relative_path);
+#endif
+    if (!parent)
+        return std::unexpected(parent.error());
+
+    for (std::size_t attempt = 0U; attempt < 64U; ++attempt) {
+        const auto temporary = temporary_entry_name(relative->filename());
+#if defined(_WIN32)
+        auto staged = open_relative(parent->get(), temporary,
+                                    FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | DELETE,
+                                    FILE_CREATE, FILE_DIRECTORY_FILE, destination.relative_path);
+        if (!staged)
+            continue;
+        const auto discard_staged = [&] {
+            static_cast<void>(delete_open_tree(staged->get(), destination.relative_path));
+            FILE_DISPOSITION_INFO disposition{.DeleteFile = TRUE};
+            static_cast<void>(
+                SetFileInformationByHandle(staged->get(), FileDispositionInfo, &disposition, sizeof(disposition)));
+        };
+        for (const auto &entry : entries) {
+            auto entry_parent = open_parent(staged->get(), entry.relative.parent_path(), destination.relative_path);
+            if (!entry_parent) {
+                discard_staged();
+                return std::unexpected(entry_parent.error());
+            }
+            if (entry.directory) {
+                auto created =
+                    open_relative(entry_parent->get(), entry.relative.filename(),
+                                  FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | DELETE,
+                                  FILE_CREATE, FILE_DIRECTORY_FILE, destination.relative_path);
+                if (!created) {
+                    discard_staged();
+                    return std::unexpected(
+                        publication_error("staged directory could not be created", destination.relative_path));
+                }
+                continue;
+            }
+            auto input = axk::FileReader::open(entry.source);
+            auto output = open_relative(entry_parent->get(), entry.relative.filename(),
+                                        FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | DELETE, FILE_CREATE,
+                                        FILE_NON_DIRECTORY_FILE, destination.relative_path);
+            if (!input || !output) {
+                discard_staged();
+                return std::unexpected(
+                    publication_error("staged output file could not be opened", destination.relative_path));
+            }
+            std::vector<std::byte> buffer(static_cast<std::size_t>(
+                std::max<std::uint64_t>(1U, std::min<std::uint64_t>(1024U * 1024U, (*input)->size()))));
+            std::uint64_t offset{};
+            while (offset < (*input)->size()) {
+                const auto count =
+                    static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), (*input)->size() - offset));
+                if (const auto read = (*input)->read_exact_at(offset, std::span{buffer}.first(count)); !read) {
+                    discard_staged();
+                    return std::unexpected(publication_error(read.error().message, destination.relative_path));
+                }
+                DWORD written{};
+                if (WriteFile(output->get(), buffer.data(), static_cast<DWORD>(count), &written, nullptr) == 0 ||
+                    written != static_cast<DWORD>(count)) {
+                    discard_staged();
+                    return std::unexpected(
+                        publication_error("staged output file could not be written", destination.relative_path));
+                }
+                offset += count;
+            }
+            if (FlushFileBuffers(output->get()) == 0) {
+                discard_staged();
+                return std::unexpected(
+                    publication_error("staged output file could not be flushed", destination.relative_path));
+            }
+        }
+
+        auto existing =
+            open_relative(parent->get(), relative->filename(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | DELETE,
+                          FILE_OPEN, FILE_DIRECTORY_FILE, destination.relative_path);
+        if (existing && !overwrite) {
+            const auto empty = directory_is_empty(existing->get());
+            if (!empty || !*empty) {
+                discard_staged();
+                return std::unexpected(
+                    output_exists_error("output directory already exists", destination.relative_path));
+            }
+            existing =
+                open_relative(parent->get(), relative->filename(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | DELETE,
+                              FILE_OPEN, FILE_DIRECTORY_FILE, destination.relative_path);
+            if (!existing) {
+                discard_staged();
+                return std::unexpected(
+                    publication_error("output directory changed during publication", destination.relative_path));
+            }
+        }
+        if (!existing) {
+            if (!rename_open_entry(staged->get(), parent->get(), relative->filename(), false)) {
+                discard_staged();
+                return std::unexpected(
+                    publication_error("output directory could not be published atomically", destination.relative_path));
+            }
+            return {};
+        }
+
+        const auto backup = temporary_entry_name(relative->filename());
+        if (!rename_open_entry(existing->get(), parent->get(), backup, false)) {
+            discard_staged();
+            return std::unexpected(
+                publication_error("existing output directory could not be reserved", destination.relative_path));
+        }
+        if (!overwrite) {
+            auto inspection = open_relative(parent->get(), backup, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+                                            FILE_OPEN, FILE_DIRECTORY_FILE, destination.relative_path);
+            const auto empty = inspection ? directory_is_empty(inspection->get()) : std::nullopt;
+            if (!empty || !*empty) {
+                static_cast<void>(rename_open_entry(existing->get(), parent->get(), relative->filename(), false));
+                discard_staged();
+                return std::unexpected(
+                    output_exists_error("output directory changed during publication", destination.relative_path));
+            }
+        }
+        if (!rename_open_entry(staged->get(), parent->get(), relative->filename(), false)) {
+            static_cast<void>(rename_open_entry(existing->get(), parent->get(), relative->filename(), false));
+            discard_staged();
+            return std::unexpected(
+                publication_error("output directory could not be published atomically", destination.relative_path));
+        }
+        if (!delete_open_tree(existing->get(), destination.relative_path)) {
+            return std::unexpected(
+                publication_error("replaced output directory could not be removed", destination.relative_path));
+        }
+        FILE_DISPOSITION_INFO disposition{.DeleteFile = TRUE};
+        if (SetFileInformationByHandle(existing->get(), FileDispositionInfo, &disposition, sizeof(disposition)) == 0) {
+            return std::unexpected(
+                publication_error("replaced output directory could not be removed", destination.relative_path));
+        }
+#else
+        if (::mkdirat(**parent, temporary.c_str(), 0700) != 0) {
+            if (errno == EEXIST)
+                continue;
+            return std::unexpected(
+                publication_error("temporary output directory could not be created", destination.relative_path));
+        }
+        const auto staged_descriptor =
+            ::openat(**parent, temporary.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if (staged_descriptor < 0) {
+            static_cast<void>(::unlinkat(**parent, temporary.c_str(), AT_REMOVEDIR));
+            return std::unexpected(
+                publication_error("temporary output directory could not be opened", destination.relative_path));
+        }
+        auto staged = descriptor_handle(staged_descriptor);
+        const auto discard_staged = [&] { static_cast<void>(delete_tree_at(**parent, temporary)); };
+        for (const auto &entry : entries) {
+            auto entry_parent = open_parent(*staged, entry.relative.parent_path(), destination.relative_path);
+            if (!entry_parent) {
+                staged.reset();
+                discard_staged();
+                return std::unexpected(entry_parent.error());
+            }
+            if (entry.directory) {
+                if (::mkdirat(**entry_parent, entry.relative.filename().c_str(), 0700) != 0) {
+                    staged.reset();
+                    discard_staged();
+                    return std::unexpected(
+                        publication_error("staged directory could not be created", destination.relative_path));
+                }
+                continue;
+            }
+            auto input = axk::FileReader::open(entry.source);
+            const auto output = ::openat(**entry_parent, entry.relative.filename().c_str(),
+                                         O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
+            if (!input || output < 0) {
+                if (output >= 0)
+                    ::close(output);
+                staged.reset();
+                discard_staged();
+                return std::unexpected(
+                    publication_error("staged output file could not be opened", destination.relative_path));
+            }
+            std::vector<std::byte> buffer(static_cast<std::size_t>(
+                std::max<std::uint64_t>(1U, std::min<std::uint64_t>(1024U * 1024U, (*input)->size()))));
+            std::uint64_t offset{};
+            bool failed{};
+            while (offset < (*input)->size() && !failed) {
+                const auto count =
+                    static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), (*input)->size() - offset));
+                if (const auto read = (*input)->read_exact_at(offset, std::span{buffer}.first(count)); !read) {
+                    failed = true;
+                    break;
+                }
+                auto remaining = std::span{buffer}.first(count);
+                while (!remaining.empty()) {
+                    const auto written = ::write(output, remaining.data(), remaining.size());
+                    if (written < 0 && errno == EINTR)
+                        continue;
+                    if (written <= 0) {
+                        failed = true;
+                        break;
+                    }
+                    remaining = remaining.subspan(static_cast<std::size_t>(written));
+                }
+                offset += count;
+            }
+            if (failed || ::fsync(output) != 0) {
+                ::close(output);
+                staged.reset();
+                discard_staged();
+                return std::unexpected(
+                    publication_error("staged output file could not be written", destination.relative_path));
+            }
+            ::close(output);
+        }
+        if (::fsync(*staged) != 0) {
+            staged.reset();
+            discard_staged();
+            return std::unexpected(
+                publication_error("temporary output directory could not be synchronized", destination.relative_path));
+        }
+        staged.reset();
+
+        struct stat destination_status{};
+        const auto destination_exists =
+            ::fstatat(**parent, relative->filename().c_str(), &destination_status, AT_SYMLINK_NOFOLLOW) == 0;
+        if (!destination_exists && errno != ENOENT) {
+            discard_staged();
+            return std::unexpected(
+                publication_error("output directory could not be inspected", destination.relative_path));
+        }
+        if (destination_exists && (!S_ISDIR(destination_status.st_mode) || S_ISLNK(destination_status.st_mode))) {
+            discard_staged();
+            return std::unexpected(
+                reference_error("output directory is not a regular directory", destination.relative_path));
+        }
+        if (destination_exists && !overwrite) {
+            const auto empty = directory_empty_at(**parent, relative->filename());
+            if (!empty || !*empty) {
+                discard_staged();
+                return std::unexpected(
+                    output_exists_error("output directory already exists", destination.relative_path));
+            }
+        }
+        const auto published =
+            destination_exists ? rename_exchange(**parent, temporary.c_str(), relative->filename().c_str())
+                               : rename_no_replace(**parent, temporary.c_str(), **parent, relative->filename().c_str());
+        if (published != 0) {
+            const auto publish_error = errno;
+            discard_staged();
+            if (!overwrite && publish_error == EEXIST)
+                return std::unexpected(
+                    output_exists_error("output directory already exists", destination.relative_path));
+            return std::unexpected(
+                publication_error("output directory could not be published atomically", destination.relative_path));
+        }
+        if (destination_exists && !overwrite) {
+            const auto displaced_empty = directory_empty_at(**parent, temporary);
+            if (!displaced_empty || !*displaced_empty) {
+                static_cast<void>(rename_exchange(**parent, temporary.c_str(), relative->filename().c_str()));
+                discard_staged();
+                return std::unexpected(
+                    output_exists_error("output directory changed during publication", destination.relative_path));
+            }
+        }
+        if (destination_exists && !delete_tree_at(**parent, temporary)) {
+            return std::unexpected(
+                publication_error("replaced output directory could not be removed", destination.relative_path));
+        }
+        if (::fsync(**parent) != 0) {
+            return std::unexpected(
+                publication_error("published output directory could not be synchronized", destination.relative_path));
+        }
+#endif
+        return {};
+    }
+    return std::unexpected(
+        publication_error("a unique temporary output directory could not be reserved", destination.relative_path));
 }
 
 axk::app::Result<std::filesystem::path> axk::app::Sandbox::resolve_existing(std::string_view root_id,

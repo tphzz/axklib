@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
+#include <vector>
 
 #if defined(_WIN32)
 #include <process.h>
@@ -13,6 +14,11 @@
 #include "axklib/application/filesystem.hpp"
 
 namespace {
+
+std::string read_text(const std::filesystem::path &path) {
+    std::ifstream input{path};
+    return {std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+}
 
 class SandboxTest : public testing::Test {
   protected:
@@ -207,6 +213,65 @@ TEST_F(SandboxTest, RejectsSymlinksEvenWhenTheirCurrentTargetRemainsInsideTheRoo
     EXPECT_FALSE(value.resolve_output_file({"workspace", "linked-images/new.hds"}, false));
 }
 
+TEST_F(SandboxTest, OpenFileRetainsTheValidatedObjectAcrossAParentSwap) {
+    const auto value = sandbox();
+    const auto opened = value.open_file({"workspace", "images/folder/inside.txt"});
+    ASSERT_FALSE(opened);
+
+    std::ofstream(root_ / "images" / "folder" / "inside.txt") << "inside";
+    const auto retained = value.open_file({"workspace", "images/folder/inside.txt"});
+    ASSERT_TRUE(retained) << retained.error().message;
+
+    const auto parent = root_ / "images" / "folder";
+    const auto parked = root_ / "images" / "folder-parked";
+    std::error_code error;
+    std::filesystem::rename(parent, parked, error);
+    ASSERT_FALSE(error) << error.message();
+    std::ofstream(outside_ / "inside.txt") << "outside";
+    std::filesystem::create_directory_symlink(outside_, parent, error);
+    if (error) {
+        std::filesystem::rename(parked, parent, error);
+        GTEST_SKIP() << "directory links are unavailable";
+    }
+
+    std::vector<std::byte> bytes(static_cast<std::size_t>(retained->size));
+    ASSERT_TRUE(retained->reader->read_exact_at(0U, bytes));
+    const std::string text{reinterpret_cast<const char *>(bytes.data()), bytes.size()};
+    EXPECT_EQ(text, "inside");
+
+    std::filesystem::remove(parent, error);
+    std::filesystem::rename(parked, parent, error);
+    ASSERT_FALSE(error) << error.message();
+}
+
+TEST_F(SandboxTest, OpenTreeFilesRetainEveryValidatedObjectAcrossAParentSwap) {
+    const auto value = sandbox();
+    std::ofstream(root_ / "images" / "folder" / "inside.txt") << "inside";
+    const auto retained = value.open_tree_files({"workspace", "images/folder"}, 8U, 1024U);
+    ASSERT_TRUE(retained) << retained.error().message;
+    ASSERT_EQ(retained->size(), 1U);
+
+    const auto parent = root_ / "images" / "folder";
+    const auto parked = root_ / "images" / "folder-parked";
+    std::error_code error;
+    std::filesystem::rename(parent, parked, error);
+    ASSERT_FALSE(error) << error.message();
+    std::ofstream(outside_ / "inside.txt") << "outside";
+    std::filesystem::create_directory_symlink(outside_, parent, error);
+    if (error) {
+        std::filesystem::rename(parked, parent, error);
+        GTEST_SKIP() << "directory links are unavailable";
+    }
+
+    std::vector<std::byte> bytes(static_cast<std::size_t>(retained->front().size));
+    ASSERT_TRUE(retained->front().reader->read_exact_at(0U, bytes));
+    EXPECT_EQ(std::string(reinterpret_cast<const char *>(bytes.data()), bytes.size()), "inside");
+
+    std::filesystem::remove(parent, error);
+    std::filesystem::rename(parked, parent, error);
+    ASSERT_FALSE(error) << error.message();
+}
+
 TEST_F(SandboxTest, RejectsMutationsAfterAValidatedParentIsReplacedByALink) {
     const auto value = sandbox();
     const auto parent = root_ / "images" / "folder";
@@ -288,6 +353,66 @@ TEST_F(SandboxTest, RejectsUnsafeEntryMutationsAndPreservesExistingData) {
 }
 
 #if !defined(_WIN32)
+TEST_F(SandboxTest, ParentSwapCannotRedirectFilePublicationOutsideTheRoot) {
+    const auto value = sandbox();
+    const auto parent = root_ / "images" / "folder";
+    const auto parked = root_ / "images" / "folder-parked";
+    const axk::MemoryReader content{
+        {std::byte{0x69}, std::byte{0x6e}, std::byte{0x73}, std::byte{0x69}, std::byte{0x64}, std::byte{0x65}}};
+    std::jthread attacker{[&](const std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            std::error_code error;
+            std::filesystem::rename(parent, parked, error);
+            if (error)
+                continue;
+            std::filesystem::create_directory_symlink(outside_, parent, error);
+            if (!error)
+                std::this_thread::yield();
+            std::filesystem::remove(parent, error);
+            std::filesystem::rename(parked, parent, error);
+        }
+    }};
+
+    for (std::size_t attempt = 0; attempt < 1000U; ++attempt) {
+        const auto published = value.publish_file({"workspace", "images/folder/published.bin"}, true, content);
+        if (published) {
+            static_cast<void>(value.delete_entry({"workspace", "images/folder/published.bin"}));
+        }
+        EXPECT_FALSE(std::filesystem::exists(outside_ / "published.bin"));
+    }
+    attacker.request_stop();
+    attacker.join();
+    EXPECT_FALSE(std::filesystem::exists(outside_ / "published.bin"));
+}
+
+TEST_F(SandboxTest, PublishesAStagedTreeWithoutFollowingASwappedParent) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "the adversarial directory swap uses POSIX symbolic links";
+#else
+    const auto value = sandbox();
+    const auto staging = std::filesystem::temp_directory_path() / "axklib-sandbox-tree-staging";
+    std::error_code error;
+    std::filesystem::remove_all(staging, error);
+    ASSERT_TRUE(std::filesystem::create_directories(staging / "nested", error));
+    ASSERT_FALSE(error);
+    std::ofstream(staging / "nested" / "result.txt") << "inside";
+
+    const auto initial = value.publish_directory({"workspace", "images/initial"}, false, staging);
+    ASSERT_TRUE(initial) << initial.error().message;
+    EXPECT_EQ(read_text(root_ / "images" / "initial" / "nested" / "result.txt"), "inside");
+
+    std::filesystem::rename(root_ / "images", root_ / "images-held", error);
+    ASSERT_FALSE(error);
+    std::filesystem::create_directory_symlink(outside_, root_ / "images", error);
+    ASSERT_FALSE(error);
+
+    const auto published = value.publish_directory({"workspace", "images/result"}, false, staging);
+    EXPECT_FALSE(published);
+    EXPECT_FALSE(std::filesystem::exists(outside_ / "result"));
+    std::filesystem::remove_all(staging, error);
+#endif
+}
+
 TEST_F(SandboxTest, ParentSwapCannotRedirectMutationsOutsideTheRoot) {
     const auto value = sandbox();
     const auto parent = root_ / "images" / "folder";

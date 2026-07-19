@@ -68,6 +68,20 @@ struct LoadedSource {
     axk::ContentTree tree;
 };
 
+struct DirectoryCleanup {
+    std::filesystem::path path;
+    bool active{true};
+
+    ~DirectoryCleanup() {
+        if (!active)
+            return;
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+    }
+
+    void release() noexcept { active = false; }
+};
+
 axk::app::Error operation_error(std::string code, std::string message,
                                 std::optional<std::string> relative_path = std::nullopt) {
     axk::app::ErrorContext context;
@@ -198,10 +212,10 @@ axk::app::Result<LoadedSource>
 load_source(const axk::app::Sandbox &sandbox, const axk::app::FileRef &source, bool include_default_programs,
             const axk::app::OperationContext &context,
             axk::MediaObjectReadMode read_mode = axk::MediaObjectReadMode::decoded_metadata) {
-    const auto path = sandbox.resolve_file(source);
-    if (!path)
-        return std::unexpected(path.error());
-    auto media = axk::open_media(*path, context.cancellation);
+    const auto file = sandbox.open_file(source);
+    if (!file)
+        return std::unexpected(file.error());
+    auto media = axk::open_media(file->reader, std::filesystem::path{file->filename}, context.cancellation);
     if (!media)
         return std::unexpected(core_error(media.error(), source));
     auto inventory = axk::build_media_inventory(*media, read_mode, 64U * 1024U * 1024U, context.cancellation);
@@ -216,13 +230,13 @@ std::expected<LoadedSource, InfoLoadFailure> load_info_source(const axk::app::Sa
                                                               const axk::app::FileRef &source,
                                                               bool include_default_programs,
                                                               const axk::app::OperationContext &context) {
-    const auto path = sandbox.resolve_file(source);
-    if (!path) {
-        return std::unexpected(InfoLoadFailure{.error = path.error(),
+    const auto file = sandbox.open_file(source);
+    if (!file) {
+        return std::unexpected(InfoLoadFailure{.error = file.error(),
                                                .error_code = static_cast<std::uint64_t>(axk::ErrorCode::io_open_failed),
                                                .original_exception = "axk::Error"});
     }
-    auto media = axk::open_media(*path, context.cancellation);
+    auto media = axk::open_media(file->reader, std::filesystem::path{file->filename}, context.cancellation);
     if (!media) {
         return std::unexpected(InfoLoadFailure{.error = core_error(media.error(), source),
                                                .error_code = static_cast<std::uint64_t>(media.error().code),
@@ -634,9 +648,10 @@ axk::app::Result<Json> execute_objects(const axk::app::Sandbox &sandbox, const J
         if (std::ranges::find(admitted, *request->object_type) == admitted.end())
             return std::unexpected(operation_error("invalid_request", "objectType is not supported"));
     }
-    const auto destination = sandbox.resolve_output_directory(request->destination, request->overwrite);
+    const auto destination = sandbox.create_staging_directory("axklib-report-objects");
     if (!destination)
         return std::unexpected(destination.error());
+    DirectoryCleanup cleanup{*destination};
     std::error_code filesystem_error;
     std::filesystem::create_directories(*destination / "_schemas", filesystem_error);
     if (filesystem_error) {
@@ -707,6 +722,9 @@ axk::app::Result<Json> execute_objects(const axk::app::Sandbox &sandbox, const J
         context.progress->report(
             {axk::ProgressPhase::writing, request->sources.size(), request->sources.size(), "objects", std::nullopt});
     }
+    if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
+        return std::unexpected(published.error());
+    cleanup.release();
     return Json{{"operationId", "report.objects"},
                 {"sourceCount", request->sources.size()},
                 {"loadedCount", request->sources.size() - failed_count},
@@ -755,9 +773,10 @@ axk::app::Result<Json> execute_inventory(const axk::app::Sandbox &sandbox, const
     const auto request = parse_request(input);
     if (!request)
         return std::unexpected(request.error());
-    const auto destination = sandbox.resolve_output_directory(request->destination, request->overwrite);
+    const auto destination = sandbox.create_staging_directory("axklib-report-inventory");
     if (!destination)
         return std::unexpected(destination.error());
+    DirectoryCleanup cleanup{*destination};
     std::error_code filesystem_error;
     std::filesystem::create_directories(*destination / "_schemas", filesystem_error);
     if (filesystem_error) {
@@ -867,6 +886,9 @@ axk::app::Result<Json> execute_inventory(const axk::app::Sandbox &sandbox, const
         context.progress->report(
             {axk::ProgressPhase::writing, request->sources.size(), request->sources.size(), "inventory", std::nullopt});
     }
+    if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
+        return std::unexpected(published.error());
+    cleanup.release();
     return Json{{"operationId", "report.inventory"},
                 {"sourceCount", request->sources.size()},
                 {"loadedCount", request->sources.size() - load_errors.size()},
@@ -1554,9 +1576,10 @@ axk::app::Result<Json> execute_coverage(const axk::app::Sandbox &sandbox, const 
     const auto request = parse_request(input);
     if (!request)
         return std::unexpected(request.error());
-    const auto destination = sandbox.resolve_output_directory(request->destination, request->overwrite);
+    const auto destination = sandbox.create_staging_directory("axklib-report-coverage");
     if (!destination)
         return std::unexpected(destination.error());
+    DirectoryCleanup cleanup{*destination};
     std::error_code filesystem_error;
     std::filesystem::create_directories(*destination / "_schemas", filesystem_error);
     if (filesystem_error) {
@@ -1638,6 +1661,9 @@ axk::app::Result<Json> execute_coverage(const axk::app::Sandbox &sandbox, const 
         artifacts.push_back({{"rootId", request->destination.root_id},
                              {"relativePath", child_reference_path(request->destination, path)}});
     }
+    if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
+        return std::unexpected(published.error());
+    cleanup.release();
     return Json{{"operationId", "report.coverage"}, {"sourceCount", request->sources.size()},
                 {"loadedCount", loaded.size()},     {"failedCount", load_errors.size()},
                 {"rowCount", relationships.size()}, {"artifacts", std::move(artifacts)}};
@@ -1648,9 +1674,10 @@ axk::app::Result<Json> execute_orphans(const axk::app::Sandbox &sandbox, const J
     const auto request = parse_request(input);
     if (!request)
         return std::unexpected(request.error());
-    const auto destination = sandbox.resolve_output_directory(request->destination, request->overwrite);
+    const auto destination = sandbox.create_staging_directory("axklib-report-orphans");
     if (!destination)
         return std::unexpected(destination.error());
+    DirectoryCleanup cleanup{*destination};
     std::error_code filesystem_error;
     std::filesystem::create_directories(*destination / "_schemas", filesystem_error);
     if (filesystem_error) {
@@ -1732,6 +1759,9 @@ axk::app::Result<Json> execute_orphans(const axk::app::Sandbox &sandbox, const J
         context.progress->report(
             {axk::ProgressPhase::writing, request->sources.size(), request->sources.size(), "orphans", std::nullopt});
     }
+    if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
+        return std::unexpected(published.error());
+    cleanup.release();
     return Json{{"operationId", "report.orphans"},
                 {"sourceCount", request->sources.size()},
                 {"loadedCount", request->sources.size()},
@@ -1746,9 +1776,10 @@ axk::app::Result<Json> execute_relationships(const axk::app::Sandbox &sandbox, c
     const auto request = parse_request(input);
     if (!request)
         return std::unexpected(request.error());
-    const auto destination = sandbox.resolve_output_directory(request->destination, request->overwrite);
+    const auto destination = sandbox.create_staging_directory("axklib-report-relationships");
     if (!destination)
         return std::unexpected(destination.error());
+    DirectoryCleanup cleanup{*destination};
     std::error_code filesystem_error;
     std::filesystem::create_directories(*destination / "_schemas", filesystem_error);
     if (filesystem_error) {
@@ -1868,6 +1899,9 @@ axk::app::Result<Json> execute_relationships(const axk::app::Sandbox &sandbox, c
         artifacts.push_back({{"rootId", request->destination.root_id},
                              {"relativePath", child_reference_path(request->destination, path)}});
     }
+    if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
+        return std::unexpected(published.error());
+    cleanup.release();
     return Json{{"operationId", "report.relationships"},
                 {"sourceCount", request->sources.size()},
                 {"loadedCount", loaded.size()},
@@ -1882,9 +1916,10 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
     const auto request = parse_corpus_audit_request(input);
     if (!request)
         return std::unexpected(request.error());
-    const auto destination = sandbox.resolve_output_directory(request->destination, request->overwrite);
+    const auto destination = sandbox.create_staging_directory("axklib-corpus-audit");
     if (!destination)
         return std::unexpected(destination.error());
+    DirectoryCleanup cleanup{*destination};
     std::error_code filesystem_error;
     std::filesystem::create_directories(*destination / "_schemas", filesystem_error);
     if (filesystem_error) {
@@ -2065,6 +2100,9 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
         context.progress->report({axk::ProgressPhase::writing, request->sources.size(), request->sources.size(),
                                   "corpus audit", std::nullopt});
     }
+    if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
+        return std::unexpected(published.error());
+    cleanup.release();
     return Json{{"operationId", "corpus.audit"},         {"sourceCount", request->sources.size()},
                 {"loadedCount", loaded.size()},          {"failedCount", load_error_count},
                 {"objectCount", inventory.size()},       {"validationIssueCount", validation_issues.size()},
