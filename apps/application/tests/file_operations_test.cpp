@@ -146,6 +146,43 @@ TEST_F(FileOperationsTest, ValidationChecksExportTreesAndRejectsAmbiguousRequest
     EXPECT_EQ(ambiguous.error().code, "invalid_request");
 }
 
+TEST_F(FileOperationsTest, ExportValidationAllowsParentTraversalThatStaysInsideTheExportRoot) {
+    const auto graph_path = root_ / "exports/file/image/partition/volume/volume.axklib.json";
+    std::filesystem::create_directories(graph_path.parent_path());
+    const auto write_graph = [&](std::string_view wav_path) {
+        std::ofstream output{graph_path};
+        output << nlohmann::json({{"schema", "axklib.volume_graph.v1"},
+                                  {"objects", {{"smpl", {{{"object_key", "smpl:1"}, {"wav_path", wav_path}}}}}}})
+                      .dump();
+    };
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_validation_operations(registry, *sandbox_));
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+
+    write_graph("../../../../_samples/physical/tone.wav");
+    const auto valid =
+        registry.invoke("report.validate",
+                        {{"exports", {{"rootId", "workspace"}, {"relativePath", "exports"}}},
+                         {"destination", {{"rootId", "workspace"}, {"relativePath", "reports/export-path-valid"}}},
+                         {"policy", "strict"}},
+                        context);
+    ASSERT_TRUE(valid) << valid.error().message;
+    EXPECT_EQ(valid->at("issueCount"), 0U);
+    EXPECT_FALSE(valid->at("failed").get<bool>());
+
+    write_graph("../../../../../outside.wav");
+    const auto escaped =
+        registry.invoke("report.validate",
+                        {{"exports", {{"rootId", "workspace"}, {"relativePath", "exports"}}},
+                         {"destination", {{"rootId", "workspace"}, {"relativePath", "reports/export-path-escaped"}}},
+                         {"policy", "strict"}},
+                        context);
+    ASSERT_TRUE(escaped) << escaped.error().message;
+    EXPECT_EQ(escaped->at("issueCount"), 1U);
+    EXPECT_TRUE(escaped->at("failed").get<bool>());
+}
+
 TEST_F(FileOperationsTest, InfoReturnsCanonicalHierarchyWithoutRequiringAnArtifactDestination) {
     auto registry = axk::app::make_operation_registry();
     ASSERT_TRUE(axk::app::bind_file_operations(registry, *sandbox_));

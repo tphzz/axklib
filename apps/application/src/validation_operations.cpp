@@ -846,7 +846,11 @@ std::vector<axk::ReportRow> validate_export_directory(const std::filesystem::pat
                 if (!value.is_string())
                     return;
                 const std::filesystem::path path{value.get<std::string>()};
-                if (path.is_absolute() || std::ranges::find(path, "..") != path.end()) {
+                const auto resolved = (iterator->path().parent_path() / path).lexically_normal();
+                const auto relative_to_root = resolved.lexically_relative(root.lexically_normal());
+                const auto escapes_root = relative_to_root.empty() || relative_to_root.is_absolute() ||
+                                          std::ranges::find(relative_to_root, "..") != relative_to_root.end();
+                if (path.is_absolute() || escapes_root) {
                     issues.push_back(export_validation_issue("error", "EXPORT_VOLUME_GRAPH_PATH_ESCAPE",
                                                              "Volume graph WAV path must be relative and stay inside "
                                                              "the export root.",
