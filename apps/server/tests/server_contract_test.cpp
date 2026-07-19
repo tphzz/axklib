@@ -166,8 +166,10 @@ TEST(ServerContract, CompleteDocumentDerivesEveryDomainRouteAndSchemaFromRegistr
                                                     ? nlohmann::json(nullptr)
                                                     : nlohmann::json(entry.descriptor.cli_command));
         EXPECT_EQ(descriptor->at("cliParity"), entry.descriptor.cli_parity);
-        EXPECT_EQ(descriptor->at("mode"), axk::app::execution_mode_name(entry.descriptor.mode));
-        EXPECT_EQ(descriptor->at("operationClass"), axk::app::operation_class_name(entry.descriptor.operation_class));
+        EXPECT_EQ(descriptor->at("mode").get<std::string>(),
+                  std::string{axk::app::execution_mode_name(entry.descriptor.mode)});
+        EXPECT_EQ(descriptor->at("operationClass").get<std::string>(),
+                  std::string{axk::app::operation_class_name(entry.descriptor.operation_class)});
         EXPECT_EQ(descriptor->at("requiresIdempotency"), entry.descriptor.requires_idempotency);
         EXPECT_EQ(descriptor->at("variant"), entry.descriptor.variant.empty()
                                                  ? nlohmann::json(nullptr)
