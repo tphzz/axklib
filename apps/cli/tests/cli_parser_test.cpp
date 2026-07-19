@@ -24,6 +24,7 @@
 #include "axklib/application/write_operations.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/package.hpp"
+#include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 #include "axklib/wav_stream.hpp"
 
@@ -514,7 +515,7 @@ TEST(Cli11Adapter, CreateHdsInvokesSharedPlanAndMatchesDirectWriter) {
     ASSERT_EQ(run_cli({"axklib", "create", "hds", manifest_path.string(), "-o", cli_path.string()}), 0);
     const auto output = testing::internal::GetCapturedStdout();
     std::ostringstream expected;
-    expected << "image=" << cli_path.string() << " size_bytes=" << direct->size_bytes
+    expected << "image=" << axk::text::path_to_utf8(cli_path) << " size_bytes=" << direct->size_bytes
              << " partitions=" << direct->partitions.size()
              << " objects=0 unused_tail_sectors=" << direct->unused_tail_sectors << '\n';
     for (const auto &partition : direct->partitions) {
@@ -596,9 +597,9 @@ TEST(Cli11Adapter, CreateFloppyAndIsoInvokeSharedPlanAndMatchDirectWriter) {
         testing::internal::CaptureStdout();
         ASSERT_EQ(run_cli({"axklib", "create", kind, manifest_path.string(), "-o", cli_path.string()}), 0) << kind;
         const auto output = testing::internal::GetCapturedStdout();
-        const auto expected = std::format("image={} format={} size_bytes={} objects={}\n", cli_path.string(),
-                                          test_case.at("format").get_ref<const std::string &>(), direct->size_bytes,
-                                          direct->object_count);
+        const auto expected = std::format(
+            "image={} format={} size_bytes={} objects={}\n", axk::text::path_to_utf8(cli_path),
+            test_case.at("format").get_ref<const std::string &>(), direct->size_bytes, direct->object_count);
         EXPECT_EQ(output, expected) << kind;
         EXPECT_EQ(read_bytes(cli_path), read_bytes(direct_path)) << kind;
     }
@@ -643,7 +644,7 @@ TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedInspectionAndDirectAlterati
     auto cli_result = nlohmann::json::parse(testing::internal::GetCapturedStdout());
     auto expected = nlohmann::json::parse(*axk::cli::schema::operations_v1::serialize(
         axk::cli::schema::operations_v1::project_alteration(*direct), false));
-    expected["output_path"] = cli_path.string();
+    expected["output_path"] = axk::text::path_to_utf8(cli_path);
     EXPECT_EQ(cli_result, expected);
     EXPECT_EQ(read_bytes(cli_path), read_bytes(direct_path));
     std::filesystem::remove_all(root, error);

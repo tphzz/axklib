@@ -79,6 +79,15 @@ add_executable(axk_cli ALIAS axklib_cli)
 set_target_properties(axklib_cli PROPERTIES OUTPUT_NAME axklib CXX_EXTENSIONS OFF)
 target_compile_features(axklib_cli PRIVATE cxx_std_23)
 target_link_libraries(axklib_cli PRIVATE axk_cli_adapter)
+if(WIN32)
+  set(_axk_cli_windows_manifest "${CMAKE_CURRENT_SOURCE_DIR}/windows-utf8.manifest")
+  target_link_options(
+    axklib_cli
+    PRIVATE "/MANIFESTINPUT:${_axk_cli_windows_manifest}"
+  )
+  set_property(TARGET axklib_cli APPEND PROPERTY LINK_DEPENDS "${_axk_cli_windows_manifest}")
+  unset(_axk_cli_windows_manifest)
+endif()
 axk_set_project_warnings(axklib_cli)
 axk_enable_sanitizers(axklib_cli)
 axk_enable_coverage(axklib_cli)

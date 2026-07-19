@@ -50,6 +50,7 @@ TEST_F(DownloadArchiveStoreTest, CreatesOwnerBoundDeterministicTarAndRemovesItEx
     ASSERT_TRUE(path) << path.error().message;
     std::ifstream input{*path, std::ios::binary};
     std::vector<char> bytes{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+    input.close();
     ASSERT_EQ(bytes.size(), created->size_bytes);
     EXPECT_EQ(std::string(bytes.data(), 9U), "alpha.txt");
     EXPECT_EQ(std::string(bytes.data() + 512, 5U), "alpha");

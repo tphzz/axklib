@@ -1702,7 +1702,15 @@ class ServerApplication {
             return std::move(*denied);
         const axk::app::DownloadArchiveRef reference{archive_id};
         if (request.method == crow::HTTPMethod::Delete) {
-            const auto removed = download_archives_.remove(reference, request_owner(request));
+            auto removed = download_archives_.remove(reference, request_owner(request));
+#ifdef _WIN32
+            // Crow may still be closing the static-file stream from the preceding download.
+            for (std::size_t attempt = 0U;
+                 !removed && removed.error().code == "archive_storage_unavailable" && attempt < 10U; ++attempt) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{5});
+                removed = download_archives_.remove(reference, request_owner(request));
+            }
+#endif
             if (!removed) {
                 audit(id, "archive_delete", "denied", request_owner(request), "archive", archive_id);
                 return error_response(status_for_error(removed.error()), removed.error(), id);

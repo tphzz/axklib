@@ -196,10 +196,10 @@ TEST(ServerContract, CheckedInCompleteDocumentMatchesRegistry) {
     const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "apps/server/contracts/openapi-v1.json";
     std::ifstream input{path, std::ios::binary};
     ASSERT_TRUE(input) << path;
-    const std::string checked_in{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+    const auto checked_in = nlohmann::json::parse(input);
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    EXPECT_EQ(checked_in, document.dump(2) + '\n');
+    EXPECT_EQ(checked_in, document);
 }
 
 TEST(ServerContract, EveryOpenApiOperationIdIsUnique) {
