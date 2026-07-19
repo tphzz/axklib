@@ -296,7 +296,8 @@ TEST(Cli11Adapter, WritesExactCanonicalManifestBytesFromSharedOperations) {
 TEST(Cli11Adapter, PortablePackageRoundTripPlansAndImportsAtomically) {
     const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images" /
                          "sampler-authored/HD00_512_single_sbnk_authored.hds";
-    const auto root = std::filesystem::temp_directory_path() / "axklib-cli-package-round-trip";
+    const auto root =
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / "axklib-cli-package-round-trip";
     const auto package_stem = root / "sine-bank";
     const auto package = root / "sine-bank.axksbnk";
     const auto manifest = root / "target.json";

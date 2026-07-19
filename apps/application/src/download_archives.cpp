@@ -280,7 +280,7 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
         release_reservation();
         return std::unexpected(archive_error("archive_storage_unavailable", "download archive cannot be created"));
     }
-    std::array<char, 1024U * 1024U> buffer{};
+    std::vector<char> buffer(1024U * 1024U);
     for (const auto &file : files) {
         const auto resolved = sandbox.resolve_file(
             {source.root_id, source.relative_path.empty() ? file.path : source.relative_path + "/" + file.path});
