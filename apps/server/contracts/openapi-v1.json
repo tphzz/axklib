@@ -3315,6 +3315,25 @@
                 "minimum": 0,
                 "type": "integer"
               },
+              "uploadCleanupFailedDeletions": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "uploadCleanupHealthy": {
+                "type": "boolean"
+              },
+              "uploadOrphanBytes": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "uploadOrphanFiles": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "uploadReservedBytes": {
+                "minimum": 0,
+                "type": "integer"
+              },
               "websocketClientsEvicted": {
                 "minimum": 0,
                 "type": "integer"
@@ -3354,7 +3373,12 @@
               "websocketEventsDelivered",
               "websocketEventsDropped",
               "websocketEventsPending",
-              "websocketClientsEvicted"
+              "websocketClientsEvicted",
+              "uploadCleanupHealthy",
+              "uploadCleanupFailedDeletions",
+              "uploadOrphanFiles",
+              "uploadOrphanBytes",
+              "uploadReservedBytes"
             ],
             "type": "object"
           },
@@ -4413,6 +4437,12 @@
                       "NOT_READY"
                     ]
                   },
+                  "uploadCleanup": {
+                    "enum": [
+                      "READY",
+                      "NOT_READY"
+                    ]
+                  },
                   "workspaceConfiguration": {
                     "enum": [
                       "READY",
@@ -4427,6 +4457,7 @@
                   "workspaceConfiguration",
                   "stateStorage",
                   "startupCleanup",
+                  "uploadCleanup",
                   "executorAdmission"
                 ],
                 "type": "object"

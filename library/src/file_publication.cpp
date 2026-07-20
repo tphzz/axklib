@@ -2,7 +2,12 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstring>
 #include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <vector>
 
 #include "axklib/utf8.hpp"
 
@@ -13,10 +18,70 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
 namespace axk::detail {
+namespace {
+
+struct RetainedFile {
+#if defined(_WIN32)
+    HANDLE handle{INVALID_HANDLE_VALUE};
+    BY_HANDLE_FILE_INFORMATION identity{};
+    ~RetainedFile() {
+        if (handle != INVALID_HANDLE_VALUE)
+            CloseHandle(handle);
+    }
+#else
+    int descriptor{-1};
+    struct stat identity{};
+    ~RetainedFile() {
+        if (descriptor >= 0)
+            ::close(descriptor);
+    }
+#endif
+};
+
+std::mutex retained_mutex;
+std::map<std::filesystem::path, std::shared_ptr<RetainedFile>> retained_files;
+
+std::filesystem::path retained_key(const std::filesystem::path &path) { return path.lexically_normal(); }
+
+void retain(const std::filesystem::path &path, std::shared_ptr<RetainedFile> file) {
+    const std::scoped_lock lock{retained_mutex};
+    retained_files.insert_or_assign(retained_key(path), std::move(file));
+}
+
+std::shared_ptr<RetainedFile> release_retained(const std::filesystem::path &path) {
+    const std::scoped_lock lock{retained_mutex};
+    const auto found = retained_files.find(retained_key(path));
+    if (found == retained_files.end())
+        return {};
+    auto result = std::move(found->second);
+    retained_files.erase(found);
+    return result;
+}
+
+std::shared_ptr<RetainedFile> find_retained(const std::filesystem::path &path) {
+    const std::scoped_lock lock{retained_mutex};
+    const auto found = retained_files.find(retained_key(path));
+    return found == retained_files.end() ? nullptr : found->second;
+}
+
+#if defined(_WIN32)
+bool same_identity(const BY_HANDLE_FILE_INFORMATION &left, const BY_HANDLE_FILE_INFORMATION &right) {
+    return left.dwVolumeSerialNumber == right.dwVolumeSerialNumber && left.nFileIndexHigh == right.nFileIndexHigh &&
+           left.nFileIndexLow == right.nFileIndexLow;
+}
+#endif
+
+Result<void> identity_error() {
+    return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                                      "temporary output identity changed before publication")};
+}
+
+} // namespace
 
 Result<std::filesystem::path> reserve_temporary_file(const std::filesystem::path &output) {
     for (std::size_t attempt = 0; attempt < 64U; ++attempt) {
@@ -25,10 +90,17 @@ Result<std::filesystem::path> reserve_temporary_file(const std::filesystem::path
             return std::unexpected{temporary.error()};
         }
 #if defined(_WIN32)
-        const auto handle = CreateFileW(temporary->c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+        const auto handle = CreateFileW(temporary->c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
+                                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_NEW,
                                         FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
         if (handle != INVALID_HANDLE_VALUE) {
-            CloseHandle(handle);
+            auto retained = std::make_shared<RetainedFile>();
+            retained->handle = handle;
+            if (GetFileInformationByHandle(handle, &retained->identity) == 0) {
+                return std::unexpected{
+                    make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not identify a temporary output")};
+            }
+            retain(*temporary, std::move(retained));
             return *temporary;
         }
         const auto error = GetLastError();
@@ -37,9 +109,15 @@ Result<std::filesystem::path> reserve_temporary_file(const std::filesystem::path
                                               "could not exclusively reserve a temporary output")};
         }
 #else
-        const auto descriptor = ::open(temporary->c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
+        const auto descriptor = ::open(temporary->c_str(), O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (descriptor >= 0) {
-            ::close(descriptor);
+            auto retained = std::make_shared<RetainedFile>();
+            retained->descriptor = descriptor;
+            if (::fstat(descriptor, &retained->identity) != 0) {
+                return std::unexpected{
+                    make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not identify a temporary output")};
+            }
+            retain(*temporary, std::move(retained));
             return *temporary;
         }
         if (errno != EEXIST) {
@@ -59,7 +137,8 @@ Result<std::filesystem::path> write_temporary_file(const std::filesystem::path &
         if (!temporary)
             return std::unexpected{temporary.error()};
 #if defined(_WIN32)
-        const auto handle = CreateFileW(temporary->c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+        const auto handle = CreateFileW(temporary->c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
+                                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_NEW,
                                         FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
         if (handle == INVALID_HANDLE_VALUE) {
             const auto error = GetLastError();
@@ -83,9 +162,14 @@ Result<std::filesystem::path> write_temporary_file(const std::filesystem::path &
         };
         auto produced = producer(sink);
         const auto flushed = produced && FlushFileBuffers(handle) != 0;
-        CloseHandle(handle);
+        auto retained = std::make_shared<RetainedFile>();
+        retained->handle = handle;
+        if (GetFileInformationByHandle(handle, &retained->identity) == 0) {
+            produced = std::unexpected{
+                make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not identify a temporary output")};
+        }
 #else
-        const auto descriptor = ::open(temporary->c_str(), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW, 0600);
+        const auto descriptor = ::open(temporary->c_str(), O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (descriptor < 0) {
             if (errno == EEXIST)
                 continue;
@@ -107,7 +191,12 @@ Result<std::filesystem::path> write_temporary_file(const std::filesystem::path &
         };
         auto produced = producer(sink);
         const auto flushed = produced && ::fsync(descriptor) == 0;
-        ::close(descriptor);
+        auto retained = std::make_shared<RetainedFile>();
+        retained->descriptor = descriptor;
+        if (::fstat(descriptor, &retained->identity) != 0) {
+            produced = std::unexpected{
+                make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not identify a temporary output")};
+        }
 #endif
         if (!produced || !flushed) {
             std::error_code ignored;
@@ -117,13 +206,89 @@ Result<std::filesystem::path> write_temporary_file(const std::filesystem::path &
             return std::unexpected{
                 make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not flush temporary output to disk")};
         }
+        retain(*temporary, std::move(retained));
         return *temporary;
     }
     return std::unexpected{
         make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create a unique temporary output")};
 }
 
+Result<void> resize_temporary_file(const std::filesystem::path &path, std::uint64_t size) {
+    const auto retained = find_retained(path);
+    if (!retained)
+        return identity_error();
+#if defined(_WIN32)
+    if (size > static_cast<std::uint64_t>(std::numeric_limits<LONGLONG>::max())) {
+        return std::unexpected{
+            make_error(ErrorCode::io_unsupported_size, ErrorCategory::io, "temporary output size is unsupported")};
+    }
+    LARGE_INTEGER position{};
+    position.QuadPart = static_cast<LONGLONG>(size);
+    if (SetFilePointerEx(retained->handle, position, nullptr, FILE_BEGIN) == 0 || SetEndOfFile(retained->handle) == 0)
+#else
+    if (size > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
+        ::ftruncate(retained->descriptor, static_cast<off_t>(size)) != 0)
+#endif
+        return std::unexpected{
+            make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not resize temporary output")};
+    return {};
+}
+
+Result<void> write_temporary_file_at(const std::filesystem::path &path, std::uint64_t offset,
+                                     std::span<const std::byte> bytes) {
+    const auto retained = find_retained(path);
+    if (!retained)
+        return identity_error();
+    while (!bytes.empty()) {
+#if defined(_WIN32)
+        if (offset > static_cast<std::uint64_t>(std::numeric_limits<LONGLONG>::max())) {
+            return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
+                                              "temporary output offset is unsupported")};
+        }
+        LARGE_INTEGER position{};
+        position.QuadPart = static_cast<LONGLONG>(offset);
+        if (SetFilePointerEx(retained->handle, position, nullptr, FILE_BEGIN) == 0) {
+            return std::unexpected{
+                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not seek temporary output")};
+        }
+        const auto chunk = static_cast<DWORD>(std::min<std::size_t>(bytes.size(), std::numeric_limits<DWORD>::max()));
+        DWORD written{};
+        if (WriteFile(retained->handle, bytes.data(), chunk, &written, nullptr) == 0 || written == 0U) {
+            return std::unexpected{
+                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary output")};
+        }
+        const auto count = static_cast<std::size_t>(written);
+#else
+        if (offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+            return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
+                                              "temporary output offset is unsupported")};
+        }
+        const auto written = ::pwrite(retained->descriptor, bytes.data(), bytes.size(), static_cast<off_t>(offset));
+        if (written < 0 && errno == EINTR)
+            continue;
+        if (written <= 0) {
+            return std::unexpected{
+                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary output")};
+        }
+        const auto count = static_cast<std::size_t>(written);
+#endif
+        bytes = bytes.subspan(count);
+        offset += count;
+    }
+    return {};
+}
+
 Result<void> flush_file_to_disk(const std::filesystem::path &path) {
+    if (const auto retained = find_retained(path)) {
+#if defined(_WIN32)
+        if (FlushFileBuffers(retained->handle) == 0)
+#else
+        if (::fsync(retained->descriptor) != 0)
+#endif
+            return std::unexpected{
+                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not flush temporary output to disk")};
+        return {};
+    }
 #if defined(_WIN32)
     const auto handle = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
                                     FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -149,35 +314,90 @@ Result<void> flush_file_to_disk(const std::filesystem::path &path) {
     return {};
 }
 
+void discard_temporary_file(const std::filesystem::path &path) noexcept {
+    static_cast<void>(release_retained(path));
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
 Result<void> publish_temporary_file(const std::filesystem::path &temporary, const std::filesystem::path &output,
                                     bool overwrite) {
+    const auto retained = release_retained(temporary);
+    if (!retained)
+        return identity_error();
 #if defined(_WIN32)
-    const auto flags = MOVEFILE_WRITE_THROUGH | (overwrite ? MOVEFILE_REPLACE_EXISTING : 0U);
-    if (MoveFileExW(temporary.c_str(), output.c_str(), flags) == 0) {
+    const auto candidate =
+        CreateFileW(temporary.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    BY_HANDLE_FILE_INFORMATION candidate_identity{};
+    const auto valid = candidate != INVALID_HANDLE_VALUE &&
+                       GetFileInformationByHandle(candidate, &candidate_identity) != 0 &&
+                       (candidate_identity.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0U &&
+                       same_identity(retained->identity, candidate_identity);
+    if (candidate != INVALID_HANDLE_VALUE)
+        CloseHandle(candidate);
+    if (!valid)
+        return identity_error();
+    const auto parent = output.parent_path().empty() ? std::filesystem::path{"."} : output.parent_path();
+    const auto parent_handle = CreateFileW(
+        parent.c_str(), FILE_TRAVERSE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    BY_HANDLE_FILE_INFORMATION parent_identity{};
+    if (parent_handle == INVALID_HANDLE_VALUE || GetFileInformationByHandle(parent_handle, &parent_identity) == 0 ||
+        (parent_identity.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) !=
+            FILE_ATTRIBUTE_DIRECTORY) {
+        if (parent_handle != INVALID_HANDLE_VALUE)
+            CloseHandle(parent_handle);
+        return identity_error();
+    }
+    const auto filename = output.filename().native();
+    std::vector<std::byte> rename_buffer(sizeof(FILE_RENAME_INFO) + filename.size() * sizeof(wchar_t));
+    auto *rename_info = reinterpret_cast<FILE_RENAME_INFO *>(rename_buffer.data());
+    rename_info->ReplaceIfExists = overwrite ? TRUE : FALSE;
+    rename_info->RootDirectory = parent_handle;
+    rename_info->FileNameLength = static_cast<DWORD>(filename.size() * sizeof(wchar_t));
+    std::memcpy(rename_info->FileName, filename.data(), rename_info->FileNameLength);
+    const auto renamed = SetFileInformationByHandle(retained->handle, FileRenameInfo, rename_info,
+                                                    static_cast<DWORD>(rename_buffer.size()));
+    CloseHandle(parent_handle);
+    if (renamed == 0)
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not atomically publish output")};
-    }
 #else
+    const auto parent = output.parent_path().empty() ? std::filesystem::path{"."} : output.parent_path();
+    const auto descriptor = ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
+    if (descriptor < 0)
+        return identity_error();
+    struct stat candidate_identity{};
+    const auto temporary_name = temporary.filename();
+    const auto output_name = output.filename();
+    const auto valid = ::fstatat(descriptor, temporary_name.c_str(), &candidate_identity, AT_SYMLINK_NOFOLLOW) == 0 &&
+                       S_ISREG(candidate_identity.st_mode) && candidate_identity.st_dev == retained->identity.st_dev &&
+                       candidate_identity.st_ino == retained->identity.st_ino;
+    if (!valid) {
+        ::close(descriptor);
+        return identity_error();
+    }
     if (overwrite) {
-        if (::rename(temporary.c_str(), output.c_str()) != 0) {
+        if (::renameat(descriptor, temporary_name.c_str(), descriptor, output_name.c_str()) != 0) {
+            ::close(descriptor);
             return std::unexpected{
                 make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not atomically replace output")};
         }
     } else {
-        if (::link(temporary.c_str(), output.c_str()) != 0) {
+        if (::linkat(descriptor, temporary_name.c_str(), descriptor, output_name.c_str(), 0) != 0) {
+            ::close(descriptor);
             return std::unexpected{
                 make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not atomically publish output")};
         }
-        if (::unlink(temporary.c_str()) != 0) {
+        if (::unlinkat(descriptor, temporary_name.c_str(), 0) != 0) {
+            ::close(descriptor);
             return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
                                               "output was published but temporary cleanup failed")};
         }
     }
-    const auto parent = output.parent_path().empty() ? std::filesystem::path{"."} : output.parent_path();
-    const auto descriptor = ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY);
-    if (descriptor < 0 || ::fsync(descriptor) != 0) {
-        if (descriptor >= 0)
-            ::close(descriptor);
+    if (::fsync(descriptor) != 0) {
+        ::close(descriptor);
         return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
                                           "output was published but its directory could not be synchronized")};
     }

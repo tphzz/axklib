@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include "media_test_fixtures.hpp"
+
 namespace {
 
 std::filesystem::path fixture_path() {
@@ -28,6 +30,11 @@ void write_test_wave(const std::filesystem::path &path) {
     };
     std::ofstream output{path, std::ios::binary};
     output.write(reinterpret_cast<const char *>(wave.data()), static_cast<std::streamsize>(wave.size()));
+}
+
+void write_bytes(const std::filesystem::path &path, std::span<const std::byte> bytes) {
+    std::ofstream output{path, std::ios::binary};
+    output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 }
 
 TEST(Sdk, PublicFacadeOwnsVersionResultAndMoveOnlySessions) {
@@ -120,6 +127,40 @@ TEST(Sdk, OpensPagesValidatesPreviewsAndOwnsPcm) {
     auto snapshot_validation = snapshot->validation();
     ASSERT_TRUE(snapshot_validation);
     EXPECT_EQ(snapshot_validation->issue_count, validation->issue_count);
+}
+
+TEST(Sdk, OpensInventoriesPreviewsAndExportsEveryDocumentedMediaProfile) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-sdk-media-profiles";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    const auto fat_path = root / "fixture.ima";
+    const auto iso_path = root / "fixture.iso";
+    const auto standalone_path = root / "fixture.smpl";
+    write_bytes(fat_path, fat_fixture());
+    write_bytes(iso_path, iso_fixture());
+    write_bytes(standalone_path, smpl_object());
+
+    axk::operation_context context;
+    for (const auto &path : {fixture_path(), fat_path, iso_path, standalone_path}) {
+        auto opened = axk::image::open(path.string(), context);
+        ASSERT_TRUE(opened) << path << ": " << opened.error().message;
+        auto objects = opened->objects(0U, 32U, context);
+        ASSERT_TRUE(objects) << path << ": " << objects.error().message;
+        const auto waveform = std::ranges::find(objects->items, "SMPL", &axk::object_info::type);
+        ASSERT_NE(waveform, objects->items.end()) << path;
+        auto validation = opened->validation(context);
+        ASSERT_TRUE(validation) << path << ": " << validation.error().message;
+        EXPECT_EQ(validation->object_count, objects->total_count) << path;
+        auto preview = opened->preview(waveform->key, 2U, context);
+        ASSERT_TRUE(preview) << path << ": " << preview.error().message;
+        EXPECT_EQ(preview->bins.size(), 2U) << path;
+        const auto output = root / (path.filename().string() + "-export");
+        auto exported = opened->export_audio(output.string(), {}, context);
+        ASSERT_TRUE(exported) << path << ": " << exported.error().message;
+        EXPECT_GT(exported->written_file_count, 0U) << path;
+    }
+    std::filesystem::remove_all(root, error);
 }
 
 TEST(Sdk, CancellationIsAnOwnedFailure) {

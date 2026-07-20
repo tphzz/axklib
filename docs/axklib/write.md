@@ -185,6 +185,11 @@ import is applied. Creation and alteration reject oversized audio before
 decoding its full payload, and the low-level writer rechecks the limit before
 serializing an `SMPL` object.
 
+Source decoding is separately bounded to 16,777,216 frames per channel and
+256 MiB of decoded intermediate samples. This bound is checked from container
+metadata before allocating the decode buffer, including when downsampling would
+produce a much smaller Yamaha Wave Data object.
+
 !!! warning "Current loop policy"
 
     Authored Wave Data entries currently use forward loop mode over the complete

@@ -1,10 +1,11 @@
 #include "writer_internal.hpp"
 
+#include "axklib/file_publication.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstring>
-#include <fstream>
 #include <mutex>
 #include <set>
 #include <span>
@@ -231,17 +232,9 @@ Result<void> write_fat12_image(const PreparedMediaImage &image, const std::files
     f_mount(nullptr, "", 0);
     reset_disk();
 
-    std::ofstream output{temporary_path, std::ios::binary | std::ios::trunc};
-    if (!output) {
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create temporary FAT12 image")};
-    }
-    output.write(reinterpret_cast<const char *>(disk.bytes.data()), static_cast<std::streamsize>(disk.bytes.size()));
-    if (!output) {
-        return std::unexpected{
-            make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary FAT12 image")};
-    }
-    return {};
+    if (auto resized = resize_temporary_file(temporary_path, disk.bytes.size()); !resized)
+        return resized;
+    return write_temporary_file_at(temporary_path, 0U, disk.bytes);
 }
 
 } // namespace axk::detail

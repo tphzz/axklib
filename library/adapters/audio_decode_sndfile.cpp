@@ -1,6 +1,7 @@
 #include "audio_import_internal.hpp"
 
 #include "axklib/utf8.hpp"
+#include "axklib/writer.hpp"
 
 #include <limits>
 #include <memory>
@@ -177,6 +178,21 @@ Result<SndfileSource> open_verified(const Source &source_input, const SourceAudi
 
 } // namespace
 
+Result<void> validate_source_resource_limits(const SourceAudioInfo &source, std::size_t decoded_sample_bytes) {
+    if (source.channels == 0U || decoded_sample_bytes == 0U ||
+        source.frames > maximum_audio_source_frames_per_channel ||
+        source.frames > std::numeric_limits<std::size_t>::max() / source.channels) {
+        return std::unexpected{make_error(ErrorCode::audio_wave_data_too_large, ErrorCategory::audio,
+                                          "audio source exceeds the configured decode resource limits")};
+    }
+    const auto sample_count = source.frames * source.channels;
+    if (sample_count > maximum_audio_decoded_source_bytes / decoded_sample_bytes) {
+        return std::unexpected{make_error(ErrorCode::audio_wave_data_too_large, ErrorCategory::audio,
+                                          "audio source exceeds the configured decode resource limits")};
+    }
+    return {};
+}
+
 Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path,
                                         std::optional<std::size_t> expected_channels) {
     SF_INFO info{};
@@ -202,7 +218,7 @@ Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path,
         return std::unexpected{
             audio_error("audio source uses a compressed or unsupported container or sample encoding")};
     }
-    return SourceAudioInfo{
+    SourceAudioInfo result{
         .format = format,
         .subtype = subtype_text,
         .channels = channels,
@@ -213,6 +229,9 @@ Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path,
         .is_pcm16 = subtype == SF_FORMAT_PCM_16,
         .reduces_precision = subtype != SF_FORMAT_PCM_U8 && subtype != SF_FORMAT_PCM_S8 && subtype != SF_FORMAT_PCM_16,
     };
+    if (const auto valid = validate_source_resource_limits(result, sizeof(double)); !valid)
+        return std::unexpected{valid.error()};
+    return result;
 }
 
 Result<SourceAudioInfo> inspect_sndfile(const RandomAccessReader &reader,
@@ -237,7 +256,7 @@ Result<SourceAudioInfo> inspect_sndfile(const RandomAccessReader &reader,
     if (format == "UNKNOWN" || subtype_text == "UNKNOWN" || width_bits == 0U)
         return std::unexpected{
             audio_error("audio source uses a compressed or unsupported container or sample encoding")};
-    return SourceAudioInfo{.format = format,
+    SourceAudioInfo result{.format = format,
                            .subtype = subtype_text,
                            .channels = channels,
                            .frames = static_cast<std::size_t>(info.frames),
@@ -247,6 +266,9 @@ Result<SourceAudioInfo> inspect_sndfile(const RandomAccessReader &reader,
                            .is_pcm16 = subtype == SF_FORMAT_PCM_16,
                            .reduces_precision = subtype != SF_FORMAT_PCM_U8 && subtype != SF_FORMAT_PCM_S8 &&
                                                 subtype != SF_FORMAT_PCM_16};
+    if (const auto valid = validate_source_resource_limits(result, sizeof(double)); !valid)
+        return std::unexpected{valid.error()};
+    return result;
 }
 
 Result<std::vector<std::int16_t>> decode_sndfile_pcm16(const std::filesystem::path &path,
@@ -255,6 +277,8 @@ Result<std::vector<std::int16_t>> decode_sndfile_pcm16(const std::filesystem::pa
     auto source = open_verified(path, expected, info);
     if (!source)
         return std::unexpected{source.error()};
+    if (const auto valid = validate_source_resource_limits(expected, sizeof(std::int16_t)); !valid)
+        return std::unexpected{valid.error()};
     std::vector<std::int16_t> samples(expected.frames * expected.channels);
     const auto read = sf_readf_short(source->get(), samples.data(), info.frames);
     if (read != info.frames) {
@@ -269,6 +293,8 @@ Result<std::vector<std::int16_t>> decode_sndfile_pcm16(const RandomAccessReader 
     auto source = open_verified(reader, expected, info);
     if (!source)
         return std::unexpected{source.error()};
+    if (const auto valid = validate_source_resource_limits(expected, sizeof(std::int16_t)); !valid)
+        return std::unexpected{valid.error()};
     std::vector<std::int16_t> samples(expected.frames * expected.channels);
     const auto read = sf_readf_short(source->get(), samples.data(), info.frames);
     if (read != info.frames)
@@ -281,6 +307,8 @@ Result<std::vector<double>> decode_sndfile_float64(const std::filesystem::path &
     auto source = open_verified(path, expected, info);
     if (!source)
         return std::unexpected{source.error()};
+    if (const auto valid = validate_source_resource_limits(expected, sizeof(double)); !valid)
+        return std::unexpected{valid.error()};
     std::vector<double> samples(expected.frames * expected.channels);
     const auto read = sf_readf_double(source->get(), samples.data(), info.frames);
     if (read != info.frames) {
@@ -294,6 +322,8 @@ Result<std::vector<double>> decode_sndfile_float64(const RandomAccessReader &rea
     auto source = open_verified(reader, expected, info);
     if (!source)
         return std::unexpected{source.error()};
+    if (const auto valid = validate_source_resource_limits(expected, sizeof(double)); !valid)
+        return std::unexpected{valid.error()};
     std::vector<double> samples(expected.frames * expected.channels);
     const auto read = sf_readf_double(source->get(), samples.data(), info.frames);
     if (read != info.frames)

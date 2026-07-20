@@ -790,13 +790,14 @@
               "checks": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["configuration", "sandbox", "workspaceConfiguration", "stateStorage", "startupCleanup", "executorAdmission"],
+                "required": ["configuration", "sandbox", "workspaceConfiguration", "stateStorage", "startupCleanup", "uploadCleanup", "executorAdmission"],
                 "properties": {
                   "configuration": {"const": "READY"},
                   "sandbox": {"const": "READY"},
                   "workspaceConfiguration": {"enum": ["READY", "NO_AVAILABLE_WORKSPACE", "CONFIGURATION_ERROR"]},
                   "stateStorage": {"enum": ["READY", "NOT_READY"]},
                   "startupCleanup": {"enum": ["READY", "NOT_READY"]},
+                  "uploadCleanup": {"enum": ["READY", "NOT_READY"]},
                   "executorAdmission": {"enum": ["READY", "NOT_READY"]}
                 }
               }
@@ -2168,7 +2169,8 @@
               "cancelledJobs", "publishedJobEvents", "progressJobEvents", "totalJobQueueWaitMs",
               "totalJobExecutionMs", "totalJobPhaseDurationMs", "totalJobCancellationLatencyMs",
               "websocketEventsDelivered", "websocketEventsDropped", "websocketEventsPending",
-              "websocketClientsEvicted"
+              "websocketClientsEvicted", "uploadCleanupHealthy", "uploadCleanupFailedDeletions",
+              "uploadOrphanFiles", "uploadOrphanBytes", "uploadReservedBytes"
             ],
             "properties": {
               "totalRequests": {"type": "integer", "minimum": 0},
@@ -2192,7 +2194,12 @@
               "websocketEventsDelivered": {"type": "integer", "minimum": 0},
               "websocketEventsDropped": {"type": "integer", "minimum": 0},
               "websocketEventsPending": {"type": "integer", "minimum": 0},
-              "websocketClientsEvicted": {"type": "integer", "minimum": 0}
+              "websocketClientsEvicted": {"type": "integer", "minimum": 0},
+              "uploadCleanupHealthy": {"type": "boolean"},
+              "uploadCleanupFailedDeletions": {"type": "integer", "minimum": 0},
+              "uploadOrphanFiles": {"type": "integer", "minimum": 0},
+              "uploadOrphanBytes": {"type": "integer", "minimum": 0},
+              "uploadReservedBytes": {"type": "integer", "minimum": 0}
             }
           },
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}

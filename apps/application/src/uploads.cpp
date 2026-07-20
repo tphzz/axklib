@@ -79,16 +79,26 @@ struct axk::app::UploadStore::Implementation {
     std::size_t maximum_chunk_bytes{};
     std::chrono::seconds retention{};
     Clock clock;
+    RemoveFile remove_file;
     std::uint64_t reserved_bytes{};
+    std::uint64_t failed_deletions{};
+    bool startup_scan_failed{};
     std::mutex mutex;
     std::unordered_map<std::string, Entry> entries;
+    std::unordered_map<std::filesystem::path, std::uint64_t> orphan_files;
 
     Implementation(std::filesystem::path directory, std::uint64_t total_bytes, std::uint64_t upload_bytes,
                    std::size_t upload_count, std::size_t chunk_bytes, std::chrono::seconds upload_retention,
-                   Clock upload_clock)
+                   Clock upload_clock, RemoveFile upload_remove_file)
         : staging_directory(std::move(directory)), maximum_total_bytes(total_bytes), maximum_upload_bytes(upload_bytes),
           maximum_uploads(upload_count), maximum_chunk_bytes(chunk_bytes), retention(upload_retention),
-          clock(std::move(upload_clock)) {}
+          clock(std::move(upload_clock)), remove_file(std::move(upload_remove_file)) {
+        if (!remove_file) {
+            remove_file = [](const std::filesystem::path &path, std::error_code &error) {
+                return std::filesystem::remove(path, error);
+            };
+        }
+    }
 
     [[nodiscard]] UploadSnapshot snapshot(std::string_view id, const Entry &entry) const {
         const auto remaining =
@@ -106,6 +116,18 @@ struct axk::app::UploadStore::Implementation {
     }
 
     void cleanup_locked() {
+        failed_deletions = 0U;
+        for (auto iterator = orphan_files.begin(); iterator != orphan_files.end();) {
+            std::error_code error;
+            const auto removed = remove_file(iterator->first, error);
+            if (!removed && error) {
+                ++failed_deletions;
+                ++iterator;
+                continue;
+            }
+            reserved_bytes -= iterator->second;
+            iterator = orphan_files.erase(iterator);
+        }
         const auto now = clock();
         for (auto iterator = entries.begin(); iterator != entries.end();) {
             if (iterator->second.expires_at > now || iterator->second.lease_count != 0U) {
@@ -113,10 +135,28 @@ struct axk::app::UploadStore::Implementation {
                 continue;
             }
             std::error_code error;
-            std::filesystem::remove(iterator->second.path, error);
+            const auto removed = remove_file(iterator->second.path, error);
+            if (!removed && error) {
+                ++failed_deletions;
+                ++iterator;
+                continue;
+            }
             reserved_bytes -= iterator->second.request.declared_size;
             iterator = entries.erase(iterator);
         }
+    }
+
+    [[nodiscard]] UploadCleanupSnapshot cleanup_snapshot_locked() const {
+        std::uint64_t orphan_bytes{};
+        for (const auto &[path, size] : orphan_files) {
+            static_cast<void>(path);
+            orphan_bytes += size;
+        }
+        return {.healthy = !startup_scan_failed && failed_deletions == 0U && orphan_files.empty(),
+                .failed_deletions = failed_deletions,
+                .orphan_count = orphan_files.size(),
+                .orphan_bytes = orphan_bytes,
+                .reserved_bytes = reserved_bytes};
     }
 
     [[nodiscard]] Result<std::unordered_map<std::string, Entry>::iterator> owned(const UploadRef &reference,
@@ -131,22 +171,34 @@ struct axk::app::UploadStore::Implementation {
 
 axk::app::UploadStore::UploadStore(std::filesystem::path staging_directory, std::uint64_t maximum_total_bytes,
                                    std::uint64_t maximum_upload_bytes, std::size_t maximum_uploads,
-                                   std::size_t maximum_chunk_bytes, std::chrono::seconds retention, Clock clock)
+                                   std::size_t maximum_chunk_bytes, std::chrono::seconds retention, Clock clock,
+                                   RemoveFile remove_file)
     : implementation_(std::make_shared<Implementation>(std::move(staging_directory), maximum_total_bytes,
                                                        maximum_upload_bytes, maximum_uploads, maximum_chunk_bytes,
-                                                       retention, std::move(clock))) {
+                                                       retention, std::move(clock), std::move(remove_file))) {
     std::error_code error;
     std::filesystem::create_directories(implementation_->staging_directory, error);
     if (!error) {
         for (const auto &entry : std::filesystem::directory_iterator{implementation_->staging_directory, error}) {
             if (error)
                 break;
-            if (entry.is_regular_file(error) && entry.path().extension() == ".upload")
-                std::filesystem::remove(entry.path(), error);
+            if (entry.is_regular_file(error) && entry.path().extension() == ".upload") {
+                const auto size = entry.file_size(error);
+                if (error)
+                    break;
+                const auto removed = implementation_->remove_file(entry.path(), error);
+                if (!removed && error) {
+                    implementation_->orphan_files.emplace(entry.path(), size);
+                    implementation_->reserved_bytes += size;
+                    error.clear();
+                }
+            }
             if (error)
                 break;
         }
     }
+    implementation_->startup_scan_failed = static_cast<bool>(error);
+    implementation_->failed_deletions = implementation_->orphan_files.size();
 }
 
 axk::app::UploadStore::~UploadStore() = default;
@@ -169,6 +221,7 @@ axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::create(UploadC
     const std::scoped_lock lock{implementation_->mutex};
     implementation_->cleanup_locked();
     if (implementation_->entries.size() >= implementation_->maximum_uploads ||
+        implementation_->reserved_bytes >= implementation_->maximum_total_bytes ||
         request.declared_size > implementation_->maximum_total_bytes - implementation_->reserved_bytes) {
         return std::unexpected(upload_error("upload_quota_exceeded", "upload staging quota is exhausted", true));
     }
@@ -319,8 +372,8 @@ axk::app::Result<void> axk::app::UploadStore::remove(const UploadRef &reference,
     if ((**found).second.lease_count != 0U)
         return std::unexpected(upload_error("upload_in_use", "upload is retained by an active operation"));
     std::error_code error;
-    std::filesystem::remove((**found).second.path, error);
-    if (error)
+    const auto removed = implementation_->remove_file((**found).second.path, error);
+    if (!removed && error)
         return std::unexpected(upload_error("upload_storage_unavailable", "upload staging file cannot be removed"));
     implementation_->reserved_bytes -= (**found).second.request.declared_size;
     implementation_->entries.erase(*found);
@@ -330,6 +383,12 @@ axk::app::Result<void> axk::app::UploadStore::remove(const UploadRef &reference,
 void axk::app::UploadStore::cleanup() {
     const std::scoped_lock lock{implementation_->mutex};
     implementation_->cleanup_locked();
+}
+
+axk::app::UploadCleanupSnapshot axk::app::UploadStore::cleanup_snapshot() {
+    const std::scoped_lock lock{implementation_->mutex};
+    implementation_->cleanup_locked();
+    return implementation_->cleanup_snapshot_locked();
 }
 
 std::size_t axk::app::UploadStore::maximum_chunk_bytes() const noexcept { return implementation_->maximum_chunk_bytes; }

@@ -1084,10 +1084,8 @@ class TemporaryPackageCleanup {
   public:
     explicit TemporaryPackageCleanup(std::filesystem::path path) : path_{std::move(path)} {}
     ~TemporaryPackageCleanup() {
-        if (!active_)
-            return;
-        std::error_code ignored;
-        std::filesystem::remove(path_, ignored);
+        if (active_)
+            detail::discard_temporary_file(path_);
     }
     TemporaryPackageCleanup(const TemporaryPackageCleanup &) = delete;
     TemporaryPackageCleanup &operator=(const TemporaryPackageCleanup &) = delete;
@@ -1478,24 +1476,10 @@ Result<PackagePublication> publish_portable_package(const PackageBuild &build, c
     if (!temporary)
         return std::unexpected{temporary.error()};
     TemporaryPackageCleanup cleanup{*temporary};
-    {
-        std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
-        if (!output) {
-            return std::unexpected{
-                make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not open temporary package output")};
-        }
-        if (build.archive.size() > static_cast<std::size_t>(std::numeric_limits<std::streamsize>::max())) {
-            return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
-                                              "package archive exceeds stream implementation limits")};
-        }
-        output.write(reinterpret_cast<const char *>(build.archive.data()),
-                     static_cast<std::streamsize>(build.archive.size()));
-        output.flush();
-        if (!output) {
-            return std::unexpected{
-                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary package output")};
-        }
-    }
+    if (auto resized = detail::resize_temporary_file(*temporary, build.archive.size()); !resized)
+        return std::unexpected{resized.error()};
+    if (auto written = detail::write_temporary_file_at(*temporary, 0U, build.archive); !written)
+        return std::unexpected{written.error()};
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected{checked.error()};
     if (const auto flushed = flush_package_file(*temporary); !flushed)

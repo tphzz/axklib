@@ -268,10 +268,14 @@ cmake --build --preset fuzz-local --target axk_server_request_validation_fuzz_sm
 
 `GET /api/v1/system/health/live` is an unauthenticated process liveness check.
 Readiness and `GET /api/v1/system/metrics` require authentication. Readiness
-reports configuration, sandbox, writable workspace, state-storage cleanup, and
-executor-admission checks separately and returns `503` when any required check
-is unavailable. Metrics are bounded aggregate request counters; they contain no
-request or payload data.
+reports configuration, sandbox, writable workspace, state-storage cleanup,
+upload cleanup, and executor-admission checks separately and returns `503` when
+any required check is unavailable. Failed upload deletion retains both the
+entry and its quota reservation. Readiness remains unavailable until cleanup
+succeeds; `.upload` files recovered at startup are tracked as orphans rather
+than silently ignored. Metrics expose cleanup health, failed deletion count,
+orphan file/byte counts, and reserved upload bytes alongside bounded aggregate
+request counters. They contain no request or payload data.
 
 Request logs are one JSON object per line. They contain only the request ID,
 HTTP method, URL path without its query, response status, and elapsed time.

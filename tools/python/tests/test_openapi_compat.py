@@ -4,6 +4,8 @@ import copy
 import json
 from pathlib import Path
 
+import pytest
+
 from openapi_compat import compatibility_issues, main
 
 
@@ -16,15 +18,27 @@ def contract() -> dict[str, object]:
                     "operationId": "items.create",
                     "security": [{"bearerAuth": []}],
                     "parameters": [
-                        {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100}}
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "schema": {"type": "integer", "minimum": 1, "maximum": 100},
+                        }
                     ],
                     "requestBody": {
                         "required": True,
-                        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ItemRequest"}}},
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ItemRequest"}
+                            }
+                        },
                     },
                     "responses": {
                         "200": {
-                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Item"}}}
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Item"}
+                                }
+                            }
                         },
                         "400": {"content": {"application/json": {"schema": {"type": "object"}}}},
                     },
@@ -91,6 +105,86 @@ def test_removed_operation_media_type_and_security_change_are_breaking() -> None
     issues = compatibility_issues(baseline, candidate)
     assert any("security contract changed" in issue for issue in issues)
     assert any("media type removed" in issue for issue in issues)
+
+
+def test_inherited_security_and_referenced_scheme_changes_are_breaking() -> None:
+    baseline = contract()
+    operation = baseline["paths"]["/items"]["post"]  # type: ignore[index]
+    operation.pop("security")
+    baseline["security"] = [{"bearerAuth": []}]
+    baseline["components"]["securitySchemes"] = {  # type: ignore[index]
+        "bearerAuth": {"type": "http", "scheme": "bearer"}
+    }
+
+    without_security = copy.deepcopy(baseline)
+    without_security.pop("security")
+    assert any(
+        "security contract changed" in issue
+        for issue in compatibility_issues(baseline, without_security)
+    )
+
+    changed_scheme = copy.deepcopy(baseline)
+    changed_scheme["components"]["securitySchemes"]["bearerAuth"]["scheme"] = "basic"  # type: ignore[index]
+    assert any(
+        "security scheme changed" in issue
+        for issue in compatibility_issues(baseline, changed_scheme)
+    )
+
+    malformed_schemes = copy.deepcopy(baseline)
+    malformed_schemes["components"]["securitySchemes"] = []  # type: ignore[index]
+    assert any(
+        "security schemes changed shape" in issue
+        for issue in compatibility_issues(baseline, malformed_schemes)
+    )
+
+
+@pytest.mark.parametrize("location", ["path", "query", "header", "cookie"])
+def test_candidate_only_required_parameters_are_breaking(location: str) -> None:
+    baseline = contract()
+    candidate = copy.deepcopy(baseline)
+    operation = candidate["paths"]["/items"]["post"]  # type: ignore[index]
+    operation["parameters"].append(
+        {
+            "name": "newInput",
+            "in": location,
+            "required": True,
+            "schema": {"type": "string"},
+        }
+    )
+    issues = compatibility_issues(baseline, candidate)
+    assert any("required parameter added" in issue for issue in issues)
+
+
+def test_candidate_only_required_referenced_body_is_breaking() -> None:
+    baseline = contract()
+    baseline["paths"]["/items"]["post"].pop("requestBody")  # type: ignore[index]
+    candidate = copy.deepcopy(baseline)
+    candidate["components"]["requestBodies"] = {  # type: ignore[index]
+        "RequiredBody": {
+            "required": True,
+            "content": {"application/json": {"schema": {"type": "object"}}},
+        }
+    }
+    candidate["paths"]["/items"]["post"]["requestBody"] = {  # type: ignore[index]
+        "$ref": "#/components/requestBodies/RequiredBody"
+    }
+    issues = compatibility_issues(baseline, candidate)
+    assert any("required request body added" in issue for issue in issues)
+
+
+def test_candidate_only_optional_inputs_remain_compatible() -> None:
+    baseline = contract()
+    baseline["paths"]["/items"]["post"].pop("requestBody")  # type: ignore[index]
+    candidate = copy.deepcopy(baseline)
+    operation = candidate["paths"]["/items"]["post"]  # type: ignore[index]
+    operation["parameters"].append(
+        {"name": "hint", "in": "query", "required": False, "schema": {"type": "string"}}
+    )
+    operation["requestBody"] = {
+        "required": False,
+        "content": {"application/json": {"schema": {"type": "object"}}},
+    }
+    assert compatibility_issues(baseline, candidate) == []
 
 
 def test_cli_snapshot_and_check_have_stable_exit_codes(tmp_path: Path) -> None:

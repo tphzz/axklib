@@ -485,3 +485,21 @@ TEST(AudioImport, RejectsEmptyChannelMismatchAndSurroundSources) {
     for (const auto &path : {mono_path, surround_path, empty_path})
         std::filesystem::remove(path, error);
 }
+
+TEST(AudioImport, RejectsOversizedDecodedSourceMetadataBeforeAllocation) {
+    detail::SourceAudioInfo source{.format = "WAV",
+                                   .subtype = "DOUBLE",
+                                   .channels = 2U,
+                                   .frames =
+                                       static_cast<std::size_t>(axk::maximum_audio_source_frames_per_channel + 1U),
+                                   .sample_rate = 192'000U,
+                                   .sample_width_bits = 64U,
+                                   .reduces_precision = true};
+
+    const auto rejected = detail::validate_source_resource_limits(source, sizeof(double));
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, axk::ErrorCode::audio_wave_data_too_large);
+
+    source.frames = static_cast<std::size_t>(axk::maximum_audio_source_frames_per_channel);
+    EXPECT_TRUE(detail::validate_source_resource_limits(source, sizeof(double)));
+}

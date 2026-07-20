@@ -2272,16 +2272,11 @@ Result<OperationReport> rename_sbnk(TransactionState &state, const OperationView
     return report;
 }
 
-Result<void> write_bytes(std::fstream &output, std::uint64_t offset, std::span<const std::byte> data) {
-    output.seekp(static_cast<std::streamoff>(offset));
-    output.write(reinterpret_cast<const char *>(data.data()), static_cast<std::streamsize>(data.size()));
-    if (!output)
-        return std::unexpected{
-            make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write alteration output")};
-    return {};
+Result<void> write_bytes(const std::filesystem::path &output, std::uint64_t offset, std::span<const std::byte> data) {
+    return detail::write_temporary_file_at(output, offset, data);
 }
 
-Result<void> write_continuation_lists(std::fstream &output, const Partition &partition,
+Result<void> write_continuation_lists(const std::filesystem::path &output, const Partition &partition,
                                       const MutablePartition::InsertedRecord &record) {
     constexpr std::size_t extents_per_cluster = (1024U - 12U) / 12U;
     for (std::size_t list_index = 0; list_index < record.continuation_clusters.size(); ++list_index) {
@@ -2312,77 +2307,37 @@ Result<void> write_continuation_lists(std::fstream &output, const Partition &par
 
 Result<std::filesystem::path> copy_to_unique_temporary(const std::filesystem::path &source,
                                                        const std::filesystem::path &output) {
-    for (std::size_t attempt = 0; attempt < 32U; ++attempt) {
-        const auto temporary = text::temporary_sibling(output);
-        if (!temporary)
-            return std::unexpected{temporary.error()};
-        std::error_code error;
-        if (std::filesystem::copy_file(source, *temporary, error))
-            return *temporary;
-        if (error != std::errc::file_exists)
-            return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
-                                              "could not copy alteration source to its temporary sibling")};
+    auto input = FileReader::open(source);
+    if (!input)
+        return std::unexpected{input.error()};
+    auto temporary = detail::reserve_temporary_file(output);
+    if (!temporary)
+        return std::unexpected{temporary.error()};
+    if (auto resized = detail::resize_temporary_file(*temporary, (*input)->size()); !resized) {
+        detail::discard_temporary_file(*temporary);
+        return std::unexpected{resized.error()};
     }
-    return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                      "could not reserve a unique alteration temporary sibling")};
+    std::vector<std::byte> buffer(static_cast<std::size_t>(std::min<std::uint64_t>((*input)->size(), 1024U * 1024U)));
+    for (std::uint64_t offset = 0U; offset < (*input)->size(); offset += buffer.size()) {
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), (*input)->size() - offset));
+        auto bytes = std::span{buffer}.first(count);
+        if (auto read = (*input)->read_exact_at(offset, bytes); !read) {
+            detail::discard_temporary_file(*temporary);
+            return std::unexpected{read.error()};
+        }
+        if (auto written = detail::write_temporary_file_at(*temporary, offset, bytes); !written) {
+            detail::discard_temporary_file(*temporary);
+            return std::unexpected{written.error()};
+        }
+    }
+    return temporary;
 }
 
-Result<void> flush_file_to_disk(const std::filesystem::path &path) {
-#if defined(_WIN32)
-    const auto handle = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (handle == INVALID_HANDLE_VALUE)
-        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                          "could not open alteration output for durable flush")};
-    const auto flushed = FlushFileBuffers(handle) != 0;
-    CloseHandle(handle);
-#else
-    const auto descriptor = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
-    if (descriptor < 0)
-        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                          "could not open alteration output for durable flush")};
-    const auto flushed = ::fsync(descriptor) == 0;
-    ::close(descriptor);
-#endif
-    if (!flushed)
-        return std::unexpected{
-            make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not flush alteration output to disk")};
-    return {};
-}
+Result<void> flush_file_to_disk(const std::filesystem::path &path) { return detail::flush_file_to_disk(path); }
 
 Result<void> publish_temporary(const std::filesystem::path &temporary, const std::filesystem::path &output,
                                bool overwrite) {
-#if defined(_WIN32)
-    const auto flags = MOVEFILE_WRITE_THROUGH | (overwrite ? MOVEFILE_REPLACE_EXISTING : 0U);
-    if (MoveFileExW(temporary.c_str(), output.c_str(), flags) == 0)
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not atomically publish alteration output")};
-#else
-    if (overwrite) {
-        if (::rename(temporary.c_str(), output.c_str()) != 0)
-            return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                              "could not atomically replace alteration output")};
-    } else {
-        if (::link(temporary.c_str(), output.c_str()) != 0)
-            return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                              "could not atomically publish alteration output")};
-        if (::unlink(temporary.c_str()) != 0)
-            return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
-                                              "alteration output was published but its temporary "
-                                              "link could not be removed")};
-    }
-    const auto parent = output.parent_path().empty() ? std::filesystem::path{"."} : output.parent_path();
-    const auto descriptor = ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY);
-    if (descriptor < 0 || ::fsync(descriptor) != 0) {
-        if (descriptor >= 0)
-            ::close(descriptor);
-        return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
-                                          "alteration output was renamed but its directory could "
-                                          "not be synchronized")};
-    }
-    ::close(descriptor);
-#endif
-    return {};
+    return detail::publish_temporary_file(temporary, output, overwrite);
 }
 
 Result<void> validate_temporary(const std::filesystem::path &temporary, const TransactionState &state,
@@ -2523,18 +2478,11 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
     if (!temporary_result)
         return std::unexpected{temporary_result.error()};
     const auto temporary = std::move(*temporary_result);
-    const auto cleanup = [&]() { std::filesystem::remove(temporary, error); };
-    std::fstream output{temporary, std::ios::binary | std::ios::in | std::ios::out};
-    if (!output) {
-        cleanup();
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not open temporary alteration output")};
-    }
+    const auto cleanup = [&]() { detail::discard_temporary_file(temporary); };
     std::uint64_t completed_partitions{};
     for (const auto &[index, item] : state.partitions) {
         static_cast<void>(index);
         if (const auto check = cancellation.check(); !check) {
-            output.close();
             cleanup();
             return std::unexpected{check.error()};
         }
@@ -2545,13 +2493,11 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
             for (std::size_t name_index = 0; name_index < item.renamed_name->size(); ++name_index)
                 encoded_name[name_index] = static_cast<std::byte>((*item.renamed_name)[name_index]);
             const auto header_offset = static_cast<std::uint64_t>(partition.start_sector) * 512U + 0x40U;
-            if (auto written = write_bytes(output, header_offset, encoded_name); !written) {
-                output.close();
+            if (auto written = write_bytes(temporary, header_offset, encoded_name); !written) {
                 cleanup();
                 return written;
             }
-            if (auto written = write_bytes(output, header_offset + 1024U, encoded_name); !written) {
-                output.close();
+            if (auto written = write_bytes(temporary, header_offset + 1024U, encoded_name); !written) {
                 cleanup();
                 return written;
             }
@@ -2561,16 +2507,14 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
             if (source_record == nullptr)
                 continue;
             std::array<std::byte, 72> zero{};
-            if (auto written = write_bytes(output, source_record->record_offset.value, zero); !written) {
-                output.close();
+            if (auto written = write_bytes(temporary, source_record->record_offset.value, zero); !written) {
                 cleanup();
                 return written;
             }
         }
         if (item.root_index && item.root_payload) {
             const auto *root = record(partition, SfsId{1});
-            if (auto written = write_bytes(output, root->record_offset.value, *item.root_index); !written) {
-                output.close();
+            if (auto written = write_bytes(temporary, root->record_offset.value, *item.root_index); !written) {
                 cleanup();
                 return written;
             }
@@ -2578,8 +2522,7 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
                 (static_cast<std::uint64_t>(partition.start_sector) +
                  static_cast<std::uint64_t>(root->extents[0].cluster_offset) * partition.sectors_per_cluster) *
                 512U;
-            if (auto written = write_bytes(output, payload_offset, *item.root_payload); !written) {
-                output.close();
+            if (auto written = write_bytes(temporary, payload_offset, *item.root_payload); !written) {
                 cleanup();
                 return written;
             }
@@ -2591,12 +2534,11 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
         for (const auto &[id, changed] : item.changed) {
             const auto *source_record = record(partition, id);
             if (source_record == nullptr) {
-                output.close();
                 cleanup();
                 return std::unexpected{transaction_error("changed record has no source index location")};
             }
-            if (auto written = write_bytes(output, source_record->record_offset.value, changed.raw_index); !written) {
-                output.close();
+            if (auto written = write_bytes(temporary, source_record->record_offset.value, changed.raw_index);
+                !written) {
                 cleanup();
                 return written;
             }
@@ -2609,9 +2551,8 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
                      static_cast<std::uint64_t>(extent.cluster_offset) * partition.sectors_per_cluster) *
                     512U;
                 if (auto written =
-                        write_bytes(output, absolute, std::span{changed.payload}.subspan(payload_offset, count));
+                        write_bytes(temporary, absolute, std::span{changed.payload}.subspan(payload_offset, count));
                     !written) {
-                    output.close();
                     cleanup();
                     return written;
                 }
@@ -2619,16 +2560,14 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
                 if (payload_offset == changed.payload.size())
                     break;
             }
-            if (auto written = write_continuation_lists(output, partition, changed); !written) {
-                output.close();
+            if (auto written = write_continuation_lists(temporary, partition, changed); !written) {
                 cleanup();
                 return written;
             }
         }
         for (const auto &[id, inserted] : item.inserted) {
             const auto index_offset = index_base + (id.value / 14U) * 1024U + (id.value % 14U) * 72U;
-            if (auto written = write_bytes(output, index_offset, inserted.raw_index); !written) {
-                output.close();
+            if (auto written = write_bytes(temporary, index_offset, inserted.raw_index); !written) {
                 cleanup();
                 return written;
             }
@@ -2641,16 +2580,14 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
                      static_cast<std::uint64_t>(extent.cluster_offset) * partition.sectors_per_cluster) *
                     512U;
                 if (auto written =
-                        write_bytes(output, absolute, std::span{inserted.payload}.subspan(payload_offset, count));
+                        write_bytes(temporary, absolute, std::span{inserted.payload}.subspan(payload_offset, count));
                     !written) {
-                    output.close();
                     cleanup();
                     return written;
                 }
                 payload_offset += count;
             }
-            if (auto written = write_continuation_lists(output, partition, inserted); !written) {
-                output.close();
+            if (auto written = write_continuation_lists(temporary, partition, inserted); !written) {
                 cleanup();
                 return written;
             }
@@ -2659,16 +2596,14 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
             (static_cast<std::uint64_t>(partition.start_sector) +
              static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
             512U;
-        if (auto written = write_bytes(output, bitmap_offset, item.bitmap); !written) {
-            output.close();
+        if (auto written = write_bytes(temporary, bitmap_offset, item.bitmap); !written) {
             cleanup();
             return written;
         }
         const auto mirror_offset = static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U;
-        if (auto written = write_bytes(output, mirror_offset,
+        if (auto written = write_bytes(temporary, mirror_offset,
                                        std::span{item.bitmap}.first(std::min<std::size_t>(512, item.bitmap.size())));
             !written) {
-            output.close();
             cleanup();
             return written;
         }
@@ -2678,8 +2613,6 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
                               "writing alteration image", output_path.string()});
         }
     }
-    output.flush();
-    output.close();
     if (auto flushed = flush_file_to_disk(temporary); !flushed) {
         cleanup();
         return std::unexpected{flushed.error()};

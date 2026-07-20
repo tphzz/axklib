@@ -7,13 +7,22 @@ import json
 import os
 import re
 import tomllib
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote
 
 import release_metadata
 import version_metadata
 
 LICENSE_OVERRIDES = {"soxr": "LGPL-2.1-or-later"}
+
+
+@dataclass(frozen=True)
+class PnpmIdentity:
+    name: str
+    version: str
+    peer_context: str = ""
 
 
 def creation_timestamp() -> str:
@@ -45,6 +54,63 @@ def package(
     if comment:
         value["comment"] = comment
     return value
+
+
+def parse_pnpm_identity(value: str) -> PnpmIdentity:
+    if not value or value != value.strip() or "'" in value or '"' in value:
+        raise ValueError(f"invalid pnpm package identity: {value!r}")
+    if value.startswith("@"):
+        slash = value.find("/")
+        separator = value.find("@", slash + 1) if slash > 1 else -1
+    else:
+        separator = value.find("@")
+    if separator <= 0 or separator + 1 >= len(value):
+        raise ValueError(f"invalid pnpm package identity: {value!r}")
+    name = value[:separator]
+    qualified_version = value[separator + 1 :]
+    context_at = qualified_version.find("(")
+    version = qualified_version if context_at < 0 else qualified_version[:context_at]
+    peer_context = "" if context_at < 0 else qualified_version[context_at:]
+    if not version or any(character.isspace() for character in name + version):
+        raise ValueError(f"invalid pnpm package identity: {value!r}")
+    if peer_context and (
+        not peer_context.startswith("(") or peer_context.count("(") != peer_context.count(")")
+    ):
+        raise ValueError(f"invalid pnpm package identity: {value!r}")
+    return PnpmIdentity(name, version, peer_context)
+
+
+def pnpm_packages(lockfile: Path) -> list[dict[str, object]]:
+    import yaml
+
+    loaded: object = yaml.safe_load(lockfile.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict) or str(loaded.get("lockfileVersion")) != "9.0":
+        raise ValueError("pnpm lockfile version 9 is required")
+    identities: dict[tuple[str, str], set[str]] = {}
+    for section_name in ("packages", "snapshots"):
+        section = loaded.get(section_name, {})
+        if not isinstance(section, dict):
+            raise ValueError(f"pnpm {section_name} section must be a mapping")
+        for raw_key in section:
+            if not isinstance(raw_key, str):
+                raise ValueError("pnpm package identity must be a string")
+            identity = parse_pnpm_identity(raw_key)
+            contexts = identities.setdefault((identity.name, identity.version), set())
+            if identity.peer_context:
+                contexts.add(identity.peer_context)
+    rows: list[dict[str, object]] = []
+    for (name, version), contexts in sorted(identities.items()):
+        comment = f"pnpm peer contexts: {', '.join(sorted(contexts))}" if contexts else None
+        row = package(name, version, "npm", comment=comment)
+        row["externalRefs"] = [
+            {
+                "referenceCategory": "PACKAGE-MANAGER",
+                "referenceType": "purl",
+                "referenceLocator": f"pkg:npm/{quote(name, safe='/')}@{version}",
+            }
+        ]
+        rows.append(row)
+    return rows
 
 
 def dependency_name(value: object) -> str:
@@ -209,12 +275,8 @@ def main() -> int:
         packages.extend(
             package(item["name"], item["version"], "crates.io") for item in cargo["package"]
         )
-        lock_text = (args.axkdeck_root / "pnpm-lock.yaml").read_text()
-        npm_rows = set(re.findall(r"^  ([^\s:]+)@([^\s:]+):$", lock_text, re.MULTILINE))
-        packages.extend(package(name, version, "npm") for name, version in sorted(npm_rows))
-    document = sbom_document(
-        args.profile, source_identity, packages, creation_timestamp()
-    )
+        packages.extend(pnpm_packages(args.axkdeck_root / "pnpm-lock.yaml"))
+    document = sbom_document(args.profile, source_identity, packages, creation_timestamp())
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(document, indent=2) + "\n")
     return 0

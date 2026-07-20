@@ -17,6 +17,8 @@ namespace axk {
 inline constexpr std::uint64_t minimum_hds_size = 1'048'576;
 inline constexpr std::uint64_t maximum_hds_size = 2'147'483'648;
 inline constexpr std::uint64_t maximum_wave_data_frames_per_channel = 1ULL << 24U;
+inline constexpr std::uint64_t maximum_audio_source_frames_per_channel = maximum_wave_data_frames_per_channel;
+inline constexpr std::uint64_t maximum_audio_decoded_source_bytes = 256ULL * 1024ULL * 1024ULL;
 inline constexpr std::uint64_t maximum_wave_data_pcm16_bytes_per_channel =
     maximum_wave_data_frames_per_channel * sizeof(std::int16_t);
 inline constexpr std::array<std::uint32_t, 12> supported_sampler_sample_rates{

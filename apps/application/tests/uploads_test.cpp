@@ -209,6 +209,73 @@ TEST_F(UploadStoreTest, RemovesAbandonedStagingFilesAtStartup) {
     EXPECT_FALSE(std::filesystem::exists(abandoned));
 }
 
+TEST_F(UploadStoreTest, RetainsExpiredUploadAndQuotaWhenRemovalFails) {
+    auto now = std::chrono::steady_clock::now();
+    bool allow_removal = false;
+    axk::app::UploadStore value{directory_,
+                                4U,
+                                4U,
+                                2U,
+                                4U,
+                                std::chrono::seconds{5},
+                                [&now] { return now; },
+                                [&allow_removal](const std::filesystem::path &path, std::error_code &error) {
+                                    if (!allow_removal) {
+                                        error = std::make_error_code(std::errc::permission_denied);
+                                        return false;
+                                    }
+                                    return std::filesystem::remove(path, error);
+                                }};
+    const auto created = value.create({.owner_id = "owner",
+                                       .filename = "manifest.json",
+                                       .kind = axk::app::UploadKind::manifest,
+                                       .media_type = "application/json",
+                                       .declared_size = 4U,
+                                       .sha256 = std::nullopt});
+    ASSERT_TRUE(created);
+    now += std::chrono::seconds{6};
+
+    const auto failed = value.cleanup_snapshot();
+    EXPECT_FALSE(failed.healthy);
+    EXPECT_EQ(failed.failed_deletions, 1U);
+    EXPECT_EQ(failed.reserved_bytes, 4U);
+    EXPECT_TRUE(std::filesystem::exists(directory_ / (created->reference.upload_id + ".upload")));
+    EXPECT_FALSE(value.create({.owner_id = "other",
+                               .filename = "replacement.json",
+                               .kind = axk::app::UploadKind::manifest,
+                               .media_type = "application/json",
+                               .declared_size = 4U,
+                               .sha256 = std::nullopt}));
+
+    allow_removal = true;
+    const auto recovered = value.cleanup_snapshot();
+    EXPECT_TRUE(recovered.healthy);
+    EXPECT_EQ(recovered.reserved_bytes, 0U);
+}
+
+TEST_F(UploadStoreTest, RetainsUndeletableStartupOrphanAndReportsItUnhealthy) {
+    const auto abandoned = directory_ / "abandoned.upload";
+    std::ofstream(abandoned) << "partial";
+    axk::app::UploadStore value{directory_,
+                                32U,
+                                16U,
+                                2U,
+                                4U,
+                                std::chrono::seconds{60},
+                                std::chrono::steady_clock::now,
+                                [](const std::filesystem::path &, std::error_code &error) {
+                                    error = std::make_error_code(std::errc::permission_denied);
+                                    return false;
+                                }};
+
+    const auto cleanup = value.cleanup_snapshot();
+    EXPECT_FALSE(cleanup.healthy);
+    EXPECT_EQ(cleanup.orphan_count, 1U);
+    EXPECT_EQ(cleanup.orphan_bytes, 7U);
+    EXPECT_EQ(cleanup.reserved_bytes, 7U);
+    EXPECT_TRUE(std::filesystem::exists(abandoned));
+}
+
 TEST_F(UploadStoreTest, MaterializesReadyUploadAtomicallyInsideWritableSandbox) {
     auto value = store();
     const auto created = value.create({.owner_id = "owner",

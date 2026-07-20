@@ -135,10 +135,8 @@ class TemporaryFileCleanup {
   public:
     explicit TemporaryFileCleanup(std::filesystem::path path) : path_{std::move(path)} {}
     ~TemporaryFileCleanup() {
-        if (!active_)
-            return;
-        std::error_code ignored;
-        std::filesystem::remove(path_, ignored);
+        if (active_)
+            detail::discard_temporary_file(path_);
     }
     TemporaryFileCleanup(const TemporaryFileCleanup &) = delete;
     TemporaryFileCleanup &operator=(const TemporaryFileCleanup &) = delete;

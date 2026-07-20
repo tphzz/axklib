@@ -38,6 +38,14 @@ struct UploadSnapshot {
     std::uint64_t expires_in_seconds{};
 };
 
+struct UploadCleanupSnapshot {
+    bool healthy{true};
+    std::uint64_t failed_deletions{};
+    std::uint64_t orphan_count{};
+    std::uint64_t orphan_bytes{};
+    std::uint64_t reserved_bytes{};
+};
+
 class UploadLease {
   public:
     UploadLease() = default;
@@ -52,10 +60,12 @@ class UploadLease {
 class UploadStore {
   public:
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
+    using RemoveFile = std::function<bool(const std::filesystem::path &, std::error_code &)>;
 
     UploadStore(std::filesystem::path staging_directory, std::uint64_t maximum_total_bytes,
                 std::uint64_t maximum_upload_bytes, std::size_t maximum_uploads, std::size_t maximum_chunk_bytes,
-                std::chrono::seconds retention, Clock clock = std::chrono::steady_clock::now);
+                std::chrono::seconds retention, Clock clock = std::chrono::steady_clock::now,
+                RemoveFile remove_file = {});
     ~UploadStore();
     UploadStore(UploadStore &&) noexcept;
     UploadStore &operator=(UploadStore &&) noexcept;
@@ -73,6 +83,7 @@ class UploadStore {
                                               const Sandbox &sandbox, const FileRef &destination, bool overwrite);
     [[nodiscard]] Result<void> remove(const UploadRef &reference, std::string_view owner_id);
     void cleanup();
+    [[nodiscard]] UploadCleanupSnapshot cleanup_snapshot();
 
     [[nodiscard]] std::size_t maximum_chunk_bytes() const noexcept;
 

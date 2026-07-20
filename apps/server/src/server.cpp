@@ -212,7 +212,7 @@ bool cleanup_complete(const std::filesystem::path &directory) {
     for (const auto &entry : std::filesystem::directory_iterator{directory, error}) {
         if (error)
             return false;
-        if (entry.path().extension() == ".part")
+        if (entry.path().extension() == ".part" || entry.path().extension() == ".upload")
             return false;
     }
     return !error;
@@ -293,7 +293,7 @@ struct CorsMiddleware {
         if (allowed) {
             response.set_header("Access-Control-Allow-Origin", origin);
             response.set_header("Vary", "Origin");
-            response.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            response.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
             response.set_header("Access-Control-Allow-Headers",
                                 "Authorization, Content-Type, Idempotency-Key, X-Request-Id, Upload-Offset");
             response.set_header("Access-Control-Expose-Headers",
@@ -586,8 +586,7 @@ class ServerApplication {
         state_storage_ready_ =
             writable_directory(upload_directory()) && writable_directory(download_archive_directory());
         const auto publication_cleanup = sandbox_.cleanup_abandoned_publications();
-        startup_cleanup_ready_ = publication_cleanup && state_storage_ready_ && cleanup_complete(upload_directory()) &&
-                                 cleanup_complete(download_archive_directory());
+        startup_cleanup_ready_ = publication_cleanup && state_storage_ready_;
         job_subscription_ = jobs_.subscribe(
             [this](const axk::app::JobEvent &event) { static_cast<void>(event_dispatcher_.publish(event)); });
         register_infrastructure_routes();
@@ -1969,7 +1968,11 @@ class ServerApplication {
             if (auto denied = guard(request, id))
                 return std::move(*denied);
             const auto executor_ready = !shutdown_requested_.load(std::memory_order_relaxed);
-            const auto ready = state_storage_ready_ && startup_cleanup_ready_ && executor_ready;
+            const auto upload_cleanup = uploads_.cleanup_snapshot();
+            const auto startup_cleanup_ready = startup_cleanup_ready_ && cleanup_complete(upload_directory()) &&
+                                               cleanup_complete(download_archive_directory());
+            const auto ready =
+                state_storage_ready_ && startup_cleanup_ready && upload_cleanup.healthy && executor_ready;
             const auto workspace_snapshot = workspaces_.snapshot();
             const auto state = [](bool value) { return value ? "READY" : "NOT_READY"; };
             return json_response(ready ? 200 : 503,
@@ -1981,7 +1984,8 @@ class ServerApplication {
                                       {"workspaceConfiguration",
                                        axk::server::workspace_configuration_state_name(workspace_snapshot.state)},
                                       {"stateStorage", state(state_storage_ready_)},
-                                      {"startupCleanup", state(startup_cleanup_ready_)},
+                                      {"startupCleanup", state(startup_cleanup_ready)},
+                                      {"uploadCleanup", state(upload_cleanup.healthy)},
                                       {"executorAdmission", state(executor_ready)}}}}}},
                                  id);
         });
@@ -1994,6 +1998,7 @@ class ServerApplication {
             const auto metrics = request_telemetry_.snapshot();
             const auto job_metrics = jobs_.metrics();
             const auto event_metrics = event_dispatcher_.snapshot();
+            const auto upload_cleanup = uploads_.cleanup_snapshot();
             return json_response(
                 200,
                 {{"data",
@@ -2018,7 +2023,12 @@ class ServerApplication {
                    {"websocketEventsDelivered", event_metrics.delivered_events},
                    {"websocketEventsDropped", event_metrics.dropped_events},
                    {"websocketEventsPending", event_metrics.pending_events},
-                   {"websocketClientsEvicted", websocket_clients_evicted_.load(std::memory_order_relaxed)}}},
+                   {"websocketClientsEvicted", websocket_clients_evicted_.load(std::memory_order_relaxed)},
+                   {"uploadCleanupHealthy", upload_cleanup.healthy},
+                   {"uploadCleanupFailedDeletions", upload_cleanup.failed_deletions},
+                   {"uploadOrphanFiles", upload_cleanup.orphan_count},
+                   {"uploadOrphanBytes", upload_cleanup.orphan_bytes},
+                   {"uploadReservedBytes", upload_cleanup.reserved_bytes}}},
                  {"meta", {{"requestId", id}}}},
                 id);
         });

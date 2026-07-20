@@ -41,6 +41,45 @@ def write_package_basename(path: Path, source_identity: str = "main-a1b2c3d") ->
     path.write_text(f"axklib-{source_identity}\n", encoding="utf-8")
 
 
+def test_pnpm_packages_preserve_scopes_and_separate_peer_context(tmp_path: Path) -> None:
+    lockfile = tmp_path / "pnpm-lock.yaml"
+    lockfile.write_text(
+        """lockfileVersion: '9.0'
+packages:
+  '@scope/plain@1.2.3': {}
+  plain@2.0.0: {}
+snapshots:
+  '@scope/plain@1.2.3(peer@4.0.0)': {}
+  plain@2.0.0(peer@4.0.0): {}
+""",
+        encoding="utf-8",
+    )
+
+    rows = generate_sbom.pnpm_packages(lockfile)
+
+    assert [(row["name"], row["versionInfo"]) for row in rows] == [
+        ("@scope/plain", "1.2.3"),
+        ("plain", "2.0.0"),
+    ]
+    assert rows[0]["externalRefs"] == [
+        {
+            "referenceCategory": "PACKAGE-MANAGER",
+            "referenceType": "purl",
+            "referenceLocator": "pkg:npm/%40scope/plain@1.2.3",
+        }
+    ]
+    assert rows[0]["comment"] == "pnpm peer contexts: (peer@4.0.0)"
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["'@scope/name@1.0.0'", "@scope/name", "plain", "@scope@1.0.0"],
+)
+def test_pnpm_identity_rejects_malformed_keys(key: str) -> None:
+    with pytest.raises(ValueError, match="pnpm package identity"):
+        generate_sbom.parse_pnpm_identity(key)
+
+
 def test_sbom_includes_base_cli_and_test_dependencies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -83,9 +122,7 @@ def test_sbom_includes_base_cli_and_test_dependencies(
     axklib = next(item for item in document["packages"] if item["name"] == "axklib")
     assert axklib["versionInfo"] == "1.2.3-rc.1"
     assert document["name"] == "axklib-workspace-release"
-    assert document["documentNamespace"].startswith(
-        "https://github.com/tphzz/axklib/spdx/"
-    )
+    assert document["documentNamespace"].startswith("https://github.com/tphzz/axklib/spdx/")
     assert document["comment"] == "axklib source identity: v1.2.3-rc.1-a1b2c3d"
 
 
@@ -149,8 +186,12 @@ def test_server_sbom_includes_crow_without_cli_or_test_dependencies(
     names = {item["name"] for item in json.loads(output.read_text())["packages"]}
     assert {"axklib", "asio", "crow", "hash-library", "libsndfile", "soxr"} <= names
     assert names.isdisjoint({"cli11", "gtest"})
-    crow = next(item for item in json.loads(output.read_text())["packages"] if item["name"] == "crow")
-    asio = next(item for item in json.loads(output.read_text())["packages"] if item["name"] == "asio")
+    crow = next(
+        item for item in json.loads(output.read_text())["packages"] if item["name"] == "crow"
+    )
+    asio = next(
+        item for item in json.loads(output.read_text())["packages"] if item["name"] == "asio"
+    )
     assert crow["versionInfo"] == "1.3.3"
     assert crow["licenseDeclared"] == "BSD-3-Clause"
     assert asio["versionInfo"] == "1.32.0"
@@ -175,7 +216,8 @@ def test_sbom_timestamp_and_namespace_are_reproducible(
     first = generate_sbom.sbom_document("sdk", "main-a1b2c3d", rows, "1970-01-01T00:00:00Z")
     repeated = generate_sbom.sbom_document("sdk", "main-a1b2c3d", rows, "1970-01-01T00:00:00Z")
     changed_version = generate_sbom.sbom_document(
-        "sdk", "main-a1b2c3d",
+        "sdk",
+        "main-a1b2c3d",
         [generate_sbom.package("axklib", "1.0.1", "axklib")],
         "1970-01-01T00:00:00Z",
     )
@@ -189,15 +231,18 @@ def test_sbom_timestamp_and_namespace_are_reproducible(
         "sdk", "main-a1b2c3d", rows, "1970-01-01T00:00:01Z"
     )
     assert first == repeated
-    assert len(
-        {
-            first["documentNamespace"],
-            changed_version["documentNamespace"],
-            changed_profile["documentNamespace"],
-            changed_source["documentNamespace"],
-            changed_timestamp["documentNamespace"],
-        }
-    ) == 5
+    assert (
+        len(
+            {
+                first["documentNamespace"],
+                changed_version["documentNamespace"],
+                changed_profile["documentNamespace"],
+                changed_source["documentNamespace"],
+                changed_timestamp["documentNamespace"],
+            }
+        )
+        == 5
+    )
 
 
 def test_package_inspector_rejects_scripts_and_unlisted_shared_libraries(
@@ -309,7 +354,9 @@ def test_release_assets_require_every_distribution_and_exact_checksums(tmp_path:
 def test_native_workflow_creates_only_release_drafts() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
-    assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives" in workflow
+    assert (
+        "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives" in workflow
+    )
     assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache" not in workflow
     assert "draft-release:" in workflow
     assert "if: ${{ !inputs.debug }}" in workflow
@@ -339,8 +386,8 @@ def test_native_workflow_builds_tests_and_packages_server_on_every_release_targe
     assert workflow.count('build_testing: "ON"') == 6
     assert workflow.count("run_tests: true") == 6
     assert "-DAXK_BUILD_SERVER=ON" in workflow
-    assert "cmake --install \"$root\" --prefix \"$scan/server\" --component server" in workflow
-    assert "python tools/python/inspect_package.py \"$scan/server\"" in workflow
+    assert 'cmake --install "$root" --prefix "$scan/server" --component server' in workflow
+    assert 'python tools/python/inspect_package.py "$scan/server"' in workflow
     assert "python tools/python/release_server_smoke.py" in workflow
     assert "build/tmp/universal/bin/axklib-server" in workflow
     for installed_file in (
@@ -358,7 +405,7 @@ def test_native_workflow_checks_contract_and_generates_source_aware_server_sbom(
     assert "tools/python/openapi_compat.py check" in workflow
     assert "apps/server/contracts/openapi-v1.compatibility.json" in workflow
     assert "apps/server/contracts/openapi-v1.json" in workflow
-    assert "--package-basename-file \"$root/package_basename.txt\" --profile server" in workflow
+    assert '--package-basename-file "$root/package_basename.txt" --profile server' in workflow
     assert '--output "$root/axklib-server.spdx.json"' in workflow
 
 
@@ -414,9 +461,7 @@ def test_release_metadata_parses_and_verifies_cli_report() -> None:
 
 def test_release_metadata_verifies_cross_compiled_binary_strings(tmp_path: Path) -> None:
     binary = tmp_path / "axklib.exe"
-    binary.write_bytes(
-        b"header\0" b"0.0.0\0main-a1b2c3d\0axklib-main-a1b2c3d\0a1b2c3d\0main\0footer"
-    )
+    binary.write_bytes(b"header\x000.0.0\0main-a1b2c3d\0axklib-main-a1b2c3d\0a1b2c3d\0main\0footer")
     release_metadata.verify_binary_strings(
         binary,
         version=metadata(),

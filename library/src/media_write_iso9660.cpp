@@ -1,10 +1,11 @@
 #include "writer_internal.hpp"
 
+#include "axklib/file_publication.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <format>
-#include <fstream>
 #include <limits>
 #include <map>
 #include <set>
@@ -493,15 +494,9 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
 
     if (const auto check = cancellation.check(); !check)
         return std::unexpected{check.error()};
-    std::ofstream output{temporary_path, std::ios::binary | std::ios::trunc};
-    if (!output)
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create temporary ISO9660 image")};
-    output.write(reinterpret_cast<const char *>(image_bytes.data()), static_cast<std::streamsize>(image_bytes.size()));
-    if (!output)
-        return std::unexpected{
-            make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary ISO9660 image")};
-    return {};
+    if (auto resized = resize_temporary_file(temporary_path, image_bytes.size()); !resized)
+        return resized;
+    return write_temporary_file_at(temporary_path, 0U, image_bytes);
 }
 
 } // namespace axk::detail

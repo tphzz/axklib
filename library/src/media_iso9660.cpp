@@ -12,6 +12,14 @@
 namespace axk {
 namespace {
 
+inline constexpr std::uint64_t maximum_iso_directory_bytes = 16ULL * 1024ULL * 1024ULL;
+inline constexpr std::uint64_t maximum_iso_aggregate_directory_bytes = 64ULL * 1024ULL * 1024ULL;
+inline constexpr std::size_t maximum_iso_directories = 16'384U;
+inline constexpr std::size_t maximum_iso_file_records = 100'000U;
+inline constexpr std::size_t maximum_iso_path_depth = 64U;
+inline constexpr std::size_t maximum_iso_path_bytes = 4'096U;
+inline constexpr std::uint64_t maximum_iso_aggregate_path_bytes = 64ULL * 1024ULL * 1024ULL;
+
 struct IsoDirectoryRecord {
     std::uint32_t extent{};
     std::uint32_t size{};
@@ -121,67 +129,99 @@ Result<IsoImage> IsoImage::open(std::shared_ptr<const RandomAccessReader> reader
         std::string path;
         std::uint32_t extent;
         std::uint32_t size;
+        std::size_t depth;
     };
-    std::deque<Pending> pending{{"", root->extent, root->size}};
+    std::deque<Pending> pending{{"", root->extent, root->size, 0U}};
     std::set<std::pair<std::uint32_t, std::uint32_t>> visited;
     std::set<std::string> all_paths;
     std::vector<IsoFile> files;
+    std::uint64_t aggregate_directory_bytes{};
+    std::uint64_t aggregate_path_bytes{};
+    std::size_t directory_count{};
     while (!pending.empty()) {
         const auto directory = std::move(pending.front());
         pending.pop_front();
+        if (directory.size > maximum_iso_directory_bytes ||
+            directory.size > maximum_iso_aggregate_directory_bytes - aggregate_directory_bytes) {
+            return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
+                                                       "ISO9660 directory extent exceeds configured bounds",
+                                                       source_name)};
+        }
+        aggregate_directory_bytes += directory.size;
+        if (++directory_count > maximum_iso_directories) {
+            return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
+                                                       "ISO9660 directory count exceeds configured bounds",
+                                                       source_name)};
+        }
         if (!visited.emplace(directory.extent, directory.size).second) {
             return std::unexpected{detail::media_error(ErrorCode::allocation_cycle,
                                                        std::format("ISO9660 directory cycle at '{}'", directory.path),
                                                        source_name)};
         }
-        const auto bytes =
-            detail::read_bytes(*reader, static_cast<std::uint64_t>(directory.extent) * detail::iso_sector_size,
-                               directory.size, cancellation);
-        if (!bytes)
-            return std::unexpected{bytes.error()};
         std::set<std::string> names;
-        std::size_t offset{};
-        while (offset < bytes->size()) {
-            const auto length = std::to_integer<std::uint8_t>((*bytes)[offset]);
-            if (length == 0U) {
-                offset = ((offset / detail::iso_sector_size) + 1U) * detail::iso_sector_size;
-                continue;
+        for (std::uint64_t sector_offset = 0U; sector_offset < directory.size;
+             sector_offset += detail::iso_sector_size) {
+            const auto remaining = static_cast<std::uint64_t>(directory.size) - sector_offset;
+            const auto chunk_size =
+                static_cast<std::size_t>(std::min<std::uint64_t>(remaining, detail::iso_sector_size));
+            const auto absolute_offset =
+                static_cast<std::uint64_t>(directory.extent) * detail::iso_sector_size + sector_offset;
+            const auto bytes = detail::read_bytes(*reader, absolute_offset, chunk_size, cancellation);
+            if (!bytes)
+                return std::unexpected{bytes.error()};
+            std::size_t offset{};
+            while (offset < bytes->size()) {
+                const auto length = std::to_integer<std::uint8_t>((*bytes)[offset]);
+                if (length == 0U)
+                    break;
+                if (offset + length > bytes->size()) {
+                    return std::unexpected{detail::media_error(ErrorCode::container_truncated,
+                                                               "ISO9660 directory record crosses its sector or extent",
+                                                               source_name, absolute_offset + offset)};
+                }
+                const auto record =
+                    parse_iso_record(std::span{*bytes}.subspan(offset, length), source_name, absolute_offset + offset);
+                if (!record)
+                    return std::unexpected{record.error()};
+                offset += length;
+                if (record->name == "." || record->name == "..")
+                    continue;
+                if (!names.insert(detail::upper_ascii(record->name)).second) {
+                    return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
+                                                               std::format("duplicate ISO9660 name '{}'", record->name),
+                                                               source_name)};
+                }
+                const auto child_depth = directory.depth + 1U;
+                const auto path =
+                    directory.path.empty() ? record->name : std::format("{}/{}", directory.path, record->name);
+                if (child_depth > maximum_iso_path_depth || path.size() > maximum_iso_path_bytes ||
+                    path.size() > maximum_iso_aggregate_path_bytes - aggregate_path_bytes) {
+                    return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
+                                                               "ISO9660 path metadata exceeds configured bounds",
+                                                               source_name)};
+                }
+                aggregate_path_bytes += path.size();
+                if (!all_paths.insert(detail::upper_ascii(path)).second) {
+                    return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
+                                                               std::format("duplicate ISO9660 path '{}'", path),
+                                                               source_name)};
+                }
+                if (files.size() >= maximum_iso_file_records) {
+                    return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
+                                                               "ISO9660 file record count exceeds configured bounds",
+                                                               source_name)};
+                }
+                const bool is_directory = (record->flags & 0x02U) != 0U;
+                if (const auto valid =
+                        validate_iso_extent(*reader, record->extent, record->size, declared_volume_sectors, source_name,
+                                            is_directory || !declared_tail_is_missing);
+                    !valid) {
+                    return std::unexpected{valid.error()};
+                }
+                files.push_back({path, record->extent, record->size, is_directory});
+                if (is_directory)
+                    pending.push_back({path, record->extent, record->size, child_depth});
             }
-            if (offset % detail::iso_sector_size + length > detail::iso_sector_size ||
-                offset + length > bytes->size()) {
-                return std::unexpected{detail::media_error(
-                    ErrorCode::container_truncated, "ISO9660 directory record crosses its sector or extent",
-                    source_name, static_cast<std::uint64_t>(directory.extent) * detail::iso_sector_size + offset)};
-            }
-            const auto record =
-                parse_iso_record(std::span{*bytes}.subspan(offset, length), source_name,
-                                 static_cast<std::uint64_t>(directory.extent) * detail::iso_sector_size + offset);
-            if (!record)
-                return std::unexpected{record.error()};
-            offset += length;
-            if (record->name == "." || record->name == "..")
-                continue;
-            if (!names.insert(detail::upper_ascii(record->name)).second) {
-                return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
-                                                           std::format("duplicate ISO9660 name '{}'", record->name),
-                                                           source_name)};
-            }
-            const auto path =
-                directory.path.empty() ? record->name : std::format("{}/{}", directory.path, record->name);
-            if (!all_paths.insert(detail::upper_ascii(path)).second) {
-                return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
-                                                           std::format("duplicate ISO9660 path '{}'", path),
-                                                           source_name)};
-            }
-            const bool is_directory = (record->flags & 0x02U) != 0U;
-            if (const auto valid = validate_iso_extent(*reader, record->extent, record->size, declared_volume_sectors,
-                                                       source_name, is_directory || !declared_tail_is_missing);
-                !valid) {
-                return std::unexpected{valid.error()};
-            }
-            files.push_back({path, record->extent, record->size, is_directory});
-            if (is_directory)
-                pending.push_back({path, record->extent, record->size});
         }
     }
     std::ranges::sort(files, {}, &IsoFile::path);

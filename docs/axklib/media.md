@@ -27,6 +27,9 @@ fixed-geometry profile documented in [FAT12 Floppy Images](floppy.md).
 The ISO reader accepts the primary ISO9660 directory form used by Yamaha media.
 It checks both-endian descriptor fields, logical block geometry, directory
 record boundaries, extents, cycles, duplicate names, and path components.
+Directory parsing reads one sector at a time and enforces limits of 16 MiB per
+directory, 64 MiB of aggregate directory data, 16,384 directories, 100,000
+records, 64 path components, and 64 MiB of aggregate path metadata.
 Multi-extent files are rejected. Joliet names, Rock Ridge system-use extensions,
 alternate descriptor trees, and in-place filesystem mutation are not
 interpreted. A hybrid image can still open through a valid primary ISO9660 tree,
@@ -58,6 +61,10 @@ support for opaque support-file formats.
 All object payloads use the same current-object decoders as SFS images. The
 normalized object catalog can therefore be passed to the normal relationship
 graph service.
+
+The installed `axk::image::open()` SDK facade uses the same media dispatcher.
+SDK inventory, validation, preview, PCM, and export operations therefore accept
+SFS, FAT12, ISO9660, and standalone Yamaha object inputs through one session API.
 
 ## CD menu labels
 

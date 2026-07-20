@@ -897,6 +897,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                     "sandbox": "READY",
                     "startupCleanup": "READY",
                     "stateStorage": "READY",
+                    "uploadCleanup": "READY",
                     "workspaceConfiguration": "READY",
                 },
             }
@@ -1244,6 +1245,26 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 status == 204
                 and headers["access-control-allow-origin"] == "https://allowed.example"
             )
+            for patch_path in (
+                "/api/v1/workspaces/workspace-test",
+                "/api/v1/filesystem/entries",
+            ):
+                status, _, headers = raw_http_request(
+                    port,
+                    "OPTIONS",
+                    patch_path,
+                    headers={
+                        "Origin": "https://allowed.example",
+                        "Access-Control-Request-Method": "PATCH",
+                        "Access-Control-Request-Headers": "authorization, content-type",
+                    },
+                )
+                assert status == 204, (patch_path, status, headers)
+                allowed_methods = {
+                    value.strip()
+                    for value in headers["access-control-allow-methods"].split(",")
+                }
+                assert "PATCH" in allowed_methods, (patch_path, headers)
 
             status, created = http_request(
                 port,
@@ -2794,6 +2815,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert counters["progressJobEvents"] >= 1, counters
             assert counters["websocketEventsDelivered"] >= len(events), counters
+            assert counters["uploadCleanupHealthy"] is True, counters
             for name in (
                 "queuedJobs",
                 "runningJobs",
@@ -2805,6 +2827,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "websocketEventsDropped",
                 "websocketEventsPending",
                 "websocketClientsEvicted",
+                "uploadCleanupFailedDeletions",
+                "uploadOrphanFiles",
+                "uploadOrphanBytes",
+                "uploadReservedBytes",
             ):
                 assert isinstance(counters[name], int) and counters[name] >= 0, (
                     name,

@@ -33,6 +33,8 @@ struct SourceAudioInfo {
     bool reduces_precision{};
 };
 
+Result<void> validate_source_resource_limits(const SourceAudioInfo &source, std::size_t decoded_sample_bytes);
+
 struct ProjectedAudioSize {
     std::uint64_t output_frames{};
     std::uint64_t bytes_per_channel{};

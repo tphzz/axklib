@@ -11,6 +11,7 @@
 #include <ranges>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 
@@ -18,6 +19,7 @@
 #include "axklib/audio.hpp"
 #include "axklib/audio_export.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/media.hpp"
 #include "axklib/package.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
@@ -95,12 +97,60 @@ std::string object_type_name(ObjectType type) {
 }
 
 struct image_state {
-    Container container;
+    MediaContainer container;
+    std::unordered_map<std::string, MediaObjectDescriptor> descriptors;
     ObjectCatalog catalog;
     RelationshipGraph graph;
     ContentTree tree;
     ValidationReport validation;
 };
+
+ValidationSeverity internal_validation_severity(std::string_view severity) {
+    if (severity == "info")
+        return ValidationSeverity::info;
+    if (severity == "warning")
+        return ValidationSeverity::warning;
+    return ValidationSeverity::error;
+}
+
+ValidationReport validate_media(const MediaContainer &container, const ObjectCatalog &catalog,
+                                const RelationshipGraph &graph, const ContentTree &tree) {
+    if (const auto *sfs = std::get_if<Container>(&container.storage()))
+        return validate_semantics(*sfs, catalog, graph);
+    ValidationReport report;
+    report.coverage.object_count = catalog.objects.size();
+    report.coverage.relationship_count = graph.relationships.size();
+    for (const auto &relationship : graph.relationships) {
+        switch (relationship.quality) {
+        case RelationshipQuality::known:
+            ++report.coverage.known_relationship_count;
+            break;
+        case RelationshipQuality::likely:
+            ++report.coverage.likely_relationship_count;
+            break;
+        case RelationshipQuality::tentative:
+            ++report.coverage.tentative_relationship_count;
+            break;
+        case RelationshipQuality::unknown:
+            ++report.coverage.unknown_relationship_count;
+            break;
+        }
+    }
+    for (const auto &object : catalog.objects) {
+        if (object.placement)
+            ++report.coverage.exact_placement_count;
+        else
+            ++report.coverage.unresolved_placement_count;
+    }
+    for (const auto &issue : tree.issues) {
+        report.issues.push_back({issue.code, internal_validation_severity(issue.severity), issue.message,
+                                 issue.sampler_path, issue.object_key});
+    }
+    for (const auto &issue : container.validation_issues()) {
+        report.issues.push_back({issue.code, ValidationSeverity::warning, issue.message, issue.sampler_path, {}});
+    }
+    return report;
+}
 
 PackageRootKind internal_root_kind(package_root_kind kind) {
     switch (kind) {
@@ -459,18 +509,24 @@ result<image> image::open(const std::string &utf8_path, operation_context &conte
         OpenOptions options;
         options.cancellation = context.impl_->cancellation.token();
         options.progress = context.impl_.get();
-        auto container = open_image(*path, options);
+        auto container = open_media(*path, options.cancellation);
         if (!container)
             return public_error(container.error());
-        auto catalog = build_object_catalog(*container, 64U * 1024U * 1024U, options.cancellation);
-        if (!catalog)
-            return public_error(catalog.error());
-        auto graph = build_relationship_graph(*catalog);
-        auto tree = build_content_tree(*container, *catalog, graph);
-        auto validation = validate_semantics(*container, *catalog, graph);
+        auto inventory = build_media_inventory(*container, MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U,
+                                               options.cancellation);
+        if (!inventory)
+            return public_error(inventory.error());
+        auto graph = build_relationship_graph(inventory->catalog);
+        auto tree = build_content_tree(*container, inventory->catalog, graph);
+        auto validation = validate_media(*container, inventory->catalog, graph, tree);
+        std::unordered_map<std::string, MediaObjectDescriptor> descriptors;
+        descriptors.reserve(inventory->objects.size());
+        for (auto &descriptor : inventory->objects)
+            descriptors.emplace(descriptor.key, std::move(descriptor));
         auto state = std::make_shared<image_state>(image_state{
             std::move(*container),
-            std::move(*catalog),
+            std::move(descriptors),
+            std::move(inventory->catalog),
             std::move(graph),
             std::move(tree),
             std::move(validation),
@@ -564,7 +620,14 @@ result<waveform_preview> image::preview(const std::string &object_key, std::uint
         if (found == impl_->state->catalog.objects.end())
             return error{
                 error_code::object_missing, error_category::object, "waveform is not part of this image session", {}};
-        auto waveform = decode_waveform(impl_->state->container, *found, context.impl_->cancellation.token());
+        const auto descriptor = impl_->state->descriptors.find(found->key);
+        if (descriptor == impl_->state->descriptors.end())
+            return internal_error("media object descriptor is missing");
+        auto media_object = load_media_object(impl_->state->container, descriptor->second, 64U * 1024U * 1024U,
+                                              context.impl_->cancellation.token());
+        if (!media_object)
+            return public_error(media_object.error());
+        auto waveform = decode_waveform(*media_object);
         if (!waveform)
             return public_error(waveform.error());
         auto envelope = build_preview_envelope(*waveform, static_cast<std::size_t>(bin_count));
@@ -591,7 +654,14 @@ result<std::vector<std::uint8_t>> image::waveform_pcm(const std::string &object_
         if (found == impl_->state->catalog.objects.end())
             return error{
                 error_code::object_missing, error_category::object, "waveform is not part of this image session", {}};
-        auto waveform = decode_waveform(impl_->state->container, *found, context.impl_->cancellation.token());
+        const auto descriptor = impl_->state->descriptors.find(found->key);
+        if (descriptor == impl_->state->descriptors.end())
+            return internal_error("media object descriptor is missing");
+        auto media_object = load_media_object(impl_->state->container, descriptor->second, 64U * 1024U * 1024U,
+                                              context.impl_->cancellation.token());
+        if (!media_object)
+            return public_error(media_object.error());
+        auto waveform = decode_waveform(*media_object);
         if (!waveform)
             return public_error(waveform.error());
         std::vector<std::uint8_t> bytes;

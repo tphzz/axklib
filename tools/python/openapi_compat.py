@@ -73,7 +73,9 @@ def _compare_schema(
     if not baseline_types and candidate_types:
         issues.append(f"{path}: type constraint added ({sorted(candidate_types)})")
     elif baseline_types and not baseline_types.issubset(candidate_types):
-        issues.append(f"{path}: accepted types removed ({sorted(baseline_types - candidate_types)})")
+        issues.append(
+            f"{path}: accepted types removed ({sorted(baseline_types - candidate_types)})"
+        )
 
     if "const" not in baseline and "const" in candidate:
         issues.append(f"{path}: const constraint added")
@@ -90,8 +92,12 @@ def _compare_schema(
             if removed:
                 issues.append(f"{path}: enum values removed ({removed})")
 
-    baseline_required = set(baseline.get("required", [])) if isinstance(baseline.get("required"), list) else set()
-    candidate_required = set(candidate.get("required", [])) if isinstance(candidate.get("required"), list) else set()
+    baseline_required = (
+        set(baseline.get("required", [])) if isinstance(baseline.get("required"), list) else set()
+    )
+    candidate_required = (
+        set(candidate.get("required", [])) if isinstance(candidate.get("required"), list) else set()
+    )
     if baseline_required != candidate_required:
         issues.append(
             f"{path}: required fields changed "
@@ -118,7 +124,10 @@ def _compare_schema(
                         issues,
                     )
 
-    if baseline.get("additionalProperties", True) is not False and candidate.get("additionalProperties", True) is False:
+    if (
+        baseline.get("additionalProperties", True) is not False
+        and candidate.get("additionalProperties", True) is False
+    ):
         issues.append(f"{path}: additional properties are no longer accepted")
 
     for name in LOWER_BOUNDS:
@@ -173,17 +182,51 @@ def _compare_schema(
             )
 
 
-def _parameters(document: JsonObject, path_item: JsonObject, operation: JsonObject) -> dict[tuple[str, str], JsonObject]:
+def _parameters(
+    document: JsonObject, path_item: JsonObject, operation: JsonObject
+) -> dict[tuple[str, str], JsonObject]:
     result: dict[tuple[str, str], JsonObject] = {}
     for source in (path_item.get("parameters", []), operation.get("parameters", [])):
         if not isinstance(source, list):
             continue
         for raw in source:
             value = _local_reference(document, raw)
-            if not isinstance(value, dict) or not isinstance(value.get("name"), str) or not isinstance(value.get("in"), str):
+            if (
+                not isinstance(value, dict)
+                or not isinstance(value.get("name"), str)
+                or not isinstance(value.get("in"), str)
+            ):
                 continue
             result[(value["name"], value["in"])] = value
     return result
+
+
+def _effective_security(document: JsonObject, operation: JsonObject) -> object:
+    return operation["security"] if "security" in operation else document.get("security")
+
+
+def _canonical_security(
+    value: object,
+) -> tuple[tuple[tuple[str, tuple[str, ...]], ...], ...] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return ()
+    requirements: list[tuple[tuple[str, tuple[str, ...]], ...]] = []
+    for raw_requirement in value:
+        if not isinstance(raw_requirement, dict):
+            return ()
+        requirement: list[tuple[str, tuple[str, ...]]] = []
+        for scheme, raw_scopes in raw_requirement.items():
+            if (
+                not isinstance(scheme, str)
+                or not isinstance(raw_scopes, list)
+                or not all(isinstance(scope, str) for scope in raw_scopes)
+            ):
+                return ()
+            requirement.append((scheme, tuple(sorted(raw_scopes))))
+        requirements.append(tuple(sorted(requirement)))
+    return tuple(sorted(requirements))
 
 
 def _compare_content(
@@ -226,6 +269,17 @@ def compatibility_issues(baseline: JsonObject, candidate: JsonObject) -> list[st
     if not isinstance(baseline_paths, dict) or not isinstance(candidate_paths, dict):
         return ["$: paths must be objects"]
 
+    old_security_schemes = baseline.get("components", {}).get("securitySchemes", {})
+    new_security_schemes = candidate.get("components", {}).get("securitySchemes", {})
+    if isinstance(old_security_schemes, dict) and not isinstance(new_security_schemes, dict):
+        issues.append("components/securitySchemes: security schemes changed shape")
+    elif isinstance(old_security_schemes, dict) and isinstance(new_security_schemes, dict):
+        for name, old_scheme in old_security_schemes.items():
+            if name not in new_security_schemes:
+                issues.append(f"components/securitySchemes/{name}: security scheme removed")
+            elif old_scheme != new_security_schemes[name]:
+                issues.append(f"components/securitySchemes/{name}: security scheme changed")
+
     for path, old_path_item in baseline_paths.items():
         if path not in candidate_paths:
             issues.append(f"paths/{path}: path removed")
@@ -244,7 +298,9 @@ def compatibility_issues(baseline: JsonObject, candidate: JsonObject) -> list[st
                 continue
             if old_operation.get("operationId") != new_operation.get("operationId"):
                 issues.append(f"{location}: operationId changed")
-            if old_operation.get("security") != new_operation.get("security"):
+            if _canonical_security(
+                _effective_security(baseline, old_operation)
+            ) != _canonical_security(_effective_security(candidate, new_operation)):
                 issues.append(f"{location}: security contract changed")
 
             old_parameters = _parameters(baseline, old_path_item, old_operation)
@@ -254,8 +310,12 @@ def compatibility_issues(baseline: JsonObject, candidate: JsonObject) -> list[st
                     issues.append(f"{location}/parameters/{key[1]}/{key[0]}: parameter removed")
                     continue
                 new_parameter = new_parameters[key]
-                if not old_parameter.get("required", False) and new_parameter.get("required", False):
-                    issues.append(f"{location}/parameters/{key[1]}/{key[0]}: parameter became required")
+                if not old_parameter.get("required", False) and new_parameter.get(
+                    "required", False
+                ):
+                    issues.append(
+                        f"{location}/parameters/{key[1]}/{key[0]}: parameter became required"
+                    )
                 if "schema" in old_parameter and "schema" in new_parameter:
                     _compare_schema(
                         baseline,
@@ -265,9 +325,14 @@ def compatibility_issues(baseline: JsonObject, candidate: JsonObject) -> list[st
                         f"{location}/parameters/{key[1]}/{key[0]}/schema",
                         issues,
                     )
+            for key, new_parameter in new_parameters.items():
+                if key not in old_parameters and new_parameter.get("required", False):
+                    issues.append(
+                        f"{location}/parameters/{key[1]}/{key[0]}: required parameter added"
+                    )
 
-            old_body = old_operation.get("requestBody")
-            new_body = new_operation.get("requestBody")
+            old_body = _local_reference(baseline, old_operation.get("requestBody"))
+            new_body = _local_reference(candidate, new_operation.get("requestBody"))
             if isinstance(old_body, dict):
                 if not isinstance(new_body, dict):
                     issues.append(f"{location}/requestBody: request body removed")
@@ -282,6 +347,8 @@ def compatibility_issues(baseline: JsonObject, candidate: JsonObject) -> list[st
                         f"{location}/requestBody/content",
                         issues,
                     )
+            elif isinstance(new_body, dict) and new_body.get("required", False):
+                issues.append(f"{location}/requestBody: required request body added")
 
             old_responses = old_operation.get("responses")
             new_responses = new_operation.get("responses")
@@ -340,7 +407,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "snapshot":
             source = _load(args.source)
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(json.dumps(source, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            args.output.write_text(
+                json.dumps(source, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
             return 0
         issues = compatibility_issues(_load(args.baseline), _load(args.candidate))
     except (OSError, ValueError, json.JSONDecodeError) as error:
