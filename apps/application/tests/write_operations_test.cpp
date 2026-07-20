@@ -95,32 +95,32 @@ axk::HdsBuildManifest all_action_source_manifest(const std::filesystem::path &au
         {"delete-wave", "Delete Wave", audio_path, 60U, {}},
         {"old-wave", "Old Wave", audio_path, 60U, {}},
     };
-    for (const auto *name : {"Delete Bank", "Old Bank", "Bank A", "Bank B", "Del Group Bank", "Delete Direct",
-                             "Old Group Bank", "Old Direct"}) {
-        axk::SampleBankSpec bank;
-        bank.name = name;
-        bank.waveform_id = "wave";
-        bank.root_key = 60U;
-        bank.key_high = 127U;
-        volume.sample_banks.push_back(std::move(bank));
+    for (const auto *name : {"Delete Sample", "Old Sample", "Sample A", "Sample B", "Del Bank Sample", "Delete Direct",
+                             "Old Bank Sample", "Old Direct"}) {
+        axk::SampleSpec sample;
+        sample.name = name;
+        sample.waveform_id = "wave";
+        sample.root_key = 60U;
+        sample.key_high = 127U;
+        volume.samples.push_back(std::move(sample));
     }
-    volume.sample_bank_groups = {
-        {"Delete Group", {"Del Group Bank"}},
-        {"Old Group", {"Old Group Bank"}},
+    volume.sample_banks = {
+        {"Delete Bank", {"Del Bank Sample"}},
+        {"Old Bank", {"Old Bank Sample"}},
     };
     volume.programs = {
-        {128U, {{"SBAC", "Delete Group", 1U}, {"SBNK", "Delete Direct", 2U}}},
-        {127U, {{"SBAC", "Old Group", 1U}, {"SBNK", "Old Direct", 2U}}},
+        {128U, {{"SBAC", "Delete Bank", 1U}, {"SBNK", "Delete Direct", 2U}}},
+        {127U, {{"SBAC", "Old Bank", 1U}, {"SBNK", "Old Direct", 2U}}},
     };
 
     axk::VolumeSpec deleted_volume;
     deleted_volume.name = "Delete Volume";
-    return {"1.0", 8U * 1024U * 1024U, {{"hd1", {std::move(volume), std::move(deleted_volume)}}}};
+    return {"1.1", 8U * 1024U * 1024U, {{"hd1", {std::move(volume), std::move(deleted_volume)}}}};
 }
 
 nlohmann::json all_action_alteration_manifest() {
     return {
-        {"schema_version", "1.0"},
+        {"schema_version", "1.1"},
         {"operations",
          nlohmann::json::array({
              {{"id", "delete-volume"},
@@ -133,18 +133,18 @@ nlohmann::json all_action_alteration_manifest() {
               {"volume",
                {{"name", "Insert Volume"},
                 {"waveforms", nlohmann::json::array()},
-                {"sample_banks", nlohmann::json::array()}}}},
-             {{"id", "delete-bank"},
+                {"samples", nlohmann::json::array()}}}},
+             {{"id", "delete-sample"},
               {"type", "delete_sbnk"},
               {"partition_index", 0U},
               {"volume_name", "Volume"},
-              {"sample_bank_name", "Delete Bank"}},
-             {{"id", "insert-bank"},
+              {"sample_name", "Delete Sample"}},
+             {{"id", "insert-sample"},
               {"type", "insert_sbnk"},
-              {"partition_index", {{"operation_ref", "delete-bank"}}},
+              {"partition_index", {{"operation_ref", "delete-sample"}}},
               {"volume_name", "Volume"},
-              {"sample_bank",
-               {{"name", "Insert Bank"},
+              {"sample",
+               {{"name", "Insert Sample"},
                 {"waveform_name", "Wave"},
                 {"root_key", 60U},
                 {"key_low", 0U},
@@ -165,42 +165,42 @@ nlohmann::json all_action_alteration_manifest() {
               {"volume_name", "Volume"},
               {"waveform_name", "Old Wave"},
               {"new_waveform_name", "New Wave"}},
-             {{"id", "rename-bank"},
+             {{"id", "rename-sample"},
               {"type", "rename_sbnk"},
               {"partition_index", 0U},
               {"volume_name", "Volume"},
-              {"sample_bank_name", "Old Bank"},
-              {"new_sample_bank_name", "New Bank"}},
+              {"sample_name", "Old Sample"},
+              {"new_sample_name", "New Sample"}},
              {{"id", "delete-program"},
               {"type", "delete_program"},
               {"partition_index", 0U},
               {"volume_name", "Volume"},
               {"program_number", 128U}},
-             {{"id", "delete-group"},
+             {{"id", "delete-sample-sample"},
               {"type", "delete_sbac"},
               {"partition_index", {{"operation_ref", "delete-program"}}},
               {"volume_name", "Volume"},
-              {"sample_bank_group_name", "Delete Group"}},
-             {{"id", "insert-group"},
+              {"sample_bank_name", "Delete Bank"}},
+             {{"id", "insert-sample-sample"},
               {"type", "insert_sbac"},
-              {"partition_index", {{"operation_ref", "delete-group"}}},
+              {"partition_index", {{"operation_ref", "delete-sample-sample"}}},
               {"volume_name", "Volume"},
-              {"sample_bank_group", {{"name", "Insert Group"}, {"member_sample_banks", {"Bank A", "Bank B"}}}}},
-             {{"id", "rename-group"},
+              {"sample_bank", {{"name", "Insert Bank"}, {"member_samples", {"Sample A", "Sample B"}}}}},
+             {{"id", "rename-sample-sample"},
               {"type", "rename_sbac"},
               {"partition_index", 0U},
               {"volume_name", "Volume"},
-              {"sample_bank_group_name", "Old Group"},
-              {"new_sample_bank_group_name", "New Group"}},
+              {"sample_bank_name", "Old Bank"},
+              {"new_sample_bank_name", "New Bank"}},
              {{"id", "insert-program"},
               {"type", "insert_program"},
-              {"partition_index", {{"operation_ref", "rename-group"}}},
+              {"partition_index", {{"operation_ref", "rename-sample-sample"}}},
               {"volume_name", "Volume"},
               {"program",
                {{"number", 128U},
                 {"assignments",
-                 {{{"sample_bank_group", "Insert Group"}, {"receive_channel", 1U}},
-                  {{"sample_bank", "Delete Direct"}, {"receive_channel", 2U}}}}}}},
+                 {{{"sample_bank", "Insert Bank"}, {"receive_channel", 1U}},
+                  {{"sample", "Delete Direct"}, {"receive_channel", 2U}}}}}}},
          })},
     };
 }
@@ -446,7 +446,7 @@ TEST_F(WriteOperationsTest, WholeSourceTransferRequiresPersistentFileRef) {
         registry_.invoke("create.floppy", {{"planToken", floppy_plan->at("planToken").get<std::string>()}}, context()));
 
     const nlohmann::json manifest = {
-        {"schema_version", "1.0"},
+        {"schema_version", "1.1"},
         {"format", "iso9660"},
         {"iso",
          {{"volume_id", "AXK_TEST"},
@@ -608,10 +608,8 @@ TEST_F(WriteOperationsTest, AlterationRequiresExplicitAtomicSourceReplacement) {
     auto build_manifest = build_starter->at("manifest");
     build_manifest["size_bytes"] = 4U * 1024U * 1024U;
     build_manifest["partitions"][0]["volumes"] = nlohmann::json::array(
-        {{{"name", "First Volume"}, {"waveforms", nlohmann::json::array()}, {"sample_banks", nlohmann::json::array()}},
-         {{"name", "Second Volume"},
-          {"waveforms", nlohmann::json::array()},
-          {"sample_banks", nlohmann::json::array()}}});
+        {{{"name", "First Volume"}, {"waveforms", nlohmann::json::array()}, {"samples", nlohmann::json::array()}},
+         {{"name", "Second Volume"}, {"waveforms", nlohmann::json::array()}, {"samples", nlohmann::json::array()}}});
     const auto build_plan = registry_.invoke("create.plan",
                                              {{"kind", "HDS"},
                                               {"manifest", {{"inline", build_manifest}}},
@@ -790,12 +788,12 @@ TEST_F(WriteOperationsTest, AlterationInspectsAndAppliesEveryMaintainedAction) {
     EXPECT_TRUE(has_object(axk::ObjectType::smpl, "Insert Wave"));
     EXPECT_TRUE(has_object(axk::ObjectType::smpl, "New Wave"));
     EXPECT_FALSE(has_object(axk::ObjectType::smpl, "Delete Wave"));
-    EXPECT_TRUE(has_object(axk::ObjectType::sbnk, "Insert Bank"));
-    EXPECT_TRUE(has_object(axk::ObjectType::sbnk, "New Bank"));
-    EXPECT_FALSE(has_object(axk::ObjectType::sbnk, "Delete Bank"));
-    EXPECT_TRUE(has_object(axk::ObjectType::sbac, "Insert Group"));
-    EXPECT_TRUE(has_object(axk::ObjectType::sbac, "New Group"));
-    EXPECT_FALSE(has_object(axk::ObjectType::sbac, "Delete Group"));
+    EXPECT_TRUE(has_object(axk::ObjectType::sbnk, "Insert Sample"));
+    EXPECT_TRUE(has_object(axk::ObjectType::sbnk, "New Sample"));
+    EXPECT_FALSE(has_object(axk::ObjectType::sbnk, "Delete Sample"));
+    EXPECT_TRUE(has_object(axk::ObjectType::sbac, "Insert Bank"));
+    EXPECT_TRUE(has_object(axk::ObjectType::sbac, "New Bank"));
+    EXPECT_FALSE(has_object(axk::ObjectType::sbac, "Delete Bank"));
     EXPECT_TRUE(has_object(axk::ObjectType::prog, "128"));
     const auto inserted = std::ranges::find_if(catalog->objects, [](const auto &object) {
         return object.object.header.type == axk::ObjectType::smpl && object.object.header.name == "Insert Wave";

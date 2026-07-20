@@ -108,7 +108,7 @@ PackageRootKind internal_root_kind(package_root_kind kind) {
         return PackageRootKind::volume;
     case package_root_kind::program:
         return PackageRootKind::prog;
-    case package_root_kind::bank_group:
+    case package_root_kind::sample_bank:
         return PackageRootKind::sbac;
     case package_root_kind::sample:
         return PackageRootKind::sbnk;
@@ -248,15 +248,15 @@ object_info public_object(const ObjectSnapshot &item) {
     value.sfs_id = item.sfs_id.value;
     value.payload_size =
         static_cast<std::uint64_t>(item.object.header.header_size) + item.object.header.payload_bytes_0x1c;
-    if (const auto *waveform = std::get_if<CurrentSmpl>(&item.object.payload)) {
-        value.sample_rate = waveform->sample_rate.value;
-        value.root_key = waveform->root_key.value;
-        value.frame_count = waveform->wave_length_frames.value;
-        value.sample_width_bytes = waveform->stored_sample_width_bytes.value;
-    } else if (const auto *bank = std::get_if<CurrentSbnk>(&item.object.payload)) {
-        value.member_count = bank->right.has_value() ? 2U : 1U;
-    } else if (const auto *group = std::get_if<CurrentSbac>(&item.object.payload)) {
-        value.member_count = group->active_slot_count;
+    if (const auto *wave_data = std::get_if<CurrentSmpl>(&item.object.payload)) {
+        value.sample_rate = wave_data->sample_rate.value;
+        value.root_key = wave_data->root_key.value;
+        value.frame_count = wave_data->wave_length_frames.value;
+        value.sample_width_bytes = wave_data->stored_sample_width_bytes.value;
+    } else if (const auto *sample = std::get_if<CurrentSbnk>(&item.object.payload)) {
+        value.member_count = sample->right.has_value() ? 2U : 1U;
+    } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&item.object.payload)) {
+        value.member_count = sample_bank->active_slot_count;
     } else if (const auto *program = std::get_if<CurrentProg>(&item.object.payload)) {
         value.name = program->program_name;
         value.member_count = program->assignments.size();

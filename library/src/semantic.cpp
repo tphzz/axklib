@@ -106,9 +106,9 @@ std::optional<std::string> assignment_detail(const Relationship &row) {
     return std::format("Rch Assign: {}", row.receive_channel_display);
 }
 
-ContentNode bank_node(const ObjectSnapshot &item, const Relationship *row = nullptr) {
+ContentNode sample_node(const ObjectSnapshot &item, const Relationship *row = nullptr) {
     ContentNode result{
-        std::format("object:{}", item.key), "sample_bank", display_text(item.object.header.name), item.key, "SBNK",
+        std::format("object:{}", item.key), "sample", display_text(item.object.header.name), item.key, "SBNK",
     };
     if (row != nullptr) {
         result.quality = row->quality;
@@ -122,8 +122,8 @@ ContentNode bank_node(const ObjectSnapshot &item, const Relationship *row = null
     return result;
 }
 
-ContentNode group_node(const ObjectSnapshot &item, const ObjectCatalog &catalog, const RelationshipGraph &graph,
-                       const Relationship *parent = nullptr, bool with_children = true) {
+ContentNode sample_bank_node(const ObjectSnapshot &item, const ObjectCatalog &catalog, const RelationshipGraph &graph,
+                             const Relationship *parent = nullptr, bool with_children = true) {
     ContentNode result{
         std::format("object:{}", item.key),
         "sample_bank",
@@ -144,7 +144,7 @@ ContentNode group_node(const ObjectSnapshot &item, const ObjectCatalog &catalog,
                 continue;
             if (const auto *child = find_object(catalog, *row->target_key);
                 child != nullptr && child->object.header.type == ObjectType::sbnk) {
-                result.children.push_back(bank_node(*child, row));
+                result.children.push_back(sample_node(*child, row));
             }
         }
     }
@@ -261,7 +261,7 @@ static ContentTree build_content_tree_impl(std::string source_path,
                            std::move(display_volume_name)};
 
         std::vector<ContentNode> programs;
-        std::vector<ContentNode> banks;
+        std::vector<ContentNode> samples_and_banks;
         std::vector<ContentNode> waveforms;
         std::vector<ContentNode> sequences;
         for (const auto *item : items) {
@@ -277,9 +277,9 @@ static ContentTree build_content_tree_impl(std::string source_path,
                     if (target == nullptr)
                         continue;
                     if (target->object.header.type == ObjectType::sbac) {
-                        node.children.push_back(group_node(*target, catalog, graph, row, false));
+                        node.children.push_back(sample_bank_node(*target, catalog, graph, row, false));
                     } else if (target->object.header.type == ObjectType::sbnk) {
-                        node.children.push_back(bank_node(*target, row));
+                        node.children.push_back(sample_node(*target, row));
                     } else if (target->object.header.type == ObjectType::smpl) {
                         ContentNode child{std::format("object:{}", target->key),
                                           "waveform",
@@ -301,14 +301,14 @@ static ContentTree build_content_tree_impl(std::string source_path,
                 if (include_default_programs || !quiet_default)
                     programs.push_back(std::move(node));
             } else if (item->object.header.type == ObjectType::sbac) {
-                banks.push_back(group_node(*item, catalog, graph));
+                samples_and_banks.push_back(sample_bank_node(*item, catalog, graph));
             } else if (item->object.header.type == ObjectType::sbnk) {
                 const bool has_group = std::ranges::any_of(graph.parents(item->key), [](const Relationship *row) {
                     return row->type == "SBAC_SLOT_TO_SBNK" && row->quality == RelationshipQuality::known &&
                            row->target_key.has_value();
                 });
                 if (!has_group)
-                    banks.push_back(bank_node(*item));
+                    samples_and_banks.push_back(sample_node(*item));
             } else if (item->object.header.type == ObjectType::smpl) {
                 waveforms.push_back({
                     std::format("object:{}", item->key),
@@ -379,7 +379,7 @@ static ContentTree build_content_tree_impl(std::string source_path,
             });
         };
         sort_nodes(programs);
-        sort_nodes(banks);
+        sort_nodes(samples_and_banks);
         sort_nodes(waveforms);
         sort_nodes(sequences);
         if (!programs.empty()) {
@@ -394,7 +394,7 @@ static ContentTree build_content_tree_impl(std::string source_path,
                                        {},
                                        std::move(programs)});
         }
-        if (!banks.empty()) {
+        if (!samples_and_banks.empty()) {
             volume.children.push_back({std::string{sample_structure_category_id},
                                        "category",
                                        std::string{sample_structure_category_label},
@@ -404,7 +404,7 @@ static ContentTree build_content_tree_impl(std::string source_path,
                                        {},
                                        {},
                                        {},
-                                       std::move(banks)});
+                                       std::move(samples_and_banks)});
         }
         if (!waveforms.empty()) {
             volume.children.push_back({std::string{wave_data_category_id},
@@ -480,18 +480,18 @@ ContentTree build_content_tree(const MediaContainer &container, const ObjectCata
 
     auto result =
         build_content_tree(text::path_to_utf8(container.source_path()), catalog, graph, include_default_programs);
-    std::set<std::string> unresolved_banks;
-    std::map<std::string, std::vector<std::string>> group_banks;
+    std::set<std::string> unresolved_samples;
+    std::map<std::string, std::vector<std::string>> bank_samples;
     for (const auto &row : graph.relationships) {
         if ((row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
             row.quality == RelationshipQuality::unknown) {
-            unresolved_banks.insert(row.source_key);
+            unresolved_samples.insert(row.source_key);
         } else if (row.type == "SBAC_SLOT_TO_SBNK" && row.target_key &&
                    (row.quality == RelationshipQuality::known || row.quality == RelationshipQuality::likely)) {
-            group_banks[row.source_key].push_back(*row.target_key);
+            bank_samples[row.source_key].push_back(*row.target_key);
         }
     }
-    std::set<std::string> reachable_banks;
+    std::set<std::string> reachable_samples;
     for (const auto &row : graph.relationships) {
         if (!row.target_key ||
             (row.assignment_state != AssignmentState::active && row.assignment_state != AssignmentState::source_load) ||
@@ -499,29 +499,28 @@ ContentTree build_content_tree(const MediaContainer &container, const ObjectCata
             continue;
         }
         if (row.type == "PROG_ASSIGNMENT_TO_SBNK") {
-            reachable_banks.insert(*row.target_key);
+            reachable_samples.insert(*row.target_key);
         } else if (row.type == "PROG_ASSIGNMENT_TO_SBAC") {
-            if (const auto members = group_banks.find(*row.target_key); members != group_banks.end())
-                reachable_banks.insert(members->second.begin(), members->second.end());
+            if (const auto members = bank_samples.find(*row.target_key); members != bank_samples.end())
+                reachable_samples.insert(members->second.begin(), members->second.end());
         }
     }
     std::set<std::pair<std::string, std::string>> affected_volumes;
-    for (const auto &bank_key : unresolved_banks) {
-        const auto *bank = find_object(catalog, bank_key);
+    for (const auto &sample_key : unresolved_samples) {
+        const auto *sample = find_object(catalog, sample_key);
         result.issues.push_back({"REL_SBNK_MEMBER_TARGET_MISSING", "warning",
-                                 "sample-bank member does not resolve to one waveform",
-                                 bank == nullptr ? "" : sampler_path(*bank), bank_key});
-        if (!reachable_banks.contains(bank_key))
+                                 "Sample does not resolve to exactly one Wave Data object",
+                                 sample == nullptr ? "" : sampler_path(*sample), sample_key});
+        if (!reachable_samples.contains(sample_key))
             continue;
-        if (bank != nullptr) {
-            if (bank->placement) {
-                affected_volumes.emplace(display_text(bank->placement->partition_name),
-                                         display_text(bank->placement->volume_name));
+        if (sample != nullptr) {
+            if (sample->placement) {
+                affected_volumes.emplace(display_text(sample->placement->partition_name),
+                                         display_text(sample->placement->volume_name));
             }
             result.issues.push_back({"REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING", "error",
-                                     "active Program reaches a sample-bank member without one "
-                                     "waveform",
-                                     sampler_path(*bank), bank_key});
+                                     "active Program reaches a Sample without exactly one Wave Data object",
+                                     sampler_path(*sample), sample_key});
         }
     }
     for (auto &root : result.roots) {
@@ -567,15 +566,15 @@ WaveformOrphanReport analyze_waveform_orphans(const Container &container, const 
                                               const RelationshipGraph &graph) {
     WaveformOrphanReport result;
     for (const auto &item : catalog.objects) {
-        const auto *sample = std::get_if<CurrentSmpl>(&item.object.payload);
-        if (sample == nullptr)
+        const auto *wave_data = std::get_if<CurrentSmpl>(&item.object.payload);
+        if (wave_data == nullptr)
             continue;
         WaveformOrphanRow row;
         row.partition = item.partition;
         row.waveform_name = item.object.header.name;
         row.object_key = item.key;
         row.sfs_id = item.sfs_id;
-        row.smpl_link_id = sample->link_id.value;
+        row.smpl_link_id = wave_data->link_id.value;
         if (item.placement) {
             row.partition_name = item.placement->partition_name;
             row.volume_name = item.placement->volume_name;
@@ -585,18 +584,18 @@ WaveformOrphanReport analyze_waveform_orphans(const Container &container, const 
             if ((relation->type == "SBNK_LEFT_MEMBER_TO_SMPL" || relation->type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
                 relation->target_key && *relation->target_key == item.key &&
                 relation->quality == RelationshipQuality::known) {
-                if (const auto *bank = find_object(catalog, relation->source_key); bank != nullptr) {
-                    row.referencing_sample_banks.push_back(
-                        bank->placement ? std::format("{}/{}", bank->placement->volume_name, bank->object.header.name)
-                                        : bank->object.header.name);
+                if (const auto *sample = find_object(catalog, relation->source_key); sample != nullptr) {
+                    row.referencing_samples.push_back(
+                        sample->placement
+                            ? std::format("{}/{}", sample->placement->volume_name, sample->object.header.name)
+                            : sample->object.header.name);
                 }
             }
         }
-        if (!row.referencing_sample_banks.empty()) {
-            std::ranges::sort(row.referencing_sample_banks);
-            row.referencing_sample_banks.erase(
-                std::unique(row.referencing_sample_banks.begin(), row.referencing_sample_banks.end()),
-                row.referencing_sample_banks.end());
+        if (!row.referencing_samples.empty()) {
+            std::ranges::sort(row.referencing_samples);
+            row.referencing_samples.erase(std::unique(row.referencing_samples.begin(), row.referencing_samples.end()),
+                                          row.referencing_samples.end());
             row.status = WaveformStatus::referenced;
             row.basis = "unique current SBNK member match by waveform name and "
                         "SMPL link ID";
@@ -616,7 +615,7 @@ WaveformOrphanReport analyze_waveform_orphans(const Container &container, const 
                 if (relation.scope_key == item.scope_key &&
                     (relation.type == "SBNK_LEFT_MEMBER_TO_SMPL" || relation.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
                     relation.quality != RelationshipQuality::known) {
-                    blockers.push_back(std::format("sample-bank member is unresolved: {}", relation.source_key));
+                    blockers.push_back(std::format("Sample relationship is unresolved: {}", relation.source_key));
                 }
             }
             if (blockers.empty()) {
@@ -698,9 +697,8 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
             result.issues.push_back({
                 "REL_SBNK_MEMBER_TARGET_MISSING",
                 ValidationSeverity::error,
-                source == nullptr ? "sample-bank member does not resolve to one waveform"
-                                  : std::format("sample bank '{}' has a member that does not "
-                                                "resolve to one waveform",
+                source == nullptr ? "Sample does not resolve to exactly one Wave Data object"
+                                  : std::format("Sample '{}' does not resolve to exactly one Wave Data object",
                                                 source->object.header.name),
                 source == nullptr ? "" : sampler_path(*source),
                 relation.source_key,
@@ -727,7 +725,7 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
         result.issues.push_back({
             "REL_SBNK_PROGRAM_BITMAP_MISMATCH",
             ValidationSeverity::warning,
-            "sample-bank program bitmap differs from decoded direct Program "
+            "Sample Program bitmap differs from decoded direct Program "
             "assignments",
             source == nullptr ? "" : sampler_path(*source),
             comparison.sbnk_key,

@@ -151,7 +151,7 @@ TEST_F(FileOperationsTest, ExportValidationAllowsParentTraversalThatStaysInsideT
     std::filesystem::create_directories(graph_path.parent_path());
     const auto write_graph = [&](std::string_view wav_path) {
         std::ofstream output{graph_path};
-        output << nlohmann::json({{"schema", "axklib.volume_graph.v1"},
+        output << nlohmann::json({{"schema", "axklib.volume_graph.v2"},
                                   {"objects", {{"smpl", {{{"object_key", "smpl:1"}, {"wav_path", wav_path}}}}}}})
                       .dump();
     };

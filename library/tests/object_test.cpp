@@ -43,23 +43,23 @@ TEST(CurrentSmpl, MatchesMaintainedSemanticContract) {
     EXPECT_EQ(decoded->header.raw_type, "SMPL");
     EXPECT_EQ(decoded->header.name, "sine wave");
     ASSERT_TRUE(std::holds_alternative<axk::CurrentSmpl>(decoded->payload));
-    const auto &sample = std::get<axk::CurrentSmpl>(decoded->payload);
-    EXPECT_EQ(sample.sample_rate.value, 48000U);
-    EXPECT_EQ(sample.duplicate_sample_rate.value, 48000U);
-    EXPECT_EQ(sample.stored_sample_width_bytes.value, 2U);
-    EXPECT_EQ(sample.root_key.value, 66U);
-    EXPECT_EQ(sample.fine_tune_cents.value, -20);
-    EXPECT_EQ(sample.loop_mode.value, 1U);
-    EXPECT_EQ(sample.loop_mode_label, "->0");
-    EXPECT_EQ(sample.wave_length_frames.value, 128U);
-    EXPECT_EQ(sample.loop_start_frame.value, 0U);
-    EXPECT_EQ(sample.loop_length_frames.value, 128U);
-    EXPECT_EQ(sample.loop_end_frame_inclusive, 127U);
-    EXPECT_EQ(sample.loop_end_frame_exclusive, 128U);
-    EXPECT_EQ(sample.stored_pcm_offset, decoded->header.header_size);
-    EXPECT_EQ(sample.stored_pcm_bytes, decoded->header.payload_bytes_0x1c);
-    EXPECT_EQ(sample.sample_rate.source.offset, 0x28U);
-    EXPECT_EQ(sample.sample_rate.source.verification, axk::Verification::corroborated);
+    const auto &wave_data = std::get<axk::CurrentSmpl>(decoded->payload);
+    EXPECT_EQ(wave_data.sample_rate.value, 48000U);
+    EXPECT_EQ(wave_data.duplicate_sample_rate.value, 48000U);
+    EXPECT_EQ(wave_data.stored_sample_width_bytes.value, 2U);
+    EXPECT_EQ(wave_data.root_key.value, 66U);
+    EXPECT_EQ(wave_data.fine_tune_cents.value, -20);
+    EXPECT_EQ(wave_data.loop_mode.value, 1U);
+    EXPECT_EQ(wave_data.loop_mode_label, "->0");
+    EXPECT_EQ(wave_data.wave_length_frames.value, 128U);
+    EXPECT_EQ(wave_data.loop_start_frame.value, 0U);
+    EXPECT_EQ(wave_data.loop_length_frames.value, 128U);
+    EXPECT_EQ(wave_data.loop_end_frame_inclusive, 127U);
+    EXPECT_EQ(wave_data.loop_end_frame_exclusive, 128U);
+    EXPECT_EQ(wave_data.stored_pcm_offset, decoded->header.header_size);
+    EXPECT_EQ(wave_data.stored_pcm_bytes, decoded->header.payload_bytes_0x1c);
+    EXPECT_EQ(wave_data.sample_rate.source.offset, 0x28U);
+    EXPECT_EQ(wave_data.sample_rate.source.verification, axk::Verification::corroborated);
 }
 
 TEST(CurrentSmpl, RetainsMetadataOutsideDeclaredPcmAndPreservesWideDerivedLoopEnd) {
@@ -75,11 +75,11 @@ TEST(CurrentSmpl, RetainsMetadataOutsideDeclaredPcmAndPreservesWideDerivedLoopEn
     ASSERT_TRUE(writer.write_be32(0x9a, 2));
     const auto outside = axk::decode_object(payload);
     ASSERT_TRUE(outside);
-    const auto &sample = std::get<axk::CurrentSmpl>(outside->payload);
-    EXPECT_EQ(sample.stored_pcm_offset, 0xacU);
-    EXPECT_EQ(sample.stored_pcm_bytes, 1U);
-    EXPECT_EQ(sample.loop_end_frame_inclusive, 4'294'967'296ULL);
-    EXPECT_EQ(sample.loop_end_frame_exclusive, 4'294'967'297ULL);
+    const auto &wave_data = std::get<axk::CurrentSmpl>(outside->payload);
+    EXPECT_EQ(wave_data.stored_pcm_offset, 0xacU);
+    EXPECT_EQ(wave_data.stored_pcm_bytes, 1U);
+    EXPECT_EQ(wave_data.loop_end_frame_inclusive, 4'294'967'296ULL);
+    EXPECT_EQ(wave_data.loop_end_frame_exclusive, 4'294'967'297ULL);
 }
 
 TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
@@ -93,38 +93,38 @@ TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
     const auto decoded = axk::decode_object(*payload);
     ASSERT_TRUE(decoded);
     ASSERT_TRUE(std::holds_alternative<axk::CurrentSbnk>(decoded->payload));
-    const auto &bank = std::get<axk::CurrentSbnk>(decoded->payload);
-    EXPECT_EQ(bank.bank_name, "sine wave");
-    EXPECT_FALSE(bank.right_slot_present);
-    EXPECT_EQ(bank.right_link_role, "unused-zero");
-    EXPECT_FALSE(bank.right);
-    EXPECT_EQ(bank.left.sample_name, "sine wave");
-    EXPECT_EQ(bank.left.smpl_link_id, 23797180U);
-    EXPECT_EQ(bank.left.root_key, 66U);
-    EXPECT_EQ(bank.left.sample_rate, 48000U);
-    EXPECT_EQ(bank.left.fine_tune_cents, -20);
-    EXPECT_EQ(bank.left.wave_length_frames, 128U);
-    EXPECT_EQ(bank.inactive_right.sample_name, "");
-    EXPECT_EQ(bank.inactive_right.root_key, 66U);
-    EXPECT_EQ(bank.inactive_right.pitch_base_word, 5442U);
-    EXPECT_EQ(bank.sample_flags, 2U);
-    EXPECT_EQ(bank.key_range_high, 127U);
-    EXPECT_EQ(bank.key_range_low, 0U);
-    EXPECT_EQ(bank.sample_level, 100U);
-    EXPECT_EQ(bank.pan, 0);
-    EXPECT_TRUE(bank.linked_program_numbers.empty());
-    EXPECT_EQ(bank.control_records[0].device, 74U);
-    EXPECT_EQ(bank.control_records[0].range, 32);
-    EXPECT_EQ(bank.control_records[2].range, -32);
-    EXPECT_EQ(bank.numeric_fields.size(), 105U);
-    ASSERT_NE(bank.find_numeric_field("coarse_tune_0x0d5"), nullptr);
-    EXPECT_EQ(bank.find_numeric_field("coarse_tune_0x0d5")->value, 0);
-    ASSERT_NE(bank.find_numeric_field("left_sample_rate_0x0d8"), nullptr);
-    EXPECT_EQ(bank.find_numeric_field("left_sample_rate_0x0d8")->value, 48000);
-    ASSERT_NE(bank.find_numeric_field("sample_eq_gain_0x123"), nullptr);
-    EXPECT_EQ(bank.find_numeric_field("sample_eq_gain_0x123")->value, 64);
-    ASSERT_NE(bank.find_numeric_field("sample_portamento_time_0x184"), nullptr);
-    EXPECT_EQ(bank.find_numeric_field("sample_portamento_time_0x184")->value, 90);
+    const auto &sample = std::get<axk::CurrentSbnk>(decoded->payload);
+    EXPECT_EQ(sample.sample_name, "sine wave");
+    EXPECT_FALSE(sample.right_slot_present);
+    EXPECT_EQ(sample.right_link_role, "unused-zero");
+    EXPECT_FALSE(sample.right);
+    EXPECT_EQ(sample.left.wave_data_name, "sine wave");
+    EXPECT_EQ(sample.left.smpl_link_id, 23797180U);
+    EXPECT_EQ(sample.left.root_key, 66U);
+    EXPECT_EQ(sample.left.sample_rate, 48000U);
+    EXPECT_EQ(sample.left.fine_tune_cents, -20);
+    EXPECT_EQ(sample.left.wave_length_frames, 128U);
+    EXPECT_EQ(sample.inactive_right.wave_data_name, "");
+    EXPECT_EQ(sample.inactive_right.root_key, 66U);
+    EXPECT_EQ(sample.inactive_right.pitch_base_word, 5442U);
+    EXPECT_EQ(sample.sample_flags, 2U);
+    EXPECT_EQ(sample.key_range_high, 127U);
+    EXPECT_EQ(sample.key_range_low, 0U);
+    EXPECT_EQ(sample.sample_level, 100U);
+    EXPECT_EQ(sample.pan, 0);
+    EXPECT_TRUE(sample.linked_program_numbers.empty());
+    EXPECT_EQ(sample.control_records[0].device, 74U);
+    EXPECT_EQ(sample.control_records[0].range, 32);
+    EXPECT_EQ(sample.control_records[2].range, -32);
+    EXPECT_EQ(sample.numeric_fields.size(), 105U);
+    ASSERT_NE(sample.find_numeric_field("coarse_tune_0x0d5"), nullptr);
+    EXPECT_EQ(sample.find_numeric_field("coarse_tune_0x0d5")->value, 0);
+    ASSERT_NE(sample.find_numeric_field("left_sample_rate_0x0d8"), nullptr);
+    EXPECT_EQ(sample.find_numeric_field("left_sample_rate_0x0d8")->value, 48000);
+    ASSERT_NE(sample.find_numeric_field("sample_eq_gain_0x123"), nullptr);
+    EXPECT_EQ(sample.find_numeric_field("sample_eq_gain_0x123")->value, 64);
+    ASSERT_NE(sample.find_numeric_field("sample_portamento_time_0x184"), nullptr);
+    EXPECT_EQ(sample.find_numeric_field("sample_portamento_time_0x184")->value, 90);
 }
 
 TEST(CurrentSbac, MatchesMaintainedSlotAndBitmapContracts) {
@@ -138,16 +138,16 @@ TEST(CurrentSbac, MatchesMaintainedSlotAndBitmapContracts) {
     const auto decoded = axk::decode_object(*payload);
     ASSERT_TRUE(decoded);
     ASSERT_TRUE(std::holds_alternative<axk::CurrentSbac>(decoded->payload));
-    const auto &group = std::get<axk::CurrentSbac>(decoded->payload);
-    EXPECT_EQ(group.active_slot_count, 1U);
-    EXPECT_EQ(group.maximum_slot_count, 9U);
-    ASSERT_EQ(group.slots.size(), 1U);
-    EXPECT_EQ(group.slots[0].name, "_NewSample");
-    EXPECT_EQ(group.slots[0].raw_handle, 21249456U);
-    EXPECT_EQ(group.value_enable_words[0], 2130756064U);
-    EXPECT_EQ(group.enabled_parameter_numbers.front(), 5U);
-    EXPECT_EQ(group.enabled_parameter_numbers.back(), 85U);
-    EXPECT_EQ(group.enabled_numbers_outside_table, (std::vector<std::uint8_t>{89, 90, 91, 92, 93}));
+    const auto &sample_bank = std::get<axk::CurrentSbac>(decoded->payload);
+    EXPECT_EQ(sample_bank.active_slot_count, 1U);
+    EXPECT_EQ(sample_bank.maximum_slot_count, 9U);
+    ASSERT_EQ(sample_bank.slots.size(), 1U);
+    EXPECT_EQ(sample_bank.slots[0].name, "_NewSample");
+    EXPECT_EQ(sample_bank.slots[0].raw_handle, 21249456U);
+    EXPECT_EQ(sample_bank.value_enable_words[0], 2130756064U);
+    EXPECT_EQ(sample_bank.enabled_parameter_numbers.front(), 5U);
+    EXPECT_EQ(sample_bank.enabled_parameter_numbers.back(), 85U);
+    EXPECT_EQ(sample_bank.enabled_numbers_outside_table, (std::vector<std::uint8_t>{89, 90, 91, 92, 93}));
 }
 
 TEST(CurrentProg, PreservesEmptyVisibleAndUnsupportedAssignmentRows) {
@@ -156,7 +156,7 @@ TEST(CurrentProg, PreservesEmptyVisibleAndUnsupportedAssignmentRows) {
     ASSERT_TRUE(writer.write_ascii_field(0, 12, "FSFSDEV3SPLX", std::byte{}));
     ASSERT_TRUE(writer.write_ascii_field(0x0c, 4, "PROG", std::byte{}));
     ASSERT_TRUE(writer.write_ascii_field(0x32, 16, "001", std::byte{}));
-    ASSERT_TRUE(writer.write_ascii_field(0x120, 16, "Bank Group", std::byte{' '}));
+    ASSERT_TRUE(writer.write_ascii_field(0x120, 16, "Sample Bank", std::byte{' '}));
     ASSERT_TRUE(writer.write_be32(0x130, 0x12345678));
     ASSERT_TRUE(writer.write_u8(0x134, 2));
     ASSERT_TRUE(writer.write_u8(0x135, 1));
@@ -173,7 +173,7 @@ TEST(CurrentProg, PreservesEmptyVisibleAndUnsupportedAssignmentRows) {
     ASSERT_TRUE(std::holds_alternative<axk::CurrentProg>(decoded->payload));
     const auto &program = std::get<axk::CurrentProg>(decoded->payload);
     ASSERT_EQ(program.assignments.size(), 11U);
-    EXPECT_EQ(program.assignments[0].name, "Bank Group");
+    EXPECT_EQ(program.assignments[0].name, "Sample Bank");
     EXPECT_EQ(program.assignments[0].raw_handle, 0x12345678U);
     EXPECT_EQ(program.assignments[0].kind, 2U);
     EXPECT_EQ(program.assignments[0].level_offset, -12);

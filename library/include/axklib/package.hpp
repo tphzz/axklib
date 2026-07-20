@@ -194,7 +194,7 @@ struct PlannedPackageObject {
     std::optional<std::uint32_t> target_sfs_id;
     std::optional<std::uint32_t> target_link_id;
     std::vector<std::uint8_t> target_program_numbers;
-    bool target_grouped{};
+    bool target_sample_bank_member{};
     std::uint64_t payload_clusters{};
     std::uint64_t payload_sectors{};
     std::uint64_t continuation_clusters{};

@@ -154,10 +154,10 @@ struct plan_summary {
 enum class package_root_kind : std::uint8_t {
     volume = 0,
     program = 1,
-    bank_group = 2,
+    sample_bank = 2,
     sample = 3,
     wave_data = 4,
-    sample_bank [[deprecated("use sample")]] = sample,
+    bank_group [[deprecated("use sample_bank")]] = sample_bank,
 };
 
 struct package_root_selector {

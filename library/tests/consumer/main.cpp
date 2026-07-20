@@ -57,7 +57,7 @@ int main() {
         return 7;
 
     std::ofstream{manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.1","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"samples":[]}]}]})";
     auto plan = axk::build_plan::from_manifest(manifest.string(), context);
     if (!plan || !plan->apply(output.string(), {}, context) || !std::filesystem::exists(output))
         return 8;

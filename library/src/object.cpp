@@ -119,22 +119,22 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
                                           "current SBNK member contract requires at least 264 bytes")};
     }
     const ByteReader reader{payload};
-    const auto bank_name = reader.printable_ascii_field(0x32, 16);
+    const auto sample_name = reader.printable_ascii_field(0x32, 16);
     const auto instrument_name = reader.printable_ascii_field(0x50, 24);
     const auto left = decode_sbnk_member(reader, false);
     const auto inactive_right = decode_sbnk_member(reader, true);
-    if (!bank_name || !instrument_name || !left || !inactive_right) {
+    if (!sample_name || !instrument_name || !left || !inactive_right) {
         return std::unexpected{!left ? left.error()
                                      : (!inactive_right ? inactive_right.error()
                                                         : make_error(ErrorCode::object_malformed, ErrorCategory::object,
                                                                      "current SBNK names are malformed"))};
     }
     CurrentSbnk result;
-    result.bank_name = *bank_name;
+    result.sample_name = *sample_name;
     result.instrument_name = *instrument_name;
     result.left = *left;
     result.inactive_right = *inactive_right;
-    result.right_slot_present = !inactive_right->sample_name.empty();
+    result.right_slot_present = !inactive_right->wave_data_name.empty();
     if (result.right_slot_present) {
         result.right = *inactive_right;
         result.right_link_role = "sample-reference";

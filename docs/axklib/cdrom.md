@@ -104,7 +104,7 @@ An ordinary one-volume tree is:
       0000                     Sample Bank catalog
       F001 ...                 SBAC object payloads
     SBNK/
-      0000                     Sample Bank catalog
+      0000                     Sample catalog
       F001 ...                 SBNK object payloads
     SMPL/
       0000                     waveform catalog
@@ -399,12 +399,12 @@ diagnostic.
 ## Paired Sample-Member Stereo
 
 Some CD-ROM volumes store stereo material as paired sampler-visible `SBNK`
-members in one `SBAC` group. The left and right members have matching names with
+Samples in one `SBAC` Sample Bank. The left and right Samples have matching names with
 terminal `-L` and `-R`, and each member links to its own physical `SMPL` object.
 Structured waveform export keeps the physical mono `SMPL` files and writes an
 additional `_samples/rendered/` stereo WAV when the pair is known and audio-compatible.
-For rendered stereo names, duplicate-marked paired members can use the owning
-sample-bank or group label so the output path remains sampler-facing instead of
+For rendered stereo names, duplicate-marked paired Samples can use the owning
+Sample Bank label so the output path remains sampler-facing instead of
 only numeric.
 
 ## Path Mapping

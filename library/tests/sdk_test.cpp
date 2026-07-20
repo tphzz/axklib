@@ -184,9 +184,9 @@ TEST(Sdk, BuildAndAlterationInspectionApplyThroughTheFacade) {
     std::filesystem::remove_all(root, filesystem_error);
     std::filesystem::create_directories(root);
     std::ofstream{build_manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Keep","waveforms":[],"sample_banks":[]},{"name":"Delete","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.1","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Keep","waveforms":[],"samples":[]},{"name":"Delete","waveforms":[],"samples":[]}]}]})";
     std::ofstream{alteration_manifest}
-        << R"({"schema_version":"1.0","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Delete"}]})";
+        << R"({"schema_version":"1.1","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Delete"}]})";
 
     axk::operation_context context;
     TestProgressSink progress;
@@ -232,7 +232,7 @@ TEST(Sdk, MediaBuildPlanCreatesAFat12Image) {
     std::filesystem::create_directories(root);
     write_test_wave(audio);
     std::ofstream{manifest}
-        << R"({"schema_version":"1.0","format":"fat12_floppy","authored_volume":{"name":"Volume","waveforms":[{"id":"tone","name":"Tone","path":"tone.wav","root_key":60}],"sample_banks":[{"name":"Tone Bank","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127}]}})";
+        << R"({"schema_version":"1.1","format":"fat12_floppy","authored_volume":{"name":"Volume","waveforms":[{"id":"tone","name":"Tone","path":"tone.wav","root_key":60}],"samples":[{"name":"Tone Sample","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127}]}})";
 
     axk::operation_context context;
     auto plan = axk::build_plan::from_manifest(manifest.string(), context);
@@ -245,7 +245,7 @@ TEST(Sdk, MediaBuildPlanCreatesAFat12Image) {
 }
 
 TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
-    static_assert(static_cast<std::uint8_t>(axk::package_root_kind::bank_group) == 2U);
+    static_assert(static_cast<std::uint8_t>(axk::package_root_kind::sample_bank) == 2U);
     static_assert(static_cast<std::uint8_t>(axk::package_root_kind::sample) == 3U);
     static_assert(static_cast<std::uint8_t>(axk::package_root_kind::wave_data) == 4U);
     const auto root = std::filesystem::temp_directory_path() / "axklib-sdk-package";
@@ -299,7 +299,7 @@ TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
     EXPECT_EQ(invalid_export.error().code, axk::error_code::invalid_argument);
 
     std::ofstream{target_manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.1","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"samples":[]}]}]})";
     auto target_plan = axk::build_plan::from_manifest(target_manifest.string(), context);
     ASSERT_TRUE(target_plan) << target_plan.error().message;
     ASSERT_TRUE(target_plan->apply(target.string(), {}, context));
@@ -364,7 +364,7 @@ TEST(Sdk, ProgressCallbackFailureDoesNotCrossTheFacade) {
     std::filesystem::remove_all(root, filesystem_error);
     std::filesystem::create_directories(root);
     std::ofstream{manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.1","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"samples":[]}]}]})";
     axk::operation_context context;
     ThrowingProgressSink sink;
     context.set_progress_sink(&sink);

@@ -173,27 +173,27 @@ axk::Result<void> retarget_export_plan(axk::ExportPlan &plan, const std::filesys
             waveform.relative_wav_path = std::move(*pooled);
             waveform_paths.emplace(waveform.object_key, waveform.relative_wav_path);
         }
-        for (auto &bank : volume.sample_banks) {
-            for (auto &member : bank.members) {
+        for (auto &sample : volume.samples) {
+            for (auto &member : sample.members) {
                 if (const auto found = waveform_paths.find(member.waveform_key); found != waveform_paths.end())
                     member.relative_wav_path = found->second;
             }
             if (!render_stereo) {
-                bank.rendered_wav_path.reset();
+                sample.rendered_wav_path.reset();
                 continue;
             }
-            if (bank.rendered_wav_path && bank.members.size() == 2U) {
-                const auto left = std::ranges::find(volume.waveforms, bank.members[0].waveform_key,
+            if (sample.rendered_wav_path && sample.members.size() == 2U) {
+                const auto left = std::ranges::find(volume.waveforms, sample.members[0].waveform_key,
                                                     &axk::PhysicalWaveformExport::object_key);
-                const auto right = std::ranges::find(volume.waveforms, bank.members[1].waveform_key,
+                const auto right = std::ranges::find(volume.waveforms, sample.members[1].waveform_key,
                                                      &axk::PhysicalWaveformExport::object_key);
                 if (left != volume.waveforms.end() && right != volume.waveforms.end()) {
                     auto pooled = pooled_paths.allocate(
-                        volume.relative_root, "rendered", safe_display_path_name(bank.display_name, "sample"),
+                        volume.relative_root, "rendered", safe_display_path_name(sample.display_name, "sample"),
                         axk::audio_internal::WavSource::from_stereo(left->waveform, right->waveform));
                     if (!pooled)
                         return std::unexpected{pooled.error()};
-                    bank.rendered_wav_path = std::move(*pooled);
+                    sample.rendered_wav_path = std::move(*pooled);
                 }
             }
         }
@@ -352,12 +352,12 @@ void add_artifact_owner(ArtifactOwners &owners, std::filesystem::path path, Json
         entries.push_back(std::move(owner));
 }
 
-bool has_sfz_region(const axk::VolumeExport &volume, const axk::SampleBankExport &bank) {
-    if (bank.rendered_wav_path && !bank.members.empty()) {
-        return std::ranges::find(volume.waveforms, bank.members.front().waveform_key,
+bool has_sfz_region(const axk::VolumeExport &volume, const axk::SampleExport &sample) {
+    if (sample.rendered_wav_path && !sample.members.empty()) {
+        return std::ranges::find(volume.waveforms, sample.members.front().waveform_key,
                                  &axk::PhysicalWaveformExport::object_key) != volume.waveforms.end();
     }
-    return std::ranges::any_of(bank.members, [&](const auto &member) {
+    return std::ranges::any_of(sample.members, [&](const auto &member) {
         return member.quality == axk::RelationshipQuality::known &&
                std::ranges::find(volume.waveforms, member.waveform_key, &axk::PhysicalWaveformExport::object_key) !=
                    volume.waveforms.end();
@@ -468,10 +468,10 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
                     add_artifact_owner(artifact_owners, volume.relative_root / waveform.relative_wav_path,
                                        artifact_owner(source, volume, "SMPL", waveform.display_name));
                 }
-                for (const auto &bank : volume.sample_banks) {
-                    if (bank.rendered_wav_path) {
-                        add_artifact_owner(artifact_owners, volume.relative_root / *bank.rendered_wav_path,
-                                           artifact_owner(source, volume, "SBNK", bank.display_name));
+                for (const auto &sample : volume.samples) {
+                    if (sample.rendered_wav_path) {
+                        add_artifact_owner(artifact_owners, volume.relative_root / *sample.rendered_wav_path,
+                                           artifact_owner(source, volume, "SBNK", sample.display_name));
                     }
                 }
                 auto serialized = axk::app::serialize_volume_graph(volume, graph, std::filesystem::path{source_display},
@@ -537,24 +537,25 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
         auto instrument = instruments->written_files.begin();
         for (std::size_t volume_index = 0; volume_index < combined.volumes.size(); ++volume_index) {
             const auto &volume = combined.volumes[volume_index];
-            std::set<std::string> grouped;
-            for (const auto &group : volume.sample_bank_groups) {
-                const auto has_region = std::ranges::any_of(group.member_bank_keys, [&](const auto &key) {
-                    const auto bank = std::ranges::find(volume.sample_banks, key, &axk::SampleBankExport::object_key);
-                    return bank != volume.sample_banks.end() && has_sfz_region(volume, *bank);
+            std::set<std::string> banked_samples;
+            for (const auto &sample_bank : volume.sample_banks) {
+                const auto has_region = std::ranges::any_of(sample_bank.member_sample_keys, [&](const auto &key) {
+                    const auto sample = std::ranges::find(volume.samples, key, &axk::SampleExport::object_key);
+                    return sample != volume.samples.end() && has_sfz_region(volume, *sample);
                 });
-                grouped.insert(group.member_bank_keys.begin(), group.member_bank_keys.end());
+                banked_samples.insert(sample_bank.member_sample_keys.begin(), sample_bank.member_sample_keys.end());
                 if (has_region && instrument != instruments->written_files.end()) {
-                    add_artifact_owner(artifact_owners, instrument->lexically_relative(staging),
-                                       object_owner(combined_volume_owners[volume_index], "SBAC", group.display_name));
+                    add_artifact_owner(
+                        artifact_owners, instrument->lexically_relative(staging),
+                        object_owner(combined_volume_owners[volume_index], "SBAC", sample_bank.display_name));
                     ++instrument;
                 }
             }
-            for (const auto &bank : volume.sample_banks) {
-                if (!grouped.contains(bank.object_key) && has_sfz_region(volume, bank) &&
+            for (const auto &sample : volume.samples) {
+                if (!banked_samples.contains(sample.object_key) && has_sfz_region(volume, sample) &&
                     instrument != instruments->written_files.end()) {
                     add_artifact_owner(artifact_owners, instrument->lexically_relative(staging),
-                                       object_owner(combined_volume_owners[volume_index], "SBNK", bank.display_name));
+                                       object_owner(combined_volume_owners[volume_index], "SBNK", sample.display_name));
                     ++instrument;
                 }
             }

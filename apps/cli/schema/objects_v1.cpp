@@ -19,7 +19,7 @@ std::string hex(std::span<const std::byte> bytes) {
 }
 
 OrderedJson member_json(const CurrentSbnkMember &member) {
-    return {{"sample_name", member.sample_name},
+    return {{"wave_data_name", member.wave_data_name},
             {"smpl_link_id", member.smpl_link_id},
             {"root_key", member.root_key},
             {"sample_rate", member.sample_rate},
@@ -31,60 +31,60 @@ OrderedJson member_json(const CurrentSbnkMember &member) {
 }
 
 OrderedJson decoded_json(const DecodedObject &object) {
-    if (const auto *sample = std::get_if<CurrentSmpl>(&object.payload)) {
+    if (const auto *wave_data = std::get_if<CurrentSmpl>(&object.payload)) {
         return {{"kind", "SMPL"},
-                {"sample_rate", sample->sample_rate.value},
-                {"stored_sample_width_bytes", sample->stored_sample_width_bytes.value},
-                {"source_wave_name", sample->source_wave_name.value},
-                {"group_id", sample->group_id.value},
-                {"link_id", sample->link_id.value},
-                {"duplicate_sample_rate", sample->duplicate_sample_rate.value},
-                {"root_key", sample->root_key.value},
-                {"fine_tune_cents", sample->fine_tune_cents.value},
-                {"loop_mode", sample->loop_mode.value},
-                {"loop_mode_label", sample->loop_mode_label},
-                {"wave_length_frames", sample->wave_length_frames.value},
-                {"loop_start_frame", sample->loop_start_frame.value},
-                {"loop_length_frames", sample->loop_length_frames.value},
-                {"loop_end_frame_inclusive", sample->loop_end_frame_inclusive},
-                {"loop_end_frame_exclusive", sample->loop_end_frame_exclusive},
-                {"stored_pcm_offset", sample->stored_pcm_offset},
-                {"stored_pcm_bytes", sample->stored_pcm_bytes},
-                {"compact_record_hex", hex(sample->compact_record)}};
+                {"sample_rate", wave_data->sample_rate.value},
+                {"stored_sample_width_bytes", wave_data->stored_sample_width_bytes.value},
+                {"source_wave_name", wave_data->source_wave_name.value},
+                {"group_id", wave_data->group_id.value},
+                {"link_id", wave_data->link_id.value},
+                {"duplicate_sample_rate", wave_data->duplicate_sample_rate.value},
+                {"root_key", wave_data->root_key.value},
+                {"fine_tune_cents", wave_data->fine_tune_cents.value},
+                {"loop_mode", wave_data->loop_mode.value},
+                {"loop_mode_label", wave_data->loop_mode_label},
+                {"wave_length_frames", wave_data->wave_length_frames.value},
+                {"loop_start_frame", wave_data->loop_start_frame.value},
+                {"loop_length_frames", wave_data->loop_length_frames.value},
+                {"loop_end_frame_inclusive", wave_data->loop_end_frame_inclusive},
+                {"loop_end_frame_exclusive", wave_data->loop_end_frame_exclusive},
+                {"stored_pcm_offset", wave_data->stored_pcm_offset},
+                {"stored_pcm_bytes", wave_data->stored_pcm_bytes},
+                {"compact_record_hex", hex(wave_data->compact_record)}};
     }
-    if (const auto *bank = std::get_if<CurrentSbnk>(&object.payload)) {
+    if (const auto *sample = std::get_if<CurrentSbnk>(&object.payload)) {
         auto fields = OrderedJson::object();
-        for (const auto &field : bank->numeric_fields)
+        for (const auto &field : sample->numeric_fields)
             fields[field.name] = field.value ? OrderedJson(*field.value) : OrderedJson(nullptr);
         auto controls = OrderedJson::array();
-        for (const auto &control : bank->control_records)
+        for (const auto &control : sample->control_records)
             controls.push_back({control.device, control.function, control.type, control.range});
         return {{"kind", "SBNK"},
-                {"bank_name", bank->bank_name},
-                {"instrument_name", bank->instrument_name},
-                {"right_slot_present", bank->right_slot_present},
-                {"right_link_role", bank->right_link_role},
-                {"left", member_json(bank->left)},
-                {"right", bank->right ? member_json(*bank->right) : OrderedJson(nullptr)},
-                {"inactive_right", member_json(bank->inactive_right)},
-                {"linked_program_bitmap_words", bank->linked_program_bitmap_words},
-                {"linked_program_numbers", bank->linked_program_numbers},
+                {"sample_name", sample->sample_name},
+                {"instrument_name", sample->instrument_name},
+                {"right_slot_present", sample->right_slot_present},
+                {"right_link_role", sample->right_link_role},
+                {"left", member_json(sample->left)},
+                {"right", sample->right ? member_json(*sample->right) : OrderedJson(nullptr)},
+                {"inactive_right", member_json(sample->inactive_right)},
+                {"linked_program_bitmap_words", sample->linked_program_bitmap_words},
+                {"linked_program_numbers", sample->linked_program_numbers},
                 {"numeric_fields", std::move(fields)},
                 {"control_records", std::move(controls)},
-                {"raw_parameter_window_hex", hex(bank->raw_parameter_window)}};
+                {"raw_parameter_window_hex", hex(sample->raw_parameter_window)}};
     }
-    if (const auto *group = std::get_if<CurrentSbac>(&object.payload)) {
+    if (const auto *sample_bank = std::get_if<CurrentSbac>(&object.payload)) {
         auto slots = OrderedJson::array();
-        for (const auto &slot : group->slots)
+        for (const auto &slot : sample_bank->slots)
             slots.push_back({{"name", slot.name}, {"raw_handle", slot.raw_handle}, {"offset", slot.offset}});
         return {{"kind", "SBAC"},
-                {"raw_sample_parameter_block_hex", hex(group->raw_sample_parameter_block)},
-                {"value_enable_words", group->value_enable_words},
-                {"enabled_parameter_numbers", group->enabled_parameter_numbers},
-                {"enabled_numbers_outside_table", group->enabled_numbers_outside_table},
-                {"bulk_assigned_sample_count", group->bulk_assigned_sample_count},
-                {"active_slot_count", group->active_slot_count},
-                {"maximum_slot_count", group->maximum_slot_count},
+                {"raw_sample_parameter_block_hex", hex(sample_bank->raw_sample_parameter_block)},
+                {"value_enable_words", sample_bank->value_enable_words},
+                {"enabled_parameter_numbers", sample_bank->enabled_parameter_numbers},
+                {"enabled_numbers_outside_table", sample_bank->enabled_numbers_outside_table},
+                {"bulk_assigned_sample_count", sample_bank->bulk_assigned_sample_count},
+                {"active_slot_count", sample_bank->active_slot_count},
+                {"maximum_slot_count", sample_bank->maximum_slot_count},
                 {"slots", std::move(slots)}};
     }
     if (const auto *program = std::get_if<CurrentProg>(&object.payload)) {

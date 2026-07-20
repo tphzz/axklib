@@ -106,14 +106,14 @@ void axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &gra
         return;
     }
     std::set<std::string> programs;
-    std::set<std::string> groups;
-    std::set<std::string> banks;
+    std::set<std::string> sample_banks;
+    std::set<std::string> samples;
     if (scope == "program")
         programs.insert(std::string{selector_key});
     else if (scope == "sbac")
-        groups.insert(std::string{selector_key});
+        sample_banks.insert(std::string{selector_key});
     else if (scope == "sbnk")
-        banks.insert(std::string{selector_key});
+        samples.insert(std::string{selector_key});
     bool changed = true;
     while (changed) {
         changed = false;
@@ -124,40 +124,41 @@ void axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &gra
                 (row.assignment_state == AssignmentState::active ||
                  row.assignment_state == AssignmentState::source_load)) {
                 if (row.type == "PROG_ASSIGNMENT_TO_SBAC")
-                    changed = groups.insert(*row.target_key).second || changed;
+                    changed = sample_banks.insert(*row.target_key).second || changed;
                 else if (row.type == "PROG_ASSIGNMENT_TO_SBNK")
-                    changed = banks.insert(*row.target_key).second || changed;
+                    changed = samples.insert(*row.target_key).second || changed;
             }
-            if (groups.contains(row.source_key) && row.type == "SBAC_SLOT_TO_SBNK" &&
+            if (sample_banks.contains(row.source_key) && row.type == "SBAC_SLOT_TO_SBNK" &&
                 (row.quality == RelationshipQuality::known || row.quality == RelationshipQuality::likely)) {
-                changed = banks.insert(*row.target_key).second || changed;
+                changed = samples.insert(*row.target_key).second || changed;
             }
         }
     }
     std::set<std::string> confirmed_waveforms;
     for (const auto &row : graph.relationships) {
-        if (!row.target_key || !banks.contains(row.source_key) || row.quality != RelationshipQuality::known)
+        if (!row.target_key || !samples.contains(row.source_key) || row.quality != RelationshipQuality::known)
             continue;
         if (row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL")
             confirmed_waveforms.insert(*row.target_key);
     }
     for (auto &volume : plan.volumes) {
-        std::erase_if(volume.sample_banks, [&](const auto &bank) { return !banks.contains(bank.object_key); });
+        std::erase_if(volume.samples, [&](const auto &sample) { return !samples.contains(sample.object_key); });
         std::set<std::string> waveforms;
-        for (const auto &bank : volume.sample_banks) {
-            for (const auto &member : bank.members)
+        for (const auto &sample : volume.samples) {
+            for (const auto &member : sample.members)
                 waveforms.insert(member.waveform_key);
         }
         std::erase_if(volume.waveforms, [&](const auto &waveform) { return !waveforms.contains(waveform.object_key); });
-        std::erase_if(volume.sample_bank_groups, [&](const auto &group) { return !groups.contains(group.object_key); });
-        for (auto &group : volume.sample_bank_groups) {
-            std::erase_if(group.member_bank_keys, [&](const auto &key) { return !banks.contains(key); });
-            std::erase_if(group.relationship_bank_keys, [&](const auto &key) { return !banks.contains(key); });
+        std::erase_if(volume.sample_banks,
+                      [&](const auto &sample_bank) { return !sample_banks.contains(sample_bank.object_key); });
+        for (auto &sample_bank : volume.sample_banks) {
+            std::erase_if(sample_bank.member_sample_keys, [&](const auto &key) { return !samples.contains(key); });
+            std::erase_if(sample_bank.relationship_sample_keys,
+                          [&](const auto &key) { return !samples.contains(key); });
         }
         std::erase_if(volume.programs, [&](const auto &program) { return !programs.contains(program.object_key); });
     }
-    std::erase_if(plan.volumes,
-                  [](const auto &volume) { return volume.waveforms.empty() && volume.sample_banks.empty(); });
+    std::erase_if(plan.volumes, [](const auto &volume) { return volume.waveforms.empty() && volume.samples.empty(); });
     for (auto &scope : plan.unresolved_wave_data) {
         std::erase_if(scope.waveforms,
                       [&](const auto &waveform) { return !confirmed_waveforms.contains(waveform.object_key); });

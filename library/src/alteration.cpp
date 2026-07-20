@@ -49,6 +49,70 @@ Error transaction_error(std::string message) {
     return make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction, std::move(message));
 }
 
+void rename_json_field(Json &object, std::string_view old_name, std::string_view new_name) {
+    if (!object.is_object() || !object.contains(old_name))
+        return;
+    object[std::string{new_name}] = std::move(object[std::string{old_name}]);
+    object.erase(std::string{old_name});
+}
+
+void migrate_legacy_program(Json &program) {
+    if (!program.is_object() || !program.contains("assignments") || !program["assignments"].is_array())
+        return;
+    for (auto &assignment : program["assignments"]) {
+        rename_json_field(assignment, "sample_bank", "sample");
+        rename_json_field(assignment, "sample_bank_group", "sample_bank");
+    }
+}
+
+void migrate_legacy_volume(Json &volume) {
+    rename_json_field(volume, "sample_banks", "samples");
+    rename_json_field(volume, "sample_bank_groups", "sample_banks");
+    if (volume.contains("sample_banks") && volume["sample_banks"].is_array()) {
+        for (auto &sample_bank : volume["sample_banks"]) {
+            rename_json_field(sample_bank, "member_sample_bank", "member_sample");
+            rename_json_field(sample_bank, "member_sample_banks", "member_samples");
+        }
+    }
+    if (volume.contains("programs") && volume["programs"].is_array()) {
+        for (auto &program : volume["programs"])
+            migrate_legacy_program(program);
+    }
+}
+
+bool migrate_legacy_alteration_manifest(Json &root) {
+    if (!root.is_object() || root.value("schema_version", "") != "1.0")
+        return false;
+    if (root.contains("operations") && root["operations"].is_array()) {
+        for (auto &operation : root["operations"]) {
+            const auto type = operation.value("type", "");
+            if (type == "delete_sbnk") {
+                rename_json_field(operation, "sample_bank_name", "sample_name");
+            } else if (type == "insert_sbnk") {
+                rename_json_field(operation, "sample_bank", "sample");
+            } else if (type == "rename_sbnk") {
+                rename_json_field(operation, "sample_bank_name", "sample_name");
+                rename_json_field(operation, "new_sample_bank_name", "new_sample_name");
+            } else if (type == "delete_sbac") {
+                rename_json_field(operation, "sample_bank_group_name", "sample_bank_name");
+            } else if (type == "insert_sbac") {
+                rename_json_field(operation, "sample_bank_group", "sample_bank");
+                if (operation.contains("sample_bank"))
+                    rename_json_field(operation["sample_bank"], "member_sample_banks", "member_samples");
+            } else if (type == "rename_sbac") {
+                rename_json_field(operation, "sample_bank_group_name", "sample_bank_name");
+                rename_json_field(operation, "new_sample_bank_group_name", "new_sample_bank_name");
+            } else if (type == "insert_volume" && operation.contains("volume")) {
+                migrate_legacy_volume(operation["volume"]);
+            } else if (type == "insert_program" && operation.contains("program")) {
+                migrate_legacy_program(operation["program"]);
+            }
+        }
+    }
+    root["schema_version"] = "1.1";
+    return true;
+}
+
 struct MutablePartition {
     const Partition *source{};
     std::optional<std::string> renamed_name;
@@ -94,15 +158,15 @@ struct OperationView {
     std::string partition_name;
     std::string new_partition_name;
     std::optional<VolumeSpec> volume;
-    std::string sample_bank_name;
-    std::optional<SampleBankSpec> sample_bank;
+    std::string sample_name;
+    std::optional<SampleSpec> sample;
     std::optional<InsertWaveformSpec> waveform;
     std::string waveform_name;
     std::string new_waveform_name;
+    std::string new_sample_name;
+    std::string sample_bank_name;
     std::string new_sample_bank_name;
-    std::string sample_bank_group_name;
-    std::string new_sample_bank_group_name;
-    std::optional<SampleBankGroupSpec> sample_bank_group;
+    std::optional<SampleBankSpec> sample_bank;
     std::optional<std::uint8_t> program_number;
     std::optional<ProgramSpec> program;
 };
@@ -126,13 +190,13 @@ OperationView operation_view(const AlterationOperation &operation) {
             } else if constexpr (std::same_as<T, RenamePartitionOperation>) {
                 result.partition_name = value.partition_name;
                 result.new_partition_name = value.new_partition_name;
-            } else if constexpr (std::same_as<T, DeleteSampleBankOperation>) {
+            } else if constexpr (std::same_as<T, DeleteSampleOperation>) {
                 result.volume_name = value.volume_name;
-                result.sample_bank_name = value.sample_bank_name;
-            } else if constexpr (std::same_as<T, InsertSampleBankOperation>) {
+                result.sample_name = value.sample_name;
+            } else if constexpr (std::same_as<T, InsertSampleOperation>) {
                 result.volume_name = value.volume_name;
-                result.sample_bank_name = value.sample_bank.name;
-                result.sample_bank = value.sample_bank;
+                result.sample_name = value.sample.name;
+                result.sample = value.sample;
             } else if constexpr (std::same_as<T, InsertWaveformOperation>) {
                 result.volume_name = value.volume_name;
                 result.waveform = value.waveform;
@@ -143,21 +207,21 @@ OperationView operation_view(const AlterationOperation &operation) {
                 result.volume_name = value.volume_name;
                 result.waveform_name = value.waveform_name;
                 result.new_waveform_name = value.new_waveform_name;
+            } else if constexpr (std::same_as<T, RenameSampleOperation>) {
+                result.volume_name = value.volume_name;
+                result.sample_name = value.sample_name;
+                result.new_sample_name = value.new_sample_name;
+            } else if constexpr (std::same_as<T, DeleteSampleBankOperation>) {
+                result.volume_name = value.volume_name;
+                result.sample_bank_name = value.sample_bank_name;
+            } else if constexpr (std::same_as<T, InsertSampleBankOperation>) {
+                result.volume_name = value.volume_name;
+                result.sample_bank_name = value.sample_bank.name;
+                result.sample_bank = value.sample_bank;
             } else if constexpr (std::same_as<T, RenameSampleBankOperation>) {
                 result.volume_name = value.volume_name;
                 result.sample_bank_name = value.sample_bank_name;
                 result.new_sample_bank_name = value.new_sample_bank_name;
-            } else if constexpr (std::same_as<T, DeleteSampleBankGroupOperation>) {
-                result.volume_name = value.volume_name;
-                result.sample_bank_group_name = value.sample_bank_group_name;
-            } else if constexpr (std::same_as<T, InsertSampleBankGroupOperation>) {
-                result.volume_name = value.volume_name;
-                result.sample_bank_group_name = value.sample_bank_group.name;
-                result.sample_bank_group = value.sample_bank_group;
-            } else if constexpr (std::same_as<T, RenameSampleBankGroupOperation>) {
-                result.volume_name = value.volume_name;
-                result.sample_bank_group_name = value.sample_bank_group_name;
-                result.new_sample_bank_group_name = value.new_sample_bank_group_name;
             } else if constexpr (std::same_as<T, DeleteProgramOperation>) {
                 result.volume_name = value.volume_name;
                 result.program_number = value.program_number;
@@ -184,11 +248,11 @@ AlterationOperation typed_operation(OperationView value) {
         data = RenamePartitionOperation{std::move(value.partition), std::move(value.partition_name),
                                         std::move(value.new_partition_name)};
     } else if (value.type == "delete_sbnk") {
-        data = DeleteSampleBankOperation{std::move(value.partition), std::move(value.volume_name),
-                                         std::move(value.sample_bank_name)};
+        data = DeleteSampleOperation{std::move(value.partition), std::move(value.volume_name),
+                                     std::move(value.sample_name)};
     } else if (value.type == "insert_sbnk") {
-        data = InsertSampleBankOperation{std::move(value.partition), std::move(value.volume_name),
-                                         std::move(*value.sample_bank)};
+        data =
+            InsertSampleOperation{std::move(value.partition), std::move(value.volume_name), std::move(*value.sample)};
     } else if (value.type == "insert_waveform") {
         data = InsertWaveformOperation{std::move(value.partition), std::move(value.volume_name),
                                        std::move(*value.waveform)};
@@ -199,18 +263,17 @@ AlterationOperation typed_operation(OperationView value) {
         data = RenameWaveformOperation{std::move(value.partition), std::move(value.volume_name),
                                        std::move(value.waveform_name), std::move(value.new_waveform_name)};
     } else if (value.type == "rename_sbnk") {
+        data = RenameSampleOperation{std::move(value.partition), std::move(value.volume_name),
+                                     std::move(value.sample_name), std::move(value.new_sample_name)};
+    } else if (value.type == "delete_sbac") {
+        data = DeleteSampleBankOperation{std::move(value.partition), std::move(value.volume_name),
+                                         std::move(value.sample_bank_name)};
+    } else if (value.type == "insert_sbac") {
+        data = InsertSampleBankOperation{std::move(value.partition), std::move(value.volume_name),
+                                         std::move(*value.sample_bank)};
+    } else if (value.type == "rename_sbac") {
         data = RenameSampleBankOperation{std::move(value.partition), std::move(value.volume_name),
                                          std::move(value.sample_bank_name), std::move(value.new_sample_bank_name)};
-    } else if (value.type == "delete_sbac") {
-        data = DeleteSampleBankGroupOperation{std::move(value.partition), std::move(value.volume_name),
-                                              std::move(value.sample_bank_group_name)};
-    } else if (value.type == "insert_sbac") {
-        data = InsertSampleBankGroupOperation{std::move(value.partition), std::move(value.volume_name),
-                                              std::move(*value.sample_bank_group)};
-    } else if (value.type == "rename_sbac") {
-        data = RenameSampleBankGroupOperation{std::move(value.partition), std::move(value.volume_name),
-                                              std::move(value.sample_bank_group_name),
-                                              std::move(value.new_sample_bank_group_name)};
     } else if (value.type == "delete_program") {
         data = DeleteProgramOperation{std::move(value.partition), std::move(value.volume_name), *value.program_number};
     } else {
@@ -638,13 +701,14 @@ Result<void> set_sbnk_program_bit(TransactionState &state, MutablePartition &par
     return replace_fixed_object_payload(state, partition, id, std::move(*payload), cancellation);
 }
 
-Result<void> set_sbnk_group_flag(TransactionState &state, MutablePartition &partition, SfsId id, bool enabled,
-                                 const CancellationToken &cancellation) {
+Result<void> set_sbnk_sample_bank_flag(TransactionState &state, MutablePartition &partition, SfsId id, bool enabled,
+                                       const CancellationToken &cancellation) {
     auto payload = current_payload(state, partition, id, cancellation);
     if (!payload)
         return std::unexpected{payload.error()};
     if (payload->size() <= 0xd0U) {
-        return std::unexpected{transaction_error("SBNK payload is too short for its sample-bank-group flag")};
+        return std::unexpected{
+            transaction_error("Sample (SBNK) payload is too short for its Sample Bank membership flag")};
     }
     auto value = std::to_integer<std::uint8_t>((*payload)[0xd0U]);
     value = enabled ? static_cast<std::uint8_t>(value | 1U) : static_cast<std::uint8_t>(value & 0xfeU);
@@ -1082,7 +1146,7 @@ Result<OperationReport> insert_volume(TransactionState &state, const OperationVi
         if (name == operation.volume->name)
             return std::unexpected{transaction_error("partition already contains the requested volume")};
     }
-    HdsBuildManifest template_manifest{"1.0", minimum_hds_size, {{"AXK ALTER", {*operation.volume}}}};
+    HdsBuildManifest template_manifest{"1.1", minimum_hds_size, {{"AXK ALTER", {*operation.volume}}}};
     auto geometry = plan_hds_geometry(template_manifest);
     if (!geometry)
         return std::unexpected{geometry.error()};
@@ -1198,48 +1262,48 @@ Result<OperationReport> delete_sbnk(TransactionState &state, const OperationView
         return std::unexpected{transaction_error("partition index does not exist")};
     }
     auto &partition = found->second;
-    auto located = category_object(state, partition, operation.volume_name, "SBNK", operation.sample_bank_name, "SBNK",
-                                   cancellation);
+    auto located =
+        category_object(state, partition, operation.volume_name, "SBNK", operation.sample_name, "SBNK", cancellation);
     if (!located)
         return std::unexpected{located.error()};
-    const auto [directory_id, bank_id] = *located;
-    auto payload = current_payload(state, partition, bank_id, cancellation);
+    const auto [directory_id, sample_id] = *located;
+    auto payload = current_payload(state, partition, sample_id, cancellation);
     if (!payload)
         return std::unexpected{payload.error()};
     auto decoded = decode_object(*payload);
     if (!decoded)
         return std::unexpected{decoded.error()};
-    const auto *bank = std::get_if<CurrentSbnk>(&decoded->payload);
-    if (bank == nullptr) {
-        return std::unexpected{transaction_error("sample bank is not a current SBNK object")};
+    const auto *sample = std::get_if<CurrentSbnk>(&decoded->payload);
+    if (sample == nullptr) {
+        return std::unexpected{transaction_error("Sample is not a current SBNK object")};
     }
-    if (!bank->linked_program_numbers.empty()) {
-        return std::unexpected{transaction_error("sample bank is referenced by its Program link bitmap")};
+    if (!sample->linked_program_numbers.empty()) {
+        return std::unexpected{transaction_error("Sample is referenced by its Program link bitmap")};
     }
     for (const auto &[edge_partition, source, target] : state.known_edges) {
-        if (edge_partition == *partition_index && target == bank_id && record_exists(partition, source)) {
-            return std::unexpected{transaction_error("sample bank is referenced by a Program or sample-bank group")};
+        if (edge_partition == *partition_index && target == sample_id && record_exists(partition, source)) {
+            return std::unexpected{transaction_error("Sample is referenced by a Program or Sample Bank")};
         }
     }
     if (auto removed =
-            remove_directory_entry(state, partition, directory_id, bank_id, operation.sample_bank_name, cancellation);
+            remove_directory_entry(state, partition, directory_id, sample_id, operation.sample_name, cancellation);
         !removed) {
         return std::unexpected{removed.error()};
     }
-    auto freed = release_record(partition, bank_id);
+    auto freed = release_record(partition, sample_id);
     if (!freed)
         return std::unexpected{freed.error()};
     std::erase_if(state.known_edges, [&](const auto &edge) {
         const auto &[edge_partition, source, target] = edge;
-        return edge_partition == *partition_index && (source == bank_id || target == bank_id);
+        return edge_partition == *partition_index && (source == sample_id || target == sample_id);
     });
     OperationReport report;
     report.id = operation.id;
     report.type = operation.type;
     report.partition = *partition_index;
     report.volume_name = operation.volume_name;
-    report.object_name = operation.sample_bank_name;
-    report.removed_sfs_ids = {bank_id};
+    report.object_name = operation.sample_name;
+    report.removed_sfs_ids = {sample_id};
     report.freed_clusters = *freed;
     return report;
 }
@@ -1256,12 +1320,12 @@ Result<detail::PreparedWaveformMember> waveform_member(TransactionState &state, 
     auto decoded = decode_object(*payload);
     if (!decoded)
         return std::unexpected{decoded.error()};
-    const auto *sample = std::get_if<CurrentSmpl>(&decoded->payload);
-    if (sample == nullptr || sample->link_id.value == 0U) {
+    const auto *wave_data = std::get_if<CurrentSmpl>(&decoded->payload);
+    if (wave_data == nullptr || wave_data->link_id.value == 0U) {
         return std::unexpected{transaction_error("waveform has no usable current SMPL link ID")};
     }
-    return detail::PreparedWaveformMember{std::string{waveform_name}, sample->link_id.value,
-                                          sample->duplicate_sample_rate.value, sample->wave_length_frames.value};
+    return detail::PreparedWaveformMember{std::string{waveform_name}, wave_data->link_id.value,
+                                          wave_data->duplicate_sample_rate.value, wave_data->wave_length_frames.value};
 }
 
 Result<OperationReport> insert_sbnk(TransactionState &state, const OperationView &operation,
@@ -1270,11 +1334,11 @@ Result<OperationReport> insert_sbnk(TransactionState &state, const OperationView
     if (!partition_index)
         return std::unexpected{partition_index.error()};
     const auto found = state.partitions.find(partition_index->value);
-    if (found == state.partitions.end() || !operation.sample_bank) {
+    if (found == state.partitions.end() || !operation.sample) {
         return std::unexpected{transaction_error("insert-sbnk target is invalid")};
     }
     auto &partition = found->second;
-    const auto &spec = *operation.sample_bank;
+    const auto &spec = *operation.sample;
     auto directory = volume_category(state, partition, operation.volume_name, "SBNK", cancellation);
     if (!directory)
         return std::unexpected{directory.error()};
@@ -1285,10 +1349,10 @@ Result<OperationReport> insert_sbnk(TransactionState &state, const OperationView
     if (!entries)
         return std::unexpected{entries.error()};
     if (std::ranges::any_of(*entries, [&](const ParsedDirectoryEntry &entry) { return entry.name == spec.name; })) {
-        return std::unexpected{transaction_error("volume already contains the requested sample bank")};
+        return std::unexpected{transaction_error("volume already contains the requested Sample")};
     }
     if (!spec.waveform_id) {
-        return std::unexpected{transaction_error("sample bank requires waveform_name")};
+        return std::unexpected{transaction_error("Sample requires waveform_name")};
     }
     auto left = waveform_member(state, partition, operation.volume_name, *spec.waveform_id, cancellation);
     if (!left)
@@ -1299,7 +1363,7 @@ Result<OperationReport> insert_sbnk(TransactionState &state, const OperationView
         if (!member)
             return std::unexpected{member.error()};
         if (member->sample_rate != left->sample_rate || member->frame_count != left->frame_count) {
-            return std::unexpected{transaction_error("stereo sample bank requires matching sample "
+            return std::unexpected{transaction_error("stereo Sample requires matching Wave Data sample "
                                                      "rates and frame counts")};
         }
         right = std::move(*member);
@@ -1376,11 +1440,11 @@ Result<OperationReport> insert_waveform(TransactionState &state, const Operation
         auto decoded = decode_object(*payload);
         if (!decoded)
             return std::unexpected{decoded.error()};
-        const auto *sample = std::get_if<CurrentSmpl>(&decoded->payload);
-        if (sample == nullptr || sample->link_id.value == 0U) {
+        const auto *wave_data = std::get_if<CurrentSmpl>(&decoded->payload);
+        if (wave_data == nullptr || wave_data->link_id.value == 0U) {
             return std::unexpected{transaction_error("existing waveform has no current SMPL link ID")};
         }
-        link_ids.insert(sample->link_id.value);
+        link_ids.insert(wave_data->link_id.value);
     }
 
     AudioImportOptions options;
@@ -1473,21 +1537,21 @@ Result<OperationReport> delete_waveform(TransactionState &state, const Operation
     auto waveform_object = decode_object(*waveform_payload);
     if (!waveform_object)
         return std::unexpected{waveform_object.error()};
-    const auto *waveform = std::get_if<CurrentSmpl>(&waveform_object->payload);
-    if (waveform == nullptr || waveform->link_id.value == 0U) {
+    const auto *wave_data = std::get_if<CurrentSmpl>(&waveform_object->payload);
+    if (wave_data == nullptr || wave_data->link_id.value == 0U) {
         return std::unexpected{transaction_error("waveform cannot be classified as known_unreferenced")};
     }
 
-    auto bank_directory = volume_category(state, partition, operation.volume_name, "SBNK", cancellation);
-    if (!bank_directory)
-        return std::unexpected{bank_directory.error()};
-    auto bank_directory_payload = current_payload(state, partition, *bank_directory, cancellation);
-    if (!bank_directory_payload)
-        return std::unexpected{bank_directory_payload.error()};
-    auto bank_entries = parse_directory(*bank_directory_payload, *bank_directory);
-    if (!bank_entries)
-        return std::unexpected{bank_entries.error()};
-    for (const auto &entry : *bank_entries) {
+    auto sample_directory = volume_category(state, partition, operation.volume_name, "SBNK", cancellation);
+    if (!sample_directory)
+        return std::unexpected{sample_directory.error()};
+    auto sample_directory_payload = current_payload(state, partition, *sample_directory, cancellation);
+    if (!sample_directory_payload)
+        return std::unexpected{sample_directory_payload.error()};
+    auto sample_entries = parse_directory(*sample_directory_payload, *sample_directory);
+    if (!sample_entries)
+        return std::unexpected{sample_entries.error()};
+    for (const auto &entry : *sample_entries) {
         if (entry.name == "." || entry.name == "..")
             continue;
         auto payload = current_payload(state, partition, entry.id, cancellation);
@@ -1498,15 +1562,15 @@ Result<OperationReport> delete_waveform(TransactionState &state, const Operation
         auto object = decode_object(*payload);
         if (!object)
             return std::unexpected{object.error()};
-        const auto *bank = std::get_if<CurrentSbnk>(&object->payload);
-        if (bank == nullptr) {
+        const auto *sample = std::get_if<CurrentSbnk>(&object->payload);
+        if (sample == nullptr) {
             return std::unexpected{transaction_error("waveform ownership is ambiguous because an "
                                                      "SBNK entry is unresolved")};
         }
         const auto references = [&](const CurrentSbnkMember &member) {
-            return member.smpl_link_id == waveform->link_id.value || member.sample_name == operation.waveform_name;
+            return member.smpl_link_id == wave_data->link_id.value || member.wave_data_name == operation.waveform_name;
         };
-        if (references(bank->left) || (bank->right && references(*bank->right))) {
+        if (references(sample->left) || (sample->right && references(*sample->right))) {
             return std::unexpected{transaction_error("waveform is referenced, not known_unreferenced")};
         }
     }
@@ -1563,32 +1627,32 @@ Result<OperationReport> delete_program(TransactionState &state, const OperationV
     const auto *program = std::get_if<CurrentProg>(&decoded->payload);
     if (program == nullptr)
         return std::unexpected{transaction_error("Program is unreadable")};
-    std::set<SfsId> assigned_banks;
+    std::set<SfsId> assigned_samples;
     for (const auto &assignment : program->assignments) {
         if (assignment.name.empty() || assignment.kind != 0x10U)
             continue;
-        auto bank =
+        auto sample =
             category_object(state, partition, operation.volume_name, "SBNK", assignment.name, "SBNK", cancellation);
-        if (!bank)
-            return std::unexpected{bank.error()};
-        assigned_banks.insert(bank->second);
+        if (!sample)
+            return std::unexpected{sample.error()};
+        assigned_samples.insert(sample->second);
     }
-    auto banks = category_objects(state, partition, operation.volume_name, "SBNK", ObjectType::sbnk, cancellation);
-    if (!banks)
-        return std::unexpected{banks.error()};
-    std::set<SfsId> bitmap_banks;
-    for (const auto &bank : *banks) {
-        auto bit = sbnk_program_bit(bank.payload, *operation.program_number);
+    auto samples = category_objects(state, partition, operation.volume_name, "SBNK", ObjectType::sbnk, cancellation);
+    if (!samples)
+        return std::unexpected{samples.error()};
+    std::set<SfsId> bitmap_samples;
+    for (const auto &sample : *samples) {
+        auto bit = sbnk_program_bit(sample.payload, *operation.program_number);
         if (!bit)
             return std::unexpected{bit.error()};
         if (*bit)
-            bitmap_banks.insert(bank.id);
+            bitmap_samples.insert(sample.id);
     }
-    if (assigned_banks != bitmap_banks) {
+    if (assigned_samples != bitmap_samples) {
         return std::unexpected{transaction_error("Program direct assignments do not match SBNK "
                                                  "Program-link bitmaps")};
     }
-    for (const auto id : assigned_banks) {
+    for (const auto id : assigned_samples) {
         if (auto updated = set_sbnk_program_bit(state, partition, id, *operation.program_number, false, cancellation);
             !updated)
             return std::unexpected{updated.error()};
@@ -1641,16 +1705,16 @@ Result<OperationReport> insert_program(TransactionState &state, const OperationV
     if (spec.assignments.size() != 2U) {
         return std::unexpected{transaction_error("Program requires exactly two assignments")};
     }
-    const auto &group_assignment = spec.assignments[0];
-    const auto &bank_assignment = spec.assignments[1];
-    auto group = category_object(state, partition, operation.volume_name, "SBAC", group_assignment.target_name, "SBAC",
-                                 cancellation);
-    if (!group)
-        return std::unexpected{group.error()};
-    auto bank = category_object(state, partition, operation.volume_name, "SBNK", bank_assignment.target_name, "SBNK",
-                                cancellation);
-    if (!bank)
-        return std::unexpected{bank.error()};
+    const auto &sample_bank_assignment = spec.assignments[0];
+    const auto &sample_assignment = spec.assignments[1];
+    auto sample_bank = category_object(state, partition, operation.volume_name, "SBAC",
+                                       sample_bank_assignment.target_name, "SBAC", cancellation);
+    if (!sample_bank)
+        return std::unexpected{sample_bank.error()};
+    auto sample = category_object(state, partition, operation.volume_name, "SBNK", sample_assignment.target_name,
+                                  "SBNK", cancellation);
+    if (!sample)
+        return std::unexpected{sample.error()};
     auto existing_programs =
         category_objects(state, partition, operation.volume_name, "PROG", ObjectType::prog, cancellation);
     if (!existing_programs)
@@ -1658,16 +1722,16 @@ Result<OperationReport> insert_program(TransactionState &state, const OperationV
     for (const auto &existing : *existing_programs) {
         const auto *decoded_program = std::get_if<CurrentProg>(&existing.decoded.payload);
         for (const auto &assignment : decoded_program->assignments) {
-            if ((assignment.kind == 0x11U && assignment.name == group_assignment.target_name) ||
-                (assignment.kind == 0x10U && assignment.name == bank_assignment.target_name)) {
+            if ((assignment.kind == 0x11U && assignment.name == sample_bank_assignment.target_name) ||
+                (assignment.kind == 0x10U && assignment.name == sample_assignment.target_name)) {
                 return std::unexpected{transaction_error("Program target is already assigned by another Program")};
             }
         }
     }
-    auto bank_payload = current_payload(state, partition, bank->second, cancellation);
-    if (!bank_payload)
-        return std::unexpected{bank_payload.error()};
-    auto bit = sbnk_program_bit(*bank_payload, spec.number);
+    auto sample_payload = current_payload(state, partition, sample->second, cancellation);
+    if (!sample_payload)
+        return std::unexpected{sample_payload.error()};
+    auto bit = sbnk_program_bit(*sample_payload, spec.number);
     if (!bit)
         return std::unexpected{bit.error()};
     if (*bit)
@@ -1681,10 +1745,11 @@ Result<OperationReport> insert_program(TransactionState &state, const OperationV
     if (auto appended = append_directory_entry(state, partition, *directory, allocated->first, name, cancellation);
         !appended)
         return std::unexpected{appended.error()};
-    if (auto updated = set_sbnk_program_bit(state, partition, bank->second, spec.number, true, cancellation); !updated)
+    if (auto updated = set_sbnk_program_bit(state, partition, sample->second, spec.number, true, cancellation);
+        !updated)
         return std::unexpected{updated.error()};
-    state.known_edges.emplace_back(*partition_index, allocated->first, group->second);
-    state.known_edges.emplace_back(*partition_index, allocated->first, bank->second);
+    state.known_edges.emplace_back(*partition_index, allocated->first, sample_bank->second);
+    state.known_edges.emplace_back(*partition_index, allocated->first, sample->second);
     OperationReport report;
     report.id = operation.id;
     report.type = operation.type;
@@ -1706,8 +1771,8 @@ Result<OperationReport> delete_sbac(TransactionState &state, const OperationView
         return std::unexpected{transaction_error("partition index does not exist")};
     }
     auto &partition = found->second;
-    auto located = category_object(state, partition, operation.volume_name, "SBAC", operation.sample_bank_group_name,
-                                   "SBAC", cancellation);
+    auto located = category_object(state, partition, operation.volume_name, "SBAC", operation.sample_bank_name, "SBAC",
+                                   cancellation);
     if (!located)
         return std::unexpected{located.error()};
     auto payload = current_payload(state, partition, located->second, cancellation);
@@ -1716,9 +1781,9 @@ Result<OperationReport> delete_sbac(TransactionState &state, const OperationView
     auto decoded = decode_object(*payload);
     if (!decoded)
         return std::unexpected{decoded.error()};
-    const auto *group = std::get_if<CurrentSbac>(&decoded->payload);
-    if (group == nullptr || group->active_slot_count > group->maximum_slot_count) {
-        return std::unexpected{transaction_error("sample-bank group slots are unreadable")};
+    const auto *sample_bank = std::get_if<CurrentSbac>(&decoded->payload);
+    if (sample_bank == nullptr || sample_bank->active_slot_count > sample_bank->maximum_slot_count) {
+        return std::unexpected{transaction_error("Sample Bank slots are unreadable")};
     }
     auto programs = category_objects(state, partition, operation.volume_name, "PROG", ObjectType::prog, cancellation);
     if (!programs)
@@ -1726,42 +1791,43 @@ Result<OperationReport> delete_sbac(TransactionState &state, const OperationView
     for (const auto &program_row : *programs) {
         const auto *program = std::get_if<CurrentProg>(&program_row.decoded.payload);
         if (std::ranges::any_of(program->assignments, [&](const ProgAssignment &assignment) {
-                return assignment.kind == 0x11U && assignment.name == operation.sample_bank_group_name;
+                return assignment.kind == 0x11U && assignment.name == operation.sample_bank_name;
             })) {
-            return std::unexpected{transaction_error("sample-bank group is referenced by a Program")};
+            return std::unexpected{transaction_error("Sample Bank is referenced by a Program")};
         }
     }
-    auto groups = category_objects(state, partition, operation.volume_name, "SBAC", ObjectType::sbac, cancellation);
-    if (!groups)
-        return std::unexpected{groups.error()};
+    auto sample_banks =
+        category_objects(state, partition, operation.volume_name, "SBAC", ObjectType::sbac, cancellation);
+    if (!sample_banks)
+        return std::unexpected{sample_banks.error()};
     std::set<std::string> members;
-    for (const auto &slot : group->slots)
+    for (const auto &slot : sample_bank->slots)
         members.insert(slot.name);
-    for (const auto &other : *groups) {
+    for (const auto &other : *sample_banks) {
         if (other.id == located->second)
             continue;
-        const auto *other_group = std::get_if<CurrentSbac>(&other.decoded.payload);
-        for (const auto &slot : other_group->slots) {
+        const auto *other_sample_bank = std::get_if<CurrentSbac>(&other.decoded.payload);
+        for (const auto &slot : other_sample_bank->slots) {
             if (members.contains(slot.name)) {
-                return std::unexpected{transaction_error("another sample-bank group shares a member")};
+                return std::unexpected{transaction_error("another Sample Bank shares a Sample")};
             }
         }
     }
-    for (const auto &slot : group->slots) {
-        auto bank = category_object(state, partition, operation.volume_name, "SBNK", slot.name, "SBNK", cancellation);
-        if (!bank)
-            return std::unexpected{bank.error()};
-        auto bank_payload = current_payload(state, partition, bank->second, cancellation);
-        if (!bank_payload)
-            return std::unexpected{bank_payload.error()};
-        if (bank_payload->size() <= 0xd0U || (std::to_integer<std::uint8_t>((*bank_payload)[0xd0U]) & 1U) == 0U) {
-            return std::unexpected{transaction_error("member SBNK is missing its grouped flag")};
+    for (const auto &slot : sample_bank->slots) {
+        auto sample = category_object(state, partition, operation.volume_name, "SBNK", slot.name, "SBNK", cancellation);
+        if (!sample)
+            return std::unexpected{sample.error()};
+        auto sample_payload = current_payload(state, partition, sample->second, cancellation);
+        if (!sample_payload)
+            return std::unexpected{sample_payload.error()};
+        if (sample_payload->size() <= 0xd0U || (std::to_integer<std::uint8_t>((*sample_payload)[0xd0U]) & 1U) == 0U) {
+            return std::unexpected{transaction_error("member Sample is missing its Sample Bank membership flag")};
         }
-        if (auto updated = set_sbnk_group_flag(state, partition, bank->second, false, cancellation); !updated)
+        if (auto updated = set_sbnk_sample_bank_flag(state, partition, sample->second, false, cancellation); !updated)
             return std::unexpected{updated.error()};
     }
     if (auto removed = remove_directory_entry(state, partition, located->first, located->second,
-                                              operation.sample_bank_group_name, cancellation);
+                                              operation.sample_bank_name, cancellation);
         !removed)
         return std::unexpected{removed.error()};
     auto freed = release_record(partition, located->second);
@@ -1776,7 +1842,7 @@ Result<OperationReport> delete_sbac(TransactionState &state, const OperationView
     report.type = operation.type;
     report.partition = *partition_index;
     report.volume_name = operation.volume_name;
-    report.object_name = operation.sample_bank_group_name;
+    report.object_name = operation.sample_bank_name;
     report.removed_sfs_ids = {located->second};
     report.freed_clusters = *freed;
     return report;
@@ -1788,60 +1854,61 @@ Result<OperationReport> insert_sbac(TransactionState &state, const OperationView
     if (!partition_index)
         return std::unexpected{partition_index.error()};
     auto found = state.partitions.find(partition_index->value);
-    if (found == state.partitions.end() || !operation.sample_bank_group) {
+    if (found == state.partitions.end() || !operation.sample_bank) {
         return std::unexpected{transaction_error("insert-sbac target is invalid")};
     }
     auto &partition = found->second;
-    const auto &spec = *operation.sample_bank_group;
+    const auto &spec = *operation.sample_bank;
     auto directory = volume_category(state, partition, operation.volume_name, "SBAC", cancellation);
     if (!directory)
         return std::unexpected{directory.error()};
-    auto existing_groups =
+    auto existing_sample_banks =
         category_objects(state, partition, operation.volume_name, "SBAC", ObjectType::sbac, cancellation);
-    if (!existing_groups)
-        return std::unexpected{existing_groups.error()};
+    if (!existing_sample_banks)
+        return std::unexpected{existing_sample_banks.error()};
     std::set<std::string> existing_members;
-    for (const auto &existing : *existing_groups) {
+    for (const auto &existing : *existing_sample_banks) {
         if (existing.name == spec.name) {
-            return std::unexpected{transaction_error("sample-bank group already exists")};
+            return std::unexpected{transaction_error("Sample Bank already exists")};
         }
-        const auto *group = std::get_if<CurrentSbac>(&existing.decoded.payload);
-        for (const auto &slot : group->slots)
+        const auto *sample_bank = std::get_if<CurrentSbac>(&existing.decoded.payload);
+        for (const auto &slot : sample_bank->slots)
             existing_members.insert(slot.name);
     }
-    std::map<std::string, SampleBankSpec> bank_specs;
+    std::map<std::string, SampleSpec> sample_specs;
     std::vector<SfsId> member_ids;
-    for (const auto &name : spec.member_sample_banks) {
+    for (const auto &name : spec.member_samples) {
         if (existing_members.contains(name)) {
-            return std::unexpected{transaction_error("SBNK already belongs to another group")};
+            return std::unexpected{transaction_error("Sample already belongs to another Sample Bank")};
         }
-        auto bank = category_object(state, partition, operation.volume_name, "SBNK", name, "SBNK", cancellation);
-        if (!bank)
-            return std::unexpected{bank.error()};
-        auto bank_payload = current_payload(state, partition, bank->second, cancellation);
-        if (!bank_payload)
-            return std::unexpected{bank_payload.error()};
-        auto decoded = decode_object(*bank_payload);
+        auto sample = category_object(state, partition, operation.volume_name, "SBNK", name, "SBNK", cancellation);
+        if (!sample)
+            return std::unexpected{sample.error()};
+        auto sample_payload = current_payload(state, partition, sample->second, cancellation);
+        if (!sample_payload)
+            return std::unexpected{sample_payload.error()};
+        auto decoded = decode_object(*sample_payload);
         if (!decoded)
             return std::unexpected{decoded.error()};
-        const auto *current_bank = std::get_if<CurrentSbnk>(&decoded->payload);
-        if (current_bank == nullptr || current_bank->right_slot_present ||
-            (std::to_integer<std::uint8_t>((*bank_payload)[0xd0U]) & 1U) != 0U) {
-            return std::unexpected{transaction_error("SBAC profile requires ungrouped mono SBNK members")};
+        const auto *current_sample = std::get_if<CurrentSbnk>(&decoded->payload);
+        if (current_sample == nullptr || current_sample->right_slot_present ||
+            (std::to_integer<std::uint8_t>((*sample_payload)[0xd0U]) & 1U) != 0U) {
+            return std::unexpected{
+                transaction_error("Sample Bank profile requires mono Samples without existing membership")};
         }
-        SampleBankSpec placeholder;
+        SampleSpec placeholder;
         placeholder.name = name;
-        bank_specs.emplace(name, std::move(placeholder));
-        member_ids.push_back(bank->second);
+        sample_specs.emplace(name, std::move(placeholder));
+        member_ids.push_back(sample->second);
     }
-    auto payload = detail::prepare_sbac_payload(spec, bank_specs);
+    auto payload = detail::prepare_sbac_payload(spec, sample_specs);
     if (!payload)
         return std::unexpected{payload.error()};
     auto allocated = allocate_record(partition, std::move(*payload), PayloadKind::object);
     if (!allocated)
         return std::unexpected{allocated.error()};
     for (const auto id : member_ids) {
-        if (auto updated = set_sbnk_group_flag(state, partition, id, true, cancellation); !updated)
+        if (auto updated = set_sbnk_sample_bank_flag(state, partition, id, true, cancellation); !updated)
             return std::unexpected{updated.error()};
         state.known_edges.emplace_back(*partition_index, allocated->first, id);
     }
@@ -1885,8 +1952,8 @@ Result<OperationReport> rename_waveform(TransactionState &state, const Operation
     auto waveform_object = decode_object(*waveform_payload);
     if (!waveform_object)
         return std::unexpected{waveform_object.error()};
-    const auto *waveform = std::get_if<CurrentSmpl>(&waveform_object->payload);
-    if (waveform == nullptr || waveform->link_id.value == 0U)
+    const auto *wave_data = std::get_if<CurrentSmpl>(&waveform_object->payload);
+    if (wave_data == nullptr || wave_data->link_id.value == 0U)
         return std::unexpected{transaction_error("waveform has no current link identity")};
     auto waveforms = category_objects(state, partition, operation.volume_name, "SMPL", ObjectType::smpl, cancellation);
     if (!waveforms)
@@ -1894,46 +1961,46 @@ Result<OperationReport> rename_waveform(TransactionState &state, const Operation
     for (const auto &other : *waveforms) {
         if (other.id == located->second)
             continue;
-        const auto *sample = std::get_if<CurrentSmpl>(&other.decoded.payload);
-        if (other.name == operation.new_waveform_name || sample->link_id.value == waveform->link_id.value) {
+        const auto *other_wave_data = std::get_if<CurrentSmpl>(&other.decoded.payload);
+        if (other.name == operation.new_waveform_name || other_wave_data->link_id.value == wave_data->link_id.value) {
             return std::unexpected{transaction_error("waveform rename identity is not unique")};
         }
     }
-    auto banks = category_objects(state, partition, operation.volume_name, "SBNK", ObjectType::sbnk, cancellation);
-    if (!banks)
-        return std::unexpected{banks.error()};
-    std::set<SfsId> updated_banks;
-    for (const auto &bank_row : *banks) {
-        const auto *bank = std::get_if<CurrentSbnk>(&bank_row.decoded.payload);
+    auto samples = category_objects(state, partition, operation.volume_name, "SBNK", ObjectType::sbnk, cancellation);
+    if (!samples)
+        return std::unexpected{samples.error()};
+    std::set<SfsId> updated_samples;
+    for (const auto &sample_row : *samples) {
+        const auto *sample = std::get_if<CurrentSbnk>(&sample_row.decoded.payload);
         std::vector<std::size_t> offsets;
         const auto inspect = [&](const CurrentSbnkMember &member, std::size_t offset) -> Result<void> {
-            const auto name_matches = member.sample_name == operation.waveform_name;
-            const auto link_matches = member.smpl_link_id == waveform->link_id.value;
+            const auto name_matches = member.wave_data_name == operation.waveform_name;
+            const auto link_matches = member.smpl_link_id == wave_data->link_id.value;
             if (name_matches != link_matches)
                 return std::unexpected{transaction_error("SBNK waveform name and link identity disagree")};
             if (name_matches)
                 offsets.push_back(offset);
             return {};
         };
-        if (auto checked = inspect(bank->left, 0x78U); !checked)
+        if (auto checked = inspect(sample->left, 0x78U); !checked)
             return std::unexpected{checked.error()};
-        if (bank->right) {
-            if (auto checked = inspect(*bank->right, 0x88U); !checked)
+        if (sample->right) {
+            if (auto checked = inspect(*sample->right, 0x88U); !checked)
                 return std::unexpected{checked.error()};
         }
         if (!offsets.empty()) {
-            auto payload = bank_row.payload;
+            auto payload = sample_row.payload;
             for (const auto offset : offsets)
                 put_padded_name(payload, offset, operation.new_waveform_name);
             if (auto replaced =
-                    replace_fixed_object_payload(state, partition, bank_row.id, std::move(payload), cancellation);
+                    replace_fixed_object_payload(state, partition, sample_row.id, std::move(payload), cancellation);
                 !replaced)
                 return std::unexpected{replaced.error()};
-            updated_banks.insert(bank_row.id);
+            updated_samples.insert(sample_row.id);
         }
     }
     for (const auto &[edge_partition, source, target] : state.known_edges) {
-        if (edge_partition == *partition_index && target == located->second && !updated_banks.contains(source))
+        if (edge_partition == *partition_index && target == located->second && !updated_samples.contains(source))
             return std::unexpected{transaction_error("known waveform references exceed exact rename set")};
     }
     if (auto renamed = rename_object_payload(state, partition, located->second, operation.waveform_name,
@@ -1962,29 +2029,30 @@ Result<OperationReport> rename_sbac(TransactionState &state, const OperationView
     if (found == state.partitions.end())
         return std::unexpected{transaction_error("partition index does not exist")};
     auto &partition = found->second;
-    auto located = category_object(state, partition, operation.volume_name, "SBAC", operation.sample_bank_group_name,
-                                   "SBAC", cancellation);
+    auto located = category_object(state, partition, operation.volume_name, "SBAC", operation.sample_bank_name, "SBAC",
+                                   cancellation);
     if (!located)
         return std::unexpected{located.error()};
-    auto groups = category_objects(state, partition, operation.volume_name, "SBAC", ObjectType::sbac, cancellation);
-    if (!groups)
-        return std::unexpected{groups.error()};
-    if (std::ranges::any_of(*groups, [&](const auto &group) {
-            return group.id != located->second && group.name == operation.new_sample_bank_group_name;
+    auto sample_banks =
+        category_objects(state, partition, operation.volume_name, "SBAC", ObjectType::sbac, cancellation);
+    if (!sample_banks)
+        return std::unexpected{sample_banks.error()};
+    if (std::ranges::any_of(*sample_banks, [&](const auto &sample_bank) {
+            return sample_bank.id != located->second && sample_bank.name == operation.new_sample_bank_name;
         }))
-        return std::unexpected{transaction_error("sample-bank group rename destination exists")};
-    auto group_payload = current_payload(state, partition, located->second, cancellation);
-    if (!group_payload)
-        return std::unexpected{group_payload.error()};
-    auto group_object = decode_object(*group_payload);
-    if (!group_object)
-        return std::unexpected{group_object.error()};
-    const auto *group = std::get_if<CurrentSbac>(&group_object->payload);
-    if (group == nullptr || group->slots.empty() || group->slots.size() > 3U ||
-        group->slots.size() != group->active_slot_count)
+        return std::unexpected{transaction_error("Sample Bank rename destination exists")};
+    auto sample_bank_payload = current_payload(state, partition, located->second, cancellation);
+    if (!sample_bank_payload)
+        return std::unexpected{sample_bank_payload.error()};
+    auto sample_bank_object = decode_object(*sample_bank_payload);
+    if (!sample_bank_object)
+        return std::unexpected{sample_bank_object.error()};
+    const auto *sample_bank = std::get_if<CurrentSbac>(&sample_bank_object->payload);
+    if (sample_bank == nullptr || sample_bank->slots.empty() || sample_bank->slots.size() > 3U ||
+        sample_bank->slots.size() != sample_bank->active_slot_count)
         return std::unexpected{transaction_error("SBAC rename requires 1..3 readable slots")};
     std::set<SfsId> member_ids;
-    for (const auto &slot : group->slots) {
+    for (const auto &slot : sample_bank->slots) {
         if (slot.raw_handle != 0U)
             return std::unexpected{transaction_error("SBAC member has unsupported nonzero handle")};
         auto member = category_object(state, partition, operation.volume_name, "SBNK", slot.name, "SBNK", cancellation);
@@ -1994,16 +2062,17 @@ Result<OperationReport> rename_sbac(TransactionState &state, const OperationView
         if (!member_payload)
             return std::unexpected{member_payload.error()};
         if (member_payload->size() <= 0xd0U || (std::to_integer<std::uint8_t>((*member_payload)[0xd0U]) & 1U) == 0U) {
-            return std::unexpected{transaction_error("SBAC member is missing its grouped flag")};
+            return std::unexpected{transaction_error("Sample Bank member is missing its membership flag")};
         }
         member_ids.insert(member->second);
     }
-    for (const auto &other : *groups) {
+    for (const auto &other : *sample_banks) {
         if (other.id == located->second)
             continue;
-        const auto *other_group = std::get_if<CurrentSbac>(&other.decoded.payload);
-        if (std::ranges::any_of(other_group->slots, [&](const SbacSlot &slot) {
-                return std::ranges::any_of(group->slots, [&](const SbacSlot &own) { return own.name == slot.name; });
+        const auto *other_sample_bank = std::get_if<CurrentSbac>(&other.decoded.payload);
+        if (std::ranges::any_of(other_sample_bank->slots, [&](const SbacSlot &slot) {
+                return std::ranges::any_of(sample_bank->slots,
+                                           [&](const SbacSlot &own) { return own.name == slot.name; });
             })) {
             return std::unexpected{transaction_error("another SBAC shares a rename member")};
         }
@@ -2029,13 +2098,13 @@ Result<OperationReport> rename_sbac(TransactionState &state, const OperationView
             const auto &assignment = program->assignments[index];
             if (assignment.kind != 0x11U)
                 continue;
-            if (assignment.name == operation.new_sample_bank_group_name)
+            if (assignment.name == operation.new_sample_bank_name)
                 return std::unexpected{transaction_error("Program already assigns rename destination")};
-            if (assignment.name != operation.sample_bank_group_name)
+            if (assignment.name != operation.sample_bank_name)
                 continue;
             if (assignment.raw_handle != 0U)
                 return std::unexpected{transaction_error("Program assignment has unsupported nonzero handle")};
-            put_padded_name(payload, 0x120U + index * 0x38U, operation.new_sample_bank_group_name);
+            put_padded_name(payload, 0x120U + index * 0x38U, operation.new_sample_bank_name);
             changed = true;
         }
         if (changed) {
@@ -2055,13 +2124,12 @@ Result<OperationReport> rename_sbac(TransactionState &state, const OperationView
     if (known_programs != updated_programs) {
         return std::unexpected{transaction_error("SBAC raw Program references disagree with known edges")};
     }
-    if (auto renamed = rename_object_payload(state, partition, located->second, operation.sample_bank_group_name,
-                                             operation.new_sample_bank_group_name, cancellation);
+    if (auto renamed = rename_object_payload(state, partition, located->second, operation.sample_bank_name,
+                                             operation.new_sample_bank_name, cancellation);
         !renamed)
         return std::unexpected{renamed.error()};
-    if (auto renamed =
-            rename_directory_entry(state, partition, located->first, located->second, operation.sample_bank_group_name,
-                                   operation.new_sample_bank_group_name, cancellation);
+    if (auto renamed = rename_directory_entry(state, partition, located->first, located->second,
+                                              operation.sample_bank_name, operation.new_sample_bank_name, cancellation);
         !renamed)
         return std::unexpected{renamed.error()};
     OperationReport report;
@@ -2069,7 +2137,7 @@ Result<OperationReport> rename_sbac(TransactionState &state, const OperationView
     report.type = operation.type;
     report.partition = *partition_index;
     report.volume_name = operation.volume_name;
-    report.object_name = operation.new_sample_bank_group_name;
+    report.object_name = operation.new_sample_bank_name;
     return report;
 }
 
@@ -2082,56 +2150,57 @@ Result<OperationReport> rename_sbnk(TransactionState &state, const OperationView
     if (found == state.partitions.end())
         return std::unexpected{transaction_error("partition index does not exist")};
     auto &partition = found->second;
-    auto located = category_object(state, partition, operation.volume_name, "SBNK", operation.sample_bank_name, "SBNK",
-                                   cancellation);
+    auto located =
+        category_object(state, partition, operation.volume_name, "SBNK", operation.sample_name, "SBNK", cancellation);
     if (!located)
         return std::unexpected{located.error()};
-    auto banks = category_objects(state, partition, operation.volume_name, "SBNK", ObjectType::sbnk, cancellation);
-    if (!banks)
-        return std::unexpected{banks.error()};
-    if (std::ranges::any_of(*banks, [&](const auto &bank) {
-            return bank.id != located->second && bank.name == operation.new_sample_bank_name;
+    auto samples = category_objects(state, partition, operation.volume_name, "SBNK", ObjectType::sbnk, cancellation);
+    if (!samples)
+        return std::unexpected{samples.error()};
+    if (std::ranges::any_of(*samples, [&](const auto &sample) {
+            return sample.id != located->second && sample.name == operation.new_sample_name;
         }))
         return std::unexpected{transaction_error("SBNK rename destination exists")};
-    auto bank_payload = current_payload(state, partition, located->second, cancellation);
-    if (!bank_payload)
-        return std::unexpected{bank_payload.error()};
-    auto bank_object = decode_object(*bank_payload);
-    if (!bank_object)
-        return std::unexpected{bank_object.error()};
-    const auto *bank = std::get_if<CurrentSbnk>(&bank_object->payload);
-    if (bank == nullptr)
+    auto sample_payload = current_payload(state, partition, located->second, cancellation);
+    if (!sample_payload)
+        return std::unexpected{sample_payload.error()};
+    auto sample_object = decode_object(*sample_payload);
+    if (!sample_object)
+        return std::unexpected{sample_object.error()};
+    const auto *sample = std::get_if<CurrentSbnk>(&sample_object->payload);
+    if (sample == nullptr)
         return std::unexpected{transaction_error("SBNK is unreadable")};
-    const auto grouped = (std::to_integer<std::uint8_t>((*bank_payload)[0xd0U]) & 1U) != 0U;
+    const auto banked = (std::to_integer<std::uint8_t>((*sample_payload)[0xd0U]) & 1U) != 0U;
 
-    auto groups = category_objects(state, partition, operation.volume_name, "SBAC", ObjectType::sbac, cancellation);
-    if (!groups)
-        return std::unexpected{groups.error()};
-    std::set<SfsId> group_references;
-    for (const auto &group_row : *groups) {
-        const auto *group = std::get_if<CurrentSbac>(&group_row.decoded.payload);
-        auto payload = group_row.payload;
+    auto sample_banks =
+        category_objects(state, partition, operation.volume_name, "SBAC", ObjectType::sbac, cancellation);
+    if (!sample_banks)
+        return std::unexpected{sample_banks.error()};
+    std::set<SfsId> sample_bank_references;
+    for (const auto &sample_bank_row : *sample_banks) {
+        const auto *sample_bank = std::get_if<CurrentSbac>(&sample_bank_row.decoded.payload);
+        auto payload = sample_bank_row.payload;
         bool changed{};
-        for (const auto &slot : group->slots) {
-            if (slot.name == operation.new_sample_bank_name)
+        for (const auto &slot : sample_bank->slots) {
+            if (slot.name == operation.new_sample_name)
                 return std::unexpected{transaction_error("SBAC already references SBNK rename destination")};
-            if (slot.name != operation.sample_bank_name)
+            if (slot.name != operation.sample_name)
                 continue;
             if (slot.raw_handle != 0U)
                 return std::unexpected{transaction_error("SBAC member has unsupported nonzero handle")};
-            put_padded_name(payload, slot.offset, operation.new_sample_bank_name);
+            put_padded_name(payload, slot.offset, operation.new_sample_name);
             changed = true;
         }
         if (changed) {
-            if (auto replaced =
-                    replace_fixed_object_payload(state, partition, group_row.id, std::move(payload), cancellation);
+            if (auto replaced = replace_fixed_object_payload(state, partition, sample_bank_row.id, std::move(payload),
+                                                             cancellation);
                 !replaced)
                 return std::unexpected{replaced.error()};
-            group_references.insert(group_row.id);
+            sample_bank_references.insert(sample_bank_row.id);
         }
     }
-    if (group_references.size() != (grouped ? 1U : 0U))
-        return std::unexpected{transaction_error("SBNK grouped flag disagrees with exact SBAC membership")};
+    if (sample_bank_references.size() != (banked ? 1U : 0U))
+        return std::unexpected{transaction_error("Sample membership flag disagrees with exact Sample Bank membership")};
 
     auto programs = category_objects(state, partition, operation.volume_name, "PROG", ObjectType::prog, cancellation);
     if (!programs)
@@ -2154,13 +2223,13 @@ Result<OperationReport> rename_sbnk(TransactionState &state, const OperationView
             const auto &assignment = program->assignments[index];
             if (assignment.kind != 0x10U)
                 continue;
-            if (assignment.name == operation.new_sample_bank_name)
+            if (assignment.name == operation.new_sample_name)
                 return std::unexpected{transaction_error("Program already assigns SBNK rename destination")};
-            if (assignment.name != operation.sample_bank_name)
+            if (assignment.name != operation.sample_name)
                 continue;
             if (assignment.raw_handle != 0U)
                 return std::unexpected{transaction_error("Program assignment has unsupported nonzero handle")};
-            put_padded_name(payload, 0x120U + index * 0x38U, operation.new_sample_bank_name);
+            put_padded_name(payload, 0x120U + index * 0x38U, operation.new_sample_name);
             changed = true;
         }
         if (changed) {
@@ -2172,10 +2241,10 @@ Result<OperationReport> rename_sbnk(TransactionState &state, const OperationView
             direct_numbers.insert(static_cast<std::uint8_t>(number));
         }
     }
-    std::set<std::uint8_t> bitmap_numbers(bank->linked_program_numbers.begin(), bank->linked_program_numbers.end());
+    std::set<std::uint8_t> bitmap_numbers(sample->linked_program_numbers.begin(), sample->linked_program_numbers.end());
     if (bitmap_numbers != direct_numbers)
         return std::unexpected{transaction_error("SBNK Program bitmap disagrees with exact Program assignments")};
-    std::set<SfsId> expected = group_references;
+    std::set<SfsId> expected = sample_bank_references;
     expected.insert(program_references.begin(), program_references.end());
     std::set<SfsId> known_incoming;
     for (const auto &[edge_partition, source, target] : state.known_edges) {
@@ -2186,12 +2255,12 @@ Result<OperationReport> rename_sbnk(TransactionState &state, const OperationView
     if (known_incoming != expected) {
         return std::unexpected{transaction_error("SBNK raw references disagree with known edges")};
     }
-    if (auto renamed = rename_object_payload(state, partition, located->second, operation.sample_bank_name,
-                                             operation.new_sample_bank_name, cancellation);
+    if (auto renamed = rename_object_payload(state, partition, located->second, operation.sample_name,
+                                             operation.new_sample_name, cancellation);
         !renamed)
         return std::unexpected{renamed.error()};
-    if (auto renamed = rename_directory_entry(state, partition, located->first, located->second,
-                                              operation.sample_bank_name, operation.new_sample_bank_name, cancellation);
+    if (auto renamed = rename_directory_entry(state, partition, located->first, located->second, operation.sample_name,
+                                              operation.new_sample_name, cancellation);
         !renamed)
         return std::unexpected{renamed.error()};
     OperationReport report;
@@ -2199,7 +2268,7 @@ Result<OperationReport> rename_sbnk(TransactionState &state, const OperationView
     report.type = operation.type;
     report.partition = *partition_index;
     report.volume_name = operation.volume_name;
-    report.object_name = operation.new_sample_bank_name;
+    report.object_name = operation.new_sample_name;
     return report;
 }
 
@@ -2668,7 +2737,7 @@ relocation_context(const PortablePackage &package, const PackageImportPlan &plan
     context.destination_name = owner.destination_name;
     context.smpl_link_id = owner.target_link_id;
     context.linked_program_numbers = owner.target_program_numbers;
-    context.grouped = owner.target_grouped;
+    context.sample_bank_member = owner.target_sample_bank_member;
     for (const auto &edge : package.relationships) {
         if (edge.source_node_id != owner.node_id)
             continue;
@@ -2737,15 +2806,15 @@ Result<void> validate_flat_package_result(const std::filesystem::path &temporary
         if (*normalized != object.normalized_sha256)
             return std::unexpected{transaction_error("post-write package object changed identity")};
         if (object.target_link_id) {
-            const auto *sample = std::get_if<CurrentSmpl>(&matches.front()->object.payload);
-            if (sample == nullptr || sample->link_id.value != *object.target_link_id) {
+            const auto *wave_data = std::get_if<CurrentSmpl>(&matches.front()->object.payload);
+            if (wave_data == nullptr || wave_data->link_id.value != *object.target_link_id) {
                 return std::unexpected{transaction_error("post-write SMPL link ID differs from the import plan")};
             }
         }
         if (object.object_type == "SBNK") {
-            const auto *bank = std::get_if<CurrentSbnk>(&matches.front()->object.payload);
-            if (bank == nullptr || bank->linked_program_numbers != object.target_program_numbers ||
-                (((bank->sample_flags & 1U) != 0U) != object.target_grouped)) {
+            const auto *sample = std::get_if<CurrentSbnk>(&matches.front()->object.payload);
+            if (sample == nullptr || sample->linked_program_numbers != object.target_program_numbers ||
+                (((sample->sample_flags & 1U) != 0U) != object.target_sample_bank_member)) {
                 return std::unexpected{transaction_error("post-write SBNK graph metadata differs "
                                                          "from the import plan")};
             }
@@ -2794,7 +2863,7 @@ Result<PackageImportReport> apply_fat12_package_import(const std::filesystem::pa
         return std::unexpected{media_objects.error()};
 
     detail::PreparedMediaImage prepared;
-    prepared.manifest.schema_version = "1.0";
+    prepared.manifest.schema_version = "1.1";
     prepared.manifest.format = MediaImageFormat::fat12_floppy;
     std::map<std::string, std::size_t, std::less<>> object_indices;
     std::set<std::string, std::less<>> object_paths;
@@ -2891,7 +2960,7 @@ apply_iso9660_package_import(const std::filesystem::path &target_path, std::span
     const auto &iso = std::get<IsoImage>(media->storage());
 
     detail::PreparedMediaImage prepared;
-    prepared.manifest.schema_version = "1.0";
+    prepared.manifest.schema_version = "1.1";
     prepared.manifest.format = MediaImageFormat::iso9660;
     prepared.manifest.iso_volume_id = iso.volume_id();
 
@@ -3090,15 +3159,15 @@ Result<void> validate_package_result(const std::filesystem::path &temporary, std
             return std::unexpected{transaction_error("post-write package object changed normalized identity")};
         }
         if (object.target_link_id) {
-            const auto *sample = std::get_if<CurrentSmpl>(&matches.front()->object.payload);
-            if (sample == nullptr || sample->link_id.value != *object.target_link_id) {
+            const auto *wave_data = std::get_if<CurrentSmpl>(&matches.front()->object.payload);
+            if (wave_data == nullptr || wave_data->link_id.value != *object.target_link_id) {
                 return std::unexpected{transaction_error("post-write SMPL link ID differs from the import plan")};
             }
         }
         if (object.object_type == "SBNK") {
-            const auto *bank = std::get_if<CurrentSbnk>(&matches.front()->object.payload);
-            if (bank == nullptr || bank->linked_program_numbers != object.target_program_numbers ||
-                (((bank->sample_flags & 1U) != 0U) != object.target_grouped)) {
+            const auto *sample = std::get_if<CurrentSbnk>(&matches.front()->object.payload);
+            if (sample == nullptr || sample->linked_program_numbers != object.target_program_numbers ||
+                (((sample->sample_flags & 1U) != 0U) != object.target_sample_bank_member)) {
                 return std::unexpected{transaction_error("post-write SBNK graph metadata differs "
                                                          "from the import plan")};
             }
@@ -3202,7 +3271,7 @@ Result<std::string> serialize_alteration_manifest_template() {
         operation["new_waveform_name"] = "New Wave";
 
         OrderedJson manifest = OrderedJson::object();
-        manifest["schema_version"] = "1.0";
+        manifest["schema_version"] = "1.1";
         manifest["operations"] = OrderedJson::array({std::move(operation)});
         return manifest.dump(2) + "\n";
     } catch (const OrderedJson::exception &error) {
@@ -3247,17 +3316,18 @@ Result<void> write_alteration_manifest_template(const std::filesystem::path &out
 Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                                                      const std::filesystem::path &base_directory) {
     try {
-        const auto root = Json::parse(json);
+        auto root = Json::parse(json);
+        const bool legacy = migrate_legacy_alteration_manifest(root);
         if (auto valid = exact_fields(root, {"schema_version", "operations"}, "manifest"); !valid)
             return std::unexpected{valid.error()};
         auto version = required_text(root, "schema_version", "manifest");
         if (!version)
             return std::unexpected{version.error()};
-        if (*version != "1.0")
-            return std::unexpected{transaction_error("manifest schema version must be 1.0")};
+        if (*version != "1.1")
+            return std::unexpected{transaction_error("manifest schema version must be 1.0 or 1.1")};
         if (!root["operations"].is_array() || root["operations"].empty())
             return std::unexpected{transaction_error("manifest.operations must be a non-empty array")};
-        AlterationManifest result{*version, {}};
+        AlterationManifest result{legacy ? "1.0" : *version, {}};
         std::set<std::string> seen;
         for (std::size_t index = 0; index < root["operations"].size(); ++index) {
             const auto &row = root["operations"][index];
@@ -3343,7 +3413,7 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (auto valid = exact_fields(row, {"id", "type", "partition_index", "volume"}, context); !valid)
                     return std::unexpected{valid.error()};
                 Json wrapper{
-                    {"schema_version", "1.0"},
+                    {"schema_version", "1.1"},
                     {"size_bytes", minimum_hds_size},
                     {"partitions", Json::array({
                                        {{"name", "AXK ALTER"}, {"volumes", Json::array({row["volume"]})}},
@@ -3355,52 +3425,51 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 operation.volume = parsed->partitions[0].volumes[0];
                 operation.volume_name = operation.volume->name;
             } else if (*type == "delete_sbnk") {
-                if (auto valid = exact_fields(row, {"id", "type", "partition_index", "volume_name", "sample_bank_name"},
-                                              context);
-                    !valid) {
-                    return std::unexpected{valid.error()};
-                }
-                auto volume = required_text(row, "volume_name", context);
-                auto bank = object_name(row, "sample_bank_name", context);
-                if (!volume)
-                    return std::unexpected{volume.error()};
-                if (!bank)
-                    return std::unexpected{bank.error()};
-                operation.volume_name = std::move(*volume);
-                operation.sample_bank_name = std::move(*bank);
-            } else if (*type == "insert_sbnk") {
                 if (auto valid =
-                        exact_fields(row, {"id", "type", "partition_index", "volume_name", "sample_bank"}, context);
+                        exact_fields(row, {"id", "type", "partition_index", "volume_name", "sample_name"}, context);
+                    !valid) {
+                    return std::unexpected{valid.error()};
+                }
+                auto volume = required_text(row, "volume_name", context);
+                auto sample = object_name(row, "sample_name", context);
+                if (!volume)
+                    return std::unexpected{volume.error()};
+                if (!sample)
+                    return std::unexpected{sample.error()};
+                operation.volume_name = std::move(*volume);
+                operation.sample_name = std::move(*sample);
+            } else if (*type == "insert_sbnk") {
+                if (auto valid = exact_fields(row, {"id", "type", "partition_index", "volume_name", "sample"}, context);
                     !valid) {
                     return std::unexpected{valid.error()};
                 }
                 auto volume = required_text(row, "volume_name", context);
                 if (!volume)
                     return std::unexpected{volume.error()};
-                const auto &bank = row["sample_bank"];
-                if (!bank.is_object()) {
-                    return std::unexpected{transaction_error(context + ".sample_bank must be an object")};
+                const auto &sample = row["sample"];
+                if (!sample.is_object()) {
+                    return std::unexpected{transaction_error(context + ".sample must be an object")};
                 }
                 const std::set<std::string> required{"name", "waveform_name", "root_key", "key_low", "key_high"};
                 const std::set<std::string> optional{"right_waveform_name", "level"};
                 for (const auto &field : required) {
-                    if (!bank.contains(field)) {
-                        return std::unexpected{transaction_error(context + ".sample_bank is missing field " + field)};
+                    if (!sample.contains(field)) {
+                        return std::unexpected{transaction_error(context + ".sample is missing field " + field)};
                     }
                 }
-                for (const auto &[field, unused] : bank.items()) {
+                for (const auto &[field, unused] : sample.items()) {
                     static_cast<void>(unused);
                     if (!required.contains(field) && !optional.contains(field)) {
-                        return std::unexpected{transaction_error(context + ".sample_bank has unknown field " + field)};
+                        return std::unexpected{transaction_error(context + ".sample has unknown field " + field)};
                     }
                 }
-                const auto bank_context = context + ".sample_bank";
-                auto name = object_name(bank, "name", bank_context);
-                auto waveform = object_name(bank, "waveform_name", bank_context);
-                auto root_key = midi_value(bank, "root_key", bank_context, 0U, true);
-                auto key_low = midi_value(bank, "key_low", bank_context, 0U, true);
-                auto key_high = midi_value(bank, "key_high", bank_context, 0U, true);
-                auto level = midi_value(bank, "level", bank_context, 100U, false);
+                const auto sample_context = context + ".sample";
+                auto name = object_name(sample, "name", sample_context);
+                auto waveform = object_name(sample, "waveform_name", sample_context);
+                auto root_key = midi_value(sample, "root_key", sample_context, 0U, true);
+                auto key_low = midi_value(sample, "key_low", sample_context, 0U, true);
+                auto key_high = midi_value(sample, "key_high", sample_context, 0U, true);
+                auto level = midi_value(sample, "level", sample_context, 100U, false);
                 if (!name)
                     return std::unexpected{name.error()};
                 if (!waveform)
@@ -3414,13 +3483,13 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (!level)
                     return std::unexpected{level.error()};
                 if (*key_high < *key_low) {
-                    return std::unexpected{transaction_error(bank_context + ".key_high must not be below key_low")};
+                    return std::unexpected{transaction_error(sample_context + ".key_high must not be below key_low")};
                 }
-                SampleBankSpec spec;
+                SampleSpec spec;
                 spec.name = std::move(*name);
                 spec.waveform_id = std::move(*waveform);
-                if (bank.contains("right_waveform_name")) {
-                    auto right = object_name(bank, "right_waveform_name", bank_context);
+                if (sample.contains("right_waveform_name")) {
+                    auto right = object_name(sample, "right_waveform_name", sample_context);
                     if (!right)
                         return std::unexpected{right.error()};
                     spec.right_waveform_id = std::move(*right);
@@ -3430,8 +3499,8 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 spec.key_high = *key_high;
                 spec.level = *level;
                 operation.volume_name = std::move(*volume);
-                operation.sample_bank_name = spec.name;
-                operation.sample_bank = std::move(spec);
+                operation.sample_name = spec.name;
+                operation.sample = std::move(spec);
             } else if (*type == "rename_waveform") {
                 if (auto valid = exact_fields(
                         row, {"id", "type", "partition_index", "volume_name", "waveform_name", "new_waveform_name"},
@@ -3454,6 +3523,26 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 operation.new_waveform_name = std::move(*new_name);
             } else if (*type == "rename_sbnk") {
                 if (auto valid = exact_fields(
+                        row, {"id", "type", "partition_index", "volume_name", "sample_name", "new_sample_name"},
+                        context);
+                    !valid)
+                    return std::unexpected{valid.error()};
+                auto volume = required_text(row, "volume_name", context);
+                auto old_name = object_name(row, "sample_name", context);
+                auto new_name = object_name(row, "new_sample_name", context);
+                if (!volume)
+                    return std::unexpected{volume.error()};
+                if (!old_name)
+                    return std::unexpected{old_name.error()};
+                if (!new_name)
+                    return std::unexpected{new_name.error()};
+                if (*old_name == *new_name)
+                    return std::unexpected{transaction_error("new_sample_name must differ")};
+                operation.volume_name = std::move(*volume);
+                operation.sample_name = std::move(*old_name);
+                operation.new_sample_name = std::move(*new_name);
+            } else if (*type == "rename_sbac") {
+                if (auto valid = exact_fields(
                         row,
                         {"id", "type", "partition_index", "volume_name", "sample_bank_name", "new_sample_bank_name"},
                         context);
@@ -3473,27 +3562,6 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 operation.volume_name = std::move(*volume);
                 operation.sample_bank_name = std::move(*old_name);
                 operation.new_sample_bank_name = std::move(*new_name);
-            } else if (*type == "rename_sbac") {
-                if (auto valid = exact_fields(row,
-                                              {"id", "type", "partition_index", "volume_name", "sample_bank_group_name",
-                                               "new_sample_bank_group_name"},
-                                              context);
-                    !valid)
-                    return std::unexpected{valid.error()};
-                auto volume = required_text(row, "volume_name", context);
-                auto old_name = object_name(row, "sample_bank_group_name", context);
-                auto new_name = object_name(row, "new_sample_bank_group_name", context);
-                if (!volume)
-                    return std::unexpected{volume.error()};
-                if (!old_name)
-                    return std::unexpected{old_name.error()};
-                if (!new_name)
-                    return std::unexpected{new_name.error()};
-                if (*old_name == *new_name)
-                    return std::unexpected{transaction_error("new_sample_bank_group_name must differ")};
-                operation.volume_name = std::move(*volume);
-                operation.sample_bank_group_name = std::move(*old_name);
-                operation.new_sample_bank_group_name = std::move(*new_name);
             } else if (*type == "delete_program") {
                 if (auto valid =
                         exact_fields(row, {"id", "type", "partition_index", "volume_name", "program_number"}, context);
@@ -3508,50 +3576,51 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 operation.volume_name = std::move(*volume);
                 operation.program_number = *number;
             } else if (*type == "delete_sbac") {
-                if (auto valid = exact_fields(
-                        row, {"id", "type", "partition_index", "volume_name", "sample_bank_group_name"}, context);
+                if (auto valid = exact_fields(row, {"id", "type", "partition_index", "volume_name", "sample_bank_name"},
+                                              context);
                     !valid)
                     return std::unexpected{valid.error()};
                 auto volume = required_text(row, "volume_name", context);
-                auto group = object_name(row, "sample_bank_group_name", context);
+                auto sample_bank = object_name(row, "sample_bank_name", context);
                 if (!volume)
                     return std::unexpected{volume.error()};
-                if (!group)
-                    return std::unexpected{group.error()};
+                if (!sample_bank)
+                    return std::unexpected{sample_bank.error()};
                 operation.volume_name = std::move(*volume);
-                operation.sample_bank_group_name = std::move(*group);
+                operation.sample_bank_name = std::move(*sample_bank);
             } else if (*type == "insert_sbac") {
-                if (auto valid = exact_fields(
-                        row, {"id", "type", "partition_index", "volume_name", "sample_bank_group"}, context);
+                if (auto valid =
+                        exact_fields(row, {"id", "type", "partition_index", "volume_name", "sample_bank"}, context);
                     !valid)
                     return std::unexpected{valid.error()};
                 auto volume = required_text(row, "volume_name", context);
                 if (!volume)
                     return std::unexpected{volume.error()};
-                const auto &group = row["sample_bank_group"];
-                if (auto valid = exact_fields(group, {"name", "member_sample_banks"}, context + ".sample_bank_group");
+                const auto &sample_bank = row["sample_bank"];
+                if (auto valid = exact_fields(sample_bank, {"name", "member_samples"}, context + ".sample_bank");
                     !valid)
                     return std::unexpected{valid.error()};
-                auto name = object_name(group, "name", context + ".sample_bank_group");
+                auto name = object_name(sample_bank, "name", context + ".sample_bank");
                 if (!name)
                     return std::unexpected{name.error()};
-                if (!group["member_sample_banks"].is_array() || group["member_sample_banks"].empty() ||
-                    group["member_sample_banks"].size() > 3U)
-                    return std::unexpected{transaction_error("member_sample_banks must contain 1..3 names")};
-                SampleBankGroupSpec spec;
+                if (!sample_bank["member_samples"].is_array() || sample_bank["member_samples"].empty() ||
+                    sample_bank["member_samples"].size() > 3U)
+                    return std::unexpected{transaction_error("member_samples must contain 1..3 names")};
+                SampleBankSpec spec;
                 spec.name = *name;
-                for (std::size_t member_index = 0; member_index < group["member_sample_banks"].size(); ++member_index) {
-                    Json wrapper{{"name", group["member_sample_banks"][member_index]}};
-                    auto member = object_name(wrapper, "name", context + ".sample_bank_group.member_sample_banks");
+                for (std::size_t member_index = 0; member_index < sample_bank["member_samples"].size();
+                     ++member_index) {
+                    Json wrapper{{"name", sample_bank["member_samples"][member_index]}};
+                    auto member = object_name(wrapper, "name", context + ".sample_bank.member_samples");
                     if (!member)
                         return std::unexpected{member.error()};
-                    if (std::ranges::contains(spec.member_sample_banks, *member))
-                        return std::unexpected{transaction_error("member_sample_banks must be distinct")};
-                    spec.member_sample_banks.push_back(std::move(*member));
+                    if (std::ranges::contains(spec.member_samples, *member))
+                        return std::unexpected{transaction_error("member_samples must be distinct")};
+                    spec.member_samples.push_back(std::move(*member));
                 }
                 operation.volume_name = std::move(*volume);
-                operation.sample_bank_group_name = spec.name;
-                operation.sample_bank_group = std::move(spec);
+                operation.sample_bank_name = spec.name;
+                operation.sample_bank = std::move(spec);
             } else if (*type == "insert_program") {
                 if (auto valid =
                         exact_fields(row, {"id", "type", "partition_index", "volume_name", "program"}, context);
@@ -3570,7 +3639,7 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{transaction_error("Program requires exactly two assignments")};
                 ProgramSpec spec;
                 spec.number = *number;
-                constexpr std::array<std::string_view, 2> target_fields{"sample_bank_group", "sample_bank"};
+                constexpr std::array<std::string_view, 2> target_fields{"sample_bank", "sample"};
                 for (std::size_t assignment_index = 0; assignment_index < 2U; ++assignment_index) {
                     const auto &assignment = program["assignments"][assignment_index];
                     const auto field = target_fields[assignment_index];

@@ -14,15 +14,15 @@ Supported operations are:
 - insert, delete, and rename Sample Bank (`SBAC`);
 - insert and delete Program.
 
-Waveform insertion uses the same WAV, FLAC, and AIFF conversion pipeline as fresh
-image creation. A subsequent sample-bank insertion in the same transaction can
-reference the newly inserted waveform name. Stereo sources become two physical
-mono waveform records when two `waveform_names` are supplied.
+Wave Data insertion uses the same WAV, FLAC, and AIFF conversion pipeline as fresh
+image creation. A subsequent Sample insertion in the same transaction can
+reference the newly inserted Wave Data name. Stereo sources become two physical
+mono Wave Data records when two `waveform_names` are supplied.
 
-Deletion is conservative. A sample bank cannot be deleted while a Program or
+Deletion is conservative. A Sample cannot be deleted while a Program or
 Sample Bank references it. Wave Data can be deleted only when exact
 current-format ownership classifies it as known and unreferenced. Program and
-sample-bank-group operations require their raw assignments, group flags, Program
+Sample Bank operations require their raw assignments, membership flags, Program
 bitmaps, and decoded relationships to agree.
 
 ## Native API

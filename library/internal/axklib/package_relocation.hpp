@@ -22,7 +22,7 @@ struct PackageNodeRelocationContext {
     std::map<std::string, std::string, std::less<>> edge_target_names;
     std::map<std::string, std::uint32_t, std::less<>> edge_target_link_ids;
     std::vector<std::uint8_t> linked_program_numbers;
-    bool grouped{};
+    bool sample_bank_member{};
 };
 
 [[nodiscard]] Result<RelocationProfile> build_relocation_profile(const DecodedObject &object,

@@ -1,7 +1,7 @@
 #include "media_test_fixtures.hpp"
 
 TEST(StandaloneObject, UsesSharedDecoderAndRejectsArbitraryFiles) {
-    auto object = axk::StandaloneObject::open(std::make_shared<axk::MemoryReader>(smpl_object()), "sample.obj");
+    auto object = axk::StandaloneObject::open(std::make_shared<axk::MemoryReader>(smpl_object()), "wave-data.obj");
     ASSERT_TRUE(object);
     EXPECT_EQ(object->object().decoded.header.name, "TEST");
 

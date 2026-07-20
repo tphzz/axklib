@@ -78,7 +78,7 @@ struct GenericObject {
 };
 
 struct CurrentSbnkMember {
-    std::string sample_name;
+    std::string wave_data_name;
     std::uint32_t smpl_link_id{};
     std::uint8_t root_key{};
     std::uint16_t sample_rate{};
@@ -103,7 +103,7 @@ struct NumericField {
 };
 
 struct CurrentSbnk {
-    std::string bank_name;
+    std::string sample_name;
     std::string instrument_name;
     bool right_slot_present{};
     std::string right_link_role;

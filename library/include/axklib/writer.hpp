@@ -35,7 +35,7 @@ struct WaveformSpec {
     std::optional<std::uint32_t> target_sample_rate;
 };
 
-struct SampleBankSpec {
+struct SampleSpec {
     std::string name;
     std::optional<std::string> waveform_id;
     std::optional<std::string> right_waveform_id;
@@ -49,10 +49,13 @@ struct SampleBankSpec {
     std::uint8_t level{127};
 };
 
-struct SampleBankGroupSpec {
+struct SampleBankSpec {
     std::string name;
-    std::vector<std::string> member_sample_banks;
+    std::vector<std::string> member_samples;
 };
+
+using LegacySampleBankSpec [[deprecated("use SampleSpec for Sample (SBNK)")]] = SampleSpec;
+using SampleBankGroupSpec [[deprecated("use SampleBankSpec for Sample Bank (SBAC)")]] = SampleBankSpec;
 
 struct ProgramAssignmentSpec {
     std::string target_kind;
@@ -68,8 +71,8 @@ struct ProgramSpec {
 struct VolumeSpec {
     std::string name;
     std::vector<WaveformSpec> waveforms;
+    std::vector<SampleSpec> samples;
     std::vector<SampleBankSpec> sample_banks;
-    std::vector<SampleBankGroupSpec> sample_bank_groups;
     std::vector<ProgramSpec> programs;
 };
 

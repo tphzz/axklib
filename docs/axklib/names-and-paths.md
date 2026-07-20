@@ -220,7 +220,7 @@ Rules:
 | Invalid path characters `< > : " / \ | ? *` | Replaced with `_`. |
 | Control characters | Replaced with `_`. |
 | Repeated whitespace | Collapsed to one space in display-path components. |
-| Trailing duplicate stars | Converted to numeric suffixes by default: `*` -> ` (2)`, `**` -> ` (3)`. Rendered stereo stems can use an owning sample-bank/group label instead when that is clearer. |
+| Trailing duplicate stars | Converted to numeric suffixes by default: `*` -> ` (2)`, `**` -> ` (3)`. Rendered stereo stems can use an owning Sample Bank label instead when that is clearer. |
 | Repeated `_` | Collapsed. |
 | Leading/trailing dots, spaces, `_` | Trimmed from path components. |
 

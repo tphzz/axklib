@@ -1,6 +1,6 @@
 # SFZ Export
 
-SFZ export uses decoded sample-bank ranges and exact waveform files. Whole-input
+SFZ export uses decoded Sample ranges and exact Wave Data files. Whole-input
 and selected Program exports are supported.
 
 ```bash
@@ -12,5 +12,5 @@ axklib extract sfz program source.hds \
 ```
 
 Only exact, unambiguous relationships are rendered as regions. Unresolved rows
-remain in the structured reports instead of being assigned to an arbitrary
-waveform.
+remain in the structured reports instead of being assigned to arbitrary Wave
+Data.

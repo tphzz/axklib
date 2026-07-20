@@ -105,8 +105,8 @@ std::string unique_wav_name(std::string stem, std::set<std::string> &used) {
     return candidate;
 }
 
-std::optional<std::int64_t> numeric(const CurrentSbnk &bank, std::string_view name) {
-    const auto *field = bank.find_numeric_field(name);
+std::optional<std::int64_t> numeric(const CurrentSbnk &sample, std::string_view name) {
+    const auto *field = sample.find_numeric_field(name);
     return field == nullptr ? std::nullopt : field->value;
 }
 
@@ -115,18 +115,18 @@ const ObjectSnapshot *object(const ObjectCatalog &catalog, std::string_view key)
     return found == catalog.objects.end() ? nullptr : &*found;
 }
 
-std::string sfz_region(const SampleBankExport &bank, const PhysicalWaveformExport &waveform, std::string_view role,
+std::string sfz_region(const SampleExport &sample, const PhysicalWaveformExport &waveform, std::string_view role,
                        std::string sample_path, std::optional<int> pan) {
-    const auto *member = &bank.decoded.left;
-    if (role == "right" && bank.decoded.right)
-        member = &*bank.decoded.right;
+    const auto *member = &sample.decoded.left;
+    if (role == "right" && sample.decoded.right)
+        member = &*sample.decoded.right;
     std::string line{"<region>"};
-    const auto key_low = bank.key_low == 255U ? member->root_key : bank.key_low;
-    const auto key_high = bank.key_high == 128U ? member->root_key : bank.key_high;
+    const auto key_low = sample.key_low == 255U ? member->root_key : sample.key_low;
+    const auto key_high = sample.key_high == 128U ? member->root_key : sample.key_high;
     line += std::format(" lokey={} hikey={}", key_low, key_high);
     line += std::format(" pitch_keycenter={}", member->root_key);
-    if (bank.coarse_tune >= -64 && bank.coarse_tune <= 64)
-        line += std::format(" transpose={}", bank.coarse_tune);
+    if (sample.coarse_tune >= -64 && sample.coarse_tune <= 64)
+        line += std::format(" transpose={}", sample.coarse_tune);
     line += std::format(" tune={}", member->fine_tune_cents);
     if (pan)
         line += std::format(" pan={}", *pan);
@@ -199,28 +199,28 @@ void populate_logical_exports(const ObjectCatalog &catalog, const RelationshipGr
                               const std::unordered_map<std::string, PhysicalWaveformExport *> &physical_by_key,
                               const std::unordered_map<std::string, VolumeKey> &waveform_volume_keys,
                               std::map<VolumeKey, std::set<std::string>> &rendered_names) {
-    std::map<std::string, std::set<VolumeKey>> bank_volumes;
-    std::map<std::string, bool> bank_has_resolved_member;
-    std::map<std::string, bool> bank_has_known_member;
-    std::map<std::string, bool> bank_has_tentative_member;
+    std::map<std::string, std::set<VolumeKey>> sample_volumes;
+    std::map<std::string, bool> sample_has_resolved_member;
+    std::map<std::string, bool> sample_has_known_member;
+    std::map<std::string, bool> sample_has_tentative_member;
     for (const auto &item : catalog.objects) {
         if (!item.placement)
             continue;
-        const auto *bank = std::get_if<CurrentSbnk>(&item.object.payload);
-        if (bank == nullptr)
+        const auto *sample = std::get_if<CurrentSbnk>(&item.object.payload);
+        if (sample == nullptr)
             continue;
 
-        SampleBankExport base;
+        SampleExport base;
         base.object_key = item.key;
         base.display_name = item.object.header.name;
-        base.key_low = bank->key_range_low;
-        base.key_high = bank->key_range_high;
-        base.coarse_tune = static_cast<std::int8_t>(numeric(*bank, "coarse_tune_0x0d5").value_or(0));
-        base.decoded = *bank;
+        base.key_low = sample->key_range_low;
+        base.key_high = sample->key_range_high;
+        base.coarse_tune = static_cast<std::int8_t>(numeric(*sample, "coarse_tune_0x0d5").value_or(0));
+        base.decoded = *sample;
         for (const auto *relation : graph.children(item.key)) {
             if ((relation->type == "SBNK_LEFT_MEMBER_TO_SMPL" || relation->type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
                 relation->quality == RelationshipQuality::tentative) {
-                bank_has_tentative_member[item.key] = true;
+                sample_has_tentative_member[item.key] = true;
             }
         }
         const auto add_member = [&](std::string_view type, std::string role) {
@@ -233,18 +233,18 @@ void populate_logical_exports(const ObjectCatalog &catalog, const RelationshipGr
                 }
                 const auto *physical = physical_by_key.at(*relation->target_key);
                 base.members.push_back({role, *relation->target_key, physical->relative_wav_path, relation->quality});
-                bank_volumes[item.key].insert(waveform_volume_keys.at(*relation->target_key));
-                bank_has_resolved_member[item.key] = true;
+                sample_volumes[item.key].insert(waveform_volume_keys.at(*relation->target_key));
+                sample_has_resolved_member[item.key] = true;
                 if (relation->quality == RelationshipQuality::known)
-                    bank_has_known_member[item.key] = true;
+                    sample_has_known_member[item.key] = true;
             }
         };
         add_member("SBNK_LEFT_MEMBER_TO_SMPL", "left");
         add_member("SBNK_RIGHT_MEMBER_TO_SMPL", "right");
-        if (bank_volumes[item.key].empty())
-            bank_volumes[item.key].insert(object_volume_key(item));
+        if (sample_volumes[item.key].empty())
+            sample_volumes[item.key].insert(object_volume_key(item));
 
-        for (const auto &destination : bank_volumes[item.key]) {
+        for (const auto &destination : sample_volumes[item.key]) {
             auto output = base;
             std::erase_if(output.members, [&](const auto &member) {
                 return waveform_volume_keys.at(member.waveform_key) != destination;
@@ -264,7 +264,7 @@ void populate_logical_exports(const ObjectCatalog &catalog, const RelationshipGr
                                                  output.members.empty() || output.members.front().role == "left"
                                                      ? "SBNK_LEFT_MEMBER_TO_SMPL"
                                                      : "SBNK_RIGHT_MEMBER_TO_SMPL",
-                                                 *bank});
+                                                 *sample});
             std::set<std::string> context_keys{item.key};
             for (const auto &member : output.members) {
                 for (const auto *relation : graph.parents(member.waveform_key)) {
@@ -285,11 +285,11 @@ void populate_logical_exports(const ObjectCatalog &catalog, const RelationshipGr
                     }
                 }
             }
-            volumes.at(destination).sample_banks.push_back(std::move(output));
+            volumes.at(destination).samples.push_back(std::move(output));
         }
     }
 
-    std::map<std::string, std::set<VolumeKey>> group_volumes;
+    std::map<std::string, std::set<VolumeKey>> sample_bank_volumes;
     for (const auto &item : catalog.objects) {
         if (!item.placement || !std::holds_alternative<CurrentSbac>(item.object.payload))
             continue;
@@ -298,24 +298,24 @@ void populate_logical_exports(const ObjectCatalog &catalog, const RelationshipGr
         for (const auto *relation : graph.children(item.key)) {
             if (relation->type != "SBAC_SLOT_TO_SBNK" || !relation->target_key ||
                 (relation->quality != RelationshipQuality::known && relation->quality != RelationshipQuality::likely) ||
-                (!bank_has_resolved_member[*relation->target_key] &&
-                 !bank_has_tentative_member[*relation->target_key])) {
+                (!sample_has_resolved_member[*relation->target_key] &&
+                 !sample_has_tentative_member[*relation->target_key])) {
                 continue;
             }
-            for (const auto &destination : bank_volumes[*relation->target_key]) {
+            for (const auto &destination : sample_volumes[*relation->target_key]) {
                 relationships_by_volume[destination].push_back(*relation->target_key);
                 auto &members = members_by_volume[destination];
-                if (relation->quality == RelationshipQuality::known && bank_has_known_member[*relation->target_key])
+                if (relation->quality == RelationshipQuality::known && sample_has_known_member[*relation->target_key])
                     members.push_back(*relation->target_key);
             }
         }
         if (members_by_volume.empty())
             members_by_volume[object_volume_key(item)] = {};
         for (auto &[destination, members] : members_by_volume) {
-            group_volumes[item.key].insert(destination);
+            sample_bank_volumes[item.key].insert(destination);
             volumes.at(destination)
-                .sample_bank_groups.push_back({item.key, item.object.header.name, std::move(members),
-                                               std::move(relationships_by_volume[destination])});
+                .sample_banks.push_back({item.key, item.object.header.name, std::move(members),
+                                         std::move(relationships_by_volume[destination])});
         }
     }
 
@@ -330,8 +330,8 @@ void populate_logical_exports(const ObjectCatalog &catalog, const RelationshipGr
                 continue;
             }
             const auto &destinations = relation->type == "PROG_ASSIGNMENT_TO_SBAC"
-                                           ? group_volumes[*relation->target_key]
-                                           : bank_volumes[*relation->target_key];
+                                           ? sample_bank_volumes[*relation->target_key]
+                                           : sample_volumes[*relation->target_key];
             for (const auto &destination : destinations)
                 targets_by_volume[destination].push_back(*relation->target_key);
         }
@@ -600,16 +600,16 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
                 !registered)
                 return std::unexpected{registered.error()};
         }
-        for (const auto &bank : volume.sample_banks) {
-            if (!bank.rendered_wav_path || bank.members.size() != 2U)
+        for (const auto &sample : volume.samples) {
+            if (!sample.rendered_wav_path || sample.members.size() != 2U)
                 continue;
-            const auto left =
-                std::ranges::find(volume.waveforms, bank.members[0].waveform_key, &PhysicalWaveformExport::object_key);
-            const auto right =
-                std::ranges::find(volume.waveforms, bank.members[1].waveform_key, &PhysicalWaveformExport::object_key);
+            const auto left = std::ranges::find(volume.waveforms, sample.members[0].waveform_key,
+                                                &PhysicalWaveformExport::object_key);
+            const auto right = std::ranges::find(volume.waveforms, sample.members[1].waveform_key,
+                                                 &PhysicalWaveformExport::object_key);
             if (left == volume.waveforms.end() || right == volume.waveforms.end())
                 continue;
-            const auto path = (output_directory / volume.relative_root / *bank.rendered_wav_path).lexically_normal();
+            const auto path = (output_directory / volume.relative_root / *sample.rendered_wav_path).lexically_normal();
             if (auto registered =
                     register_target(path, audio_internal::WavSource::from_stereo(left->waveform, right->waveform));
                 !registered)
@@ -658,14 +658,14 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
         planned_paths.push_back(std::move(path));
     };
     for (const auto &volume : plan.volumes) {
-        std::set<std::string> grouped;
-        for (const auto &group : volume.sample_bank_groups) {
-            reserve_path(volume, "B " + display_text(group.display_name, "instrument"));
-            grouped.insert(group.member_bank_keys.begin(), group.member_bank_keys.end());
+        std::set<std::string> banked_samples;
+        for (const auto &sample_bank : volume.sample_banks) {
+            reserve_path(volume, "B " + display_text(sample_bank.display_name, "instrument"));
+            banked_samples.insert(sample_bank.member_sample_keys.begin(), sample_bank.member_sample_keys.end());
         }
-        for (const auto &bank : volume.sample_banks) {
-            if (!grouped.contains(bank.object_key))
-                reserve_path(volume, bank.display_name);
+        for (const auto &sample : volume.samples) {
+            if (!banked_samples.contains(sample.object_key))
+                reserve_path(volume, sample.display_name);
         }
     }
     if (!overwrite) {
@@ -678,27 +678,27 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
     }
     auto planned_path = planned_paths.begin();
     for (const auto &volume : plan.volumes) {
-        std::set<std::string> grouped;
+        std::set<std::string> banked_samples;
         const auto write_instrument = [&](std::string name,
-                                          const std::vector<const SampleBankExport *> &banks) -> Result<void> {
+                                          const std::vector<const SampleExport *> &samples) -> Result<void> {
             const auto path = *planned_path++;
             std::string text = std::format("// Generated by axklib\n// Volume: {}\n// "
                                            "Instrument: {}\n\n<group>\n",
                                            text::path_to_utf8(volume.relative_root), name);
             std::size_t region_count{};
-            for (const auto *bank : banks) {
-                if (bank->rendered_wav_path && !bank->members.empty()) {
-                    const auto waveform = std::ranges::find(volume.waveforms, bank->members.front().waveform_key,
+            for (const auto *sample : samples) {
+                if (sample->rendered_wav_path && !sample->members.empty()) {
+                    const auto waveform = std::ranges::find(volume.waveforms, sample->members.front().waveform_key,
                                                             &PhysicalWaveformExport::object_key);
                     if (waveform != volume.waveforms.end()) {
-                        text += "// " + display_text(bank->display_name, "sample") + '\n';
-                        text += sfz_region(*bank, *waveform, bank->members.front().role,
-                                           text::path_to_utf8(*bank->rendered_wav_path), {}) +
+                        text += "// " + display_text(sample->display_name, "sample") + '\n';
+                        text += sfz_region(*sample, *waveform, sample->members.front().role,
+                                           text::path_to_utf8(*sample->rendered_wav_path), {}) +
                                 '\n';
                         ++region_count;
                     }
                 } else {
-                    for (const auto &member : bank->members) {
+                    for (const auto &member : sample->members) {
                         if (member.quality != RelationshipQuality::known)
                             continue;
                         const auto waveform = std::ranges::find(volume.waveforms, member.waveform_key,
@@ -706,17 +706,18 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
                         if (waveform == volume.waveforms.end())
                             continue;
                         const bool physical_pair =
-                            bank->members.size() > 1U &&
-                            std::ranges::any_of(bank->members, [](const auto &item) { return item.role == "left"; }) &&
-                            std::ranges::any_of(bank->members, [](const auto &item) { return item.role == "right"; });
+                            sample->members.size() > 1U &&
+                            std::ranges::any_of(sample->members,
+                                                [](const auto &item) { return item.role == "left"; }) &&
+                            std::ranges::any_of(sample->members, [](const auto &item) { return item.role == "right"; });
                         std::optional<int> pan;
                         if (physical_pair && member.role == "left")
                             pan = -100;
                         else if (physical_pair && member.role == "right")
                             pan = 100;
-                        text += "// " + display_text(bank->display_name, "sample") + '\n';
-                        text += sfz_region(*bank, *waveform, member.role, text::path_to_utf8(member.relative_wav_path),
-                                           pan) +
+                        text += "// " + display_text(sample->display_name, "sample") + '\n';
+                        text += sfz_region(*sample, *waveform, member.role,
+                                           text::path_to_utf8(member.relative_wav_path), pan) +
                                 '\n';
                         ++region_count;
                     }
@@ -732,24 +733,25 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
             result.written_files.push_back(path);
             return {};
         };
-        for (const auto &group : volume.sample_bank_groups) {
-            std::vector<const SampleBankExport *> banks;
-            for (const auto &key : group.member_bank_keys) {
-                const auto found = std::ranges::find(volume.sample_banks, key, &SampleBankExport::object_key);
-                if (found != volume.sample_banks.end()) {
-                    banks.push_back(&*found);
-                    grouped.insert(key);
+        for (const auto &sample_bank : volume.sample_banks) {
+            std::vector<const SampleExport *> samples;
+            for (const auto &key : sample_bank.member_sample_keys) {
+                const auto found = std::ranges::find(volume.samples, key, &SampleExport::object_key);
+                if (found != volume.samples.end()) {
+                    samples.push_back(&*found);
+                    banked_samples.insert(key);
                 }
             }
-            if (const auto written = write_instrument("B " + display_text(group.display_name, "instrument"), banks);
+            if (const auto written =
+                    write_instrument("B " + display_text(sample_bank.display_name, "instrument"), samples);
                 !written) {
                 return std::unexpected{written.error()};
             }
         }
-        for (const auto &bank : volume.sample_banks) {
-            if (grouped.contains(bank.object_key))
+        for (const auto &sample : volume.samples) {
+            if (banked_samples.contains(sample.object_key))
                 continue;
-            if (const auto written = write_instrument(bank.display_name, {&bank}); !written) {
+            if (const auto written = write_instrument(sample.display_name, {&sample}); !written) {
                 return std::unexpected{written.error()};
             }
         }

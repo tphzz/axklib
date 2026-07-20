@@ -303,13 +303,13 @@ axk::ReportRow inventory_row(const LoadedSource &source, const axk::ObjectSnapsh
     std::string decoded_kind{"UnknownObject"};
     std::string decoded_fields;
     if (item.object.header.type == axk::ObjectType::smpl) {
-        decoded_kind = "DecodedSample";
+        decoded_kind = "DecodedWaveData";
         decoded_fields = "fine_tune;loop_length;loop_mode;loop_start;root_key;sample_rate";
     } else if (item.object.header.type == axk::ObjectType::sbnk) {
-        decoded_kind = "DecodedSampleBank";
-        decoded_fields = "bank_topology;left_sample_name;left_smpl_link_id";
+        decoded_kind = "DecodedSample";
+        decoded_fields = "sample_topology;left_wave_data_name;left_smpl_link_id";
     } else if (item.object.header.type == axk::ObjectType::sbac) {
-        decoded_kind = "DecodedSampleBankAccessory";
+        decoded_kind = "DecodedSampleBank";
         decoded_fields = "active_slot_count;max_slot_count_from_payload";
     } else if (item.object.header.type == axk::ObjectType::prog) {
         decoded_kind = "DecodedProgram";
@@ -927,29 +927,29 @@ axk::ReportRow relationship_report_row(const LoadedSource &source, const axk::Re
         std::ranges::find(source.inventory.catalog.objects, row.source_key, &axk::ObjectSnapshot::key);
     if (source_object != source.inventory.catalog.objects.end() &&
         (row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL")) {
-        if (const auto *bank = std::get_if<axk::CurrentSbnk>(&source_object->object.payload)) {
+        if (const auto *sample = std::get_if<axk::CurrentSbnk>(&source_object->object.payload)) {
             const bool right = row.type == "SBNK_RIGHT_MEMBER_TO_SMPL";
-            const auto *member = right && bank->right ? &*bank->right : &bank->left;
+            const auto *member = right && sample->right ? &*sample->right : &sample->left;
             raw_fields = std::format("SBNK+{} member {}; name={}; link_id=0x{:08x}", right ? "right" : "left",
-                                     right ? "right" : "left", member->sample_name, member->smpl_link_id);
+                                     right ? "right" : "left", member->wave_data_name, member->smpl_link_id);
             if (row.basis == "sbnk-member-link+name") {
                 notes = "Current SBNK member name and member link ID match exactly one same-scope SMPL object.";
             }
         }
     } else if (source_object != source.inventory.catalog.objects.end() && row.type == "SBAC_SLOT_TO_SBNK") {
-        if (const auto *group = std::get_if<axk::CurrentSbac>(&source_object->object.payload)) {
+        if (const auto *sample_bank = std::get_if<axk::CurrentSbac>(&source_object->object.payload)) {
             std::size_t index{};
             if (row.target_key) {
                 const auto target_object =
                     std::ranges::find(source.inventory.catalog.objects, *row.target_key, &axk::ObjectSnapshot::key);
                 if (target_object != source.inventory.catalog.objects.end()) {
                     const auto found =
-                        std::ranges::find(group->slots, target_object->object.header.name, &axk::SbacSlot::name);
-                    if (found != group->slots.end())
-                        index = static_cast<std::size_t>(std::distance(group->slots.begin(), found));
+                        std::ranges::find(sample_bank->slots, target_object->object.header.name, &axk::SbacSlot::name);
+                    if (found != sample_bank->slots.end())
+                        index = static_cast<std::size_t>(std::distance(sample_bank->slots.begin(), found));
                 }
             }
-            const auto offset = index < group->slots.size() ? group->slots[index].offset : 0x14cU;
+            const auto offset = index < sample_bank->slots.size() ? sample_bank->slots[index].offset : 0x14cU;
             raw_fields = std::format("SBAC slot {} at 0x{:03x}", index, offset);
             if (row.basis == "active-sbac-slot-name") {
                 notes = "Input consistency: counted SBAC slot name uniquely matches a same-scope SBNK header name. "
@@ -1233,8 +1233,8 @@ std::vector<axk::ReportRow> bitmap_detail_rows(std::span<const LoadedSource> sou
             const auto *item = catalog_object(source, comparison.sbnk_key);
             if (item == nullptr)
                 continue;
-            const auto *bank = std::get_if<axk::CurrentSbnk>(&item->object.payload);
-            if (bank == nullptr)
+            const auto *sample = std::get_if<axk::CurrentSbnk>(&item->object.payload);
+            if (sample == nullptr)
                 continue;
             const auto *object = media_object(source, item->key);
             const bool sfs = source.media.kind() == axk::MediaKind::sfs;
@@ -1288,13 +1288,13 @@ std::vector<axk::ReportRow> bitmap_detail_rows(std::span<const LoadedSource> sou
                                    sfs ? sfs_payload_offset(source, *item) : object->data_offset)},
                 {"sbnk_name", item->object.header.name},
                 {"linked_programs_001_032_bitmap_0x0c0",
-                 static_cast<std::uint64_t>(bank->linked_program_bitmap_words[0])},
+                 static_cast<std::uint64_t>(sample->linked_program_bitmap_words[0])},
                 {"linked_programs_033_064_bitmap_0x0c4",
-                 static_cast<std::uint64_t>(bank->linked_program_bitmap_words[1])},
+                 static_cast<std::uint64_t>(sample->linked_program_bitmap_words[1])},
                 {"linked_programs_065_096_bitmap_0x0c8",
-                 static_cast<std::uint64_t>(bank->linked_program_bitmap_words[2])},
+                 static_cast<std::uint64_t>(sample->linked_program_bitmap_words[2])},
                 {"linked_programs_097_128_bitmap_0x0cc",
-                 static_cast<std::uint64_t>(bank->linked_program_bitmap_words[3])},
+                 static_cast<std::uint64_t>(sample->linked_program_bitmap_words[3])},
                 {"bitmap_programs", joined_programs(comparison.bitmap_programs)},
                 {"direct_prog_assignment_programs", joined_programs(comparison.direct_assignment_programs)},
                 {"direct_prog_assignment_details", joined_strings(direct_details)},
@@ -1715,7 +1715,7 @@ axk::app::Result<Json> execute_orphans(const axk::app::Sandbox &sandbox, const J
                 {"sfs_id", static_cast<std::uint64_t>(row.sfs_id.value)},
                 {"smpl_link_id", static_cast<std::uint64_t>(row.smpl_link_id)},
                 {"status", std::string{axk::waveform_status_name(row.status)}},
-                {"referencing_sample_banks", joined_strings(row.referencing_sample_banks)},
+                {"referencing_samples", joined_strings(row.referencing_samples)},
                 {"basis", row.basis},
                 {"notes", row.notes},
             });
@@ -1834,7 +1834,7 @@ axk::app::Result<Json> execute_relationships(const axk::app::Sandbox &sandbox, c
         return std::unexpected(written.error());
     if (auto written = append_report("current_sbac_sbnk_links", sbac_rows); !written)
         return std::unexpected(written.error());
-    if (auto written = append_report("current_prog_bank_links", program_rows); !written)
+    if (auto written = append_report("current_prog_assignment_links", program_rows); !written)
         return std::unexpected(written.error());
     if (auto written = append_report("current_prog_ignored_reserved_or_tail", ignored_rows); !written)
         return std::unexpected(written.error());
@@ -1878,8 +1878,8 @@ axk::app::Result<Json> execute_relationships(const axk::app::Sandbox &sandbox, c
              "relationships.json",
              "current_sbac_sbnk_links.csv",
              "current_sbac_sbnk_links.json",
-             "current_prog_bank_links.csv",
-             "current_prog_bank_links.json",
+             "current_prog_assignment_links.csv",
+             "current_prog_assignment_links.json",
              "current_prog_ignored_reserved_or_tail.csv",
              "current_prog_ignored_reserved_or_tail.json",
              "current_sbnk_program_bitmap_crosscheck.csv",
@@ -1889,7 +1889,7 @@ axk::app::Result<Json> execute_relationships(const axk::app::Sandbox &sandbox, c
              "relationship_summary.json",
              "_schemas/relationships.schema.json",
              "_schemas/current_sbac_sbnk_links.schema.json",
-             "_schemas/current_prog_bank_links.schema.json",
+             "_schemas/current_prog_assignment_links.schema.json",
              "_schemas/current_prog_ignored_reserved_or_tail.schema.json",
              "_schemas/current_sbnk_program_bitmap_crosscheck.schema.json",
              "_schemas/load_errors.schema.json",

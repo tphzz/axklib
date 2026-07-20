@@ -378,8 +378,8 @@ sampler object links.
 
 The writer APIs create fresh HDS/SFS images from a small typed model. The
 current writer creates a new hard-disk image, partitions,
-volumes, current-format `SMPL` waveform objects, direct single-member `SBNK`
-sample-bank objects, equal-format two-member stereo `SBNK` objects, and one
+volumes, current-format `SMPL` Wave Data objects, direct single-member `SBNK`
+Sample objects, equal-format two-member stereo `SBNK` Sample objects, and one
 explicitly bounded one-to-three-member `SBAC` / Program profile. It does not modify
 existing images and does not require a template container image.
 

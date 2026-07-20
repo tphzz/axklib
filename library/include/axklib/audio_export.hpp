@@ -50,39 +50,42 @@ struct UnresolvedWaveDataExport {
     std::vector<PhysicalWaveformExport> waveforms;
 };
 
-struct BankMemberExport {
+struct WaveDataMemberExport {
     std::string role;
     std::string waveform_key;
     std::filesystem::path relative_wav_path;
     RelationshipQuality quality{RelationshipQuality::unknown};
 };
 
-struct BankParameterContext {
+struct SampleParameterContext {
     std::string object_key;
     std::string display_name;
     std::string relationship_type;
     CurrentSbnk decoded;
 };
 
-struct SampleBankExport {
+struct SampleExport {
     std::string object_key;
     std::string display_name;
-    std::vector<BankMemberExport> members;
+    std::vector<WaveDataMemberExport> members;
     std::optional<std::filesystem::path> rendered_wav_path;
     std::optional<StereoRenderDecision> stereo_decision;
     std::uint8_t key_low{};
     std::uint8_t key_high{};
     std::int8_t coarse_tune{};
     CurrentSbnk decoded;
-    std::vector<BankParameterContext> parameter_contexts;
+    std::vector<SampleParameterContext> parameter_contexts;
 };
 
-struct SampleBankGroupExport {
+struct SampleBankExport {
     std::string object_key;
     std::string display_name;
-    std::vector<std::string> member_bank_keys;
-    std::vector<std::string> relationship_bank_keys;
+    std::vector<std::string> member_sample_keys;
+    std::vector<std::string> relationship_sample_keys;
 };
+
+using LegacySampleBankExport [[deprecated("use SampleExport for Sample (SBNK)")]] = SampleExport;
+using SampleBankGroupExport [[deprecated("use SampleBankExport for Sample Bank (SBAC)")]] = SampleBankExport;
 
 struct ProgramExport {
     std::string object_key;
@@ -96,8 +99,8 @@ struct VolumeExport {
     std::string volume_name;
     std::filesystem::path relative_root;
     std::vector<PhysicalWaveformExport> waveforms;
+    std::vector<SampleExport> samples;
     std::vector<SampleBankExport> sample_banks;
-    std::vector<SampleBankGroupExport> sample_bank_groups;
     std::vector<ProgramExport> programs;
 };
 

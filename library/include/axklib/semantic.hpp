@@ -68,7 +68,7 @@ struct WaveformOrphanRow {
     SfsId sfs_id;
     std::uint32_t smpl_link_id{};
     WaveformStatus status{WaveformStatus::ambiguous_or_unresolved};
-    std::vector<std::string> referencing_sample_banks;
+    std::vector<std::string> referencing_samples;
     std::string basis;
     std::string notes;
 };

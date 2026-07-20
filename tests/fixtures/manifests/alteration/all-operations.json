@@ -1,19 +1,19 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "operations": [
     {"id":"delete-volume","type":"delete_volume","partition_index":0,"volume_name":"Delete Volume"},
-    {"id":"insert-volume","type":"insert_volume","partition_index":{"operation_ref":"delete-volume"},"volume":{"name":"Insert Volume","waveforms":[],"sample_banks":[]}},
-    {"id":"delete-bank","type":"delete_sbnk","partition_index":0,"volume_name":"Volume","sample_bank_name":"Delete Bank"},
-    {"id":"insert-bank","type":"insert_sbnk","partition_index":{"operation_ref":"delete-bank"},"volume_name":"Volume","sample_bank":{"name":"Insert Bank","waveform_name":"Wave","root_key":60,"key_low":0,"key_high":127}},
+    {"id":"insert-volume","type":"insert_volume","partition_index":{"operation_ref":"delete-volume"},"volume":{"name":"Insert Volume","waveforms":[],"samples":[]}},
+    {"id":"delete-sample","type":"delete_sbnk","partition_index":0,"volume_name":"Volume","sample_name":"Delete Sample"},
+    {"id":"insert-sample","type":"insert_sbnk","partition_index":{"operation_ref":"delete-sample"},"volume_name":"Volume","sample":{"name":"Insert Sample","waveform_name":"Wave","root_key":60,"key_low":0,"key_high":127}},
     {"id":"insert-wave","type":"insert_waveform","partition_index":0,"volume_name":"Volume","audio":{"path":"audio.wav","waveform_names":["Insert Wave"],"root_key":60}},
     {"id":"delete-wave","type":"delete_waveform","partition_index":{"operation_ref":"insert-wave"},"volume_name":"Volume","waveform_name":"Delete Wave"},
     {"id":"rename-wave","type":"rename_waveform","partition_index":0,"volume_name":"Volume","waveform_name":"Old Wave","new_waveform_name":"New Wave"},
-    {"id":"rename-bank","type":"rename_sbnk","partition_index":0,"volume_name":"Volume","sample_bank_name":"Old Bank","new_sample_bank_name":"New Bank"},
-    {"id":"delete-group","type":"delete_sbac","partition_index":0,"volume_name":"Volume","sample_bank_group_name":"Delete Group"},
-    {"id":"insert-group","type":"insert_sbac","partition_index":{"operation_ref":"delete-group"},"volume_name":"Volume","sample_bank_group":{"name":"Insert Group","member_sample_banks":["Bank A","Bank B"]}},
-    {"id":"rename-group","type":"rename_sbac","partition_index":0,"volume_name":"Volume","sample_bank_group_name":"Old Group","new_sample_bank_group_name":"New Group"},
+    {"id":"rename-sample","type":"rename_sbnk","partition_index":0,"volume_name":"Volume","sample_name":"Old Sample","new_sample_name":"New Sample"},
+    {"id":"delete-sample-bank","type":"delete_sbac","partition_index":0,"volume_name":"Volume","sample_bank_name":"Delete Bank"},
+    {"id":"insert-sample-bank","type":"insert_sbac","partition_index":{"operation_ref":"delete-sample-bank"},"volume_name":"Volume","sample_bank":{"name":"Insert Bank","member_samples":["Sample A","Sample B"]}},
+    {"id":"rename-sample-bank","type":"rename_sbac","partition_index":0,"volume_name":"Volume","sample_bank_name":"Old Bank","new_sample_bank_name":"New Bank"},
     {"id":"delete-program","type":"delete_program","partition_index":0,"volume_name":"Volume","program_number":128},
-    {"id":"insert-program","type":"insert_program","partition_index":{"operation_ref":"delete-program"},"volume_name":"Volume","program":{"number":128,"assignments":[{"sample_bank_group":"Group","receive_channel":1},{"sample_bank":"Direct Bank","receive_channel":2}]}},
+    {"id":"insert-program","type":"insert_program","partition_index":{"operation_ref":"delete-program"},"volume_name":"Volume","program":{"number":128,"assignments":[{"sample_bank":"Group","receive_channel":1},{"sample":"Direct Sample","receive_channel":2}]}},
     {"id":"rename-volume","type":"rename_volume","partition_index":0,"volume_name":"Old Volume","new_volume_name":"New Volume"},
     {"id":"rename-partition","type":"rename_partition","partition_index":0,"partition_name":"Old Partition","new_partition_name":"New Partition"}
   ]

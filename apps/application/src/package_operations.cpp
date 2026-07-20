@@ -238,14 +238,14 @@ axk::app::Result<axk::PackageRootKind> parse_root_kind(std::string_view value) {
         return axk::PackageRootKind::volume;
     if (value == "program" || value == "prog")
         return axk::PackageRootKind::prog;
-    if (value == "sbac" || value == "bank-group")
+    if (value == "sbac" || value == "sample-bank" || value == "bank-group")
         return axk::PackageRootKind::sbac;
-    if (value == "sbnk" || value == "sample" || value == "sample-bank")
+    if (value == "sbnk" || value == "sample")
         return axk::PackageRootKind::sbnk;
     if (value == "smpl" || value == "wave-data")
         return axk::PackageRootKind::smpl;
     return std::unexpected(operation_error("unsupported_package_root",
-                                           "package root kind must be volume, program, bank-group, sample, "
+                                           "package root kind must be volume, program, sample-bank, sample, "
                                            "wave-data, sbac, sbnk, or smpl"));
 }
 

@@ -7,18 +7,21 @@
 
 #include "schema/export_v1.hpp"
 #include "schema/info_v1.hpp"
+#include "schema/objects_v1.hpp"
 #include "schema/operations_v1.hpp"
 #include "schema/package_v1.hpp"
 
 namespace schema = axk::cli::schema::operations_v1;
 namespace info_schema = axk::cli::schema::info_v1;
+namespace object_schema = axk::cli::schema::objects_v1;
 namespace export_schema = axk::cli::schema::export_v1;
 namespace package_schema = axk::cli::schema::package_v1;
 
 TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
     EXPECT_EQ(info_schema::schema_version, "compat-v1");
     EXPECT_EQ(schema::alteration_schema_version, "compat-v1");
-    EXPECT_EQ(export_schema::volume_graph_schema_version, "axklib.volume_graph.v1");
+    EXPECT_EQ(export_schema::volume_graph_schema_version, "axklib.volume_graph.v2");
+    EXPECT_EQ(object_schema::schema_version, "1.1");
 
     axk::RelationshipGraph graph;
     graph.relationships.push_back({
@@ -47,7 +50,7 @@ TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
     wide_loop.loop_start = 23'423U;
     wide_loop.loop_length = 4'294'967'293U;
     volume.waveforms.push_back({"wide", "Wide", "SMPL/Wide.wav", wide_loop});
-    volume.sample_bank_groups.push_back({"group", "Group", {"known-bank"}, {"known-bank", "likely-bank"}});
+    volume.sample_banks.push_back({"sample-bank", "Bank", {"known-sample"}, {"known-sample", "likely-sample"}});
     volume.programs.push_back({"source", "001", {"target"}});
     graph.relationships.push_back({
         .key = "program-edge",
@@ -78,7 +81,7 @@ TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
         return row["relationship_type"] == "PROG_ASSIGNMENT_TO_SBAC";
     }));
     EXPECT_EQ(parsed_graph["objects"]["sbac"][0]["members"].size(), 1U);
-    EXPECT_EQ(parsed_graph["objects"]["sbac"][0]["relationship_bank_keys"].size(), 2U);
+    EXPECT_EQ(parsed_graph["objects"]["sbac"][0]["relationship_sample_keys"].size(), 2U);
 }
 
 TEST(CliSchema, InfoV1KeepsRecursiveOrderNullCountsAndUtf8Paths) {
@@ -169,7 +172,7 @@ TEST(CliSchema, SerializationRejectsInvalidInternalUtf8) {
 TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
     EXPECT_EQ(package_schema::schema_version, "1.0");
     package_schema::PackageOutput package{
-        .path_utf8 = "portable/Bank.axksbnk",
+        .path_utf8 = "portable/Sample.axksbnk",
         .package_id = "digest",
         .package_kind = "sbnk",
         .required_extension = ".axksbnk",
@@ -177,8 +180,8 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
         .valid = true,
         .payloads_verified = false,
         .relationship_count = std::numeric_limits<std::uint64_t>::max(),
-        .roots = {{"sbnk", "Bank", {"node"}}},
-        .objects = {{"node", "SBNK", "Bank", "payload", "normalized", std::nullopt, std::nullopt}},
+        .roots = {{"sbnk", "Sample", {"node"}}},
+        .objects = {{"node", "SBNK", "Sample", "payload", "normalized", std::nullopt, std::nullopt}},
         .issues = {},
     };
     const auto serialized_package = package_schema::serialize(package, false);
@@ -193,7 +196,7 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
 
     package_schema::PlanOutput plan{
         .target_path_utf8 = "target.hds",
-        .package_paths_utf8 = {"portable/Bank.axksbnk"},
+        .package_paths_utf8 = {"portable/Sample.axksbnk"},
         .plan_id = "plan",
         .target_kind = "sfs",
         .target_snapshot_id = "snapshot",
@@ -207,8 +210,8 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
                      "digest",
                      "node",
                      "SBNK",
-                     "Bank",
-                     "Bank",
+                     "Sample",
+                     "Sample",
                      0U,
                      "",
                      "Volume",

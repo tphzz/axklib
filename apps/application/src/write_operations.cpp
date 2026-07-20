@@ -511,9 +511,9 @@ file_state(const std::filesystem::path &path) {
 void append_volume_paths(const axk::VolumeSpec &volume, std::vector<std::filesystem::path> &paths) {
     for (const auto &waveform : volume.waveforms)
         paths.push_back(waveform.path);
-    for (const auto &bank : volume.sample_banks) {
-        if (bank.interleaved_audio_path)
-            paths.push_back(*bank.interleaved_audio_path);
+    for (const auto &sample : volume.samples) {
+        if (sample.interleaved_audio_path)
+            paths.push_back(*sample.interleaved_audio_path);
     }
 }
 
@@ -543,9 +543,9 @@ std::vector<std::filesystem::path> external_paths(const axk::AlterationManifest 
                 using Value = std::decay_t<decltype(value)>;
                 if constexpr (std::same_as<Value, axk::InsertVolumeOperation>) {
                     append_volume_paths(value.volume, result);
-                } else if constexpr (std::same_as<Value, axk::InsertSampleBankOperation>) {
-                    if (value.sample_bank.interleaved_audio_path)
-                        result.push_back(*value.sample_bank.interleaved_audio_path);
+                } else if constexpr (std::same_as<Value, axk::InsertSampleOperation>) {
+                    if (value.sample.interleaved_audio_path)
+                        result.push_back(*value.sample.interleaved_audio_path);
                 } else if constexpr (std::same_as<Value, axk::InsertWaveformOperation>) {
                     result.push_back(value.waveform.path);
                 }

@@ -222,7 +222,8 @@ Result<void> validate_written_image(const detail::PreparedMediaImage &prepared, 
 
 Result<detail::PreparedMediaImage> detail::prepare_media_image(const MediaBuildManifest &manifest,
                                                                const CancellationToken &cancellation) {
-    if (manifest.schema_version != "1.0" || manifest.transfer.has_value() == manifest.authored_volume.has_value()) {
+    if ((manifest.schema_version != "1.0" && manifest.schema_version != "1.1") ||
+        manifest.transfer.has_value() == manifest.authored_volume.has_value()) {
         return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                           "invalid media build manifest content mode")};
     }

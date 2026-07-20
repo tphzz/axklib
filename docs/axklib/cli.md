@@ -127,7 +127,7 @@ The HDS starter is immediately buildable and object-empty. The floppy starter
 references `tone.wav` because a generated Yamaha FAT12 image must contain at
 least one object. The ISO starter is an object-empty staging volume intended to
 be populated with `package import`; the standalone hardware-tested authored ISO
-profile contains audio and a Sample Bank. See [Writer And
+profile contains Wave Data and a Sample. See [Writer And
 Alteration](write.md).
 
 ## Alter An HDS Image

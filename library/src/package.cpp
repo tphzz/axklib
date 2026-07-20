@@ -317,22 +317,22 @@ Result<std::vector<const Relationship *>> required_relationships(const ObjectSna
     };
 
     std::vector<const Relationship *> result;
-    if (const auto *bank = std::get_if<CurrentSbnk>(&object.object.payload)) {
-        if (!bank->left.sample_name.empty()) {
+    if (const auto *sample = std::get_if<CurrentSbnk>(&object.object.payload)) {
+        if (!sample->left.wave_data_name.empty()) {
             auto row = require_one("SBNK_LEFT_MEMBER_TO_SMPL");
             if (!row)
                 return std::unexpected{row.error()};
             result.push_back(*row);
         }
-        if (bank->right && !bank->right->sample_name.empty()) {
+        if (sample->right && !sample->right->wave_data_name.empty()) {
             auto row = require_one("SBNK_RIGHT_MEMBER_TO_SMPL");
             if (!row)
                 return std::unexpected{row.error()};
             result.push_back(*row);
         }
-    } else if (const auto *group = std::get_if<CurrentSbac>(&object.object.payload)) {
+    } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&object.object.payload)) {
         const auto active_slots =
-            std::ranges::count_if(group->slots, [](const SbacSlot &slot) { return !slot.name.empty(); });
+            std::ranges::count_if(sample_bank->slots, [](const SbacSlot &slot) { return !slot.name.empty(); });
         if (candidates.size() != static_cast<std::size_t>(active_slots)) {
             return std::unexpected{make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
                                               "package closure does not contain one relationship for every "
@@ -622,16 +622,16 @@ Result<PackageRelocation> parse_relocation(const Json &value) {
 }
 
 Result<void> validate_node_ids(const PortablePackage &package) {
-    std::map<std::string, std::vector<std::string>, std::less<>> groups;
+    std::map<std::string, std::vector<std::string>, std::less<>> sample_banks;
     for (const auto &node : package.nodes) {
         std::string identity = node.object_type;
         identity.push_back('\0');
         identity += node.name;
         identity.push_back('\0');
         identity += node.normalized_sha256;
-        groups[digest_text(identity)].push_back(node.node_id);
+        sample_banks[digest_text(identity)].push_back(node.node_id);
     }
-    for (auto &[identity, actual_ids] : groups) {
+    for (auto &[identity, actual_ids] : sample_banks) {
         std::vector<std::string> expected_ids;
         if (actual_ids.size() == 1U) {
             expected_ids.push_back("n-" + identity);
@@ -720,33 +720,35 @@ Result<void> validate_package_closure(const PortablePackage &package) {
             return {};
         };
 
-        if (const auto *bank = std::get_if<CurrentSbnk>(&decoded->payload)) {
-            if (!bank->left.sample_name.empty()) {
-                if (auto valid = require_edge("SBNK_LEFT_MEMBER_TO_SMPL", bank->left.sample_name, ObjectType::smpl);
+        if (const auto *sample = std::get_if<CurrentSbnk>(&decoded->payload)) {
+            if (!sample->left.wave_data_name.empty()) {
+                if (auto valid =
+                        require_edge("SBNK_LEFT_MEMBER_TO_SMPL", sample->left.wave_data_name, ObjectType::smpl);
                     !valid) {
                     return valid;
                 }
             }
-            if (bank->right && !bank->right->sample_name.empty()) {
-                if (auto valid = require_edge("SBNK_RIGHT_MEMBER_TO_SMPL", bank->right->sample_name, ObjectType::smpl);
+            if (sample->right && !sample->right->wave_data_name.empty()) {
+                if (auto valid =
+                        require_edge("SBNK_RIGHT_MEMBER_TO_SMPL", sample->right->wave_data_name, ObjectType::smpl);
                     !valid) {
                     return valid;
                 }
             }
-        } else if (const auto *group = std::get_if<CurrentSbac>(&decoded->payload)) {
+        } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&decoded->payload)) {
             auto edges = package_children(package, node.node_id, "SBAC_SLOT_TO_SBNK");
             std::ranges::sort(edges, {}, &PackageRelationship::ordinal);
             const auto active_slots =
-                std::ranges::count_if(group->slots, [](const SbacSlot &slot) { return !slot.name.empty(); });
+                std::ranges::count_if(sample_bank->slots, [](const SbacSlot &slot) { return !slot.name.empty(); });
             if (edges.size() != static_cast<std::size_t>(active_slots))
                 return std::unexpected{package_error("package SBAC closure does not match its "
                                                      "active member slots")};
             std::set<std::uint32_t> ordinals;
             for (const auto *edge : edges) {
                 const auto *target = node_by_id(package, edge->target_node_id);
-                const auto valid_ordinal = edge->ordinal < group->slots.size();
+                const auto valid_ordinal = edge->ordinal < sample_bank->slots.size();
                 const auto expected_name =
-                    valid_ordinal ? std::string_view{group->slots[edge->ordinal].name} : std::string_view{};
+                    valid_ordinal ? std::string_view{sample_bank->slots[edge->ordinal].name} : std::string_view{};
                 if (!ordinals.emplace(edge->ordinal).second || expected_name.empty() || target == nullptr ||
                     target->object_type != "SBNK" || target->name != expected_name) {
                     return std::unexpected{package_error(
@@ -1319,10 +1321,10 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
         std::map<std::string, std::uint32_t, std::less<>> role_ordinals;
         std::map<std::string, std::vector<std::uint32_t>, std::less<>> sbac_slot_ordinals;
         std::map<std::string, std::size_t, std::less<>> next_sbac_slot;
-        if (const auto *group = std::get_if<CurrentSbac>(&object->object.payload)) {
-            for (std::size_t index = 0; index < group->slots.size(); ++index) {
-                if (!group->slots[index].name.empty())
-                    sbac_slot_ordinals[group->slots[index].name].push_back(static_cast<std::uint32_t>(index));
+        if (const auto *sample_bank = std::get_if<CurrentSbac>(&object->object.payload)) {
+            for (std::size_t index = 0; index < sample_bank->slots.size(); ++index) {
+                if (!sample_bank->slots[index].name.empty())
+                    sbac_slot_ordinals[sample_bank->slots[index].name].push_back(static_cast<std::uint32_t>(index));
             }
         }
         for (const auto *relationship : *required) {

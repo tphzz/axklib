@@ -103,34 +103,34 @@ axk::VolumeSpec graph_volume(const std::filesystem::path &audio_path) {
     axk::VolumeSpec volume;
     volume.name = "Graph Volume";
     volume.waveforms.push_back({"wave", "Graph Wave", audio_path, 60U, {}});
-    axk::SampleBankSpec grouped;
-    grouped.name = "Grouped Bank";
-    grouped.waveform_id = "wave";
-    grouped.root_key = 60U;
-    grouped.key_high = 127U;
-    volume.sample_banks.push_back(std::move(grouped));
-    axk::SampleBankSpec direct;
-    direct.name = "Direct Bank";
+    axk::SampleSpec banked;
+    banked.name = "Grouped Sample";
+    banked.waveform_id = "wave";
+    banked.root_key = 60U;
+    banked.key_high = 127U;
+    volume.samples.push_back(std::move(banked));
+    axk::SampleSpec direct;
+    direct.name = "Direct Sample";
     direct.waveform_id = "wave";
     direct.root_key = 60U;
     direct.key_high = 127U;
-    volume.sample_banks.push_back(std::move(direct));
-    volume.sample_bank_groups.push_back({"Graph Group", {"Grouped Bank"}});
-    volume.programs.push_back({1U, {{"SBAC", "Graph Group", 1U}, {"SBNK", "Direct Bank", 2U}}});
+    volume.samples.push_back(std::move(direct));
+    volume.sample_banks.push_back({"Graph Bank", {"Grouped Sample"}});
+    volume.programs.push_back({1U, {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
     return volume;
 }
 
-axk::VolumeSpec single_bank_volume(const std::filesystem::path &audio_path, std::string volume_name,
-                                   std::string waveform_name, std::string bank_name) {
+axk::VolumeSpec single_sample_volume(const std::filesystem::path &audio_path, std::string volume_name,
+                                     std::string waveform_name, std::string sample_name) {
     axk::VolumeSpec volume;
     volume.name = std::move(volume_name);
     volume.waveforms.push_back({"wave", std::move(waveform_name), audio_path, 60U, {}});
-    axk::SampleBankSpec bank;
-    bank.name = std::move(bank_name);
-    bank.waveform_id = "wave";
-    bank.root_key = 60U;
-    bank.key_high = 127U;
-    volume.sample_banks.push_back(std::move(bank));
+    axk::SampleSpec sample;
+    sample.name = std::move(sample_name);
+    sample.waveform_id = "wave";
+    sample.root_key = 60U;
+    sample.key_high = 127U;
+    volume.samples.push_back(std::move(sample));
     return volume;
 }
 
@@ -155,7 +155,7 @@ axk::Result<std::vector<axk::PortablePackage>> mixed_source_packages(const std::
     if (const auto written = axk::write_wav_atomic(iso_audio, tiny_waveform(2000)); !written)
         return std::unexpected{written.error()};
 
-    axk::HdsBuildManifest sfs_manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest sfs_manifest{"1.1", 4U * 1024U * 1024U, {}};
     sfs_manifest.partitions.push_back({"P1", {graph_volume(graph_audio)}});
     if (const auto written = axk::write_hds_image(sfs_manifest, sfs_path); !written)
         return std::unexpected{written.error()};
@@ -172,14 +172,14 @@ axk::Result<std::vector<axk::PortablePackage>> mixed_source_packages(const std::
         return std::unexpected{fat.error()};
 
     axk::MediaBuildManifest iso_manifest;
-    iso_manifest.schema_version = "1.0";
+    iso_manifest.schema_version = "1.1";
     iso_manifest.format = axk::MediaImageFormat::iso9660;
     iso_manifest.iso_volume_id = "MIXED_SOURCE";
     iso_manifest.group_name = "ISO Group";
     iso_manifest.raw_group = "GROUP";
     iso_manifest.volume_name = "ISO Volume";
     iso_manifest.raw_volume = "F001";
-    iso_manifest.authored_volume = single_bank_volume(iso_audio, "ISO Volume", "ISO Wave", "ISO Bank");
+    iso_manifest.authored_volume = single_sample_volume(iso_audio, "ISO Volume", "ISO Wave", "ISO Sample");
     if (const auto written = axk::write_media_image(iso_manifest, iso_path); !written)
         return std::unexpected{written.error()};
     auto iso = axk::open_media(iso_path);
@@ -188,30 +188,30 @@ axk::Result<std::vector<axk::PortablePackage>> mixed_source_packages(const std::
     auto iso_catalog = axk::build_object_catalog(*iso);
     if (!iso_catalog)
         return std::unexpected{iso_catalog.error()};
-    const auto bank = std::ranges::find_if(iso_catalog->objects, [](const auto &object) {
-        return object.object.header.type == axk::ObjectType::sbnk && object.object.header.name == "ISO Bank" &&
+    const auto sample = std::ranges::find_if(iso_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbnk && object.object.header.name == "ISO Sample" &&
                object.placement.has_value();
     });
-    if (bank == iso_catalog->objects.end()) {
+    if (sample == iso_catalog->objects.end()) {
         return std::unexpected{axk::make_error(axk::ErrorCode::object_missing, axk::ErrorCategory::object,
-                                               "generated ISO bank is missing")};
+                                               "generated ISO sample is missing")};
     }
     axk::PackageRootSelector iso_selector;
     iso_selector.kind = axk::PackageRootKind::sbnk;
-    iso_selector.partition_index = bank->placement->partition.value;
-    iso_selector.group_name = bank->placement->partition_name;
-    iso_selector.volume_name = bank->placement->volume_name;
-    iso_selector.object_name = bank->object.header.name;
-    iso_selector.object_key = bank->key;
+    iso_selector.partition_index = sample->placement->partition.value;
+    iso_selector.group_name = sample->placement->partition_name;
+    iso_selector.volume_name = sample->placement->volume_name;
+    iso_selector.object_name = sample->object.header.name;
+    iso_selector.object_key = sample->key;
     const std::vector iso_roots{std::move(iso_selector)};
-    auto iso_bank = axk::build_portable_package(*iso, iso_roots);
-    if (!iso_bank)
-        return std::unexpected{iso_bank.error()};
+    auto iso_sample = axk::build_portable_package(*iso, iso_roots);
+    if (!iso_sample)
+        return std::unexpected{iso_sample.error()};
 
     std::vector<axk::PortablePackage> packages;
     packages.push_back(std::move(program->package));
     packages.push_back(std::move(fat->package));
-    packages.push_back(std::move(iso_bank->package));
+    packages.push_back(std::move(iso_sample->package));
     return packages;
 }
 
@@ -407,15 +407,15 @@ TEST(PortablePackage, ExportsAndVerifiesTypedSmplFromFat12) {
 TEST(PortablePackage, BuildsStrictSbnkClosureAndDeduplicatesMultiRootDependencies) {
     auto source = axk::open_media(fixture("HD00_512_single_sbnk_authored.hds"));
     ASSERT_TRUE(source) << source.error().message;
-    const std::vector bank_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
-    const auto bank = axk::build_portable_package(*source, bank_root);
-    ASSERT_TRUE(bank) << bank.error().message;
-    EXPECT_EQ(bank->package.kind, axk::PackageKind::sbnk);
-    EXPECT_EQ(bank->required_extension, ".axksbnk");
-    EXPECT_EQ(bank->package.nodes.size(), 2U);
-    EXPECT_EQ(bank->package.relationships.size(), 1U);
-    EXPECT_EQ(std::ranges::count(bank->package.nodes, std::string{"SBNK"}, &axk::PackageNode::object_type), 1);
-    EXPECT_EQ(std::ranges::count(bank->package.nodes, std::string{"SMPL"}, &axk::PackageNode::object_type), 1);
+    const std::vector sample_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
+    const auto sample = axk::build_portable_package(*source, sample_root);
+    ASSERT_TRUE(sample) << sample.error().message;
+    EXPECT_EQ(sample->package.kind, axk::PackageKind::sbnk);
+    EXPECT_EQ(sample->required_extension, ".axksbnk");
+    EXPECT_EQ(sample->package.nodes.size(), 2U);
+    EXPECT_EQ(sample->package.relationships.size(), 1U);
+    EXPECT_EQ(std::ranges::count(sample->package.nodes, std::string{"SBNK"}, &axk::PackageNode::object_type), 1);
+    EXPECT_EQ(std::ranges::count(sample->package.nodes, std::string{"SMPL"}, &axk::PackageNode::object_type), 1);
 
     std::vector bundle_roots{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave"),
                              root(axk::PackageRootKind::smpl, "New Volume", "sine wave")};
@@ -423,8 +423,8 @@ TEST(PortablePackage, BuildsStrictSbnkClosureAndDeduplicatesMultiRootDependencie
     ASSERT_TRUE(bundle) << bundle.error().message;
     EXPECT_EQ(bundle->package.kind, axk::PackageKind::bundle);
     EXPECT_EQ(bundle->required_extension, ".axkpkg");
-    EXPECT_EQ(bundle->package.nodes.size(), bank->package.nodes.size());
-    EXPECT_EQ(bundle->package.relationships, bank->package.relationships);
+    EXPECT_EQ(bundle->package.nodes.size(), sample->package.nodes.size());
+    EXPECT_EQ(bundle->package.relationships, sample->package.relationships);
     EXPECT_EQ(bundle->package.roots.size(), 2U);
 }
 
@@ -469,22 +469,22 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     waveform.pcm = {std::byte{},     std::byte{},     std::byte{0xe8}, std::byte{0x03},
                     std::byte{0x18}, std::byte{0xfc}, std::byte{},     std::byte{}};
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
-    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
     auto authored_volume = graph_volume(audio_path);
-    axk::SampleBankSpec grouped_two;
-    grouped_two.name = "Grouped Bank 2";
-    grouped_two.waveform_id = "wave";
-    grouped_two.root_key = 60U;
-    grouped_two.key_high = 127U;
-    authored_volume.sample_banks.push_back(std::move(grouped_two));
-    axk::SampleBankSpec direct_two;
-    direct_two.name = "Direct Bank 2";
+    axk::SampleSpec banked_two;
+    banked_two.name = "Grouped Sample 2";
+    banked_two.waveform_id = "wave";
+    banked_two.root_key = 60U;
+    banked_two.key_high = 127U;
+    authored_volume.samples.push_back(std::move(banked_two));
+    axk::SampleSpec direct_two;
+    direct_two.name = "Direct Sample 2";
     direct_two.waveform_id = "wave";
     direct_two.root_key = 60U;
     direct_two.key_high = 127U;
-    authored_volume.sample_banks.push_back(std::move(direct_two));
-    authored_volume.sample_bank_groups.push_back({"Graph Group 2", {"Grouped Bank 2"}});
-    authored_volume.programs.push_back({2U, {{"SBAC", "Graph Group 2", 1U}, {"SBNK", "Direct Bank 2", 2U}}});
+    authored_volume.samples.push_back(std::move(direct_two));
+    authored_volume.sample_banks.push_back({"Graph Bank 2", {"Grouped Sample 2"}});
+    authored_volume.programs.push_back({2U, {{"SBAC", "Graph Bank 2", 1U}, {"SBNK", "Direct Sample 2", 2U}}});
     manifest.partitions.push_back({"P1", {std::move(authored_volume)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
     auto source = axk::open_media(source_path);
@@ -500,8 +500,8 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     const std::vector cases{
         Case{axk::PackageRootKind::volume, "", axk::PackageKind::volume, ".axkvol", 5U},
         Case{axk::PackageRootKind::prog, "001", axk::PackageKind::program, ".axkprg", 5U},
-        Case{axk::PackageRootKind::sbac, "Graph Group", axk::PackageKind::sbac, ".axksbac", 3U},
-        Case{axk::PackageRootKind::sbnk, "Grouped Bank", axk::PackageKind::sbnk, ".axksbnk", 2U},
+        Case{axk::PackageRootKind::sbac, "Graph Bank", axk::PackageKind::sbac, ".axksbac", 3U},
+        Case{axk::PackageRootKind::sbnk, "Grouped Sample", axk::PackageKind::sbnk, ".axksbnk", 2U},
         Case{axk::PackageRootKind::smpl, "Graph Wave", axk::PackageKind::smpl, ".axksmpl", 1U},
     };
     for (const auto &test : cases) {
@@ -528,8 +528,8 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     }
 
     const std::vector bundle_roots{
-        root(axk::PackageRootKind::sbac, "Graph Volume", "Graph Group"),
-        root(axk::PackageRootKind::sbnk, "Graph Volume", "Direct Bank"),
+        root(axk::PackageRootKind::sbac, "Graph Volume", "Graph Bank"),
+        root(axk::PackageRootKind::sbnk, "Graph Volume", "Direct Sample"),
     };
     const auto bundle = axk::build_portable_package(*source, bundle_roots);
     ASSERT_TRUE(bundle) << bundle.error().message;
@@ -599,30 +599,30 @@ TEST(PortablePackage, SbacRelationshipOrdinalsPreserveSourceSlotOrder) {
     axk::VolumeSpec volume;
     volume.name = "Slot Order";
     volume.waveforms.push_back({"wave", "Shared Wave", audio_path, 60U, {}});
-    for (const auto &name : {std::string{"Z Bank"}, std::string{"A Bank"}}) {
-        axk::SampleBankSpec bank;
-        bank.name = name;
-        bank.waveform_id = "wave";
-        bank.root_key = 60U;
-        bank.key_high = 127U;
-        volume.sample_banks.push_back(std::move(bank));
+    for (const auto &name : {std::string{"Z Sample"}, std::string{"A Sample"}}) {
+        axk::SampleSpec sample;
+        sample.name = name;
+        sample.waveform_id = "wave";
+        sample.root_key = 60U;
+        sample.key_high = 127U;
+        volume.samples.push_back(std::move(sample));
     }
-    axk::SampleBankSpec direct;
-    direct.name = "Direct Bank";
+    axk::SampleSpec direct;
+    direct.name = "Direct Sample";
     direct.waveform_id = "wave";
     direct.root_key = 60U;
     direct.key_high = 127U;
-    volume.sample_banks.push_back(std::move(direct));
-    volume.sample_bank_groups.push_back({"Ordered Group", {"Z Bank", "A Bank"}});
-    volume.programs.push_back({1U, {{"SBAC", "Ordered Group", 1U}, {"SBNK", "Direct Bank", 2U}}});
-    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    volume.samples.push_back(std::move(direct));
+    volume.sample_banks.push_back({"Ordered Bank", {"Z Sample", "A Sample"}});
+    volume.programs.push_back({1U, {{"SBAC", "Ordered Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume)}});
     const auto written = axk::write_hds_image(manifest, source_path);
     ASSERT_TRUE(written) << written.error().message;
     const auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
 
-    const std::vector roots{root(axk::PackageRootKind::sbac, "Slot Order", "Ordered Group")};
+    const std::vector roots{root(axk::PackageRootKind::sbac, "Slot Order", "Ordered Bank")};
     const auto built = axk::build_portable_package(*source, roots);
     ASSERT_TRUE(built) << built.error().message;
     std::vector<axk::PackageRelationship> edges;
@@ -638,9 +638,9 @@ TEST(PortablePackage, SbacRelationshipOrdinalsPreserveSourceSlotOrder) {
         return target->name;
     };
     EXPECT_EQ(edges[0].ordinal, 0U);
-    EXPECT_EQ(target_name(edges[0]), "Z Bank");
+    EXPECT_EQ(target_name(edges[0]), "Z Sample");
     EXPECT_EQ(edges[1].ordinal, 1U);
-    EXPECT_EQ(target_name(edges[1]), "A Bank");
+    EXPECT_EQ(target_name(edges[1]), "A Sample");
     EXPECT_TRUE(axk::verify_portable_package(built->package));
     std::filesystem::remove_all(output_root, error);
 }
@@ -653,7 +653,7 @@ TEST(PortablePackage, NormativeJsonSchemaMatchesCanonicalManifestShapeAndEnums) 
     std::filesystem::remove_all(output_root, error);
     std::filesystem::create_directories(output_root);
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1000)));
-    axk::HdsBuildManifest source_manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest source_manifest{"1.1", 4U * 1024U * 1024U, {}};
     source_manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
     ASSERT_TRUE(axk::write_hds_image(source_manifest, source_path));
     auto source = axk::open_media(source_path);
@@ -996,7 +996,7 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
     std::filesystem::remove_all(output_root, error);
     ASSERT_TRUE(std::filesystem::create_directories(output_root));
     ASSERT_TRUE(axk::write_wav_atomic(audio, tiny_waveform(1234)));
-    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {graph_volume(audio)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, image_path));
     auto media = axk::open_media(image_path);
@@ -1006,8 +1006,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
     ASSERT_TRUE(built) << built.error().message;
 
     const std::map<std::string, std::string, std::less<>> destination_names{
-        {"PROG", "Reloc Program"},       {"SBAC", "Reloc Group"}, {"Grouped Bank", "Reloc Grouped"},
-        {"Direct Bank", "Reloc Direct"}, {"SMPL", "Reloc Wave"},
+        {"PROG", "Reloc Program"},         {"SBAC", "Reloc Bank"}, {"Grouped Sample", "Reloc Banked"},
+        {"Direct Sample", "Reloc Direct"}, {"SMPL", "Reloc Wave"},
     };
     const auto destination_name = [&](const axk::PackageNode &node) -> const std::string & {
         if (node.object_type == "SBNK")
@@ -1071,11 +1071,11 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             EXPECT_EQ(profile->relocations[3].role, "SBNK_GROUP_MEMBERSHIP");
             EXPECT_EQ(profile->relocations[3].mask_hex, "01");
         } else if (node.object_type == "SBAC") {
-            const auto *group = std::get_if<axk::CurrentSbac>(&decoded->payload);
-            ASSERT_NE(group, nullptr);
-            ASSERT_EQ(profile->relocations.size(), group->slots.size());
-            for (std::size_t index = 0; index < group->slots.size(); ++index) {
-                EXPECT_EQ(profile->relocations[index].offset, group->slots[index].offset + 16U);
+            const auto *sample_bank = std::get_if<axk::CurrentSbac>(&decoded->payload);
+            ASSERT_NE(sample_bank, nullptr);
+            ASSERT_EQ(profile->relocations.size(), sample_bank->slots.size());
+            for (std::size_t index = 0; index < sample_bank->slots.size(); ++index) {
+                EXPECT_EQ(profile->relocations[index].offset, sample_bank->slots[index].offset + 16U);
                 EXPECT_EQ(profile->relocations[index].width, 4U);
                 EXPECT_EQ(profile->relocations[index].role, "SBAC_SLOT_HANDLE");
                 EXPECT_TRUE(profile->relocations[index].mask_hex.empty());
@@ -1089,8 +1089,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
                 EXPECT_EQ(edge->ordinal, index);
             }
             auto nonzero_handles = node.raw_payload;
-            for (std::size_t index = 0; index < group->slots.size(); ++index) {
-                const auto offset = static_cast<std::size_t>(group->slots[index].offset) + 16U;
+            for (std::size_t index = 0; index < sample_bank->slots.size(); ++index) {
+                const auto offset = static_cast<std::size_t>(sample_bank->slots[index].offset) + 16U;
                 const auto value = static_cast<std::uint32_t>(0x10203040U + index);
                 nonzero_handles[offset] = static_cast<std::byte>(value >> 24U);
                 nonzero_handles[offset + 1U] = static_cast<std::byte>(value >> 16U);
@@ -1104,7 +1104,7 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             ASSERT_TRUE(nonzero_profile) << nonzero_profile.error().message;
             EXPECT_EQ(nonzero_profile->normalized_payload, profile->normalized_payload);
             auto mutable_nonzero_profile = *nonzero_profile;
-            for (std::size_t index = 0; index < group->slots.size(); ++index) {
+            for (std::size_t index = 0; index < sample_bank->slots.size(); ++index) {
                 EXPECT_EQ(nonzero_profile->relocations[index].expected_hex, std::format("{:08x}", 0x10203040U + index));
                 mutable_nonzero_profile.relocations[index].edge_ids = node.relocations[index].edge_ids;
             }
@@ -1255,7 +1255,7 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             context.smpl_link_id = 0x234U;
         if (node.object_type == "SBNK") {
             context.linked_program_numbers = {2U, 33U, 96U, 128U};
-            context.grouped =
+            context.sample_bank_member =
                 std::ranges::any_of(built->package.relationships, [&](const axk::PackageRelationship &edge) {
                     return edge.role == "SBAC_SLOT_TO_SBNK" && edge.target_node_id == node.node_id;
                 });
@@ -1303,9 +1303,10 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
         } else if (node.object_type == "SBAC") {
             const auto relocated_decoded = axk::decode_object(*relocated);
             ASSERT_TRUE(relocated_decoded) << relocated_decoded.error().message;
-            const auto *group = std::get_if<axk::CurrentSbac>(&relocated_decoded->payload);
-            ASSERT_NE(group, nullptr);
-            EXPECT_TRUE(std::ranges::all_of(group->slots, [](const auto &slot) { return slot.raw_handle == 0U; }));
+            const auto *sample_bank = std::get_if<axk::CurrentSbac>(&relocated_decoded->payload);
+            ASSERT_NE(sample_bank, nullptr);
+            EXPECT_TRUE(
+                std::ranges::all_of(sample_bank->slots, [](const auto &slot) { return slot.raw_handle == 0U; }));
         } else if (node.object_type == "PROG") {
             const auto relocated_decoded = axk::decode_object(*relocated);
             ASSERT_TRUE(relocated_decoded) << relocated_decoded.error().message;
@@ -1324,8 +1325,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
 TEST(PackageImportPlanner, ReusesAnExactExistingSfsClosureWithoutAllocation) {
     auto source = axk::open_media(fixture("HD00_512_single_sbnk_authored.hds"));
     ASSERT_TRUE(source) << source.error().message;
-    const std::vector bank_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
-    const auto built = axk::build_portable_package(*source, bank_root);
+    const std::vector sample_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
+    const auto built = axk::build_portable_package(*source, sample_root);
     ASSERT_TRUE(built) << built.error().message;
 
     axk::PackageImportRequest request;
@@ -1533,13 +1534,13 @@ TEST(PackageImportPlanner, ReportsInsufficientSfsAndFat12CapacityBeforeApply) {
     axk::VolumeSpec source_volume;
     source_volume.name = "Source";
     source_volume.waveforms.push_back({"large", "Large Wave", audio_path, 60U, {}});
-    axk::HdsBuildManifest source_manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest source_manifest{"1.1", 4U * 1024U * 1024U, {}};
     source_manifest.partitions.push_back({"P1", {std::move(source_volume)}});
     ASSERT_TRUE(axk::write_hds_image(source_manifest, source_path));
 
     axk::VolumeSpec target_volume;
     target_volume.name = "Target";
-    axk::HdsBuildManifest target_manifest{"1.0", 1024U * 1024U, {}};
+    axk::HdsBuildManifest target_manifest{"1.1", 1024U * 1024U, {}};
     target_manifest.partitions.push_back({"P1", {std::move(target_volume)}});
     ASSERT_TRUE(axk::write_hds_image(target_manifest, target_path));
 
@@ -1581,7 +1582,7 @@ TEST(PackageImportPlanner, RejectsFat12RootExhaustionAndInvalidExistingChains) {
     std::filesystem::create_directories(output_root);
 
     axk::detail::PreparedMediaImage full;
-    full.manifest.schema_version = "1.0";
+    full.manifest.schema_version = "1.1";
     full.manifest.format = axk::MediaImageFormat::fat12_floppy;
     for (std::size_t index = 0U; index < 224U; ++index)
         full.retained_files.push_back({std::format("R{:07}.DAT", index), {static_cast<std::byte>(index)}});
@@ -1644,14 +1645,14 @@ TEST(PackageImportPlanner, ReportsIsoDirectoryCapacityBeforeApply) {
     std::filesystem::create_directories(output_root);
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1000)));
     axk::MediaBuildManifest target_manifest;
-    target_manifest.schema_version = "1.0";
+    target_manifest.schema_version = "1.1";
     target_manifest.format = axk::MediaImageFormat::iso9660;
     target_manifest.iso_volume_id = "CAPACITY_TEST";
     target_manifest.group_name = "Target Group";
     target_manifest.raw_group = "GROUP";
     target_manifest.volume_name = "Target Volume";
     target_manifest.raw_volume = "F001";
-    target_manifest.authored_volume = single_bank_volume(audio_path, "Target Volume", "Target Wave", "Target Bank");
+    target_manifest.authored_volume = single_sample_volume(audio_path, "Target Volume", "Target Wave", "Target Sample");
     ASSERT_TRUE(axk::write_media_image(target_manifest, target_path));
 
     const auto built = fat_smpl_package();
@@ -1757,9 +1758,9 @@ TEST(PackageImportApply, AtomicallyInsertsAndThenReusesAnExactSmpl) {
     }
     ASSERT_EQ(imported.size(), 1U);
     EXPECT_EQ(imported.front()->sfs_id.value, *plan->objects.front().target_sfs_id);
-    const auto *sample = std::get_if<axk::CurrentSmpl>(&imported.front()->object.payload);
-    ASSERT_NE(sample, nullptr);
-    EXPECT_EQ(sample->link_id.value, *plan->objects.front().target_link_id);
+    const auto *wave_data = std::get_if<axk::CurrentSmpl>(&imported.front()->object.payload);
+    ASSERT_NE(wave_data, nullptr);
+    EXPECT_EQ(wave_data->link_id.value, *plan->objects.front().target_link_id);
 
     const auto repeat_plan = axk::plan_package_import(first_output, packages, request);
     ASSERT_TRUE(repeat_plan) << repeat_plan.error().message;
@@ -1791,7 +1792,7 @@ TEST(PackageImportApply, AppliesVolumeLocalReuseAndPartitionIsolationInOnePlan) 
     volume_b.name = "Volume B";
     axk::VolumeSpec volume_c;
     volume_c.name = "Volume C";
-    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume_a), std::move(volume_b)}});
     manifest.partitions.push_back({"P2", {std::move(volume_c)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, target_path));
@@ -1857,14 +1858,14 @@ TEST(PackageImportApply, RelocatesACompleteRenamedSbnkClosureAndReopensItsGraph)
     const auto source_path = fixture("HD00_512_single_sbnk_authored.hds");
     auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
-    const std::vector bank_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
-    const auto built = axk::build_portable_package(*source, bank_root);
+    const std::vector sample_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
+    const auto built = axk::build_portable_package(*source, sample_root);
     ASSERT_TRUE(built) << built.error().message;
     const std::vector packages{built->package};
     axk::PackageImportRequest request;
     request.root_destinations.push_back(destination(0U, "New Volume"));
     for (const auto &node : built->package.nodes) {
-        request.policy.renames.push_back({0U, node.node_id, node.object_type == "SBNK" ? "Bank Copy" : "Wave Copy"});
+        request.policy.renames.push_back({0U, node.node_id, node.object_type == "SBNK" ? "Sample Copy" : "Wave Copy"});
     }
     const auto plan = axk::plan_package_import(source_path, packages, request);
     ASSERT_TRUE(plan) << plan.error().message;
@@ -1876,34 +1877,34 @@ TEST(PackageImportApply, RelocatesACompleteRenamedSbnkClosureAndReopensItsGraph)
                std::ranges::contains(object.actions, axk::PackageImportObjectAction::insert);
     }));
 
-    const auto output = output_root / "renamed-bank.hds";
+    const auto output = output_root / "renamed-sample.hds";
     const auto applied = axk::apply_package_import(source_path, packages, *plan, output);
     ASSERT_TRUE(applied) << applied.error().message;
     auto reopened = axk::open_media(output);
     ASSERT_TRUE(reopened) << reopened.error().message;
     auto catalog = axk::build_object_catalog(*reopened);
     ASSERT_TRUE(catalog) << catalog.error().message;
-    const auto bank = std::ranges::find_if(catalog->objects, [](const auto &object) {
+    const auto sample_object = std::ranges::find_if(catalog->objects, [](const auto &object) {
         return object.placement && object.placement->volume_name == "New Volume" &&
-               object.object.header.raw_type == "SBNK" && object.object.header.name == "Bank Copy";
+               object.object.header.raw_type == "SBNK" && object.object.header.name == "Sample Copy";
     });
-    const auto sample = std::ranges::find_if(catalog->objects, [](const auto &object) {
+    const auto wave_data_object = std::ranges::find_if(catalog->objects, [](const auto &object) {
         return object.placement && object.placement->volume_name == "New Volume" &&
                object.object.header.raw_type == "SMPL" && object.object.header.name == "Wave Copy";
     });
-    ASSERT_NE(bank, catalog->objects.end());
-    ASSERT_NE(sample, catalog->objects.end());
-    const auto *decoded_bank = std::get_if<axk::CurrentSbnk>(&bank->object.payload);
-    const auto *decoded_sample = std::get_if<axk::CurrentSmpl>(&sample->object.payload);
-    ASSERT_NE(decoded_bank, nullptr);
+    ASSERT_NE(sample_object, catalog->objects.end());
+    ASSERT_NE(wave_data_object, catalog->objects.end());
+    const auto *decoded_sample = std::get_if<axk::CurrentSbnk>(&sample_object->object.payload);
+    const auto *decoded_wave_data = std::get_if<axk::CurrentSmpl>(&wave_data_object->object.payload);
     ASSERT_NE(decoded_sample, nullptr);
-    EXPECT_EQ(decoded_bank->left.sample_name, "Wave Copy");
-    EXPECT_EQ(decoded_bank->left.smpl_link_id, decoded_sample->link_id.value);
+    ASSERT_NE(decoded_wave_data, nullptr);
+    EXPECT_EQ(decoded_sample->left.wave_data_name, "Wave Copy");
+    EXPECT_EQ(decoded_sample->left.smpl_link_id, decoded_wave_data->link_id.value);
     const auto graph = axk::build_relationship_graph(*catalog);
-    const auto children = graph.children(bank->key);
+    const auto children = graph.children(sample_object->key);
     EXPECT_TRUE(std::ranges::any_of(children, [&](const axk::Relationship *edge) {
         return edge->type == "SBNK_LEFT_MEMBER_TO_SMPL" && edge->quality == axk::RelationshipQuality::known &&
-               edge->target_key == sample->key;
+               edge->target_key == wave_data_object->key;
     }));
 
     const auto repeat_plan = axk::plan_package_import(output, packages, request);
@@ -1913,7 +1914,7 @@ TEST(PackageImportApply, RelocatesACompleteRenamedSbnkClosureAndReopensItsGraph)
         return std::ranges::contains(object.actions, axk::PackageImportObjectAction::reuse) &&
                !std::ranges::contains(object.actions, axk::PackageImportObjectAction::insert);
     }));
-    const auto repeated = output_root / "renamed-bank-repeat.hds";
+    const auto repeated = output_root / "renamed-sample-repeat.hds";
     ASSERT_TRUE(axk::apply_package_import(output, packages, *repeat_plan, repeated));
     EXPECT_EQ(read_file(output), read_file(repeated));
     std::filesystem::remove_all(output_root, error);
@@ -1944,21 +1945,21 @@ TEST(PackageImportApply, PreservesStereoClosureAndExactPhysicalPcm) {
     volume.name = "Stereo Source";
     volume.waveforms.push_back({"left", "Stereo L", left_path, 60U, {}});
     volume.waveforms.push_back({"right", "Stereo R", right_path, 60U, {}});
-    axk::SampleBankSpec bank;
-    bank.name = "Stereo Bank";
-    bank.waveform_id = "left";
-    bank.right_waveform_id = "right";
-    bank.root_key = 60U;
-    bank.key_high = 127U;
-    volume.sample_banks.push_back(std::move(bank));
-    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::SampleSpec sample;
+    sample.name = "Stereo Sample";
+    sample.waveform_id = "left";
+    sample.right_waveform_id = "right";
+    sample.root_key = 60U;
+    sample.key_high = 127U;
+    volume.samples.push_back(std::move(sample));
+    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
 
     auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
-    const std::vector bank_root{root(axk::PackageRootKind::sbnk, "Stereo Source", "Stereo Bank")};
-    const auto built = axk::build_portable_package(*source, bank_root);
+    const std::vector sample_root{root(axk::PackageRootKind::sbnk, "Stereo Source", "Stereo Sample")};
+    const auto built = axk::build_portable_package(*source, sample_root);
     ASSERT_TRUE(built) << built.error().message;
     ASSERT_EQ(built->package.nodes.size(), 3U);
     ASSERT_EQ(built->package.relationships.size(), 2U);
@@ -1993,9 +1994,9 @@ TEST(PackageImportApply, PreservesStereoClosureAndExactPhysicalPcm) {
     ASSERT_TRUE(reopened) << reopened.error().message;
     const auto catalog = axk::build_object_catalog(*reopened);
     ASSERT_TRUE(catalog) << catalog.error().message;
-    const auto imported_bank = std::ranges::find_if(catalog->objects, [](const auto &object) {
+    const auto imported_sample = std::ranges::find_if(catalog->objects, [](const auto &object) {
         return object.placement && object.placement->volume_name == "Stereo Imported" &&
-               object.object.header.raw_type == "SBNK" && object.object.header.name == "Stereo Bank";
+               object.object.header.raw_type == "SBNK" && object.object.header.name == "Stereo Sample";
     });
     const auto imported_left = std::ranges::find_if(catalog->objects, [](const auto &object) {
         return object.placement && object.placement->volume_name == "Stereo Imported" &&
@@ -2005,16 +2006,16 @@ TEST(PackageImportApply, PreservesStereoClosureAndExactPhysicalPcm) {
         return object.placement && object.placement->volume_name == "Stereo Imported" &&
                object.object.header.raw_type == "SMPL" && object.object.header.name == "Stereo R";
     });
-    ASSERT_NE(imported_bank, catalog->objects.end());
+    ASSERT_NE(imported_sample, catalog->objects.end());
     ASSERT_NE(imported_left, catalog->objects.end());
     ASSERT_NE(imported_right, catalog->objects.end());
-    const auto *decoded_bank = std::get_if<axk::CurrentSbnk>(&imported_bank->object.payload);
-    ASSERT_NE(decoded_bank, nullptr);
-    ASSERT_TRUE(decoded_bank->right);
-    EXPECT_EQ(decoded_bank->left.sample_name, "Stereo L");
-    EXPECT_EQ(decoded_bank->right->sample_name, "Stereo R");
+    const auto *decoded_sample = std::get_if<axk::CurrentSbnk>(&imported_sample->object.payload);
+    ASSERT_NE(decoded_sample, nullptr);
+    ASSERT_TRUE(decoded_sample->right);
+    EXPECT_EQ(decoded_sample->left.wave_data_name, "Stereo L");
+    EXPECT_EQ(decoded_sample->right->wave_data_name, "Stereo R");
     const auto graph = axk::build_relationship_graph(*catalog);
-    const auto children = graph.children(imported_bank->key);
+    const auto children = graph.children(imported_sample->key);
     EXPECT_TRUE(std::ranges::any_of(children, [&](const axk::Relationship *edge) {
         return edge->type == "SBNK_LEFT_MEMBER_TO_SMPL" && edge->quality == axk::RelationshipQuality::known &&
                edge->target_key == imported_left->key;
@@ -2046,12 +2047,12 @@ TEST(PackageImportApply, PreservesStereoClosureAndExactPhysicalPcm) {
     expect_package_audio(*fat_reopened, packages);
     const auto fat_catalog = axk::build_object_catalog(*fat_reopened);
     ASSERT_TRUE(fat_catalog) << fat_catalog.error().message;
-    const auto fat_bank = std::ranges::find_if(fat_catalog->objects, [](const auto &object) {
-        return object.object.header.raw_type == "SBNK" && object.object.header.name == "Stereo Bank";
+    const auto fat_sample = std::ranges::find_if(fat_catalog->objects, [](const auto &object) {
+        return object.object.header.raw_type == "SBNK" && object.object.header.name == "Stereo Sample";
     });
-    ASSERT_NE(fat_bank, fat_catalog->objects.end());
+    ASSERT_NE(fat_sample, fat_catalog->objects.end());
     const auto fat_graph = axk::build_relationship_graph(*fat_catalog);
-    EXPECT_EQ(std::ranges::count_if(fat_graph.children(fat_bank->key),
+    EXPECT_EQ(std::ranges::count_if(fat_graph.children(fat_sample->key),
                                     [](const axk::Relationship *edge) {
                                         return (edge->type == "SBNK_LEFT_MEMBER_TO_SMPL" ||
                                                 edge->type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
@@ -2106,7 +2107,7 @@ TEST(PackageImportApply, CreatesAnExplicitDestinationWithFullyPlannedScaffolding
     std::filesystem::remove_all(output_root, error);
 }
 
-TEST(PackageImportApply, ImportsACompleteProgramGroupBankAndWaveformGraph) {
+TEST(PackageImportApply, ImportsACompleteProgramSampleBankSampleAndWaveDataGraph) {
     const auto output_root = publication_root("axklib-package-import-program");
     const auto audio_path = output_root / "tone.wav";
     const auto source_path = output_root / "source.hds";
@@ -2120,7 +2121,7 @@ TEST(PackageImportApply, ImportsACompleteProgramGroupBankAndWaveformGraph) {
     waveform.pcm = {std::byte{},     std::byte{},     std::byte{0xe8}, std::byte{0x03},
                     std::byte{0x18}, std::byte{0xfc}, std::byte{},     std::byte{}};
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
-    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
     auto source = axk::open_media(source_path);
@@ -2169,21 +2170,21 @@ TEST(PackageImportApply, ImportsACompleteProgramGroupBankAndWaveformGraph) {
         return object.placement && object.placement->volume_name == "Imported Graph";
     };
     EXPECT_EQ(std::ranges::count_if(catalog->objects, in_imported_volume), 5);
-    const auto grouped_bank = std::ranges::find_if(catalog->objects, [&](const auto &object) {
+    const auto banked_sample = std::ranges::find_if(catalog->objects, [&](const auto &object) {
         return in_imported_volume(object) && object.object.header.raw_type == "SBNK" &&
-               object.object.header.name == "Grouped Bank";
+               object.object.header.name == "Grouped Sample";
     });
-    const auto direct_bank = std::ranges::find_if(catalog->objects, [&](const auto &object) {
+    const auto direct_sample = std::ranges::find_if(catalog->objects, [&](const auto &object) {
         return in_imported_volume(object) && object.object.header.raw_type == "SBNK" &&
-               object.object.header.name == "Direct Bank";
+               object.object.header.name == "Direct Sample";
     });
-    ASSERT_NE(grouped_bank, catalog->objects.end());
-    ASSERT_NE(direct_bank, catalog->objects.end());
-    const auto *grouped = std::get_if<axk::CurrentSbnk>(&grouped_bank->object.payload);
-    const auto *direct = std::get_if<axk::CurrentSbnk>(&direct_bank->object.payload);
-    ASSERT_NE(grouped, nullptr);
+    ASSERT_NE(banked_sample, catalog->objects.end());
+    ASSERT_NE(direct_sample, catalog->objects.end());
+    const auto *banked = std::get_if<axk::CurrentSbnk>(&banked_sample->object.payload);
+    const auto *direct = std::get_if<axk::CurrentSbnk>(&direct_sample->object.payload);
+    ASSERT_NE(banked, nullptr);
     ASSERT_NE(direct, nullptr);
-    EXPECT_NE(grouped->sample_flags & 1U, 0U);
+    EXPECT_NE(banked->sample_flags & 1U, 0U);
     EXPECT_TRUE(direct->linked_program_numbers == std::vector<std::uint8_t>{1U});
     const auto graph = axk::build_relationship_graph(*catalog);
     for (const auto &object : plan->objects) {
@@ -2233,7 +2234,7 @@ TEST(PackageImportApply, CancellationAtEveryGraphBoundaryPublishesNothing) {
     waveform.pcm = {std::byte{},     std::byte{},     std::byte{0xe8}, std::byte{0x03},
                     std::byte{0x18}, std::byte{0xfc}, std::byte{},     std::byte{}};
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
-    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
     const auto source_before = read_file(source_path);
@@ -2271,8 +2272,8 @@ TEST(PackageImportApply, CancellationAtEveryGraphBoundaryPublishesNothing) {
     std::filesystem::remove_all(output_root, error);
 }
 
-TEST(PackageImportApply, MergesPlannedGraphMetadataIntoReusedSampleBanks) {
-    const auto output_root = publication_root("axklib-package-import-reused-banks");
+TEST(PackageImportApply, MergesPlannedGraphMetadataIntoReusedSamples) {
+    const auto output_root = publication_root("axklib-package-import-reused-samples");
     const auto audio_path = output_root / "tone.wav";
     const auto source_path = output_root / "source.hds";
     const auto target_path = output_root / "target.hds";
@@ -2288,14 +2289,14 @@ TEST(PackageImportApply, MergesPlannedGraphMetadataIntoReusedSampleBanks) {
                     std::byte{0x18}, std::byte{0xfc}, std::byte{},     std::byte{}};
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
 
-    axk::HdsBuildManifest source_manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest source_manifest{"1.1", 4U * 1024U * 1024U, {}};
     source_manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
     ASSERT_TRUE(axk::write_hds_image(source_manifest, source_path));
     auto target_volume = graph_volume(audio_path);
     target_volume.name = "Target Volume";
-    target_volume.sample_bank_groups.clear();
+    target_volume.sample_banks.clear();
     target_volume.programs.clear();
-    axk::HdsBuildManifest target_manifest{"1.0", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest target_manifest{"1.1", 4U * 1024U * 1024U, {}};
     target_manifest.partitions.push_back({"P1", {std::move(target_volume)}});
     ASSERT_TRUE(axk::write_hds_image(target_manifest, target_path));
 
@@ -2316,22 +2317,22 @@ TEST(PackageImportApply, MergesPlannedGraphMetadataIntoReusedSampleBanks) {
                                                                      axk::PackageImportObjectAction::insert);
                                     }),
               2);
-    const auto grouped_bank = std::ranges::find_if(plan->objects, [](const auto &object) {
-        return object.object_type == "SBNK" && object.destination_name == "Grouped Bank";
+    const auto banked_sample = std::ranges::find_if(plan->objects, [](const auto &object) {
+        return object.object_type == "SBNK" && object.destination_name == "Grouped Sample";
     });
-    const auto direct_bank = std::ranges::find_if(plan->objects, [](const auto &object) {
-        return object.object_type == "SBNK" && object.destination_name == "Direct Bank";
+    const auto direct_sample = std::ranges::find_if(plan->objects, [](const auto &object) {
+        return object.object_type == "SBNK" && object.destination_name == "Direct Sample";
     });
-    ASSERT_NE(grouped_bank, plan->objects.end());
-    ASSERT_NE(direct_bank, plan->objects.end());
-    EXPECT_TRUE(grouped_bank->target_grouped);
-    EXPECT_TRUE(grouped_bank->target_program_numbers.empty());
-    EXPECT_FALSE(direct_bank->target_grouped);
-    EXPECT_TRUE(direct_bank->target_program_numbers == std::vector<std::uint8_t>{1U});
-    for (const auto *bank : {&*grouped_bank, &*direct_bank}) {
-        EXPECT_TRUE(std::ranges::contains(bank->actions, axk::PackageImportObjectAction::reuse));
-        EXPECT_TRUE(std::ranges::contains(bank->actions, axk::PackageImportObjectAction::relocate));
-        EXPECT_FALSE(std::ranges::contains(bank->actions, axk::PackageImportObjectAction::insert));
+    ASSERT_NE(banked_sample, plan->objects.end());
+    ASSERT_NE(direct_sample, plan->objects.end());
+    EXPECT_TRUE(banked_sample->target_sample_bank_member);
+    EXPECT_TRUE(banked_sample->target_program_numbers.empty());
+    EXPECT_FALSE(direct_sample->target_sample_bank_member);
+    EXPECT_TRUE(direct_sample->target_program_numbers == std::vector<std::uint8_t>{1U});
+    for (const auto *sample : {&*banked_sample, &*direct_sample}) {
+        EXPECT_TRUE(std::ranges::contains(sample->actions, axk::PackageImportObjectAction::reuse));
+        EXPECT_TRUE(std::ranges::contains(sample->actions, axk::PackageImportObjectAction::relocate));
+        EXPECT_FALSE(std::ranges::contains(sample->actions, axk::PackageImportObjectAction::insert));
     }
 
     const auto applied = axk::apply_package_import(target_path, packages, *plan, output_path);
@@ -2340,21 +2341,21 @@ TEST(PackageImportApply, MergesPlannedGraphMetadataIntoReusedSampleBanks) {
     ASSERT_TRUE(reopened) << reopened.error().message;
     auto catalog = axk::build_object_catalog(*reopened);
     ASSERT_TRUE(catalog) << catalog.error().message;
-    const auto imported_grouped = std::ranges::find_if(catalog->objects, [](const auto &object) {
+    const auto imported_banked_sample = std::ranges::find_if(catalog->objects, [](const auto &object) {
         return object.placement && object.placement->volume_name == "Target Volume" &&
-               object.object.header.raw_type == "SBNK" && object.object.header.name == "Grouped Bank";
+               object.object.header.raw_type == "SBNK" && object.object.header.name == "Grouped Sample";
     });
     const auto imported_direct = std::ranges::find_if(catalog->objects, [](const auto &object) {
         return object.placement && object.placement->volume_name == "Target Volume" &&
-               object.object.header.raw_type == "SBNK" && object.object.header.name == "Direct Bank";
+               object.object.header.raw_type == "SBNK" && object.object.header.name == "Direct Sample";
     });
-    ASSERT_NE(imported_grouped, catalog->objects.end());
+    ASSERT_NE(imported_banked_sample, catalog->objects.end());
     ASSERT_NE(imported_direct, catalog->objects.end());
-    const auto *grouped = std::get_if<axk::CurrentSbnk>(&imported_grouped->object.payload);
+    const auto *banked = std::get_if<axk::CurrentSbnk>(&imported_banked_sample->object.payload);
     const auto *direct = std::get_if<axk::CurrentSbnk>(&imported_direct->object.payload);
-    ASSERT_NE(grouped, nullptr);
+    ASSERT_NE(banked, nullptr);
     ASSERT_NE(direct, nullptr);
-    EXPECT_NE(grouped->sample_flags & 1U, 0U);
+    EXPECT_NE(banked->sample_flags & 1U, 0U);
     EXPECT_TRUE(direct->linked_program_numbers == std::vector<std::uint8_t>{1U});
 
     const auto repeat_plan = axk::plan_package_import(output_path, packages, request);
@@ -2448,7 +2449,7 @@ TEST(PackageRegressionMatrix, MixesSfsFat12AndIsoSourcesIntoSfsDeterministically
 
     axk::VolumeSpec target_volume;
     target_volume.name = "Mixed";
-    axk::HdsBuildManifest target_manifest{"1.0", 8U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest target_manifest{"1.1", 8U * 1024U * 1024U, {}};
     target_manifest.partitions.push_back({"P1", {std::move(target_volume)}});
     ASSERT_TRUE(axk::write_hds_image(target_manifest, target_path));
 
@@ -2530,7 +2531,7 @@ TEST(PackageRegressionMatrix, MixesSfsFat12AndIsoSourcesIntoFat12Deterministical
     ASSERT_TRUE(seed_objects) << seed_objects.error().message;
     ASSERT_EQ(seed_objects->size(), 1U);
     axk::detail::PreparedMediaImage target_prepared;
-    target_prepared.manifest.schema_version = "1.0";
+    target_prepared.manifest.schema_version = "1.1";
     target_prepared.manifest.format = axk::MediaImageFormat::fat12_floppy;
     target_prepared.objects.push_back({seed_objects->front().decoded.header.type,
                                        seed_objects->front().decoded.header.name, seed_objects->front().raw_payload});
@@ -2639,8 +2640,8 @@ TEST(PackageImportApply, RebuildsFat12GraphAndRepeatsByteIdentically) {
     const auto source_path = fixture("HD00_512_single_sbnk_authored.hds");
     auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
-    const std::vector bank_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
-    const auto built = axk::build_portable_package(*source, bank_root);
+    const std::vector sample_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
+    const auto built = axk::build_portable_package(*source, sample_root);
     ASSERT_TRUE(built) << built.error().message;
     const std::vector packages{built->package, built->package};
     axk::PackageImportRequest request;
@@ -2683,12 +2684,12 @@ TEST(PackageImportApply, RebuildsFat12GraphAndRepeatsByteIdentically) {
     }));
     const auto catalog = axk::build_object_catalog(*reopened);
     ASSERT_TRUE(catalog) << catalog.error().message;
-    const auto bank = std::ranges::find_if(catalog->objects, [](const auto &object) {
+    const auto sample = std::ranges::find_if(catalog->objects, [](const auto &object) {
         return object.object.header.raw_type == "SBNK" && object.object.header.name == "sine wave";
     });
-    ASSERT_NE(bank, catalog->objects.end());
+    ASSERT_NE(sample, catalog->objects.end());
     const auto graph = axk::build_relationship_graph(*catalog);
-    EXPECT_TRUE(std::ranges::any_of(graph.children(bank->key), [](const axk::Relationship *edge) {
+    EXPECT_TRUE(std::ranges::any_of(graph.children(sample->key), [](const axk::Relationship *edge) {
         return edge->type == "SBNK_LEFT_MEMBER_TO_SMPL" && edge->quality == axk::RelationshipQuality::known &&
                edge->target_key.has_value();
     }));
@@ -2721,14 +2722,15 @@ TEST(PackageRegressionMatrix, MixesSfsFat12AndIsoSourcesIntoIso9660Deterministic
     ASSERT_TRUE(axk::write_wav_atomic(target_audio, tiny_waveform(3000)));
 
     axk::MediaBuildManifest target_manifest;
-    target_manifest.schema_version = "1.0";
+    target_manifest.schema_version = "1.1";
     target_manifest.format = axk::MediaImageFormat::iso9660;
     target_manifest.iso_volume_id = "MIXED_TARGET";
     target_manifest.group_name = "Target Group";
     target_manifest.raw_group = "GROUP";
     target_manifest.volume_name = "Target Volume";
     target_manifest.raw_volume = "F001";
-    target_manifest.authored_volume = single_bank_volume(target_audio, "Target Volume", "Target Wave", "Target Bank");
+    target_manifest.authored_volume =
+        single_sample_volume(target_audio, "Target Volume", "Target Wave", "Target Sample");
     auto prepared = axk::detail::prepare_media_image(target_manifest, {});
     ASSERT_TRUE(prepared) << prepared.error().message;
     const std::vector retained_payload{std::byte{'r'}, std::byte{'e'}, std::byte{'t'},
@@ -2862,7 +2864,7 @@ TEST(PackageImportApply, RebuildsIsoWithVolumeLocalReuseAndByteIdenticalRepeat) 
                     std::byte{0x18}, std::byte{0xfc}, std::byte{},     std::byte{}};
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
     axk::MediaBuildManifest target_manifest;
-    target_manifest.schema_version = "1.0";
+    target_manifest.schema_version = "1.1";
     target_manifest.format = axk::MediaImageFormat::iso9660;
     target_manifest.iso_volume_id = "PACKAGE_TEST";
     target_manifest.group_name = "Target Group";
@@ -2880,8 +2882,8 @@ TEST(PackageImportApply, RebuildsIsoWithVolumeLocalReuseAndByteIdenticalRepeat) 
 
     auto source = axk::open_media(fixture("HD00_512_single_sbnk_authored.hds"));
     ASSERT_TRUE(source) << source.error().message;
-    const std::vector bank_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
-    const auto built = axk::build_portable_package(*source, bank_root);
+    const std::vector sample_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
+    const auto built = axk::build_portable_package(*source, sample_root);
     ASSERT_TRUE(built) << built.error().message;
     const std::vector packages{built->package, built->package};
     axk::PackageImportRequest request;

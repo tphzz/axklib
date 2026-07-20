@@ -194,8 +194,8 @@ struct LoadedWaveform {
     std::uint32_t link_id{};
 };
 
-Result<std::vector<std::byte>> serialize_sbnk(const SampleBankSpec &bank, const LoadedWaveform &left,
-                                              const LoadedWaveform *right, bool grouped,
+Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const LoadedWaveform &left,
+                                              const LoadedWaveform *right, bool sample_bank_member,
                                               const std::vector<std::uint8_t> &linked_programs) {
     if (left.audio.output_frames > maximum_wave_data_frames_per_channel ||
         (right != nullptr && right->audio.output_frames > maximum_wave_data_frames_per_channel)) {
@@ -221,7 +221,7 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleBankSpec &bank, const 
     std::ranges::copy(header, result.begin() + 0x10);
     result[0x30] = std::byte{0x10};
     result[0x31] = std::byte{0x0c};
-    if (auto written = put_text(0x32, bank.name, 16); !written)
+    if (auto written = put_text(0x32, sample.name, 16); !written)
         return std::unexpected{written.error()};
     constexpr std::array<std::byte, 7> suffix{std::byte{0xb8}, std::byte{0},    std::byte{0x0a}, std::byte{0xf6},
                                               std::byte{0x7a}, std::byte{0x01}, std::byte{0x54}};
@@ -243,7 +243,7 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleBankSpec &bank, const 
         std::byte{0x01}, std::byte{0x20}, std::byte{0x49}, std::byte{0x0b}, std::byte{0x01}, std::byte{0xe0},
         std::byte{0x48}, std::byte{0x0c}, std::byte{0x01}, std::byte{0xe0}};
     std::ranges::copy(member_defaults, result.begin() + 0xa8);
-    result[0xd0] = static_cast<std::byte>(grouped ? 0x03U : 0x02U);
+    result[0xd0] = static_cast<std::byte>(sample_bank_member ? 0x03U : 0x02U);
     result[0xd4] = std::byte{2};
     for (const auto number : linked_programs) {
         const auto offset = 0xc0U + ((number - 1U) / 32U) * 4U;
@@ -254,16 +254,16 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleBankSpec &bank, const 
                               std::to_integer<std::uint32_t>(result[offset + 3U]);
         be32(result, offset, existing | bit);
     }
-    result[0xd6] = static_cast<std::byte>(bank.root_key);
+    result[0xd6] = static_cast<std::byte>(sample.root_key);
     be16(result, 0xd8, static_cast<std::uint16_t>(left.audio.output_sample_rate));
-    be16(result, 0xde, pitch_word(bank.root_key, left.audio.output_sample_rate));
+    be16(result, 0xde, pitch_word(sample.root_key, left.audio.output_sample_rate));
     if (right != nullptr) {
-        result[0xd7] = static_cast<std::byte>(bank.root_key);
+        result[0xd7] = static_cast<std::byte>(sample.root_key);
         be16(result, 0xda, static_cast<std::uint16_t>(right->audio.output_sample_rate));
-        be16(result, 0xe0, pitch_word(bank.root_key, right->audio.output_sample_rate));
+        be16(result, 0xe0, pitch_word(sample.root_key, right->audio.output_sample_rate));
     }
-    result[0xe2] = static_cast<std::byte>(bank.key_high);
-    result[0xe3] = static_cast<std::byte>(bank.key_low);
+    result[0xe2] = static_cast<std::byte>(sample.key_high);
+    result[0xe3] = static_cast<std::byte>(sample.key_low);
     result[0xe4] = std::byte{0x30};
     result[0xe5] = std::byte{1};
     be16(result, 0xe6, 9000);
@@ -277,7 +277,7 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleBankSpec &bank, const 
     }
     const std::array<std::pair<std::size_t, std::uint8_t>, 32> defaults{
         {{0x109, 0},   {0x10a, 127}, {0x10b, 4},   {0x10c, 0},   {0x10d, 127}, {0x10e, 0},  {0x10f, 0},
-         {0x110, 0},   {0x111, 0},   {0x112, 0},   {0x113, 0},   {0x114, 63},  {0x115, 0},  {0x116, bank.level},
+         {0x110, 0},   {0x111, 0},   {0x112, 0},   {0x113, 0},   {0x114, 63},  {0x115, 0},  {0x116, sample.level},
          {0x117, 0},   {0x118, 0},   {0x119, 0},   {0x11a, 127}, {0x11b, 0},   {0x11c, 0},  {0x11d, 127},
          {0x11e, 127}, {0x11f, 127}, {0x120, 0},   {0x121, 0},   {0x122, 26},  {0x123, 64}, {0x124, 10},
          {0x125, 0},   {0x126, 127}, {0x127, 127}, {0x128, 127}}};
@@ -313,8 +313,8 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleBankSpec &bank, const 
     return result;
 }
 
-Result<std::vector<std::byte>> serialize_sbac(const SampleBankGroupSpec &group,
-                                              const std::map<std::string, SampleBankSpec> &banks) {
+Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
+                                              const std::map<std::string, SampleSpec> &samples) {
     std::vector<std::byte> result(0x210);
     std::ranges::transform(std::string_view{"FSFSDEV3SPLX"}, result.begin(),
                            [](char value) { return static_cast<std::byte>(value); });
@@ -325,14 +325,14 @@ Result<std::vector<std::byte>> serialize_sbac(const SampleBankGroupSpec &group,
     be32(result, 0x1c, 0x1e0);
     result[0x30] = std::byte{0x11};
     result[0x31] = std::byte{0x0c};
-    auto name = ascii(group.name, 16);
+    auto name = ascii(sample_bank.name, 16);
     if (!name)
         return std::unexpected{name.error()};
     std::ranges::copy(*name, result.begin() + 0x32);
-    result[0x144] = static_cast<std::byte>(group.member_sample_banks.size());
-    for (std::size_t index = 0; index < group.member_sample_banks.size(); ++index) {
-        const auto found = banks.find(group.member_sample_banks[index]);
-        if (found == banks.end())
+    result[0x144] = static_cast<std::byte>(sample_bank.member_samples.size());
+    for (std::size_t index = 0; index < sample_bank.member_samples.size(); ++index) {
+        const auto found = samples.find(sample_bank.member_samples[index]);
+        if (found == samples.end())
             return std::unexpected{
                 make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, "SBAC references an unknown SBNK")};
         auto member = ascii(found->second.name, 16);
@@ -398,10 +398,9 @@ Result<std::vector<std::byte>> detail::prepare_smpl_payload(const WaveformSpec &
     return serialize_smpl(spec, audio, link_id);
 }
 
-Result<std::vector<std::byte>> detail::prepare_sbnk_payload(const SampleBankSpec &spec,
-                                                            const PreparedWaveformMember &left,
+Result<std::vector<std::byte>> detail::prepare_sbnk_payload(const SampleSpec &spec, const PreparedWaveformMember &left,
                                                             const std::optional<PreparedWaveformMember> &right,
-                                                            bool grouped,
+                                                            bool sample_bank_member,
                                                             const std::vector<std::uint8_t> &linked_programs) {
     ImportedAudio left_audio;
     left_audio.output_sample_rate = left.sample_rate;
@@ -418,12 +417,13 @@ Result<std::vector<std::byte>> detail::prepare_sbnk_payload(const SampleBankSpec
         right_spec.name = right->name;
         right_loaded.emplace(LoadedWaveform{std::move(right_spec), std::move(right_audio), right->link_id});
     }
-    return serialize_sbnk(spec, left_loaded, right_loaded ? &*right_loaded : nullptr, grouped, linked_programs);
+    return serialize_sbnk(spec, left_loaded, right_loaded ? &*right_loaded : nullptr, sample_bank_member,
+                          linked_programs);
 }
 
-Result<std::vector<std::byte>> detail::prepare_sbac_payload(const SampleBankGroupSpec &group,
-                                                            const std::map<std::string, SampleBankSpec> &banks) {
-    return serialize_sbac(group, banks);
+Result<std::vector<std::byte>> detail::prepare_sbac_payload(const SampleBankSpec &sample_bank,
+                                                            const std::map<std::string, SampleSpec> &samples) {
+    return serialize_sbac(sample_bank, samples);
 }
 
 Result<std::vector<std::byte>> detail::prepare_prog_payload(const ProgramSpec &program) {
@@ -443,19 +443,19 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
     for (const auto &volume : partition.volumes) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
-        if (volume.sample_bank_groups.empty() != volume.programs.empty() ||
-            volume.sample_bank_groups.size() != volume.programs.size()) {
+        if (volume.sample_banks.empty() != volume.programs.empty() ||
+            volume.sample_banks.size() != volume.programs.size()) {
             return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                              "current SBAC/PROG profile requires one group per Program")};
+                                              "current SBAC/PROG profile requires one Sample Bank per Program")};
         }
         if (!volume.programs.empty()) {
-            std::map<std::string, const SampleBankSpec *> bank_specs;
-            std::map<std::string, const SampleBankGroupSpec *> group_specs;
-            for (const auto &bank : volume.sample_banks)
-                bank_specs.emplace(bank.name, &bank);
-            for (const auto &group : volume.sample_bank_groups)
-                group_specs.emplace(group.name, &group);
-            std::set<std::string> assigned_groups;
+            std::map<std::string, const SampleSpec *> sample_specs;
+            std::map<std::string, const SampleBankSpec *> sample_bank_specs;
+            for (const auto &sample : volume.samples)
+                sample_specs.emplace(sample.name, &sample);
+            for (const auto &sample_bank : volume.sample_banks)
+                sample_bank_specs.emplace(sample_bank.name, &sample_bank);
+            std::set<std::string> assigned_sample_banks;
             std::set<std::string> assigned_direct;
             for (const auto &program : volume.programs) {
                 if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
@@ -465,41 +465,42 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                                                       "Program profile requires SBAC channel 1 "
                                                       "then SBNK channel 2")};
                 }
-                const auto group = group_specs.find(program.assignments[0].target_name);
-                const auto direct = bank_specs.find(program.assignments[1].target_name);
-                if (group == group_specs.end() || direct == bank_specs.end() ||
-                    !assigned_groups.insert(group->first).second || !assigned_direct.insert(direct->first).second ||
-                    std::ranges::contains(group->second->member_sample_banks, direct->first)) {
+                const auto sample_bank = sample_bank_specs.find(program.assignments[0].target_name);
+                const auto direct = sample_specs.find(program.assignments[1].target_name);
+                if (sample_bank == sample_bank_specs.end() || direct == sample_specs.end() ||
+                    !assigned_sample_banks.insert(sample_bank->first).second ||
+                    !assigned_direct.insert(direct->first).second ||
+                    std::ranges::contains(sample_bank->second->member_samples, direct->first)) {
                     return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                       "Program targets must be unique, known, and separate")};
                 }
                 if (direct->second->right_waveform_id || direct->second->interleaved_audio_path) {
                     return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                      "SBAC/PROG writer profile supports mono banks only")};
+                                                      "SBAC/PROG writer profile supports mono Samples only")};
                 }
-                for (const auto &member_name : group->second->member_sample_banks) {
-                    const auto member = bank_specs.find(member_name);
-                    if (member == bank_specs.end() || member->second->right_waveform_id ||
+                for (const auto &member_name : sample_bank->second->member_samples) {
+                    const auto member = sample_specs.find(member_name);
+                    if (member == sample_specs.end() || member->second->right_waveform_id ||
                         member->second->interleaved_audio_path) {
                         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                           "SBAC/PROG writer profile supports mono "
-                                                          "banks only")};
+                                                          "Samples only")};
                     }
                 }
-                if (group->second->member_sample_banks.size() == 1U) {
-                    const auto *member = bank_specs.at(group->second->member_sample_banks[0]);
+                if (sample_bank->second->member_samples.size() == 1U) {
+                    const auto *member = sample_specs.at(sample_bank->second->member_samples[0]);
                     if (member->waveform_id != direct->second->waveform_id ||
                         member->root_key != direct->second->root_key || member->key_low != direct->second->key_low ||
                         member->key_high != direct->second->key_high || member->level != direct->second->level) {
                         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                          "one-member group and direct control "
+                                                          "one-member Sample Bank and direct Sample control "
                                                           "parameters must match")};
                     }
                 }
             }
-            if (assigned_groups.size() != group_specs.size()) {
+            if (assigned_sample_banks.size() != sample_bank_specs.size()) {
                 return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                  "every sample-bank group must be assigned once")};
+                                                  "every Sample Bank must be assigned once")};
             }
         }
         const auto volume_id = next++;
@@ -541,9 +542,9 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             loaded.emplace(spec.id, LoadedWaveform{spec, std::move(*imported), link_id});
         }
         std::map<std::string, std::pair<std::string, std::string>> generated_members;
-        std::set<std::string> grouped_banks;
-        for (const auto &group : volume.sample_bank_groups) {
-            grouped_banks.insert(group.member_sample_banks.begin(), group.member_sample_banks.end());
+        std::set<std::string> banked_samples;
+        for (const auto &sample_bank : volume.sample_banks) {
+            banked_samples.insert(sample_bank.member_samples.begin(), sample_bank.member_samples.end());
         }
         std::map<std::string, std::vector<std::uint8_t>> linked_programs;
         for (const auto &program : volume.programs) {
@@ -556,23 +557,23 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             }
             linked_programs[program.assignments[1].target_name].push_back(program.number);
         }
-        std::map<std::string, SampleBankSpec> banks;
-        for (const auto &bank : volume.sample_banks) {
+        std::map<std::string, SampleSpec> samples;
+        for (const auto &sample : volume.samples) {
             if (const auto check = cancellation.check(); !check)
                 return std::unexpected{check.error()};
-            if (!bank.interleaved_audio_path)
+            if (!sample.interleaved_audio_path)
                 continue;
             AudioImportOptions options;
             options.expected_channels = 2;
-            options.target_sample_rate = bank.target_sample_rate;
-            auto imported = import_sampler_audio(*bank.interleaved_audio_path, options);
+            options.target_sample_rate = sample.target_sample_rate;
+            auto imported = import_sampler_audio(*sample.interleaved_audio_path, options);
             if (!imported)
                 return std::unexpected{imported.error()};
-            const auto base = bank.name.substr(0, std::min<std::size_t>(bank.name.size(), 14U));
-            const auto left_name = bank.left_waveform_name.value_or(base + "-L");
-            const auto right_name = bank.right_waveform_name.value_or(base + "-R");
-            const auto left_key = bank.name + "#left";
-            const auto right_key = bank.name + "#right";
+            const auto base = sample.name.substr(0, std::min<std::size_t>(sample.name.size(), 14U));
+            const auto left_name = sample.left_waveform_name.value_or(base + "-L");
+            const auto right_name = sample.right_waveform_name.value_or(base + "-R");
+            const auto left_key = sample.name + "#left";
+            const auto right_key = sample.name + "#right";
             const auto make_channel = [&](std::size_t channel) {
                 auto audio = *imported;
                 audio.source_channels = 1;
@@ -580,8 +581,8 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                 return audio;
             };
             const auto add_member = [&](std::string key, std::string name, std::size_t channel) -> Result<void> {
-                WaveformSpec spec{key, std::move(name), *bank.interleaved_audio_path, bank.root_key,
-                                  bank.target_sample_rate};
+                WaveformSpec spec{key, std::move(name), *sample.interleaved_audio_path, sample.root_key,
+                                  sample.target_sample_rate};
                 const auto link_id = 0x016b1dbcU + static_cast<std::uint32_t>(loaded.size()) * 0x100U;
                 auto audio = make_channel(channel);
                 auto payload = serialize_smpl(spec, audio, link_id);
@@ -597,16 +598,16 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                 return std::unexpected{added.error()};
             if (auto added = add_member(right_key, right_name, 1); !added)
                 return std::unexpected{added.error()};
-            generated_members.emplace(bank.name, std::pair{left_key, right_key});
+            generated_members.emplace(sample.name, std::pair{left_key, right_key});
         }
-        for (const auto &bank : volume.sample_banks) {
+        for (const auto &sample : volume.samples) {
             if (const auto check = cancellation.check(); !check)
                 return std::unexpected{check.error()};
-            const auto generated = generated_members.find(bank.name);
-            const auto left_key = bank.waveform_id                       ? *bank.waveform_id
+            const auto generated = generated_members.find(sample.name);
+            const auto left_key = sample.waveform_id                     ? *sample.waveform_id
                                   : generated == generated_members.end() ? std::string{}
                                                                          : generated->second.first;
-            const auto right_key = bank.right_waveform_id                 ? *bank.right_waveform_id
+            const auto right_key = sample.right_waveform_id               ? *sample.right_waveform_id
                                    : generated == generated_members.end() ? std::string{}
                                                                           : generated->second.second;
             const auto left = loaded.find(left_key);
@@ -620,21 +621,21 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                 return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                   "stereo SBNK members require matching rate and frame "
                                                   "count")};
-            auto payload = serialize_sbnk(bank, left->second, right == loaded.end() ? nullptr : &right->second,
-                                          grouped_banks.contains(bank.name), linked_programs[bank.name]);
+            auto payload = serialize_sbnk(sample, left->second, right == loaded.end() ? nullptr : &right->second,
+                                          banked_samples.contains(sample.name), linked_programs[sample.name]);
             if (!payload)
                 return std::unexpected{payload.error()};
             const auto id = next++;
-            sbnk_entries.emplace_back(bank.name, id, 16U);
+            sbnk_entries.emplace_back(sample.name, id, 16U);
             objects.push_back({id, std::move(*payload), RecordKind::object});
-            banks.emplace(bank.name, bank);
+            samples.emplace(sample.name, sample);
         }
-        for (const auto &group : volume.sample_bank_groups) {
-            auto payload = serialize_sbac(group, banks);
+        for (const auto &sample_bank : volume.sample_banks) {
+            auto payload = serialize_sbac(sample_bank, samples);
             if (!payload)
                 return std::unexpected{payload.error()};
             const auto id = next++;
-            sbac_entries.emplace_back(group.name, id, 16U);
+            sbac_entries.emplace_back(sample_bank.name, id, 16U);
             objects.push_back({id, std::move(*payload), RecordKind::object});
         }
         for (const auto &program : volume.programs) {

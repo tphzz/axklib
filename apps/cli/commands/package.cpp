@@ -43,13 +43,13 @@ Result<PackageRootKind> parse_root_kind(std::string_view value) {
         return PackageRootKind::volume;
     if (value == "program" || value == "prog")
         return PackageRootKind::prog;
-    if (value == "sbac" || value == "bank-group")
+    if (value == "sbac" || value == "sample-bank" || value == "bank-group")
         return PackageRootKind::sbac;
-    if (value == "sbnk" || value == "sample" || value == "sample-bank")
+    if (value == "sbnk" || value == "sample")
         return PackageRootKind::sbnk;
     if (value == "smpl" || value == "wave-data")
         return PackageRootKind::smpl;
-    return std::unexpected{argument_error("package root kind must be volume, program, bank-group, sample, "
+    return std::unexpected{argument_error("package root kind must be volume, program, sample-bank, sample, "
                                           "wave-data, sbac, sbnk, or smpl")};
 }
 

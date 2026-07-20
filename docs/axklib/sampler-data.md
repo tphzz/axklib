@@ -186,7 +186,7 @@ carry most Sample parameters.
 
 The ordinary stereo layout uses the left and right member link fields on one
 `SBNK`. Some source media instead stores stereo as two sibling `SBNK` objects
-under the same `SBAC` group, with sampler-facing names ending in `-L` and `-R`.
+under the same `SBAC` Sample Bank, with sampler-facing names ending in `-L` and `-R`.
 In that layout each sibling still uses its own left-member `SMPL` link. axklib
 keeps both `SBNK` objects and both physical `SMPL` exports, then writes an
 additive rendered stereo WAV when the sibling names and links are known and
@@ -233,7 +233,7 @@ preserves those raw values and exposes a `resolved_key_range` projection in
 volume graphs. The projection resolves `Orig` to the member root key so export
 formats with only concrete MIDI limits can emit bounded zones. Generated direct
 single-member `SBNK` objects have been hardware-tested with concrete root key
-and key-range values. For a single-member bank, an empty right member name means
+and key-range values. For a single-member Sample, an empty right member name means
 there is no active right member; the generated writer treats right-member fields
 as inactive compatibility fields rather than as a second playback region.
 

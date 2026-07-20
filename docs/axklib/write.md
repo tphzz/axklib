@@ -35,7 +35,7 @@ different starting content:
 - `hds` is an immediately buildable 512 MiB image definition with one empty
   partition and no volumes. Add authored volume entries to the manifest or
   insert/import volumes after creation.
-- `floppy` contains one waveform and Sample Bank skeleton referring to
+- `floppy` contains one Wave Data object and Sample skeleton referring to
   `tone.wav`. Replace that path and the sampler-facing names as needed. A
   Yamaha FAT12 image with no Yamaha objects is not a valid writer target, so
   the floppy starter cannot be object-empty.
@@ -48,7 +48,7 @@ The generated HDS document is:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "size_bytes": 536870912,
   "partitions": [
     {
@@ -132,9 +132,9 @@ Wave Data object (`SMPL`) and one Sample (`SBNK`) that references it:
       "root_key": 60
     }
   ],
-  "sample_banks": [
+  "samples": [
     {
-      "name": "Tone Bank",
+      "name": "Tone Sample",
       "waveform_id": "tone",
       "root_key": 60,
       "key_low": 0,
@@ -200,7 +200,7 @@ Place `tone.wav` next to `cdrom.json` and write:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "format": "iso9660",
   "iso": {
     "volume_id": "AXK_AUDIO",
@@ -219,7 +219,7 @@ Place `tone.wav` next to `cdrom.json` and write:
         "root_key": 60
       }
     ],
-    "sample_banks": [
+    "samples": [
       {
         "name": "Authored Tone",
         "waveform_id": "tone",
@@ -245,7 +245,7 @@ For optical media, burn `authored.iso` as a finalized, single-session disc
 image. Do not copy the ISO file onto a data disc.
 
 The exact minimal profile above has been verified on physical Yamaha A-series
-hardware through group and volume enumeration, Sample Bank loading, audible
+hardware through group and volume enumeration, Sample loading, audible
 waveform playback, and pitch-correct audition. That result covers one group,
 one `F001` volume, one mono Wave Data object (`SMPL`), and one direct
 single-member Sample (`SBNK`). It does
@@ -276,7 +276,7 @@ Place `tone.wav` next to `floppy.json` and write:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "format": "fat12_floppy",
   "authored_volume": {
     "name": "FAT ROOT",
@@ -288,7 +288,7 @@ Place `tone.wav` next to `floppy.json` and write:
         "root_key": 60
       }
     ],
-    "sample_banks": [
+    "samples": [
       {
         "name": "Authored Tone",
         "waveform_id": "tone",
@@ -329,7 +329,7 @@ Given `source.ima` next to `floppy-to-iso.json`:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "format": "iso9660",
   "iso": {
     "volume_id": "FLOPPY_COPY",
@@ -391,12 +391,12 @@ Then reference one or more reported object keys:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "format": "fat12_floppy",
   "transfer": {
     "source_path": "source.hds",
     "selection": "roots",
-    "root_object_keys": ["<sample-bank-object-key>"]
+    "root_object_keys": ["<sample-object-key>"]
   }
 }
 ```
@@ -414,7 +414,7 @@ Top-level HDS fields:
 
 | Field | Rule |
 | --- | --- |
-| `schema_version` | Required; currently exactly `"1.0"`. |
+| `schema_version` | Required; canonical output is `"1.1"`; legacy `"1.0"` input is migrated during parsing. |
 | `size_bytes` | Required integer from 1 MiB through 2 GiB, divisible by 512. The starter uses 512 MiB. |
 | `partitions` | Required array containing `1..8` partition objects. |
 
@@ -426,15 +426,15 @@ HDS partition and volume fields:
 | partition `volumes` | Required array of volume objects; it may be empty. |
 | volume `name` | Required non-empty sampler-facing volume name. |
 | volume `waveforms` | Required array; it may be empty. |
-| volume `sample_banks` | Required array; it may be empty. |
-| volume `sample_bank_groups` | Optional array using the common authored-content schema below. |
+| volume `samples` | Required Sample (`SBNK`) array; it may be empty. |
+| volume `sample_banks` | Optional Sample Bank (`SBAC`) array using the common authored-content schema below. |
 | volume `programs` | Optional array using the common authored-content schema below. |
 
 Top-level removable-media fields:
 
 | Field | Rule |
 | --- | --- |
-| `schema_version` | Required; currently exactly `"1.0"`. |
+| `schema_version` | Required; canonical output is `"1.1"`; legacy `"1.0"` input is migrated during parsing. |
 | `format` | Required; `"fat12_floppy"` or `"iso9660"`. |
 | `authored_volume` / `transfer` | Exactly one is required. |
 | `iso` | Required for `iso9660`; omitted for `fat12_floppy`. |
@@ -445,8 +445,8 @@ Top-level removable-media fields:
 | --- | --- |
 | `name` | Required non-empty string. Match `iso.volume_name` for clear ISO manifests. |
 | `waveforms` | Required array. Completed FAT12 images must contain at least one generated object. An object-empty ISO volume is accepted only as a package-import staging target; it is not a hardware-promoted standalone profile. |
-| `sample_banks` | Required array. |
-| `sample_bank_groups` | Optional array; current groups contain 1..3 distinct Sample Bank names. |
+| `samples` | Required Sample (`SBNK`) array. |
+| `sample_banks` | Optional Sample Bank (`SBAC`) array; current banks contain 1..3 distinct Sample names. |
 | `programs` | Optional array; Program numbers are `1..128`. |
 
 Waveform fields:
@@ -459,7 +459,7 @@ Waveform fields:
 | `root_key` | Required MIDI note `0..127`. |
 | `target_sample_rate` | Optional requested output rate. Omit to preserve supported native rates or use the default conversion policy. |
 
-Direct and stereo Sample Bank fields:
+Direct and stereo Sample fields:
 
 | Field | Rule |
 | --- | --- |
@@ -477,10 +477,10 @@ Direct stereo members must have equal sample rate and logical frame count.
 Interleaved input is split into two physical mono objects and inherently meets
 that constraint.
 
-The current authored `SBAC`/`PROG` profile is intentionally narrow. Each group
+The current authored `SBAC`/`PROG` profile is intentionally narrow. Each Sample Bank
 contains 1..3 mono Samples. Each Program has exactly two ordered
-assignments: one distinct `sample_bank_group` on receive channel `1`, followed
-by one direct `sample_bank` on receive channel `2`. Every group and direct bank
+assignments: one distinct `sample_bank` on receive channel `1`, followed
+by one direct `sample` on receive channel `2`. Every Sample Bank and direct Sample
 used by this profile is assigned once. Sequence (`SEQU`) and profile (`PRF3`)
 payload authoring are not exposed; transfer mode can preserve existing objects
 of those known types.
@@ -508,7 +508,7 @@ The starter contains one valid rename operation with placeholder names:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "operations": [
     {
       "id": "rename-waveform",
@@ -544,12 +544,12 @@ Supported operation types:
 | `delete_waveform` | `volume_name`, `waveform_name` |
 | `insert_waveform` | `volume_name`, `audio` |
 | `rename_waveform` | `volume_name`, `waveform_name`, `new_waveform_name` |
-| `delete_sbnk` | `volume_name`, `sample_bank_name` |
-| `insert_sbnk` | `volume_name`, `sample_bank` |
-| `rename_sbnk` | `volume_name`, `sample_bank_name`, `new_sample_bank_name` |
-| `delete_sbac` | `volume_name`, `sample_bank_group_name` |
-| `insert_sbac` | `volume_name`, `sample_bank_group` |
-| `rename_sbac` | `volume_name`, `sample_bank_group_name`, `new_sample_bank_group_name` |
+| `delete_sbnk` | `volume_name`, `sample_name` |
+| `insert_sbnk` | `volume_name`, `sample` |
+| `rename_sbnk` | `volume_name`, `sample_name`, `new_sample_name` |
+| `delete_sbac` | `volume_name`, `sample_bank_name` |
+| `insert_sbac` | `volume_name`, `sample_bank` |
+| `rename_sbac` | `volume_name`, `sample_bank_name`, `new_sample_bank_name` |
 | `delete_program` | `volume_name`, `program_number` |
 | `insert_program` | `volume_name`, `program` |
 
@@ -562,10 +562,10 @@ and `key_high`. Optional fields are `right_waveform_name` and `level`. The named
 Wave Data entries in the manifest's `waveforms` array must already exist at
 that point in the ordered transaction.
 
-An `insert_sbac` object contains `name` and `member_sample_banks`, an array of
-one to three distinct existing Sample Bank names. An `insert_program` object
+An `insert_sbac` object contains `name` and `member_samples`, an array of
+one to three distinct existing Sample names. An `insert_program` object
 contains a Program `number` and exactly two assignments: a
-`sample_bank_group` on receive channel 1 followed by a direct `sample_bank` on
+`sample_bank` on receive channel 1 followed by a direct `sample` on
 receive channel 2. These limits match the currently supported authored profile.
 
 Plan without writing an image:
@@ -580,9 +580,28 @@ Apply to a different output path only after reviewing that plan:
 axklib alter hds source.hds transaction.json -o altered.hds --pretty
 ```
 
-Deletion checks live relationships. Delete a Program or group before deleting
-objects it owns, and delete a Sample Bank before deleting its waveform. The
+Deletion checks live relationships. Delete a Program or Sample Bank before deleting
+objects it owns, and delete a Sample before deleting its Wave Data. The
 engine rejects an operation that would leave a known dangling relationship.
+
+## Terminology Migration
+
+Schema `1.1` is the canonical authored and alteration format. It uses `samples`
+for Sample (`SBNK`) objects, `sample_banks` for Sample Bank (`SBAC`) objects,
+`member_samples` for bank membership, and Program targets `sample` and
+`sample_bank`. Parsers continue to accept schema `1.0` documents with the former
+`sample_banks`, `sample_bank_groups`, `member_sample_banks`,
+`sample_bank`, and `sample_bank_group` meanings and migrate them at the input
+boundary. Generated manifests always use `1.1`.
+
+The C++ writer API follows the same terminology: `SampleSpec` models `SBNK`,
+`SampleBankSpec` models `SBAC`, and `VolumeSpec` exposes `samples` and
+`sample_banks`. `LegacySampleBankSpec` names the former `SBNK` model during
+migration. `SampleBankGroupSpec` remains a deprecated alias for the canonical
+`SBAC` model. The equivalent alteration and export aliases are deprecated on the
+same basis. Because the old `SampleBankSpec` name had the wrong `SBNK` meaning
+and now has the correct `SBAC` meaning, callers must rename old declarations to
+`SampleSpec` or `LegacySampleBankSpec` when upgrading.
 
 ## Publication And Validation Guarantees
 

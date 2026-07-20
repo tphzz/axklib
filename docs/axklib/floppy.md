@@ -223,7 +223,7 @@ position is appended. If that still collides, image creation fails rather than
 silently replacing a file. The writer supports at most 224 objects because the
 fixed root directory has 224 entries.
 
-For example, a freshly authored waveform and Sample Bank both named
+For example, freshly authored Wave Data and a Sample both named
 `Authored Tone` are sorted as `SMPL` then `SBNK` and become:
 
 ```text

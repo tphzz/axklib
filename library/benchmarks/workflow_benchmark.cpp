@@ -96,7 +96,7 @@ int main(int argc, char **argv) try {
 
     const auto build = require(
         axk::parse_hds_build_manifest(
-            R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"sample_banks":[]}]}]})"),
+            R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"samples":[]}]}]})"),
         "build manifest");
     measurements.push_back(measure("fresh_write", [&] {
         static_cast<void>(require(axk::write_hds_image(build, scratch / "fresh.hds"), "fresh write"));

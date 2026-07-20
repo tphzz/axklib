@@ -59,12 +59,12 @@ struct PreparedMediaImage {
 
 Result<std::vector<std::byte>> prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
                                                     std::uint32_t link_id);
-Result<std::vector<std::byte>> prepare_sbnk_payload(const SampleBankSpec &spec, const PreparedWaveformMember &left,
+Result<std::vector<std::byte>> prepare_sbnk_payload(const SampleSpec &spec, const PreparedWaveformMember &left,
                                                     const std::optional<PreparedWaveformMember> &right = {},
-                                                    bool grouped = false,
+                                                    bool sample_bank_member = false,
                                                     const std::vector<std::uint8_t> &linked_programs = {});
-Result<std::vector<std::byte>> prepare_sbac_payload(const SampleBankGroupSpec &group,
-                                                    const std::map<std::string, SampleBankSpec> &banks);
+Result<std::vector<std::byte>> prepare_sbac_payload(const SampleBankSpec &sample_bank,
+                                                    const std::map<std::string, SampleSpec> &samples);
 Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program);
 
 Result<std::vector<PreparedRecord>> prepare_partition_records(const PartitionSpec &partition,

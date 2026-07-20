@@ -257,7 +257,7 @@ TEST(Cli11Adapter, HidesUnavailablePortablePackageChoices) {
     EXPECT_NE(error.find("package root kind must be"), std::string::npos);
 }
 
-TEST(Cli11Adapter, UsesCanonicalSampleAndWaveDataPackageSelectors) {
+TEST(Cli11Adapter, UsesCanonicalSampleBankSampleAndWaveDataPackageSelectors) {
     const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images" /
                          "sampler-authored/HD00_512_single_sbnk_authored.hds";
     const auto root = std::filesystem::temp_directory_path() / "axklib-cli-package-terminology";
@@ -281,19 +281,19 @@ TEST(Cli11Adapter, UsesCanonicalSampleAndWaveDataPackageSelectors) {
 
     testing::internal::CaptureStdout();
     ASSERT_EQ(
-        run_cli({"axklib", "package", "export", fixture.string(), "--root", "sample-bank=sine wave", "--partition", "0",
-                 "--volume", "New Volume", "-o", (root / "sample-bank").string(), "--format", "json"}),
+        run_cli({"axklib", "package", "export", fixture.string(), "--root", "sample-bank=New SmpBank", "--partition",
+                 "0", "--volume", "New Volume", "-o", (root / "sample-bank").string(), "--format", "json"}),
         0);
-    const auto legacy_sample_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
-    EXPECT_EQ(legacy_sample_output.at("package_kind"), "sbnk");
+    const auto sample_bank_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(sample_bank_output.at("package_kind"), "sbac");
 
     testing::internal::CaptureStdout();
     ASSERT_EQ(
         run_cli({"axklib", "package", "export", fixture.string(), "--root", "bank-group=New SmpBank", "--partition",
                  "0", "--volume", "New Volume", "-o", (root / "bank-group").string(), "--format", "json"}),
         0);
-    const auto bank_group_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
-    EXPECT_EQ(bank_group_output.at("package_kind"), "sbac");
+    const auto legacy_sample_bank_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(legacy_sample_bank_output.at("package_kind"), "sbac");
 
     std::filesystem::remove_all(root, error);
 }
@@ -309,7 +309,7 @@ TEST(Cli11Adapter, WritesStarterBuildManifestsWithoutSilentReplacement) {
     EXPECT_NE(testing::internal::GetCapturedStdout().find("kind=hds"), std::string::npos);
     ASSERT_TRUE(std::filesystem::is_regular_file(output));
     const auto parsed = nlohmann::json::parse(read_bytes(output));
-    EXPECT_EQ(parsed.at("schema_version"), "1.0");
+    EXPECT_EQ(parsed.at("schema_version"), "1.1");
     EXPECT_EQ(parsed.at("size_bytes"), 536'870'912U);
     EXPECT_TRUE(parsed.at("partitions").at(0).at("volumes").empty());
 
@@ -369,8 +369,8 @@ TEST(Cli11Adapter, PortablePackageRoundTripPlansAndImportsAtomically) {
                          "sampler-authored/HD00_512_single_sbnk_authored.hds";
     const auto root =
         std::filesystem::canonical(std::filesystem::temp_directory_path()) / "axklib-cli-package-round-trip";
-    const auto package_stem = root / "sine-bank";
-    const auto package = root / "sine-bank.axksbnk";
+    const auto package_stem = root / "sine-sample";
+    const auto package = root / "sine-sample.axksbnk";
     const auto manifest = root / "target.json";
     const auto target = root / "target.hds";
     const auto imported = root / "imported.hds";
@@ -405,7 +405,7 @@ TEST(Cli11Adapter, PortablePackageRoundTripPlansAndImportsAtomically) {
     sdk_selector.volume_name = "New Volume";
     sdk_selector.object_name = "sine wave";
     const auto sdk_export = axk::portable_package::export_from(fixture.string(), {sdk_selector},
-                                                               (root / "sdk-sine-bank").string(), {}, sdk_context);
+                                                               (root / "sdk-sine-sample").string(), {}, sdk_context);
     ASSERT_TRUE(sdk_export) << sdk_export.error().message;
     EXPECT_EQ(sdk_export->package_id, cli_export_json.at("package_id").get<std::string>());
     EXPECT_EQ(sdk_export->required_extension, ".axksbnk");
@@ -435,7 +435,7 @@ TEST(Cli11Adapter, PortablePackageRoundTripPlansAndImportsAtomically) {
     }
 
     std::ofstream{manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.1","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"samples":[]}]}]})";
     ASSERT_EQ(run_cli({"axklib", "create", "hds", manifest.string(), "-o", target.string()}), 0);
     ASSERT_TRUE(std::filesystem::is_regular_file(target));
     const std::string destination = R"({"package":0,"root":0,"partition":0,"volume":"Imported"})";
@@ -534,7 +534,7 @@ TEST(Cli11Adapter, PortablePackageRejectsBadSelectorsMappingsAndConflictsCleanly
                        "--group", "New Partition", "--volume", "New Volume", "-o", package.string()}),
               0);
     std::ofstream{manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.1","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"samples":[]}]}]})";
     ASSERT_EQ(run_cli({"axklib", "create", "hds", manifest.string(), "-o", target.string()}), 0);
 
     testing::internal::CaptureStderr();
@@ -574,7 +574,7 @@ TEST(Cli11Adapter, CreateHdsInvokesSharedPlanAndMatchesDirectWriter) {
     std::filesystem::remove_all(root, error);
     ASSERT_TRUE(std::filesystem::create_directory(root, error));
     const auto manifest_text =
-        R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Parity","volumes":[{"name":"Empty","waveforms":[],"sample_banks":[]}]}]})";
+        R"({"schema_version":"1.1","size_bytes":1048576,"partitions":[{"name":"Parity","volumes":[{"name":"Empty","waveforms":[],"samples":[]}]}]})";
     std::ofstream{manifest_path, std::ios::binary} << manifest_text;
     const auto manifest = axk::parse_hds_build_manifest(manifest_text);
     ASSERT_TRUE(manifest) << axk::render_error(manifest.error());
@@ -624,13 +624,13 @@ TEST(Cli11Adapter, CreateFloppyAndIsoInvokeSharedPlanAndMatchDirectWriter) {
             {"kind", "floppy"},
             {"format", "fat12_floppy"},
             {"manifest",
-             {{"schema_version", "1.0"},
+             {{"schema_version", "1.1"},
               {"format", "fat12_floppy"},
               {"authored_volume",
                {{"name", "FAT ROOT"},
                 {"waveforms",
                  {{{"id", "tone"}, {"name", "Authored Tone"}, {"path", tone_path.string()}, {"root_key", 60}}}},
-                {"sample_banks",
+                {"samples",
                  {{{"name", "Authored Tone"},
                    {"waveform_id", "tone"},
                    {"root_key", 60},
@@ -640,7 +640,7 @@ TEST(Cli11Adapter, CreateFloppyAndIsoInvokeSharedPlanAndMatchDirectWriter) {
         nlohmann::json{{"kind", "iso"},
                        {"format", "iso9660"},
                        {"manifest",
-                        {{"schema_version", "1.0"},
+                        {{"schema_version", "1.1"},
                          {"format", "iso9660"},
                          {"iso",
                           {{"volume_id", "AXK_AUDIO"},
@@ -651,7 +651,7 @@ TEST(Cli11Adapter, CreateFloppyAndIsoInvokeSharedPlanAndMatchDirectWriter) {
                          {"authored_volume",
                           {{"name", "NEW VOLUME"},
                            {"waveforms", nlohmann::json::array()},
-                           {"sample_banks", nlohmann::json::array()}}}}}}};
+                           {"samples", nlohmann::json::array()}}}}}}};
 
     for (const auto &test_case : cases) {
         const auto kind = test_case.at("kind").get<std::string>();
@@ -687,12 +687,12 @@ TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedInspectionAndDirectAlterati
     ASSERT_TRUE(std::filesystem::create_directory(root, error));
 
     const auto build_text =
-        R"({"schema_version":"1.0","size_bytes":4194304,"partitions":[{"name":"Parity","volumes":[{"name":"Keep","waveforms":[],"sample_banks":[]},{"name":"Remove","waveforms":[],"sample_banks":[]}]}]})";
+        R"({"schema_version":"1.1","size_bytes":4194304,"partitions":[{"name":"Parity","volumes":[{"name":"Keep","waveforms":[],"samples":[]},{"name":"Remove","waveforms":[],"samples":[]}]}]})";
     const auto build = axk::parse_hds_build_manifest(build_text);
     ASSERT_TRUE(build) << axk::render_error(build.error());
     ASSERT_TRUE(axk::write_hds_image(*build, source_path, false));
     const auto alteration_text =
-        R"({"schema_version":"1.0","operations":[{"id":"remove","type":"delete_volume","partition_index":0,"volume_name":"Remove"}]})";
+        R"({"schema_version":"1.1","operations":[{"id":"remove","type":"delete_volume","partition_index":0,"volume_name":"Remove"}]})";
     std::ofstream{manifest_path, std::ios::binary} << alteration_text;
     const auto manifest = axk::parse_alteration_manifest(alteration_text);
     ASSERT_TRUE(manifest) << axk::render_error(manifest.error());

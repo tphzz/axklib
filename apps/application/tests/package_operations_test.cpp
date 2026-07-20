@@ -30,8 +30,8 @@ std::vector<std::byte> read_bytes(const std::filesystem::path &path) {
 
 void write_empty_target(const std::filesystem::path &path, std::string_view partition_name = "Target") {
     const auto manifest = axk::parse_hds_build_manifest(
-        std::string{R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":")"} +
-        std::string{partition_name} + R"(","volumes":[{"name":"Imported","waveforms":[],"sample_banks":[]}]}]})");
+        std::string{R"({"schema_version":"1.1","size_bytes":1048576,"partitions":[{"name":")"} +
+        std::string{partition_name} + R"(","volumes":[{"name":"Imported","waveforms":[],"samples":[]}]}]})");
     ASSERT_TRUE(manifest) << manifest.error().message;
     const auto written = axk::write_hds_image(*manifest, path);
     ASSERT_TRUE(written) << written.error().message;
@@ -80,17 +80,17 @@ TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegis
     const auto exported = registry_.invoke(
         "package.export",
         {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}},
-         {"output", {{"rootId", "workspace"}, {"relativePath", "bank"}}},
+         {"output", {{"rootId", "workspace"}, {"relativePath", "sample"}}},
          {"roots",
           {{{"kind", "sbnk"}, {"partitionIndex", 0U}, {"volumeName", "New Volume"}, {"objectName", "sine wave"}}}}},
         context());
     ASSERT_TRUE(exported) << exported.error().message;
-    EXPECT_EQ(exported->at("output").at("relativePath"), "bank.axksbnk");
+    EXPECT_EQ(exported->at("output").at("relativePath"), "sample.axksbnk");
     EXPECT_TRUE(exported->at("payloadsVerified").get<bool>());
-    EXPECT_TRUE(std::filesystem::is_regular_file(root_ / "bank.axksbnk"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(root_ / "sample.axksbnk"));
 
     const nlohmann::json file_input = {
-        {"package", {{"fileRef", {{"rootId", "workspace"}, {"relativePath", "bank.axksbnk"}}}}}};
+        {"package", {{"fileRef", {{"rootId", "workspace"}, {"relativePath", "sample.axksbnk"}}}}}};
     const auto inspected = registry_.invoke("package.inspect", file_input, context());
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_FALSE(inspected->at("payloadsVerified").get<bool>());
@@ -104,7 +104,7 @@ TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegis
         EXPECT_TRUE(object.at("audioSha256").is_null() || object.at("audioSha256").is_string());
     }
 
-    const auto bytes = read_bytes(root_ / "bank.axksbnk");
+    const auto bytes = read_bytes(root_ / "sample.axksbnk");
     auto upload = uploads_->create({.owner_id = "owner",
                                     .filename = "dropped.axksbnk",
                                     .kind = axk::app::UploadKind::package,
@@ -198,17 +198,17 @@ TEST_F(PackageOperationsTest, MapsCanonicalAndDeprecatedFriendlyRootNamesToRawOb
             context());
     };
 
-    const auto bank_group = export_kind("bank-group", "New SmpBank", "bank-group");
-    ASSERT_TRUE(bank_group) << bank_group.error().message;
-    EXPECT_EQ(bank_group->at("packageKind"), "sbac");
+    const auto sample_bank = export_kind("sample-bank", "New SmpBank", "sample-bank");
+    ASSERT_TRUE(sample_bank) << sample_bank.error().message;
+    EXPECT_EQ(sample_bank->at("packageKind"), "sbac");
+
+    const auto legacy_bank_group = export_kind("bank-group", "New SmpBank", "bank-group");
+    ASSERT_TRUE(legacy_bank_group) << legacy_bank_group.error().message;
+    EXPECT_EQ(legacy_bank_group->at("packageKind"), "sbac");
 
     const auto sample = export_kind("sample", "sine wave", "sample");
     ASSERT_TRUE(sample) << sample.error().message;
     EXPECT_EQ(sample->at("packageKind"), "sbnk");
-
-    const auto deprecated_sample_bank = export_kind("sample-bank", "sine wave", "sample-bank");
-    ASSERT_TRUE(deprecated_sample_bank) << deprecated_sample_bank.error().message;
-    EXPECT_EQ(deprecated_sample_bank->at("packageKind"), "sbnk");
 
     const auto wave_data = export_kind("wave-data", "sine wave", "wave-data");
     ASSERT_TRUE(wave_data) << wave_data.error().message;

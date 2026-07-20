@@ -36,16 +36,16 @@ struct InsertVolumeOperation {
     VolumeSpec volume;
 };
 
-struct DeleteSampleBankOperation {
+struct DeleteSampleOperation {
     PartitionSelector partition;
     std::string volume_name;
-    std::string sample_bank_name;
+    std::string sample_name;
 };
 
-struct InsertSampleBankOperation {
+struct InsertSampleOperation {
     PartitionSelector partition;
     std::string volume_name;
-    SampleBankSpec sample_bank;
+    SampleSpec sample;
 };
 
 struct InsertWaveformOperation {
@@ -67,6 +67,25 @@ struct RenameWaveformOperation {
     std::string new_waveform_name;
 };
 
+struct RenameSampleOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_name;
+    std::string new_sample_name;
+};
+
+struct DeleteSampleBankOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_bank_name;
+};
+
+struct InsertSampleBankOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    SampleBankSpec sample_bank;
+};
+
 struct RenameSampleBankOperation {
     PartitionSelector partition;
     std::string volume_name;
@@ -74,24 +93,18 @@ struct RenameSampleBankOperation {
     std::string new_sample_bank_name;
 };
 
-struct DeleteSampleBankGroupOperation {
-    PartitionSelector partition;
-    std::string volume_name;
-    std::string sample_bank_group_name;
-};
-
-struct InsertSampleBankGroupOperation {
-    PartitionSelector partition;
-    std::string volume_name;
-    SampleBankGroupSpec sample_bank_group;
-};
-
-struct RenameSampleBankGroupOperation {
-    PartitionSelector partition;
-    std::string volume_name;
-    std::string sample_bank_group_name;
-    std::string new_sample_bank_group_name;
-};
+using LegacyDeleteSampleBankOperation [[deprecated("use DeleteSampleOperation for Sample (SBNK)")]] =
+    DeleteSampleOperation;
+using LegacyInsertSampleBankOperation [[deprecated("use InsertSampleOperation for Sample (SBNK)")]] =
+    InsertSampleOperation;
+using LegacyRenameSampleBankOperation [[deprecated("use RenameSampleOperation for Sample (SBNK)")]] =
+    RenameSampleOperation;
+using DeleteSampleBankGroupOperation [[deprecated("use DeleteSampleBankOperation for Sample Bank (SBAC)")]] =
+    DeleteSampleBankOperation;
+using InsertSampleBankGroupOperation [[deprecated("use InsertSampleBankOperation for Sample Bank (SBAC)")]] =
+    InsertSampleBankOperation;
+using RenameSampleBankGroupOperation [[deprecated("use RenameSampleBankOperation for Sample Bank (SBAC)")]] =
+    RenameSampleBankOperation;
 
 struct DeleteProgramOperation {
     PartitionSelector partition;
@@ -118,9 +131,9 @@ struct RenamePartitionOperation {
 };
 
 using AlterationOperationData =
-    std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleBankOperation, InsertSampleBankOperation,
-                 InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleBankOperation,
-                 DeleteSampleBankGroupOperation, InsertSampleBankGroupOperation, RenameSampleBankGroupOperation,
+    std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
+                 InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleOperation,
+                 DeleteSampleBankOperation, InsertSampleBankOperation, RenameSampleBankOperation,
                  DeleteProgramOperation, InsertProgramOperation, RenameVolumeOperation, RenamePartitionOperation>;
 
 struct AlterationOperation {

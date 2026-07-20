@@ -429,9 +429,9 @@ def prepare_cross_format_sources(root: Path, cli: Path, sfs_fixture: Path) -> li
         "waveforms": [
             {"id": "tone", "name": "Tone", "path": "tone.wav", "root_key": 60}
         ],
-        "sample_banks": [
+        "samples": [
             {
-                "name": "Tone Bank",
+                "name": "Tone Sample",
                 "waveform_id": "tone",
                 "root_key": 60,
                 "key_low": 0,
@@ -441,12 +441,12 @@ def prepare_cross_format_sources(root: Path, cli: Path, sfs_fixture: Path) -> li
     }
     manifests = {
         "authored.ima": {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "format": "fat12_floppy",
             "authored_volume": authored_volume,
         },
         "authored.iso": {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "format": "iso9660",
             "iso": {
                 "volume_id": "AXK_TEST",
@@ -523,17 +523,17 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
             "root_key": 60,
         },
     ]
-    bank_names = [
-        "Delete Bank",
-        "Old Bank",
-        "Bank A",
-        "Bank B",
-        "Del Group Bank",
+    sample_names = [
+        "Delete Sample",
+        "Old Sample",
+        "Sample A",
+        "Sample B",
+        "Del Bank Sample",
         "Delete Direct",
-        "Old Group Bank",
+        "Old Bank Sample",
         "Old Direct",
     ]
-    sample_banks = [
+    samples = [
         {
             "name": name,
             "waveform_id": "wave",
@@ -541,10 +541,10 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
             "key_low": 0,
             "key_high": 127,
         }
-        for name in bank_names
+        for name in sample_names
     ]
     source_manifest = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "size_bytes": 8 * 1024 * 1024,
         "partitions": [
             {
@@ -553,15 +553,15 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                     {
                         "name": "Volume",
                         "waveforms": waveforms,
-                        "sample_banks": sample_banks,
-                        "sample_bank_groups": [
+                        "samples": samples,
+                        "sample_banks": [
                             {
-                                "name": "Delete Group",
-                                "member_sample_banks": ["Del Group Bank"],
+                                "name": "Delete Bank",
+                                "member_samples": ["Del Bank Sample"],
                             },
                             {
-                                "name": "Old Group",
-                                "member_sample_banks": ["Old Group Bank"],
+                                "name": "Old Bank",
+                                "member_samples": ["Old Bank Sample"],
                             },
                         ],
                         "programs": [
@@ -569,11 +569,11 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                                 "number": 128,
                                 "assignments": [
                                     {
-                                        "sample_bank_group": "Delete Group",
+                                        "sample_bank": "Delete Bank",
                                         "receive_channel": 1,
                                     },
                                     {
-                                        "sample_bank": "Delete Direct",
+                                        "sample": "Delete Direct",
                                         "receive_channel": 2,
                                     },
                                 ],
@@ -582,24 +582,24 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                                 "number": 127,
                                 "assignments": [
                                     {
-                                        "sample_bank_group": "Old Group",
+                                        "sample_bank": "Old Bank",
                                         "receive_channel": 1,
                                     },
                                     {
-                                        "sample_bank": "Old Direct",
+                                        "sample": "Old Direct",
                                         "receive_channel": 2,
                                     },
                                 ],
                             },
                         ],
                     },
-                    {"name": "Delete Volume", "waveforms": [], "sample_banks": []},
+                    {"name": "Delete Volume", "waveforms": [], "samples": []},
                 ],
             }
         ],
     }
     alteration_manifest = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "operations": [
             {
                 "id": "delete-volume",
@@ -614,23 +614,23 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                 "volume": {
                     "name": "Insert Volume",
                     "waveforms": [],
-                    "sample_banks": [],
+                    "samples": [],
                 },
             },
             {
-                "id": "delete-bank",
+                "id": "delete-sample",
                 "type": "delete_sbnk",
                 "partition_index": 0,
                 "volume_name": "Volume",
-                "sample_bank_name": "Delete Bank",
+                "sample_name": "Delete Sample",
             },
             {
-                "id": "insert-bank",
+                "id": "insert-sample",
                 "type": "insert_sbnk",
-                "partition_index": {"operation_ref": "delete-bank"},
+                "partition_index": {"operation_ref": "delete-sample"},
                 "volume_name": "Volume",
-                "sample_bank": {
-                    "name": "Insert Bank",
+                "sample": {
+                    "name": "Insert Sample",
                     "waveform_name": "Wave",
                     "root_key": 60,
                     "key_low": 0,
@@ -664,12 +664,12 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                 "new_waveform_name": "New Wave",
             },
             {
-                "id": "rename-bank",
+                "id": "rename-sample",
                 "type": "rename_sbnk",
                 "partition_index": 0,
                 "volume_name": "Volume",
-                "sample_bank_name": "Old Bank",
-                "new_sample_bank_name": "New Bank",
+                "sample_name": "Old Sample",
+                "new_sample_name": "New Sample",
             },
             {
                 "id": "delete-program",
@@ -679,43 +679,43 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                 "program_number": 128,
             },
             {
-                "id": "delete-group",
+                "id": "delete-sample-bank",
                 "type": "delete_sbac",
                 "partition_index": {"operation_ref": "delete-program"},
                 "volume_name": "Volume",
-                "sample_bank_group_name": "Delete Group",
+                "sample_bank_name": "Delete Bank",
             },
             {
-                "id": "insert-group",
+                "id": "insert-sample-bank",
                 "type": "insert_sbac",
-                "partition_index": {"operation_ref": "delete-group"},
+                "partition_index": {"operation_ref": "delete-sample-bank"},
                 "volume_name": "Volume",
-                "sample_bank_group": {
-                    "name": "Insert Group",
-                    "member_sample_banks": ["Bank A", "Bank B"],
+                "sample_bank": {
+                    "name": "Insert Bank",
+                    "member_samples": ["Sample A", "Sample B"],
                 },
             },
             {
-                "id": "rename-group",
+                "id": "rename-sample-bank",
                 "type": "rename_sbac",
                 "partition_index": 0,
                 "volume_name": "Volume",
-                "sample_bank_group_name": "Old Group",
-                "new_sample_bank_group_name": "New Group",
+                "sample_bank_name": "Old Bank",
+                "new_sample_bank_name": "New Bank",
             },
             {
                 "id": "insert-program",
                 "type": "insert_program",
-                "partition_index": {"operation_ref": "rename-group"},
+                "partition_index": {"operation_ref": "rename-sample-bank"},
                 "volume_name": "Volume",
                 "program": {
                     "number": 128,
                     "assignments": [
                         {
-                            "sample_bank_group": "Insert Group",
+                            "sample_bank": "Insert Bank",
                             "receive_channel": 1,
                         },
-                        {"sample_bank": "Delete Direct", "receive_channel": 2},
+                        {"sample": "Delete Direct", "receive_channel": 2},
                     ],
                 },
             },
@@ -786,7 +786,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
         target_manifest.write_text(
             json.dumps(
                 {
-                    "schema_version": "1.0",
+                    "schema_version": "1.1",
                     "size_bytes": 1048576,
                     "partitions": [
                         {
@@ -795,7 +795,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                                 {
                                     "name": "Imported",
                                     "waveforms": [],
-                                    "sample_banks": [],
+                                    "samples": [],
                                 }
                             ],
                         }
@@ -1785,7 +1785,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                     canonical_info_node(node) for node in cli_tree["roots"]
                 ]
 
-            cli_package_path = Path("packages/cli/bank.axksbnk")
+            cli_package_path = Path("packages/cli/sample.axksbnk")
             cli_export = subprocess.run(
                 [
                     str(cli),
@@ -1799,7 +1799,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                     "--volume",
                     "New Volume",
                     "-o",
-                    "packages/cli/bank",
+                    "packages/cli/sample",
                     "--format",
                     "json",
                 ],
@@ -1814,7 +1814,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "source": {"rootId": "workspace", "relativePath": "fixture.hds"},
                 "output": {
                     "rootId": "workspace",
-                    "relativePath": "packages/server/bank",
+                    "relativePath": "packages/server/sample",
                 },
                 "roots": [
                     {
@@ -1849,7 +1849,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             export_result = export_job["result"]
             assert export_result["output"] == {
                 "rootId": "workspace",
-                "relativePath": "packages/server/bank.axksbnk",
+                "relativePath": "packages/server/sample.axksbnk",
             }
             server_package_path = Path(export_result["output"]["relativePath"])
             assert (root_path / server_package_path).read_bytes() == (
@@ -2159,7 +2159,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
 
             transfer_manifest = {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "format": "iso9660",
                 "iso": {
                     "volume_id": "AXK_TEST",

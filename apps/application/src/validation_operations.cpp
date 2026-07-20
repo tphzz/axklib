@@ -877,7 +877,7 @@ std::vector<axk::ReportRow> validate_export_directory(const std::filesystem::pat
         if (!record.is_object())
             continue;
         const auto schema = record.value("schema", std::string{});
-        if (schema == "axklib.volume_graph.v1") {
+        if (schema == "axklib.volume_graph.v1" || schema == "axklib.volume_graph.v2") {
             const auto inspect_path = [&](const Json &value, std::string_view object_key) {
                 if (!value.is_string())
                     return;
@@ -895,8 +895,8 @@ std::vector<axk::ReportRow> validate_export_directory(const std::filesystem::pat
             };
             if (record.contains("objects") && record["objects"].is_object() && record["objects"].contains("smpl") &&
                 record["objects"]["smpl"].is_array()) {
-                for (const auto &sample : record["objects"]["smpl"])
-                    inspect_path(sample.value("wav_path", Json{}), sample.value("object_key", std::string{}));
+                for (const auto &wave_data : record["objects"]["smpl"])
+                    inspect_path(wave_data.value("wav_path", Json{}), wave_data.value("object_key", std::string{}));
             }
             continue;
         }

@@ -103,7 +103,7 @@ relocation_context(const PortablePackage &package, const PackageImportPlan &plan
     context.destination_name = owner.destination_name;
     context.smpl_link_id = owner.target_link_id;
     context.linked_program_numbers = owner.target_program_numbers;
-    context.grouped = owner.target_grouped;
+    context.sample_bank_member = owner.target_sample_bank_member;
     for (const auto &edge : package.relationships) {
         if (edge.source_node_id != owner.node_id)
             continue;
@@ -204,9 +204,9 @@ std::vector<ExistingObject> existing_objects(const ObjectCatalog &catalog) {
             item.normalized_sha256 =
                 package_internal::hex_digest(package_internal::sha256(profile->normalized_payload));
         }
-        if (const auto *sample = std::get_if<CurrentSmpl>(&object.object.payload);
-            sample != nullptr && sample->link_id.value != 0U) {
-            item.link_id = sample->link_id.value;
+        if (const auto *wave_data = std::get_if<CurrentSmpl>(&object.object.payload);
+            wave_data != nullptr && wave_data->link_id.value != 0U) {
+            item.link_id = wave_data->link_id.value;
         }
         result.push_back(std::move(item));
     }
@@ -302,9 +302,9 @@ PartitionCapacity partition_capacity(const Partition &partition, const ObjectCat
     for (const auto &object : catalog.objects) {
         if (object.partition != partition.index)
             continue;
-        if (const auto *sample = std::get_if<CurrentSmpl>(&object.object.payload);
-            sample != nullptr && sample->link_id.value != 0U) {
-            result.used_link_ids.insert(sample->link_id.value);
+        if (const auto *wave_data = std::get_if<CurrentSmpl>(&object.object.payload);
+            wave_data != nullptr && wave_data->link_id.value != 0U) {
+            result.used_link_ids.insert(wave_data->link_id.value);
         }
     }
     return result;
@@ -440,7 +440,7 @@ std::string plan_identity(const PackageImportPlan &plan) {
         append_integer(source, object.target_link_id.value_or(0U));
         for (const auto number : object.target_program_numbers)
             append_integer(source, number);
-        append_integer(source, object.target_grouped);
+        append_integer(source, object.target_sample_bank_member);
         append_integer(source, object.payload_clusters);
         append_integer(source, object.payload_sectors);
         append_integer(source, object.continuation_clusters);
@@ -709,7 +709,7 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
 
     struct BankMetadata {
         std::set<std::uint8_t> programs;
-        bool grouped{};
+        bool sample_bank_member{};
     };
     const auto physical_key = [](const PlannedPackageObject &object) {
         if (object.existing_object_key)
@@ -728,9 +728,9 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
         const auto found = std::ranges::find_if(
             existing, [&](const auto &candidate) { return candidate.snapshot->key == *object.existing_object_key; });
         if (found != existing.end()) {
-            if (const auto *bank = std::get_if<CurrentSbnk>(&found->snapshot->object.payload)) {
-                metadata.programs.insert(bank->linked_program_numbers.begin(), bank->linked_program_numbers.end());
-                metadata.grouped = (bank->sample_flags & 1U) != 0U;
+            if (const auto *sample = std::get_if<CurrentSbnk>(&found->snapshot->object.payload)) {
+                metadata.programs.insert(sample->linked_program_numbers.begin(), sample->linked_program_numbers.end());
+                metadata.sample_bank_member = (sample->sample_flags & 1U) != 0U;
             }
         }
     }
@@ -748,7 +748,7 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
                 continue;
             auto &metadata = bank_metadata[physical_key(*target_action)];
             if (edge.role == "SBAC_SLOT_TO_SBNK") {
-                metadata.grouped = true;
+                metadata.sample_bank_member = true;
             } else {
                 const auto number = planned_program_number(owner);
                 if (!number)
@@ -764,7 +764,7 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
         if (metadata == bank_metadata.end())
             continue;
         object.target_program_numbers.assign(metadata->second.programs.begin(), metadata->second.programs.end());
-        object.target_grouped = metadata->second.grouped;
+        object.target_sample_bank_member = metadata->second.sample_bank_member;
     }
 
     if (plan.conflicts.empty()) {
@@ -1303,7 +1303,7 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
 
     struct BankMetadata {
         std::set<std::uint8_t> programs;
-        bool grouped{};
+        bool sample_bank_member{};
     };
     const auto physical_key = [](const PlannedPackageObject &object) {
         const auto prefix = object.raw_group + "/" + object.raw_volume + ":";
@@ -1323,9 +1323,9 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
         const auto found = std::ranges::find_if(
             existing, [&](const auto &candidate) { return candidate.snapshot->key == *object.existing_object_key; });
         if (found != existing.end()) {
-            if (const auto *bank = std::get_if<CurrentSbnk>(&found->snapshot->object.payload)) {
-                metadata.programs.insert(bank->linked_program_numbers.begin(), bank->linked_program_numbers.end());
-                metadata.grouped = (bank->sample_flags & 1U) != 0U;
+            if (const auto *sample = std::get_if<CurrentSbnk>(&found->snapshot->object.payload)) {
+                metadata.programs.insert(sample->linked_program_numbers.begin(), sample->linked_program_numbers.end());
+                metadata.sample_bank_member = (sample->sample_flags & 1U) != 0U;
             }
         }
     }
@@ -1342,7 +1342,7 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
                 continue;
             auto &metadata = bank_metadata[physical_key(*target_action)];
             if (edge.role == "SBAC_SLOT_TO_SBNK") {
-                metadata.grouped = true;
+                metadata.sample_bank_member = true;
             } else {
                 const auto number = planned_program_number(owner);
                 if (!number)
@@ -1358,7 +1358,7 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
         if (metadata == bank_metadata.end())
             continue;
         object.target_program_numbers.assign(metadata->second.programs.begin(), metadata->second.programs.end());
-        object.target_grouped = metadata->second.grouped;
+        object.target_sample_bank_member = metadata->second.sample_bank_member;
     }
 
     if (plan.conflicts.empty()) {
@@ -1624,7 +1624,8 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
             (!sorted_programs || unique_programs.size() != object.target_program_numbers.size()) ||
             std::ranges::any_of(object.target_program_numbers,
                                 [](const auto number) { return number < 1U || number > 128U; }) ||
-            (object.object_type != "SBNK" && (!object.target_program_numbers.empty() || object.target_grouped)) ||
+            (object.object_type != "SBNK" &&
+             (!object.target_program_numbers.empty() || object.target_sample_bank_member)) ||
             (plan.target_kind == MediaKind::iso9660
                  ? (object.payload_clusters != 0U || object.continuation_clusters != 0U ||
                     (inserts && !conflicts && object.payload_sectors == 0U))
@@ -1654,7 +1655,7 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
             object.target_sfs_id != canonical->second->target_sfs_id ||
             object.target_link_id != canonical->second->target_link_id ||
             object.target_program_numbers != canonical->second->target_program_numbers ||
-            object.target_grouped != canonical->second->target_grouped) {
+            object.target_sample_bank_member != canonical->second->target_sample_bank_member) {
             return std::unexpected{planner_error("package import plan canonical reuse binding is invalid")};
         }
     }
@@ -2144,7 +2145,7 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
 
     struct SbnkTargetMetadata {
         std::set<std::uint8_t> program_numbers;
-        bool grouped{};
+        bool sample_bank_member{};
     };
     using PhysicalObjectKey = std::pair<std::uint8_t, std::uint32_t>;
     std::map<PhysicalObjectKey, SbnkTargetMetadata> sbnk_metadata;
@@ -2159,9 +2160,10 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
         });
         if (found == existing.end())
             continue;
-        if (const auto *bank = std::get_if<CurrentSbnk>(&found->snapshot->object.payload)) {
-            metadata.program_numbers.insert(bank->linked_program_numbers.begin(), bank->linked_program_numbers.end());
-            metadata.grouped = (bank->sample_flags & 1U) != 0U;
+        if (const auto *sample = std::get_if<CurrentSbnk>(&found->snapshot->object.payload)) {
+            metadata.program_numbers.insert(sample->linked_program_numbers.begin(),
+                                            sample->linked_program_numbers.end());
+            metadata.sample_bank_member = (sample->sample_flags & 1U) != 0U;
         }
     }
     for (const auto &owner : plan.objects) {
@@ -2179,7 +2181,7 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
             }
             auto &metadata = sbnk_metadata[{target_action->partition_index, *target_action->target_sfs_id}];
             if (edge.role == "SBAC_SLOT_TO_SBNK") {
-                metadata.grouped = true;
+                metadata.sample_bank_member = true;
             } else {
                 auto number = planned_program_number(owner);
                 if (!number)
@@ -2196,7 +2198,7 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
             continue;
         object.target_program_numbers.assign(metadata->second.program_numbers.begin(),
                                              metadata->second.program_numbers.end());
-        object.target_grouped = metadata->second.grouped;
+        object.target_sample_bank_member = metadata->second.sample_bank_member;
     }
 
     if (plan.conflicts.empty()) {

@@ -23,7 +23,7 @@ struct Match {
 struct ScopeIndex {
     std::map<std::pair<ObjectType, std::string>, std::vector<const ObjectSnapshot *>> typed_names;
     std::map<std::string, std::vector<const ObjectSnapshot *>> names;
-    std::unordered_map<std::uint32_t, std::vector<const ObjectSnapshot *>> sample_links;
+    std::unordered_map<std::uint32_t, std::vector<const ObjectSnapshot *>> wave_data_links;
     std::unordered_map<std::string, const ObjectSnapshot *> keys;
 };
 
@@ -33,8 +33,8 @@ ScopeIndex index_scope(const std::vector<const ObjectSnapshot *> &scope) {
         index.typed_names[{item->object.header.type, item->object.header.name}].push_back(item);
         index.names[item->object.header.name].push_back(item);
         index.keys.emplace(item->key, item);
-        if (const auto *sample = std::get_if<CurrentSmpl>(&item->object.payload)) {
-            index.sample_links[sample->link_id.value].push_back(item);
+        if (const auto *wave_data = std::get_if<CurrentSmpl>(&item->object.payload)) {
+            index.wave_data_links[wave_data->link_id.value].push_back(item);
         } else if (item->object.header.type == ObjectType::smpl) {
             const auto *generic = std::get_if<GenericObject>(&item->object.payload);
             if (generic != nullptr && generic->raw_payload.size() >= 0x7cU) {
@@ -43,7 +43,7 @@ ScopeIndex index_scope(const std::vector<const ObjectSnapshot *> &scope) {
                                   static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x79U])) << 16U |
                                   static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x7aU])) << 8U |
                                   static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x7bU]));
-                index.sample_links[link].push_back(item);
+                index.wave_data_links[link].push_back(item);
             }
         }
     }
@@ -98,12 +98,12 @@ std::string local_suffix(const ObjectSnapshot &source) {
 }
 
 Match match_member(const ObjectSnapshot &source, const CurrentSbnkMember &member, const ScopeIndex &index) {
-    const auto link_entry = index.sample_links.find(member.smpl_link_id);
+    const auto link_entry = index.wave_data_links.find(member.smpl_link_id);
     const auto by_link =
-        link_entry == index.sample_links.end() ? std::vector<const ObjectSnapshot *>{} : link_entry->second;
+        link_entry == index.wave_data_links.end() ? std::vector<const ObjectSnapshot *>{} : link_entry->second;
     std::vector<const ObjectSnapshot *> exact;
     for (const auto *item : by_link) {
-        if (item->object.header.name == member.sample_name)
+        if (item->object.header.name == member.wave_data_name)
             exact.push_back(item);
     }
     if (exact.size() == 1) {
@@ -119,7 +119,7 @@ Match match_member(const ObjectSnapshot &source, const CurrentSbnkMember &member
         return {nullptr, exact, RelationshipQuality::tentative, "sbnk-member-link+name-ambiguous",
                 "member name and link ID match multiple SMPL objects"};
     }
-    auto by_name = named(index, ObjectType::smpl, member.sample_name);
+    auto by_name = named(index, ObjectType::smpl, member.wave_data_name);
     if (by_name.size() == 1) {
         return {by_name.front(), by_name, RelationshipQuality::likely, "sbnk-member-name-only",
                 "member name uniquely matches but link ID does not confirm it"};
@@ -291,17 +291,17 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
         static_cast<void>(scope_key);
         const auto scope_index = index_scope(scope);
         for (const auto *item : scope) {
-            if (const auto *bank = std::get_if<CurrentSbnk>(&item->object.payload)) {
-                if (!bank->left.sample_name.empty()) {
+            if (const auto *sample = std::get_if<CurrentSbnk>(&item->object.payload)) {
+                if (!sample->left.wave_data_name.empty()) {
                     result.relationships.push_back(
-                        edge(*item, "SBNK_LEFT_MEMBER_TO_SMPL", match_member(*item, bank->left, scope_index)));
+                        edge(*item, "SBNK_LEFT_MEMBER_TO_SMPL", match_member(*item, sample->left, scope_index)));
                 }
-                if (bank->right && !bank->right->sample_name.empty()) {
+                if (sample->right && !sample->right->wave_data_name.empty()) {
                     result.relationships.push_back(
-                        edge(*item, "SBNK_RIGHT_MEMBER_TO_SMPL", match_member(*item, *bank->right, scope_index)));
+                        edge(*item, "SBNK_RIGHT_MEMBER_TO_SMPL", match_member(*item, *sample->right, scope_index)));
                 }
-            } else if (const auto *group = std::get_if<CurrentSbac>(&item->object.payload)) {
-                for (const auto &slot : group->slots) {
+            } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&item->object.payload)) {
+                for (const auto &slot : sample_bank->slots) {
                     if (slot.name.empty())
                         continue;
                     result.relationships.push_back(
@@ -473,11 +473,11 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
             }
         }
 
-        std::unordered_map<std::string, std::vector<std::string>> group_banks;
+        std::unordered_map<std::string, std::vector<std::string>> sample_bank_members;
         for (const auto &row : result.relationships) {
             if (row.scope_key == scope_key && row.type == "SBAC_SLOT_TO_SBNK" && row.target_key &&
                 row.quality == RelationshipQuality::known) {
-                group_banks[row.source_key].push_back(*row.target_key);
+                sample_bank_members[row.source_key].push_back(*row.target_key);
             }
         }
         std::unordered_map<std::string, std::vector<std::uint8_t>> direct_programs;
@@ -510,21 +510,21 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                 for (const auto &candidate : row.candidate_keys)
                     ambiguous_programs[candidate].push_back(*number);
             } else if (row.type == "PROG_ASSIGNMENT_TO_SBAC" && row.target_key) {
-                const auto members = group_banks.find(*row.target_key);
-                if (members == group_banks.end())
+                const auto members = sample_bank_members.find(*row.target_key);
+                if (members == sample_bank_members.end())
                     continue;
-                for (const auto &bank_key : members->second)
-                    indirect_programs[bank_key].push_back(*number);
+                for (const auto &sample_key : members->second)
+                    indirect_programs[sample_key].push_back(*number);
             }
         }
 
         for (const auto *item : scope) {
-            const auto *bank = std::get_if<CurrentSbnk>(&item->object.payload);
-            if (bank == nullptr)
+            const auto *sample = std::get_if<CurrentSbnk>(&item->object.payload);
+            if (sample == nullptr)
                 continue;
             BitmapComparison comparison;
             comparison.sbnk_key = item->key;
-            comparison.bitmap_programs = bank->linked_program_numbers;
+            comparison.bitmap_programs = sample->linked_program_numbers;
             comparison.direct_assignment_programs = direct_programs[item->key];
             comparison.indirect_assignment_programs = indirect_programs[item->key];
             comparison.direct_assignment_programs = sorted_unique(comparison.direct_assignment_programs);
