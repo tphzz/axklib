@@ -73,6 +73,7 @@ add_custom_target(axk_server_openapi DEPENDS "${AXK_SERVER_GENERATED_OPENAPI_PAT
 add_library(
   axk_server_adapter
   STATIC
+  src/archive_download_budget.cpp
   src/config.cpp
   src/event_delivery_budget.cpp
   src/event_dispatcher.cpp
@@ -150,6 +151,7 @@ if(BUILD_TESTING)
   include(GoogleTest)
   add_executable(
     axk_server_tests
+    tests/archive_download_budget_test.cpp
     tests/config_test.cpp
     tests/event_delivery_budget_test.cpp
     tests/event_dispatcher_test.cpp

@@ -209,11 +209,15 @@
       ],
       "get": {
         "operationId": "filesystem.archive.download",
-        "responses": {"200": {"description": "Short-lived TAR archive stream"}, "404": {"description": "Archive absent, expired, or owned by another principal"}}
+        "responses": {
+          "200": {"description": "Short-lived TAR archive stream", "content": {"application/x-tar": {"schema": {"type": "string", "format": "binary"}}}},
+          "404": {"description": "Archive absent, expired, or owned by another principal"},
+          "429": {"description": "Concurrent archive download limit reached", "headers": {"Retry-After": {"schema": {"type": "integer", "minimum": 1}, "description": "Minimum retry delay in seconds"}}}
+        }
       },
       "delete": {
         "operationId": "filesystem.archive.delete",
-        "responses": {"204": {"description": "Temporary archive deleted"}, "404": {"description": "Archive absent, expired, or owned by another principal"}}
+        "responses": {"204": {"description": "Temporary archive deleted"}, "404": {"description": "Archive absent, expired, or owned by another principal"}, "409": {"description": "Archive transfer is still active"}}
       }
     },
     "/images": {
@@ -1091,6 +1095,7 @@
           "maximumDownloadArchiveBytes": {"type": "integer", "minimum": 1},
           "maximumDownloadArchiveTotalBytes": {"type": "integer", "minimum": 1},
           "maximumDownloadArchiveEntries": {"type": "integer", "minimum": 1},
+          "maximumConcurrentArchiveDownloads": {"type": "integer", "minimum": 1, "maximum": 64},
           "downloadArchiveRetentionSeconds": {"type": "integer", "minimum": 1},
           "maximumWebsocketDeliveryEvents": {"type": "integer", "minimum": 1},
           "maximumWebsocketDeliveryBytes": {"type": "integer", "minimum": 1},

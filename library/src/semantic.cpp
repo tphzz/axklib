@@ -732,6 +732,16 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
         });
     }
     for (const auto &partition : container.partitions()) {
+        if (partition.allocation.conflicting_cluster_count != 0U) {
+            result.issues.push_back({
+                "SFS_ALLOCATION_CROSS_LINK",
+                ValidationSeverity::error,
+                std::format("{} cluster(s) are claimed by multiple SFS allocation owners",
+                            partition.allocation.conflicting_cluster_count),
+                std::format("partition {}: {}", partition.index.value, partition.name),
+                {},
+            });
+        }
         const auto stored_without_record = mismatch_cluster_count(partition.allocation.stored_not_reconstructed);
         const auto record_marked_free = mismatch_cluster_count(partition.allocation.reconstructed_not_stored);
         if (partition.allocation.invalid_extent_record_count != 0U ||

@@ -2351,6 +2351,13 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
         const auto partition = std::ranges::find(actual->partitions(), PartitionIndex{index}, &Partition::index);
         if (partition == actual->partitions().end())
             return std::unexpected{transaction_error("post-write validation lost a planned partition")};
+        if (partition->allocation.conflicting_cluster_count != 0U ||
+            partition->allocation.invalid_extent_record_count != 0U ||
+            partition->allocation.extent_total_mismatch_count != 0U ||
+            !partition->allocation.stored_not_reconstructed.empty() ||
+            !partition->allocation.reconstructed_not_stored.empty()) {
+            return std::unexpected{transaction_error("post-write allocation validation is not clean")};
+        }
         if (expected.renamed_name && (partition->name != *expected.renamed_name || !partition->backup_header_matches)) {
             return std::unexpected{transaction_error("post-write partition name differs from the transaction plan")};
         }
@@ -2390,7 +2397,47 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
             if (auto compared = compare_payload(id, inserted.payload); !compared)
                 return compared;
         }
-        const auto bitmap_size = (partition->cluster_count + 7U) / 8U;
+        for (const auto &source_record : expected.source->records) {
+            if (expected.deleted.contains(source_record.sfs_id) || expected.changed.contains(source_record.sfs_id) ||
+                expected.inserted.contains(source_record.sfs_id) ||
+                (source_record.sfs_id.value == 1U && expected.root_payload)) {
+                continue;
+            }
+            const auto written_record =
+                std::ranges::find(partition->records, source_record.sfs_id, &IndexRecord::sfs_id);
+            if (written_record == partition->records.end())
+                return std::unexpected{transaction_error("post-write validation lost an unchanged SFS record")};
+            auto source_index = read_raw(state.container.source_path(), source_record.record_offset.value, 72U);
+            if (!source_index)
+                return std::unexpected{source_index.error()};
+            auto written_index = read_raw(temporary, written_record->record_offset.value, 72U);
+            if (!written_index)
+                return std::unexpected{written_index.error()};
+            if (*source_index != *written_index)
+                return std::unexpected{transaction_error("post-write validation changed untouched SFS ID " +
+                                                         std::to_string(source_record.sfs_id.value) + " index record")};
+            constexpr std::size_t comparison_chunk_size = 1024U * 1024U;
+            for (std::uint64_t offset = 0U; offset < source_record.data_size;) {
+                const auto count = static_cast<std::size_t>(
+                    std::min<std::uint64_t>(comparison_chunk_size, source_record.data_size - offset));
+                auto source_data = state.container.read_record_range(expected.source->index, source_record.sfs_id,
+                                                                     offset, count, cancellation);
+                if (!source_data)
+                    return std::unexpected{source_data.error()};
+                auto written_data =
+                    actual->read_record_range(partition->index, source_record.sfs_id, offset, count, cancellation);
+                if (!written_data)
+                    return std::unexpected{written_data.error()};
+                if (*source_data != *written_data)
+                    return std::unexpected{transaction_error("post-write validation changed untouched SFS ID " +
+                                                             std::to_string(source_record.sfs_id.value) + " payload")};
+                offset += count;
+            }
+        }
+        const auto bitmap_size_u64 = (static_cast<std::uint64_t>(partition->cluster_count) + 7U) / 8U;
+        if (bitmap_size_u64 > std::numeric_limits<std::size_t>::max())
+            return std::unexpected{transaction_error("post-write allocation bitmap exceeds platform limits")};
+        const auto bitmap_size = static_cast<std::size_t>(bitmap_size_u64);
         const auto bitmap_offset =
             (static_cast<std::uint64_t>(partition->start_sector) +
              static_cast<std::uint64_t>(partition->bitmap_cluster) * partition->sectors_per_cluster) *
@@ -2435,11 +2482,17 @@ Result<TransactionState> open_transaction_state(const std::filesystem::path &sou
         }
     }
     for (const auto &partition : state.container.partitions()) {
-        if (!partition.allocation.reconstructed_not_stored.empty() ||
-            partition.allocation.extent_total_mismatch_count != 0U) {
+        if (partition.allocation.conflicting_cluster_count != 0U ||
+            partition.allocation.invalid_extent_record_count != 0U ||
+            partition.allocation.extent_total_mismatch_count != 0U ||
+            !partition.allocation.stored_not_reconstructed.empty() ||
+            !partition.allocation.reconstructed_not_stored.empty()) {
             return std::unexpected{transaction_error("source allocation cannot safely support alteration")};
         }
-        const auto bitmap_size = (partition.cluster_count + 7U) / 8U;
+        const auto bitmap_size_u64 = (static_cast<std::uint64_t>(partition.cluster_count) + 7U) / 8U;
+        if (bitmap_size_u64 > std::numeric_limits<std::size_t>::max())
+            return std::unexpected{transaction_error("source allocation bitmap exceeds platform limits")};
+        const auto bitmap_size = static_cast<std::size_t>(bitmap_size_u64);
         const auto bitmap_offset =
             (static_cast<std::uint64_t>(partition.start_sector) +
              static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *

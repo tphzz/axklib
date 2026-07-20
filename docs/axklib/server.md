@@ -67,7 +67,11 @@ expiry. Download the archive, then delete that content resource; expiry and
 startup cleanup are fallbacks. Archive creation rejects links, non-regular
 entries, source changes, excessive entry counts, and byte-quota overflow. It
 does not move, modify, or take ownership of the source directory or any durable
-job output.
+job output. Archive content is sent from the retained file in bounded transport
+chunks rather than copied into a response-sized memory buffer. The
+`maximumConcurrentArchiveDownloads` configuration limit, which defaults to
+`1` and accepts values from `1` through `64`, bounds simultaneous transfers.
+Expiry and explicit deletion defer removal while a transfer lease is active.
 
 ## Loopback Use
 

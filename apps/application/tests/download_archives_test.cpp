@@ -109,6 +109,33 @@ TEST_F(DownloadArchiveStoreTest, RetainsExpiredArchiveAndQuotaWhenRemovalFails) 
     EXPECT_EQ(exhausted.error().code, "download_archive_quota_exceeded");
 }
 
+TEST_F(DownloadArchiveStoreTest, ActiveDownloadLeaseDefersExpiryAndDeletion) {
+    auto now = std::chrono::steady_clock::now();
+    axk::app::DownloadArchiveStore store{root_ / "leased",   4096U, 4096U, 4U, std::chrono::seconds{5},
+                                         [&] { return now; }};
+    const auto created = store.create("owner", *sandbox_, {"workspace", "exports"});
+    ASSERT_TRUE(created) << created.error().message;
+    auto opened = store.open(created->reference, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    std::optional<axk::app::DownloadArchiveContent> content{std::move(*opened)};
+    EXPECT_EQ(content->path, root_ / "leased" / (created->reference.archive_id + ".tar"));
+
+    now += std::chrono::seconds{6};
+    store.cleanup();
+    EXPECT_TRUE(std::filesystem::is_regular_file(content->path));
+    const auto in_use = store.remove(created->reference, "owner");
+    ASSERT_FALSE(in_use);
+    EXPECT_EQ(in_use.error().code, "archive_in_use");
+    EXPECT_TRUE(in_use.error().retryable);
+
+    content.reset();
+    store.cleanup();
+    EXPECT_FALSE(std::filesystem::exists(root_ / "leased" / (created->reference.archive_id + ".tar")));
+    const auto expired = store.inspect(created->reference, "owner");
+    ASSERT_FALSE(expired);
+    EXPECT_EQ(expired.error().code, "download_archive_not_found");
+}
+
 TEST_F(DownloadArchiveStoreTest, ConcurrentReservationsCannotExceedTheArchiveQuota) {
     axk::app::DownloadArchiveStore store{root_ / "concurrent", 3072U, 3072U, 16U, std::chrono::seconds{30}};
     constexpr std::size_t contenders = 8U;

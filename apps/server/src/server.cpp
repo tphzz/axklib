@@ -30,6 +30,7 @@
 #include <crow.h>
 #include <nlohmann/json.hpp>
 
+#include "archive_download_budget.hpp"
 #include "axklib/application/application_operations.hpp"
 #include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_sessions.hpp"
@@ -433,6 +434,8 @@ int status_for_error(const axk::app::Error &error, int fallback = 422) {
         return 429;
     if (error.code == "download_archive_quota_exceeded")
         return 429;
+    if (error.code == "archive_download_capacity_exhausted")
+        return 429;
     if (error.code == "download_archive_too_large")
         return 413;
     if (error.code == "upload_type_not_allowed")
@@ -443,6 +446,8 @@ int status_for_error(const axk::app::Error &error, int fallback = 422) {
         return 409;
     if (error.code == "download_archive_not_found")
         return 404;
+    if (error.code == "archive_in_use")
+        return 409;
     if (error.code == "idempotency_conflict")
         return 409;
     if (error.code == "destination_reserved")
@@ -567,6 +572,7 @@ class ServerApplication {
           download_archives_(download_archive_directory(), config_.maximum_download_archive_total_bytes,
                              config_.maximum_download_archive_bytes, config_.maximum_download_archive_entries,
                              std::chrono::seconds{config_.download_archive_retention_seconds}),
+          archive_download_budget_(config_.maximum_concurrent_archive_downloads),
           images_(sandbox_, config_.maximum_image_sessions, config_.maximum_page_size,
                   std::chrono::seconds{config_.image_idle_seconds}, std::chrono::steady_clock::now,
                   &path_reservations_),
@@ -833,6 +839,7 @@ class ServerApplication {
                           {"maximumDownloadArchiveBytes", config_.maximum_download_archive_bytes},
                           {"maximumDownloadArchiveTotalBytes", config_.maximum_download_archive_total_bytes},
                           {"maximumDownloadArchiveEntries", config_.maximum_download_archive_entries},
+                          {"maximumConcurrentArchiveDownloads", config_.maximum_concurrent_archive_downloads},
                           {"downloadArchiveRetentionSeconds", config_.download_archive_retention_seconds},
                           {"maximumWebsocketDeliveryEvents", config_.maximum_websocket_delivery_events},
                           {"maximumWebsocketDeliveryBytes", config_.maximum_websocket_delivery_bytes},
@@ -1747,45 +1754,54 @@ class ServerApplication {
         return response;
     }
 
-    crow::response download_archive_response(const crow::request &request, const std::string &archive_id) {
+    void download_archive_response(const crow::request &request, crow::response &response,
+                                   const std::string &archive_id) {
+        const auto finish = [&response](crow::response value) {
+            response = std::move(value);
+            response.end();
+        };
         const auto id = request_id(request);
-        if (auto denied = guard(request, id))
-            return std::move(*denied);
+        if (auto denied = guard(request, id)) {
+            finish(std::move(*denied));
+            return;
+        }
         const axk::app::DownloadArchiveRef reference{archive_id};
         if (request.method == crow::HTTPMethod::Delete) {
-            auto removed = download_archives_.remove(reference, request_owner(request));
-#ifdef _WIN32
-            // Crow may still be closing the static-file stream from the preceding download.
-            for (std::size_t attempt = 0U;
-                 !removed && removed.error().code == "archive_storage_unavailable" && attempt < 10U; ++attempt) {
-                std::this_thread::sleep_for(std::chrono::milliseconds{5});
-                removed = download_archives_.remove(reference, request_owner(request));
-            }
-#endif
+            const auto removed = download_archives_.remove(reference, request_owner(request));
             if (!removed) {
                 audit(id, "archive_delete", "denied", request_owner(request), "archive", archive_id);
-                return error_response(status_for_error(removed.error()), removed.error(), id);
+                finish(error_response(status_for_error(removed.error()), removed.error(), id));
+                return;
             }
             audit(id, "archive_delete", "allowed", request_owner(request), "archive", archive_id);
-            return crow::response{204};
+            finish(crow::response{204});
+            return;
+        }
+        auto budget = archive_download_budget_.try_acquire();
+        if (!budget) {
+            finish(error_response(429,
+                                  {"archive_download_capacity_exhausted",
+                                   "maximum concurrent archive downloads are already active",
+                                   {},
+                                   true},
+                                  id));
+            return;
         }
         const auto content = download_archives_.open(reference, request_owner(request));
-        if (!content)
-            return error_response(status_for_error(content.error()), content.error(), id);
-        if (content->reader->size() > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
-            return error_response(500, {"archive_storage_unavailable", "download archive is too large to serve"}, id);
-        std::vector<std::byte> bytes(static_cast<std::size_t>(content->reader->size()));
-        if (const auto read = content->reader->read_exact_at(0U, bytes); !read)
-            return error_response(500, {"archive_storage_unavailable", read.error().message}, id);
-        crow::response response;
-        response.code = 200;
-        response.body.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        if (!content) {
+            finish(error_response(status_for_error(content.error()), content.error(), id));
+            return;
+        }
+        response.set_static_file_info_unsafe(axk::text::path_to_utf8(content->path), "application/x-tar");
+        if (response.code != 200) {
+            finish(error_response(500, {"archive_storage_unavailable", "download archive cannot be streamed"}, id));
+            return;
+        }
         response.set_header("X-Request-Id", id);
         response.set_header("Cache-Control", "no-store");
-        response.set_header("Content-Type", "application/x-tar");
         response.set_header("Content-Disposition", "attachment; filename=\"" + content->snapshot.filename + "\"");
         audit(id, "archive_download", "allowed", request_owner(request), "archive", archive_id);
-        return response;
+        response.end();
     }
 
     axk::app::Result<Json> wire_job_snapshot(const axk::app::JobSnapshot &snapshot) const {
@@ -2085,10 +2101,10 @@ class ServerApplication {
             .methods(crow::HTTPMethod::Post)(
                 [this](const crow::request &request) { return create_download_archive_response(request); });
         app_.route_dynamic("/api/v1/download-archives/<string>/content")
-            .methods(crow::HTTPMethod::Get,
-                     crow::HTTPMethod::Delete)([this](const crow::request &request, std::string archive_id) {
-                return download_archive_response(request, archive_id);
-            });
+            .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(
+                [this](const crow::request &request, crow::response &response, std::string archive_id) {
+                    download_archive_response(request, response, archive_id);
+                });
         app_.route_dynamic("/api/v1/images").methods(crow::HTTPMethod::Post)([this](const crow::request &request) {
             return create_image_response(request);
         });
@@ -2247,6 +2263,7 @@ class ServerApplication {
     axk::app::PathReservationCoordinator path_reservations_;
     axk::app::UploadStore uploads_;
     axk::app::DownloadArchiveStore download_archives_;
+    axk::server::ArchiveDownloadBudget archive_download_budget_;
     axk::app::ImageSessionManager images_;
     axk::app::OperationRegistry registry_;
     Json openapi_document_;

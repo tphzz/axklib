@@ -123,6 +123,7 @@ struct axk::app::DownloadArchiveStore::Implementation {
         std::uint64_t size_bytes{};
         std::size_t entry_count{};
         std::chrono::steady_clock::time_point expires_at;
+        std::size_t active_downloads{};
     };
 
     std::filesystem::path staging_directory;
@@ -144,7 +145,7 @@ struct axk::app::DownloadArchiveStore::Implementation {
     void cleanup_locked() {
         const auto now = clock();
         for (auto iterator = entries.begin(); iterator != entries.end();) {
-            if (iterator->second.expires_at > now) {
+            if (iterator->second.expires_at > now || iterator->second.active_downloads != 0U) {
                 ++iterator;
                 continue;
             }
@@ -314,7 +315,7 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
     const std::scoped_lock lock{implementation_->mutex};
     auto [position, inserted] = implementation_->entries.emplace(
         id, Implementation::Entry{owner_id, archive_filename(source), final_path, archive_size, files.size(),
-                                  implementation_->clock() + implementation_->retention});
+                                  implementation_->clock() + implementation_->retention, 0U});
     if (!inserted) {
         implementation_->reserved_bytes -= archive_size;
         std::filesystem::remove(final_path, error);
@@ -342,8 +343,19 @@ axk::app::DownloadArchiveStore::open(const DownloadArchiveRef &reference, std::s
     auto reader = axk::FileReader::open((**found).second.path);
     if (!reader)
         return std::unexpected(archive_error("archive_storage_unavailable", reader.error().message));
+    ++(**found).second.active_downloads;
+    const auto archive_id = reference.archive_id;
+    const auto implementation = implementation_;
+    auto lease = std::shared_ptr<void>{implementation_.get(), [implementation, archive_id](void *) {
+                                           const std::scoped_lock release_lock{implementation->mutex};
+                                           if (const auto retained = implementation->entries.find(archive_id);
+                                               retained != implementation->entries.end() &&
+                                               retained->second.active_downloads != 0U) {
+                                               --retained->second.active_downloads;
+                                           }
+                                       }};
     return DownloadArchiveContent{implementation_->snapshot(reference.archive_id, (**found).second),
-                                  std::move(*reader)};
+                                  (**found).second.path, std::move(*reader), std::move(lease)};
 }
 
 axk::app::Result<void> axk::app::DownloadArchiveStore::remove(const DownloadArchiveRef &reference,
@@ -352,6 +364,8 @@ axk::app::Result<void> axk::app::DownloadArchiveStore::remove(const DownloadArch
     auto found = implementation_->owned(reference, owner_id);
     if (!found)
         return std::unexpected(found.error());
+    if ((**found).second.active_downloads != 0U)
+        return std::unexpected(archive_error("archive_in_use", "download archive is being transferred", true));
     std::error_code error;
     std::filesystem::remove((**found).second.path, error);
     if (error)

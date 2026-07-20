@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <limits>
 #include <span>
 #include <string_view>
@@ -129,6 +130,39 @@ bool bitmap_set(std::span<std::byte> bitmap, std::uint32_t cluster) {
     }
     bitmap[index] |= static_cast<std::byte>(0x80U >> (cluster & 7U));
     return true;
+}
+
+constexpr std::uint32_t owner_conflict_bit = 0x8000'0000U;
+constexpr std::uint32_t reserved_owner = 1U;
+
+std::uint32_t record_owner(SfsId record, AllocationClaimKind kind) {
+    return 2U + record.value * 2U + (kind == AllocationClaimKind::continuation ? 1U : 0U);
+}
+
+AllocationClaim decode_owner(std::uint32_t encoded) {
+    encoded &= ~owner_conflict_bit;
+    if (encoded == reserved_owner)
+        return {AllocationClaimKind::reserved, std::nullopt};
+    const auto kind = (encoded & 1U) == 0U ? AllocationClaimKind::data : AllocationClaimKind::continuation;
+    return {kind, SfsId{(encoded - 2U) / 2U}};
+}
+
+void claim_cluster(std::span<std::uint32_t> owners, std::uint32_t cluster, SfsId record, AllocationClaimKind kind,
+                   AllocationSummary &summary, std::size_t conflict_limit) {
+    const auto claimed = record_owner(record, kind);
+    auto &existing = owners[cluster];
+    if (existing == 0U) {
+        existing = claimed;
+        return;
+    }
+    if ((existing & owner_conflict_bit) == 0U)
+        ++summary.conflicting_cluster_count;
+    if (summary.conflicts.size() < conflict_limit) {
+        summary.conflicts.push_back({cluster, decode_owner(existing), {kind, record}});
+    } else {
+        summary.conflicts_truncated = true;
+    }
+    existing |= owner_conflict_bit;
 }
 
 std::vector<AllocationMismatchRange> mismatch_ranges(std::span<const std::byte> left, std::span<const std::byte> right,
@@ -631,6 +665,21 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
                                                "partition bitmap exceeds the configured memory bound", result.index)};
     }
     std::vector<std::byte> reconstructed(static_cast<std::size_t>(bitmap_bytes_u64));
+    const auto owner_bytes = checked_multiply(result.cluster_count, sizeof(std::uint32_t));
+    if (!owner_bytes || *owner_bytes > std::numeric_limits<std::size_t>::max() ||
+        *owner_bytes > options.max_allocation_owner_bytes) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition allocation ownership exceeds the configured memory bound",
+                                               result.index)};
+    }
+    const auto first_payload_u64 = checked_add(result.directory_index_cluster, result.directory_index_span_clusters);
+    if (!first_payload_u64 || *first_payload_u64 > result.cluster_count) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition index extends beyond the cluster range", result.index)};
+    }
+    const auto first_payload = static_cast<std::uint32_t>(*first_payload_u64);
+    std::vector<std::uint32_t> owners(result.cluster_count);
+    std::ranges::fill(std::span{owners}.first(first_payload), reserved_owner);
     for (std::size_t block = 0; block + index_block_size <= index_data->size(); block += index_block_size) {
         if (const auto check = options.cancellation.check(); !check) {
             return std::unexpected{check.error()};
@@ -681,6 +730,8 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
             std::uint64_t extent_cluster_sum{};
             for (const auto list_cluster : record.continuation_clusters) {
                 if (list_cluster < result.cluster_count) {
+                    claim_cluster(owners, list_cluster, record.sfs_id, AllocationClaimKind::continuation,
+                                  result.allocation, options.max_allocation_conflicts);
                     if (!bitmap_set(reconstructed, list_cluster)) {
                         return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
                                                                "continuation cluster exceeds the partition bitmap",
@@ -700,6 +751,8 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
                 }
                 for (std::uint32_t cluster = extent.cluster_offset;
                      cluster < extent.cluster_offset + extent.cluster_count; ++cluster) {
+                    claim_cluster(owners, cluster, record.sfs_id, AllocationClaimKind::data, result.allocation,
+                                  options.max_allocation_conflicts);
                     if (!bitmap_set(reconstructed, cluster)) {
                         return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
                                                                "data cluster exceeds the partition bitmap",
@@ -736,6 +789,13 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
         }
     }
 
+    if (result.allocation.conflicting_cluster_count != 0U) {
+        result.diagnostics.push_back(partition_error(
+            ErrorCode::allocation_cross_link,
+            std::format("{} cluster(s) have multiple allocation owners", result.allocation.conflicting_cluster_count),
+            result.index));
+    }
+
     if (const auto directories = validate_directory_graph(result, options); !directories) {
         return std::unexpected{directories.error()};
     }
@@ -755,7 +815,6 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
         mismatch_ranges(*stored, reconstructed, result.cluster_count, options.max_mismatch_ranges);
     result.allocation.reconstructed_not_stored =
         mismatch_ranges(reconstructed, *stored, result.cluster_count, options.max_mismatch_ranges);
-    const auto first_payload_u64 = checked_add(result.directory_index_cluster, result.directory_index_span_clusters);
     if (first_payload_u64 && *first_payload_u64 <= std::numeric_limits<std::uint32_t>::max() &&
         *cluster_bytes <= std::numeric_limits<std::uint32_t>::max()) {
         const auto free = calculate_sfs_free_space(result.cluster_count, static_cast<std::uint32_t>(*first_payload_u64),

@@ -25,7 +25,9 @@ struct OpenOptions {
     std::size_t max_directory_records{65'536U};
     std::size_t max_directory_depth{1'024U};
     std::size_t max_allocation_bitmap_bytes{64U * 1024U * 1024U};
+    std::size_t max_allocation_owner_bytes{64U * 1024U * 1024U};
     std::size_t max_mismatch_ranges{512};
+    std::size_t max_allocation_conflicts{1'024U};
     CancellationToken cancellation;
     ProgressSink *progress{};
 };
@@ -86,6 +88,19 @@ struct AllocationMismatchRange {
     std::uint32_t end_cluster{};
 };
 
+enum class AllocationClaimKind : std::uint8_t { reserved, data, continuation };
+
+struct AllocationClaim {
+    AllocationClaimKind kind{AllocationClaimKind::reserved};
+    std::optional<SfsId> record;
+};
+
+struct AllocationConflict {
+    std::uint32_t cluster{};
+    AllocationClaim first;
+    AllocationClaim second;
+};
+
 struct SfsFreeSpace {
     std::uint32_t total_cluster_count{};
     std::uint32_t reserved_cluster_count{};
@@ -101,6 +116,9 @@ struct AllocationSummary {
     std::uint32_t reconstructed_used_cluster_count{};
     std::uint32_t invalid_extent_record_count{};
     std::uint32_t extent_total_mismatch_count{};
+    std::uint32_t conflicting_cluster_count{};
+    std::vector<AllocationConflict> conflicts;
+    bool conflicts_truncated{};
     std::vector<AllocationMismatchRange> stored_not_reconstructed;
     std::vector<AllocationMismatchRange> reconstructed_not_stored;
     std::optional<SfsFreeSpace> free_space;

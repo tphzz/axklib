@@ -1124,6 +1124,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "maximumDownloadArchiveBytes": 4 * 1024 * 1024 * 1024,
                 "maximumDownloadArchiveTotalBytes": 8 * 1024 * 1024 * 1024,
                 "maximumDownloadArchiveEntries": 100000,
+                "maximumConcurrentArchiveDownloads": 1,
                 "downloadArchiveRetentionSeconds": 300,
                 "maximumWebsocketDeliveryEvents": 1024,
                 "maximumWebsocketDeliveryBytes": 4 * 1024 * 1024,

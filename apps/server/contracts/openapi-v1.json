@@ -269,6 +269,11 @@
             "minimum": 1,
             "type": "integer"
           },
+          "maximumConcurrentArchiveDownloads": {
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          },
           "maximumDownloadArchiveBytes": {
             "minimum": 1,
             "type": "integer"
@@ -6975,6 +6980,34 @@
               }
             }
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Archive transfer is still active",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
           "default": {
             "content": {
               "application/json": {
@@ -7009,6 +7042,14 @@
         "operationId": "filesystem.archive.download",
         "responses": {
           "200": {
+            "content": {
+              "application/x-tar": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
             "description": "Short-lived TAR archive stream",
             "headers": {
               "X-Request-Id": {
@@ -7039,6 +7080,41 @@
             },
             "description": "Archive absent, expired, or owned by another principal",
             "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Concurrent archive download limit reached",
+            "headers": {
+              "Retry-After": {
+                "description": "Minimum retry delay in seconds",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
               }

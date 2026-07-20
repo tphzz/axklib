@@ -69,6 +69,7 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         "jobWorkerThreads",
         "maximumDownloadRangeBytes",
         "maximumDownloadArchiveBytes",
+        "maximumConcurrentArchiveDownloads",
         "maximumDownloadArchiveEntries",
         "maximumDownloadArchiveTotalBytes",
         "maximumEventTickets",
@@ -139,6 +140,7 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         assign("maximumDownloadArchiveBytes", config.maximum_download_archive_bytes);
         assign("maximumDownloadArchiveTotalBytes", config.maximum_download_archive_total_bytes);
         assign("maximumDownloadArchiveEntries", config.maximum_download_archive_entries);
+        assign("maximumConcurrentArchiveDownloads", config.maximum_concurrent_archive_downloads);
         assign("downloadArchiveRetentionSeconds", config.download_archive_retention_seconds);
         assign("uploadRetentionSeconds", config.upload_retention_seconds);
         assign("maximumImageSessions", config.maximum_image_sessions);
@@ -518,6 +520,7 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
     if (config.maximum_download_archive_bytes == 0U ||
         config.maximum_download_archive_total_bytes < config.maximum_download_archive_bytes ||
         config.maximum_download_archive_entries == 0U || config.maximum_download_archive_entries > 1000000U ||
+        config.maximum_concurrent_archive_downloads == 0U || config.maximum_concurrent_archive_downloads > 64U ||
         config.download_archive_retention_seconds == 0U || config.download_archive_retention_seconds > 86400U) {
         return std::unexpected(argument_error("download archive limits are invalid"));
     }

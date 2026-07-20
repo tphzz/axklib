@@ -5,6 +5,7 @@
 #include <future>
 #include <iterator>
 #include <ranges>
+#include <set>
 
 #include <gtest/gtest.h>
 
@@ -114,6 +115,46 @@ void mark_cluster_used(const std::filesystem::path &path, const axk::Partition &
     }
 }
 
+void add_single_cluster_record(const std::filesystem::path &path, const axk::Partition &partition, axk::SfsId id,
+                               std::uint32_t cluster) {
+    std::array<char, 72> record{};
+    const auto put_be16 = [&](std::size_t offset, std::uint16_t value) {
+        record[offset] = static_cast<char>(value >> 8U);
+        record[offset + 1U] = static_cast<char>(value);
+    };
+    const auto put_be32 = [&](std::size_t offset, std::uint32_t value) {
+        record[offset] = static_cast<char>(value >> 24U);
+        record[offset + 1U] = static_cast<char>(value >> 16U);
+        record[offset + 2U] = static_cast<char>(value >> 8U);
+        record[offset + 3U] = static_cast<char>(value);
+    };
+    put_be16(0U, 1U);
+    put_be16(4U, 1U);
+    put_be32(6U, 1U);
+    put_be32(0x0aU, cluster);
+    put_be32(0x0eU, 1U);
+    put_be32(0x12U, 1U);
+    std::fill(record.begin() + 0x3aU, record.begin() + 0x42U, static_cast<char>(0xff));
+    record[0x42U] = static_cast<char>(0x9e);
+    record[0x47U] = 1;
+
+    constexpr std::uint64_t index_block_size = 1024U;
+    constexpr std::uint64_t index_record_size = 72U;
+    constexpr std::uint64_t records_per_index_block = 14U;
+    const auto index_base =
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(partition.directory_index_cluster) * partition.sectors_per_cluster) *
+        512U;
+    const auto record_offset = index_base + (id.value / records_per_index_block) * index_block_size +
+                               (id.value % records_per_index_block) * index_record_size;
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    image.seekp(static_cast<std::streamoff>(record_offset));
+    image.write(record.data(), static_cast<std::streamsize>(record.size()));
+    ASSERT_TRUE(image);
+    mark_cluster_used(path, partition, cluster);
+}
+
 void mark_cluster_free(const std::filesystem::path &path, const axk::Partition &partition, std::uint32_t cluster) {
     std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
     ASSERT_TRUE(image);
@@ -159,6 +200,17 @@ void patch_record_be32(const std::filesystem::path &path, const axk::Partition &
     patch_record_byte(path, partition, record, payload_offset + 1U, static_cast<std::byte>((value >> 16U) & 0xffU));
     patch_record_byte(path, partition, record, payload_offset + 2U, static_cast<std::byte>((value >> 8U) & 0xffU));
     patch_record_byte(path, partition, record, payload_offset + 3U, static_cast<std::byte>(value & 0xffU));
+}
+
+void patch_index_be32(const std::filesystem::path &path, const axk::IndexRecord &record, std::size_t offset,
+                      std::uint32_t value) {
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    const std::array bytes{static_cast<char>((value >> 24U) & 0xffU), static_cast<char>((value >> 16U) & 0xffU),
+                           static_cast<char>((value >> 8U) & 0xffU), static_cast<char>(value & 0xffU)};
+    image.seekp(static_cast<std::streamoff>(record.record_offset.value + offset));
+    image.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    ASSERT_TRUE(image);
 }
 
 void patch_record_name(const std::filesystem::path &path, const axk::Partition &partition,
@@ -608,6 +660,50 @@ TEST(Alteration, RejectsSourceBitmapThatExposesLiveExtentsAsFree) {
     std::filesystem::remove_all(root, error);
 }
 
+TEST(Alteration, RejectsSourceWithCrossLinkedRecordAllocation) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-cross-linked-source";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
+    const auto opened = axk::open_image(source);
+    ASSERT_TRUE(opened);
+    const auto &partition = opened->partitions().front();
+    const axk::IndexRecord *first{};
+    const axk::IndexRecord *second{};
+    for (const auto &candidate : partition.records) {
+        if (candidate.extents.size() != 1U)
+            continue;
+        const auto matching = std::ranges::find_if(partition.records, [&](const auto &other) {
+            return other.sfs_id != candidate.sfs_id && other.extents.size() == 1U &&
+                   other.extents.front().cluster_count == candidate.extents.front().cluster_count;
+        });
+        if (matching != partition.records.end()) {
+            first = &candidate;
+            second = &*matching;
+            break;
+        }
+    }
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    patch_index_be32(source, *second, 0x0aU, first->extents.front().cluster_offset);
+    const auto corrupted = axk::open_image(source);
+    ASSERT_TRUE(corrupted);
+    EXPECT_NE(corrupted->partitions().front().allocation.conflicting_cluster_count, 0U);
+
+    const auto manifest = axk::parse_alteration_manifest(
+        R"({"schema_version":"1.1","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
+    ASSERT_TRUE(manifest);
+    const auto altered = axk::alter_hds(source, *manifest, output);
+    ASSERT_FALSE(altered);
+    EXPECT_EQ(altered.error().code, axk::ErrorCode::transaction_rejected);
+    EXPECT_EQ(altered.error().message, "source allocation cannot safely support alteration");
+    EXPECT_FALSE(std::filesystem::exists(output));
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(Alteration, RejectsSharedSampleBankMemberAndNonzeroRenameHandle) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-sample-bank-safety";
     const auto audio = root / "tone.wav";
@@ -932,8 +1028,15 @@ TEST(Alteration, WritesAndReopensFortyEightExtentContinuationList) {
     })) {
         ++first_free;
     }
+    std::set<std::uint32_t> used_ids;
+    for (const auto &record : partition.records)
+        used_ids.insert(record.sfs_id.value);
+    std::uint32_t next_id = 3U;
     for (std::uint32_t index = 0; index < 48U; ++index) {
-        mark_cluster_used(source, partition, first_free + index * 2U + 1U);
+        while (used_ids.contains(next_id))
+            ++next_id;
+        add_single_cluster_record(source, partition, axk::SfsId{next_id}, first_free + index * 2U + 1U);
+        used_ids.insert(next_id++);
     }
     const auto manifest = axk::parse_alteration_manifest(
         R"({"schema_version":"1.1","operations":[

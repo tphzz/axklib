@@ -45,6 +45,7 @@ enum class ErrorCode : std::uint32_t {
     allocation_invalid_extent = 300,
     allocation_cycle = 301,
     allocation_mismatch = 302,
+    allocation_cross_link = 303,
     // Object errors: 400-499.
     object_malformed = 400,
     object_missing = 401,

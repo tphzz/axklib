@@ -227,6 +227,23 @@ TEST(ServerConfig, RejectsInvalidJobResourceLimits) {
     EXPECT_NE(queue.error().message.find("queued jobs"), std::string::npos);
 }
 
+TEST(ServerConfig, ParsesAndBoundsConcurrentArchiveDownloads) {
+    TemporaryConfigFile config{R"({"bearerToken":"0123456789abcdef","maximumConcurrentArchiveDownloads":7})"};
+    std::array arguments{std::string{"axklib-server"}, std::string{"--config"}, config.path().string()};
+    std::array<char *, arguments.size()> pointers{};
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+        pointers[index] = arguments[index].data();
+    const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_EQ(parsed->config.maximum_concurrent_archive_downloads, 7U);
+
+    auto invalid = parsed->config;
+    invalid.maximum_concurrent_archive_downloads = 0U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid.maximum_concurrent_archive_downloads = 65U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+}
+
 TEST(ServerConfig, RestrictsParentMonitoringToSidecarMode) {
     auto config = axk::server::Config{};
     config.bearer_token = "0123456789abcdef";

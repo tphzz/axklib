@@ -81,28 +81,6 @@ axk::app::Error core_error(const axk::Error &error, const axk::app::FileRef &sou
             error.message, std::move(context)};
 }
 
-axk::app::Result<void> write_reader(const std::filesystem::path &path, const axk::RandomAccessReader &reader) {
-    std::error_code error;
-    std::filesystem::create_directories(path.parent_path(), error);
-    if (error)
-        return std::unexpected(operation_error("validation_input_failed", "could not stage export directory"));
-    std::ofstream output{path, std::ios::binary | std::ios::trunc};
-    if (!output)
-        return std::unexpected(operation_error("validation_input_failed", "could not stage export file"));
-    std::vector<std::byte> buffer(
-        static_cast<std::size_t>(std::max<std::uint64_t>(1U, std::min<std::uint64_t>(1024U * 1024U, reader.size()))));
-    for (std::uint64_t offset = 0U; offset < reader.size();) {
-        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), reader.size() - offset));
-        if (const auto read = reader.read_exact_at(offset, std::span{buffer}.first(count)); !read)
-            return std::unexpected(operation_error("validation_input_failed", read.error().message));
-        output.write(reinterpret_cast<const char *>(buffer.data()), static_cast<std::streamsize>(count));
-        if (!output)
-            return std::unexpected(operation_error("validation_input_failed", "could not stage export file"));
-        offset += count;
-    }
-    return {};
-}
-
 axk::app::Result<ValidationRequest> parse_request(const Json &input) {
     ValidationRequest result;
     try {
@@ -244,6 +222,8 @@ std::vector<axk::ReportRow> allocation_summary_rows(const std::filesystem::path 
             {"stored_used_not_reconstructed_count", mismatch_cluster_count(allocation.stored_not_reconstructed)},
             {"reconstructed_used_not_stored_count", mismatch_cluster_count(allocation.reconstructed_not_stored)},
             {"extent_total_mismatch_count", static_cast<std::uint64_t>(allocation.extent_total_mismatch_count)},
+            {"conflicting_cluster_count", static_cast<std::uint64_t>(allocation.conflicting_cluster_count)},
+            {"conflicts_truncated", allocation.conflicts_truncated},
             {"warning_count", std::uint64_t{0}},
             {"warnings", warnings},
         });
@@ -292,6 +272,35 @@ std::vector<axk::ReportRow> allocation_mismatch_rows(const std::filesystem::path
     for (const auto &partition : partitions) {
         append(partition, "stored-used-without-index-extent", partition.allocation.stored_not_reconstructed);
         append(partition, "index-extent-references-free-cluster", partition.allocation.reconstructed_not_stored);
+        const auto claim_kind = [](axk::AllocationClaimKind kind) {
+            switch (kind) {
+            case axk::AllocationClaimKind::reserved:
+                return "reserved";
+            case axk::AllocationClaimKind::data:
+                return "data";
+            case axk::AllocationClaimKind::continuation:
+                return "continuation";
+            }
+            return "unknown";
+        };
+        for (const auto &conflict : partition.allocation.conflicts) {
+            rows.push_back(
+                {{"source_image", axk::text::path_to_utf8(path)},
+                 {"partition_index", static_cast<std::uint64_t>(partition.index.value)},
+                 {"partition_name", partition.name},
+                 {"direction", "multiple-allocation-owners"},
+                 {"start_cluster", static_cast<std::uint64_t>(conflict.cluster)},
+                 {"end_cluster", static_cast<std::uint64_t>(conflict.cluster)},
+                 {"cluster_count", std::uint64_t{1}},
+                 {"first_owner_kind", claim_kind(conflict.first.kind)},
+                 {"first_owner_sfs_id", conflict.first.record
+                                            ? axk::ReportValue{static_cast<std::uint64_t>(conflict.first.record->value)}
+                                            : axk::ReportValue{nullptr}},
+                 {"second_owner_kind", claim_kind(conflict.second.kind)},
+                 {"second_owner_sfs_id",
+                  conflict.second.record ? axk::ReportValue{static_cast<std::uint64_t>(conflict.second.record->value)}
+                                         : axk::ReportValue{nullptr}}});
+        }
     }
     return rows;
 }
@@ -404,8 +413,12 @@ std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &
         }
         const auto allocation_issues =
             partition == container.partitions().end()
-                ? 1U
-                : partition->allocation.invalid_extent_record_count + partition->allocation.extent_total_mismatch_count;
+                ? std::uint64_t{1}
+                : static_cast<std::uint64_t>(partition->allocation.invalid_extent_record_count) +
+                      partition->allocation.extent_total_mismatch_count +
+                      partition->allocation.conflicting_cluster_count +
+                      mismatch_cluster_count(partition->allocation.stored_not_reconstructed) +
+                      mismatch_cluster_count(partition->allocation.reconstructed_not_stored);
         std::uint64_t artifact_count{};
         for (const auto &[type, count] : artifact_counts) {
             static_cast<void>(type);
@@ -850,30 +863,141 @@ std::optional<std::uint16_t> little_u16(std::span<const std::byte> bytes, std::s
         (static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(bytes[offset + 1U])) << 8U));
 }
 
-std::vector<axk::ReportRow> validate_export_directory(const std::filesystem::path &root) {
-    std::vector<axk::ReportRow> issues;
-    if (!std::filesystem::exists(root)) {
-        issues.push_back(export_validation_issue("error", "EXPORT_DIR_NOT_FOUND", "Export directory does not exist.",
-                                                 "export", root));
-        return issues;
+struct ExportWavHeader {
+    std::uint64_t sample_rate{};
+    std::uint64_t channels{};
+    std::uint64_t sample_width_bytes{};
+    std::uint64_t frames{};
+};
+
+std::expected<ExportWavHeader, std::string> parse_export_wav(const axk::RandomAccessReader &reader) {
+    constexpr std::uint64_t riff_header_size = 12U;
+    constexpr std::size_t maximum_chunks = 1024U;
+    if (reader.size() < riff_header_size)
+        return std::unexpected("truncated RIFF header");
+    std::array<std::byte, riff_header_size> riff{};
+    if (const auto read = reader.read_exact_at(0U, riff); !read)
+        return std::unexpected(read.error().message);
+    if (std::string_view{reinterpret_cast<const char *>(riff.data()), 4U} != "RIFF" ||
+        std::string_view{reinterpret_cast<const char *>(riff.data() + 8U), 4U} != "WAVE") {
+        return std::unexpected("invalid RIFF/WAVE signature");
     }
-    std::error_code iteration_error;
-    for (std::filesystem::recursive_directory_iterator iterator{root, iteration_error}, end;
-         iterator != end && !iteration_error; iterator.increment(iteration_error)) {
-        if (!iterator->is_regular_file() || iterator->path().extension() != ".json" ||
-            iterator->path().filename() == "schema_index.json" ||
-            std::ranges::find(iterator->path(), "_schemas") != iterator->path().end())
-            continue;
-        Json record;
-        try {
-            std::ifstream input{iterator->path()};
-            input >> record;
-        } catch (const std::exception &error) {
-            issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_BAD_JSON",
-                                                     std::string{"Sidecar JSON could not be parsed: "} + error.what(),
-                                                     "sidecar", iterator->path()));
+    const auto riff_size = little_u32(riff, 4U);
+    if (!riff_size || static_cast<std::uint64_t>(*riff_size) + 8U > reader.size())
+        return std::unexpected("RIFF size exceeds the retained file");
+    const auto riff_end = static_cast<std::uint64_t>(*riff_size) + 8U;
+
+    std::optional<ExportWavHeader> format;
+    std::optional<std::uint32_t> data_size;
+    std::uint64_t offset = riff_header_size;
+    for (std::size_t chunk_index = 0U; offset < riff_end && chunk_index < maximum_chunks; ++chunk_index) {
+        if (riff_end - offset < 8U)
+            return std::unexpected("truncated chunk header");
+        std::array<std::byte, 8U> chunk{};
+        if (const auto read = reader.read_exact_at(offset, chunk); !read)
+            return std::unexpected(read.error().message);
+        const auto size = little_u32(chunk, 4U);
+        if (!size)
+            return std::unexpected("invalid chunk size");
+        const auto payload_offset = offset + 8U;
+        const auto padded_size = static_cast<std::uint64_t>(*size) + (*size & 1U);
+        if (padded_size > riff_end - payload_offset)
+            return std::unexpected("chunk exceeds the RIFF container");
+        const std::string_view identifier{reinterpret_cast<const char *>(chunk.data()), 4U};
+        if (identifier == "fmt ") {
+            if (format || *size < 16U)
+                return std::unexpected(format ? "duplicate format chunk" : "truncated format chunk");
+            std::array<std::byte, 16U> bytes{};
+            if (const auto read = reader.read_exact_at(payload_offset, bytes); !read)
+                return std::unexpected(read.error().message);
+            const auto encoding = little_u16(bytes, 0U);
+            const auto channels = little_u16(bytes, 2U);
+            const auto sample_rate = little_u32(bytes, 4U);
+            const auto byte_rate = little_u32(bytes, 8U);
+            const auto block_align = little_u16(bytes, 12U);
+            const auto bits_per_sample = little_u16(bytes, 14U);
+            if (!encoding || *encoding != 1U)
+                return std::unexpected("WAV is not integer PCM");
+            if (!channels || *channels == 0U || *channels > 2U)
+                return std::unexpected("invalid channel count");
+            if (!sample_rate || *sample_rate == 0U)
+                return std::unexpected("invalid sample rate");
+            if (!bits_per_sample || (*bits_per_sample != 8U && *bits_per_sample != 16U))
+                return std::unexpected("invalid sample width");
+            const auto sample_width = static_cast<std::uint16_t>(*bits_per_sample / 8U);
+            const auto expected_alignment = static_cast<std::uint32_t>(*channels) * sample_width;
+            const auto expected_byte_rate = static_cast<std::uint64_t>(*sample_rate) * expected_alignment;
+            if (!block_align || *block_align != expected_alignment || !byte_rate || *byte_rate != expected_byte_rate)
+                return std::unexpected("inconsistent PCM format geometry");
+            format = ExportWavHeader{*sample_rate, *channels, sample_width, 0U};
+        } else if (identifier == "data") {
+            if (data_size)
+                return std::unexpected("duplicate data chunk");
+            data_size = *size;
+        }
+        offset = payload_offset + padded_size;
+    }
+    if (offset != riff_end)
+        return std::unexpected("WAV chunk count exceeds the validation limit");
+    if (!format || !data_size)
+        return std::unexpected(!format ? "missing format chunk" : "missing data chunk");
+    const auto block_align = format->channels * format->sample_width_bytes;
+    if (block_align == 0U || *data_size % block_align != 0U)
+        return std::unexpected("data chunk is not frame-aligned");
+    format->frames = *data_size / block_align;
+    return *format;
+}
+
+std::optional<std::string> normalized_export_path(std::string_view raw_path, const std::filesystem::path &sidecar,
+                                                  bool relative_to_export_root) {
+    const auto decoded = axk::text::path_from_utf8(raw_path);
+    if (!decoded || decoded->empty() || decoded->is_absolute() || decoded->has_root_name() ||
+        decoded->has_root_directory()) {
+        return std::nullopt;
+    }
+    const auto combined = (relative_to_export_root ? std::filesystem::path{} : sidecar.parent_path()) / *decoded;
+    const auto normalized = combined.lexically_normal();
+    if (normalized.empty() || normalized.is_absolute() || normalized.has_root_name() ||
+        normalized.has_root_directory() || *normalized.begin() == "..") {
+        return std::nullopt;
+    }
+    return axk::text::path_to_utf8(normalized);
+}
+
+std::expected<Json, std::string> parse_export_json(const axk::app::SandboxTreeFile &file) {
+    constexpr std::uint64_t maximum_sidecar_bytes = 64U * 1024U * 1024U;
+    if (file.size > maximum_sidecar_bytes)
+        return std::unexpected("sidecar exceeds the 64 MiB validation limit");
+    std::vector<std::byte> bytes(static_cast<std::size_t>(file.size));
+    if (const auto read = file.reader->read_exact_at(0U, bytes); !read)
+        return std::unexpected(read.error().message);
+    try {
+        return Json::parse(reinterpret_cast<const char *>(bytes.data()),
+                           reinterpret_cast<const char *>(bytes.data() + bytes.size()));
+    } catch (const std::exception &error) {
+        return std::unexpected(error.what());
+    }
+}
+
+std::vector<axk::ReportRow> validate_export_directory(std::span<const axk::app::SandboxTreeFile> files) {
+    std::vector<axk::ReportRow> issues;
+    std::map<std::string, const axk::app::SandboxTreeFile *, std::less<>> by_path;
+    for (const auto &file : files)
+        by_path.emplace(file.relative_path, &file);
+    for (const auto &file : files) {
+        const auto sidecar_path = axk::text::path_from_utf8(file.relative_path);
+        if (!sidecar_path || sidecar_path->extension() != ".json" || sidecar_path->filename() == "schema_index.json" ||
+            std::ranges::find(*sidecar_path, "_schemas") != sidecar_path->end()) {
             continue;
         }
+        const auto record_result = parse_export_json(file);
+        if (!record_result) {
+            issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_BAD_JSON",
+                                                     "Sidecar JSON could not be parsed: " + record_result.error(),
+                                                     "sidecar", *sidecar_path));
+            continue;
+        }
+        const auto &record = *record_result;
         if (!record.is_object())
             continue;
         const auto schema = record.value("schema", std::string{});
@@ -881,16 +1005,11 @@ std::vector<axk::ReportRow> validate_export_directory(const std::filesystem::pat
             const auto inspect_path = [&](const Json &value, std::string_view object_key) {
                 if (!value.is_string())
                     return;
-                const std::filesystem::path path{value.get<std::string>()};
-                const auto resolved = (iterator->path().parent_path() / path).lexically_normal();
-                const auto relative_to_root = resolved.lexically_relative(root.lexically_normal());
-                const auto escapes_root = relative_to_root.empty() || relative_to_root.is_absolute() ||
-                                          std::ranges::find(relative_to_root, "..") != relative_to_root.end();
-                if (path.is_absolute() || escapes_root) {
+                if (!normalized_export_path(value.get<std::string>(), *sidecar_path, false)) {
                     issues.push_back(export_validation_issue("error", "EXPORT_VOLUME_GRAPH_PATH_ESCAPE",
                                                              "Volume graph WAV path must be relative and stay inside "
                                                              "the export root.",
-                                                             "sidecar", iterator->path(), std::string{object_key}));
+                                                             "sidecar", *sidecar_path, std::string{object_key}));
                 }
             };
             if (record.contains("objects") && record["objects"].is_object() && record["objects"].contains("smpl") &&
@@ -922,20 +1041,21 @@ std::vector<axk::ReportRow> validate_export_directory(const std::filesystem::pat
                 }
                 issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_MISSING_FIELD",
                                                          "Sidecar missing required sections: " + section_names,
-                                                         "sidecar", iterator->path(), object_key));
+                                                         "sidecar", *sidecar_path, object_key));
             }
             if (!record.contains("audio") || !record["audio"].is_object())
                 continue;
             header = record["audio"];
-            wav_path = header.value("wav_path", std::string{});
-            if (wav_path.is_absolute() || std::ranges::find(wav_path, "..") != wav_path.end()) {
+            const auto normalized =
+                normalized_export_path(header.value("wav_path", std::string{}), *sidecar_path, true);
+            if (!normalized) {
                 issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_PATH_ESCAPE",
                                                          "v2 sidecar audio.wav_path must be relative and stay inside "
                                                          "the export root.",
-                                                         "sidecar", iterator->path(), object_key));
+                                                         "sidecar", *sidecar_path, object_key));
                 continue;
             }
-            wav_path = root / wav_path;
+            wav_path = axk::text::path_from_utf8(*normalized).value_or(std::filesystem::path{});
         } else {
             if (!record.contains("wav_path"))
                 continue;
@@ -958,37 +1078,40 @@ std::vector<axk::ReportRow> validate_export_directory(const std::filesystem::pat
                 }
                 issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_MISSING_FIELD",
                                                          "Sidecar missing required fields: " + fields, "sidecar",
-                                                         iterator->path(), object_key));
+                                                         *sidecar_path, object_key));
             }
-            wav_path = record.value("wav_path", std::string{});
-            if (!wav_path.is_absolute()) {
-                if (!std::filesystem::exists(wav_path))
-                    wav_path = iterator->path().parent_path() / wav_path;
+            const auto normalized =
+                normalized_export_path(record.value("wav_path", std::string{}), *sidecar_path, false);
+            if (!normalized) {
+                issues.push_back(
+                    export_validation_issue("error", "EXPORT_SIDECAR_PATH_ESCAPE",
+                                            "Legacy sidecar wav_path must be relative and stay inside the export root.",
+                                            "sidecar", *sidecar_path, object_key));
+                continue;
             }
+            wav_path = axk::text::path_from_utf8(*normalized).value_or(std::filesystem::path{});
         }
-        if (!std::filesystem::exists(wav_path)) {
-            issues.push_back(export_validation_issue(
-                "error", "EXPORT_WAV_MISSING", "Referenced WAV does not exist: " + axk::text::path_to_utf8(wav_path),
-                "export", iterator->path(), object_key));
+        const auto wav_key = axk::text::path_to_utf8(wav_path);
+        const auto wav_file = by_path.find(wav_key);
+        if (wav_file == by_path.end()) {
+            issues.push_back(export_validation_issue("error", "EXPORT_WAV_MISSING",
+                                                     "Referenced WAV does not exist: " + wav_key, "export",
+                                                     *sidecar_path, object_key));
             continue;
         }
-        std::ifstream wav{wav_path, std::ios::binary};
-        std::array<std::byte, 44> bytes{};
-        wav.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-        if (wav.gcount() != static_cast<std::streamsize>(bytes.size()) ||
-            std::string_view{reinterpret_cast<const char *>(bytes.data()), 4U} != "RIFF" ||
-            std::string_view{reinterpret_cast<const char *>(bytes.data() + 8U), 4U} != "WAVE") {
-            issues.push_back(export_validation_issue("error", "EXPORT_WAV_BAD_HEADER",
-                                                     "Referenced WAV could not be opened: invalid WAVE header",
-                                                     "export", wav_path, object_key));
+        const auto observed_header = parse_export_wav(*wav_file->second->reader);
+        if (!observed_header) {
+            issues.push_back(
+                export_validation_issue("error", "EXPORT_WAV_BAD_HEADER",
+                                        "Referenced WAV has an invalid WAVE header: " + observed_header.error(),
+                                        "export", wav_path, object_key));
             continue;
         }
         const std::array observed{
-            std::pair{"sample_rate", static_cast<std::uint64_t>(*little_u32(bytes, 24U))},
-            std::pair{"channels", static_cast<std::uint64_t>(*little_u16(bytes, 22U))},
-            std::pair{"sample_width_bytes", static_cast<std::uint64_t>(*little_u16(bytes, 34U) / 8U)},
-            std::pair{"frames", static_cast<std::uint64_t>(*little_u32(bytes, 40U) /
-                                                           (*little_u16(bytes, 22U) * (*little_u16(bytes, 34U) / 8U)))},
+            std::pair{"sample_rate", observed_header->sample_rate},
+            std::pair{"channels", observed_header->channels},
+            std::pair{"sample_width_bytes", observed_header->sample_width_bytes},
+            std::pair{"frames", observed_header->frames},
         };
         for (const auto &[name, value] : observed) {
             if (header.contains(name) && header[name].is_number_integer() &&
@@ -1064,15 +1187,7 @@ axk::app::Result<Json> execute_validation(const axk::app::Sandbox &sandbox, cons
         auto export_files = sandbox.open_tree_files(*request->exports, maximum_export_files, maximum_export_bytes);
         if (!export_files)
             return std::unexpected(export_files.error());
-        auto export_staging = sandbox.create_staging_directory("axklib-validation-input");
-        if (!export_staging)
-            return std::unexpected(export_staging.error());
-        DirectoryCleanup export_cleanup{*export_staging};
-        for (const auto &file : *export_files) {
-            if (auto staged = write_reader(*export_staging / file.relative_path, *file.reader); !staged)
-                return std::unexpected(staged.error());
-        }
-        issues = validate_export_directory(*export_staging);
+        issues = validate_export_directory(*export_files);
         for (const auto &issue : issues) {
             const auto code = std::ranges::find(issue, "code", &std::pair<std::string, axk::ReportValue>::first);
             if (code != issue.end())

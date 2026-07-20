@@ -27,7 +27,9 @@ struct DownloadArchiveSnapshot {
 
 struct DownloadArchiveContent {
     DownloadArchiveSnapshot snapshot;
+    std::filesystem::path path;
     std::shared_ptr<const axk::RandomAccessReader> reader;
+    std::shared_ptr<void> lease;
 };
 
 class DownloadArchiveStore {

@@ -81,6 +81,23 @@ std::vector<std::byte> image_fixture() {
     return bytes;
 }
 
+std::vector<std::byte> cross_linked_fixture() {
+    auto bytes = image_fixture();
+    constexpr auto index = 11U * sector_size;
+    constexpr auto record_size = 72U;
+    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(index), record_size,
+                bytes.begin() + static_cast<std::ptrdiff_t>(index + record_size));
+    return bytes;
+}
+
+std::vector<std::byte> reserved_cross_linked_fixture() {
+    auto bytes = image_fixture();
+    axk::ByteWriter writer{bytes};
+    constexpr auto index = 11U * sector_size;
+    EXPECT_TRUE(writer.write_be32(index + 0x0aU, 5U));
+    return bytes;
+}
+
 std::vector<std::byte> deep_directory_fixture(std::size_t directory_count) {
     constexpr std::size_t sectors = 4096U;
     constexpr std::uint32_t cluster_count = 2046U;
@@ -192,6 +209,19 @@ std::vector<std::byte> continuation_fixture(bool cycle) {
     for (std::uint32_t cluster = 6; cluster <= last_cluster; ++cluster) {
         bytes[bitmap + cluster / 8U] |= static_cast<std::byte>(0x80U >> (cluster & 7U));
     }
+    return bytes;
+}
+
+std::vector<std::byte> continuation_cross_linked_fixture() {
+    auto bytes = continuation_fixture(false);
+    axk::ByteWriter writer{bytes};
+    constexpr auto record = 11U * sector_size + 72U;
+    EXPECT_TRUE(writer.write_be16(record, 1U));
+    EXPECT_TRUE(writer.write_be16(record + 4U, 1U));
+    EXPECT_TRUE(writer.write_be32(record + 6U, 96U));
+    EXPECT_TRUE(writer.write_be32(record + 0x0aU, 6U));
+    EXPECT_TRUE(writer.write_be32(record + 0x0eU, 1U));
+    EXPECT_TRUE(writer.write_be32(record + 0x12U, 96U));
     return bytes;
 }
 
@@ -535,6 +565,56 @@ TEST(SfsReader, ReportsContinuationCycleAndBitmapMismatchWithoutRepair) {
     const auto issue = std::ranges::find(validation.issues, "SFS_ALLOCATION_MISMATCH", &axk::ValidationIssue::code);
     ASSERT_NE(issue, validation.issues.end());
     EXPECT_NE(issue->message.find("1 cluster(s) are referenced by index records but marked free"), std::string::npos);
+}
+
+TEST(SfsReader, ReportsEveryClusterWithMultipleAllocationOwners) {
+    auto reader = std::make_shared<axk::MemoryReader>(cross_linked_fixture());
+    const auto image = axk::open_image(reader, "cross-linked.hds");
+    ASSERT_TRUE(image) << image.error().message;
+    ASSERT_EQ(image->partitions().size(), 1U);
+    const auto &partition = image->partitions().front();
+    EXPECT_EQ(partition.allocation.conflicting_cluster_count, 1U);
+    ASSERT_EQ(partition.allocation.conflicts.size(), 1U);
+    const auto &conflict = partition.allocation.conflicts.front();
+    EXPECT_EQ(conflict.cluster, 6U);
+    ASSERT_TRUE(conflict.first.record);
+    ASSERT_TRUE(conflict.second.record);
+    EXPECT_EQ(conflict.first.record->value, 0U);
+    EXPECT_EQ(conflict.second.record->value, 1U);
+    EXPECT_EQ(conflict.first.kind, axk::AllocationClaimKind::data);
+    EXPECT_EQ(conflict.second.kind, axk::AllocationClaimKind::data);
+    EXPECT_FALSE(partition.allocation.conflicts_truncated);
+    EXPECT_TRUE(std::ranges::any_of(partition.diagnostics, [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::allocation_cross_link;
+    }));
+
+    const auto validation = axk::validate_semantics(*image, {}, {});
+    EXPECT_NE(std::ranges::find(validation.issues, "SFS_ALLOCATION_CROSS_LINK", &axk::ValidationIssue::code),
+              validation.issues.end());
+}
+
+TEST(SfsReader, ReportsReservedAndContinuationListOwnershipConflicts) {
+    const auto reserved = axk::open_image(std::make_shared<axk::MemoryReader>(reserved_cross_linked_fixture()),
+                                          "reserved-cross-link.hds");
+    ASSERT_TRUE(reserved) << reserved.error().message;
+    const auto &reserved_conflicts = reserved->partitions().front().allocation.conflicts;
+    ASSERT_EQ(reserved_conflicts.size(), 1U);
+    EXPECT_EQ(reserved_conflicts.front().cluster, 5U);
+    EXPECT_EQ(reserved_conflicts.front().first.kind, axk::AllocationClaimKind::reserved);
+    EXPECT_FALSE(reserved_conflicts.front().first.record);
+    EXPECT_EQ(reserved_conflicts.front().second.kind, axk::AllocationClaimKind::data);
+    EXPECT_EQ(reserved_conflicts.front().second.record, axk::SfsId{0U});
+
+    const auto continuation = axk::open_image(std::make_shared<axk::MemoryReader>(continuation_cross_linked_fixture()),
+                                              "continuation-cross-link.hds");
+    ASSERT_TRUE(continuation) << continuation.error().message;
+    const auto &continuation_conflicts = continuation->partitions().front().allocation.conflicts;
+    ASSERT_EQ(continuation_conflicts.size(), 1U);
+    EXPECT_EQ(continuation_conflicts.front().cluster, 6U);
+    EXPECT_EQ(continuation_conflicts.front().first.kind, axk::AllocationClaimKind::continuation);
+    EXPECT_EQ(continuation_conflicts.front().first.record, axk::SfsId{0U});
+    EXPECT_EQ(continuation_conflicts.front().second.kind, axk::AllocationClaimKind::data);
+    EXPECT_EQ(continuation_conflicts.front().second.record, axk::SfsId{1U});
 }
 
 TEST(SfsReader, ReportsMissingDirectoryTargetsAndChildCycles) {
