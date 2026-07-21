@@ -19,6 +19,10 @@
 #endif
 #include <windows.h>
 #include <winternl.h>
+
+extern "C" NTSYSAPI NTSTATUS NTAPI NtSetInformationFile(HANDLE file_handle, PIO_STATUS_BLOCK io_status_block,
+                                                        PVOID file_information, ULONG length,
+                                                        FILE_INFORMATION_CLASS file_information_class);
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -464,8 +468,9 @@ Result<void> publish_temporary_file(const std::filesystem::path &temporary, cons
     rename_info->FileNameLength = static_cast<DWORD>(filename.size() * sizeof(wchar_t));
     std::memcpy(rename_info->FileName, filename.data(), rename_info->FileNameLength);
     IO_STATUS_BLOCK status{};
+    constexpr auto rename_information_class = static_cast<FILE_INFORMATION_CLASS>(10);
     const auto renamed = NtSetInformationFile(publication_handle.get(), &status, rename_info,
-                                              static_cast<ULONG>(rename_buffer.size()), FileRenameInformation);
+                                              static_cast<ULONG>(rename_buffer.size()), rename_information_class);
     if (renamed < 0) {
         const std::error_code error{static_cast<int>(RtlNtStatusToDosError(renamed)), std::system_category()};
         return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,

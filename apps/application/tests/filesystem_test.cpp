@@ -492,11 +492,15 @@ TEST_F(SandboxTest, ParentSwapCannotRedirectMutationsOutsideTheRoot) {
         if (created)
             static_cast<void>(value.delete_entry({"workspace", "images/folder/escaped"}));
         const auto renamed = value.rename_entry({"workspace", "images/folder/rename-source.hds"}, "renamed.hds");
-        if (renamed)
-            static_cast<void>(value.rename_entry({"workspace", "images/folder/renamed.hds"}, "rename-source.hds"));
-        std::error_code error;
-        if (std::filesystem::exists(parent / "renamed.hds", error)) {
-            std::filesystem::rename(parent / "renamed.hds", parent / "rename-source.hds", error);
+        if (renamed) {
+            bool restored = false;
+            for (std::size_t retry = 0; retry < 10000U && !restored; ++retry) {
+                restored =
+                    value.rename_entry({"workspace", "images/folder/renamed.hds"}, "rename-source.hds").has_value();
+                if (!restored)
+                    std::this_thread::yield();
+            }
+            ASSERT_TRUE(restored);
         }
         EXPECT_FALSE(std::filesystem::exists(outside_ / "escaped"));
         EXPECT_FALSE(std::filesystem::exists(outside_ / "renamed.hds"));
