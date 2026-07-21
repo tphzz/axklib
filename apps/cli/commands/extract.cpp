@@ -19,7 +19,10 @@ int run_extract_request(const axk::cli::ExtractRequest &request) {
                      "paths`\n";
         return axk::cli::exit_code(axk::cli::ExitStatus::invalid_request);
     }
-    auto sources = expand_cli_paths(request.paths);
+    auto expanded = expand_cli_paths(request.paths);
+    if (!expanded)
+        return report_failure(expanded.error());
+    auto sources = std::move(*expanded);
     std::vector<std::filesystem::path> runtime_paths = sources;
     runtime_paths.push_back(request.output_directory);
     auto runtime = LocalOperationRuntime::create(runtime_paths);

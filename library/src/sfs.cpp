@@ -647,6 +647,39 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
                                                "partition index span exceeds configured bounds", result.index,
                                                *start + 0xa8U)};
     }
+    const auto index_end = checked_add(result.directory_index_cluster, result.directory_index_span_clusters);
+    if (!index_end || *index_end > result.cluster_count) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition index extends beyond the cluster range", result.index,
+                                               *start + 0xa4U)};
+    }
+    const auto bitmap_bytes_u64 = (static_cast<std::uint64_t>(result.cluster_count) + 7U) / 8U;
+    if (bitmap_bytes_u64 > std::numeric_limits<std::size_t>::max() ||
+        bitmap_bytes_u64 > options.max_allocation_bitmap_bytes) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition bitmap exceeds the configured memory bound", result.index,
+                                               *start + 0x9cU)};
+    }
+    const auto rounded_bitmap_bytes = checked_add(bitmap_bytes_u64, *cluster_bytes - 1U);
+    if (!rounded_bitmap_bytes) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition bitmap extent arithmetic overflowed", result.index,
+                                               *start + 0x9cU)};
+    }
+    const auto bitmap_span_clusters = *rounded_bitmap_bytes / *cluster_bytes;
+    const auto bitmap_end = checked_add(result.bitmap_cluster, bitmap_span_clusters);
+    if (bitmap_span_clusters == 0U || !bitmap_end || *bitmap_end > result.cluster_count) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition bitmap extends beyond the cluster range", result.index,
+                                               *start + 0x9cU)};
+    }
+    const auto allocation_regions_are_disjoint =
+        *bitmap_end <= result.directory_index_cluster || *index_end <= result.bitmap_cluster;
+    if (!allocation_regions_are_disjoint) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition bitmap overlaps the directory index", result.index,
+                                               *start + 0x9cU)};
+    }
     const auto index_offset =
         cluster_offset(result.start_sector, sector_size, result.sectors_per_cluster, result.directory_index_cluster);
     if (!index_offset) {
@@ -658,12 +691,6 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
         return std::unexpected{index_data.error()};
     }
 
-    const auto bitmap_bytes_u64 = (static_cast<std::uint64_t>(result.cluster_count) + 7U) / 8U;
-    if (bitmap_bytes_u64 > std::numeric_limits<std::size_t>::max() ||
-        bitmap_bytes_u64 > options.max_allocation_bitmap_bytes) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition bitmap exceeds the configured memory bound", result.index)};
-    }
     std::vector<std::byte> reconstructed(static_cast<std::size_t>(bitmap_bytes_u64));
     const auto owner_bytes = checked_multiply(result.cluster_count, sizeof(std::uint32_t));
     if (!owner_bytes || *owner_bytes > std::numeric_limits<std::size_t>::max() ||
@@ -672,11 +699,7 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
                                                "partition allocation ownership exceeds the configured memory bound",
                                                result.index)};
     }
-    const auto first_payload_u64 = checked_add(result.directory_index_cluster, result.directory_index_span_clusters);
-    if (!first_payload_u64 || *first_payload_u64 > result.cluster_count) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition index extends beyond the cluster range", result.index)};
-    }
+    const auto first_payload_u64 = index_end;
     const auto first_payload = static_cast<std::uint32_t>(*first_payload_u64);
     std::vector<std::uint32_t> owners(result.cluster_count);
     std::ranges::fill(std::span{owners}.first(first_payload), reserved_owner);

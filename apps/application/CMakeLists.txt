@@ -9,7 +9,8 @@ find_package(unofficial-hash-library CONFIG REQUIRED)
 add_library(axk_application STATIC src/application_operations.cpp src/audio_operations.cpp src/content_id.cpp src/download_archives.cpp
                                    src/extraction_operations.cpp src/extraction_selection.cpp src/file_operations.cpp
                                    src/filesystem.cpp src/image_sessions.cpp src/jobs.cpp
-                                   src/operation_registry.cpp src/package_operations.cpp src/path_reservations.cpp src/system_service.cpp
+                                   src/operation_registry.cpp src/package_operations.cpp src/path_reservations.cpp
+                                   src/private_storage.cpp src/system_service.cpp
                                    src/secure_random.cpp src/uploads.cpp src/validation_operations.cpp src/volume_graph.cpp
                                    src/write_operations.cpp)
 add_library(axklib::application ALIAS axk_application)
@@ -26,7 +27,7 @@ target_link_libraries(
 )
 if(WIN32)
   target_compile_definitions(axk_application PRIVATE _WIN32_WINNT=0x0A00)
-  target_link_libraries(axk_application PRIVATE bcrypt ntdll)
+  target_link_libraries(axk_application PRIVATE advapi32 bcrypt ntdll)
 endif()
 axk_set_project_warnings(axk_application)
 axk_enable_sanitizers(axk_application)

@@ -14,6 +14,7 @@
 
 #include "app.hpp"
 #include "commands/package_projection.hpp"
+#include "commands/support.hpp"
 #include "content_id.hpp"
 #include "exit_status.hpp"
 #include "local_operations.hpp"
@@ -103,6 +104,16 @@ TEST(ContentId, MatchesPublishedSha1VectorsAndStablePooledName) {
         paths.allocate("file", "physical", "Sample", axk::audio_internal::WavSource::from_physical(waveform));
     ASSERT_TRUE(pooled);
     EXPECT_EQ(pooled->filename(), "Sample__" + wav_id.digest_hex.substr(0U, 12U) + ".wav");
+}
+
+TEST(CliPathExpansion, RejectsInputsThatCannotBeInspected) {
+    const auto missing = std::filesystem::temp_directory_path() / "axklib-cli-missing-scan-root";
+    std::error_code error;
+    std::filesystem::remove_all(missing, error);
+
+    const auto expanded = axk::cli::commands::expand_cli_paths({missing});
+    ASSERT_FALSE(expanded);
+    EXPECT_EQ(expanded.error().code, axk::ErrorCode::io_read_failed);
 }
 
 TEST(ContentId, ReusesEqualContentAndRejectsInjectedShortPrefixCollision) {

@@ -7,7 +7,7 @@
 
 namespace axk::cli::commands {
 
-std::vector<std::filesystem::path> expand_cli_paths(const std::vector<std::filesystem::path> &inputs);
+Result<std::vector<std::filesystem::path>> expand_cli_paths(const std::vector<std::filesystem::path> &inputs);
 int report_failure(const Error &error);
 
 } // namespace axk::cli::commands

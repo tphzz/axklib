@@ -2,6 +2,8 @@
 #include <array>
 #include <fstream>
 #include <limits>
+#include <map>
+#include <string>
 #include <tuple>
 
 #if defined(__unix__)
@@ -66,6 +68,17 @@ TEST(HdsManifest, ParsesStrictSchemaAndResolvesRelativeAudioPaths) {
     ASSERT_TRUE(parsed) << parsed.error().message;
     ASSERT_EQ(parsed->partitions.size(), 1U);
     EXPECT_EQ(parsed->partitions[0].volumes[0].waveforms[0].path, "/project/audio/tone.wav");
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].level, 100U);
+    const axk::detail::PreparedWaveformMember member{"Tone", 0x100U, 44'100U, 4U};
+    const auto parsed_payload = axk::detail::prepare_sbnk_payload(parsed->partitions[0].volumes[0].samples[0], member);
+    ASSERT_TRUE(parsed_payload) << parsed_payload.error().message;
+    EXPECT_EQ(std::to_integer<std::uint8_t>((*parsed_payload)[0x116U]), 100U);
+
+    axk::SampleSpec direct;
+    direct.name = "Direct";
+    const auto direct_payload = axk::detail::prepare_sbnk_payload(direct, member);
+    ASSERT_TRUE(direct_payload) << direct_payload.error().message;
+    EXPECT_EQ(std::to_integer<std::uint8_t>((*direct_payload)[0x116U]), 100U);
     const auto geometry = axk::plan_hds_geometry(*parsed);
     ASSERT_TRUE(geometry);
     ASSERT_EQ(geometry->size(), 1U);
@@ -307,6 +320,57 @@ TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {
     ASSERT_EQ(reopened->partitions().size(), 1U);
     EXPECT_EQ(reopened->partitions()[0].name, "hd1");
     std::filesystem::remove(path, error);
+}
+
+TEST(HdsWriter, SizesDirectoryIndexFromRecordIdsAndEnforcesFixedCapacity) {
+    const auto record = [](std::uint32_t id) {
+        return axk::detail::PreparedRecord{id, {}, axk::detail::RecordKind::directory};
+    };
+    const std::array first_page{record(0U), record(13U)};
+    const auto first_size = axk::detail::checked_directory_index_size(first_page);
+    ASSERT_TRUE(first_size) << first_size.error().message;
+    EXPECT_EQ(*first_size, 1024U);
+
+    const std::array second_page{record(0U), record(14U)};
+    const auto second_size = axk::detail::checked_directory_index_size(second_page);
+    ASSERT_TRUE(second_size) << second_size.error().message;
+    EXPECT_EQ(*second_size, 2048U);
+
+    const std::array boundary{record(0U), record(5011U)};
+    const auto boundary_size = axk::detail::checked_directory_index_size(boundary);
+    ASSERT_TRUE(boundary_size) << boundary_size.error().message;
+    EXPECT_EQ(*boundary_size, 358U * 1024U);
+
+    const std::array outside{record(0U), record(5012U)};
+    EXPECT_FALSE(axk::detail::checked_directory_index_size(outside));
+    const std::array duplicate{record(1U), record(1U)};
+    EXPECT_FALSE(axk::detail::checked_directory_index_size(duplicate));
+}
+
+TEST(HdsWriter, RejectsAValidTypedManifestThatExceedsTheFixedDirectoryIndex) {
+    axk::HdsBuildManifest value{"1.1", axk::maximum_hds_size, {{"hd1", {}}}};
+    for (std::size_t index = 0; index < 835U; ++index)
+        value.partitions.front().volumes.push_back({"V" + std::to_string(index), {}, {}, {}, {}});
+    const auto geometry = axk::plan_hds_geometry(value);
+    ASSERT_TRUE(geometry) << geometry.error().message;
+    const auto records = axk::detail::prepare_partition_records(value.partitions.front(), geometry->front(), 1U, {});
+    ASSERT_FALSE(records);
+    EXPECT_EQ(records.error().code, axk::ErrorCode::unsupported_profile);
+}
+
+TEST(HdsWriter, DirectSampleBankPreparationRequiresOneToThreeUniqueMembers) {
+    std::map<std::string, axk::SampleSpec> samples;
+    for (const auto *name : {"A", "B", "C", "D"}) {
+        axk::SampleSpec sample;
+        sample.name = name;
+        samples.emplace(name, std::move(sample));
+    }
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Empty", {}}, samples));
+    EXPECT_TRUE(axk::detail::prepare_sbac_payload({"Three", {"A", "B", "C"}}, samples));
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Duplicate", {"A", "A"}}, samples));
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Four", {"A", "B", "C", "D"}}, samples));
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload(
+        {"Oversized", {"A", "B", "C", "D", "A", "B", "C", "D", "A", "B", "C"}}, samples));
 }
 
 TEST(HdsWriter, AtomicallyWritesAndReopensPartitionWithoutVolumes) {

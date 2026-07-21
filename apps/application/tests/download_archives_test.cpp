@@ -56,6 +56,13 @@ TEST_F(DownloadArchiveStoreTest, CreatesOwnerBoundDeterministicTarAndRemovesItEx
         ASSERT_TRUE(content->reader->read_exact_at(0U, std::as_writable_bytes(std::span{bytes})));
     }
     ASSERT_EQ(bytes.size(), created->size_bytes);
+#if !defined(_WIN32)
+    const auto archive_path = root_ / "archives" / (created->reference.archive_id + ".tar");
+    EXPECT_EQ(std::filesystem::status(root_ / "archives").permissions() & std::filesystem::perms::all,
+              std::filesystem::perms::owner_all);
+    EXPECT_EQ(std::filesystem::status(archive_path).permissions() & std::filesystem::perms::all,
+              std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+#endif
     EXPECT_EQ(std::string(bytes.data(), 9U), "alpha.txt");
     EXPECT_EQ(std::string(bytes.data() + 512, 5U), "alpha");
     EXPECT_EQ(std::string(bytes.data() + 1024, 6U), "nested");

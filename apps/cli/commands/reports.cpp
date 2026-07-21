@@ -19,7 +19,10 @@ using Json = nlohmann::json;
 int run_objects_request(const axk::cli::ObjectsRequest &request) {
     if (!request.output_directory)
         return exit_code(ExitStatus::invalid_request);
-    const auto paths = expand_cli_paths(request.paths);
+    auto expanded = expand_cli_paths(request.paths);
+    if (!expanded)
+        return report_failure(expanded.error());
+    const auto &paths = *expanded;
     auto runtime_paths = paths;
     runtime_paths.push_back(*request.output_directory);
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
@@ -54,7 +57,10 @@ int run_objects_request(const axk::cli::ObjectsRequest &request) {
 }
 
 int run_inventory_request(const axk::cli::InventoryRequest &request) {
-    const auto paths = expand_cli_paths(request.paths);
+    auto expanded = expand_cli_paths(request.paths);
+    if (!expanded)
+        return report_failure(expanded.error());
+    const auto &paths = *expanded;
     auto runtime_paths = paths;
     runtime_paths.push_back(request.output_directory);
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
@@ -87,7 +93,10 @@ int run_inventory_request(const axk::cli::InventoryRequest &request) {
 }
 
 int run_orphans_request(const axk::cli::OrphansRequest &request) {
-    const auto paths = expand_cli_paths(request.paths);
+    auto expanded = expand_cli_paths(request.paths);
+    if (!expanded)
+        return report_failure(expanded.error());
+    const auto &paths = *expanded;
     auto runtime_paths = paths;
     runtime_paths.push_back(request.output_directory);
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
@@ -126,7 +135,11 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
         std::cerr << "validate requires input paths unless --exports is supplied\n";
         return exit_code(ExitStatus::invalid_request);
     }
-    const auto paths = request.exports ? std::vector<std::filesystem::path>{} : expand_cli_paths(request.paths);
+    auto expanded = request.exports ? Result<std::vector<std::filesystem::path>>{std::vector<std::filesystem::path>{}}
+                                    : expand_cli_paths(request.paths);
+    if (!expanded)
+        return report_failure(expanded.error());
+    const auto &paths = *expanded;
     auto runtime_paths = paths;
     runtime_paths.push_back(request.output_directory);
     if (request.exports)
@@ -165,7 +178,10 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
 }
 
 int run_corpus_audit_request(const axk::cli::CorpusAuditRequest &request) {
-    const auto paths = expand_cli_paths(request.paths);
+    auto expanded = expand_cli_paths(request.paths);
+    if (!expanded)
+        return report_failure(expanded.error());
+    const auto &paths = *expanded;
     auto runtime_paths = paths;
     runtime_paths.push_back(request.output_directory);
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);

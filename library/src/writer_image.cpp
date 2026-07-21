@@ -314,6 +314,12 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
 
 Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
                                               const std::map<std::string, SampleSpec> &samples) {
+    const std::set<std::string> unique_members{sample_bank.member_samples.begin(), sample_bank.member_samples.end()};
+    if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > 3U ||
+        unique_members.size() != sample_bank.member_samples.size()) {
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "Sample Bank must contain 1..3 distinct Samples")};
+    }
     std::vector<std::byte> result(0x210);
     std::ranges::transform(std::string_view{"FSFSDEV3SPLX"}, result.begin(),
                            [](char value) { return static_cast<std::byte>(value); });
@@ -337,7 +343,9 @@ Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
         auto member = ascii(found->second.name, 16);
         if (!member)
             return std::unexpected{member.error()};
-        std::ranges::copy(*member, result.begin() + static_cast<std::ptrdiff_t>(0x14cU + index * 0x14U));
+        const auto offset = 0x14cU + index * 0x14U;
+        auto destination = std::span{result}.subspan(offset, member->size());
+        std::ranges::copy(*member, destination.begin());
     }
     return result;
 }
@@ -666,6 +674,8 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
         return std::unexpected{root_data.error()};
     records.push_back({1, std::move(*root_data), RecordKind::directory, static_cast<std::uint16_t>(root.size())});
     std::ranges::sort(records, {}, &PreparedRecord::id);
+    if (auto index_size = checked_directory_index_size(records); !index_size)
+        return std::unexpected{index_size.error()};
     std::uint64_t cluster = geometry.first_payload_cluster;
     for (auto &record : records) {
         if (record.kind == RecordKind::system)
@@ -681,6 +691,33 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "partition does not have enough payload clusters")};
     return records;
+}
+
+Result<std::size_t> detail::checked_directory_index_size(std::span<const PreparedRecord> records) {
+    if (records.empty()) {
+        return std::unexpected{
+            make_error(ErrorCode::internal_invariant, ErrorCategory::internal, "SFS directory index has no records")};
+    }
+    std::uint32_t maximum_id{};
+    std::set<std::uint32_t> ids;
+    for (const auto &record : records) {
+        if (record.id >= sfs_directory_index_capacity) {
+            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                              "SFS directory index exceeds the 5012-entry writer profile")};
+        }
+        if (!ids.insert(record.id).second) {
+            return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                              "SFS directory index contains a duplicate record ID")};
+        }
+        maximum_id = std::max(maximum_id, record.id);
+    }
+    const auto pages = static_cast<std::size_t>(maximum_id) / sfs_directory_index_records_per_page + 1U;
+    if (pages > sfs_directory_index_page_capacity ||
+        pages > std::numeric_limits<std::size_t>::max() / sfs_directory_index_page_bytes) {
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "SFS directory index exceeds its fixed page capacity")};
+    }
+    return pages * sfs_directory_index_page_bytes;
 }
 
 namespace {
@@ -839,17 +876,37 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
             return std::unexpected{
                 make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write partition headers")};
         std::vector<std::byte> bitmap(geometry.bitmap_cluster_count * cluster_size);
-        std::vector<std::byte> index(((records.size() * 72U + 1023U) / 1024U) * 1024U);
+        auto index_size = detail::checked_directory_index_size(records);
+        if (!index_size)
+            return std::unexpected{index_size.error()};
+        std::vector<std::byte> index(*index_size);
         std::uint64_t allocated{};
         for (const auto &record : records) {
             if (const auto check = cancellation.check(); !check)
                 return std::unexpected{check.error()};
             allocated += record.clusters;
-            for (std::uint32_t cluster = record.cluster; cluster < record.cluster + record.clusters; ++cluster)
-                bitmap[cluster / 8U] |= static_cast<std::byte>(0x80U >> (cluster % 8U));
-            const auto offset = (record.id / 14U) * 1024U + (record.id % 14U) * 72U;
+            const auto record_end = static_cast<std::uint64_t>(record.cluster) + record.clusters;
+            if (record_end > geometry.cluster_count) {
+                return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                                  "prepared SFS record exceeds the partition cluster range")};
+            }
+            for (std::uint32_t cluster = record.cluster; cluster < record_end; ++cluster) {
+                const auto byte = static_cast<std::size_t>(cluster / 8U);
+                if (byte >= bitmap.size()) {
+                    return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                                      "prepared SFS allocation exceeds the bitmap")};
+                }
+                bitmap[byte] |= static_cast<std::byte>(0x80U >> (cluster % 8U));
+            }
+            const auto offset =
+                (record.id / detail::sfs_directory_index_records_per_page) * detail::sfs_directory_index_page_bytes +
+                (record.id % detail::sfs_directory_index_records_per_page) * detail::sfs_directory_index_record_bytes;
             const auto bytes = index_record(record);
-            std::ranges::copy(bytes, index.begin() + static_cast<std::ptrdiff_t>(offset));
+            if (offset > index.size() || bytes.size() > index.size() - offset) {
+                return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                                  "prepared SFS directory record exceeds the index")};
+            }
+            std::ranges::copy(bytes, std::span{index}.subspan(offset, bytes.size()).begin());
             if (!record.payload.empty() &&
                 !detail::write_temporary_file_at(*temporary, (geometry.start_sector + record.cluster * 2U) * 512U,
                                                  record.payload))

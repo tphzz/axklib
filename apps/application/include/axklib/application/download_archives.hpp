@@ -62,6 +62,7 @@ class DownloadArchiveStore {
     [[nodiscard]] Result<DownloadArchiveContent> open(const DownloadArchiveRef &reference, std::string_view owner_id);
     [[nodiscard]] Result<void> remove(const DownloadArchiveRef &reference, std::string_view owner_id);
     void cleanup();
+    [[nodiscard]] bool storage_ready() const noexcept;
 
   private:
     struct Implementation;

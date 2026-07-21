@@ -84,6 +84,7 @@ class UploadStore {
     [[nodiscard]] Result<void> remove(const UploadRef &reference, std::string_view owner_id);
     void cleanup();
     [[nodiscard]] UploadCleanupSnapshot cleanup_snapshot();
+    [[nodiscard]] bool storage_ready() const noexcept;
 
     [[nodiscard]] std::size_t maximum_chunk_bytes() const noexcept;
 

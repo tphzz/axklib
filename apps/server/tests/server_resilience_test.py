@@ -56,6 +56,23 @@ def create_upload(port: int, token: str, size: int = 12) -> str:
     return str(response.json()["data"]["uploadId"])
 
 
+def rejected_raw_request(port: int, payload: bytes) -> bytes:
+    with socket.create_connection(("127.0.0.1", port), timeout=2) as connection:
+        connection.settimeout(2)
+        connection.sendall(payload)
+        connection.shutdown(socket.SHUT_WR)
+        chunks: list[bytes] = []
+        while True:
+            try:
+                chunk = connection.recv(4096)
+            except ConnectionResetError:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None:
     instrumented = any(
         os.environ.get(name)
@@ -140,6 +157,28 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
         assert limits["maximumJsonBytes"] == 512
         assert limits["maximumUploadTotalBytes"] == 20
         assert limits["maximumImageSessions"] == 1
+
+        fixed_length_rejection = rejected_raw_request(
+            port,
+            b"POST /api/v1/files/metadata HTTP/1.1\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: 513\r\n\r\n",
+        )
+        assert not fixed_length_rejection.startswith(b"HTTP/1.1 2")
+
+        chunked_rejection = rejected_raw_request(
+            port,
+            b"POST /api/v1/files/metadata HTTP/1.1\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"Content-Type: application/json\r\n\r\n"
+            b"201\r\n"
+            + (b"x" * 513)
+            + b"\r\n0\r\n\r\n",
+        )
+        assert not chunked_rejection.startswith(b"HTTP/1.1 2")
+        assert request(port, None, "GET", "/api/v1/system/health/live").status == 204
 
         malformed_cases = [
             b"{",

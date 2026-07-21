@@ -161,10 +161,42 @@ TEST(FilePublication, RejectsCandidatePathReplacementBeforePublication) {
 
     const auto published = axk::detail::publish_temporary_file(*candidate, output, true);
 
+#if defined(_WIN32)
+    ASSERT_TRUE(published) << published.error().message;
+    EXPECT_EQ(read_text(output), "validated");
+    EXPECT_EQ(read_text(*candidate), "substitute");
+#else
     ASSERT_FALSE(published);
-    EXPECT_EQ(read_text(victim), "victim");
     EXPECT_FALSE(std::filesystem::exists(output));
+#endif
+    EXPECT_EQ(read_text(victim), "victim");
     std::filesystem::remove_all(root, error);
 }
+
+#if !defined(_WIN32)
+TEST(FilePublication, PublishesThroughTheRetainedParentAfterPathRebinding) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-file-publication-parent-rebinding";
+    const auto original_parent = root / "destination";
+    const auto retained_parent = root / "retained-destination";
+    const auto output = original_parent / "output.bin";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(original_parent);
+    const auto candidate = axk::detail::write_temporary_file(output, [](const auto &sink) {
+        constexpr std::string_view content{"validated"};
+        return sink(std::as_bytes(std::span{content}));
+    });
+    ASSERT_TRUE(candidate);
+    std::filesystem::rename(original_parent, retained_parent);
+    std::filesystem::create_directories(original_parent);
+
+    const auto published = axk::detail::publish_temporary_file(*candidate, output, true);
+
+    ASSERT_TRUE(published) << published.error().message;
+    EXPECT_FALSE(std::filesystem::exists(output));
+    EXPECT_EQ(read_text(retained_parent / output.filename()), "validated");
+    std::filesystem::remove_all(root, error);
+}
+#endif
 
 } // namespace

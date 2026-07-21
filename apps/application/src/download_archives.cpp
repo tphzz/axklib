@@ -14,6 +14,7 @@
 
 #include "axklib/application/secure_random.hpp"
 #include "axklib/utf8.hpp"
+#include "private_storage.hpp"
 
 namespace {
 
@@ -137,6 +138,7 @@ struct axk::app::DownloadArchiveStore::Implementation {
     std::chrono::seconds retention{};
     Clock clock;
     std::uint64_t reserved_bytes{};
+    bool storage_ready{};
     std::mutex mutex;
     std::unordered_map<std::string, Entry> entries;
 
@@ -200,8 +202,9 @@ axk::app::DownloadArchiveStore::DownloadArchiveStore(std::filesystem::path stagi
     : implementation_(
           std::make_shared<Implementation>(std::move(staging_directory), limits, retention, std::move(clock))) {
     std::error_code error;
-    std::filesystem::create_directories(implementation_->staging_directory, error);
-    if (!error) {
+    const auto prepared = detail::prepare_private_directory(implementation_->staging_directory);
+    implementation_->storage_ready = prepared.has_value();
+    if (prepared) {
         for (const auto &entry : std::filesystem::directory_iterator{implementation_->staging_directory, error}) {
             if (error)
                 break;
@@ -218,10 +221,17 @@ axk::app::DownloadArchiveStore::~DownloadArchiveStore() = default;
 axk::app::DownloadArchiveStore::DownloadArchiveStore(DownloadArchiveStore &&) noexcept = default;
 axk::app::DownloadArchiveStore &axk::app::DownloadArchiveStore::operator=(DownloadArchiveStore &&) noexcept = default;
 
+bool axk::app::DownloadArchiveStore::storage_ready() const noexcept {
+    return implementation_ != nullptr && implementation_->storage_ready;
+}
+
 axk::app::Result<axk::app::DownloadArchiveSnapshot>
 axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sandbox, const DirectoryRef &source) {
     if (owner_id.empty())
         return std::unexpected(archive_error("invalid_archive_request", "download archive owner is required"));
+    if (!implementation_->storage_ready)
+        return std::unexpected(
+            archive_error("archive_storage_unavailable", "download archive staging directory is not private"));
     std::vector<SourceEntry> entries;
     std::uint64_t archive_size = tar_block_size * 2U;
     auto tree = sandbox.open_tree(source, {implementation_->maximum_entries, implementation_->maximum_archive_bytes,
@@ -273,6 +283,10 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
         std::error_code ignored;
         std::filesystem::remove(temporary_path, ignored);
     };
+    if (const auto created = detail::create_private_file(temporary_path); !created) {
+        release_reservation();
+        return std::unexpected(archive_error("archive_storage_unavailable", created.error().message));
+    }
     std::ofstream output{temporary_path, std::ios::binary | std::ios::trunc};
     if (!output) {
         release_reservation();

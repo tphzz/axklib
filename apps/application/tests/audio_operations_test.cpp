@@ -26,7 +26,7 @@ class AudioOperationsTest : public testing::Test {
         root_ = std::filesystem::temp_directory_path() / "axklib-audio-operations-test";
         std::error_code error;
         std::filesystem::remove_all(root_, error);
-        std::filesystem::create_directories(root_ / "uploads");
+        std::filesystem::create_directories(root_);
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root_, true}});
         ASSERT_TRUE(sandbox);
         sandbox_ = std::make_unique<axk::app::Sandbox>(std::move(*sandbox));

@@ -102,6 +102,12 @@ TEST(PackageArchive, RejectsUnsafeDuplicateMissingManifestAndOversizedInputs) {
     limits = {};
     limits.maximum_entries = 1U;
     EXPECT_FALSE(axk::package_internal::write_archive(entries(), limits));
+    limits = {};
+    limits.maximum_directory_bytes = 1U;
+    EXPECT_FALSE(axk::package_internal::write_archive(entries(), limits));
+    limits = {};
+    limits.maximum_manifest_bytes = 1U;
+    EXPECT_FALSE(axk::package_internal::write_archive(entries(), limits));
 }
 
 TEST(PackageArchive, RejectsCorruptionTrailingDataAndNonProfileMetadata) {
@@ -139,6 +145,12 @@ TEST(PackageArchive, AppliesReadLimitsBeforeMaterializingEntries) {
     EXPECT_FALSE(axk::package_internal::read_archive(*valid, limits));
     limits = {};
     limits.maximum_total_bytes = 4U;
+    EXPECT_FALSE(axk::package_internal::read_archive(*valid, limits));
+    limits = {};
+    limits.maximum_directory_bytes = 1U;
+    EXPECT_FALSE(axk::package_internal::read_archive(*valid, limits));
+    limits = {};
+    limits.maximum_manifest_bytes = 1U;
     EXPECT_FALSE(axk::package_internal::read_archive(*valid, limits));
 }
 

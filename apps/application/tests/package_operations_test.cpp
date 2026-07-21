@@ -43,7 +43,7 @@ class PackageOperationsTest : public testing::Test {
         root_ = std::filesystem::temp_directory_path() / "axklib-package-operations-test";
         std::error_code error;
         std::filesystem::remove_all(root_, error);
-        std::filesystem::create_directories(root_ / "uploads");
+        std::filesystem::create_directories(root_);
         std::filesystem::copy_file(fixture_path(), root_ / "fixture.hds");
         write_empty_target(root_ / "target.hds");
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root_, true}});

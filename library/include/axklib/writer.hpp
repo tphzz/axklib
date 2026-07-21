@@ -48,7 +48,7 @@ struct SampleSpec {
     std::uint8_t root_key{};
     std::uint8_t key_low{};
     std::uint8_t key_high{};
-    std::uint8_t level{127};
+    std::uint8_t level{100};
 };
 
 struct SampleBankSpec {

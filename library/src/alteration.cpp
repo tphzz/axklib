@@ -49,6 +49,37 @@ Error transaction_error(std::string message) {
     return make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction, std::move(message));
 }
 
+Result<void> require_distinct_source_and_output(const std::filesystem::path &source,
+                                                const std::filesystem::path &output, std::string_view operation) {
+    std::error_code error;
+    const auto canonical_source = std::filesystem::canonical(source, error);
+    if (error) {
+        return std::unexpected{
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not identify source image")};
+    }
+    const auto canonical_output = std::filesystem::weakly_canonical(output, error);
+    if (error) {
+        return std::unexpected{
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not identify output image")};
+    }
+    if (canonical_source == canonical_output) {
+        return std::unexpected{transaction_error(std::string{operation} + " output must differ from source")};
+    }
+    const auto output_exists = std::filesystem::exists(output, error);
+    if (error) {
+        return std::unexpected{
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not inspect output image identity")};
+    }
+    if (output_exists && std::filesystem::equivalent(source, output, error)) {
+        return std::unexpected{transaction_error(std::string{operation} + " output must differ from source")};
+    }
+    if (error) {
+        return std::unexpected{
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not compare image identities")};
+    }
+    return {};
+}
+
 void rename_json_field(Json &object, std::string_view old_name, std::string_view new_name) {
     if (!object.is_object() || !object.contains(old_name))
         return;
@@ -2452,6 +2483,29 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
     return {};
 }
 
+Result<void> validate_mutable_partition_geometry(const Partition &partition, std::uint64_t image_size_bytes) {
+    if (partition.cluster_count == 0U || partition.sectors_per_cluster == 0U ||
+        partition.directory_index_span_clusters == 0U) {
+        return std::unexpected{transaction_error("source partition has incomplete allocation geometry")};
+    }
+    const auto bitmap_bytes = (static_cast<std::uint64_t>(partition.cluster_count) + 7U) / 8U;
+    const auto cluster_bytes = static_cast<std::uint64_t>(partition.sectors_per_cluster) * 512U;
+    const auto bitmap_span = (bitmap_bytes + cluster_bytes - 1U) / cluster_bytes;
+    const auto bitmap_end = static_cast<std::uint64_t>(partition.bitmap_cluster) + bitmap_span;
+    const auto index_end =
+        static_cast<std::uint64_t>(partition.directory_index_cluster) + partition.directory_index_span_clusters;
+    const auto physical_cluster_capacity =
+        static_cast<std::uint64_t>(partition.sector_count) / partition.sectors_per_cluster;
+    const auto partition_end_sector = static_cast<std::uint64_t>(partition.start_sector) + partition.sector_count;
+    if (bitmap_span == 0U || partition.cluster_count > physical_cluster_capacity ||
+        bitmap_end > partition.cluster_count || index_end > partition.cluster_count ||
+        !(bitmap_end <= partition.directory_index_cluster || index_end <= partition.bitmap_cluster) ||
+        partition_end_sector > image_size_bytes / 512U) {
+        return std::unexpected{transaction_error("source allocation geometry cannot safely support alteration")};
+    }
+    return {};
+}
+
 Result<TransactionState> open_transaction_state(const std::filesystem::path &source_path,
                                                 const CancellationToken &cancellation, ProgressSink *progress,
                                                 bool include_object_graph) {
@@ -2462,6 +2516,12 @@ Result<TransactionState> open_transaction_state(const std::filesystem::path &sou
     if (!container)
         return std::unexpected{container.error()};
     TransactionState state{std::move(*container), {}, {}, {}, {}, {}};
+    if (std::ranges::any_of(state.container.diagnostics(), [](const Error &error) {
+            return error.code == ErrorCode::container_invalid_geometry ||
+                   error.code == ErrorCode::container_partition_out_of_range;
+        })) {
+        return std::unexpected{transaction_error("source allocation geometry cannot safely support alteration")};
+    }
     if (include_object_graph) {
         auto catalog = build_object_catalog(state.container, 64U * 1024U * 1024U, cancellation);
         if (!catalog)
@@ -2482,6 +2542,10 @@ Result<TransactionState> open_transaction_state(const std::filesystem::path &sou
         }
     }
     for (const auto &partition : state.container.partitions()) {
+        if (auto geometry = validate_mutable_partition_geometry(partition, state.container.image_size_bytes());
+            !geometry) {
+            return std::unexpected{geometry.error()};
+        }
         if (partition.allocation.conflicting_cluster_count != 0U ||
             partition.allocation.invalid_extent_record_count != 0U ||
             partition.allocation.extent_total_mismatch_count != 0U ||
@@ -2527,6 +2591,10 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
     }
     if (const auto check = cancellation.check(); !check)
         return std::unexpected{check.error()};
+    if (auto distinct = require_distinct_source_and_output(state.container.source_path(), output_path, "alteration");
+        !distinct) {
+        return std::unexpected{distinct.error()};
+    }
     auto temporary_result = copy_to_unique_temporary(state.container.source_path(), output_path);
     if (!temporary_result)
         return std::unexpected{temporary_result.error()};
@@ -2673,6 +2741,11 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
     if (const auto check = cancellation.check(); !check) {
         cleanup();
         return std::unexpected{check.error()};
+    }
+    if (auto distinct = require_distinct_source_and_output(state.container.source_path(), output_path, "alteration");
+        !distinct) {
+        cleanup();
+        return std::unexpected{distinct.error()};
     }
     auto validated = validate_temporary(temporary, state, cancellation);
     if (!validated) {
@@ -3751,10 +3824,8 @@ Result<AlterationManifest> load_alteration_manifest(const std::filesystem::path 
 Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, const AlterationManifest &manifest,
                                    const std::filesystem::path &output_path, const CancellationToken &cancellation,
                                    ProgressSink *progress, bool overwrite) {
-    if (std::filesystem::absolute(source_path).lexically_normal() ==
-        std::filesystem::absolute(output_path).lexically_normal()) {
-        return std::unexpected{transaction_error("alteration output must differ from source")};
-    }
+    if (auto distinct = require_distinct_source_and_output(source_path, output_path, "alteration"); !distinct)
+        return std::unexpected{distinct.error()};
     auto prepared = prepare_alteration(source_path, manifest, cancellation, progress, "planning alteration",
                                        text::path_to_utf8(output_path));
     if (!prepared)
@@ -3781,10 +3852,8 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
                                                  const std::filesystem::path &output_path, bool overwrite,
                                                  const CancellationToken &cancellation, ProgressSink *progress) {
     try {
-        if (std::filesystem::absolute(target_path).lexically_normal() ==
-            std::filesystem::absolute(output_path).lexically_normal()) {
-            return std::unexpected{transaction_error("package import output must differ from its source image")};
-        }
+        if (auto distinct = require_distinct_source_and_output(target_path, output_path, "package import"); !distinct)
+            return std::unexpected{distinct.error()};
         if (!overwrite && std::filesystem::exists(output_path)) {
             return std::unexpected{
                 make_error(ErrorCode::io_open_failed, ErrorCategory::io, "package import output already exists")};

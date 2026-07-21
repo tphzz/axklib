@@ -12,6 +12,7 @@
 #include "axklib/alteration.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/package.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
@@ -211,6 +212,20 @@ void patch_index_be32(const std::filesystem::path &path, const axk::IndexRecord 
     image.seekp(static_cast<std::streamoff>(record.record_offset.value + offset));
     image.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     ASSERT_TRUE(image);
+}
+
+void patch_partition_header_be32(const std::filesystem::path &path, const axk::Partition &partition, std::size_t offset,
+                                 std::uint32_t value) {
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    const std::array encoded{static_cast<char>((value >> 24U) & 0xffU), static_cast<char>((value >> 16U) & 0xffU),
+                             static_cast<char>((value >> 8U) & 0xffU), static_cast<char>(value & 0xffU)};
+    for (const auto copy_offset : {std::uint64_t{0}, std::uint64_t{1024}}) {
+        const auto absolute = static_cast<std::uint64_t>(partition.start_sector) * 512U + copy_offset + offset;
+        image.seekp(static_cast<std::streamoff>(absolute));
+        image.write(encoded.data(), static_cast<std::streamsize>(encoded.size()));
+        ASSERT_TRUE(image);
+    }
 }
 
 void patch_record_name(const std::filesystem::path &path, const axk::Partition &partition,
@@ -656,6 +671,82 @@ TEST(Alteration, RejectsSourceBitmapThatExposesLiveExtentsAsFree) {
         R"({"schema_version":"1.1","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
     ASSERT_TRUE(manifest);
     EXPECT_FALSE(axk::alter_hds(source, *manifest, output));
+    EXPECT_FALSE(std::filesystem::exists(output));
+    std::filesystem::remove_all(root, error);
+}
+
+#if !defined(_WIN32)
+TEST(Alteration, RejectsOutputAliasesThroughASymlinkedParent) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-source-alias";
+    const auto real = root / "real";
+    const auto alias = root / "alias";
+    const auto source = real / "source.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(real);
+    ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
+    std::filesystem::create_directory_symlink(real, alias);
+    const auto original = bytes(source);
+    const auto manifest = axk::parse_alteration_manifest(
+        R"({"schema_version":"1.1","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
+    ASSERT_TRUE(manifest);
+
+    const auto altered = axk::alter_hds(source, *manifest, alias / "source.hds", {}, nullptr, true);
+    ASSERT_FALSE(altered);
+    EXPECT_EQ(altered.error().code, axk::ErrorCode::transaction_rejected);
+    EXPECT_EQ(bytes(source), original);
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(PackageImport, RejectsOutputAliasesThroughASymlinkedParentBeforePlanEvaluation) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-package-import-source-alias";
+    const auto real = root / "real";
+    const auto alias = root / "alias";
+    const auto source = real / "source.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(real);
+    ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
+    std::filesystem::create_directory_symlink(real, alias);
+    const auto original = bytes(source);
+
+    const axk::PackageImportPlan untrusted_plan;
+    const auto applied = axk::apply_package_import(source, {}, untrusted_plan, alias / "source.hds", true);
+    ASSERT_FALSE(applied);
+    EXPECT_EQ(applied.error().code, axk::ErrorCode::transaction_rejected);
+    EXPECT_EQ(bytes(source), original);
+    std::filesystem::remove_all(root, error);
+}
+#endif
+
+TEST(Alteration, RejectsBitmapGeometryThatTargetsANeighboringPartitionWithoutPublishing) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-cross-partition-bitmap";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    auto build = source_manifest();
+    build.partitions.push_back({"hd2", {}});
+    ASSERT_TRUE(axk::write_hds_image(build, source));
+    const auto opened = axk::open_image(source);
+    ASSERT_TRUE(opened);
+    ASSERT_EQ(opened->partitions().size(), 2U);
+    const auto &first = opened->partitions()[0];
+    const auto &second = opened->partitions()[1];
+    ASSERT_EQ(second.start_sector - first.start_sector, first.sector_count + 1U);
+    const auto neighboring_cluster = (second.start_sector - first.start_sector) / first.sectors_per_cluster;
+    patch_partition_header_be32(source, first, 0x9cU, neighboring_cluster);
+    const auto original = bytes(source);
+
+    const auto manifest = axk::parse_alteration_manifest(
+        R"({"schema_version":"1.1","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
+    ASSERT_TRUE(manifest);
+    const auto altered = axk::alter_hds(source, *manifest, output);
+    ASSERT_FALSE(altered);
+    EXPECT_EQ(altered.error().code, axk::ErrorCode::transaction_rejected);
+    EXPECT_EQ(altered.error().message, "source allocation geometry cannot safely support alteration");
+    EXPECT_EQ(bytes(source), original);
     EXPECT_FALSE(std::filesystem::exists(output));
     std::filesystem::remove_all(root, error);
 }

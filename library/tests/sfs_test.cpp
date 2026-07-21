@@ -309,7 +309,9 @@ std::shared_ptr<SparseReader> sparse_geometry_fixture(std::uint64_t total_sector
         EXPECT_TRUE(header_writer.write_be32(0x90, static_cast<std::uint32_t>(count / 2U)));
         EXPECT_TRUE(header_writer.write_be32(0x94, 2));
         EXPECT_TRUE(header_writer.write_be32(0x9c, 3));
-        EXPECT_TRUE(header_writer.write_be32(0xa4, 4));
+        const auto bitmap_bytes = (count / 2U + 7U) / 8U;
+        const auto bitmap_clusters = (bitmap_bytes + 1023U) / 1024U;
+        EXPECT_TRUE(header_writer.write_be32(0xa4, static_cast<std::uint32_t>(3U + bitmap_clusters)));
         EXPECT_TRUE(header_writer.write_be32(0xa8, 358));
         const auto header_offset = start * sector_size;
         sparse->add(header_offset, header);
@@ -404,6 +406,33 @@ TEST(SfsReader, RejectsHeaderClusterCountBeyondPhysicalPartitionCapacity) {
         return error.code == axk::ErrorCode::container_invalid_geometry &&
                error.message.find("physical sector capacity") != std::string::npos;
     }));
+}
+
+TEST(SfsReader, RejectsAllocationBitmapThatPointsIntoANeighboringPartition) {
+    constexpr std::uint64_t total_sectors = 20'002U;
+    constexpr std::uint32_t neighboring_partition_cluster = 5'000U;
+    constexpr std::uint64_t first_partition_start = 3U;
+    constexpr std::uint64_t partition_slot_sectors = 10'000U;
+    auto reader = sparse_geometry_fixture(total_sectors, 2U);
+    const auto encoded_cluster = std::vector{
+        static_cast<std::byte>((neighboring_partition_cluster >> 24U) & 0xffU),
+        static_cast<std::byte>((neighboring_partition_cluster >> 16U) & 0xffU),
+        static_cast<std::byte>((neighboring_partition_cluster >> 8U) & 0xffU),
+        static_cast<std::byte>(neighboring_partition_cluster & 0xffU),
+    };
+    reader->add(first_partition_start * sector_size + 0x9cU, encoded_cluster);
+    reader->add(first_partition_start * sector_size + 1024U + 0x9cU, encoded_cluster);
+
+    const auto result = axk::open_image(reader, "cross-partition-bitmap.hds");
+    ASSERT_TRUE(result);
+    ASSERT_EQ(result->partitions().size(), 1U);
+    EXPECT_EQ(result->partitions().front().index.value, 1U);
+    EXPECT_TRUE(std::ranges::any_of(result->diagnostics(), [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::container_invalid_geometry &&
+               error.message.find("bitmap extends beyond") != std::string::npos;
+    }));
+    EXPECT_EQ(first_partition_start + neighboring_partition_cluster * 2U,
+              first_partition_start + partition_slot_sectors);
 }
 
 TEST(SfsReader, AppliesConfiguredDirectoryRecordAndDepthBounds) {

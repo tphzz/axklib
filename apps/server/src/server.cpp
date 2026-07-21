@@ -597,8 +597,9 @@ class ServerApplication {
                             [this](const axk::app::JobEvent &event) { broadcast(event); }) {
         app_.template get_middleware<CorsMiddleware>().allowed_origins = config_.allowed_origins;
         app_.template get_middleware<RequestTelemetryMiddleware>().telemetry = &request_telemetry_;
-        state_storage_ready_ =
-            writable_directory(upload_directory()) && writable_directory(download_archive_directory());
+        state_storage_ready_ = uploads_.storage_ready() && download_archives_.storage_ready() &&
+                               writable_directory(upload_directory()) &&
+                               writable_directory(download_archive_directory());
         const auto publication_cleanup = sandbox_.cleanup_abandoned_publications();
         startup_cleanup_ready_ = publication_cleanup && state_storage_ready_;
         job_subscription_ = jobs_.subscribe(
@@ -642,6 +643,7 @@ class ServerApplication {
                 .port(config_.port)
                 .concurrency(config_.worker_threads)
                 .stream_threshold(config_.stream_threshold_bytes)
+                .max_request_body(std::max(config_.maximum_json_bytes, config_.maximum_upload_chunk_bytes))
                 .websocket_max_payload(config_.maximum_websocket_payload_bytes)
                 .server_name("axklib-server");
 

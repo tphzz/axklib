@@ -147,8 +147,6 @@ TEST(JobManager, RetainsReferencedUploadsWhileWorkWaitsInTheQueue) {
     const auto directory = std::filesystem::temp_directory_path() / "axklib-job-upload-lease-test";
     std::error_code error;
     std::filesystem::remove_all(directory, error);
-    std::filesystem::create_directories(directory);
-
     auto upload_now = std::chrono::steady_clock::now();
     axk::app::UploadStore uploads{directory, 32U, 16U, 2U, 16U, 5s, [&] { return upload_now; }};
     const std::string manifest{"{}"};

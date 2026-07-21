@@ -12,6 +12,7 @@
 #include "axklib/io.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/utf8.hpp"
+#include "private_storage.hpp"
 
 namespace {
 
@@ -177,8 +178,8 @@ axk::app::UploadStore::UploadStore(std::filesystem::path staging_directory, std:
                                                        maximum_upload_bytes, maximum_uploads, maximum_chunk_bytes,
                                                        retention, std::move(clock), std::move(remove_file))) {
     std::error_code error;
-    std::filesystem::create_directories(implementation_->staging_directory, error);
-    if (!error) {
+    const auto prepared = detail::prepare_private_directory(implementation_->staging_directory);
+    if (prepared) {
         for (const auto &entry : std::filesystem::directory_iterator{implementation_->staging_directory, error}) {
             if (error)
                 break;
@@ -197,7 +198,7 @@ axk::app::UploadStore::UploadStore(std::filesystem::path staging_directory, std:
                 break;
         }
     }
-    implementation_->startup_scan_failed = static_cast<bool>(error);
+    implementation_->startup_scan_failed = !prepared || static_cast<bool>(error);
     implementation_->failed_deletions = implementation_->orphan_files.size();
 }
 
@@ -219,6 +220,8 @@ axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::create(UploadC
     }
 
     const std::scoped_lock lock{implementation_->mutex};
+    if (implementation_->startup_scan_failed)
+        return std::unexpected(upload_error("upload_storage_unavailable", "upload staging directory is not private"));
     implementation_->cleanup_locked();
     if (implementation_->entries.size() >= implementation_->maximum_uploads ||
         implementation_->reserved_bytes >= implementation_->maximum_total_bytes ||
@@ -233,8 +236,7 @@ axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::create(UploadC
         id = std::move(*generated);
     } while (implementation_->entries.contains(id));
     const auto path = implementation_->staging_directory / (id + ".upload");
-    std::ofstream output{path, std::ios::binary | std::ios::trunc};
-    if (!output)
+    if (!detail::create_private_file(path))
         return std::unexpected(upload_error("upload_storage_unavailable", "upload staging file cannot be created"));
     auto [position, inserted] = implementation_->entries.emplace(
         id, Implementation::Entry{.request = std::move(request),
@@ -389,6 +391,10 @@ axk::app::UploadCleanupSnapshot axk::app::UploadStore::cleanup_snapshot() {
     const std::scoped_lock lock{implementation_->mutex};
     implementation_->cleanup_locked();
     return implementation_->cleanup_snapshot_locked();
+}
+
+bool axk::app::UploadStore::storage_ready() const noexcept {
+    return implementation_ != nullptr && !implementation_->startup_scan_failed;
 }
 
 std::size_t axk::app::UploadStore::maximum_chunk_bytes() const noexcept { return implementation_->maximum_chunk_bytes; }

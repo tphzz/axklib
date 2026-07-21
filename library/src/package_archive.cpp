@@ -101,6 +101,7 @@ Result<void> validate_entries(const std::vector<ArchiveEntry> &entries, const Ar
     std::set<std::string, std::less<>> paths;
     std::uint64_t total{};
     std::uint64_t archive_size = end_header_size;
+    std::uint64_t directory_size{};
     std::string previous;
     for (const auto &entry : entries) {
         if (!safe_archive_path(entry.path) || !fits_u16(entry.path.size()))
@@ -112,6 +113,8 @@ Result<void> validate_entries(const std::vector<ArchiveEntry> &entries, const Ar
             return std::unexpected{archive_error("package archive contains a duplicate entry path")};
         if (entry.bytes.size() > limits.maximum_entry_bytes || !fits_u32(entry.bytes.size()))
             return std::unexpected{archive_error("package archive entry exceeds the configured size limit")};
+        if (entry.path == "manifest.json" && entry.bytes.size() > limits.maximum_manifest_bytes)
+            return std::unexpected{archive_error("package manifest exceeds the configured size limit")};
         if (entry.bytes.size() > limits.maximum_total_bytes - total)
             return std::unexpected{archive_error("package archive expanded size exceeds the configured limit")};
         total += entry.bytes.size();
@@ -120,6 +123,10 @@ Result<void> validate_entries(const std::vector<ArchiveEntry> &entries, const Ar
         if (entry_archive_size > limits.maximum_archive_bytes - archive_size)
             return std::unexpected{archive_error("package archive exceeds the configured archive limit")};
         archive_size += entry_archive_size;
+        const auto directory_entry_size = static_cast<std::uint64_t>(central_header_size) + entry.path.size();
+        if (directory_entry_size > limits.maximum_directory_bytes - directory_size)
+            return std::unexpected{archive_error("package archive central directory exceeds the configured limit")};
+        directory_size += directory_entry_size;
     }
     return {};
 }
@@ -456,6 +463,8 @@ Result<ArchiveInspection> inspect_archive(const RandomAccessReader &reader, cons
             return std::unexpected{archive_error("package archive local entries are not contiguous")};
         if (item.size > limits.maximum_entry_bytes || item.size > limits.maximum_total_bytes - total)
             return std::unexpected{archive_error("package archive expanded size exceeds the configured limit")};
+        if (item.path == "manifest.json" && item.size > limits.maximum_manifest_bytes)
+            return std::unexpected{archive_error("package manifest exceeds the configured size limit")};
         total += item.size;
 
         auto local = read_bytes(item.local_offset, local_header_size);
@@ -532,6 +541,8 @@ Result<std::vector<ArchiveEntry>> read_archive(std::span<const std::byte> archiv
     }
     if (*total_entries == 0U || *total_entries > limits.maximum_entries)
         return std::unexpected{archive_error("package archive entry count exceeds the configured limit")};
+    if (*central_size > limits.maximum_directory_bytes)
+        return std::unexpected{archive_error("package archive central directory exceeds the configured limit")};
     if (static_cast<std::uint64_t>(*central_offset) + *central_size != end_offset)
         return std::unexpected{archive_error("package archive central directory bounds are invalid")};
 
@@ -598,6 +609,8 @@ Result<std::vector<ArchiveEntry>> read_archive(std::span<const std::byte> archiv
             return std::unexpected{archive_error("package archive local entries are not contiguous")};
         if (item.size > limits.maximum_entry_bytes || item.size > limits.maximum_total_bytes - total)
             return std::unexpected{archive_error("package archive expanded size exceeds the configured limit")};
+        if (item.path == "manifest.json" && item.size > limits.maximum_manifest_bytes)
+            return std::unexpected{archive_error("package manifest exceeds the configured size limit")};
         total += item.size;
         const auto local = static_cast<std::size_t>(item.local_offset);
         if (local > *central_offset || local_header_size > *central_offset - local)

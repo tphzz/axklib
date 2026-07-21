@@ -212,7 +212,7 @@ class WriteOperationsTest : public testing::Test {
         now_ = std::chrono::steady_clock::now();
         std::error_code error;
         std::filesystem::remove_all(root_, error);
-        std::filesystem::create_directories(root_ / "uploads");
+        std::filesystem::create_directories(root_);
         std::filesystem::copy_file(fixture_path(), root_ / "fixture.hds");
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root_, true}});
         ASSERT_TRUE(sandbox);

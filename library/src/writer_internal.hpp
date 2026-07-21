@@ -13,6 +13,12 @@
 
 namespace axk::detail {
 
+inline constexpr std::size_t sfs_directory_index_page_bytes = 1024U;
+inline constexpr std::size_t sfs_directory_index_record_bytes = 72U;
+inline constexpr std::size_t sfs_directory_index_records_per_page = 14U;
+inline constexpr std::uint32_t sfs_directory_index_capacity = 5012U;
+inline constexpr std::size_t sfs_directory_index_page_capacity = 358U;
+
 enum class RecordKind : std::uint8_t { hidden, system, directory, object };
 
 struct PreparedRecord {
@@ -72,6 +78,7 @@ Result<std::vector<PreparedRecord>> prepare_partition_records(const PartitionSpe
                                                               const PartitionGeometry &geometry,
                                                               std::size_t partition_count,
                                                               const CancellationToken &cancellation);
+Result<std::size_t> checked_directory_index_size(std::span<const PreparedRecord> records);
 
 Result<PreparedMediaImage> prepare_media_image(const MediaBuildManifest &manifest, const MediaBuildLimits &limits,
                                                const CancellationToken &cancellation);

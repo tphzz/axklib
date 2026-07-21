@@ -41,7 +41,10 @@
 namespace axk::cli::commands {
 
 int run_relationships_request(const axk::cli::RelationshipsRequest &request) {
-    const auto paths = expand_cli_paths(request.paths);
+    auto expanded = expand_cli_paths(request.paths);
+    if (!expanded)
+        return report_failure(expanded.error());
+    const auto &paths = *expanded;
     auto runtime_paths = paths;
     runtime_paths.push_back(request.output_directory);
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
@@ -72,7 +75,10 @@ int run_relationships_request(const axk::cli::RelationshipsRequest &request) {
 }
 
 int run_coverage_request(const axk::cli::CoverageRequest &request) {
-    const auto paths = expand_cli_paths(request.paths);
+    auto expanded = expand_cli_paths(request.paths);
+    if (!expanded)
+        return report_failure(expanded.error());
+    const auto &paths = *expanded;
     auto runtime_paths = paths;
     runtime_paths.push_back(request.output_directory);
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
@@ -221,7 +227,10 @@ void render_tree_paths(const axk::cli::schema::info_v1::TreeOutput &tree,
 }
 
 int run_info_request(const axk::cli::InfoRequest &request) {
-    const auto paths = expand_cli_paths(request.paths);
+    auto expanded = expand_cli_paths(request.paths);
+    if (!expanded)
+        return report_failure(expanded.error());
+    const auto &paths = *expanded;
     if (paths.empty()) {
         if (request.format == "json")
             std::cout << "{\n  \"trees\": [],\n  \"load_errors\": []\n}\n";

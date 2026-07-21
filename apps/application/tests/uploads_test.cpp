@@ -27,6 +27,10 @@ class UploadStoreTest : public testing::Test {
         std::error_code error;
         std::filesystem::remove_all(directory_, error);
         std::filesystem::create_directories(directory_);
+#if !defined(_WIN32)
+        std::filesystem::permissions(directory_, std::filesystem::perms::owner_all,
+                                     std::filesystem::perm_options::replace);
+#endif
     }
 
     void TearDown() override {
@@ -62,7 +66,33 @@ TEST_F(UploadStoreTest, ReceivesBoundedChunksAndFinalizesOnlyAfterHashVerificati
     const auto path = value.resolve(created->reference, "owner");
     ASSERT_TRUE(path) << path.error().message;
     EXPECT_EQ(std::filesystem::file_size(*path), 3U);
+#if !defined(_WIN32)
+    EXPECT_EQ(std::filesystem::status(directory_).permissions() & std::filesystem::perms::all,
+              std::filesystem::perms::owner_all);
+    EXPECT_EQ(std::filesystem::status(*path).permissions() & std::filesystem::perms::all,
+              std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+#endif
 }
+
+#if !defined(_WIN32)
+TEST(UploadStorePermissions, RejectsAnUnsafePreexistingStorageDirectory) {
+    const auto directory = std::filesystem::temp_directory_path() / "axklib-upload-store-unsafe";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    std::filesystem::create_directories(directory);
+    std::filesystem::permissions(directory, std::filesystem::perms::owner_all | std::filesystem::perms::group_read,
+                                 std::filesystem::perm_options::replace);
+    axk::app::UploadStore store{directory, 32U, 16U, 2U, 4U, std::chrono::seconds{60}};
+    EXPECT_FALSE(store.storage_ready());
+    EXPECT_FALSE(store.create({.owner_id = "owner",
+                               .filename = "sample.wav",
+                               .kind = axk::app::UploadKind::audio,
+                               .media_type = "audio/wav",
+                               .declared_size = 3U,
+                               .sha256 = std::nullopt}));
+    std::filesystem::remove_all(directory, error);
+}
+#endif
 
 TEST_F(UploadStoreTest, RejectsDiskImagesWrongOwnersOffsetsAndOversizedChunks) {
     auto value = store();
