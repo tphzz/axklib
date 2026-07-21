@@ -106,7 +106,7 @@ jobs:
             macos_slice: arm64
     runs-on: ${{ matrix.runner }}
     env:
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg/archives
 
     steps:
       - name: Checkout axklib

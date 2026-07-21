@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include "axklib/utf8.hpp"
@@ -81,6 +82,49 @@ bool same_identity(const BY_HANDLE_FILE_INFORMATION &left, const BY_HANDLE_FILE_
     return left.dwVolumeSerialNumber == right.dwVolumeSerialNumber && left.nFileIndexHigh == right.nFileIndexHigh &&
            left.nFileIndexLow == right.nFileIndexLow;
 }
+
+class OwnedHandle {
+  public:
+    OwnedHandle() = default;
+    explicit OwnedHandle(HANDLE value) : value_{value} {}
+    OwnedHandle(const OwnedHandle &) = delete;
+    OwnedHandle &operator=(const OwnedHandle &) = delete;
+    OwnedHandle(OwnedHandle &&other) noexcept : value_{std::exchange(other.value_, INVALID_HANDLE_VALUE)} {}
+    OwnedHandle &operator=(OwnedHandle &&other) noexcept {
+        if (this != &other) {
+            if (value_ != INVALID_HANDLE_VALUE)
+                CloseHandle(value_);
+            value_ = std::exchange(other.value_, INVALID_HANDLE_VALUE);
+        }
+        return *this;
+    }
+    ~OwnedHandle() {
+        if (value_ != INVALID_HANDLE_VALUE)
+            CloseHandle(value_);
+    }
+
+    [[nodiscard]] HANDLE get() const noexcept { return value_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return value_ != INVALID_HANDLE_VALUE; }
+
+  private:
+    HANDLE value_{INVALID_HANDLE_VALUE};
+};
+
+OwnedHandle open_retained_candidate(const std::filesystem::path &path, const RetainedFile &retained,
+                                    DWORD desired_access) {
+    OwnedHandle handle{CreateFileW(path.c_str(), desired_access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                   nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                                   nullptr)};
+    if (!handle)
+        return {};
+    BY_HANDLE_FILE_INFORMATION identity{};
+    if (GetFileInformationByHandle(handle.get(), &identity) == 0 ||
+        (identity.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U ||
+        !same_identity(retained.identity, identity)) {
+        return {};
+    }
+    return handle;
+}
 #endif
 
 Result<void> identity_error() {
@@ -110,7 +154,7 @@ Result<std::filesystem::path> reserve_temporary_file(const std::filesystem::path
                 CloseHandle(parent_handle);
             return std::unexpected{identity_error().error()};
         }
-        const auto handle = CreateFileW(temporary->c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
+        const auto handle = CreateFileW(temporary->c_str(), GENERIC_READ | GENERIC_WRITE,
                                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_NEW,
                                         FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
         if (handle != INVALID_HANDLE_VALUE) {
@@ -181,7 +225,7 @@ Result<std::filesystem::path> write_temporary_file(const std::filesystem::path &
                 CloseHandle(parent_handle);
             return std::unexpected{identity_error().error()};
         }
-        const auto handle = CreateFileW(temporary->c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
+        const auto handle = CreateFileW(temporary->c_str(), GENERIC_READ | GENERIC_WRITE,
                                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_NEW,
                                         FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
         if (handle == INVALID_HANDLE_VALUE) {
@@ -372,10 +416,14 @@ Result<void> flush_file_to_disk(const std::filesystem::path &path) {
 void discard_temporary_file(const std::filesystem::path &path) noexcept {
     const auto retained = release_retained(path);
 #if defined(_WIN32)
-    if (retained && retained->handle != INVALID_HANDLE_VALUE) {
-        FILE_DISPOSITION_INFO disposition{TRUE};
-        if (SetFileInformationByHandle(retained->handle, FileDispositionInfo, &disposition, sizeof(disposition)) != 0)
+    if (retained) {
+        const auto deletion_handle = open_retained_candidate(path, *retained, DELETE | FILE_READ_ATTRIBUTES);
+        if (!deletion_handle)
             return;
+        FILE_DISPOSITION_INFO disposition{TRUE};
+        static_cast<void>(
+            SetFileInformationByHandle(deletion_handle.get(), FileDispositionInfo, &disposition, sizeof(disposition)));
+        return;
     }
 #else
     if (retained && retained->parent_descriptor >= 0 &&
@@ -393,11 +441,8 @@ Result<void> publish_temporary_file(const std::filesystem::path &temporary, cons
     if (!retained || retained->output_filename != output.filename())
         return identity_error();
 #if defined(_WIN32)
-    BY_HANDLE_FILE_INFORMATION candidate_identity{};
-    const auto valid = GetFileInformationByHandle(retained->handle, &candidate_identity) != 0 &&
-                       (candidate_identity.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0U &&
-                       same_identity(retained->identity, candidate_identity);
-    if (!valid) {
+    const auto publication_handle = open_retained_candidate(temporary, *retained, DELETE | FILE_READ_ATTRIBUTES);
+    if (!publication_handle) {
         static_cast<void>(release_retained(temporary));
         return identity_error();
     }
@@ -410,7 +455,7 @@ Result<void> publish_temporary_file(const std::filesystem::path &temporary, cons
     rename_info->RootDirectory = retained->parent_handle;
     rename_info->FileNameLength = static_cast<DWORD>(filename.size() * sizeof(wchar_t));
     std::memcpy(rename_info->FileName, filename.data(), rename_info->FileNameLength);
-    const auto renamed = SetFileInformationByHandle(retained->handle, FileRenameInfo, rename_info,
+    const auto renamed = SetFileInformationByHandle(publication_handle.get(), FileRenameInfo, rename_info,
                                                     static_cast<DWORD>(rename_buffer.size()));
     if (renamed == 0)
         return std::unexpected{

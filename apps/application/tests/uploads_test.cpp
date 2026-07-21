@@ -26,11 +26,6 @@ class UploadStoreTest : public testing::Test {
         directory_ = std::filesystem::temp_directory_path() / "axklib-upload-store-test";
         std::error_code error;
         std::filesystem::remove_all(directory_, error);
-        std::filesystem::create_directories(directory_);
-#if !defined(_WIN32)
-        std::filesystem::permissions(directory_, std::filesystem::perms::owner_all,
-                                     std::filesystem::perm_options::replace);
-#endif
     }
 
     void TearDown() override {
@@ -232,6 +227,10 @@ TEST_F(UploadStoreTest, LeasePreventsExpiryAndDeletionUntilReleased) {
 }
 
 TEST_F(UploadStoreTest, RemovesAbandonedStagingFilesAtStartup) {
+    {
+        const auto prepared = store();
+        ASSERT_TRUE(prepared.storage_ready());
+    }
     const auto abandoned = directory_ / "abandoned.upload";
     std::ofstream(abandoned) << "partial";
     ASSERT_TRUE(std::filesystem::exists(abandoned));
@@ -284,6 +283,10 @@ TEST_F(UploadStoreTest, RetainsExpiredUploadAndQuotaWhenRemovalFails) {
 }
 
 TEST_F(UploadStoreTest, RetainsUndeletableStartupOrphanAndReportsItUnhealthy) {
+    {
+        const auto prepared = store();
+        ASSERT_TRUE(prepared.storage_ready());
+    }
     const auto abandoned = directory_ / "abandoned.upload";
     std::ofstream(abandoned) << "partial";
     axk::app::UploadStore value{directory_,

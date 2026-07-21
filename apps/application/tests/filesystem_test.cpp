@@ -22,6 +22,22 @@ std::string read_text(const std::filesystem::path &path) {
     return {std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
 }
 
+class ThreadStopGuard {
+  public:
+    ThreadStopGuard(std::atomic_bool &stop, std::thread &thread) : stop_{stop}, thread_{thread} {}
+    ThreadStopGuard(const ThreadStopGuard &) = delete;
+    ThreadStopGuard &operator=(const ThreadStopGuard &) = delete;
+    ~ThreadStopGuard() {
+        stop_.store(true, std::memory_order_relaxed);
+        if (thread_.joinable())
+            thread_.join();
+    }
+
+  private:
+    std::atomic_bool &stop_;
+    std::thread &thread_;
+};
+
 class SandboxTest : public testing::Test {
   protected:
     void SetUp() override {
@@ -409,6 +425,7 @@ TEST_F(SandboxTest, ParentSwapCannotRedirectFilePublicationOutsideTheRoot) {
             std::filesystem::rename(parked, parent, error);
         }
     }};
+    const ThreadStopGuard stop_and_join{stop_attacker, attacker};
 
     for (std::size_t attempt = 0; attempt < 1000U; ++attempt) {
         const auto published = value.publish_file({"workspace", "images/folder/published.bin"}, true, content);
@@ -417,8 +434,6 @@ TEST_F(SandboxTest, ParentSwapCannotRedirectFilePublicationOutsideTheRoot) {
         }
         EXPECT_FALSE(std::filesystem::exists(outside_ / "published.bin"));
     }
-    stop_attacker.store(true, std::memory_order_relaxed);
-    attacker.join();
     EXPECT_FALSE(std::filesystem::exists(outside_ / "published.bin"));
 }
 
@@ -470,6 +485,7 @@ TEST_F(SandboxTest, ParentSwapCannotRedirectMutationsOutsideTheRoot) {
             std::filesystem::rename(parked, parent, error);
         }
     }};
+    const ThreadStopGuard stop_and_join{stop_attacker, attacker};
 
     for (std::size_t attempt = 0; attempt < 2000U; ++attempt) {
         const auto created = value.create_directory({"workspace", "images/folder"}, "escaped");
@@ -478,8 +494,8 @@ TEST_F(SandboxTest, ParentSwapCannotRedirectMutationsOutsideTheRoot) {
         const auto renamed = value.rename_entry({"workspace", "images/folder/rename-source.hds"}, "renamed.hds");
         if (renamed)
             static_cast<void>(value.rename_entry({"workspace", "images/folder/renamed.hds"}, "rename-source.hds"));
-        if (std::filesystem::exists(parent / "renamed.hds")) {
-            std::error_code error;
+        std::error_code error;
+        if (std::filesystem::exists(parent / "renamed.hds", error)) {
             std::filesystem::rename(parent / "renamed.hds", parent / "rename-source.hds", error);
         }
         EXPECT_FALSE(std::filesystem::exists(outside_ / "escaped"));
@@ -487,8 +503,6 @@ TEST_F(SandboxTest, ParentSwapCannotRedirectMutationsOutsideTheRoot) {
         std::ifstream outside_source{outside_ / "rename-source.hds"};
         EXPECT_EQ(std::string(std::istreambuf_iterator<char>{outside_source}, {}), "outside");
     }
-    stop_attacker.store(true, std::memory_order_relaxed);
-    attacker.join();
     EXPECT_FALSE(std::filesystem::exists(outside_ / "escaped"));
 }
 #endif

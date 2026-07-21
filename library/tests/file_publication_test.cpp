@@ -161,15 +161,13 @@ TEST(FilePublication, RejectsCandidatePathReplacementBeforePublication) {
 
     const auto published = axk::detail::publish_temporary_file(*candidate, output, true);
 
-#if defined(_WIN32)
-    ASSERT_TRUE(published) << published.error().message;
-    EXPECT_EQ(read_text(output), "validated");
-    EXPECT_EQ(read_text(*candidate), "substitute");
-#else
     ASSERT_FALSE(published);
     EXPECT_FALSE(std::filesystem::exists(output));
-#endif
+    EXPECT_EQ(read_text(displaced), "validated");
     EXPECT_EQ(read_text(victim), "victim");
+#if defined(_WIN32)
+    EXPECT_EQ(read_text(*candidate), "substitute");
+#endif
     std::filesystem::remove_all(root, error);
 }
 
