@@ -1,3 +1,5 @@
+#include <format>
+
 #include "media_test_fixtures.hpp"
 
 namespace {

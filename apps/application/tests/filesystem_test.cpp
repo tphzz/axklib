@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -394,8 +395,9 @@ TEST_F(SandboxTest, ParentSwapCannotRedirectFilePublicationOutsideTheRoot) {
     const auto parked = root_ / "images" / "folder-parked";
     const axk::MemoryReader content{
         {std::byte{0x69}, std::byte{0x6e}, std::byte{0x73}, std::byte{0x69}, std::byte{0x64}, std::byte{0x65}}};
-    std::jthread attacker{[&](const std::stop_token stop) {
-        while (!stop.stop_requested()) {
+    std::atomic_bool stop_attacker{};
+    std::thread attacker{[&] {
+        while (!stop_attacker.load(std::memory_order_relaxed)) {
             std::error_code error;
             std::filesystem::rename(parent, parked, error);
             if (error)
@@ -415,7 +417,7 @@ TEST_F(SandboxTest, ParentSwapCannotRedirectFilePublicationOutsideTheRoot) {
         }
         EXPECT_FALSE(std::filesystem::exists(outside_ / "published.bin"));
     }
-    attacker.request_stop();
+    stop_attacker.store(true, std::memory_order_relaxed);
     attacker.join();
     EXPECT_FALSE(std::filesystem::exists(outside_ / "published.bin"));
 }
@@ -454,8 +456,9 @@ TEST_F(SandboxTest, ParentSwapCannotRedirectMutationsOutsideTheRoot) {
     const auto parked = root_ / "images" / "folder-parked";
     std::ofstream(parent / "rename-source.hds") << "inside";
     std::ofstream(outside_ / "rename-source.hds") << "outside";
-    std::jthread attacker{[&](const std::stop_token stop) {
-        while (!stop.stop_requested()) {
+    std::atomic_bool stop_attacker{};
+    std::thread attacker{[&] {
+        while (!stop_attacker.load(std::memory_order_relaxed)) {
             std::error_code error;
             std::filesystem::rename(parent, parked, error);
             if (error)
@@ -484,7 +487,7 @@ TEST_F(SandboxTest, ParentSwapCannotRedirectMutationsOutsideTheRoot) {
         std::ifstream outside_source{outside_ / "rename-source.hds"};
         EXPECT_EQ(std::string(std::istreambuf_iterator<char>{outside_source}, {}), "outside");
     }
-    attacker.request_stop();
+    stop_attacker.store(true, std::memory_order_relaxed);
     attacker.join();
     EXPECT_FALSE(std::filesystem::exists(outside_ / "escaped"));
 }

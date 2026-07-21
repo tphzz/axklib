@@ -1,3 +1,5 @@
+#include <array>
+
 #include "media_test_fixtures.hpp"
 
 TEST(StandaloneObject, UsesSharedDecoderAndRejectsArbitraryFiles) {

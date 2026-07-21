@@ -1,6 +1,7 @@
 #include "axklib/report.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <fstream>
 #include <map>

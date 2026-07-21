@@ -219,6 +219,7 @@ jobs:
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
 
       - name: Configure native build
+        id: configure-native
         run: >-
           cmake --preset ${{ inputs.debug && 'debug' || 'release' }}
           -DAXK_BUILD_SERVER=ON
@@ -513,6 +514,25 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Save vcpkg binary cache after failure
+        if: ${{ failure() && steps.configure-native.outcome == 'success' && steps.vcpkg-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
+
+      - name: Save native incremental build cache after failure
+        if: ${{ failure() && steps.configure-native.outcome == 'success' && steps.native-build-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            build/native/${{ inputs.debug && 'debug' || 'release' }}
+            !build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**
+            !build/native/${{ inputs.debug && 'debug' || 'release' }}/*.spdx.json
+          key: native-v1-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
+
       - name: Package macOS slice for universal assembly
         if: runner.os == 'macOS'
         shell: bash
@@ -566,6 +586,8 @@ jobs:
             build/tmp/macos-x86_64-package-basename.txt
             build/tmp/macos-x86_64-version-metadata.json
           key: macos-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            macos-x86_64-${{ github.run_id }}-
           fail-on-cache-miss: true
 
       - name: Restore ARM64 slice
@@ -576,6 +598,8 @@ jobs:
             build/tmp/macos-arm64-package-basename.txt
             build/tmp/macos-arm64-version-metadata.json
           key: macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            macos-arm64-${{ github.run_id }}-
           fail-on-cache-miss: true
 
       - name: Import macOS code signing certificate

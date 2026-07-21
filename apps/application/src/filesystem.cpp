@@ -1,6 +1,7 @@
 #include "axklib/application/filesystem.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <charconv>

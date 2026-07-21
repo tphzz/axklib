@@ -1,5 +1,6 @@
 #include "handlers.hpp"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>

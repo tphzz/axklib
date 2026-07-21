@@ -159,8 +159,8 @@ void axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &gra
         std::erase_if(volume.programs, [&](const auto &program) { return !programs.contains(program.object_key); });
     }
     std::erase_if(plan.volumes, [](const auto &volume) { return volume.waveforms.empty() && volume.samples.empty(); });
-    for (auto &scope : plan.unresolved_wave_data) {
-        std::erase_if(scope.waveforms,
+    for (auto &unresolved_scope : plan.unresolved_wave_data) {
+        std::erase_if(unresolved_scope.waveforms,
                       [&](const auto &waveform) { return !confirmed_waveforms.contains(waveform.object_key); });
     }
     std::erase_if(plan.unresolved_wave_data, [](const auto &scope) { return scope.waveforms.empty(); });

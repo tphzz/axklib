@@ -388,6 +388,21 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**" in workflow
     assert "tools/python/native_build_cache.py fingerprint" in workflow
     assert "tools/python/native_build_cache.py prepare" in workflow
+    assert workflow.count("uses: actions/cache/save@v6") == 3
+    assert "Save vcpkg binary cache after failure" in workflow
+    assert "Save native incremental build cache after failure" in workflow
+    assert workflow.count("steps.configure-native.outcome == 'success'") == 2
+    assert workflow.count("continue-on-error: true") == 2
+
+
+def test_native_workflow_restores_macos_slices_across_rerun_attempts() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+
+    assert "key: macos-x86_64-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
+    assert "restore-keys: |\n            macos-x86_64-${{ github.run_id }}-" in workflow
+    assert "key: macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
+    assert "restore-keys: |\n            macos-arm64-${{ github.run_id }}-" in workflow
 
 
 def test_native_workflow_builds_tests_and_packages_server_on_every_release_target() -> None:

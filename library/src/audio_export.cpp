@@ -1,6 +1,7 @@
 #include "axklib/audio_export.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <format>
 #include <fstream>
