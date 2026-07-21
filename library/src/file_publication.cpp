@@ -18,6 +18,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <winternl.h>
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -459,14 +460,14 @@ Result<void> publish_temporary_file(const std::filesystem::path &temporary, cons
     std::vector<std::byte> rename_buffer(sizeof(FILE_RENAME_INFO) + filename.size() * sizeof(wchar_t));
     auto *rename_info = reinterpret_cast<FILE_RENAME_INFO *>(rename_buffer.data());
     rename_info->ReplaceIfExists = overwrite ? TRUE : FALSE;
-    // A simple name with no root handle renames within the open candidate's directory.
-    rename_info->RootDirectory = nullptr;
+    rename_info->RootDirectory = retained->parent_handle;
     rename_info->FileNameLength = static_cast<DWORD>(filename.size() * sizeof(wchar_t));
     std::memcpy(rename_info->FileName, filename.data(), rename_info->FileNameLength);
-    const auto renamed = SetFileInformationByHandle(publication_handle.get(), FileRenameInfo, rename_info,
-                                                    static_cast<DWORD>(rename_buffer.size()));
-    if (renamed == 0) {
-        const std::error_code error{static_cast<int>(GetLastError()), std::system_category()};
+    IO_STATUS_BLOCK status{};
+    const auto renamed = NtSetInformationFile(publication_handle.get(), &status, rename_info,
+                                              static_cast<ULONG>(rename_buffer.size()), FileRenameInformation);
+    if (renamed < 0) {
+        const std::error_code error{static_cast<int>(RtlNtStatusToDosError(renamed)), std::system_category()};
         return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                           "could not atomically publish output: " + error.message())};
     }

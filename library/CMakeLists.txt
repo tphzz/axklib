@@ -160,6 +160,9 @@ axk_enable_coverage(axk_core)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(utf8cpp CONFIG REQUIRED)
 target_link_libraries(axk_core PRIVATE nlohmann_json::nlohmann_json utf8::cpp)
+if(WIN32)
+  target_link_libraries(axk_core PRIVATE ntdll)
+endif()
 
 add_library(
   axk_audio
