@@ -368,6 +368,28 @@ def test_native_workflow_creates_only_release_drafts() -> None:
     assert '"libaxklib.${project_version}.dylib"' in workflow
 
 
+def test_native_workflow_uses_official_dependency_and_incremental_build_caches() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+
+    assert workflow.count("uses: actions/cache@v6") == 2
+    assert "sccache" not in workflow.lower()
+    assert "cold_build" not in workflow
+    assert "git rev-parse HEAD:external/vcpkg" in workflow
+    assert "CMakePresets.json" in workflow
+    assert "library/cmake/triplets/**" in workflow
+    assert "library/cmake/ports/**" in workflow
+    assert "key: vcpkg-v2-${{ matrix.triplet }}-" in workflow
+    assert "vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-" in workflow
+    assert "key: native-v1-${{ matrix.triplet }}-" in workflow
+    assert "${{ steps.native-toolchain.outputs.toolchain_fingerprint }}" in workflow
+    assert "${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}" in workflow
+    assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/vcpkg_installed/**" not in workflow
+    assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**" in workflow
+    assert "tools/python/native_build_cache.py fingerprint" in workflow
+    assert "tools/python/native_build_cache.py prepare" in workflow
+
+
 def test_native_workflow_builds_tests_and_packages_server_on_every_release_target() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")

@@ -32,6 +32,7 @@ py-modules = [
   "generate_current_lookups",
   "generate_sbom",
   "inspect_package",
+  "native_build_cache",
   "openapi_compat",
   "release_metadata",
   "version_metadata",

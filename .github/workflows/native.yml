@@ -119,11 +119,22 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Resolve native cache inputs
+        id: cache-inputs
+        shell: bash
+        run: |
+          echo "vcpkg_revision=$(git rev-parse HEAD:external/vcpkg)" >> "$GITHUB_OUTPUT"
+          echo "dependency_fingerprint=${{ hashFiles('vcpkg.json', 'CMakeLists.txt', 'CMakePresets.json', 'library/CMakeLists.txt', 'library/cmake/triplets/**', 'library/cmake/ports/**') }}" >> "$GITHUB_OUTPUT"
+
       - name: Restore vcpkg binary cache
+        id: vcpkg-cache
         uses: actions/cache@v6
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: vcpkg-f87344cac031-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
+          restore-keys: |
+            vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-
+            vcpkg-v2-${{ matrix.triplet }}-
 
       - name: Prepare vcpkg binary cache directory
         run: cmake -E make_directory "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
@@ -164,6 +175,35 @@ jobs:
           "CC=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Using $compiler"
+
+      - name: Fingerprint native toolchain
+        id: native-toolchain
+        shell: bash
+        run: >-
+          python tools/python/native_build_cache.py fingerprint
+          --triplet "${{ matrix.triplet }}"
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Restore native incremental build cache
+        id: native-build-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            build/native/${{ inputs.debug && 'debug' || 'release' }}
+            !build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**
+            !build/native/${{ inputs.debug && 'debug' || 'release' }}/*.spdx.json
+          key: native-v1-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
+          restore-keys: |
+            native-v1-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-
+
+      - name: Prepare native incremental build cache
+        id: native-cache-state
+        shell: bash
+        run: >-
+          python tools/python/native_build_cache.py prepare
+          --source-root "${{ github.workspace }}"
+          --build-directory "${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          --github-output "$GITHUB_OUTPUT"
 
       - name: Bootstrap vcpkg
         if: runner.os != 'Windows'
