@@ -288,8 +288,24 @@ struct axk::app::JobManager::Impl {
     void transition(const std::shared_ptr<Record> &record, JobState state, std::string type,
                     std::optional<Json> result = std::nullopt, std::optional<Error> error = std::nullopt) {
         std::optional<JobEvent> event;
-        PathReservationCoordinator::Lease completed_lease;
-        {
+        if (is_terminal(state)) {
+            const std::scoped_lock lock{mutex, record->mutex};
+            if (is_terminal(record->state))
+                return;
+            record->path_lease = {};
+            for (const auto &key : record->destination_keys) {
+                const auto found = destination_reservations.find(key);
+                if (found != destination_reservations.end() && found->second == record->job_id)
+                    destination_reservations.erase(found);
+            }
+            const auto previous = record->state;
+            record->state = state;
+            record->result = std::move(result);
+            record->error = std::move(error);
+            record_transition_locked(*record, previous, state);
+            event = append_event_locked(*record, std::move(type), record->progress);
+            terminal_jobs.push_back({now(), record->job_id});
+        } else {
             const std::scoped_lock lock{record->mutex};
             if (is_terminal(record->state))
                 return;
@@ -299,11 +315,7 @@ struct axk::app::JobManager::Impl {
             record->error = std::move(error);
             record_transition_locked(*record, previous, state);
             event = append_event_locked(*record, std::move(type), record->progress);
-            if (is_terminal(state))
-                completed_lease = std::move(record->path_lease);
         }
-        if (is_terminal(state))
-            retain_terminal(record);
         emit(*event);
     }
 
@@ -384,16 +396,6 @@ struct axk::app::JobManager::Impl {
                 transition(record, JobState::failed, "failed", std::nullopt, result.error());
             }
         }
-    }
-
-    void retain_terminal(const std::shared_ptr<Record> &record) {
-        const std::scoped_lock lock{mutex};
-        for (const auto &key : record->destination_keys) {
-            const auto found = destination_reservations.find(key);
-            if (found != destination_reservations.end() && found->second == record->job_id)
-                destination_reservations.erase(found);
-        }
-        terminal_jobs.push_back({now(), record->job_id});
     }
 
     void cleanup_expired_locked() {
@@ -675,26 +677,29 @@ axk::app::Result<void> axk::app::JobManager::cancel(std::string_view job_id, std
     }
 
     std::optional<JobEvent> event;
-    PathReservationCoordinator::Lease completed_lease;
     {
-        const std::scoped_lock lock{record->mutex};
+        const std::scoped_lock lock{impl_->mutex, record->mutex};
         if (is_terminal(record->state) || record->cancellation_requested)
             return {};
         record->cancellation_requested = true;
         record->cancellation_requested_at = impl_->now();
         record->cancellation.cancel();
         if (record->state == JobState::queued) {
+            record->path_lease = {};
+            for (const auto &key : record->destination_keys) {
+                const auto found = impl_->destination_reservations.find(key);
+                if (found != impl_->destination_reservations.end() && found->second == record->job_id)
+                    impl_->destination_reservations.erase(found);
+            }
             const auto previous = record->state;
             record->state = JobState::cancelled;
             impl_->record_transition_locked(*record, previous, record->state);
             event = impl_->append_event_locked(*record, "cancelled");
-            completed_lease = std::move(record->path_lease);
+            impl_->terminal_jobs.push_back({impl_->now(), record->job_id});
         } else {
             event = impl_->append_event_locked(*record, "cancellation_requested", record->progress);
         }
     }
-    if (event->state == JobState::cancelled)
-        impl_->retain_terminal(record);
     impl_->emit(*event);
     impl_->condition.notify_all();
     return {};

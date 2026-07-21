@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -420,6 +421,10 @@ void discard_temporary_file(const std::filesystem::path &path) noexcept {
         const auto deletion_handle = open_retained_candidate(path, *retained, DELETE | FILE_READ_ATTRIBUTES);
         if (!deletion_handle)
             return;
+        if (retained->handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(retained->handle);
+            retained->handle = INVALID_HANDLE_VALUE;
+        }
         FILE_DISPOSITION_INFO disposition{TRUE};
         static_cast<void>(
             SetFileInformationByHandle(deletion_handle.get(), FileDispositionInfo, &disposition, sizeof(disposition)));
@@ -446,6 +451,10 @@ Result<void> publish_temporary_file(const std::filesystem::path &temporary, cons
         static_cast<void>(release_retained(temporary));
         return identity_error();
     }
+    if (retained->handle != INVALID_HANDLE_VALUE) {
+        CloseHandle(retained->handle);
+        retained->handle = INVALID_HANDLE_VALUE;
+    }
     if (retained->parent_handle == INVALID_HANDLE_VALUE)
         return identity_error();
     const auto filename = output.filename().native();
@@ -457,9 +466,11 @@ Result<void> publish_temporary_file(const std::filesystem::path &temporary, cons
     std::memcpy(rename_info->FileName, filename.data(), rename_info->FileNameLength);
     const auto renamed = SetFileInformationByHandle(publication_handle.get(), FileRenameInfo, rename_info,
                                                     static_cast<DWORD>(rename_buffer.size()));
-    if (renamed == 0)
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not atomically publish output")};
+    if (renamed == 0) {
+        const std::error_code error{static_cast<int>(GetLastError()), std::system_category()};
+        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                                          "could not atomically publish output: " + error.message())};
+    }
 #else
     const auto descriptor = retained->parent_descriptor;
     if (descriptor < 0)
