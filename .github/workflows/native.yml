@@ -105,9 +105,6 @@ jobs:
             run_tests: true
             macos_slice: arm64
     runs-on: ${{ matrix.runner }}
-    env:
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg/archives
-
     steps:
       - name: Checkout axklib
         uses: actions/checkout@v7
@@ -126,18 +123,21 @@ jobs:
           echo "vcpkg_revision=$(git rev-parse HEAD:external/vcpkg)" >> "$GITHUB_OUTPUT"
           echo "dependency_fingerprint=${{ hashFiles('vcpkg.json', 'CMakeLists.txt', 'CMakePresets.json', 'library/CMakeLists.txt', 'library/cmake/triplets/**', 'library/cmake/ports/**') }}" >> "$GITHUB_OUTPUT"
 
+      - name: Configure vcpkg binary cache
+        shell: bash
+        run: |
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg/archives" >> "$GITHUB_ENV"
+          cmake -E make_directory "$RUNNER_TEMP/vcpkg/archives"
+
       - name: Restore vcpkg binary cache
         id: vcpkg-cache
         uses: actions/cache@v6
         with:
-          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          path: ${{ runner.temp }}/vcpkg/archives
           key: vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
           restore-keys: |
             vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-
             vcpkg-v2-${{ matrix.triplet }}-
-
-      - name: Prepare vcpkg binary cache directory
-        run: cmake -E make_directory "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
 
       - name: Locate Visual Studio 2026
         id: vs2026
@@ -519,7 +519,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
-          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          path: ${{ runner.temp }}/vcpkg/archives
           key: vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
 
       - name: Save native incremental build cache after failure
