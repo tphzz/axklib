@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/secure_random.hpp"
+#include "axklib/writer.hpp"
 #include "environment.hpp"
 
 namespace {
@@ -71,9 +72,14 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         "maximumDownloadArchiveBytes",
         "maximumConcurrentArchiveDownloads",
         "maximumDownloadArchiveEntries",
+        "maximumDownloadArchiveDepth",
+        "maximumDownloadArchivePathBytes",
         "maximumDownloadArchiveTotalBytes",
         "maximumEventTickets",
         "maximumImageSessions",
+        "maximumMediaBuildObjectBytes",
+        "maximumMediaBuildPayloadBytes",
+        "maximumMediaBuildOutputBytes",
         "maximumJsonBytes",
         "maximumJsonContainerItems",
         "maximumJsonDepth",
@@ -140,10 +146,15 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         assign("maximumDownloadArchiveBytes", config.maximum_download_archive_bytes);
         assign("maximumDownloadArchiveTotalBytes", config.maximum_download_archive_total_bytes);
         assign("maximumDownloadArchiveEntries", config.maximum_download_archive_entries);
+        assign("maximumDownloadArchiveDepth", config.maximum_download_archive_depth);
+        assign("maximumDownloadArchivePathBytes", config.maximum_download_archive_path_bytes);
         assign("maximumConcurrentArchiveDownloads", config.maximum_concurrent_archive_downloads);
         assign("downloadArchiveRetentionSeconds", config.download_archive_retention_seconds);
         assign("uploadRetentionSeconds", config.upload_retention_seconds);
         assign("maximumImageSessions", config.maximum_image_sessions);
+        assign("maximumMediaBuildObjectBytes", config.maximum_media_build_object_bytes);
+        assign("maximumMediaBuildPayloadBytes", config.maximum_media_build_payload_bytes);
+        assign("maximumMediaBuildOutputBytes", config.maximum_media_build_output_bytes);
         assign("maximumPageSize", config.maximum_page_size);
         assign("imageIdleSeconds", config.image_idle_seconds);
         assign("workerThreads", config.worker_threads);
@@ -520,9 +531,20 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
     if (config.maximum_download_archive_bytes == 0U ||
         config.maximum_download_archive_total_bytes < config.maximum_download_archive_bytes ||
         config.maximum_download_archive_entries == 0U || config.maximum_download_archive_entries > 1000000U ||
-        config.maximum_concurrent_archive_downloads == 0U || config.maximum_concurrent_archive_downloads > 64U ||
-        config.download_archive_retention_seconds == 0U || config.download_archive_retention_seconds > 86400U) {
+        config.maximum_download_archive_depth == 0U || config.maximum_download_archive_depth > 1024U ||
+        config.maximum_download_archive_path_bytes == 0U || config.maximum_concurrent_archive_downloads == 0U ||
+        config.maximum_concurrent_archive_downloads > 64U || config.download_archive_retention_seconds == 0U ||
+        config.download_archive_retention_seconds > 86400U) {
         return std::unexpected(argument_error("download archive limits are invalid"));
+    }
+    constexpr axk::MediaBuildLimits public_media_limits{};
+    if (config.maximum_media_build_object_bytes == 0U ||
+        config.maximum_media_build_object_bytes > config.maximum_media_build_payload_bytes ||
+        config.maximum_media_build_payload_bytes == 0U || config.maximum_media_build_output_bytes == 0U ||
+        config.maximum_media_build_object_bytes > public_media_limits.maximum_object_bytes ||
+        config.maximum_media_build_payload_bytes > public_media_limits.maximum_aggregate_payload_bytes ||
+        config.maximum_media_build_output_bytes > public_media_limits.maximum_output_bytes) {
+        return std::unexpected(argument_error("media build limits are invalid"));
     }
     if (config.maximum_image_sessions == 0U || config.maximum_image_sessions > 1024U ||
         config.maximum_page_size == 0U || config.maximum_page_size > 5000U || config.image_idle_seconds == 0U ||

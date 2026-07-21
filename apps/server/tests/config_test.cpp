@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/server/config.hpp"
+#include "axklib/writer.hpp"
 #include "environment.hpp"
 
 namespace {
@@ -241,6 +242,30 @@ TEST(ServerConfig, ParsesAndBoundsConcurrentArchiveDownloads) {
     invalid.maximum_concurrent_archive_downloads = 0U;
     EXPECT_FALSE(axk::server::validate_config(invalid));
     invalid.maximum_concurrent_archive_downloads = 65U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+}
+
+TEST(ServerConfig, ParsesAndBoundsArchiveTraversalAndMediaBuildLimits) {
+    TemporaryConfigFile config{
+        R"({"bearerToken":"0123456789abcdef","maximumDownloadArchiveDepth":12,"maximumDownloadArchivePathBytes":4096,"maximumMediaBuildObjectBytes":1048576,"maximumMediaBuildPayloadBytes":2097152,"maximumMediaBuildOutputBytes":4194304})"};
+    std::array arguments{std::string{"axklib-server"}, std::string{"--config"}, config.path().string()};
+    std::array<char *, arguments.size()> pointers{};
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+        pointers[index] = arguments[index].data();
+    const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_EQ(parsed->config.maximum_download_archive_depth, 12U);
+    EXPECT_EQ(parsed->config.maximum_download_archive_path_bytes, 4096U);
+    EXPECT_EQ(parsed->config.maximum_media_build_object_bytes, 1048576U);
+
+    auto invalid = parsed->config;
+    invalid.maximum_download_archive_depth = 0U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid = parsed->config;
+    invalid.maximum_media_build_object_bytes = invalid.maximum_media_build_payload_bytes + 1U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid = parsed->config;
+    invalid.maximum_media_build_output_bytes = axk::MediaBuildLimits{}.maximum_output_bytes + 1U;
     EXPECT_FALSE(axk::server::validate_config(invalid));
 }
 

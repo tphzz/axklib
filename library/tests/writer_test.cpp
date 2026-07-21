@@ -775,6 +775,49 @@ TEST(MediaWriter, AllowsObjectEmptyIsoPackageStagingTargetOnly) {
     std::filesystem::remove_all(root, error);
 }
 
+TEST(MediaWriter, EnforcesAggregatePayloadAndProjectedOutputLimits) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-media-limits";
+    const auto iso_path = root / "limited.iso";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+
+    axk::VolumeSpec empty_volume;
+    empty_volume.name = "Empty";
+    axk::MediaBuildManifest empty_iso;
+    empty_iso.schema_version = "1.1";
+    empty_iso.format = axk::MediaImageFormat::iso9660;
+    empty_iso.authored_volume = empty_volume;
+    empty_iso.iso_volume_id = "AXK_LIMIT";
+    empty_iso.raw_group = "GROUP";
+    empty_iso.group_name = "Limits";
+    empty_iso.raw_volume = "F001";
+    empty_iso.volume_name = "Empty";
+    axk::MediaBuildLimits output_limited;
+    output_limited.maximum_output_bytes = 4096U;
+    const auto oversized_output = axk::write_media_image(empty_iso, iso_path, false, output_limited);
+    ASSERT_FALSE(oversized_output);
+    EXPECT_EQ(oversized_output.error().code, axk::ErrorCode::io_unsupported_size);
+    EXPECT_FALSE(std::filesystem::exists(iso_path));
+
+    axk::Waveform waveform;
+    waveform.format = {1, 2, 44100};
+    waveform.frame_count = 4U;
+    waveform.pcm.resize(8U);
+    const auto wav_path = root / "tone.wav";
+    ASSERT_TRUE(axk::write_wav_atomic(wav_path, waveform));
+    auto authored = empty_iso;
+    authored.authored_volume->waveforms.push_back({"wave", "Wave", wav_path, 60U, {}});
+    axk::MediaBuildLimits aggregate_limited;
+    aggregate_limited.maximum_object_bytes = 128U;
+    aggregate_limited.maximum_aggregate_payload_bytes = 128U;
+    const auto oversized_payload = axk::plan_media_build(authored, aggregate_limited);
+    ASSERT_FALSE(oversized_payload);
+    EXPECT_EQ(oversized_payload.error().code, axk::ErrorCode::io_unsupported_size);
+
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(MediaWriter, SavedObjectTransferAddsKnownSampleDependencies) {
     axk::Waveform source;
     source.format = {1, 2, 44100};

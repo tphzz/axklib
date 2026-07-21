@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cctype>
 #include <charconv>
+#include <cstring>
 #include <format>
 #include <iterator>
 #include <limits>
@@ -371,6 +372,68 @@ int rename_exchange(int parent, const char *first, const char *second) {
 
 #endif
 
+struct NativeIdentity {
+#if defined(_WIN32)
+    std::uint64_t volume_serial{};
+    std::array<std::byte, sizeof(FILE_ID_128)> file_id{};
+    std::uint64_t size{};
+    std::int64_t last_write_time{};
+    std::int64_t change_time{};
+#else
+    std::uint64_t device{};
+    std::uint64_t inode{};
+    std::uint64_t size{};
+    std::int64_t modification_seconds{};
+    std::int64_t modification_nanoseconds{};
+    std::int64_t change_seconds{};
+    std::int64_t change_nanoseconds{};
+#endif
+
+    friend bool operator==(const NativeIdentity &, const NativeIdentity &) = default;
+};
+
+#if defined(_WIN32)
+axk::app::Result<NativeIdentity> native_identity(HANDLE handle, std::string_view relative_path) {
+    FILE_ID_INFO id{};
+    FILE_STANDARD_INFO standard{};
+    FILE_BASIC_INFO basic{};
+    if (GetFileInformationByHandleEx(handle, FileIdInfo, &id, sizeof(id)) == 0 ||
+        GetFileInformationByHandleEx(handle, FileStandardInfo, &standard, sizeof(standard)) == 0 ||
+        GetFileInformationByHandleEx(handle, FileBasicInfo, &basic, sizeof(basic)) == 0 ||
+        standard.EndOfFile.QuadPart < 0) {
+        return std::unexpected(reference_error("sandbox entry identity cannot be inspected", relative_path));
+    }
+    NativeIdentity result;
+    result.volume_serial = id.VolumeSerialNumber;
+    std::memcpy(result.file_id.data(), &id.FileId, sizeof(id.FileId));
+    result.size = static_cast<std::uint64_t>(standard.EndOfFile.QuadPart);
+    result.last_write_time = basic.LastWriteTime.QuadPart;
+    result.change_time = basic.ChangeTime.QuadPart;
+    return result;
+}
+#else
+NativeIdentity native_identity(const struct stat &status) {
+#if defined(__APPLE__)
+    const auto modification = status.st_mtimespec;
+    const auto change = status.st_ctimespec;
+#else
+    const auto modification = status.st_mtim;
+    const auto change = status.st_ctim;
+#endif
+    return {static_cast<std::uint64_t>(status.st_dev),       static_cast<std::uint64_t>(status.st_ino),
+            static_cast<std::uint64_t>(status.st_size),      static_cast<std::int64_t>(modification.tv_sec),
+            static_cast<std::int64_t>(modification.tv_nsec), static_cast<std::int64_t>(change.tv_sec),
+            static_cast<std::int64_t>(change.tv_nsec)};
+}
+
+axk::app::Result<NativeIdentity> native_identity(int descriptor, std::string_view relative_path) {
+    struct stat status{};
+    if (::fstat(descriptor, &status) != 0 || status.st_size < 0)
+        return std::unexpected(reference_error("sandbox entry identity cannot be inspected", relative_path));
+    return native_identity(status);
+}
+#endif
+
 class NativeFileReader final : public axk::RandomAccessReader {
   public:
     NativeFileReader(NativeHandle handle, std::uint64_t size, std::string source_name)
@@ -430,6 +493,19 @@ class NativeFileReader final : public axk::RandomAccessReader {
             position += read;
         }
 #endif
+        return {};
+    }
+
+    [[nodiscard]] axk::app::Result<void> verify_unchanged(const NativeIdentity &expected) const {
+#if defined(_WIN32)
+        auto current = native_identity(handle_.get(), source_name_);
+#else
+        auto current = native_identity(*handle_, source_name_);
+#endif
+        if (!current || *current != expected) {
+            return std::unexpected(
+                entry_error("archive_source_changed", "directory entry changed while it was archived", source_name_));
+        }
         return {};
     }
 
@@ -608,6 +684,64 @@ struct axk::app::Sandbox::NativeRoot {
 #endif
 };
 
+struct axk::app::SandboxTree::Implementation {
+    NativeHandle root;
+    std::vector<SandboxTreeEntry> entries;
+    std::vector<NativeIdentity> identities;
+};
+
+axk::app::SandboxTree::SandboxTree() = default;
+axk::app::SandboxTree::~SandboxTree() = default;
+axk::app::SandboxTree::SandboxTree(SandboxTree &&) noexcept = default;
+axk::app::SandboxTree &axk::app::SandboxTree::operator=(SandboxTree &&) noexcept = default;
+
+axk::app::SandboxTree::SandboxTree(std::unique_ptr<Implementation> implementation)
+    : implementation_(std::move(implementation)) {}
+
+std::span<const axk::app::SandboxTreeEntry> axk::app::SandboxTree::entries() const noexcept {
+    return implementation_ ? std::span<const SandboxTreeEntry>{implementation_->entries}
+                           : std::span<const SandboxTreeEntry>{};
+}
+
+axk::app::Result<axk::app::OpenedSandboxTreeFile> axk::app::SandboxTree::open_file(std::size_t index) const {
+    if (!implementation_ || index >= implementation_->entries.size() ||
+        implementation_->entries[index].kind != SandboxTreeEntryKind::file) {
+        return std::unexpected(entry_error("archive_source_changed", "archive file entry is unavailable", {}));
+    }
+    const auto &entry = implementation_->entries[index];
+    auto relative = relative_path_from_utf8(entry.relative_path);
+    if (!relative || relative->filename().empty())
+        return std::unexpected(
+            entry_error("archive_source_changed", "archive file path is invalid", entry.relative_path));
+#if defined(_WIN32)
+    auto parent = open_parent(implementation_->root.get(), relative->parent_path(), entry.relative_path);
+#else
+    auto parent = open_parent(*implementation_->root, relative->parent_path(), entry.relative_path);
+#endif
+    if (!parent)
+        return std::unexpected(entry_error("archive_source_changed", "archive parent changed", entry.relative_path));
+#if defined(_WIN32)
+    auto opened = open_relative(parent->get(), relative->filename(), FILE_READ_DATA | FILE_READ_ATTRIBUTES, FILE_OPEN,
+                                FILE_NON_DIRECTORY_FILE, entry.relative_path);
+    if (!opened)
+        return std::unexpected(entry_error("archive_source_changed", "archive file changed", entry.relative_path));
+    auto file_handle = std::move(*opened);
+    auto identity = native_identity(file_handle.get(), entry.relative_path);
+#else
+    const auto descriptor =
+        ::openat(**parent, relative->filename().c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (descriptor < 0)
+        return std::unexpected(entry_error("archive_source_changed", "archive file changed", entry.relative_path));
+    auto file_handle = descriptor_handle(descriptor);
+    auto identity = native_identity(*file_handle, entry.relative_path);
+#endif
+    if (!identity || *identity != implementation_->identities[index])
+        return std::unexpected(entry_error("archive_source_changed", "archive file changed", entry.relative_path));
+    auto reader = std::make_shared<NativeFileReader>(std::move(file_handle), entry.size, entry.relative_path);
+    const auto expected = implementation_->identities[index];
+    return OpenedSandboxTreeFile{reader, [reader, expected] { return reader->verify_unchanged(expected); }};
+}
+
 axk::app::Result<std::vector<axk::app::Sandbox::Root>>
 axk::app::Sandbox::validate_roots(std::vector<RootDefinition> definitions) {
     std::vector<Root> roots;
@@ -731,11 +865,12 @@ axk::app::Result<axk::app::SandboxFile> axk::app::Sandbox::open_file(const FileR
     return SandboxFile{reference, filename, size, std::move(reader)};
 }
 
-axk::app::Result<std::vector<axk::app::SandboxTreeFile>>
-axk::app::Sandbox::open_tree_files(const DirectoryRef &reference, std::size_t maximum_entries,
-                                   std::uint64_t maximum_total_bytes) const {
-    if (maximum_entries == 0U || maximum_total_bytes == 0U)
+axk::app::Result<axk::app::SandboxTree> axk::app::Sandbox::open_tree(const DirectoryRef &reference,
+                                                                     const SandboxTreeLimits &limits) const {
+    if (limits.maximum_entries == 0U || limits.maximum_total_file_bytes == 0U || limits.maximum_depth == 0U ||
+        limits.maximum_path_bytes == 0U) {
         return std::unexpected(reference_error("directory traversal limits must be positive", reference.relative_path));
+    }
     const auto root = find_root(reference.root_id);
     if (!root)
         return std::unexpected(reference_error("sandbox root does not exist", reference.relative_path));
@@ -751,20 +886,45 @@ axk::app::Sandbox::open_tree_files(const DirectoryRef &reference, std::size_t ma
         return std::unexpected(opened_root.error());
 
     struct PendingDirectory {
-        NativeHandle handle;
         std::filesystem::path relative;
+        std::optional<NativeIdentity> identity;
+        std::size_t depth{};
     };
     std::vector<PendingDirectory> pending;
-    pending.push_back({std::move(*opened_root), {}});
-    std::vector<SandboxTreeFile> result;
+    pending.push_back({{}, std::nullopt, 0U});
+    struct CollectedEntry {
+        SandboxTreeEntry entry;
+        NativeIdentity identity;
+    };
+    std::vector<CollectedEntry> collected;
     std::uint64_t total_bytes{};
+    std::size_t total_path_bytes{};
     while (!pending.empty()) {
         auto current = std::move(pending.back());
         pending.pop_back();
 #if defined(_WIN32)
+        auto current_handle = open_parent(opened_root->get(), current.relative, reference.relative_path);
+#else
+        auto current_handle = open_parent(**opened_root, current.relative, reference.relative_path);
+#endif
+        if (!current_handle)
+            return std::unexpected(current_handle.error());
+        if (current.identity) {
+#if defined(_WIN32)
+            auto identity = native_identity(current_handle->get(), text::path_to_utf8(current.relative));
+#else
+            auto identity = native_identity(**current_handle, text::path_to_utf8(current.relative));
+#endif
+            if (!identity || *identity != *current.identity) {
+                return std::unexpected(entry_error("archive_source_changed",
+                                                   "directory changed while it was being archived",
+                                                   text::path_to_utf8(current.relative)));
+            }
+        }
+#if defined(_WIN32)
         alignas(FILE_ID_BOTH_DIR_INFO) std::array<std::byte, 64U * 1024U> buffer{};
         for (;;) {
-            if (GetFileInformationByHandleEx(current.handle.get(), FileIdBothDirectoryInfo, buffer.data(),
+            if (GetFileInformationByHandleEx(current_handle->get(), FileIdBothDirectoryInfo, buffer.data(),
                                              static_cast<DWORD>(buffer.size())) == 0) {
                 if (GetLastError() == ERROR_NO_MORE_FILES)
                     break;
@@ -784,34 +944,42 @@ axk::app::Sandbox::open_tree_files(const DirectoryRef &reference, std::size_t ma
                         return std::unexpected(
                             reference_error("directory archives do not follow links", reference.relative_path));
                     const auto child_relative = current.relative / name;
+                    const auto child_path = text::path_to_utf8(child_relative);
+                    const auto child_depth = current.depth + 1U;
+                    if (collected.size() >= limits.maximum_entries || child_depth > limits.maximum_depth ||
+                        child_path.size() > limits.maximum_path_bytes - total_path_bytes) {
+                        return std::unexpected(entry_error("download_archive_too_large",
+                                                           "directory archive exceeds configured limits",
+                                                           reference.relative_path));
+                    }
                     if ((entry->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U) {
                         auto child =
-                            open_relative(current.handle.get(), name, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+                            open_relative(current_handle->get(), name, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
                                           FILE_OPEN, FILE_DIRECTORY_FILE, reference.relative_path);
                         if (!child)
                             return std::unexpected(child.error());
-                        pending.push_back({std::move(*child), child_relative});
+                        auto identity = native_identity(child->get(), child_path);
+                        if (!identity)
+                            return std::unexpected(identity.error());
+                        total_path_bytes += child_path.size();
+                        collected.push_back({{child_path, SandboxTreeEntryKind::directory, 0U}, *identity});
+                        pending.push_back({child_relative, *identity, child_depth});
                     } else {
-                        auto child = open_relative(current.handle.get(), name, FILE_READ_DATA | FILE_READ_ATTRIBUTES,
+                        auto child = open_relative(current_handle->get(), name, FILE_READ_DATA | FILE_READ_ATTRIBUTES,
                                                    FILE_OPEN, FILE_NON_DIRECTORY_FILE, reference.relative_path);
                         if (!child)
                             return std::unexpected(child.error());
-                        FILE_STANDARD_INFO information{};
-                        if (GetFileInformationByHandleEx(child->get(), FileStandardInfo, &information,
-                                                         sizeof(information)) == 0 ||
-                            information.Directory || information.EndOfFile.QuadPart < 0) {
-                            return std::unexpected(
-                                reference_error("directory contains an unsupported entry", reference.relative_path));
-                        }
-                        const auto size = static_cast<std::uint64_t>(information.EndOfFile.QuadPart);
-                        if (result.size() >= maximum_entries || size > maximum_total_bytes - total_bytes)
+                        auto identity = native_identity(child->get(), child_path);
+                        if (!identity)
+                            return std::unexpected(identity.error());
+                        if (identity->size > limits.maximum_total_file_bytes - total_bytes)
                             return std::unexpected(entry_error("download_archive_too_large",
                                                                "directory archive exceeds configured limits",
                                                                reference.relative_path));
-                        total_bytes += size;
-                        auto reader = std::make_shared<NativeFileReader>(std::move(*child), size,
-                                                                         text::path_to_utf8(child_relative));
-                        result.push_back({text::path_to_utf8(child_relative), size, std::move(reader)});
+                        total_bytes += identity->size;
+                        total_path_bytes += child_path.size();
+                        collected.push_back(
+                            {{child_path, SandboxTreeEntryKind::file, identity->size}, std::move(*identity)});
                     }
                 }
                 if (entry->NextEntryOffset == 0U)
@@ -821,7 +989,7 @@ axk::app::Sandbox::open_tree_files(const DirectoryRef &reference, std::size_t ma
             }
         }
 #else
-        const auto enumeration_descriptor = ::dup(*current.handle);
+        const auto enumeration_descriptor = ::dup(**current_handle);
         if (enumeration_descriptor < 0)
             return std::unexpected(reference_error("sandbox directory cannot be duplicated", reference.relative_path));
         auto *directory = ::fdopendir(enumeration_descriptor);
@@ -842,7 +1010,7 @@ axk::app::Sandbox::open_tree_files(const DirectoryRef &reference, std::size_t ma
                     reference_error("directory contains a non-portable entry name", reference.relative_path));
             }
             struct stat status{};
-            if (::fstatat(*current.handle, name->c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0) {
+            if (::fstatat(**current_handle, name->c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0) {
                 ::closedir(directory);
                 return std::unexpected(
                     reference_error("directory changed while it was opened", reference.relative_path));
@@ -853,18 +1021,31 @@ axk::app::Sandbox::open_tree_files(const DirectoryRef &reference, std::size_t ma
                     reference_error("directory archives do not follow links", reference.relative_path));
             }
             const auto child_relative = current.relative / *name;
+            const auto child_path = text::path_to_utf8(child_relative);
+            const auto child_depth = current.depth + 1U;
+            if (collected.size() >= limits.maximum_entries || child_depth > limits.maximum_depth ||
+                child_path.size() > limits.maximum_path_bytes - total_path_bytes) {
+                ::closedir(directory);
+                return std::unexpected(entry_error("download_archive_too_large",
+                                                   "directory archive exceeds configured limits",
+                                                   reference.relative_path));
+            }
+            const auto identity = native_identity(status);
             if (S_ISDIR(status.st_mode)) {
                 const auto child_descriptor =
-                    ::openat(*current.handle, name->c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+                    ::openat(**current_handle, name->c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
                 if (child_descriptor < 0) {
                     ::closedir(directory);
                     return std::unexpected(
                         reference_error("directory changed while it was opened", reference.relative_path));
                 }
-                pending.push_back({descriptor_handle(child_descriptor), child_relative});
+                ::close(child_descriptor);
+                total_path_bytes += child_path.size();
+                collected.push_back({{child_path, SandboxTreeEntryKind::directory, 0U}, identity});
+                pending.push_back({child_relative, identity, child_depth});
             } else if (S_ISREG(status.st_mode)) {
                 const auto child_descriptor =
-                    ::openat(*current.handle, name->c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+                    ::openat(**current_handle, name->c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
                 if (child_descriptor < 0) {
                     ::closedir(directory);
                     return std::unexpected(
@@ -878,17 +1059,21 @@ axk::app::Sandbox::open_tree_files(const DirectoryRef &reference, std::size_t ma
                     return std::unexpected(
                         reference_error("directory contains an unsupported entry", reference.relative_path));
                 }
+                if (native_identity(opened_status) != identity) {
+                    ::closedir(directory);
+                    return std::unexpected(entry_error("archive_source_changed",
+                                                       "directory entry changed while it was inspected", child_path));
+                }
                 const auto size = static_cast<std::uint64_t>(opened_status.st_size);
-                if (result.size() >= maximum_entries || size > maximum_total_bytes - total_bytes) {
+                if (size > limits.maximum_total_file_bytes - total_bytes) {
                     ::closedir(directory);
                     return std::unexpected(entry_error("download_archive_too_large",
                                                        "directory archive exceeds configured limits",
                                                        reference.relative_path));
                 }
                 total_bytes += size;
-                auto reader =
-                    std::make_shared<NativeFileReader>(std::move(child), size, text::path_to_utf8(child_relative));
-                result.push_back({text::path_to_utf8(child_relative), size, std::move(reader)});
+                total_path_bytes += child_path.size();
+                collected.push_back({{child_path, SandboxTreeEntryKind::file, size}, identity});
             } else {
                 ::closedir(directory);
                 return std::unexpected(
@@ -902,8 +1087,16 @@ axk::app::Sandbox::open_tree_files(const DirectoryRef &reference, std::size_t ma
                 reference_error("sandbox directory cannot be enumerated safely", reference.relative_path));
 #endif
     }
-    std::ranges::sort(result, {}, &SandboxTreeFile::relative_path);
-    return result;
+    std::ranges::sort(collected, {}, [](const auto &value) { return value.entry.relative_path; });
+    auto implementation = std::make_unique<SandboxTree::Implementation>();
+    implementation->root = std::move(*opened_root);
+    implementation->entries.reserve(collected.size());
+    implementation->identities.reserve(collected.size());
+    for (auto &value : collected) {
+        implementation->entries.push_back(std::move(value.entry));
+        implementation->identities.push_back(std::move(value.identity));
+    }
+    return SandboxTree{std::move(implementation)};
 }
 
 axk::app::Result<void> axk::app::Sandbox::publish_file(const FileRef &destination, bool overwrite,

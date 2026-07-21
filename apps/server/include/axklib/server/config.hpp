@@ -47,10 +47,15 @@ struct Config {
     std::uint64_t maximum_download_archive_bytes{4ULL * 1024ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_download_archive_total_bytes{8ULL * 1024ULL * 1024ULL * 1024ULL};
     std::size_t maximum_download_archive_entries{100000U};
+    std::size_t maximum_download_archive_depth{64U};
+    std::size_t maximum_download_archive_path_bytes{32U * 1024U * 1024U};
     std::size_t maximum_concurrent_archive_downloads{1U};
     std::uint32_t download_archive_retention_seconds{300U};
     std::uint32_t upload_retention_seconds{3600U};
     std::size_t maximum_image_sessions{32U};
+    std::uint64_t maximum_media_build_object_bytes{64ULL * 1024ULL * 1024ULL};
+    std::uint64_t maximum_media_build_payload_bytes{737'280'000ULL};
+    std::uint64_t maximum_media_build_output_bytes{737'280'000ULL};
     std::size_t maximum_page_size{500U};
     std::uint32_t image_idle_seconds{900U};
     std::uint16_t worker_threads{2};

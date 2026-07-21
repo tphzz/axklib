@@ -47,10 +47,13 @@ The media source modules preserve a separate responsibility boundary:
 
 - `media_fat12.cpp` owns the supported FAT12 container profile.
 - `media_iso9660.cpp` owns the supported primary ISO9660 container profile.
-- `media_build.cpp` prepares authored or raw-preserving object sets independently
-  of their destination container.
+- `media_build.cpp` inventories metadata before loading a selected dependency
+  closure, enforces public aggregate build limits, and validates written
+  payloads through bounded range readers.
 - `media_write_fat12.cpp` adapts pinned FatFs to an in-memory 1.44 MB image.
-- `media_write_iso9660.cpp` owns the deterministic narrow ISO9660 layout writer.
+- `media_write_iso9660.cpp` owns the deterministic narrow ISO9660 layout writer
+  and writes projected sectors directly to the reserved temporary file without
+  retaining a second output-sized image buffer.
 - `media_yamaha.cpp` owns Yamaha object recognition, CD menu labels, catalog
   placement, and structured paths.
 - `media.cpp` owns common media dispatch and `MediaContainer` orchestration.

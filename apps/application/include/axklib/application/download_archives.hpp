@@ -32,12 +32,22 @@ struct DownloadArchiveContent {
     std::shared_ptr<void> lease;
 };
 
+struct DownloadArchiveLimits {
+    std::uint64_t maximum_total_bytes{};
+    std::uint64_t maximum_archive_bytes{};
+    std::size_t maximum_entries{};
+    std::size_t maximum_depth{64U};
+    std::size_t maximum_path_bytes{32U * 1024U * 1024U};
+};
+
 class DownloadArchiveStore {
   public:
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
 
     DownloadArchiveStore(std::filesystem::path staging_directory, std::uint64_t maximum_total_bytes,
                          std::uint64_t maximum_archive_bytes, std::size_t maximum_entries,
+                         std::chrono::seconds retention, Clock clock = std::chrono::steady_clock::now);
+    DownloadArchiveStore(std::filesystem::path staging_directory, DownloadArchiveLimits limits,
                          std::chrono::seconds retention, Clock clock = std::chrono::steady_clock::now);
     ~DownloadArchiveStore();
     DownloadArchiveStore(DownloadArchiveStore &&) noexcept;

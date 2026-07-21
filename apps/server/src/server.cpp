@@ -48,6 +48,7 @@
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 #include "axklib/writer.hpp"
+#include "http_headers.hpp"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -438,6 +439,8 @@ int status_for_error(const axk::app::Error &error, int fallback = 422) {
         return 429;
     if (error.code == "download_archive_too_large")
         return 413;
+    if (error.code == "image_build_too_large")
+        return 413;
     if (error.code == "upload_type_not_allowed")
         return 415;
     if (error.code == "invalid_upload_chunk" || error.code == "upload_not_ready")
@@ -569,14 +572,19 @@ class ServerApplication {
           uploads_(upload_directory(), config_.maximum_upload_total_bytes, config_.maximum_upload_bytes,
                    config_.maximum_uploads, config_.maximum_upload_chunk_bytes,
                    std::chrono::seconds{config_.upload_retention_seconds}),
-          download_archives_(download_archive_directory(), config_.maximum_download_archive_total_bytes,
-                             config_.maximum_download_archive_bytes, config_.maximum_download_archive_entries,
+          download_archives_(download_archive_directory(),
+                             {config_.maximum_download_archive_total_bytes, config_.maximum_download_archive_bytes,
+                              config_.maximum_download_archive_entries, config_.maximum_download_archive_depth,
+                              config_.maximum_download_archive_path_bytes},
                              std::chrono::seconds{config_.download_archive_retention_seconds}),
           archive_download_budget_(config_.maximum_concurrent_archive_downloads),
           images_(sandbox_, config_.maximum_image_sessions, config_.maximum_page_size,
                   std::chrono::seconds{config_.image_idle_seconds}, std::chrono::steady_clock::now,
                   &path_reservations_),
-          registry_(prepare_registry(std::move(registry), sandbox_, uploads_, images_)),
+          registry_(
+              prepare_registry(std::move(registry), sandbox_, uploads_, images_,
+                               {config_.maximum_media_build_object_bytes, config_.maximum_media_build_payload_bytes,
+                                config_.maximum_media_build_output_bytes})),
           openapi_document_(axk::server::build_openapi_document(axk::server::embedded_openapi(), registry_)),
           openapi_validator_(openapi_document_),
           jobs_(
@@ -695,8 +703,9 @@ class ServerApplication {
     static axk::app::OperationRegistry prepare_registry(axk::app::OperationRegistry registry,
                                                         const axk::app::Sandbox &sandbox,
                                                         axk::app::UploadStore &uploads,
-                                                        axk::app::ImageSessionManager &images) {
-        auto prepared = axk::app::make_application_registry(sandbox, uploads, std::move(registry));
+                                                        axk::app::ImageSessionManager &images,
+                                                        const axk::MediaBuildLimits &media_limits) {
+        auto prepared = axk::app::make_application_registry(sandbox, uploads, std::move(registry), media_limits);
         if (!prepared)
             std::terminate();
         const auto bound = prepared->bind(
@@ -839,12 +848,17 @@ class ServerApplication {
                           {"maximumDownloadArchiveBytes", config_.maximum_download_archive_bytes},
                           {"maximumDownloadArchiveTotalBytes", config_.maximum_download_archive_total_bytes},
                           {"maximumDownloadArchiveEntries", config_.maximum_download_archive_entries},
+                          {"maximumDownloadArchiveDepth", config_.maximum_download_archive_depth},
+                          {"maximumDownloadArchivePathBytes", config_.maximum_download_archive_path_bytes},
                           {"maximumConcurrentArchiveDownloads", config_.maximum_concurrent_archive_downloads},
                           {"downloadArchiveRetentionSeconds", config_.download_archive_retention_seconds},
                           {"maximumWebsocketDeliveryEvents", config_.maximum_websocket_delivery_events},
                           {"maximumWebsocketDeliveryBytes", config_.maximum_websocket_delivery_bytes},
                           {"maximumQueuedJobs", config_.maximum_queued_jobs},
                           {"maximumImageSessions", config_.maximum_image_sessions},
+                          {"maximumMediaBuildObjectBytes", config_.maximum_media_build_object_bytes},
+                          {"maximumMediaBuildPayloadBytes", config_.maximum_media_build_payload_bytes},
+                          {"maximumMediaBuildOutputBytes", config_.maximum_media_build_output_bytes},
                           {"maximumPageSize", config_.maximum_page_size}};
         Json sample_rates = Json::array();
         for (const auto rate : axk::supported_sampler_sample_rates)
@@ -1710,7 +1724,7 @@ class ServerApplication {
         response.set_header("X-Request-Id", id);
         response.set_header("Cache-Control", "no-store");
         response.set_header("Accept-Ranges", "bytes");
-        response.set_header("Content-Disposition", "attachment; filename=\"" + file->filename + "\"");
+        response.set_header("Content-Disposition", axk::server::attachment_content_disposition(file->filename));
         audit(id, "file_download", "allowed", request_owner(request), "root", root_id);
         return response;
     }
@@ -1799,7 +1813,8 @@ class ServerApplication {
         }
         response.set_header("X-Request-Id", id);
         response.set_header("Cache-Control", "no-store");
-        response.set_header("Content-Disposition", "attachment; filename=\"" + content->snapshot.filename + "\"");
+        response.set_header("Content-Disposition",
+                            axk::server::attachment_content_disposition(content->snapshot.filename));
         audit(id, "archive_download", "allowed", request_owner(request), "archive", archive_id);
         response.end();
     }

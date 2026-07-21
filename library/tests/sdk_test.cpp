@@ -276,6 +276,13 @@ TEST(Sdk, MediaBuildPlanCreatesAFat12Image) {
         << R"({"schema_version":"1.1","format":"fat12_floppy","authored_volume":{"name":"Volume","waveforms":[{"id":"tone","name":"Tone","path":"tone.wav","root_key":60}],"samples":[{"name":"Tone Sample","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127}]}})";
 
     axk::operation_context context;
+    axk::media_build_limits limits;
+    limits.maximum_object_bytes = 128U;
+    limits.maximum_aggregate_payload_bytes = 128U;
+    const auto limited = axk::build_plan::from_manifest(manifest.string(), limits, context);
+    ASSERT_FALSE(limited);
+    EXPECT_EQ(limited.error().code, axk::error_code::io_unsupported_size);
+
     auto plan = axk::build_plan::from_manifest(manifest.string(), context);
     ASSERT_TRUE(plan) << plan.error().message;
     EXPECT_EQ(plan->summary().size_bytes, 1'474'560U);

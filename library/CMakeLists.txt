@@ -100,6 +100,7 @@ add_library(
   src/catalog.cpp
   src/error.cpp
   src/effects.cpp
+  src/export_paths.cpp
   src/file_publication.cpp
   src/io.cpp
   src/media.cpp
@@ -473,6 +474,14 @@ if(BUILD_TESTING)
     axk_set_project_warnings(axk_large_image_memory_test)
     add_test(NAME Hardening.LargeImageMemory COMMAND axk_large_image_memory_test)
     set_tests_properties(Hardening.LargeImageMemory PROPERTIES TIMEOUT 120)
+
+    add_executable(axk_large_media_memory_test tests/large_media_memory_test.cpp)
+    target_compile_features(axk_large_media_memory_test PRIVATE cxx_std_23)
+    target_include_directories(axk_large_media_memory_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(axk_large_media_memory_test PRIVATE axklib::audio)
+    axk_set_project_warnings(axk_large_media_memory_test)
+    add_test(NAME Hardening.LargeMediaMemory COMMAND axk_large_media_memory_test)
+    set_tests_properties(Hardening.LargeMediaMemory PROPERTIES TIMEOUT 120)
   endif()
   # A sanitizer-instrumented static archive requires sanitizer runtime flags in
   # downstream executables. Package consumption is covered by the normal build;

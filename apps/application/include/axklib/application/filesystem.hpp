@@ -3,10 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -59,10 +61,44 @@ struct SandboxFile {
     std::shared_ptr<const axk::RandomAccessReader> reader;
 };
 
-struct SandboxTreeFile {
+enum class SandboxTreeEntryKind : std::uint8_t { file, directory };
+
+struct SandboxTreeEntry {
     std::string relative_path;
+    SandboxTreeEntryKind kind{SandboxTreeEntryKind::file};
     std::uint64_t size{};
+};
+
+struct OpenedSandboxTreeFile {
     std::shared_ptr<const axk::RandomAccessReader> reader;
+    std::function<Result<void>()> verify_unchanged;
+};
+
+struct SandboxTreeLimits {
+    std::size_t maximum_entries{};
+    std::uint64_t maximum_total_file_bytes{};
+    std::size_t maximum_depth{64U};
+    std::size_t maximum_path_bytes{32U * 1024U * 1024U};
+};
+
+class SandboxTree {
+  public:
+    SandboxTree();
+    ~SandboxTree();
+    SandboxTree(SandboxTree &&) noexcept;
+    SandboxTree &operator=(SandboxTree &&) noexcept;
+    SandboxTree(const SandboxTree &) = delete;
+    SandboxTree &operator=(const SandboxTree &) = delete;
+
+    [[nodiscard]] std::span<const SandboxTreeEntry> entries() const noexcept;
+    [[nodiscard]] Result<OpenedSandboxTreeFile> open_file(std::size_t index) const;
+
+  private:
+    struct Implementation;
+    explicit SandboxTree(std::unique_ptr<Implementation> implementation);
+
+    std::unique_ptr<Implementation> implementation_;
+    friend class Sandbox;
 };
 
 class Sandbox {
@@ -72,9 +108,7 @@ class Sandbox {
 
     [[nodiscard]] std::vector<RootInfo> roots() const;
     [[nodiscard]] Result<SandboxFile> open_file(const FileRef &reference) const;
-    [[nodiscard]] Result<std::vector<SandboxTreeFile>> open_tree_files(const DirectoryRef &reference,
-                                                                       std::size_t maximum_entries,
-                                                                       std::uint64_t maximum_total_bytes) const;
+    [[nodiscard]] Result<SandboxTree> open_tree(const DirectoryRef &reference, const SandboxTreeLimits &limits) const;
     [[nodiscard]] Result<void> publish_file(const FileRef &destination, bool overwrite,
                                             const axk::RandomAccessReader &source) const;
     [[nodiscard]] Result<std::filesystem::path> create_staging_directory(std::string_view purpose) const;

@@ -1095,12 +1095,17 @@
           "maximumDownloadArchiveBytes": {"type": "integer", "minimum": 1},
           "maximumDownloadArchiveTotalBytes": {"type": "integer", "minimum": 1},
           "maximumDownloadArchiveEntries": {"type": "integer", "minimum": 1},
+          "maximumDownloadArchiveDepth": {"type": "integer", "minimum": 1},
+          "maximumDownloadArchivePathBytes": {"type": "integer", "minimum": 1},
           "maximumConcurrentArchiveDownloads": {"type": "integer", "minimum": 1, "maximum": 64},
           "downloadArchiveRetentionSeconds": {"type": "integer", "minimum": 1},
           "maximumWebsocketDeliveryEvents": {"type": "integer", "minimum": 1},
           "maximumWebsocketDeliveryBytes": {"type": "integer", "minimum": 1},
           "maximumQueuedJobs": {"type": "integer", "minimum": 1},
           "maximumImageSessions": {"type": "integer", "minimum": 1},
+          "maximumMediaBuildObjectBytes": {"type": "integer", "minimum": 1},
+          "maximumMediaBuildPayloadBytes": {"type": "integer", "minimum": 1},
+          "maximumMediaBuildOutputBytes": {"type": "integer", "minimum": 1},
           "maximumPageSize": {"type": "integer", "minimum": 1, "maximum": 5000}
         }
       },

@@ -398,6 +398,12 @@ class AXK_SDK_API snapshot final {
     friend class image;
 };
 
+struct media_build_limits {
+    std::uint64_t maximum_object_bytes{64ULL * 1024ULL * 1024ULL};
+    std::uint64_t maximum_aggregate_payload_bytes{737'280'000ULL};
+    std::uint64_t maximum_output_bytes{737'280'000ULL};
+};
+
 class AXK_SDK_API build_plan final {
   public:
     build_plan();
@@ -408,6 +414,8 @@ class AXK_SDK_API build_plan final {
     build_plan &operator=(const build_plan &) = delete;
 
     static result<build_plan> from_manifest(const std::string &utf8_manifest_path, operation_context &context);
+    static result<build_plan> from_manifest(const std::string &utf8_manifest_path, const media_build_limits &limits,
+                                            operation_context &context);
     plan_summary summary() const noexcept;
     result<void> apply(const std::string &utf8_output_path, const write_options &options, operation_context &context);
 

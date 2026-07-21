@@ -25,8 +25,9 @@ axk::app::Error archive_error(std::string code, std::string message, bool retrya
 
 struct SourceEntry {
     std::string path;
+    axk::app::SandboxTreeEntryKind kind{axk::app::SandboxTreeEntryKind::file};
     std::uint64_t size{};
-    std::shared_ptr<const axk::RandomAccessReader> reader;
+    std::size_t source_index{};
 };
 
 bool split_tar_path(std::string_view path, std::string_view &name, std::string_view &prefix) {
@@ -78,15 +79,16 @@ axk::app::Result<std::array<char, tar_block_size>> tar_header(const SourceEntry 
             archive_error("archive_path_too_long", "directory entry does not fit the TAR path profile"));
     std::array<char, tar_block_size> header{};
     std::ranges::copy(name, header.begin());
-    if (!write_octal(std::span{header}.subspan(100U, 8U), 0644U) ||
+    const auto directory = entry.kind == axk::app::SandboxTreeEntryKind::directory;
+    if (!write_octal(std::span{header}.subspan(100U, 8U), directory ? 0755U : 0644U) ||
         !write_octal(std::span{header}.subspan(108U, 8U), 0U) ||
         !write_octal(std::span{header}.subspan(116U, 8U), 0U) ||
-        !write_octal(std::span{header}.subspan(124U, 12U), entry.size) ||
+        !write_octal(std::span{header}.subspan(124U, 12U), directory ? 0U : entry.size) ||
         !write_octal(std::span{header}.subspan(136U, 12U), 0U)) {
         return std::unexpected(archive_error("archive_too_large", "directory entry does not fit the TAR size profile"));
     }
     std::fill(header.begin() + 148, header.begin() + 156, ' ');
-    header[156] = '0';
+    header[156] = directory ? '5' : '0';
     constexpr std::string_view magic{"ustar\0", 6U};
     std::ranges::copy(magic, header.begin() + 257);
     header[263] = '0';
@@ -130,17 +132,20 @@ struct axk::app::DownloadArchiveStore::Implementation {
     std::uint64_t maximum_total_bytes{};
     std::uint64_t maximum_archive_bytes{};
     std::size_t maximum_entries{};
+    std::size_t maximum_depth{};
+    std::size_t maximum_path_bytes{};
     std::chrono::seconds retention{};
     Clock clock;
     std::uint64_t reserved_bytes{};
     std::mutex mutex;
     std::unordered_map<std::string, Entry> entries;
 
-    Implementation(std::filesystem::path directory, std::uint64_t total_bytes, std::uint64_t archive_bytes,
-                   std::size_t entry_limit, std::chrono::seconds archive_retention, Clock archive_clock)
-        : staging_directory(std::move(directory)), maximum_total_bytes(total_bytes),
-          maximum_archive_bytes(archive_bytes), maximum_entries(entry_limit), retention(archive_retention),
-          clock(std::move(archive_clock)) {}
+    Implementation(std::filesystem::path directory, DownloadArchiveLimits limits,
+                   std::chrono::seconds archive_retention, Clock archive_clock)
+        : staging_directory(std::move(directory)), maximum_total_bytes(limits.maximum_total_bytes),
+          maximum_archive_bytes(limits.maximum_archive_bytes), maximum_entries(limits.maximum_entries),
+          maximum_depth(limits.maximum_depth), maximum_path_bytes(limits.maximum_path_bytes),
+          retention(archive_retention), clock(std::move(archive_clock)) {}
 
     void cleanup_locked() {
         const auto now = clock();
@@ -186,9 +191,14 @@ axk::app::DownloadArchiveStore::DownloadArchiveStore(std::filesystem::path stagi
                                                      std::uint64_t maximum_total_bytes,
                                                      std::uint64_t maximum_archive_bytes, std::size_t maximum_entries,
                                                      std::chrono::seconds retention, Clock clock)
-    : implementation_(std::make_shared<Implementation>(std::move(staging_directory), maximum_total_bytes,
-                                                       maximum_archive_bytes, maximum_entries, retention,
-                                                       std::move(clock))) {
+    : DownloadArchiveStore(std::move(staging_directory), {maximum_total_bytes, maximum_archive_bytes, maximum_entries},
+                           retention, std::move(clock)) {}
+
+axk::app::DownloadArchiveStore::DownloadArchiveStore(std::filesystem::path staging_directory,
+                                                     DownloadArchiveLimits limits, std::chrono::seconds retention,
+                                                     Clock clock)
+    : implementation_(
+          std::make_shared<Implementation>(std::move(staging_directory), limits, retention, std::move(clock))) {
     std::error_code error;
     std::filesystem::create_directories(implementation_->staging_directory, error);
     if (!error) {
@@ -212,27 +222,31 @@ axk::app::Result<axk::app::DownloadArchiveSnapshot>
 axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sandbox, const DirectoryRef &source) {
     if (owner_id.empty())
         return std::unexpected(archive_error("invalid_archive_request", "download archive owner is required"));
-    std::vector<SourceEntry> files;
+    std::vector<SourceEntry> entries;
     std::uint64_t archive_size = tar_block_size * 2U;
-    auto opened =
-        sandbox.open_tree_files(source, implementation_->maximum_entries, implementation_->maximum_archive_bytes);
-    if (!opened)
-        return std::unexpected(opened.error());
-    for (auto &file : *opened) {
+    auto tree = sandbox.open_tree(source, {implementation_->maximum_entries, implementation_->maximum_archive_bytes,
+                                           implementation_->maximum_depth, implementation_->maximum_path_bytes});
+    if (!tree)
+        return std::unexpected(tree.error());
+    for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
+        const auto &entry = tree->entries()[index];
         std::string_view name;
         std::string_view prefix;
-        if (!split_tar_path(file.relative_path, name, prefix))
+        if (!split_tar_path(entry.relative_path, name, prefix))
             return std::unexpected(
                 archive_error("archive_path_too_long", "directory entry does not fit the TAR path profile"));
-        if (file.size > std::numeric_limits<std::uint64_t>::max() - archive_size - tar_block_size)
+        const auto payload_size = entry.kind == axk::app::SandboxTreeEntryKind::file ? padded_size(entry.size) : 0U;
+        if (payload_size > std::numeric_limits<std::uint64_t>::max() - archive_size - tar_block_size)
             return std::unexpected(archive_error("archive_too_large", "directory archive size overflows"));
-        archive_size += tar_block_size + padded_size(file.size);
-        files.push_back({std::move(file.relative_path), file.size, std::move(file.reader)});
-        if (files.size() > implementation_->maximum_entries || archive_size > implementation_->maximum_archive_bytes)
+        archive_size += tar_block_size + payload_size;
+        entries.push_back({entry.relative_path, entry.kind, entry.size, index});
+        if (entries.size() > implementation_->maximum_entries ||
+            archive_size > implementation_->maximum_archive_bytes) {
             return std::unexpected(
                 archive_error("download_archive_too_large", "directory archive exceeds configured limits"));
+        }
     }
-    std::ranges::sort(files, {}, &SourceEntry::path);
+    std::ranges::sort(entries, {}, &SourceEntry::path);
 
     std::string id;
     std::filesystem::path final_path;
@@ -265,19 +279,27 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
         return std::unexpected(archive_error("archive_storage_unavailable", "download archive cannot be created"));
     }
     std::vector<std::byte> buffer(1024U * 1024U);
-    for (const auto &file : files) {
-        const auto header = tar_header(file);
+    for (const auto &entry : entries) {
+        const auto header = tar_header(entry);
         if (!header) {
             output.close();
             release_reservation();
             return std::unexpected(header.error());
         }
         output.write(header->data(), static_cast<std::streamsize>(header->size()));
-        std::uint64_t remaining = file.size;
+        if (entry.kind == axk::app::SandboxTreeEntryKind::directory)
+            continue;
+        auto file = tree->open_file(entry.source_index);
+        if (!file) {
+            output.close();
+            release_reservation();
+            return std::unexpected(file.error());
+        }
+        std::uint64_t remaining = entry.size;
         std::uint64_t offset{};
         while (remaining != 0U) {
             const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.size()));
-            const auto read = file.reader->read_exact_at(offset, std::span{buffer}.first(count));
+            const auto read = file->reader->read_exact_at(offset, std::span{buffer}.first(count));
             if (!read) {
                 output.close();
                 release_reservation();
@@ -295,7 +317,12 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
             offset += count;
         }
         const std::array<char, tar_block_size> padding{};
-        const auto padding_size = padded_size(file.size) - file.size;
+        if (const auto unchanged = file->verify_unchanged(); !unchanged) {
+            output.close();
+            release_reservation();
+            return std::unexpected(unchanged.error());
+        }
+        const auto padding_size = padded_size(entry.size) - entry.size;
         output.write(padding.data(), static_cast<std::streamsize>(padding_size));
     }
     const std::array<char, tar_block_size * 2U> end_blocks{};
@@ -314,7 +341,7 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
 
     const std::scoped_lock lock{implementation_->mutex};
     auto [position, inserted] = implementation_->entries.emplace(
-        id, Implementation::Entry{owner_id, archive_filename(source), final_path, archive_size, files.size(),
+        id, Implementation::Entry{owner_id, archive_filename(source), final_path, archive_size, entries.size(),
                                   implementation_->clock() + implementation_->retention, 0U});
     if (!inserted) {
         implementation_->reserved_bytes -= archive_size;

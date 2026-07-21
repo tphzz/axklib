@@ -238,6 +238,12 @@ struct MediaBuildPlanSummary {
     std::size_t object_count{};
 };
 
+struct MediaBuildLimits {
+    std::uint64_t maximum_object_bytes{64ULL * 1024ULL * 1024ULL};
+    std::uint64_t maximum_aggregate_payload_bytes{737'280'000ULL};
+    std::uint64_t maximum_output_bytes{737'280'000ULL};
+};
+
 AXK_AUDIO_API Result<HdsBuildManifest> parse_hds_build_manifest(std::string_view json,
                                                                 const std::filesystem::path &base_directory = {});
 AXK_AUDIO_API Result<HdsBuildManifest> load_hds_build_manifest(const std::filesystem::path &path);
@@ -257,6 +263,9 @@ AXK_AUDIO_API Result<HdsBuildPlanSummary> plan_hds_build(const HdsBuildManifest 
                                                          const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildManifest &manifest,
                                                              const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildManifest &manifest,
+                                                             const MediaBuildLimits &limits,
+                                                             const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<std::uint32_t> choose_sampler_sample_rate(std::uint32_t source_rate,
                                                                std::optional<std::uint32_t> target_sample_rate = {});
 AXK_AUDIO_API Result<AudioSourceInfo> inspect_sampler_audio(const std::filesystem::path &path,
@@ -274,6 +283,10 @@ AXK_AUDIO_API Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest 
 AXK_AUDIO_API Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
                                                           const std::filesystem::path &output_path,
                                                           bool overwrite = false,
+                                                          const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
+                                                          const std::filesystem::path &output_path, bool overwrite,
+                                                          const MediaBuildLimits &limits,
                                                           const CancellationToken &cancellation = {});
 
 } // namespace axk

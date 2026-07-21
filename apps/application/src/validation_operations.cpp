@@ -964,13 +964,19 @@ std::optional<std::string> normalized_export_path(std::string_view raw_path, con
     return axk::text::path_to_utf8(normalized);
 }
 
-std::expected<Json, std::string> parse_export_json(const axk::app::SandboxTreeFile &file) {
+std::expected<Json, std::string> parse_export_json(const axk::app::SandboxTree &tree, std::size_t index,
+                                                   const axk::app::SandboxTreeEntry &file) {
     constexpr std::uint64_t maximum_sidecar_bytes = 64U * 1024U * 1024U;
     if (file.size > maximum_sidecar_bytes)
         return std::unexpected("sidecar exceeds the 64 MiB validation limit");
+    auto opened = tree.open_file(index);
+    if (!opened)
+        return std::unexpected(opened.error().message);
     std::vector<std::byte> bytes(static_cast<std::size_t>(file.size));
-    if (const auto read = file.reader->read_exact_at(0U, bytes); !read)
+    if (const auto read = opened->reader->read_exact_at(0U, bytes); !read)
         return std::unexpected(read.error().message);
+    if (const auto unchanged = opened->verify_unchanged(); !unchanged)
+        return std::unexpected(unchanged.error().message);
     try {
         return Json::parse(reinterpret_cast<const char *>(bytes.data()),
                            reinterpret_cast<const char *>(bytes.data() + bytes.size()));
@@ -979,18 +985,23 @@ std::expected<Json, std::string> parse_export_json(const axk::app::SandboxTreeFi
     }
 }
 
-std::vector<axk::ReportRow> validate_export_directory(std::span<const axk::app::SandboxTreeFile> files) {
+std::vector<axk::ReportRow> validate_export_directory(const axk::app::SandboxTree &tree) {
     std::vector<axk::ReportRow> issues;
-    std::map<std::string, const axk::app::SandboxTreeFile *, std::less<>> by_path;
-    for (const auto &file : files)
-        by_path.emplace(file.relative_path, &file);
-    for (const auto &file : files) {
+    std::map<std::string, std::size_t, std::less<>> by_path;
+    for (std::size_t index = 0U; index < tree.entries().size(); ++index) {
+        if (tree.entries()[index].kind == axk::app::SandboxTreeEntryKind::file)
+            by_path.emplace(tree.entries()[index].relative_path, index);
+    }
+    for (std::size_t index = 0U; index < tree.entries().size(); ++index) {
+        const auto &file = tree.entries()[index];
+        if (file.kind != axk::app::SandboxTreeEntryKind::file)
+            continue;
         const auto sidecar_path = axk::text::path_from_utf8(file.relative_path);
         if (!sidecar_path || sidecar_path->extension() != ".json" || sidecar_path->filename() == "schema_index.json" ||
             std::ranges::find(*sidecar_path, "_schemas") != sidecar_path->end()) {
             continue;
         }
-        const auto record_result = parse_export_json(file);
+        const auto record_result = parse_export_json(tree, index, file);
         if (!record_result) {
             issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_BAD_JSON",
                                                      "Sidecar JSON could not be parsed: " + record_result.error(),
@@ -1099,11 +1110,20 @@ std::vector<axk::ReportRow> validate_export_directory(std::span<const axk::app::
                                                      *sidecar_path, object_key));
             continue;
         }
-        const auto observed_header = parse_export_wav(*wav_file->second->reader);
-        if (!observed_header) {
+        auto opened_wav = tree.open_file(wav_file->second);
+        if (!opened_wav) {
+            issues.push_back(export_validation_issue("error", "EXPORT_WAV_CHANGED",
+                                                     "Referenced WAV changed during validation", "export", wav_path,
+                                                     object_key));
+            continue;
+        }
+        const auto observed_header = parse_export_wav(*opened_wav->reader);
+        const auto unchanged = opened_wav->verify_unchanged();
+        if (!observed_header || !unchanged) {
             issues.push_back(
                 export_validation_issue("error", "EXPORT_WAV_BAD_HEADER",
-                                        "Referenced WAV has an invalid WAVE header: " + observed_header.error(),
+                                        "Referenced WAV has an invalid WAVE header: " +
+                                            (observed_header ? unchanged.error().message : observed_header.error()),
                                         "export", wav_path, object_key));
             continue;
         }
@@ -1184,7 +1204,8 @@ axk::app::Result<Json> execute_validation(const axk::app::Sandbox &sandbox, cons
     if (request->exports) {
         constexpr std::size_t maximum_export_files = 100'000U;
         constexpr std::uint64_t maximum_export_bytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
-        auto export_files = sandbox.open_tree_files(*request->exports, maximum_export_files, maximum_export_bytes);
+        auto export_files = sandbox.open_tree(*request->exports,
+                                              {maximum_export_files, maximum_export_bytes, 64U, 32U * 1024U * 1024U});
         if (!export_files)
             return std::unexpected(export_files.error());
         issues = validate_export_directory(*export_files);

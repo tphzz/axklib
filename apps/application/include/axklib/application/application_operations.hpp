@@ -3,15 +3,18 @@
 #include "axklib/application/filesystem.hpp"
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/application/uploads.hpp"
+#include "axklib/writer.hpp"
 
 namespace axk::app {
 
 // Composes every stateful domain-operation family. Transport adapters should
 // depend on this function rather than knowing the individual service modules.
 [[nodiscard]] Result<void> bind_application_operations(OperationRegistry &registry, const Sandbox &sandbox,
-                                                       UploadStore &uploads);
+                                                       UploadStore &uploads,
+                                                       const axk::MediaBuildLimits &media_limits = {});
 [[nodiscard]] Result<OperationRegistry>
 make_application_registry(const Sandbox &sandbox, UploadStore &uploads,
-                          OperationRegistry registry = make_operation_registry());
+                          OperationRegistry registry = make_operation_registry(),
+                          const axk::MediaBuildLimits &media_limits = {});
 
 } // namespace axk::app

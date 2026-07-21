@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -244,12 +245,12 @@ TEST_F(SandboxTest, OpenFileRetainsTheValidatedObjectAcrossAParentSwap) {
     ASSERT_FALSE(error) << error.message();
 }
 
-TEST_F(SandboxTest, OpenTreeFilesRetainEveryValidatedObjectAcrossAParentSwap) {
+TEST_F(SandboxTest, OpenTreeReopensValidatedObjectsRelativeToTheRetainedRoot) {
     const auto value = sandbox();
     std::ofstream(root_ / "images" / "folder" / "inside.txt") << "inside";
-    const auto retained = value.open_tree_files({"workspace", "images/folder"}, 8U, 1024U);
+    const auto retained = value.open_tree({"workspace", "images/folder"}, {8U, 1024U});
     ASSERT_TRUE(retained) << retained.error().message;
-    ASSERT_EQ(retained->size(), 1U);
+    ASSERT_EQ(retained->entries().size(), 1U);
 
     const auto parent = root_ / "images" / "folder";
     const auto parked = root_ / "images" / "folder-parked";
@@ -263,13 +264,47 @@ TEST_F(SandboxTest, OpenTreeFilesRetainEveryValidatedObjectAcrossAParentSwap) {
         GTEST_SKIP() << "directory links are unavailable";
     }
 
-    std::vector<std::byte> bytes(static_cast<std::size_t>(retained->front().size));
-    ASSERT_TRUE(retained->front().reader->read_exact_at(0U, bytes));
+    auto opened = retained->open_file(0U);
+    ASSERT_TRUE(opened) << opened.error().message;
+    std::vector<std::byte> bytes(static_cast<std::size_t>(retained->entries().front().size));
+    ASSERT_TRUE(opened->reader->read_exact_at(0U, bytes));
+    ASSERT_TRUE(opened->verify_unchanged());
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(bytes.data()), bytes.size()), "inside");
 
     std::filesystem::remove(parent, error);
     std::filesystem::rename(parked, parent, error);
     ASSERT_FALSE(error) << error.message();
+}
+
+TEST_F(SandboxTest, OpenTreeRejectsAFileReplacedAfterCollection) {
+    const auto value = sandbox();
+    std::ofstream(root_ / "images" / "original.txt") << "original";
+    const auto tree = value.open_tree({"workspace", "images"}, {8U, 1024U});
+    ASSERT_TRUE(tree) << tree.error().message;
+    const auto found = std::ranges::find(tree->entries(), "original.txt", &axk::app::SandboxTreeEntry::relative_path);
+    ASSERT_NE(found, tree->entries().end());
+    const auto index = static_cast<std::size_t>(std::distance(tree->entries().begin(), found));
+
+    std::filesystem::rename(root_ / "images" / "original.txt", root_ / "images" / "parked.txt");
+    std::ofstream(root_ / "images" / "original.txt") << "replacement";
+
+    const auto opened = tree->open_file(index);
+    ASSERT_FALSE(opened);
+    EXPECT_EQ(opened.error().code, "archive_source_changed");
+}
+
+TEST_F(SandboxTest, OpenTreeBoundsDepthAndAggregatePathBytes) {
+    const auto value = sandbox();
+    std::filesystem::create_directories(root_ / "images/deep/child");
+    std::ofstream(root_ / "images/deep/child/file.txt") << "data";
+
+    const auto too_deep = value.open_tree({"workspace", "images"}, {16U, 1024U, 2U, 1024U});
+    ASSERT_FALSE(too_deep);
+    EXPECT_EQ(too_deep.error().code, "download_archive_too_large");
+
+    const auto too_many_path_bytes = value.open_tree({"workspace", "images"}, {16U, 1024U, 8U, 8U});
+    ASSERT_FALSE(too_many_path_bytes);
+    EXPECT_EQ(too_many_path_bytes.error().code, "download_archive_too_large");
 }
 
 TEST_F(SandboxTest, RejectsMutationsAfterAValidatedParentIsReplacedByALink) {

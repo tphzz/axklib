@@ -2736,7 +2736,7 @@ TEST(PackageRegressionMatrix, MixesSfsFat12AndIsoSourcesIntoIso9660Deterministic
     target_manifest.raw_volume = "F001";
     target_manifest.authored_volume =
         single_sample_volume(target_audio, "Target Volume", "Target Wave", "Target Sample");
-    auto prepared = axk::detail::prepare_media_image(target_manifest, {});
+    auto prepared = axk::detail::prepare_media_image(target_manifest, {}, {});
     ASSERT_TRUE(prepared) << prepared.error().message;
     const std::vector retained_payload{std::byte{'r'}, std::byte{'e'}, std::byte{'t'},
                                        std::byte{'a'}, std::byte{'i'}, std::byte{'n'}};
@@ -2877,7 +2877,7 @@ TEST(PackageImportApply, RebuildsIsoWithVolumeLocalReuseAndByteIdenticalRepeat) 
     target_manifest.volume_name = "Target Volume";
     target_manifest.raw_volume = "F001";
     target_manifest.authored_volume = graph_volume(audio_path);
-    auto target_prepared = axk::detail::prepare_media_image(target_manifest, {});
+    auto target_prepared = axk::detail::prepare_media_image(target_manifest, {}, {});
     ASSERT_TRUE(target_prepared) << target_prepared.error().message;
     const std::vector retained_payload{std::byte{'r'}, std::byte{'e'}, std::byte{'t'},
                                        std::byte{'a'}, std::byte{'i'}, std::byte{'n'}};

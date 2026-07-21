@@ -278,7 +278,15 @@
             "minimum": 1,
             "type": "integer"
           },
+          "maximumDownloadArchiveDepth": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "maximumDownloadArchiveEntries": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maximumDownloadArchivePathBytes": {
             "minimum": 1,
             "type": "integer"
           },
@@ -311,6 +319,18 @@
             "type": "integer"
           },
           "maximumJsonStringBytes": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maximumMediaBuildObjectBytes": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maximumMediaBuildOutputBytes": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maximumMediaBuildPayloadBytes": {
             "minimum": 1,
             "type": "integer"
           },

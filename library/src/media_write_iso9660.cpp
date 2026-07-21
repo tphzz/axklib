@@ -61,8 +61,14 @@ struct IsoNode {
     std::string name;
     bool directory{};
     std::uint32_t sector{};
-    std::vector<std::byte> data;
     std::size_t parent{};
+    std::vector<std::byte> owned_data;
+    const std::vector<std::byte> *external_data{};
+
+    [[nodiscard]] std::span<const std::byte> data() const noexcept {
+        return external_data == nullptr ? std::span<const std::byte>{owned_data}
+                                        : std::span<const std::byte>{*external_data};
+    }
 };
 
 std::vector<std::byte> directory_record(const IsoNode &node, std::span<const std::byte> name) {
@@ -71,7 +77,7 @@ std::vector<std::byte> directory_record(const IsoNode &node, std::span<const std
     result[0] = static_cast<std::byte>(length);
     little32(result, 2, node.sector);
     big32(result, 6, node.sector);
-    const auto data_size = node.directory ? sector_size : node.data.size();
+    const auto data_size = node.directory ? sector_size : node.data().size();
     little32(result, 10, static_cast<std::uint32_t>(data_size));
     big32(result, 14, static_cast<std::uint32_t>(data_size));
     const auto time = recording_time();
@@ -200,19 +206,29 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
                                           "ISO9660 writer requires an uppercase ISO volume identifier")};
     }
 
-    std::vector<PreparedIsoVolume> volumes = image.iso_volumes;
-    if (volumes.empty()) {
+    struct VolumeView {
+        std::string_view raw_group;
+        std::string_view group_name;
+        std::string_view raw_volume;
+        std::string_view volume_name;
+        std::span<const PreparedMediaObject> objects;
+    };
+    std::vector<VolumeView> volumes;
+    if (image.iso_volumes.empty()) {
         volumes.push_back(
             {manifest.raw_group, manifest.group_name, manifest.raw_volume, manifest.volume_name, image.objects});
+    } else {
+        volumes.reserve(image.iso_volumes.size());
+        for (const auto &volume : image.iso_volumes) {
+            volumes.push_back(
+                {volume.raw_group, volume.group_name, volume.raw_volume, volume.volume_name, volume.objects});
+        }
     }
-    if (volumes.empty())
-        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
-                                          "ISO9660 writer requires at least one Yamaha volume")};
     std::ranges::sort(volumes, [](const auto &left, const auto &right) {
         return std::tie(left.raw_group, left.raw_volume) < std::tie(right.raw_group, right.raw_volume);
     });
 
-    std::map<std::string, std::vector<const PreparedIsoVolume *>, std::less<>> groups;
+    std::map<std::string, std::vector<const VolumeView *>, std::less<>> groups;
     std::set<std::pair<std::string, std::string>> volume_ids;
     std::map<std::string, std::string, std::less<>> group_labels;
     for (const auto &volume : volumes) {
@@ -233,7 +249,7 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
                                               "ISO9660 volumes in one raw group must share one "
                                               "sampler-visible group label")};
         }
-        groups[volume.raw_group].push_back(&volume);
+        groups[std::string{volume.raw_group}].push_back(&volume);
     }
     for (const auto &[raw_group, group_volumes] : groups) {
         for (std::size_t index = 0; index < group_volumes.size(); ++index) {
@@ -246,7 +262,7 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
         }
     }
 
-    std::vector<IsoNode> nodes{{"", true, 0, {}, 0}};
+    std::vector<IsoNode> nodes{{"", true, 0, 0, {}, nullptr}};
     const auto add_directory = [&](std::string name, std::size_t parent) -> Result<std::size_t> {
         if (!iso_identifier(name, 31U)) {
             return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
@@ -257,17 +273,29 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
             return std::unexpected{
                 make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, "duplicate ISO9660 path")};
         }
-        nodes.push_back({std::move(name), true, 0, {}, parent});
+        nodes.push_back({std::move(name), true, 0, parent, {}, nullptr});
         return nodes.size() - 1U;
     };
-    const auto add_file = [&](std::string name, std::vector<std::byte> data, std::size_t parent) -> Result<void> {
+    const auto validate_file = [&](std::string_view name, std::size_t parent) -> Result<void> {
         if (!iso_identifier(name, 31U) || std::ranges::find_if(nodes, [&](const auto &node) {
                                               return node.parent == parent && node.name == name;
                                           }) != nodes.end()) {
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                               "invalid or duplicate ISO9660 file path")};
         }
-        nodes.push_back({std::move(name), false, 0, std::move(data), parent});
+        return {};
+    };
+    const auto add_owned_file = [&](std::string name, std::vector<std::byte> data, std::size_t parent) -> Result<void> {
+        if (auto valid = validate_file(name, parent); !valid)
+            return valid;
+        nodes.push_back({std::move(name), false, 0, parent, std::move(data), nullptr});
+        return {};
+    };
+    const auto add_external_file = [&](std::string name, const std::vector<std::byte> &data,
+                                       std::size_t parent) -> Result<void> {
+        if (auto valid = validate_file(name, parent); !valid)
+            return valid;
+        nodes.push_back({std::move(name), false, 0, parent, {}, &data});
         return {};
     };
     const auto find_child = [&](std::size_t parent, std::string_view name) -> std::optional<std::size_t> {
@@ -319,17 +347,17 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
         const auto group_label_filename = std::format("F{:03}", group_volumes.size() + 1U);
         const auto name_record = disk_name_record(group_label_filename);
         group_catalog.insert(group_catalog.end(), name_record.begin(), name_record.end());
-        if (auto added = add_file("0000", std::move(group_catalog), *group); !added)
+        if (auto added = add_owned_file("0000", std::move(group_catalog), *group); !added)
             return std::unexpected{added.error()};
-        std::vector<std::pair<const PreparedIsoVolume *, std::size_t>> volume_nodes;
+        std::vector<std::pair<const VolumeView *, std::size_t>> volume_nodes;
         volume_nodes.reserve(group_volumes.size());
         for (const auto *volume : group_volumes) {
-            auto volume_node = add_directory(volume->raw_volume, *group);
+            auto volume_node = add_directory(std::string{volume->raw_volume}, *group);
             if (!volume_node)
                 return std::unexpected{volume_node.error()};
             volume_nodes.emplace_back(volume, *volume_node);
         }
-        if (auto added = add_file(group_label_filename, label_file(group_labels.at(raw_group)), *group); !added) {
+        if (auto added = add_owned_file(group_label_filename, label_file(group_labels.at(raw_group)), *group); !added) {
             return std::unexpected{added.error()};
         }
         for (const auto &[volume, volume_node] : volume_nodes) {
@@ -354,10 +382,11 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
                     catalog_bytes.insert(catalog_bytes.end(), record.begin(), record.end());
                     filenames.push_back(std::move(filename));
                 }
-                if (auto added = add_file("0000", std::move(catalog_bytes), *category_node); !added)
+                if (auto added = add_owned_file("0000", std::move(catalog_bytes), *category_node); !added)
                     return std::unexpected{added.error()};
                 for (std::size_t index = 0; index < objects.size(); ++index) {
-                    if (auto added = add_file(std::move(filenames[index]), objects[index]->payload, *category_node);
+                    if (auto added =
+                            add_external_file(std::move(filenames[index]), objects[index]->payload, *category_node);
                         !added) {
                         return std::unexpected{added.error()};
                     }
@@ -375,7 +404,7 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
         auto parent = ensure_directory(parent_path);
         if (!parent)
             return std::unexpected{parent.error()};
-        if (auto added = add_file(std::string{name}, retained.payload, *parent); !added)
+        if (auto added = add_external_file(std::string{name}, retained.payload, *parent); !added)
             return std::unexpected{added.error()};
     }
 
@@ -383,7 +412,7 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
     file_sizes.reserve(nodes.size());
     for (const auto &node : nodes) {
         if (!node.directory)
-            file_sizes.push_back(node.data.size());
+            file_sizes.push_back(node.data().size());
     }
     const auto directory_count = static_cast<std::size_t>(std::ranges::count(nodes, true, &IsoNode::directory));
     const auto sector_count = checked_iso9660_sector_count(directory_count, file_sizes);
@@ -401,14 +430,20 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
         if (node.directory)
             continue;
         node.sector = next_sector;
-        next_sector += static_cast<std::uint32_t>(node.data.size() / sector_size +
-                                                  (node.data.size() % sector_size == 0U ? 0U : 1U));
+        next_sector += static_cast<std::uint32_t>(node.data().size() / sector_size +
+                                                  (node.data().size() % sector_size == 0U ? 0U : 1U));
     }
     if (next_sector != *sector_count) {
         return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
                                           "ISO9660 sector projection disagrees with allocation")};
     }
-    std::vector<std::byte> image_bytes(static_cast<std::size_t>(*sector_count) * sector_size);
+    const auto output_size = static_cast<std::uint64_t>(*sector_count) * sector_size;
+    if (output_size > image.limits.maximum_output_bytes) {
+        return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
+                                          "ISO9660 output exceeds the configured build limit")};
+    }
+    if (auto resized = resize_temporary_file(temporary_path, output_size); !resized)
+        return resized;
 
     std::vector<std::size_t> directory_indices;
     for (std::size_t index = 0; index < nodes.size(); ++index) {
@@ -429,20 +464,29 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "ISO9660 path table exceeds the narrow one-sector profile")};
     }
-    std::ranges::copy(little_path, image_bytes.begin() + little_path_sector * sector_size);
-    std::ranges::copy(big_path, image_bytes.begin() + big_path_sector * sector_size);
+    if (auto written = write_temporary_file_at(
+            temporary_path, static_cast<std::uint64_t>(little_path_sector) * sector_size, little_path);
+        !written) {
+        return written;
+    }
+    if (auto written = write_temporary_file_at(temporary_path,
+                                               static_cast<std::uint64_t>(big_path_sector) * sector_size, big_path);
+        !written) {
+        return written;
+    }
 
     for (const auto index : directory_indices) {
         const auto &node = nodes[index];
-        const auto directory_offset = static_cast<std::size_t>(node.sector) * sector_size;
+        const auto directory_offset = static_cast<std::uint64_t>(node.sector) * sector_size;
+        std::array<std::byte, sector_size> directory_bytes{};
         std::size_t offset{};
         const std::array<std::byte, 1> dot{std::byte{0}};
         const std::array<std::byte, 1> dotdot{std::byte{1}};
         const auto self = directory_record(node, dot);
         const auto parent = directory_record(nodes[index == 0 ? 0 : node.parent], dotdot);
-        std::ranges::copy(self, image_bytes.begin() + static_cast<std::ptrdiff_t>(directory_offset));
+        std::ranges::copy(self, directory_bytes.begin());
         offset += self.size();
-        std::ranges::copy(parent, image_bytes.begin() + static_cast<std::ptrdiff_t>(directory_offset + offset));
+        std::ranges::copy(parent, directory_bytes.begin() + static_cast<std::ptrdiff_t>(offset));
         offset += parent.size();
         for (const auto &child : nodes) {
             if (&child == &nodes[0] || child.parent != index)
@@ -453,17 +497,34 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
                 return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                   "ISO9660 directory exceeds the narrow one-sector profile")};
             }
-            std::ranges::copy(record, image_bytes.begin() + static_cast<std::ptrdiff_t>(directory_offset + offset));
+            std::ranges::copy(record, directory_bytes.begin() + static_cast<std::ptrdiff_t>(offset));
             offset += record.size();
         }
+        if (auto written = write_temporary_file_at(temporary_path, directory_offset, directory_bytes); !written)
+            return written;
     }
+    constexpr std::size_t write_chunk_size = 1024U * 1024U;
     for (const auto &node : nodes) {
-        if (!node.directory) {
-            std::ranges::copy(node.data, image_bytes.begin() + static_cast<std::ptrdiff_t>(node.sector * sector_size));
+        if (node.directory)
+            continue;
+        const auto data = node.data();
+        std::size_t offset{};
+        while (offset < data.size()) {
+            if (const auto check = cancellation.check(); !check)
+                return std::unexpected{check.error()};
+            const auto count = std::min(write_chunk_size, data.size() - offset);
+            if (auto written = write_temporary_file_at(temporary_path,
+                                                       static_cast<std::uint64_t>(node.sector) * sector_size + offset,
+                                                       data.subspan(offset, count));
+                !written) {
+                return written;
+            }
+            offset += count;
         }
     }
 
-    auto pvd = std::span{image_bytes}.subspan(16U * sector_size, sector_size);
+    std::array<std::byte, sector_size> pvd_bytes{};
+    auto pvd = std::span{pvd_bytes};
     pvd[0] = std::byte{1};
     ascii(pvd, 1, 5, "CD001");
     pvd[6] = std::byte{1};
@@ -487,16 +548,17 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
         pvd[offset + 16U] = std::byte{0};
     }
     pvd[881] = std::byte{1};
-    auto terminator = std::span{image_bytes}.subspan(17U * sector_size, sector_size);
+    std::array<std::byte, sector_size> terminator_bytes{};
+    auto terminator = std::span{terminator_bytes};
     terminator[0] = std::byte{255};
     ascii(terminator, 1, 5, "CD001");
     terminator[6] = std::byte{1};
 
     if (const auto check = cancellation.check(); !check)
         return std::unexpected{check.error()};
-    if (auto resized = resize_temporary_file(temporary_path, image_bytes.size()); !resized)
-        return resized;
-    return write_temporary_file_at(temporary_path, 0U, image_bytes);
+    if (auto written = write_temporary_file_at(temporary_path, 16U * sector_size, pvd); !written)
+        return written;
+    return write_temporary_file_at(temporary_path, 17U * sector_size, terminator);
 }
 
 } // namespace axk::detail

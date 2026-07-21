@@ -335,3 +335,60 @@ TEST(AudioExport, DeduplicatesSfzNamesAcrossLogicalVolumesSharingOneDirectory) {
     EXPECT_TRUE(std::filesystem::is_regular_file(output / "shared-volume/Duplicate (2).sfz"));
     std::filesystem::remove_all(output, error);
 }
+
+TEST(AudioExport, RejectsEveryEscapingPlanPathBeforeCreatingOutput) {
+    axk::Waveform waveform;
+    waveform.format = {1, 2, 44100};
+    waveform.frame_count = 1;
+    waveform.pcm = {std::byte{}, std::byte{}};
+    axk::VolumeExport volume;
+    volume.relative_root = "volume";
+    volume.waveforms = {{"wave", "Wave", "SMPL/Wave.wav", waveform}};
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Sample";
+    sample.members = {{"left", "wave", "SMPL/Wave.wav", axk::RelationshipQuality::known}};
+    sample.rendered_wav_path = "RENDERED/Sample.wav";
+    volume.samples = {sample};
+    axk::ExportPlan base;
+    base.volumes = {volume};
+    base.unresolved_wave_data = {{axk::PartitionIndex{0}, "", "unresolved", {volume.waveforms.front()}}};
+
+    const auto root = std::filesystem::temp_directory_path() / "axklib-export-containment-test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    const auto outside = root.parent_path() / "axklib-export-containment-outside.wav";
+    std::filesystem::remove(outside, error);
+
+    const auto rejected = [&](axk::ExportPlan plan, bool sfz = false) {
+        const auto result = sfz ? static_cast<bool>(axk::write_sfz(plan, root))
+                                : static_cast<bool>(axk::write_export_audio(plan, root));
+        EXPECT_FALSE(result);
+        EXPECT_FALSE(std::filesystem::exists(root));
+        EXPECT_FALSE(std::filesystem::exists(outside));
+    };
+
+    auto absolute = base;
+    absolute.volumes[0].waveforms[0].relative_wav_path = outside;
+    rejected(std::move(absolute));
+
+    auto physical = base;
+    physical.volumes[0].waveforms[0].relative_wav_path = "../../axklib-export-containment-outside.wav";
+    rejected(std::move(physical));
+
+    auto rendered = base;
+    rendered.volumes[0].samples[0].rendered_wav_path = "../../axklib-export-containment-outside.wav";
+    rejected(std::move(rendered));
+
+    auto member = base;
+    member.volumes[0].samples[0].members[0].relative_wav_path = "../../axklib-export-containment-outside.wav";
+    rejected(std::move(member), true);
+
+    auto unresolved = base;
+    unresolved.unresolved_wave_data[0].relative_root = "../../escape";
+    rejected(std::move(unresolved));
+
+    auto sfz = base;
+    sfz.volumes[0].relative_root = "../../escape";
+    rejected(std::move(sfz), true);
+}

@@ -52,6 +52,7 @@ struct PreparedIsoVolume {
 
 struct PreparedMediaImage {
     MediaBuildManifest manifest;
+    MediaBuildLimits limits{};
     std::vector<PreparedMediaObject> objects;
     std::vector<PreparedMediaFile> retained_files;
     std::vector<PreparedIsoVolume> iso_volumes;
@@ -72,7 +73,7 @@ Result<std::vector<PreparedRecord>> prepare_partition_records(const PartitionSpe
                                                               std::size_t partition_count,
                                                               const CancellationToken &cancellation);
 
-Result<PreparedMediaImage> prepare_media_image(const MediaBuildManifest &manifest,
+Result<PreparedMediaImage> prepare_media_image(const MediaBuildManifest &manifest, const MediaBuildLimits &limits,
                                                const CancellationToken &cancellation);
 Result<WrittenMediaImage>
 write_prepared_media_image(const PreparedMediaImage &image, const std::filesystem::path &output_path, bool overwrite,

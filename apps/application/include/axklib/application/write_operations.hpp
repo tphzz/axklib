@@ -10,12 +10,13 @@
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/application/uploads.hpp"
 #include "axklib/error.hpp"
+#include "axklib/writer.hpp"
 
 namespace axk::app {
 
 [[nodiscard]] Result<void> bind_manifest_operations(OperationRegistry &registry);
 [[nodiscard]] Result<void> bind_write_operations(OperationRegistry &registry, const Sandbox &sandbox,
-                                                 UploadStore &uploads);
+                                                 UploadStore &uploads, const axk::MediaBuildLimits &media_limits = {});
 
 struct LocalManifestInputBinding {
     std::string manifest_path;

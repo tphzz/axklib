@@ -376,6 +376,19 @@ Non-object files such as `YAMAHA.SYM` or model-specific system metadata are
 therefore outside whole-source transfer. This is deliberately described as a
 byte-preserving Yamaha-object transfer, not a sector-level floppy clone.
 
+Transfer planning inventories object metadata and relationships before it
+loads payloads. For `selection: "roots"`, only the selected dependency closure
+is loaded. The C++ engine's `MediaBuildLimits` and the shared SDK's
+`media_build_limits` bound each object, all prepared payloads together, and the
+completed output. Their defaults are 64 MiB per object and 737,280,000 bytes
+for both aggregate payloads and output. Supplying a limits object to
+`plan_media_build()` or `build_plan::from_manifest()` makes object and aggregate
+payload admission part of planning; the output limit is checked against the ISO
+projection before the temporary file is resized. The same limits remain
+attached to an SDK plan during apply. Limits may be lowered for a constrained
+host but must remain nonzero, and the object limit cannot exceed the aggregate
+payload limit.
+
 Physical Yamaha hardware has enumerated the generated group and volume, loaded
 the transferred Program, Sample Banks, and Samples and resolved their transferred Wave Data
 relationships, and produced audible playback. The transferred Sequence was
@@ -616,6 +629,12 @@ Both removable-media writers:
 2. reopen the temporary image through the production reader;
 3. compare the complete expected and reopened object-payload multisets;
 4. publish only after those checks pass.
+
+ISO sectors are written directly to the reserved temporary file in bounded
+chunks. Reopen validation inventories metadata first and hashes retained files
+and object payloads one at a time. The writer therefore does not allocate a
+second output-sized image buffer; prepared payload memory and output size are
+still independently bounded by `MediaBuildLimits`.
 
 This proves deterministic container construction and exact object retention
 within axklib. It does not replace physical sampler testing for a new object

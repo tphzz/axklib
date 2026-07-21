@@ -130,6 +130,23 @@ The scalar environment overrides are `AXKLIB_SERVER_BIND`,
 `AXKLIB_SERVER_MAX_QUEUED_JOBS`. Prefer the configuration file for the
 workspace-store override, origins, token hashes, and detailed resource limits.
 
+Directory archives count both files and directories. In addition to entry and
+byte quotas, `maximumDownloadArchiveDepth` (default `64`) and
+`maximumDownloadArchivePathBytes` (default 32 MiB) bound traversal depth and
+the aggregate bytes needed for relative paths. Traversal retains only the
+selected directory capability; files are reopened and identity-checked one at
+a time while the TAR is written, so `maximumDownloadArchiveEntries` is not also
+a file-descriptor budget.
+
+Fresh floppy and ISO planning uses `maximumMediaBuildObjectBytes` (default
+64 MiB), `maximumMediaBuildPayloadBytes` (default 737,280,000 bytes), and
+`maximumMediaBuildOutputBytes` (default 737,280,000 bytes). The first limit
+cannot exceed the aggregate payload limit. Server values may lower, but cannot
+raise, the public engine defaults. Payload admission failures return HTTP `413`
+during planning; an oversized ISO projection is rejected during apply before
+the temporary file is resized or published. These values are reported by
+`GET /api/v1/system/capabilities`.
+
 Non-loopback startup rejects plaintext tokens, wildcard or missing origins,
 and missing named token hashes. Terminate HTTPS at a trusted reverse proxy;
 Crow TLS is intentionally not enabled in axklib-server.
@@ -176,8 +193,8 @@ resource. A request whose own archive or payload exceeds a configured limit is
 not transient and returns `413` instead.
 
 The capabilities response also reports the active JSON, upload, download,
-queue, image-session, and page limits. Clients should honor those values rather
-than assuming compiled defaults.
+archive traversal, media build, queue, image-session, and page limits. Clients
+should honor those values rather than assuming compiled defaults.
 
 Existing HDS images are normally altered into a distinct output file. A trusted
 workspace client that needs to update the selected image may submit

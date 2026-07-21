@@ -3068,13 +3068,11 @@ apply_iso9660_package_import(const std::filesystem::path &target_path, std::span
     std::ranges::sort(prepared.iso_volumes, [](const auto &left, const auto &right) {
         return std::tie(left.raw_group, left.raw_volume) < std::tie(right.raw_group, right.raw_volume);
     });
-    prepared.objects.clear();
     for (auto &volume : prepared.iso_volumes) {
         std::ranges::sort(volume.objects, [](const auto &left, const auto &right) {
             return std::tuple{left.type, left.name, left.payload.size()} <
                    std::tuple{right.type, right.name, right.payload.size()};
         });
-        prepared.objects.insert(prepared.objects.end(), volume.objects.begin(), volume.objects.end());
     }
     std::ranges::sort(prepared.retained_files, {}, &detail::PreparedMediaFile::path);
     const auto validator = [&](const std::filesystem::path &temporary) -> Result<void> {

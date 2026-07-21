@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <barrier>
 #include <chrono>
@@ -40,8 +41,8 @@ TEST_F(DownloadArchiveStoreTest, CreatesOwnerBoundDeterministicTarAndRemovesItEx
     const auto created = store.create("owner-a", *sandbox_, {"workspace", "exports"});
     ASSERT_TRUE(created) << created.error().message;
     EXPECT_EQ(created->filename, "exports.tar");
-    EXPECT_EQ(created->entry_count, 2U);
-    EXPECT_EQ(created->size_bytes, 3072U);
+    EXPECT_EQ(created->entry_count, 3U);
+    EXPECT_EQ(created->size_bytes, 3584U);
 
     const auto denied = store.open(created->reference, "owner-b");
     ASSERT_FALSE(denied);
@@ -57,8 +58,10 @@ TEST_F(DownloadArchiveStoreTest, CreatesOwnerBoundDeterministicTarAndRemovesItEx
     ASSERT_EQ(bytes.size(), created->size_bytes);
     EXPECT_EQ(std::string(bytes.data(), 9U), "alpha.txt");
     EXPECT_EQ(std::string(bytes.data() + 512, 5U), "alpha");
-    EXPECT_EQ(std::string(bytes.data() + 1024, 15U), "nested/beta.bin");
-    EXPECT_EQ(std::string(bytes.data() + 1536, 4U), "beta");
+    EXPECT_EQ(std::string(bytes.data() + 1024, 6U), "nested");
+    EXPECT_EQ(bytes[1024U + 156U], '5');
+    EXPECT_EQ(std::string(bytes.data() + 1536, 15U), "nested/beta.bin");
+    EXPECT_EQ(std::string(bytes.data() + 2048, 4U), "beta");
 
     ASSERT_TRUE(store.remove(created->reference, "owner-a"));
     EXPECT_FALSE(store.inspect(created->reference, "owner-a"));
@@ -86,7 +89,7 @@ TEST_F(DownloadArchiveStoreTest, EnforcesEntryByteAndRetentionLimitsWithoutLeavi
 
 TEST_F(DownloadArchiveStoreTest, RetainsExpiredArchiveAndQuotaWhenRemovalFails) {
     auto now = std::chrono::steady_clock::now();
-    axk::app::DownloadArchiveStore store{root_ / "locked",   3072U, 3072U, 4U, std::chrono::seconds{5},
+    axk::app::DownloadArchiveStore store{root_ / "locked",   3584U, 3584U, 4U, std::chrono::seconds{5},
                                          [&] { return now; }};
     const auto created = store.create("owner", *sandbox_, {"workspace", "exports"});
     ASSERT_TRUE(created) << created.error().message;
@@ -137,7 +140,7 @@ TEST_F(DownloadArchiveStoreTest, ActiveDownloadLeaseDefersExpiryAndDeletion) {
 }
 
 TEST_F(DownloadArchiveStoreTest, ConcurrentReservationsCannotExceedTheArchiveQuota) {
-    axk::app::DownloadArchiveStore store{root_ / "concurrent", 3072U, 3072U, 16U, std::chrono::seconds{30}};
+    axk::app::DownloadArchiveStore store{root_ / "concurrent", 3584U, 3584U, 16U, std::chrono::seconds{30}};
     constexpr std::size_t contenders = 8U;
     std::barrier start{static_cast<std::ptrdiff_t>(contenders)};
     std::atomic<std::size_t> accepted{};
@@ -161,6 +164,39 @@ TEST_F(DownloadArchiveStoreTest, ConcurrentReservationsCannotExceedTheArchiveQuo
 
     EXPECT_EQ(accepted, 1U);
     EXPECT_EQ(rejected, contenders - 1U);
+}
+
+TEST_F(DownloadArchiveStoreTest, CountsAndArchivesWideEmptyDirectoryTrees) {
+    constexpr std::size_t file_count = 1500U;
+    std::filesystem::create_directories(root_ / "wide/empty/leaf");
+    for (std::size_t index = 0U; index < file_count; ++index)
+        std::ofstream{root_ / "wide" / ("file-" + std::to_string(index) + ".bin"), std::ios::binary}.put('x');
+
+    axk::app::DownloadArchiveStore store{root_ / "wide-archives", 4U * 1024U * 1024U, 4U * 1024U * 1024U,
+                                         file_count + 2U, std::chrono::seconds{30}};
+    const auto created = store.create("owner", *sandbox_, {"workspace", "wide"});
+    ASSERT_TRUE(created) << created.error().message;
+    EXPECT_EQ(created->entry_count, file_count + 2U);
+
+    const auto content = store.open(created->reference, "owner");
+    ASSERT_TRUE(content) << content.error().message;
+    std::vector<std::byte> bytes(static_cast<std::size_t>(content->reader->size()));
+    ASSERT_TRUE(content->reader->read_exact_at(0U, bytes));
+    std::size_t directory_headers{};
+    for (std::size_t offset = 0U; offset + 512U <= bytes.size();) {
+        const auto header = std::span{bytes}.subspan(offset, 512U);
+        if (std::ranges::all_of(header, [](std::byte value) { return value == std::byte{}; }))
+            break;
+        if (header[156U] == std::byte{'5'})
+            ++directory_headers;
+        std::uint64_t size{};
+        for (std::size_t digit = 124U;
+             digit < 135U && header[digit] >= std::byte{'0'} && header[digit] <= std::byte{'7'}; ++digit) {
+            size = size * 8U + static_cast<std::uint64_t>(std::to_integer<unsigned int>(header[digit]) - '0');
+        }
+        offset += 512U + static_cast<std::size_t>((size + 511U) / 512U) * 512U;
+    }
+    EXPECT_EQ(directory_headers, 2U);
 }
 
 } // namespace

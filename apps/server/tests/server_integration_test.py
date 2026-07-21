@@ -1124,12 +1124,17 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "maximumDownloadArchiveBytes": 4 * 1024 * 1024 * 1024,
                 "maximumDownloadArchiveTotalBytes": 8 * 1024 * 1024 * 1024,
                 "maximumDownloadArchiveEntries": 100000,
+                "maximumDownloadArchiveDepth": 64,
+                "maximumDownloadArchivePathBytes": 32 * 1024 * 1024,
                 "maximumConcurrentArchiveDownloads": 1,
                 "downloadArchiveRetentionSeconds": 300,
                 "maximumWebsocketDeliveryEvents": 1024,
                 "maximumWebsocketDeliveryBytes": 4 * 1024 * 1024,
                 "maximumQueuedJobs": 64,
                 "maximumImageSessions": 32,
+                "maximumMediaBuildObjectBytes": 64 * 1024 * 1024,
+                "maximumMediaBuildPayloadBytes": 737280000,
+                "maximumMediaBuildOutputBytes": 737280000,
                 "maximumPageSize": 500,
             }
             status, metrics = http_request(port, "GET", "/api/v1/system/metrics")
@@ -1344,14 +1349,14 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert status == 201, archive
             assert archive["data"]["filename"] == "archive-source.tar"
-            assert archive["data"]["entryCount"] == 2
+            assert archive["data"]["entryCount"] == 3
             archive_path = str(archive["data"]["contentPath"])
             status, content, headers = raw_http_request(port, "GET", archive_path)
             assert status == 200 and headers["content-type"].startswith(
                 "application/x-tar"
             ), headers
             with tarfile.open(fileobj=io.BytesIO(content), mode="r:") as downloaded:
-                assert downloaded.getnames() == ["alpha.txt", "nested/beta.bin"]
+                assert downloaded.getnames() == ["alpha.txt", "nested", "nested/beta.bin"]
                 alpha = downloaded.extractfile("alpha.txt")
                 beta = downloaded.extractfile("nested/beta.bin")
                 assert alpha is not None and alpha.read() == b"alpha"

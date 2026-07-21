@@ -177,7 +177,8 @@ Result<void> bind_standard_path_accesses(axk::app::OperationRegistry &registry) 
 } // namespace
 
 axk::app::Result<void> axk::app::bind_application_operations(OperationRegistry &registry, const Sandbox &sandbox,
-                                                             UploadStore &uploads) {
+                                                             UploadStore &uploads,
+                                                             const axk::MediaBuildLimits &media_limits) {
     if (auto bound = bind_file_operations(registry, sandbox); !bound)
         return bound;
     if (auto bound = bind_audio_operations(registry, sandbox, uploads); !bound)
@@ -188,14 +189,15 @@ axk::app::Result<void> axk::app::bind_application_operations(OperationRegistry &
         return bound;
     if (auto bound = bind_package_operations(registry, sandbox, uploads); !bound)
         return bound;
-    if (auto bound = bind_write_operations(registry, sandbox, uploads); !bound)
+    if (auto bound = bind_write_operations(registry, sandbox, uploads, media_limits); !bound)
         return bound;
     return bind_standard_path_accesses(registry);
 }
 
 axk::app::Result<axk::app::OperationRegistry>
-axk::app::make_application_registry(const Sandbox &sandbox, UploadStore &uploads, OperationRegistry registry) {
-    if (auto bound = bind_application_operations(registry, sandbox, uploads); !bound)
+axk::app::make_application_registry(const Sandbox &sandbox, UploadStore &uploads, OperationRegistry registry,
+                                    const axk::MediaBuildLimits &media_limits) {
+    if (auto bound = bind_application_operations(registry, sandbox, uploads, media_limits); !bound)
         return std::unexpected(bound.error());
     return registry;
 }

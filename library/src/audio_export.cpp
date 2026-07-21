@@ -10,6 +10,7 @@
 #include <tuple>
 #include <unordered_map>
 
+#include "axklib/export_paths.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
 #include "axklib/utf8.hpp"
@@ -577,6 +578,8 @@ Result<ExportPlan> build_export_plan(const MediaContainer &container, const Obje
 
 Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::filesystem::path &output_directory,
                                         bool overwrite, const CancellationToken &cancellation) {
+    if (auto valid = audio_internal::validate_export_plan_paths(plan, output_directory); !valid)
+        return std::unexpected{valid.error()};
     ExportResult result;
     std::map<std::filesystem::path, audio_internal::WavSource> targets;
     const auto register_target = [&](const std::filesystem::path &path,
@@ -595,7 +598,8 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
     };
     for (const auto &volume : plan.volumes) {
         for (const auto &waveform : volume.waveforms) {
-            const auto path = (output_directory / volume.relative_root / waveform.relative_wav_path).lexically_normal();
+            const std::array parts{volume.relative_root, waveform.relative_wav_path};
+            const auto path = *audio_internal::resolve_export_destination(output_directory, parts);
             if (auto registered = register_target(path, audio_internal::WavSource::from_physical(waveform.waveform));
                 !registered)
                 return std::unexpected{registered.error()};
@@ -609,7 +613,8 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
                                                  &PhysicalWaveformExport::object_key);
             if (left == volume.waveforms.end() || right == volume.waveforms.end())
                 continue;
-            const auto path = (output_directory / volume.relative_root / *sample.rendered_wav_path).lexically_normal();
+            const std::array parts{volume.relative_root, *sample.rendered_wav_path};
+            const auto path = *audio_internal::resolve_export_destination(output_directory, parts);
             if (auto registered =
                     register_target(path, audio_internal::WavSource::from_stereo(left->waveform, right->waveform));
                 !registered)
@@ -618,7 +623,8 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
     }
     for (const auto &scope : plan.unresolved_wave_data) {
         for (const auto &waveform : scope.waveforms) {
-            const auto path = (output_directory / scope.relative_root / waveform.relative_wav_path).lexically_normal();
+            const std::array parts{scope.relative_root, waveform.relative_wav_path};
+            const auto path = *audio_internal::resolve_export_destination(output_directory, parts);
             if (auto registered = register_target(path, audio_internal::WavSource::from_physical(waveform.waveform));
                 !registered)
                 return std::unexpected{registered.error()};
@@ -645,11 +651,14 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
 
 Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem::path &output_directory,
                                   bool overwrite) {
+    if (auto valid = audio_internal::validate_export_plan_paths(plan, output_directory); !valid)
+        return std::unexpected{valid.error()};
     SfzExportResult result;
     std::vector<std::filesystem::path> planned_paths;
     std::set<std::filesystem::path> reserved_paths;
     const auto reserve_path = [&](const VolumeExport &volume, std::string name) {
-        const auto directory = output_directory / volume.relative_root;
+        const std::array parts{volume.relative_root};
+        const auto directory = *audio_internal::resolve_export_destination(output_directory, parts);
         const auto stem = safe_component(std::move(name), "instrument");
         auto path = directory / (stem + ".sfz");
         for (std::size_t index = 2U; reserved_paths.contains(path); ++index)

@@ -78,6 +78,7 @@ add_library(
   src/event_delivery_budget.cpp
   src/event_dispatcher.cpp
   src/event_tickets.cpp
+  src/http_headers.cpp
   src/job_json.cpp
   src/process_lifetime.cpp
   src/request_validation.cpp
@@ -156,6 +157,7 @@ if(BUILD_TESTING)
     tests/event_delivery_budget_test.cpp
     tests/event_dispatcher_test.cpp
     tests/event_tickets_test.cpp
+    tests/http_headers_test.cpp
     tests/job_json_test.cpp
     tests/process_lifetime_test.cpp
     tests/request_validation_test.cpp
