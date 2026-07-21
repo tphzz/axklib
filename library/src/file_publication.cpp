@@ -455,13 +455,12 @@ Result<void> publish_temporary_file(const std::filesystem::path &temporary, cons
         CloseHandle(retained->handle);
         retained->handle = INVALID_HANDLE_VALUE;
     }
-    if (retained->parent_handle == INVALID_HANDLE_VALUE)
-        return identity_error();
     const auto filename = output.filename().native();
     std::vector<std::byte> rename_buffer(sizeof(FILE_RENAME_INFO) + filename.size() * sizeof(wchar_t));
     auto *rename_info = reinterpret_cast<FILE_RENAME_INFO *>(rename_buffer.data());
     rename_info->ReplaceIfExists = overwrite ? TRUE : FALSE;
-    rename_info->RootDirectory = retained->parent_handle;
+    // A simple name with no root handle renames within the open candidate's directory.
+    rename_info->RootDirectory = nullptr;
     rename_info->FileNameLength = static_cast<DWORD>(filename.size() * sizeof(wchar_t));
     std::memcpy(rename_info->FileName, filename.data(), rename_info->FileNameLength);
     const auto renamed = SetFileInformationByHandle(publication_handle.get(), FileRenameInfo, rename_info,
