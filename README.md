@@ -175,6 +175,27 @@ uploaded into memory. See [REST and WebSocket server](docs/axklib/server.md) for
 workspace setup, configuration, filesystem references, downloads, jobs, LAN
 deployment, and the OpenAPI contract.
 
+## Desktop
+
+The Svelte/Tauri desktop application lives in `apps/axkdeck`. It packages the
+`axklib-server` binary from the current monorepo native build; Cargo does not
+configure or rebuild the C++ project. For local development, build the release
+server once, install the desktop dependencies, and launch Tauri:
+
+```bash
+cmake --preset release
+cmake --build --preset release --target axklib_server
+cd apps/axkdeck
+corepack pnpm install --frozen-lockfile
+corepack pnpm desktop:dev
+```
+
+Use `corepack pnpm desktop:dev:fresh` to incrementally rebuild the server before
+launching. Native CI reuses each tested matrix server for the matching desktop
+build and produces Linux x64/ARM64 DEB and RPM packages, Windows x64/ARM64 NSIS
+installers, and one universal macOS DMG. See the
+[axkdeck development guide](apps/axkdeck/README.md) for platform prerequisites.
+
 ## License
 
 This project is licensed under the Mozilla Public License 2.0.

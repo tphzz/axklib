@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      sign_windows_desktop:
+        description: "Windows: Sign axkdeck NSIS installers"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -55,9 +60,44 @@ jobs:
           --baseline apps/server/contracts/openapi-v1.compatibility.json
           --candidate apps/server/contracts/openapi-v1.json
 
+  desktop-static:
+    name: Desktop static checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout axklib
+        uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/axkdeck/pnpm-lock.yaml
+      - name: Install desktop dependencies
+        working-directory: apps/axkdeck
+        run: pnpm install --frozen-lockfile
+      - name: Validate desktop sources
+        working-directory: apps/axkdeck
+        run: |
+          pnpm version:check
+          pnpm contract:check
+          pnpm format:check
+          pnpm test
+          pnpm check
+          pnpm build
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+          components: rustfmt
+      - name: Validate Rust formatting
+        run: cargo fmt --manifest-path apps/axkdeck/src-tauri/Cargo.toml -- --check
+
   native:
     name: ${{ matrix.name }}
-    needs: release-tools
+    needs:
+      - release-tools
+      - desktop-static
     strategy:
       fail-fast: false
       matrix:
@@ -65,18 +105,24 @@ jobs:
           - name: Linux x64
             runner: ubuntu-24.04
             artifact: linux-x64
+            desktop_platform: linux
+            desktop_architecture: x64
             triplet: x64-linux-axk
             build_testing: "ON"
             run_tests: true
           - name: Linux ARM64
             runner: ubuntu-24.04-arm
             artifact: linux-arm64
+            desktop_platform: linux
+            desktop_architecture: arm64
             triplet: arm64-linux-axk
             build_testing: "ON"
             run_tests: true
           - name: Windows x64
             runner: windows-2025-vs2026
             artifact: windows-x64
+            desktop_platform: windows
+            desktop_architecture: x64
             triplet: x64-windows-axk
             build_testing: "ON"
             run_tests: true
@@ -85,6 +131,8 @@ jobs:
           - name: Windows ARM64
             runner: windows-11-vs2026-arm
             artifact: windows-arm64
+            desktop_platform: windows
+            desktop_architecture: arm64
             triplet: arm64-windows-axk
             build_testing: "ON"
             run_tests: true
@@ -343,6 +391,223 @@ jobs:
           python tools/python/release_server_smoke.py \
             --server "$server" \
             --fixture tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/axkdeck/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+          components: clippy
+
+      - name: Restore desktop Rust cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/axkdeck/src-tauri/target
+          key: axkdeck-rust-v1-${{ matrix.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            axkdeck-rust-v1-${{ matrix.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-
+            axkdeck-rust-v1-${{ matrix.artifact }}-
+
+      - name: Install Linux desktop packaging dependencies
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          build-essential curl wget file pkg-config libssl-dev libxdo-dev
+          libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+          patchelf rpm cpio
+
+      - name: Install desktop dependencies
+        working-directory: apps/axkdeck
+        run: pnpm install --frozen-lockfile
+
+      - name: Select the tested native server for axkdeck
+        shell: bash
+        run: |
+          set -euo pipefail
+          server="$GITHUB_WORKSPACE/build/native/${{ inputs.debug && 'debug' || 'release' }}/apps/server/axklib-server"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            server="${server}.exe"
+          fi
+          test -f "$server"
+          "$server" --print-version
+          echo "AXKLIB_SERVER_BINARY=$server" >> "$GITHUB_ENV"
+
+      - name: Test desktop Rust integration
+        if: >-
+          matrix.artifact == 'linux-x64' ||
+          matrix.artifact == 'windows-x64' ||
+          matrix.artifact == 'macos-arm64'
+        run: cargo test --manifest-path apps/axkdeck/src-tauri/Cargo.toml
+
+      - name: Lint desktop Rust integration
+        if: matrix.artifact == 'linux-x64'
+        run: |
+          cargo clippy --manifest-path apps/axkdeck/src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --manifest-path apps/axkdeck/src-tauri/Cargo.toml --all-targets --release -- -D warnings
+
+      - name: Generate desktop SBOM from the tested native server
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          python tools/python/generate_sbom.py \
+            --axklib-root . \
+            --axkdeck-root apps/axkdeck \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" \
+            --profile server \
+            --output apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+
+      - name: Import Windows desktop signing certificate
+        if: runner.os == 'Windows' && inputs.sign_windows_desktop
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or
+              [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw 'WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD secrets are required'
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'axkdeck-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $pfx `
+            -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build Linux desktop packages
+        if: runner.os == 'Linux'
+        working-directory: apps/axkdeck
+        run: pnpm tauri build
+
+      - name: Build Windows desktop package
+        if: runner.os == 'Windows'
+        working-directory: apps/axkdeck
+        shell: pwsh
+        run: |
+          if ('${{ inputs.sign_windows_desktop }}' -eq 'true') {
+            $config = Join-Path $env:RUNNER_TEMP 'tauri-signing.json'
+            @{
+              bundle = @{
+                windows = @{
+                  certificateThumbprint = $env:WINDOWS_CERTIFICATE_THUMBPRINT
+                  digestAlgorithm = 'sha256'
+                  timestampUrl = 'http://timestamp.digicert.com'
+                  tsp = $true
+                }
+              }
+            } | ConvertTo-Json -Depth 4 | Set-Content -Path $config -Encoding utf8
+            pnpm tauri build --config $config
+          } else {
+            pnpm tauri build
+          }
+
+      - name: Build macOS desktop slice
+        if: runner.os == 'macOS'
+        working-directory: apps/axkdeck
+        run: pnpm tauri build --no-bundle
+
+      - name: Reject nested native desktop builds
+        shell: bash
+        run: |
+          if find apps/axkdeck/src-tauri/target -type f -name CMakeCache.txt -print -quit | grep .; then
+            echo 'Cargo unexpectedly configured a nested axklib build.' >&2
+            exit 1
+          fi
+
+      - name: Inspect Linux desktop packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle=apps/axkdeck/src-tauri/target/release/bundle
+          scan=build/tmp/axkdeck-package-scan-${{ matrix.artifact }}
+          rm -rf "$scan"
+          mkdir -p "$scan/deb" "$scan/rpm"
+          deb=$(find "$bundle/deb" -type f -name '*.deb' -print -quit)
+          rpm=$(find "$bundle/rpm" -type f -name '*.rpm' -print -quit)
+          test -n "$deb"
+          test -n "$rpm"
+          dpkg-deb -x "$deb" "$scan/deb"
+          (cd "$scan/rpm" && rpm2cpio "$GITHUB_WORKSPACE/$rpm" | cpio -idm)
+          for root in "$scan/deb" "$scan/rpm"; do
+            python tools/python/inspect_package.py "$root"
+            find "$root" -type f -name axkdeck -print -quit | grep .
+            find "$root" -type f -name axklib-server -print -quit | grep .
+            find "$root" -type f -name axkdeck.spdx.json -print -quit | grep .
+            find "$root" -type f -name LGPL-2.1-or-later.txt -print -quit | grep .
+          done
+
+      - name: Install and inspect Windows desktop package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bundle = Join-Path $PWD 'apps\axkdeck\src-tauri\target\release\bundle\nsis'
+          $installer = Get-ChildItem $bundle -Filter '*.exe' | Select-Object -First 1
+          if ($null -eq $installer) { throw 'NSIS installer was not generated' }
+          $install = Join-Path $env:RUNNER_TEMP 'axkdeck-installed'
+          $process = Start-Process $installer.FullName -ArgumentList '/S', "/D=$install" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NSIS installation failed with $($process.ExitCode)" }
+          python tools/python/inspect_package.py $install
+          if (-not (Get-ChildItem $install -Recurse -Filter axkdeck.exe)) { throw 'axkdeck.exe missing' }
+          if (-not (Get-ChildItem $install -Recurse -Filter axklib-server.exe)) { throw 'axklib-server.exe missing' }
+          if (-not (Get-ChildItem $install -Recurse -Filter axkdeck.spdx.json)) { throw 'desktop SBOM missing' }
+          if (-not (Get-ChildItem $install -Recurse -Filter LGPL-2.1-or-later.txt)) { throw 'LGPL notice missing' }
+          $uninstaller = Get-ChildItem $install -Recurse -Filter 'uninstall.exe' | Select-Object -First 1
+          if ($null -eq $uninstaller) { throw 'NSIS uninstaller missing' }
+          $process = Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NSIS uninstall failed with $($process.ExitCode)" }
+
+      - name: Generate Linux desktop release metadata
+        if: runner.os == 'Linux'
+        run: >-
+          python tools/python/desktop_release.py
+          --bundle-directory apps/axkdeck/src-tauri/target/release/bundle
+          --extension .deb --extension .rpm
+          --output-directory build/artifacts/axkdeck-${{ matrix.artifact }}
+          --commit "${{ github.sha }}"
+          --platform "${{ matrix.desktop_platform }}"
+          --architecture "${{ matrix.desktop_architecture }}"
+          --package-json apps/axkdeck/package.json
+          --axklib-version-metadata build/native/${{ inputs.debug && 'debug' || 'release' }}/version_metadata.json
+          --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+
+      - name: Generate Windows desktop release metadata
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/python/desktop_release.py
+          --bundle-directory apps/axkdeck/src-tauri/target/release/bundle/nsis
+          --extension .exe
+          --output-directory build/artifacts/axkdeck-${{ matrix.artifact }}
+          --commit "${{ github.sha }}"
+          --platform "${{ matrix.desktop_platform }}"
+          --architecture "${{ matrix.desktop_architecture }}"
+          --package-json apps/axkdeck/package.json
+          --axklib-version-metadata build/native/${{ inputs.debug && 'debug' || 'release' }}/version_metadata.json
+          --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+
+      - name: Upload Linux or Windows desktop packages
+        if: runner.os != 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: axkdeck-${{ matrix.artifact }}
+          path: |
+            apps/axkdeck/src-tauri/target/release/bundle/**/*
+            build/artifacts/axkdeck-${{ matrix.artifact }}/*
+          if-no-files-found: error
 
       - name: Package combined Linux or Windows distribution
         if: runner.os != 'macOS'
@@ -731,6 +996,92 @@ jobs:
             --sign "$MACOS_DEV_ID_CERT_NAME" build/tmp/universal/bin/axklib-server
           codesign --verify --strict --verbose=2 build/tmp/universal/bin/axklib-server
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/axkdeck/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Restore universal desktop Rust cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/axkdeck/src-tauri/target
+          key: axkdeck-rust-v1-macos-universal-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            axkdeck-rust-v1-macos-universal-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-
+            axkdeck-rust-v1-macos-universal-
+
+      - name: Install desktop dependencies
+        working-directory: apps/axkdeck
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate universal desktop SBOM
+        run: |
+          python tools/python/generate_sbom.py \
+            --axklib-root . \
+            --axkdeck-root apps/axkdeck \
+            --version-metadata-file build/tmp/macos-arm64-version-metadata.json \
+            --package-basename-file build/tmp/macos-arm64-package-basename.txt \
+            --profile server \
+            --output apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+
+      - name: Build signed universal macOS desktop DMG
+        working-directory: apps/axkdeck
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_DEV_ID_CERT_NAME }}
+          AXKLIB_SERVER_BINARY: ${{ github.workspace }}/build/tmp/universal/bin/axklib-server
+        run: |
+          set -euo pipefail
+          test -n "$APPLE_SIGNING_IDENTITY"
+          mkdir -p src-tauri/binaries
+          cp "$AXKLIB_SERVER_BINARY" \
+            src-tauri/binaries/axklib-server-universal-apple-darwin
+          pnpm tauri build --target universal-apple-darwin
+
+      - name: Verify universal macOS desktop package
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle=apps/axkdeck/src-tauri/target/universal-apple-darwin/release/bundle
+          app=$(find "$bundle/macos" -type d -name '*.app' -print -quit)
+          dmg=$(find "$bundle/dmg" -type f -name '*.dmg' -print -quit)
+          test -n "$app"
+          test -n "$dmg"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          main="$app/Contents/MacOS/axkdeck"
+          sidecar="$app/Contents/MacOS/axklib-server"
+          test -f "$main"
+          test -f "$sidecar"
+          lipo "$main" -verify_arch x86_64 arm64
+          lipo "$sidecar" -verify_arch x86_64 arm64
+          test -f "$app/Contents/Resources/licenses/axkdeck.spdx.json"
+          test -f "$app/Contents/Resources/licenses/LGPL-2.1-or-later.txt"
+
+      - name: Generate universal macOS desktop release metadata
+        run: >-
+          python tools/python/desktop_release.py
+          --bundle-directory apps/axkdeck/src-tauri/target/universal-apple-darwin/release/bundle/dmg
+          --extension .dmg
+          --output-directory build/artifacts/axkdeck-macos-universal
+          --commit "${{ github.sha }}"
+          --platform macos
+          --architecture universal
+          --package-json apps/axkdeck/package.json
+          --axklib-version-metadata build/tmp/macos-arm64-version-metadata.json
+          --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+
       - name: Package signed macOS universal distribution
         shell: bash
         env:
@@ -778,6 +1129,35 @@ jobs:
             --password "$APPLE_NOTARY_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
+
+      - name: Notarize and staple universal macOS desktop DMG
+        if: inputs.notarize_macos
+        shell: bash
+        env:
+          APPLE_NOTARY_USER: ${{ secrets.APPLE_NOTARY_USER }}
+          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          dmg=$(find apps/axkdeck/src-tauri/target/universal-apple-darwin/release/bundle/dmg \
+            -type f -name '*.dmg' -print -quit)
+          test -n "$dmg"
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_NOTARY_USER" \
+            --password "$APPLE_NOTARY_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+
+      - name: Upload universal macOS desktop DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: axkdeck-macos-universal
+          path: |
+            apps/axkdeck/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            build/artifacts/axkdeck-macos-universal/*
+          if-no-files-found: error
 
       - name: Upload universal macOS distribution
         uses: actions/upload-artifact@v7

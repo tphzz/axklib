@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "axkdeck",
+  "version": "0.1.0",
+  "identifier": "app.axkdeck.desktop",
+  "build": {
+    "beforeDevCommand": "corepack pnpm dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "corepack pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "axkdeck",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 800,
+        "minHeight": 600,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "visible": true,
+        "dragDropEnabled": true,
+        "backgroundColor": "#111315"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' customprotocol: asset:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:* https: wss:; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "externalBin": [
+      "binaries/axklib-server"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "resources/LGPL-2.1-or-later.txt": "licenses/LGPL-2.1-or-later.txt",
+      "resources/THIRD-PARTY-NOTICES.md": "licenses/THIRD-PARTY-NOTICES.md",
+      "resources/axkdeck.spdx.json": "licenses/axkdeck.spdx.json"
+    },
+    "category": "Music",
+    "shortDescription": "Yamaha A-series disk workspace",
+    "longDescription": "Browse and organize Yamaha A-series sampler disks, programs, banks, and waveforms."
+  }
+}

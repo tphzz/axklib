@@ -372,7 +372,7 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
 
-    assert workflow.count("uses: actions/cache@v6") == 2
+    assert workflow.count("uses: actions/cache@v6") == 4
     assert "sccache" not in workflow.lower()
     assert "cold_build" not in workflow
     assert "git rev-parse HEAD:external/vcpkg" in workflow
@@ -382,6 +382,8 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert "key: vcpkg-v2-${{ matrix.triplet }}-" in workflow
     assert "vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-" in workflow
     assert "key: native-v1-${{ matrix.triplet }}-" in workflow
+    assert "key: axkdeck-rust-v1-${{ matrix.artifact }}-" in workflow
+    assert "key: axkdeck-rust-v1-macos-universal-" in workflow
     assert "${{ steps.native-toolchain.outputs.toolchain_fingerprint }}" in workflow
     assert "${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}" in workflow
     assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/vcpkg_installed/**" not in workflow
@@ -393,6 +395,25 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert "Save native incremental build cache after failure" in workflow
     assert workflow.count("steps.configure-native.outcome == 'success'") == 2
     assert workflow.count("continue-on-error: true") == 2
+
+
+def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+
+    assert "desktop-static:" in workflow
+    assert "needs:\n      - release-tools\n      - desktop-static" in workflow
+    assert "AXKLIB_SERVER_BINARY=$server" in workflow
+    assert "pnpm tauri build --no-bundle" in workflow
+    assert workflow.count("pnpm tauri build") >= 4
+    assert '--extension .deb --extension .rpm' in workflow
+    assert '--extension .exe' in workflow
+    assert '--extension .dmg' in workflow
+    assert "name: axkdeck-${{ matrix.artifact }}" in workflow
+    assert "name: axkdeck-macos-universal" in workflow
+    assert "pnpm tauri build --target universal-apple-darwin" in workflow
+    assert "lipo \"$sidecar\" -verify_arch x86_64 arm64" in workflow
+    assert "if-no-files-found: error" in workflow
 
 
 def test_native_workflow_restores_macos_slices_across_rerun_attempts() -> None:

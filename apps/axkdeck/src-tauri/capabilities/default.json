@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions for the main axkdeck window.",
+  "windows": ["main"],
+  "permissions": ["core:default", "log:default", "fs:allow-read-file"]
+}
