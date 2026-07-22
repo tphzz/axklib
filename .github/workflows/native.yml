@@ -829,6 +829,7 @@ jobs:
       - name: Checkout axklib
         uses: actions/checkout@v7
         with:
+          submodules: recursive
           fetch-depth: 0
 
       - uses: actions/setup-python@v6

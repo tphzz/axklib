@@ -535,6 +535,10 @@ def test_native_workflow_restores_macos_slices_across_rerun_attempts() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
 
+    universal_job = workflow.split("  macos-universal:\n", 1)[1].split(
+        "  draft-release:\n", 1
+    )[0]
+    assert "submodules: recursive" in universal_job
     assert "key: macos-x86_64-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert "restore-keys: |\n            macos-x86_64-${{ github.run_id }}-" in workflow
     assert "key: macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
