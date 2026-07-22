@@ -428,7 +428,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y
           build-essential curl wget file pkg-config libssl-dev libxdo-dev
           libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-          patchelf rpm cpio
+          patchelf rpm libarchive-tools
 
       - name: Install desktop dependencies
         working-directory: apps/axkdeck
@@ -545,7 +545,8 @@ jobs:
           test -n "$deb"
           test -n "$rpm"
           dpkg-deb -x "$deb" "$scan/deb"
-          (cd "$scan/rpm" && rpm2cpio "$GITHUB_WORKSPACE/$rpm" | cpio -idm)
+          rpm -Kv "$rpm"
+          bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"
           for root in "$scan/deb" "$scan/rpm"; do
             python tools/python/inspect_package.py "$root"
             find "$root" -type f -name axkdeck -print -quit | grep .

@@ -517,6 +517,20 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert "if-no-files-found: error" in workflow
 
 
+def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
+    root = Path(__file__).resolve().parents[3]
+    attributes = (root / ".gitattributes").read_text(encoding="utf-8")
+    prettier = json.loads((root / "apps/axkdeck/.prettierrc.json").read_text(encoding="utf-8"))
+    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+
+    assert "/apps/axkdeck/src/lib/generated/axklibApiV1.ts text eol=lf" in attributes
+    assert prettier["endOfLine"] == "lf"
+    assert "libarchive-tools" in workflow
+    assert 'rpm -Kv "$rpm"' in workflow
+    assert 'bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"' in workflow
+    assert "rpm2cpio" not in workflow
+
+
 def test_native_workflow_restores_macos_slices_across_rerun_attempts() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")

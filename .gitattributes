@@ -1,6 +1,7 @@
 /library/fuzz/corpus/** binary
 /library/fuzz/corpus/README.md text eol=lf
 /tests/fixtures/images/sampler-authored/MANIFEST.json text eol=lf
+/apps/axkdeck/src/lib/generated/axklibApiV1.ts text eol=lf
 *.aiff binary
 *.flac binary
 *.hda binary
