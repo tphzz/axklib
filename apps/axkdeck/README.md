@@ -79,8 +79,8 @@ For Arch, Fedora, openSUSE, Alpine, NixOS, and other distributions, use the
 distribution-specific package list in the official
 [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux).
 
-After installing the system packages, verify the complete toolchain from the
-`axkdeck` directory:
+After installing the system packages, verify the complete toolchain from
+`apps/axkdeck`:
 
 ```bash
 rustc --version
@@ -183,8 +183,12 @@ separate x64 and ARM64 NSIS installers, and matching DEB and RPM packages.
 
 ## Develop
 
+Run the following commands from `apps/axkdeck`. The native release server must
+already exist at `build/native/release/apps/server/axklib-server` relative to
+the monorepo root, as described under **Native dependencies** above.
+
 ```bash
-corepack pnpm install
+corepack pnpm install --frozen-lockfile
 corepack pnpm dev
 ```
 
