@@ -52,6 +52,14 @@ script stages the existing native release server and never configures or builds
 the C++ project. Set `AXKLIB_SERVER_BINARY` only when using a nonstandard native
 build directory.
 
+The same Git tag versions axklib and axkdeck. `desktop:dev` and
+`desktop:build` read `version_metadata.json` and `package_basename.txt` from the
+native build, inject that identity into Tauri, and embed it in the Rust binary.
+The tracked npm and Cargo versions are `0.0.0` placeholders and are not release
+version sources. A locally launched desktop refuses a bundled sidecar whose
+semantic version or source identity differs, so rebuild the native server after
+changing commits.
+
 ### Linux
 
 Tauri uses the system WebKitGTK webview on Linux and therefore requires native
@@ -91,7 +99,7 @@ corepack pnpm tauri info
 ```
 
 All entries in the `Environment` section of `tauri info` should show as
-available before running `corepack pnpm tauri build`.
+available before running `corepack pnpm desktop:build`.
 
 #### Linux graphics compatibility
 
@@ -119,7 +127,7 @@ including preparation, transfer, decoding, cache, and scheduling timings. For
 example:
 
 ```bash
-AXKDECK_LOG_LEVEL=debug corepack pnpm tauri dev
+AXKDECK_LOG_LEVEL=debug corepack pnpm desktop:dev
 ```
 
 ### macOS
@@ -253,13 +261,15 @@ the server request ID when one is available.
 ```bash
 corepack pnpm format:check
 corepack pnpm contract:check
+corepack pnpm version:check
+corepack pnpm version:test
 corepack pnpm test
 corepack pnpm check
 corepack pnpm build
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-corepack pnpm tauri build
+corepack pnpm desktop:build
 ```
 
 TypeScript and Svelte source is formatted with the project-local

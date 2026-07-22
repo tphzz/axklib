@@ -14,6 +14,28 @@ use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 const LOG_FILE_SIZE: u128 = 5 * 1024 * 1024;
 const RETAINED_LOG_FILES: usize = 3;
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopBuildInfo {
+    schema_version: u32,
+    semantic_version: &'static str,
+    project_version: &'static str,
+    source_identity: &'static str,
+    release_tag: &'static str,
+    is_release: bool,
+}
+
+fn current_build_info() -> DesktopBuildInfo {
+    DesktopBuildInfo {
+        schema_version: 1,
+        semantic_version: env!("AXKDECK_SEMANTIC_VERSION"),
+        project_version: env!("AXKDECK_PROJECT_VERSION"),
+        source_identity: env!("AXKDECK_SOURCE_IDENTITY"),
+        release_tag: env!("AXKDECK_RELEASE_TAG"),
+        is_release: env!("AXKDECK_IS_RELEASE") == "true",
+    }
+}
+
 fn parse_log_level(value: Option<&str>) -> log::LevelFilter {
     match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
         Some("trace") => log::LevelFilter::Trace,
@@ -53,7 +75,7 @@ fn log_level_name(level: log::LevelFilter) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_log_level;
+    use super::{current_build_info, parse_log_level};
 
     #[test]
     fn log_level_parser_accepts_supported_values_and_defaults_to_info() {
@@ -64,6 +86,16 @@ mod tests {
         assert_eq!(parse_log_level(Some("error")), log::LevelFilter::Error);
         assert_eq!(parse_log_level(Some("off")), log::LevelFilter::Off);
         assert_eq!(parse_log_level(Some("verbose")), log::LevelFilter::Info);
+    }
+
+    #[test]
+    fn build_info_exposes_the_native_build_identity() {
+        let build = current_build_info();
+        assert_eq!(build.schema_version, 1);
+        assert!(!build.semantic_version.is_empty());
+        assert!(!build.project_version.is_empty());
+        assert!(!build.source_identity.is_empty());
+        assert_eq!(build.is_release, !build.release_tag.is_empty());
     }
 }
 
@@ -183,6 +215,11 @@ fn diagnostic_log_level() -> &'static str {
 }
 
 #[tauri::command]
+fn desktop_build_info() -> DesktopBuildInfo {
+    current_build_info()
+}
+
+#[tauri::command]
 fn server_connection(
     state: State<'_, Mutex<remote_settings::ServerConnectionManager>>,
 ) -> Result<Option<server_sidecar::FrontendConnection>, String> {
@@ -286,7 +323,12 @@ pub fn run() {
                         remote_settings::ServerConnectionManager::unavailable(error, log_directory)
                     });
             app.manage(Mutex::new(manager));
-            log::info!("axkdeck desktop shell initialized");
+            let build = current_build_info();
+            log::info!(
+                "axkdeck desktop shell initialized: version={} source={}",
+                build.semantic_version,
+                build.source_identity
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -298,7 +340,8 @@ pub fn run() {
             select_local_workspace,
             commit_local_workspace,
             open_developer_tools,
-            diagnostic_log_level
+            diagnostic_log_level,
+            desktop_build_info
         ])
         .run(tauri::generate_context!())
         .expect("failed to run axkdeck");

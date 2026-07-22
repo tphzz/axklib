@@ -224,10 +224,12 @@ def sbom_document(
     source_identity: str,
     packages: list[dict[str, object]],
     created: str,
+    *,
+    product: str = "axklib",
 ) -> dict[str, object]:
     unique = {str(row["SPDXID"]): row for row in packages}
     ordered_packages = [unique[key] for key in sorted(unique)]
-    name = f"axklib-{profile}-release"
+    name = f"{product}-{profile}-release" if product == "axklib" else f"{product}-release"
     identity = {
         "name": name,
         "profile": profile,
@@ -270,13 +272,28 @@ def main() -> int:
     ).removeprefix("axklib-")
     packages = [package("axklib", version, "axklib", license_expression="MPL-2.0")]
     packages.extend(vcpkg_packages(args.axklib_root, args.profile))
+    product = "axklib"
     if args.axkdeck_root:
+        product = "axkdeck"
+        packages.append(
+            package(
+                "axkdeck",
+                version,
+                "axkdeck",
+                license_expression="MIT OR Apache-2.0",
+                comment=f"monorepo source identity: {source_identity}",
+            )
+        )
         cargo = tomllib.loads((args.axkdeck_root / "src-tauri/Cargo.lock").read_text())
         packages.extend(
-            package(item["name"], item["version"], "crates.io") for item in cargo["package"]
+            package(item["name"], item["version"], "crates.io")
+            for item in cargo["package"]
+            if item["name"] != "axkdeck"
         )
         packages.extend(pnpm_packages(args.axkdeck_root / "pnpm-lock.yaml"))
-    document = sbom_document(args.profile, source_identity, packages, creation_timestamp())
+    document = sbom_document(
+        args.profile, source_identity, packages, creation_timestamp(), product=product
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(document, indent=2) + "\n")
     return 0

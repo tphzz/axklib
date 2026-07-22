@@ -81,6 +81,7 @@ jobs:
         working-directory: apps/axkdeck
         run: |
           pnpm version:check
+          pnpm version:test
           pnpm contract:check
           pnpm format:check
           pnpm test
@@ -438,13 +439,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          server="$GITHUB_WORKSPACE/build/native/${{ inputs.debug && 'debug' || 'release' }}/apps/server/axklib-server"
+          root="$GITHUB_WORKSPACE/build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          server="$root/apps/server/axklib-server"
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             server="${server}.exe"
           fi
           test -f "$server"
+          test -f "$root/version_metadata.json"
+          test -f "$root/package_basename.txt"
           "$server" --print-version
           echo "AXKLIB_SERVER_BINARY=$server" >> "$GITHUB_ENV"
+          echo "AXKLIB_BUILD_DIRECTORY=$root" >> "$GITHUB_ENV"
+          echo "AXKLIB_VERSION_METADATA_FILE=$root/version_metadata.json" >> "$GITHUB_ENV"
+          echo "AXKLIB_PACKAGE_BASENAME_FILE=$root/package_basename.txt" >> "$GITHUB_ENV"
+          echo "AXKDECK_BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
       - name: Test desktop Rust integration
         if: >-
@@ -494,7 +502,7 @@ jobs:
       - name: Build Linux desktop packages
         if: runner.os == 'Linux'
         working-directory: apps/axkdeck
-        run: pnpm tauri build
+        run: pnpm desktop:build
 
       - name: Build Windows desktop package
         if: runner.os == 'Windows'
@@ -513,15 +521,15 @@ jobs:
                 }
               }
             } | ConvertTo-Json -Depth 4 | Set-Content -Path $config -Encoding utf8
-            pnpm tauri build --config $config
+            pnpm desktop:build -- --config $config
           } else {
-            pnpm tauri build
+            pnpm desktop:build
           }
 
       - name: Build macOS desktop slice
         if: runner.os == 'macOS'
         working-directory: apps/axkdeck
-        run: pnpm tauri build --no-bundle
+        run: pnpm desktop:build -- --no-bundle
 
       - name: Reject nested native desktop builds
         shell: bash
@@ -584,9 +592,10 @@ jobs:
           --output-directory build/artifacts/axkdeck-${{ matrix.artifact }}
           --platform "${{ matrix.desktop_platform }}"
           --architecture "${{ matrix.desktop_architecture }}"
-          --package-json apps/axkdeck/package.json
           --axklib-version-metadata build/native/${{ inputs.debug && 'debug' || 'release' }}/version_metadata.json
+          --package-basename-file build/native/${{ inputs.debug && 'debug' || 'release' }}/package_basename.txt
           --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+          --configuration "${{ inputs.debug && 'Debug' || 'Release' }}"
 
       - name: Stage Windows desktop release package
         if: runner.os == 'Windows'
@@ -597,9 +606,10 @@ jobs:
           --output-directory build/artifacts/axkdeck-${{ matrix.artifact }}
           --platform "${{ matrix.desktop_platform }}"
           --architecture "${{ matrix.desktop_architecture }}"
-          --package-json apps/axkdeck/package.json
           --axklib-version-metadata build/native/${{ inputs.debug && 'debug' || 'release' }}/version_metadata.json
+          --package-basename-file build/native/${{ inputs.debug && 'debug' || 'release' }}/package_basename.txt
           --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+          --configuration "${{ inputs.debug && 'Debug' || 'Release' }}"
 
       - name: Upload Linux or Windows desktop packages
         if: runner.os != 'macOS'
@@ -1040,13 +1050,16 @@ jobs:
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.MACOS_DEV_ID_CERT_NAME }}
           AXKLIB_SERVER_BINARY: ${{ github.workspace }}/build/tmp/universal/bin/axklib-server
+          AXKLIB_VERSION_METADATA_FILE: ${{ github.workspace }}/build/tmp/macos-arm64-version-metadata.json
+          AXKLIB_PACKAGE_BASENAME_FILE: ${{ github.workspace }}/build/tmp/macos-arm64-package-basename.txt
+          AXKDECK_BUILD_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
           test -n "$APPLE_SIGNING_IDENTITY"
           mkdir -p src-tauri/binaries
           cp "$AXKLIB_SERVER_BINARY" \
             src-tauri/binaries/axklib-server-universal-apple-darwin
-          pnpm tauri build --target universal-apple-darwin
+          pnpm desktop:build -- --target universal-apple-darwin
 
       - name: Stage universal macOS desktop release package
         run: >-
@@ -1056,9 +1069,10 @@ jobs:
           --output-directory build/artifacts/axkdeck-macos-universal
           --platform macos
           --architecture universal
-          --package-json apps/axkdeck/package.json
           --axklib-version-metadata build/tmp/macos-arm64-version-metadata.json
+          --package-basename-file build/tmp/macos-arm64-package-basename.txt
           --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+          --configuration "${{ inputs.debug && 'Debug' || 'Release' }}"
 
       - name: Package signed macOS universal SDK and CLI archives
         shell: bash

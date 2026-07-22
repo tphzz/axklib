@@ -2,16 +2,27 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "axklib-workspace-release",
-  "comment": "axklib source identity: feature-axkserver-finetuning-9969d89-mod",
-  "documentNamespace": "https://github.com/tphzz/axklib/spdx/ebed64efd9a85cd3cd923f4e38e10dedd1c15ef8768487b4b6e20417a26d9c16",
+  "name": "axkdeck-release",
+  "comment": "axklib source identity: feature-axkserver-finetuning-d40ae7c-mod",
+  "documentNamespace": "https://github.com/tphzz/axklib/spdx/4ebbc5e80a57bdf77a34537625f2d1d694ed359a9b338b7b3ee93d14d7a241d5",
   "creationInfo": {
     "creators": [
       "Tool: axklib-generate-sbom"
     ],
-    "created": "2026-07-20T07:03:08Z"
+    "created": "2026-07-22T21:15:16Z"
   },
   "packages": [
+    {
+      "SPDXID": "SPDXRef-axkdeck-axkdeck-0.0.0",
+      "name": "axkdeck",
+      "versionInfo": "0.0.0",
+      "supplier": "Organization: axkdeck",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "comment": "monorepo source identity: feature-axkserver-finetuning-d40ae7c-mod"
+    },
     {
       "SPDXID": "SPDXRef-axklib-axklib-0.0.0",
       "name": "axklib",
@@ -236,16 +247,6 @@
       "SPDXID": "SPDXRef-crates.io-autocfg-1.5.1",
       "name": "autocfg",
       "versionInfo": "1.5.1",
-      "supplier": "Organization: crates.io",
-      "downloadLocation": "NOASSERTION",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-crates.io-axkdeck-0.1.0",
-      "name": "axkdeck",
-      "versionInfo": "0.1.0",
       "supplier": "Organization: crates.io",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
@@ -556,16 +557,6 @@
       "SPDXID": "SPDXRef-crates.io-cipher-0.4.4",
       "name": "cipher",
       "versionInfo": "0.4.4",
-      "supplier": "Organization: crates.io",
-      "downloadLocation": "NOASSERTION",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-crates.io-cmake-0.1.58",
-      "name": "cmake",
-      "versionInfo": "0.1.58",
       "supplier": "Organization: crates.io",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
@@ -8889,17 +8880,6 @@
       "comment": "vcpkg baseline f87344cac03158cbf1467264565f1fd36b382a24; features: core; source SHA512: 9374ff97bd4af7b5b41754970b2bcb468f450fee46a80c9c3344f732c64091f2ac5a73ebf4ac1831c623793c08a3c109ae90b601273c40d062bfd4f026f1d94d"
     },
     {
-      "SPDXID": "SPDXRef-vcpkg-cli11-2.6.2",
-      "name": "cli11",
-      "versionInfo": "2.6.2",
-      "supplier": "Organization: vcpkg",
-      "downloadLocation": "https://github.com/CLIUtils/CLI11",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "BSD-3-Clause",
-      "comment": "vcpkg baseline f87344cac03158cbf1467264565f1fd36b382a24; features: core; source SHA512: 3b17c02e120d6c14246157fcfef1e55c34462d8ee3adb55e49f4b180fc2e0d52ec4371505c009839c623ccc5bf4ac16c8c94707d10b1f1cb0e916c3402d2e7a6"
-    },
-    {
       "SPDXID": "SPDXRef-vcpkg-crow-1.3.3",
       "name": "crow",
       "versionInfo": "1.3.3",
@@ -8920,17 +8900,6 @@
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "BSD-1-Clause",
       "comment": "vcpkg baseline f87344cac03158cbf1467264565f1fd36b382a24; features: core"
-    },
-    {
-      "SPDXID": "SPDXRef-vcpkg-gtest-1.17.0-2",
-      "name": "gtest",
-      "versionInfo": "1.17.0#2",
-      "supplier": "Organization: vcpkg",
-      "downloadLocation": "https://github.com/google/googletest",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "BSD-3-Clause",
-      "comment": "vcpkg baseline f87344cac03158cbf1467264565f1fd36b382a24; features: core; source SHA512: 0f57e9ef06925e5b7722df1eb92ef5850e8dce79220ea16a8aaff586a71c0b01460ef1713649ee24ffedb2e6ad5a51e9198c5a5ae1b2789e43feb1f494e7d45c"
     },
     {
       "SPDXID": "SPDXRef-vcpkg-hash-library-8-3",

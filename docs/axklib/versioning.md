@@ -1,7 +1,8 @@
 # Versioning And Build Identity
 
-axklib derives its product version from Git release tags. Source identity is a
-separate value that identifies the exact checkout used for a build.
+The monorepo derives one axklib/axkdeck product version from Git release tags.
+Source identity is a separate value that identifies the exact checkout used for
+a build.
 
 ## Release Version
 
@@ -22,7 +23,9 @@ The complete semantic version is used by:
 - `axk::version()` and `axk::sdk_version()`;
 - installed SDK version constants;
 - release artifact names and SPDX SBOM metadata; and
-- CPack package metadata.
+- CPack package metadata;
+- axkdeck application and installer metadata; and
+- the identity axkdeck requires from its bundled local `axklib-server`.
 
 CMake's `project(VERSION)` field and shared-library ABI filenames require a
 numeric version. They use only the `MAJOR.MINOR.PATCH` core. For example,
@@ -32,7 +35,10 @@ project version `1.2.3`.
 Named-branch builds and source trees without usable Git metadata deliberately
 use product version `0.0.0`. A release version is never guessed from a branch,
 manifest, or tracked literal. The top-level vcpkg manifest therefore does not
-declare an independent axklib version.
+declare an independent axklib version. Axkdeck's `package.json` and
+`Cargo.toml` use the non-authoritative `0.0.0` development placeholder, while
+`tauri.conf.json` deliberately has no tracked version. The desktop build wrapper
+injects the generated native version into Tauri at build time.
 
 In GitHub Actions, the selected workflow ref type is explicit: a branch run is
 always a development build, while a tag run validates `GITHUB_REF_NAME` against
@@ -113,6 +119,16 @@ Manual Native CI builds use these names:
 | Branch CLI Debug | `axklib-cli-main-a1b2c3d-linux-x64-debug` |
 | Tagged SDK Release | `axklib-sdk-1.2.3-linux-x64` |
 | Tagged CLI prerelease | `axklib-cli-1.2.3-rc.1-linux-x64` |
+| Branch axkdeck DEB | `axkdeck-main-a1b2c3d-linux-x64.deb` |
+| Tagged axkdeck NSIS installer | `axkdeck-1.2.3-windows-x64.exe` |
+| Tagged axkdeck prerelease DMG | `axkdeck-1.2.3-rc.1-macos-universal.dmg` |
+
+Branch desktop binaries carry semantic version `0.0.0` plus the same source
+identity as their bundled server. Tagged desktop binaries carry the complete
+semantic version. On macOS, `CFBundleShortVersionString` uses the numeric
+`MAJOR.MINOR.PATCH` core and `CFBundleVersion` uses a numeric CI build number,
+while the complete semantic version and source identity remain embedded in the
+application runtime metadata.
 
 After every successful Release-configuration Native CI run, the workflow
 collects separate SDK and CLI archives for Linux x64, Linux ARM64, Windows x64,
@@ -131,5 +147,5 @@ and causes the workflow to fail. Debug builds remain available only as
 workflow artifacts.
 
 The version fields in `docs/pyproject.toml` and `tools/python/pyproject.toml`
-version their independent Python environments. They are not axklib product
+version their independent Python environments. They are not monorepo product
 version sources.

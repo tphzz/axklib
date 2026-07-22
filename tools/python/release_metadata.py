@@ -286,7 +286,7 @@ def verify_release_assets(directory: Path) -> list[Path]:
             f"native release archives use different identities: {sorted(native_identities)}"
         )
 
-    desktop_versions: set[str] = set()
+    desktop_identities: set[str] = set()
     for platform, architecture, extension in DESKTOP_RELEASE_TARGETS:
         prefix = "axkdeck-"
         suffix = f"-{platform}-{architecture}{extension}"
@@ -301,14 +301,19 @@ def verify_release_assets(directory: Path) -> list[Path]:
         package = packages[0]
         if package.stat().st_size == 0:
             raise ValueError(f"desktop release package is empty: {package.name}")
-        version = package.name[len(prefix) : -len(suffix)]
-        if not re.fullmatch(r"[0-9]+[.][0-9]+[.][0-9]+(?:[-+][A-Za-z0-9.+-]+)?", version):
-            raise ValueError(f"desktop release package has an invalid version: {package.name}")
-        desktop_versions.add(version)
+        identity = package.name[len(prefix) : -len(suffix)]
+        if not re.fullmatch(r"[A-Za-z0-9.+_-]+(?:-[A-Za-z0-9.+_-]+)*", identity):
+            raise ValueError(f"desktop release package has an invalid identity: {package.name}")
+        desktop_identities.add(identity)
         expected.add(package)
-    if len(desktop_versions) != 1:
+    if len(desktop_identities) != 1:
         raise ValueError(
-            f"desktop release packages use different versions: {sorted(desktop_versions)}"
+            f"desktop release packages use different identities: {sorted(desktop_identities)}"
+        )
+    if desktop_identities != native_identities:
+        raise ValueError(
+            "desktop and native release assets use different identities: "
+            f"desktop={sorted(desktop_identities)}, native={sorted(native_identities)}"
         )
 
     unexpected = sorted(path.name for path in files if path not in expected)

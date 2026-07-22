@@ -201,6 +201,43 @@ def test_server_sbom_includes_crow_without_cli_or_test_dependencies(
     assert "source SHA512: 9374ff97bd4af7b5" in asio["comment"]
 
 
+def test_desktop_sbom_uses_the_shared_monorepo_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = Path(__file__).resolve().parents[3]
+    output = tmp_path / "desktop.json"
+    version_file = tmp_path / "version.json"
+    package_file = tmp_path / "package-basename.txt"
+    write_metadata(version_file, metadata("2.3.4", "2.3.4", "v2.3.4"))
+    write_package_basename(package_file, "v2.3.4-a1b2c3d")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "generate_sbom.py",
+            "--axklib-root",
+            str(root),
+            "--axkdeck-root",
+            str(root / "apps/axkdeck"),
+            "--profile",
+            "server",
+            "--version-metadata-file",
+            str(version_file),
+            "--package-basename-file",
+            str(package_file),
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert generate_sbom.main() == 0
+    document = json.loads(output.read_text(encoding="utf-8"))
+    desktop = [item for item in document["packages"] if item["name"] == "axkdeck"]
+    assert document["name"] == "axkdeck-release"
+    assert document["comment"] == "axklib source identity: v2.3.4-a1b2c3d"
+    assert len(desktop) == 1
+    assert desktop[0]["versionInfo"] == "2.3.4"
+
+
 def test_version_metadata_rejects_inconsistent_values(tmp_path: Path) -> None:
     path = tmp_path / "version.json"
     write_metadata(path, metadata("1.2.3", "1.2.4", "v1.2.3"))
@@ -400,7 +437,7 @@ def test_release_assets_require_exact_native_and_desktop_deliverables(tmp_path: 
             assets.append(archive)
 
     for platform, architecture, extension in release_metadata.DESKTOP_RELEASE_TARGETS:
-        package = tmp_path / f"axkdeck-0.1.0-{platform}-{architecture}{extension}"
+        package = tmp_path / f"axkdeck-main-a1b2c3d-{platform}-{architecture}{extension}"
         package.write_bytes(f"{platform}-{architecture}".encode())
         assets.append(package)
 
@@ -419,7 +456,7 @@ def write_complete_release_asset_set(directory: Path) -> list[Path]:
             write_native_archive(archive, component)
     packages: list[Path] = []
     for platform, architecture, extension in release_metadata.DESKTOP_RELEASE_TARGETS:
-        package = directory / f"axkdeck-0.1.0-{platform}-{architecture}{extension}"
+        package = directory / f"axkdeck-main-a1b2c3d-{platform}-{architecture}{extension}"
         package.write_bytes(b"installer")
         packages.append(package)
     return packages
@@ -430,6 +467,15 @@ def test_release_assets_reject_missing_installer(tmp_path: Path) -> None:
     packages[-1].unlink()
 
     with pytest.raises(ValueError, match="expected one macos-universal desktop package"):
+        release_metadata.verify_release_assets(tmp_path)
+
+
+def test_release_assets_reject_desktop_identity_that_differs_from_native(tmp_path: Path) -> None:
+    packages = write_complete_release_asset_set(tmp_path)
+    package = packages[0]
+    package.rename(package.with_name(package.name.replace("main-a1b2c3d", "0.1.0")))
+
+    with pytest.raises(ValueError, match="different identities"):
         release_metadata.verify_release_assets(tmp_path)
 
 
@@ -500,8 +546,15 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
         workflow.count("uv --project tools/python run python tools/python/generate_sbom.py") == 5
     )
     assert "AXKLIB_SERVER_BINARY=$server" in workflow
-    assert "pnpm tauri build --no-bundle" in workflow
-    assert workflow.count("pnpm tauri build") >= 4
+    assert "AXKLIB_VERSION_METADATA_FILE=$root/version_metadata.json" in workflow
+    assert "AXKLIB_PACKAGE_BASENAME_FILE=$root/package_basename.txt" in workflow
+    assert "pnpm version:test" in workflow
+    assert "pnpm desktop:build -- --no-bundle" in workflow
+    assert workflow.count("pnpm desktop:build") >= 4
+    assert "pnpm tauri build" not in workflow
+    assert "--package-json" not in workflow
+    assert workflow.count("--package-basename-file") >= 8
+    assert workflow.count("--configuration") >= 5
     assert '--extension .deb --extension .rpm' in workflow
     assert '--extension .exe' in workflow
     assert '--extension .dmg' in workflow
@@ -512,7 +565,7 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert "pattern: release-*" in workflow
     assert "SHA256SUMS" not in workflow
     assert "combined Linux or Windows distribution" not in workflow
-    assert "pnpm tauri build --target universal-apple-darwin" in workflow
+    assert "pnpm desktop:build -- --target universal-apple-darwin" in workflow
     assert "lipo \"$sidecar\" -verify_arch x86_64 arm64" in workflow
     assert workflow.count("pnpm/action-setup@v6") == 3
     assert "pnpm/action-setup@v4" not in workflow
@@ -531,6 +584,29 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
     assert 'rpm -Kv "$rpm"' in workflow
     assert 'bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"' in workflow
     assert "rpm2cpio" not in workflow
+
+
+def test_windows_desktop_bundle_uses_branded_gui_startup() -> None:
+    root = Path(__file__).resolve().parents[3]
+    desktop = root / "apps/axkdeck"
+    configuration = json.loads(
+        (desktop / "src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+    )
+    nsis = configuration["bundle"]["windows"]["nsis"]
+
+    assert nsis["installerIcon"] == "icons/icon.ico"
+    assert nsis["uninstallerIcon"] == "icons/icon.ico"
+    assert (desktop / "src-tauri" / nsis["installerIcon"]).is_file()
+
+    main = (desktop / "src-tauri/src/main.rs").read_text(encoding="utf-8")
+    assert '#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]' in main
+    sidecar = (desktop / "src-tauri/src/server_sidecar.rs").read_text(encoding="utf-8")
+    assert "command.creation_flags(CREATE_NO_WINDOW)" in sidecar
+
+    index = (desktop / "index.html").read_text(encoding="utf-8")
+    assert "#app:empty::before" in index
+    assert 'content: "Loading axkdeck..."' in index
+    assert "background: #111315" in index
 
 
 def test_native_workflow_restores_macos_slices_across_rerun_attempts() -> None:

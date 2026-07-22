@@ -1,6 +1,6 @@
 {
   "name": "axkdeck",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.15.1",
@@ -19,9 +19,10 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.app.json",
     "check:watch": "svelte-check --tsconfig ./tsconfig.app.json --watch",
-    "desktop:dev": "tauri dev",
-    "desktop:dev:fresh": "cmake --build ../../build/native/release --target axklib_server && tauri dev",
-    "desktop:build": "tauri build",
+    "version:test": "node --test tools/build-version.test.mjs",
+    "desktop:dev": "node tools/build-version.mjs dev",
+    "desktop:dev:fresh": "cmake --build ../../build/native/release --target axklib_server && node tools/build-version.mjs dev",
+    "desktop:build": "node tools/build-version.mjs build",
     "tauri": "tauri"
   },
   "dependencies": {

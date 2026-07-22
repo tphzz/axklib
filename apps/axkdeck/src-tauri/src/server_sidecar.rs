@@ -21,6 +21,17 @@ const ALLOWED_ORIGINS: [&str; 3] = [
     "http://tauri.localhost",
 ];
 
+#[cfg(windows)]
+fn suppress_child_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn suppress_child_console(_command: &mut Command) {}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ConnectionFile {
@@ -115,11 +126,14 @@ impl ServerSidecar {
         prepare_state_directory(&state_directory)?;
         let connection_path = state_directory.join("connection.json");
         let arguments = sidecar_arguments(&state_directory, &connection_path);
-        let mut child = Command::new(binary)
+        let mut command = Command::new(binary);
+        command
             .args(arguments)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        suppress_child_console(&mut command);
+        let mut child = command
             .spawn()
             .map_err(|error| format!("start axklib-server: {error}"))?;
         let log_threads = match capture_child_logs(&mut child, log_directory) {
@@ -143,7 +157,13 @@ impl ServerSidecar {
                     return Err(error);
                 }
             };
-        if let Err(error) = validate_connection(&metadata, child.id()).and_then(|()| {
+        if let Err(error) = validate_connection(
+            &metadata,
+            child.id(),
+            env!("AXKDECK_SEMANTIC_VERSION"),
+            env!("AXKDECK_SOURCE_IDENTITY"),
+        )
+        .and_then(|()| {
             std::fs::remove_file(&connection_path)
                 .map_err(|error| format!("remove consumed sidecar connection file: {error}"))
         }) {
@@ -484,7 +504,12 @@ fn wait_for_connection(
     ))
 }
 
-fn validate_connection(connection: &ConnectionFile, child_pid: u32) -> Result<(), String> {
+fn validate_connection(
+    connection: &ConnectionFile,
+    child_pid: u32,
+    semantic_version: &str,
+    source_identity: &str,
+) -> Result<(), String> {
     if connection.schema_version != CONNECTION_SCHEMA_VERSION
         || connection.api_version != API_VERSION
     {
@@ -503,6 +528,14 @@ fn validate_connection(connection: &ConnectionFile, child_pid: u32) -> Result<()
         || connection.source_identity.is_empty()
     {
         return Err("sidecar connection metadata is incomplete or non-loopback".to_owned());
+    }
+    if connection.semantic_version != semantic_version
+        || connection.source_identity != source_identity
+    {
+        return Err(format!(
+            "axklib-server build identity does not match axkdeck: expected {semantic_version} / {source_identity}, found {} / {}",
+            connection.semantic_version, connection.source_identity
+        ));
     }
     Ok(())
 }
@@ -602,7 +635,7 @@ mod tests {
             base_url: "http://127.0.0.1:7300/api/v1".to_owned(),
             websocket_url: "ws://127.0.0.1:7300/api/v1/events".to_owned(),
             bearer_token: "0123456789abcdef0123456789abcdef".to_owned(),
-            semantic_version: "0.1.0".to_owned(),
+            semantic_version: "0.0.0".to_owned(),
             source_identity: "main-1234567".to_owned(),
         }
     }
@@ -653,21 +686,25 @@ mod tests {
 
     #[test]
     fn connection_metadata_must_match_the_loopback_child() {
-        let connection = connection(42);
-        assert!(validate_connection(&connection, 42).is_ok());
-        assert!(validate_connection(&connection, 43).is_err());
+        let metadata = connection(42);
+        assert!(validate_connection(&metadata, 42, "0.0.0", "main-1234567").is_ok());
+        assert!(validate_connection(&metadata, 43, "0.0.0", "main-1234567").is_err());
 
-        let mut wrong_protocol = connection.clone();
+        let mut wrong_protocol = metadata.clone();
         wrong_protocol.api_version = "v2".to_owned();
-        assert!(validate_connection(&wrong_protocol, 42).is_err());
+        assert!(validate_connection(&wrong_protocol, 42, "0.0.0", "main-1234567").is_err());
 
-        let mut weak_token = connection.clone();
+        let mut weak_token = metadata.clone();
         weak_token.bearer_token = "short".to_owned();
-        assert!(validate_connection(&weak_token, 42).is_err());
+        assert!(validate_connection(&weak_token, 42, "0.0.0", "main-1234567").is_err());
 
-        let mut non_loopback = connection;
+        let mut non_loopback = metadata;
         non_loopback.base_url = "http://192.0.2.1:7300/api/v1".to_owned();
-        assert!(validate_connection(&non_loopback, 42).is_err());
+        assert!(validate_connection(&non_loopback, 42, "0.0.0", "main-1234567").is_err());
+
+        let connection = connection(42);
+        assert!(validate_connection(&connection, 42, "1.0.0", "main-1234567").is_err());
+        assert!(validate_connection(&connection, 42, "0.0.0", "other-7654321").is_err());
     }
 
     #[test]

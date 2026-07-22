@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "axkdeck",
-  "version": "0.1.0",
   "identifier": "app.axkdeck.desktop",
   "build": {
     "beforeDevCommand": "corepack pnpm dev",
@@ -47,6 +46,12 @@
       "resources/LGPL-2.1-or-later.txt": "licenses/LGPL-2.1-or-later.txt",
       "resources/THIRD-PARTY-NOTICES.md": "licenses/THIRD-PARTY-NOTICES.md",
       "resources/axkdeck.spdx.json": "licenses/axkdeck.spdx.json"
+    },
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
+      }
     },
     "category": "Music",
     "shortDescription": "Yamaha A-series disk workspace",
