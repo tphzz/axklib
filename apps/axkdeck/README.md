@@ -180,6 +180,9 @@ Tauri desktop packages are native to the build host. The native CI matrix builds
 the C++ targets once per platform and then reuses the resulting server for the
 matching axkdeck build. Release packaging produces a universal macOS DMG,
 separate x64 and ARM64 NSIS installers, and matching DEB and RPM packages.
+These installers are attached directly to the GitHub draft release alongside,
+but separately from, the native axklib SDK and CLI archives. Each installer
+contains the matching tested `axklib-server` sidecar.
 
 ## Develop
 

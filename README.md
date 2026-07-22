@@ -109,25 +109,23 @@ Write validation reports:
 build/native/debug/apps/cli/axklib validate -o build/reports/validation <image-or-directory>
 ```
 
-Create separate SDK and CLI archives:
-
-```bash
-cmake --preset release
-cmake --build --preset release
-cd build/native/release && cpack
-```
-
 The presets select axklib's static-dependency vcpkg triplet for the host
 architecture. After changing triplets or updating an existing checkout, use
 `cmake --fresh --preset release` once to discard the previous vcpkg selection.
 
-The native GitHub workflow combines those components into one distribution per
-target. Windows publishes a ZIP, Linux publishes a compressed tar archive, and
-macOS publishes one universal ZIP containing both the self-contained CLI and
-the shared SDK development files. Development archives use a Git-derived source
-identity such as `axklib-main-a1b2c3d-linux-x64`; validated `v1.2.3` tag builds
-use the concise `axklib-1.2.3-linux-x64` form while retaining the tag and commit
-inside the binaries. Debug archives add `-debug`. See
+The native GitHub workflow publishes the SDK and self-contained CLI separately.
+Windows uses ZIP, Linux uses compressed tar archives, and macOS uses universal
+ZIPs. The compact download archives contain only the component's runtime or
+development files, the project `LICENSE`, and required notices under
+`licenses/`; the conventional CMake install layout remains unchanged.
+`axklib-server` is built and tested on every target but is distributed only as
+the sidecar in axkdeck installers.
+
+Development archive names use a Git-derived source identity, for example
+`axklib-sdk-main-a1b2c3d-linux-x64` and
+`axklib-cli-main-a1b2c3d-linux-x64`. Validated `v1.2.3` tag builds use
+`axklib-sdk-1.2.3-linux-x64` and `axklib-cli-1.2.3-linux-x64` while retaining
+the tag and commit inside the binaries. Debug archives add `-debug`. See
 [Versioning and build identity](docs/axklib/versioning.md) for the complete
 contract.
 

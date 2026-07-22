@@ -338,22 +338,25 @@ jobs:
         if: matrix.run_tests
         run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }}
 
-      - name: Stage and inspect combined distribution
+      - name: Stage and inspect native components
         shell: bash
         run: |
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
           scan="build/tmp/package-scan-${{ matrix.artifact }}"
-          distribution="build/tmp/distribution-${{ matrix.artifact }}"
           rm -rf "$scan"
-          rm -rf "$distribution"
-          mkdir -p "$scan/sdk" "$scan/cli" "$scan/server" "$distribution"
+          mkdir -p "$scan/sdk" "$scan/cli" "$scan/server"
           cmake --install "$root" --prefix "$scan/sdk" --component sdk
           cmake --install "$root" --prefix "$scan/cli" --component cli
           cmake --install "$root" --prefix "$scan/server" --component server
-          cmake --install "$root" --prefix "$distribution" --component sdk
-          cmake --install "$root" --prefix "$distribution" --component cli
-          cmake --install "$root" --prefix "$distribution" --component server
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            macos_slice="build/tmp/macos-slice-${{ matrix.artifact }}"
+            rm -rf "$macos_slice"
+            mkdir -p "$macos_slice"
+            cmake --install "$root" --prefix "$macos_slice" --component sdk
+            cmake --install "$root" --prefix "$macos_slice" --component cli
+            cmake --install "$root" --prefix "$macos_slice" --component server
+          fi
           project_version="${{ steps.package.outputs.project_version }}"
           soversion="${{ steps.package.outputs.soversion }}"
           library_args=(
@@ -368,7 +371,6 @@ jobs:
           python tools/python/inspect_package.py "$scan/sdk" "${library_args[@]}"
           python tools/python/inspect_package.py "$scan/cli"
           python tools/python/inspect_package.py "$scan/server"
-          python tools/python/inspect_package.py "$distribution" "${library_args[@]}"
           test -f "$scan/sdk/share/axklib/axklib.spdx.json"
           test -f "$scan/cli/share/axklib/axklib-cli.spdx.json"
           server_binary="axklib-server"
@@ -379,10 +381,6 @@ jobs:
           test -f "$scan/server/share/axklib/axklib-server.spdx.json"
           test -f "$scan/server/share/axklib/server/openapi-v1.json"
           test -f "$scan/server/share/doc/axklib/server.md"
-          test -f "$distribution/share/axklib/axklib.spdx.json"
-          test -f "$distribution/share/axklib/axklib-cli.spdx.json"
-          test -f "$distribution/share/axklib/axklib-server.spdx.json"
-          test -f "$distribution/share/doc/axklib/server.md"
 
       - name: Smoke-test installed server
         if: matrix.run_tests
@@ -576,28 +574,26 @@ jobs:
           $process = Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "NSIS uninstall failed with $($process.ExitCode)" }
 
-      - name: Generate Linux desktop release metadata
+      - name: Stage Linux desktop release packages
         if: runner.os == 'Linux'
         run: >-
           python tools/python/desktop_release.py
           --bundle-directory apps/axkdeck/src-tauri/target/release/bundle
           --extension .deb --extension .rpm
           --output-directory build/artifacts/axkdeck-${{ matrix.artifact }}
-          --commit "${{ github.sha }}"
           --platform "${{ matrix.desktop_platform }}"
           --architecture "${{ matrix.desktop_architecture }}"
           --package-json apps/axkdeck/package.json
           --axklib-version-metadata build/native/${{ inputs.debug && 'debug' || 'release' }}/version_metadata.json
           --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
 
-      - name: Generate Windows desktop release metadata
+      - name: Stage Windows desktop release package
         if: runner.os == 'Windows'
         run: >-
           python tools/python/desktop_release.py
           --bundle-directory apps/axkdeck/src-tauri/target/release/bundle/nsis
           --extension .exe
           --output-directory build/artifacts/axkdeck-${{ matrix.artifact }}
-          --commit "${{ github.sha }}"
           --platform "${{ matrix.desktop_platform }}"
           --architecture "${{ matrix.desktop_architecture }}"
           --package-json apps/axkdeck/package.json
@@ -608,49 +604,33 @@ jobs:
         if: runner.os != 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: axkdeck-${{ matrix.artifact }}
-          path: |
-            apps/axkdeck/src-tauri/target/release/bundle/**/*
-            build/artifacts/axkdeck-${{ matrix.artifact }}/*
+          name: release-axkdeck-${{ matrix.artifact }}
+          path: build/artifacts/axkdeck-${{ matrix.artifact }}/*
           if-no-files-found: error
 
-      - name: Package combined Linux or Windows distribution
+      - name: Package Linux or Windows SDK and CLI archives
         if: runner.os != 'macOS'
         shell: bash
         env:
-          AXK_ARTIFACT_STEM: ${{ steps.package.outputs.artifact_stem }}
+          AXK_SDK_ARTIFACT_STEM: ${{ steps.package.outputs.sdk_artifact_stem }}
+          AXK_CLI_ARTIFACT_STEM: ${{ steps.package.outputs.cli_artifact_stem }}
         run: |
           set -euo pipefail
-          distribution="build/tmp/distribution-${{ matrix.artifact }}"
-          stem="$AXK_ARTIFACT_STEM"
-          test -n "$stem"
-          mkdir -p build/artifacts
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            archive="build/artifacts/${stem}.zip"
-            python - "$distribution" "$archive" <<'PY'
-          import pathlib, sys, zipfile
-
-          source, output = map(pathlib.Path, sys.argv[1:])
-          with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-              for path in sorted(source.rglob("*")):
-                  if path.is_file():
-                      archive.write(path, path.relative_to(source))
-          PY
+            archive_format=zip
           else
-            archive="build/artifacts/${stem}.tar.gz"
-            tar -czf "$archive" -C "$distribution" .
+            archive_format=tar.gz
           fi
-          checksum="build/artifacts/${stem}-SHA256SUMS"
-          python - "$archive" "$checksum" <<'PY'
-          import hashlib, pathlib, sys
-
-          archive, output = map(pathlib.Path, sys.argv[1:])
-          output.write_text(
-              f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n"
-          )
-          PY
-          echo "AXK_DISTRIBUTION_ARCHIVE=$archive" >> "$GITHUB_ENV"
-          echo "AXK_DISTRIBUTION_CHECKSUM=$checksum" >> "$GITHUB_ENV"
+          python tools/python/release_metadata.py package-native \
+            --source-directory "build/tmp/package-scan-${{ matrix.artifact }}/sdk" \
+            --output-directory build/artifacts \
+            --artifact-stem "$AXK_SDK_ARTIFACT_STEM" \
+            --component sdk --archive-format "$archive_format"
+          python tools/python/release_metadata.py package-native \
+            --source-directory "build/tmp/package-scan-${{ matrix.artifact }}/cli" \
+            --output-directory build/artifacts \
+            --artifact-stem "$AXK_CLI_ARTIFACT_STEM" \
+            --component cli --archive-format "$archive_format"
 
       - name: Verify Linux runtime dependency closure
         if: runner.os == 'Linux'
@@ -808,7 +788,7 @@ jobs:
         shell: bash
         run: |
           tar -czf "build/tmp/macos-${{ matrix.macos_slice }}.tar.gz" \
-            -C "build/tmp/distribution-${{ matrix.artifact }}" .
+            -C "build/tmp/macos-slice-${{ matrix.artifact }}" .
           cp "build/native/${{ inputs.debug && 'debug' || 'release' }}/package_basename.txt" \
             "build/tmp/macos-${{ matrix.macos_slice }}-package-basename.txt"
           cp "build/native/${{ inputs.debug && 'debug' || 'release' }}/version_metadata.json" \
@@ -824,14 +804,20 @@ jobs:
             build/tmp/macos-${{ matrix.macos_slice }}-version-metadata.json
           key: macos-${{ matrix.macos_slice }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Upload combined Linux or Windows distribution
+      - name: Upload Linux or Windows SDK archive
         if: runner.os != 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.package.outputs.artifact_stem }}
-          path: |
-            ${{ env.AXK_DISTRIBUTION_ARCHIVE }}
-            ${{ env.AXK_DISTRIBUTION_CHECKSUM }}
+          name: release-${{ steps.package.outputs.sdk_artifact_stem }}
+          path: build/artifacts/${{ steps.package.outputs.sdk_artifact_stem }}.*
+          if-no-files-found: error
+
+      - name: Upload Linux or Windows CLI archive
+        if: runner.os != 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ steps.package.outputs.cli_artifact_stem }}
+          path: build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.*
           if-no-files-found: error
 
   macos-universal:
@@ -883,7 +869,7 @@ jobs:
           p12-file-base64: ${{ secrets.P12_BASE64 }}
           p12-password: ${{ secrets.P12_PASSWORD }}
 
-      - name: Assemble and verify universal distribution
+      - name: Assemble and verify universal native binaries
         shell: bash
         run: |
           set -euo pipefail
@@ -979,7 +965,7 @@ jobs:
           --server build/tmp/universal/bin/axklib-server
           --fixture tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds
 
-      - name: Sign macOS universal distribution
+      - name: Sign macOS universal native binaries
         shell: bash
         env:
           MACOS_DEV_ID_CERT_NAME: ${{ secrets.MACOS_DEV_ID_CERT_NAME }}
@@ -1079,34 +1065,37 @@ jobs:
           test -f "$app/Contents/Resources/licenses/axkdeck.spdx.json"
           test -f "$app/Contents/Resources/licenses/LGPL-2.1-or-later.txt"
 
-      - name: Generate universal macOS desktop release metadata
+      - name: Stage universal macOS desktop release package
         run: >-
           python tools/python/desktop_release.py
           --bundle-directory apps/axkdeck/src-tauri/target/universal-apple-darwin/release/bundle/dmg
           --extension .dmg
           --output-directory build/artifacts/axkdeck-macos-universal
-          --commit "${{ github.sha }}"
           --platform macos
           --architecture universal
           --package-json apps/axkdeck/package.json
           --axklib-version-metadata build/tmp/macos-arm64-version-metadata.json
           --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
 
-      - name: Package signed macOS universal distribution
+      - name: Package signed macOS universal SDK and CLI archives
         shell: bash
         env:
-          AXK_ARTIFACT_STEM: ${{ steps.package.outputs.artifact_stem }}
+          AXK_SDK_ARTIFACT_STEM: ${{ steps.package.outputs.sdk_artifact_stem }}
+          AXK_CLI_ARTIFACT_STEM: ${{ steps.package.outputs.cli_artifact_stem }}
         run: |
           set -euo pipefail
-          stem="$AXK_ARTIFACT_STEM"
-          test -n "$stem"
-          archive="build/artifacts/${stem}.zip"
-          (cd build/tmp/universal && /usr/bin/zip -qry \
-            "../../artifacts/$(basename "$archive")" .)
-          (cd build/artifacts && shasum -a 256 "$(basename "$archive")" \
-            > "${stem}-SHA256SUMS")
+          python tools/python/release_metadata.py package-native \
+            --source-directory build/tmp/universal \
+            --output-directory build/artifacts \
+            --artifact-stem "$AXK_SDK_ARTIFACT_STEM" \
+            --component sdk --archive-format zip
+          python tools/python/release_metadata.py package-native \
+            --source-directory build/tmp/universal \
+            --output-directory build/artifacts \
+            --artifact-stem "$AXK_CLI_ARTIFACT_STEM" \
+            --component cli --archive-format zip
 
-      - name: Notarize macOS universal distribution
+      - name: Notarize macOS universal SDK and CLI archives
         if: inputs.notarize_macos
         shell: bash
         env:
@@ -1127,18 +1116,16 @@ jobs:
             exit 1
           fi
 
-          archive=$(find build/artifacts -maxdepth 1 -type f \
-            -name 'axklib-*-macos-universal*.zip' -print -quit)
-          if [ -z "$archive" ]; then
-            echo "Expected macOS universal ZIP not found." >&2
-            exit 1
-          fi
-
-          xcrun notarytool submit "$archive" \
-            --apple-id "$APPLE_NOTARY_USER" \
-            --password "$APPLE_NOTARY_APP_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
+          for archive in \
+            "build/artifacts/${{ steps.package.outputs.sdk_artifact_stem }}.zip" \
+            "build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.zip"; do
+            test -f "$archive"
+            xcrun notarytool submit "$archive" \
+              --apple-id "$APPLE_NOTARY_USER" \
+              --password "$APPLE_NOTARY_APP_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
+          done
 
       - name: Notarize and staple universal macOS desktop DMG
         if: inputs.notarize_macos
@@ -1163,19 +1150,22 @@ jobs:
       - name: Upload universal macOS desktop DMG
         uses: actions/upload-artifact@v7
         with:
-          name: axkdeck-macos-universal
-          path: |
-            apps/axkdeck/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            build/artifacts/axkdeck-macos-universal/*
+          name: release-axkdeck-macos-universal
+          path: build/artifacts/axkdeck-macos-universal/*
           if-no-files-found: error
 
-      - name: Upload universal macOS distribution
+      - name: Upload universal macOS SDK archive
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.package.outputs.artifact_stem }}
-          path: |
-            build/artifacts/axklib-*-macos-universal*.zip
-            build/artifacts/axklib-*-macos-universal*-SHA256SUMS
+          name: release-${{ steps.package.outputs.sdk_artifact_stem }}
+          path: build/artifacts/${{ steps.package.outputs.sdk_artifact_stem }}.zip
+          if-no-files-found: error
+
+      - name: Upload universal macOS CLI archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ steps.package.outputs.cli_artifact_stem }}
+          path: build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.zip
           if-no-files-found: error
 
   draft-release:
@@ -1201,10 +1191,10 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Download distributions
+      - name: Download release deliverables
         uses: actions/download-artifact@v8
         with:
-          pattern: axklib-*
+          pattern: release-*
           path: build/release-assets
           merge-multiple: true
 
@@ -1235,7 +1225,7 @@ jobs:
           - Commit: \`${GITHUB_SHA}\`
           - Configuration: \`Release\`
 
-          Review the attached distributions and checksums before publishing this release.
+          Review the attached SDK archives, CLI archives, and axkdeck installers before publishing this release.
           EOF
 
       - name: Replace draft release

@@ -109,14 +109,19 @@ Manual Native CI builds use these names:
 
 | Build | Example archive stem |
 | --- | --- |
-| Branch Release | `axklib-main-a1b2c3d-linux-x64` |
-| Branch Debug | `axklib-main-a1b2c3d-linux-x64-debug` |
-| Tagged Release | `axklib-1.2.3-linux-x64` |
-| Tagged prerelease | `axklib-1.2.3-rc.1-linux-x64` |
+| Branch SDK Release | `axklib-sdk-main-a1b2c3d-linux-x64` |
+| Branch CLI Debug | `axklib-cli-main-a1b2c3d-linux-x64-debug` |
+| Tagged SDK Release | `axklib-sdk-1.2.3-linux-x64` |
+| Tagged CLI prerelease | `axklib-cli-1.2.3-rc.1-linux-x64` |
 
 After every successful Release-configuration Native CI run, the workflow
-collects the Linux x64, Linux ARM64, Windows x64, Windows ARM64, and universal
-macOS distributions into an unpublished GitHub draft release. Branch
+collects separate SDK and CLI archives for Linux x64, Linux ARM64, Windows x64,
+Windows ARM64, and universal macOS into an unpublished GitHub draft release.
+The same draft contains axkdeck DEB and RPM installers for both Linux
+architectures, NSIS installers for both Windows architectures, and one universal
+macOS DMG. `axklib-server` is shipped in those desktop installers rather than as
+a standalone release asset. GitHub displays the digest for each asset, so the
+workflow does not attach checksum or release-manifest sidecars. Branch
 `features/packages` targets the prerelease draft and generated tag
 `features/packages-preview`; a semantic-version tag build targets an
 unpublished release with that exact tag. Semantic-version prereleases are

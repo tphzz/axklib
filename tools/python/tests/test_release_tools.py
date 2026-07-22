@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import hashlib
 import json
+import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -276,7 +277,11 @@ def test_release_metadata_uses_source_identity_and_debug_suffix(tmp_path: Path) 
         package, metadata(), "branch", "feature/audio", "windows-arm64", "Debug"
     )
     assert release.artifact_stem == "axklib-feature-audio-a1b2c3d-linux-x64"
+    assert release.sdk_artifact_stem == "axklib-sdk-feature-audio-a1b2c3d-linux-x64"
+    assert release.cli_artifact_stem == "axklib-cli-feature-audio-a1b2c3d-linux-x64"
     assert debug.artifact_stem == "axklib-feature-audio-a1b2c3d-windows-arm64-debug"
+    assert debug.sdk_artifact_stem.endswith("-windows-arm64-debug")
+    assert debug.cli_artifact_stem.endswith("-windows-arm64-debug")
 
 
 def test_release_metadata_shortens_only_exact_project_tag() -> None:
@@ -327,27 +332,114 @@ def test_release_target_uses_preview_for_branches_and_preserves_tags() -> None:
         release_metadata.draft_release_target("pull_request", "123", metadata())
 
 
-def test_release_assets_require_every_distribution_and_exact_checksums(tmp_path: Path) -> None:
+def write_native_archive(path: Path, component: str) -> None:
+    files = {
+        "LICENSE": b"project license",
+        "licenses/dependency/copyright": b"dependency license",
+    }
+    if component == "sdk":
+        files.update({"include/axklib/sdk.hpp": b"header", "lib/libaxklib.so": b"library"})
+    else:
+        files["bin/axklib"] = b"executable"
+
+    if path.suffix == ".zip":
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, contents in files.items():
+                archive.writestr(name, contents)
+    else:
+        source = path.parent / f"{path.name}.contents"
+        for name, contents in files.items():
+            target = source / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(contents)
+        with tarfile.open(path, "w:gz") as archive:
+            for item in sorted(source.rglob("*")):
+                archive.add(item, arcname=item.relative_to(source))
+
+
+def test_native_archives_are_component_specific_and_compact(tmp_path: Path) -> None:
+    source = tmp_path / "install"
+    (source / "include/axklib").mkdir(parents=True)
+    (source / "lib").mkdir()
+    (source / "bin").mkdir()
+    (source / "share/licenses/axklib").mkdir(parents=True)
+    (source / "share/licenses/dependency").mkdir()
+    (source / "share/axklib").mkdir(parents=True)
+    (source / "include/axklib/sdk.hpp").write_text("header", encoding="utf-8")
+    (source / "lib/libaxklib.so").write_bytes(b"library")
+    (source / "bin/axklib.dll").write_bytes(b"library")
+    (source / "share/licenses/axklib/LICENSE").write_text("project", encoding="utf-8")
+    (source / "share/licenses/dependency/copyright").write_text("third party", encoding="utf-8")
+    (source / "share/axklib/axklib.spdx.json").write_text("{}", encoding="utf-8")
+
+    archive = release_metadata.package_native_component(
+        source_directory=source,
+        output_directory=tmp_path / "output",
+        artifact_stem="axklib-sdk-main-a1b2c3d-windows-x64",
+        component="sdk",
+        archive_format="zip",
+    )
+
+    with zipfile.ZipFile(archive) as package:
+        names = set(package.namelist())
+    assert "include/axklib/sdk.hpp" in names
+    assert "lib/libaxklib.so" in names
+    assert "bin/axklib.dll" in names
+    assert "LICENSE" in names
+    assert "licenses/dependency/copyright" in names
+    assert not any(name.startswith("share/") for name in names)
+    assert "licenses/axklib/LICENSE" not in names
+
+
+def test_release_assets_require_exact_native_and_desktop_deliverables(tmp_path: Path) -> None:
     assets: list[Path] = []
     for platform, extension in release_metadata.RELEASE_ASSET_EXTENSIONS.items():
-        archive = tmp_path / f"axklib-main-a1b2c3d-{platform}{extension}"
-        archive.write_bytes(platform.encode())
-        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        checksum = tmp_path / f"axklib-main-a1b2c3d-{platform}-SHA256SUMS"
-        checksum.write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
-        assets.extend((archive, checksum))
+        for component in release_metadata.NATIVE_RELEASE_COMPONENTS:
+            archive = tmp_path / f"axklib-{component}-main-a1b2c3d-{platform}{extension}"
+            write_native_archive(archive, component)
+            assets.append(archive)
 
+    for platform, architecture, extension in release_metadata.DESKTOP_RELEASE_TARGETS:
+        package = tmp_path / f"axkdeck-0.1.0-{platform}-{architecture}{extension}"
+        package.write_bytes(f"{platform}-{architecture}".encode())
+        assets.append(package)
+
+    assert len(assets) == 17
     assert release_metadata.verify_release_assets(tmp_path) == sorted(assets)
-    assets[1].write_text("0" * 64 + f"  {assets[0].name}\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="checksum does not match"):
-        release_metadata.verify_release_assets(tmp_path)
-    assets[1].write_text(
-        f"{hashlib.sha256(assets[0].read_bytes()).hexdigest()}  {assets[0].name}\n",
-        encoding="utf-8",
-    )
     unexpected = tmp_path / "unexpected.txt"
     unexpected.write_text("unexpected", encoding="utf-8")
     with pytest.raises(ValueError, match="unexpected release assets"):
+        release_metadata.verify_release_assets(tmp_path)
+
+
+def write_complete_release_asset_set(directory: Path) -> list[Path]:
+    for platform, extension in release_metadata.RELEASE_ASSET_EXTENSIONS.items():
+        for component in release_metadata.NATIVE_RELEASE_COMPONENTS:
+            archive = directory / f"axklib-{component}-main-a1b2c3d-{platform}{extension}"
+            write_native_archive(archive, component)
+    packages: list[Path] = []
+    for platform, architecture, extension in release_metadata.DESKTOP_RELEASE_TARGETS:
+        package = directory / f"axkdeck-0.1.0-{platform}-{architecture}{extension}"
+        package.write_bytes(b"installer")
+        packages.append(package)
+    return packages
+
+
+def test_release_assets_reject_missing_installer(tmp_path: Path) -> None:
+    packages = write_complete_release_asset_set(tmp_path)
+    packages[-1].unlink()
+
+    with pytest.raises(ValueError, match="expected one macos-universal desktop package"):
+        release_metadata.verify_release_assets(tmp_path)
+
+
+def test_release_assets_reject_share_content(tmp_path: Path) -> None:
+    write_complete_release_asset_set(tmp_path)
+    sdk = tmp_path / "axklib-sdk-main-a1b2c3d-windows-x64.zip"
+    with zipfile.ZipFile(sdk, "a") as archive:
+        archive.writestr("share/axklib/axklib.spdx.json", "{}")
+
+    with pytest.raises(ValueError, match="contains share/"):
         release_metadata.verify_release_assets(tmp_path)
 
 
@@ -413,8 +505,13 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert '--extension .deb --extension .rpm' in workflow
     assert '--extension .exe' in workflow
     assert '--extension .dmg' in workflow
-    assert "name: axkdeck-${{ matrix.artifact }}" in workflow
-    assert "name: axkdeck-macos-universal" in workflow
+    assert "name: release-axkdeck-${{ matrix.artifact }}" in workflow
+    assert "name: release-axkdeck-macos-universal" in workflow
+    assert "name: release-${{ steps.package.outputs.sdk_artifact_stem }}" in workflow
+    assert "name: release-${{ steps.package.outputs.cli_artifact_stem }}" in workflow
+    assert "pattern: release-*" in workflow
+    assert "SHA256SUMS" not in workflow
+    assert "combined Linux or Windows distribution" not in workflow
     assert "pnpm tauri build --target universal-apple-darwin" in workflow
     assert "lipo \"$sidecar\" -verify_arch x86_64 arm64" in workflow
     assert "if-no-files-found: error" in workflow

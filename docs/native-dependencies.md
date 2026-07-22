@@ -55,6 +55,12 @@ obscure the recipient's rights for LGPL-covered libraries. This table is an
 engineering summary, not legal advice and not a substitute for the installed
 license texts.
 
+Compact GitHub SDK and CLI archives move the project license to `LICENSE` and
+dependency copyright files to `licenses/` at the archive root. They omit the
+normal CMake `share/` hierarchy, but this layout change does not remove any
+required legal notice. System packaging through `cmake --install` retains the
+conventional `share/licenses/` layout.
+
 Official release builds use the overlay triplets under
 `library/cmake/triplets`. They select static, release-only dependency libraries.
 Pass the matching `*-axk` triplet through `VCPKG_TARGET_TRIPLET`. This linkage
