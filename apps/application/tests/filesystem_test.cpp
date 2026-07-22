@@ -244,6 +244,10 @@ TEST_F(SandboxTest, OpenFileRetainsTheValidatedObjectAcrossAParentSwap) {
     const auto parked = root_ / "images" / "folder-parked";
     std::error_code error;
     std::filesystem::rename(parent, parked, error);
+#if defined(_WIN32)
+    if (error == std::errc::permission_denied)
+        GTEST_SKIP() << "Windows prevented the parent swap while the retained file handle was open";
+#endif
     ASSERT_FALSE(error) << error.message();
     std::ofstream(outside_ / "inside.txt") << "outside";
     std::filesystem::create_directory_symlink(outside_, parent, error);
@@ -273,6 +277,10 @@ TEST_F(SandboxTest, OpenTreeReopensValidatedObjectsRelativeToTheRetainedRoot) {
     const auto parked = root_ / "images" / "folder-parked";
     std::error_code error;
     std::filesystem::rename(parent, parked, error);
+#if defined(_WIN32)
+    if (error == std::errc::permission_denied)
+        GTEST_SKIP() << "Windows prevented the parent swap while the retained directory handle was open";
+#endif
     ASSERT_FALSE(error) << error.message();
     std::ofstream(outside_ / "inside.txt") << "outside";
     std::filesystem::create_directory_symlink(outside_, parent, error);

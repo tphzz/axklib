@@ -19,6 +19,10 @@
 #endif
 #include <windows.h>
 #include <winternl.h>
+
+extern "C" NTSYSAPI NTSTATUS NTAPI NtSetInformationFile(HANDLE file_handle, PIO_STATUS_BLOCK io_status_block,
+                                                        PVOID file_information, ULONG length,
+                                                        FILE_INFORMATION_CLASS file_information_class);
 #else
 #include <cerrno>
 #include <csignal>
@@ -530,7 +534,7 @@ std::filesystem::path temporary_entry_name(const std::filesystem::path &destinat
 
 #if defined(_WIN32)
 
-bool rename_open_entry(HANDLE entry, HANDLE parent, const std::filesystem::path &name, bool replace) {
+NTSTATUS rename_open_entry(HANDLE entry, HANDLE parent, const std::filesystem::path &name, bool replace) {
     const auto native = name.native();
     const auto bytes = sizeof(FILE_RENAME_INFO) + native.size() * sizeof(wchar_t);
     std::vector<std::byte> storage(bytes);
@@ -539,7 +543,9 @@ bool rename_open_entry(HANDLE entry, HANDLE parent, const std::filesystem::path 
     rename->RootDirectory = parent;
     rename->FileNameLength = static_cast<DWORD>(native.size() * sizeof(wchar_t));
     std::copy(native.begin(), native.end(), rename->FileName);
-    return SetFileInformationByHandle(entry, FileRenameInfo, rename, static_cast<DWORD>(bytes)) != 0;
+    IO_STATUS_BLOCK status{};
+    constexpr auto rename_information_class = static_cast<FILE_INFORMATION_CLASS>(10);
+    return NtSetInformationFile(entry, &status, rename, static_cast<ULONG>(bytes), rename_information_class);
 }
 
 bool delete_open_tree(HANDLE directory, std::string_view relative_path) {
@@ -1155,16 +1161,9 @@ axk::app::Result<void> axk::app::Sandbox::publish_file(const FileRef &destinatio
             return std::unexpected(
                 publication_error("temporary output could not be flushed", destination.relative_path));
         }
-        const auto destination_name = relative->filename().native();
-        const auto bytes = sizeof(FILE_RENAME_INFO) + destination_name.size() * sizeof(wchar_t);
-        std::vector<std::byte> storage(bytes);
-        auto *rename = reinterpret_cast<FILE_RENAME_INFO *>(storage.data());
-        rename->ReplaceIfExists = overwrite ? TRUE : FALSE;
-        rename->RootDirectory = parent->get();
-        rename->FileNameLength = static_cast<DWORD>(destination_name.size() * sizeof(wchar_t));
-        std::copy(destination_name.begin(), destination_name.end(), rename->FileName);
-        if (SetFileInformationByHandle(output->get(), FileRenameInfo, rename, static_cast<DWORD>(bytes)) == 0) {
-            const auto error = GetLastError();
+        const auto renamed = rename_open_entry(output->get(), parent->get(), relative->filename(), overwrite);
+        if (renamed < 0) {
+            const auto error = RtlNtStatusToDosError(renamed);
             cleanup();
             if (!overwrite && (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS))
                 return std::unexpected(output_exists_error("output file already exists", destination.relative_path));
@@ -1405,7 +1404,7 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
             }
         }
         if (!existing) {
-            if (!rename_open_entry(staged->get(), parent->get(), relative->filename(), false)) {
+            if (rename_open_entry(staged->get(), parent->get(), relative->filename(), false) < 0) {
                 discard_staged();
                 return std::unexpected(
                     publication_error("output directory could not be published atomically", destination.relative_path));
@@ -1414,7 +1413,7 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
         }
 
         const auto backup = temporary_entry_name(relative->filename());
-        if (!rename_open_entry(existing->get(), parent->get(), backup, false)) {
+        if (rename_open_entry(existing->get(), parent->get(), backup, false) < 0) {
             discard_staged();
             return std::unexpected(
                 publication_error("existing output directory could not be reserved", destination.relative_path));
@@ -1430,7 +1429,7 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
                     output_exists_error("output directory changed during publication", destination.relative_path));
             }
         }
-        if (!rename_open_entry(staged->get(), parent->get(), relative->filename(), false)) {
+        if (rename_open_entry(staged->get(), parent->get(), relative->filename(), false) < 0) {
             static_cast<void>(rename_open_entry(existing->get(), parent->get(), relative->filename(), false));
             discard_staged();
             return std::unexpected(
@@ -1891,15 +1890,7 @@ axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::rename_entry(const 
                     ? std::nullopt
                     : std::optional<std::uintmax_t>{static_cast<std::uintmax_t>(source_information.EndOfFile.QuadPart)},
         .writable = true};
-    const auto destination_name = filename->native();
-    const auto bytes = sizeof(FILE_RENAME_INFO) + destination_name.size() * sizeof(wchar_t);
-    std::vector<std::byte> storage(bytes);
-    auto *rename = reinterpret_cast<FILE_RENAME_INFO *>(storage.data());
-    rename->ReplaceIfExists = FALSE;
-    rename->RootDirectory = directory->get();
-    rename->FileNameLength = static_cast<DWORD>(destination_name.size() * sizeof(wchar_t));
-    std::copy(destination_name.begin(), destination_name.end(), rename->FileName);
-    if (SetFileInformationByHandle(source->get(), FileRenameInfo, rename, static_cast<DWORD>(bytes)) == 0)
+    if (rename_open_entry(source->get(), directory->get(), *filename, false) < 0)
         return std::unexpected(
             entry_error("entry_mutation_failed", "sandbox entry could not be renamed", reference.relative_path));
 #else
