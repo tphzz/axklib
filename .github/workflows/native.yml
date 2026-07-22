@@ -164,6 +164,11 @@ jobs:
         with:
           python-version: "3.13"
 
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: "0.10.4"
+          enable-cache: true
+
       - name: Resolve native cache inputs
         id: cache-inputs
         shell: bash
@@ -316,15 +321,15 @@ jobs:
         run: |
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          python tools/python/generate_sbom.py --axklib-root . \
+          uv --project tools/python run python tools/python/generate_sbom.py --axklib-root . \
             --version-metadata-file "$root/version_metadata.json" \
             --package-basename-file "$root/package_basename.txt" --profile sdk \
             --output "$root/axklib-sdk.spdx.json"
-          python tools/python/generate_sbom.py --axklib-root . \
+          uv --project tools/python run python tools/python/generate_sbom.py --axklib-root . \
             --version-metadata-file "$root/version_metadata.json" \
             --package-basename-file "$root/package_basename.txt" --profile cli \
             --output "$root/axklib-cli.spdx.json"
-          python tools/python/generate_sbom.py --axklib-root . \
+          uv --project tools/python run python tools/python/generate_sbom.py --axklib-root . \
             --version-metadata-file "$root/version_metadata.json" \
             --package-basename-file "$root/package_basename.txt" --profile server \
             --output "$root/axklib-server.spdx.json"
@@ -461,7 +466,7 @@ jobs:
         run: |
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          python tools/python/generate_sbom.py \
+          uv --project tools/python run python tools/python/generate_sbom.py \
             --axklib-root . \
             --axkdeck-root apps/axkdeck \
             --version-metadata-file "$root/version_metadata.json" \
@@ -843,6 +848,11 @@ jobs:
         with:
           python-version: "3.13"
 
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          version: "0.10.4"
+          enable-cache: true
+
       - name: Restore x64 slice
         uses: actions/cache/restore@v6
         with:
@@ -1029,7 +1039,7 @@ jobs:
 
       - name: Generate universal desktop SBOM
         run: |
-          python tools/python/generate_sbom.py \
+          uv --project tools/python run python tools/python/generate_sbom.py \
             --axklib-root . \
             --axkdeck-root apps/axkdeck \
             --version-metadata-file build/tmp/macos-arm64-version-metadata.json \

@@ -403,6 +403,10 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
 
     assert "desktop-static:" in workflow
     assert "needs:\n      - release-tools\n      - desktop-static" in workflow
+    assert workflow.count("uses: astral-sh/setup-uv@v8.3.2") == 3
+    assert (
+        workflow.count("uv --project tools/python run python tools/python/generate_sbom.py") == 5
+    )
     assert "AXKLIB_SERVER_BINARY=$server" in workflow
     assert "pnpm tauri build --no-bundle" in workflow
     assert workflow.count("pnpm tauri build") >= 4
