@@ -630,14 +630,9 @@ ObjectCatalog catalog_from_media_objects(std::vector<MediaObject> objects) {
                                   : object.raw_volume.empty()
                                       ? object.raw_group
                                       : std::format("{}/{}", object.raw_group, object.raw_volume)};
-        result.objects.push_back({object.key,
-                                  PartitionIndex{0},
-                                  SfsId{id},
-                                  object.scope_key,
-                                  std::move(object.decoded),
-                                  placement,
-                                  std::move(object.raw_payload),
-                                  {std::move(placement)},
+        std::vector<ObjectPlacement> placement_candidates{placement};
+        result.objects.push_back({object.key, PartitionIndex{0}, SfsId{id}, object.scope_key, std::move(object.decoded),
+                                  placement, std::move(object.raw_payload), std::move(placement_candidates),
                                   PlacementResolution::exact});
         if (object.decode_issue) {
             result.issues.push_back(
