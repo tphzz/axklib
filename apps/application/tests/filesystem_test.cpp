@@ -289,12 +289,14 @@ TEST_F(SandboxTest, OpenTreeReopensValidatedObjectsRelativeToTheRetainedRoot) {
         GTEST_SKIP() << "directory links are unavailable";
     }
 
-    auto opened = retained->open_file(0U);
-    ASSERT_TRUE(opened) << opened.error().message;
-    std::vector<std::byte> bytes(static_cast<std::size_t>(retained->entries().front().size));
-    ASSERT_TRUE(opened->reader->read_exact_at(0U, bytes));
-    ASSERT_TRUE(opened->verify_unchanged());
-    EXPECT_EQ(std::string(reinterpret_cast<const char *>(bytes.data()), bytes.size()), "inside");
+    {
+        auto opened = retained->open_file(0U);
+        ASSERT_TRUE(opened) << opened.error().message;
+        std::vector<std::byte> bytes(static_cast<std::size_t>(retained->entries().front().size));
+        ASSERT_TRUE(opened->reader->read_exact_at(0U, bytes));
+        ASSERT_TRUE(opened->verify_unchanged());
+        EXPECT_EQ(std::string(reinterpret_cast<const char *>(bytes.data()), bytes.size()), "inside");
+    }
 
     std::filesystem::remove(parent, error);
     std::filesystem::rename(parked, parent, error);

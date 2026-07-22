@@ -539,12 +539,19 @@ NTSTATUS rename_open_entry(HANDLE entry, HANDLE parent, const std::filesystem::p
     const auto bytes = sizeof(FILE_RENAME_INFO) + native.size() * sizeof(wchar_t);
     std::vector<std::byte> storage(bytes);
     auto *rename = reinterpret_cast<FILE_RENAME_INFO *>(storage.data());
-    rename->ReplaceIfExists = replace ? TRUE : FALSE;
     rename->RootDirectory = parent;
     rename->FileNameLength = static_cast<DWORD>(native.size() * sizeof(wchar_t));
     std::copy(native.begin(), native.end(), rename->FileName);
     IO_STATUS_BLOCK status{};
-    constexpr auto rename_information_class = static_cast<FILE_INFORMATION_CLASS>(10);
+    constexpr ULONG replace_if_exists = 0x1U;
+    constexpr ULONG posix_semantics = 0x2U;
+    const auto rename_information_class = static_cast<FILE_INFORMATION_CLASS>(replace ? 65 : 10);
+    if (replace) {
+        const ULONG flags = replace_if_exists | posix_semantics;
+        std::memcpy(rename, &flags, sizeof(flags));
+    } else {
+        rename->ReplaceIfExists = FALSE;
+    }
     return NtSetInformationFile(entry, &status, rename, static_cast<ULONG>(bytes), rename_information_class);
 }
 
