@@ -514,6 +514,8 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert "combined Linux or Windows distribution" not in workflow
     assert "pnpm tauri build --target universal-apple-darwin" in workflow
     assert "lipo \"$sidecar\" -verify_arch x86_64 arm64" in workflow
+    assert workflow.count("pnpm/action-setup@v6") == 3
+    assert "pnpm/action-setup@v4" not in workflow
     assert "if-no-files-found: error" in workflow
 
 
@@ -557,6 +559,7 @@ def test_native_workflow_notarizes_and_verifies_the_uploaded_macos_dmg() -> None
     verify = universal_job.index("- name: Verify staged universal macOS desktop DMG")
     upload = universal_job.index("- name: Upload universal macOS desktop DMG")
     assert stage < notarize < verify < upload
+    assert "- name: Verify universal macOS desktop package" not in universal_job
 
     notarization_step = universal_job[notarize:verify]
     assert "build/artifacts/axkdeck-macos-universal" in notarization_step
@@ -568,6 +571,10 @@ def test_native_workflow_notarizes_and_verifies_the_uploaded_macos_dmg() -> None
     assert "spctl --assess --type execute" in verification_step
     assert '"$app/Contents/MacOS/axkdeck"' in verification_step
     assert '"$app/Contents/MacOS/axklib-server"' in verification_step
+    assert 'lipo "$main" -verify_arch x86_64 arm64' in verification_step
+    assert 'lipo "$sidecar" -verify_arch x86_64 arm64' in verification_step
+    assert '"$app/Contents/Resources/licenses/axkdeck.spdx.json"' in verification_step
+    assert '"$app/Contents/Resources/licenses/LGPL-2.1-or-later.txt"' in verification_step
 
 
 def test_native_workflow_builds_tests_and_packages_server_on_every_release_target() -> None:

@@ -66,7 +66,7 @@ jobs:
     steps:
       - name: Checkout axklib
         uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.15.1
       - uses: actions/setup-node@v6
@@ -395,7 +395,7 @@ jobs:
             --server "$server" \
             --fixture tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.15.1
 
@@ -994,7 +994,7 @@ jobs:
             --sign "$MACOS_DEV_ID_CERT_NAME" build/tmp/universal/bin/axklib-server
           codesign --verify --strict --verbose=2 build/tmp/universal/bin/axklib-server
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.15.1
 
@@ -1047,25 +1047,6 @@ jobs:
           cp "$AXKLIB_SERVER_BINARY" \
             src-tauri/binaries/axklib-server-universal-apple-darwin
           pnpm tauri build --target universal-apple-darwin
-
-      - name: Verify universal macOS desktop package
-        shell: bash
-        run: |
-          set -euo pipefail
-          bundle=apps/axkdeck/src-tauri/target/universal-apple-darwin/release/bundle
-          app=$(find "$bundle/macos" -type d -name '*.app' -print -quit)
-          dmg=$(find "$bundle/dmg" -type f -name '*.dmg' -print -quit)
-          test -n "$app"
-          test -n "$dmg"
-          codesign --verify --deep --strict --verbose=2 "$app"
-          main="$app/Contents/MacOS/axkdeck"
-          sidecar="$app/Contents/MacOS/axklib-server"
-          test -f "$main"
-          test -f "$sidecar"
-          lipo "$main" -verify_arch x86_64 arm64
-          lipo "$sidecar" -verify_arch x86_64 arm64
-          test -f "$app/Contents/Resources/licenses/axkdeck.spdx.json"
-          test -f "$app/Contents/Resources/licenses/LGPL-2.1-or-later.txt"
 
       - name: Stage universal macOS desktop release package
         run: >-
@@ -1171,11 +1152,17 @@ jobs:
           mounted=1
           app=$(find "$mount_dir" -type d -name '*.app' -print -quit)
           test -n "$app"
-          test -f "$app/Contents/MacOS/axkdeck"
-          test -f "$app/Contents/MacOS/axklib-server"
+          main="$app/Contents/MacOS/axkdeck"
+          sidecar="$app/Contents/MacOS/axklib-server"
+          test -f "$main"
+          test -f "$sidecar"
+          lipo "$main" -verify_arch x86_64 arm64
+          lipo "$sidecar" -verify_arch x86_64 arm64
+          test -f "$app/Contents/Resources/licenses/axkdeck.spdx.json"
+          test -f "$app/Contents/Resources/licenses/LGPL-2.1-or-later.txt"
           codesign --verify --deep --strict --verbose=2 "$app"
-          codesign --verify --strict --verbose=2 "$app/Contents/MacOS/axkdeck"
-          codesign --verify --strict --verbose=2 "$app/Contents/MacOS/axklib-server"
+          codesign --verify --strict --verbose=2 "$main"
+          codesign --verify --strict --verbose=2 "$sidecar"
 
           if [ "${{ inputs.notarize_macos }}" = "true" ]; then
             xcrun stapler validate "$dmg"
