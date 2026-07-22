@@ -1138,7 +1138,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          dmg=$(find apps/axkdeck/src-tauri/target/universal-apple-darwin/release/bundle/dmg \
+          dmg=$(find build/artifacts/axkdeck-macos-universal \
             -type f -name '*.dmg' -print -quit)
           test -n "$dmg"
           xcrun notarytool submit "$dmg" \
@@ -1147,7 +1147,42 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --wait
           xcrun stapler staple "$dmg"
-          xcrun stapler validate "$dmg"
+
+      - name: Verify staged universal macOS desktop DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg=$(find build/artifacts/axkdeck-macos-universal \
+            -type f -name '*.dmg' -print -quit)
+          test -n "$dmg"
+          codesign --verify --strict --verbose=2 "$dmg"
+
+          mount_dir=$(mktemp -d)
+          mounted=0
+          cleanup() {
+            if [ "$mounted" -eq 1 ]; then
+              hdiutil detach "$mount_dir" >/dev/null || true
+            fi
+            rmdir "$mount_dir" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir"
+          mounted=1
+          app=$(find "$mount_dir" -type d -name '*.app' -print -quit)
+          test -n "$app"
+          test -f "$app/Contents/MacOS/axkdeck"
+          test -f "$app/Contents/MacOS/axklib-server"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --verify --strict --verbose=2 "$app/Contents/MacOS/axkdeck"
+          codesign --verify --strict --verbose=2 "$app/Contents/MacOS/axklib-server"
+
+          if [ "${{ inputs.notarize_macos }}" = "true" ]; then
+            xcrun stapler validate "$dmg"
+            spctl --assess --type open --context context:primary-signature \
+              --verbose=4 "$dmg"
+            spctl --assess --type execute --verbose=4 "$app"
+          fi
 
       - name: Upload universal macOS desktop DMG
         uses: actions/upload-artifact@v7

@@ -545,6 +545,31 @@ def test_native_workflow_restores_macos_slices_across_rerun_attempts() -> None:
     assert "restore-keys: |\n            macos-arm64-${{ github.run_id }}-" in workflow
 
 
+def test_native_workflow_notarizes_and_verifies_the_uploaded_macos_dmg() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    universal_job = workflow.split("  macos-universal:\n", 1)[1].split(
+        "  draft-release:\n", 1
+    )[0]
+
+    stage = universal_job.index("- name: Stage universal macOS desktop release package")
+    notarize = universal_job.index("- name: Notarize and staple universal macOS desktop DMG")
+    verify = universal_job.index("- name: Verify staged universal macOS desktop DMG")
+    upload = universal_job.index("- name: Upload universal macOS desktop DMG")
+    assert stage < notarize < verify < upload
+
+    notarization_step = universal_job[notarize:verify]
+    assert "build/artifacts/axkdeck-macos-universal" in notarization_step
+    assert "src-tauri/target/universal-apple-darwin/release/bundle/dmg" not in notarization_step
+    verification_step = universal_job[verify:upload]
+    assert 'codesign --verify --strict --verbose=2 "$dmg"' in verification_step
+    assert 'xcrun stapler validate "$dmg"' in verification_step
+    assert "spctl --assess --type open" in verification_step
+    assert "spctl --assess --type execute" in verification_step
+    assert '"$app/Contents/MacOS/axkdeck"' in verification_step
+    assert '"$app/Contents/MacOS/axklib-server"' in verification_step
+
+
 def test_native_workflow_builds_tests_and_packages_server_on_every_release_target() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
