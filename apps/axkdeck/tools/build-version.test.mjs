@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { readBuildIdentity, tauriVersionConfig } from './build-version.mjs';
+import { normalizeTauriArguments, readBuildIdentity, tauriVersionConfig } from './build-version.mjs';
 
 function fixture(metadata, packageBasename = 'axklib-feature-audio-a1b2c3d') {
     const directory = mkdtempSync(join(tmpdir(), 'axkdeck-version-'));
@@ -15,8 +15,8 @@ function fixture(metadata, packageBasename = 'axklib-feature-audio-a1b2c3d') {
     return readBuildIdentity(versionPath, packagePath);
 }
 
-test('branch builds use source identity for artifacts and 0.0.0 for Tauri', () => {
-    const identity = fixture({
+function metadataFixture() {
+    return {
         schema_version: 1,
         semantic_version: '0.0.0',
         project_version: '0.0.0',
@@ -26,11 +26,33 @@ test('branch builds use source identity for artifacts and 0.0.0 for Tauri', () =
         release_tag: '',
         is_release: false,
         is_prerelease: false,
-    });
+    };
+}
+
+test('branch builds use source identity for artifacts and 0.0.0 for Tauri', () => {
+    const identity = fixture(metadataFixture());
 
     assert.equal(identity.artifactIdentity, 'feature-audio-a1b2c3d');
     assert.equal(identity.desktopPackageBasename, 'axkdeck-feature-audio-a1b2c3d');
     assert.deepEqual(tauriVersionConfig(identity, 'linux', '12'), { version: '0.0.0' });
+});
+
+test('native package basename accepts one LF- or CRLF-terminated line', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'axkdeck-version-newline-'));
+    const versionPath = join(directory, 'version.json');
+    const packagePath = join(directory, 'package.txt');
+    writeFileSync(versionPath, JSON.stringify(metadataFixture()));
+    writeFileSync(packagePath, 'axklib-feature-windows-a1b2c3d\r\n');
+
+    assert.equal(readBuildIdentity(versionPath, packagePath).sourceIdentity, 'feature-windows-a1b2c3d');
+});
+
+test('pnpm argument separator is not forwarded to the Tauri CLI', () => {
+    assert.deepEqual(normalizeTauriArguments(['--', '--no-bundle']), ['--no-bundle']);
+    assert.deepEqual(normalizeTauriArguments(['--target', 'universal-apple-darwin']), [
+        '--target',
+        'universal-apple-darwin',
+    ]);
 });
 
 test('tag builds use complete semantic version while macOS uses numeric bundle fields', () => {

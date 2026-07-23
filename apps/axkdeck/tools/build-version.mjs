@@ -54,10 +54,11 @@ export function readBuildIdentity(versionMetadataPath, packageBasenamePath) {
     }
 
     const packageText = readFileSync(packageBasenamePath, 'utf8');
-    if (!packageText.endsWith('\n') || packageText.indexOf('\n') !== packageText.length - 1) {
+    const packageMatch = packageText.match(/^([^\r\n]+)\r?\n$/);
+    if (!packageMatch) {
         throw new Error('package basename must contain one newline-terminated line');
     }
-    const nativePackageBasename = packageText.slice(0, -1);
+    const nativePackageBasename = packageMatch[1];
     if (!packageBasenamePattern.test(nativePackageBasename)) {
         throw new Error('invalid axklib package basename');
     }
@@ -83,6 +84,10 @@ export function tauriVersionConfig(identity, platform, buildNumber) {
         version: identity.projectVersion,
         bundle: { macOS: { bundleVersion: buildNumber } },
     };
+}
+
+export function normalizeTauriArguments(arguments_) {
+    return arguments_[0] === '--' ? arguments_.slice(1) : arguments_;
 }
 
 function gitCommitCount(repositoryRoot) {
@@ -131,7 +136,7 @@ function main() {
     };
     const result = spawnSync(
         process.execPath,
-        [tauriCli, command, '--config', JSON.stringify(config), ...arguments_],
+        [tauriCli, command, '--config', JSON.stringify(config), ...normalizeTauriArguments(arguments_)],
         { cwd: desktopRoot, env: environment, stdio: 'inherit' },
     );
     if (result.error) throw result.error;

@@ -89,10 +89,13 @@ pub fn read_build_identity(
             package_basename_path.display()
         )
     })?;
-    let Some(package_basename) = package_text.strip_suffix('\n') else {
+    let Some(package_basename) = package_text
+        .strip_suffix("\r\n")
+        .or_else(|| package_text.strip_suffix('\n'))
+    else {
         return Err("native package basename is not newline-terminated".to_owned());
     };
-    if package_basename.contains('\n') {
+    if package_basename.contains(['\r', '\n']) {
         return Err("native package basename contains multiple lines".to_owned());
     }
     let Some(source_identity) = package_basename.strip_prefix("axklib-") else {

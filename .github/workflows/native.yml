@@ -418,6 +418,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/axkdeck/src-tauri/target
+            !apps/axkdeck/src-tauri/target/**/bundle/**
           key: axkdeck-rust-v1-${{ matrix.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-${{ github.sha }}
           restore-keys: |
             axkdeck-rust-v1-${{ matrix.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-
@@ -479,6 +480,10 @@ jobs:
             --package-basename-file "$root/package_basename.txt" \
             --profile server \
             --output apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+
+      - name: Remove cached desktop bundles
+        shell: bash
+        run: rm -rf apps/axkdeck/src-tauri/target/*/bundle apps/axkdeck/src-tauri/target/*/*/bundle
 
       - name: Import Windows desktop signing certificate
         if: runner.os == 'Windows' && inputs.sign_windows_desktop
@@ -1026,6 +1031,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/axkdeck/src-tauri/target
+            !apps/axkdeck/src-tauri/target/**/bundle/**
           key: axkdeck-rust-v1-macos-universal-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-${{ github.sha }}
           restore-keys: |
             axkdeck-rust-v1-macos-universal-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-
@@ -1056,6 +1062,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$APPLE_SIGNING_IDENTITY"
+          rm -rf src-tauri/target/universal-apple-darwin/release/bundle
           mkdir -p src-tauri/binaries
           cp "$AXKLIB_SERVER_BINARY" \
             src-tauri/binaries/axklib-server-universal-apple-darwin

@@ -85,6 +85,26 @@ fn build_identity_comes_from_the_native_generated_contract() {
 }
 
 #[test]
+fn build_identity_accepts_a_windows_line_ending() {
+    let directory = temporary_directory("windows-line-ending");
+    std::fs::create_dir_all(&directory).expect("create test directory");
+    let metadata = directory.join("version_metadata.json");
+    let package = directory.join("package_basename.txt");
+    std::fs::write(
+        &metadata,
+        r#"{"schema_version":1,"semantic_version":"0.0.0","project_version":"0.0.0","major":0,"minor":0,"patch":0,"release_tag":"","is_release":false,"is_prerelease":false}"#,
+    )
+    .expect("write version metadata");
+    std::fs::write(&package, "axklib-feature-windows-a1b2c3d\r\n").expect("write package basename");
+
+    let identity =
+        build_support::read_build_identity(&metadata, &package).expect("read build identity");
+    assert_eq!(identity.source_identity, "feature-windows-a1b2c3d");
+
+    std::fs::remove_dir_all(directory).expect("remove test directory");
+}
+
+#[test]
 fn inconsistent_development_identity_is_rejected() {
     let directory = temporary_directory("invalid");
     std::fs::create_dir_all(&directory).expect("create test directory");
