@@ -69,13 +69,14 @@ describe('ObjectWorkspace', () => {
         expect(screen.getByRole('searchbox', { name: 'Search Programs' })).toBeTruthy();
     });
 
-    it('renders Wave Data as dense waveform rows', () => {
+    it('renders Wave Data as dense rows with one full-row selection target', async () => {
         const waveObject = {
             ...object('SMPL', 'SMP 001'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
             frameCount: 44_100,
         };
+        const onwavedataselect = vi.fn();
         render(ObjectWorkspace, {
             props: {
                 ...common,
@@ -99,6 +100,7 @@ describe('ObjectWorkspace', () => {
                     },
                 ],
                 view: 'wave-data',
+                onwavedataselect,
             },
         });
 
@@ -107,6 +109,14 @@ describe('ObjectWorkspace', () => {
         expect(screen.queryByText('SMPL')).toBeNull();
         expect(document.querySelector('.object-code')).toBeNull();
         expect(document.querySelector('.waveform span')).toBeNull();
+
+        const selectionTarget = screen.getByRole('button', { name: 'Inspect SMP 001' });
+        expect(selectionTarget.parentElement?.classList.contains('wave-data-row')).toBe(true);
+        expect(screen.getByRole('button', { name: 'Seek SMP 001' }).parentElement).toBe(selectionTarget.parentElement);
+        expect(screen.getByRole('button', { name: 'Play SMP 001' }).parentElement).toBe(selectionTarget.parentElement);
+
+        await fireEvent.click(selectionTarget);
+        expect(onwavedataselect).toHaveBeenCalledOnce();
     });
 
     it('delegates play and selection as one coordinated action', async () => {

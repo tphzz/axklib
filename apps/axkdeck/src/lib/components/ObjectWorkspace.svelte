@@ -121,13 +121,12 @@
             {#each filteredWaveData as item (item.id)}
                 <div use:observePreview={item} class:active={activeObjectId === item.objectKey} class="wave-data-row">
                     <button
-                        class="wave-data-identity"
+                        class="wave-data-selection"
                         type="button"
                         aria-label={`Inspect ${item.name}`}
                         onclick={() => onwavedataselect(item)}
-                    >
-                        <strong>{item.name}</strong>
-                    </button>
+                    ></button>
+                    <strong class="wave-data-identity">{item.name}</strong>
                     <span class="wave-data-meta">{item.note} · {item.duration}</span>
                     <button
                         class="waveform-seek"
@@ -162,7 +161,8 @@
                         onpointerleave={clearPrefetch}
                         onfocus={() => schedulePrefetch(item)}
                         onblur={clearPrefetch}
-                        onclick={() => {
+                        onclick={(event) => {
+                            event.stopPropagation();
                             clearPrefetch();
                             if (playingObjectId === item.objectKey) onstop();
                             else onplay(item);
