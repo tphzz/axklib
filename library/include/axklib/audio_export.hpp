@@ -84,9 +84,6 @@ struct SampleBankExport {
     std::vector<std::string> relationship_sample_keys;
 };
 
-using LegacySampleBankExport [[deprecated("use SampleExport for Sample (SBNK)")]] = SampleExport;
-using SampleBankGroupExport [[deprecated("use SampleBankExport for Sample Bank (SBAC)")]] = SampleBankExport;
-
 struct ProgramExport {
     std::string object_key;
     std::string display_name;

@@ -1194,7 +1194,7 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             Json generic_request{{"kind", "HDS"},
                                  {"manifest",
                                   {{"inline",
-                                    {{"schema_version", "1.0"},
+                                    {{"schema_version", axk::build_manifest_schema_version},
                                      {"size_bytes", planned->manifest.size_bytes},
                                      {"partitions", std::move(partitions)}}}}},
                                  {"output", input.at("output")},

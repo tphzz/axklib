@@ -54,12 +54,10 @@ wave-data=NAME
 ```
 
 The raw object selectors `sbac`, `sbnk`, and `smpl` remain supported. `prog` is
-an alias for `program`. The former `bank-group` spelling is deprecated and is
-accepted as a compatibility alias for `sample-bank`; it will be removed in a
-future major release. `sample-bank` now always selects an `SBAC` Sample Bank;
-use `sample` or `sbnk` for an `SBNK` Sample. `--partition`, `--group`, and
-`--volume` constrain all roots in one export command. Repeat `--root` to create
-a multi-root `.axkpkg`.
+an alias for `program`. `sample-bank` always selects an `SBAC` Sample Bank; use
+`sample` or `sbnk` for an `SBNK` Sample. Obsolete pre-release selector names are
+rejected. `--partition`, `--group`, and `--volume` constrain all roots in one
+export command. Repeat `--root` to create a multi-root `.axkpkg`.
 A selector must resolve exactly once and every required active relationship
 must be known and unambiguous; otherwise no archive is published. Ambiguous
 inactive Program diagnostic rows are not package content.

@@ -24,35 +24,21 @@ A shared SDK package is compatible only with the matching compiler-family C++
 ABI and runtime generation. The CLI has no axklib runtime dependency but still
 uses the documented platform C/C++ runtime libraries.
 
-CLI commands retain option names, structured field meanings, and exit categories
-within a major release. Human-readable formatting may gain additional context.
+After a public release, CLI commands retain option names, structured field
+meanings, and exit categories within that major release. Human-readable
+formatting may gain additional context.
 
 The canonical object terminology is Sample (`SBNK`) and Sample Bank (`SBAC`).
-Writer and alteration manifest schema `1.1` uses that meaning consistently;
-schema `1.0` remains accepted as a legacy input and is migrated at the parse
-boundary. Generated manifests and volume graphs use only the canonical names.
-The C++ migration is necessarily source-breaking for the old `SampleBankSpec`
-name because it formerly represented `SBNK` and now correctly represents
-`SBAC`; use `SampleSpec` (or the transitional `LegacySampleBankSpec` alias) for
-the former model. Deprecated `*SampleBankGroup*` aliases represent `SBAC` and
-remain available only for migration. See [Writer And
-Alteration](write.md#terminology-migration) for the complete field mapping.
+Writer and alteration manifest schema `1.0`, object JSON schema `1.0`, and
+`axklib.volume_graph.v1` use that terminology directly. `SampleSpec` models
+`SBNK`; `SampleBankSpec` models `SBAC`; and package roots use `sample`,
+`sample-bank`, and `wave-data`. Obsolete pre-release names are rejected and
+have no compatibility aliases or migration readers.
 
-The same terminology correction changes these public names and machine schemas:
-
-| Legacy name or schema | Canonical replacement |
-| --- | --- |
-| `CurrentSbnk::bank_name` | `CurrentSbnk::sample_name` |
-| `CurrentSbnkMember::sample_name` | `CurrentSbnkMember::wave_data_name` |
-| `PlannedPackageObject::target_grouped` | `PlannedPackageObject::target_sample_bank_member` |
-| SDK `package_root_kind::bank_group` | `package_root_kind::sample_bank`; the old enumerator is deprecated |
-| Object JSON schema `1.0` | Schema `1.1`, with `sample_name` and `wave_data_name` |
-| `axklib.volume_graph.v1` | `axklib.volume_graph.v2`, with canonical Sample and Sample Bank fields |
-
-These C++ data-member renames cannot be expressed as type aliases. Consumers
-must update source when moving to this API version. Current serializers emit
-only the canonical schemas; compatibility readers accept legacy writer and
-alteration manifest `1.0` documents at their parse boundaries.
+Until the first supported public release, axklib corrects unreleased contracts
+in place and updates all in-repository consumers together. Compatibility
+versions and migration paths begin only when a released contract or real
+persisted user data requires them.
 
 The current portable-package reader accepts exactly manifest schema `1.0` and
 rejects unknown or missing fields. All typed package extensions share that one

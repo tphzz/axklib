@@ -9,11 +9,12 @@
 #include <set>
 #include <span>
 
+#include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
 #include "axklib/utf8.hpp"
-#include "writer_internal.hpp"
+#include "axklib/writer_internal.hpp"
 
 namespace axk {
 namespace {
@@ -48,17 +49,6 @@ Result<void> validate_hds_image(const std::filesystem::path &path,
     return {};
 }
 
-void be16(std::span<std::byte> data, std::size_t offset, std::uint16_t value) {
-    data[offset] = static_cast<std::byte>(value >> 8U);
-    data[offset + 1U] = static_cast<std::byte>(value & 0xffU);
-}
-
-void be32(std::span<std::byte> data, std::size_t offset, std::uint32_t value) {
-    for (std::size_t index = 0; index < 4; ++index) {
-        data[offset + index] = static_cast<std::byte>((value >> ((3U - index) * 8U)) & 0xffU);
-    }
-}
-
 Result<std::vector<std::byte>> ascii(std::string_view value, std::size_t size, std::byte pad = std::byte{' '}) {
     if (value.size() > size || !std::ranges::all_of(value, [](unsigned char character) { return character < 0x80U; })) {
         return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
@@ -78,14 +68,19 @@ Result<std::array<std::byte, 32>> directory_entry(std::string_view name, std::ui
             name_bytes ? make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, "directory name is too long")
                        : name_bytes.error()};
     std::array<std::byte, 32> result{};
-    be16(result, 0, 0x20);
-    be16(result, 2, static_cast<std::uint16_t>(name_bytes->size() + 1U));
-    be32(result, 4, link);
+    ByteWriter writer{result};
+    if (auto written = writer.write_be16(0, 0x20); !written)
+        return std::unexpected{written.error()};
+    if (auto written = writer.write_be16(2, static_cast<std::uint16_t>(name_bytes->size() + 1U)); !written)
+        return std::unexpected{written.error()};
+    if (auto written = writer.write_be32(4, link); !written)
+        return std::unexpected{written.error()};
     std::ranges::copy(*name_bytes, result.begin() + 8);
     if (name == ".") {
         result[10] = std::byte{0x4f};
         result[11] = std::byte{0x58};
-        be32(result, 16, 0x0017821a);
+        if (auto written = writer.write_be32(16, 0x0017821a); !written)
+            return std::unexpected{written.error()};
         std::fill(result.begin() + 24, result.begin() + 28, std::byte{0xff});
         result[31] = static_cast<std::byte>(marker);
     } else if (name == "..") {
@@ -93,12 +88,19 @@ Result<std::array<std::byte, 32>> directory_entry(std::string_view name, std::ui
             return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                               "directory ID exceeds the writer profile")};
         result[11] = static_cast<std::byte>(*directory_id);
-        be32(result, 16, 0x001783c8);
+        if (auto written = writer.write_be32(16, 0x001783c8); !written)
+            return std::unexpected{written.error()};
     }
     return result;
 }
 
 using Entry = std::tuple<std::string, std::uint32_t, std::optional<std::size_t>>;
+
+struct LoadedWaveform {
+    WaveformSpec spec;
+    ImportedAudio audio;
+    std::uint32_t link_id{};
+};
 
 Result<std::vector<std::byte>> directory_payload(std::uint32_t id, std::uint32_t parent,
                                                  const std::vector<Entry> &entries, std::uint8_t marker = 0) {
@@ -121,321 +123,7 @@ Result<std::vector<std::byte>> directory_payload(std::uint32_t id, std::uint32_t
     return result;
 }
 
-std::uint16_t pitch_word(std::uint8_t root_key, std::uint32_t sample_rate) {
-    constexpr std::array<std::uint16_t, 12> fractions{0x000, 0x055, 0x0ab, 0x100, 0x155, 0x1ab,
-                                                      0x200, 0x255, 0x2ab, 0x300, 0x355, 0x3ab};
-    const auto root = root_key == 0U ? 0x03ab : ((root_key - 1U) / 12U) * 1024U + fractions[(root_key - 1U) % 12U];
-    const auto rate = static_cast<int>(std::log(static_cast<double>(sample_rate) / 44'100.0) * 1477.3197);
-    return static_cast<std::uint16_t>(static_cast<int>(root) - rate);
-}
-
-Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const ImportedAudio &audio,
-                                              std::uint32_t link_id) {
-    const auto pcm_bytes = audio.pcm_channels.size() == 1U ? audio.pcm_channels[0].size() : 0U;
-    if (audio.output_frames > maximum_wave_data_frames_per_channel ||
-        pcm_bytes > maximum_wave_data_pcm16_bytes_per_channel) {
-        return std::unexpected{make_error(ErrorCode::audio_wave_data_too_large, ErrorCategory::audio,
-                                          "Wave Data exceeds the 32 MiB per-channel A-series limit")};
-    }
-    if (audio.output_sample_width_bits != sampler_output_sample_width_bits || audio.pcm_channels.size() != 1U ||
-        pcm_bytes % 2U != 0U || pcm_bytes / 2U != audio.output_frames ||
-        audio.output_frames > std::numeric_limits<std::uint32_t>::max()) {
-        return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
-                                          "SMPL writer requires bounded mono 16-bit PCM")};
-    }
-    std::vector<std::byte> stored;
-    stored.reserve(audio.pcm_channels[0].size() + 8U);
-    for (std::size_t offset = 0; offset < audio.pcm_channels[0].size(); offset += 2U) {
-        stored.push_back(audio.pcm_channels[0][offset + 1U]);
-        stored.push_back(audio.pcm_channels[0][offset]);
-    }
-    stored.insert(stored.end(), stored.begin(),
-                  stored.begin() + static_cast<std::ptrdiff_t>(std::min<std::size_t>(stored.size(), 8U)));
-    std::vector<std::byte> result(512U + stored.size());
-    constexpr std::string_view magic{"FSFSDEV3SPLX"};
-    std::ranges::transform(magic, result.begin(), [](char value) { return static_cast<std::byte>(value); });
-    std::ranges::transform(std::string_view{"SMPL"}, result.begin() + 0x0c,
-                           [](char value) { return static_cast<std::byte>(value); });
-    be32(result, 0x10, 512);
-    be32(result, 0x14, 3);
-    be32(result, 0x18, 0x7c);
-    be32(result, 0x1c, static_cast<std::uint32_t>(stored.size()));
-    be32(result, 0x20, static_cast<std::uint32_t>(stored.size()));
-    be16(result, 0x28, static_cast<std::uint16_t>(audio.output_sample_rate));
-    be16(result, 0x2a, 2);
-    result[0x30] = std::byte{0x02};
-    result[0x31] = std::byte{0xc0};
-    auto name = ascii(spec.name, 16);
-    if (!name)
-        return std::unexpected{name.error()};
-    std::ranges::copy(*name, result.begin() + 0x32);
-    constexpr std::array<std::byte, 8> identity{std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0x0a},
-                                                std::byte{0x87}, std::byte{0x7c}, std::byte{0x01}, std::byte{0x54}};
-    std::ranges::copy(identity, result.begin() + 0x42);
-    be32(result, 0x68, 0x01443840);
-    be32(result, 0x6c, link_id - 0xbaU);
-    be32(result, 0x74, 0x01443840);
-    be32(result, 0x78, link_id);
-    be16(result, 0x7c, static_cast<std::uint16_t>(audio.output_sample_rate));
-    result[0x7e] = static_cast<std::byte>(spec.root_key);
-    be16(result, 0x80, pitch_word(spec.root_key, audio.output_sample_rate));
-    be32(result, 0x84, 0x30010000);
-    be32(result, 0x92, static_cast<std::uint32_t>(audio.output_frames));
-    be32(result, 0x96, 0);
-    be32(result, 0x9a, static_cast<std::uint32_t>(audio.output_frames));
-    std::ranges::copy(stored, result.begin() + 512);
-    return result;
-}
-
-struct LoadedWaveform {
-    WaveformSpec spec;
-    ImportedAudio audio;
-    std::uint32_t link_id{};
-};
-
-Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const LoadedWaveform &left,
-                                              const LoadedWaveform *right, bool sample_bank_member,
-                                              const std::vector<std::uint8_t> &linked_programs) {
-    if (left.audio.output_frames > maximum_wave_data_frames_per_channel ||
-        (right != nullptr && right->audio.output_frames > maximum_wave_data_frames_per_channel)) {
-        return std::unexpected{make_error(ErrorCode::audio_wave_data_too_large, ErrorCategory::audio,
-                                          "Sample references Wave Data beyond the A-series per-channel limit")};
-    }
-    std::vector<std::byte> result(0x188);
-    const auto put_text = [&](std::size_t offset, std::string_view value, std::size_t width) -> Result<void> {
-        auto bytes = ascii(value, width);
-        if (!bytes)
-            return std::unexpected{bytes.error()};
-        std::ranges::copy(*bytes, result.begin() + static_cast<std::ptrdiff_t>(offset));
-        return {};
-    };
-    constexpr std::string_view magic{"FSFSDEV3SPLX"};
-    std::ranges::transform(magic, result.begin(), [](char value) { return static_cast<std::byte>(value); });
-    std::ranges::transform(std::string_view{"SBNK"}, result.begin() + 0x0c,
-                           [](char value) { return static_cast<std::byte>(value); });
-    constexpr std::array<std::byte, 16> header{std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0},
-                                               std::byte{0}, std::byte{0}, std::byte{0}, std::byte{4},
-                                               std::byte{0}, std::byte{0}, std::byte{1}, std::byte{0x34},
-                                               std::byte{0}, std::byte{0}, std::byte{1}, std::byte{0x58}};
-    std::ranges::copy(header, result.begin() + 0x10);
-    result[0x30] = std::byte{0x10};
-    result[0x31] = std::byte{0x0c};
-    if (auto written = put_text(0x32, sample.name, 16); !written)
-        return std::unexpected{written.error()};
-    constexpr std::array<std::byte, 7> suffix{std::byte{0xb8}, std::byte{0},    std::byte{0x0a}, std::byte{0xf6},
-                                              std::byte{0x7a}, std::byte{0x01}, std::byte{0x54}};
-    std::ranges::copy(suffix, result.begin() + 0x43);
-    std::fill(result.begin() + 0x50, result.begin() + 0x68, std::byte{' '});
-    be32(result, 0x68, 0x01443c30);
-    be32(result, 0x98, 0x01443c30);
-    if (auto written = put_text(0x78, left.spec.name, 16); !written)
-        return std::unexpected{written.error()};
-    if (right != nullptr) {
-        if (auto written = put_text(0x88, right->spec.name, 16); !written) {
-            return std::unexpected{written.error()};
-        }
-    }
-    be32(result, 0xa0, left.link_id);
-    be32(result, 0xa4, right == nullptr ? 0U : right->link_id);
-    constexpr std::array<std::byte, 16> member_defaults{
-        std::byte{0x4a}, std::byte{0x04}, std::byte{0x01}, std::byte{0x20}, std::byte{0x47}, std::byte{0x05},
-        std::byte{0x01}, std::byte{0x20}, std::byte{0x49}, std::byte{0x0b}, std::byte{0x01}, std::byte{0xe0},
-        std::byte{0x48}, std::byte{0x0c}, std::byte{0x01}, std::byte{0xe0}};
-    std::ranges::copy(member_defaults, result.begin() + 0xa8);
-    result[0xd0] = static_cast<std::byte>(sample_bank_member ? 0x03U : 0x02U);
-    result[0xd4] = std::byte{2};
-    for (const auto number : linked_programs) {
-        const auto offset = 0xc0U + ((number - 1U) / 32U) * 4U;
-        const auto bit = static_cast<std::uint32_t>(1U << ((number - 1U) % 32U));
-        const auto existing = (std::to_integer<std::uint32_t>(result[offset]) << 24U) |
-                              (std::to_integer<std::uint32_t>(result[offset + 1U]) << 16U) |
-                              (std::to_integer<std::uint32_t>(result[offset + 2U]) << 8U) |
-                              std::to_integer<std::uint32_t>(result[offset + 3U]);
-        be32(result, offset, existing | bit);
-    }
-    result[0xd6] = static_cast<std::byte>(sample.root_key);
-    be16(result, 0xd8, static_cast<std::uint16_t>(left.audio.output_sample_rate));
-    be16(result, 0xde, pitch_word(sample.root_key, left.audio.output_sample_rate));
-    if (right != nullptr) {
-        result[0xd7] = static_cast<std::byte>(sample.root_key);
-        be16(result, 0xda, static_cast<std::uint16_t>(right->audio.output_sample_rate));
-        be16(result, 0xe0, pitch_word(sample.root_key, right->audio.output_sample_rate));
-    }
-    result[0xe2] = static_cast<std::byte>(sample.key_high);
-    result[0xe3] = static_cast<std::byte>(sample.key_low);
-    result[0xe4] = std::byte{0x30};
-    result[0xe5] = std::byte{1};
-    be16(result, 0xe6, 9000);
-    be32(result, 0xf0, static_cast<std::uint32_t>(left.audio.output_frames));
-    be32(result, 0xf8, 0);
-    be32(result, 0x100, static_cast<std::uint32_t>(left.audio.output_frames));
-    if (right != nullptr) {
-        be32(result, 0xf4, static_cast<std::uint32_t>(right->audio.output_frames));
-        be32(result, 0xfc, 0);
-        be32(result, 0x104, static_cast<std::uint32_t>(right->audio.output_frames));
-    }
-    const std::array<std::pair<std::size_t, std::uint8_t>, 32> defaults{
-        {{0x109, 0},   {0x10a, 127}, {0x10b, 4},   {0x10c, 0},   {0x10d, 127}, {0x10e, 0},  {0x10f, 0},
-         {0x110, 0},   {0x111, 0},   {0x112, 0},   {0x113, 0},   {0x114, 63},  {0x115, 0},  {0x116, sample.level},
-         {0x117, 0},   {0x118, 0},   {0x119, 0},   {0x11a, 127}, {0x11b, 0},   {0x11c, 0},  {0x11d, 127},
-         {0x11e, 127}, {0x11f, 127}, {0x120, 0},   {0x121, 0},   {0x122, 26},  {0x123, 64}, {0x124, 10},
-         {0x125, 0},   {0x126, 127}, {0x127, 127}, {0x128, 127}}};
-    for (const auto &[offset, value] : defaults)
-        result[offset] = static_cast<std::byte>(value);
-    result[0x131] = std::byte{127};
-    result[0x132] = std::byte{127};
-    result[0x133] = std::byte{127};
-    result[0x13b] = std::byte{12};
-    result[0x13c] = std::byte{127};
-    result[0x13d] = std::byte{127};
-    result[0x13e] = std::byte{126};
-    result[0x141] = std::byte{127};
-    result[0x146] = std::byte{1};
-    result[0x147] = std::byte{39};
-    result[0x149] = std::byte{1};
-    constexpr std::array<std::byte, 5> playback{std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a},
-                                                std::byte{0x20}};
-    constexpr std::array<std::byte, 4> tone{std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6}};
-    std::ranges::copy(playback, result.begin() + 0x152);
-    std::ranges::copy(tone, result.begin() + 0x158);
-    constexpr std::array<std::byte, 24> controls{
-        std::byte{74}, std::byte{4},  std::byte{1},  std::byte{32},   std::byte{71}, std::byte{5},
-        std::byte{1},  std::byte{32}, std::byte{73}, std::byte{11},   std::byte{1},  std::byte{0xe0},
-        std::byte{72}, std::byte{12}, std::byte{1},  std::byte{0xe0}, std::byte{0},  std::byte{0},
-        std::byte{0},  std::byte{0},  std::byte{0},  std::byte{0},    std::byte{0},  std::byte{0}};
-    std::ranges::copy(controls, result.begin() + 0x164);
-    result[0x17e] = std::byte{1};
-    result[0x17f] = std::byte{127};
-    result[0x181] = std::byte{127};
-    result[0x183] = std::byte{90};
-    result[0x184] = std::byte{90};
-    return result;
-}
-
-Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
-                                              const std::map<std::string, SampleSpec> &samples) {
-    const std::set<std::string> unique_members{sample_bank.member_samples.begin(), sample_bank.member_samples.end()};
-    if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > 3U ||
-        unique_members.size() != sample_bank.member_samples.size()) {
-        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Sample Bank must contain 1..3 distinct Samples")};
-    }
-    std::vector<std::byte> result(0x210);
-    std::ranges::transform(std::string_view{"FSFSDEV3SPLX"}, result.begin(),
-                           [](char value) { return static_cast<std::byte>(value); });
-    std::ranges::transform(std::string_view{"SBAC"}, result.begin() + 0x0c,
-                           [](char value) { return static_cast<std::byte>(value); });
-    be32(result, 0x14, 4);
-    be32(result, 0x18, 0x1bc);
-    be32(result, 0x1c, 0x1e0);
-    result[0x30] = std::byte{0x11};
-    result[0x31] = std::byte{0x0c};
-    auto name = ascii(sample_bank.name, 16);
-    if (!name)
-        return std::unexpected{name.error()};
-    std::ranges::copy(*name, result.begin() + 0x32);
-    result[0x144] = static_cast<std::byte>(sample_bank.member_samples.size());
-    for (std::size_t index = 0; index < sample_bank.member_samples.size(); ++index) {
-        const auto found = samples.find(sample_bank.member_samples[index]);
-        if (found == samples.end())
-            return std::unexpected{
-                make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, "SBAC references an unknown SBNK")};
-        auto member = ascii(found->second.name, 16);
-        if (!member)
-            return std::unexpected{member.error()};
-        const auto offset = 0x14cU + index * 0x14U;
-        auto destination = std::span{result}.subspan(offset, member->size());
-        std::ranges::copy(*member, destination.begin());
-    }
-    return result;
-}
-
-Result<std::vector<std::byte>> serialize_prog(const ProgramSpec &program) {
-    std::vector<std::byte> result(0x390);
-    std::ranges::transform(std::string_view{"FSFSDEV3SPLX"}, result.begin(),
-                           [](char value) { return static_cast<std::byte>(value); });
-    std::ranges::transform(std::string_view{"PROG"}, result.begin() + 0x0c,
-                           [](char value) { return static_cast<std::byte>(value); });
-    be32(result, 0x14, 4);
-    be32(result, 0x18, 0x2b0);
-    be32(result, 0x1c, 0x360);
-    result[0x30] = std::byte{0x14};
-    result[0x31] = std::byte{0x0c};
-    const auto object_name = std::format("{:03}", program.number);
-    auto name = ascii(object_name, 16);
-    if (!name)
-        return std::unexpected{name.error()};
-    std::ranges::copy(*name, result.begin() + 0x32);
-    auto display = ascii("Pgm " + object_name, 8);
-    if (!display)
-        return std::unexpected{display.error()};
-    std::ranges::copy(*display, result.begin() + 0x78);
-    constexpr std::array<std::byte, 24> defaults{
-        std::byte{0},    std::byte{5},    std::byte{0xff}, std::byte{0xff}, std::byte{0},    std::byte{0},
-        std::byte{0},    std::byte{1},    std::byte{0x40}, std::byte{0},    std::byte{0x40}, std::byte{0x7f},
-        std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0xfe}, std::byte{0},    std::byte{0x5a},
-        std::byte{0x5a}, std::byte{0x27}, std::byte{0x78}, std::byte{0xff}, std::byte{0},    std::byte{2}};
-    std::ranges::copy(defaults, result.begin() + 0x80);
-    for (std::size_t index = 0; index < program.assignments.size(); ++index) {
-        const auto &assignment = program.assignments[index];
-        const auto offset = 0x120U + index * 0x38U;
-        auto target = ascii(assignment.target_name, 16);
-        if (!target)
-            return std::unexpected{target.error()};
-        std::ranges::copy(*target, result.begin() + static_cast<std::ptrdiff_t>(offset));
-        result[offset + 0x14U] = assignment.target_kind == "SBAC" ? std::byte{0x11} : std::byte{0x10};
-        result[offset + 0x15U] = static_cast<std::byte>(assignment.receive_channel - 1U);
-        result[offset + 0x1dU] = std::byte{0xff};
-        result[offset + 0x1eU] = std::byte{0x7f};
-        result[offset + 0x21U] = std::byte{0x7f};
-        result[offset + 0x23U] = std::byte{0xff};
-        result[offset + 0x24U] = std::byte{0xff};
-        result[offset + 0x28U] = std::byte{0xff};
-        result[offset + 0x2dU] = std::byte{0xff};
-        result[offset + 0x30U] = std::byte{0xff};
-        result[offset + 0x33U] = std::byte{1};
-    }
-    return result;
-}
-
 } // namespace
-
-Result<std::vector<std::byte>> detail::prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
-                                                            std::uint32_t link_id) {
-    return serialize_smpl(spec, audio, link_id);
-}
-
-Result<std::vector<std::byte>> detail::prepare_sbnk_payload(const SampleSpec &spec, const PreparedWaveformMember &left,
-                                                            const std::optional<PreparedWaveformMember> &right,
-                                                            bool sample_bank_member,
-                                                            const std::vector<std::uint8_t> &linked_programs) {
-    ImportedAudio left_audio;
-    left_audio.output_sample_rate = left.sample_rate;
-    left_audio.output_frames = left.frame_count;
-    WaveformSpec left_spec;
-    left_spec.name = left.name;
-    LoadedWaveform left_loaded{std::move(left_spec), std::move(left_audio), left.link_id};
-    std::optional<LoadedWaveform> right_loaded;
-    if (right) {
-        ImportedAudio right_audio;
-        right_audio.output_sample_rate = right->sample_rate;
-        right_audio.output_frames = right->frame_count;
-        WaveformSpec right_spec;
-        right_spec.name = right->name;
-        right_loaded.emplace(LoadedWaveform{std::move(right_spec), std::move(right_audio), right->link_id});
-    }
-    return serialize_sbnk(spec, left_loaded, right_loaded ? &*right_loaded : nullptr, sample_bank_member,
-                          linked_programs);
-}
-
-Result<std::vector<std::byte>> detail::prepare_sbac_payload(const SampleBankSpec &sample_bank,
-                                                            const std::map<std::string, SampleSpec> &samples) {
-    return serialize_sbac(sample_bank, samples);
-}
-
-Result<std::vector<std::byte>> detail::prepare_prog_payload(const ProgramSpec &program) {
-    return serialize_prog(program);
-}
 
 Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const PartitionSpec &partition,
                                                                       const PartitionGeometry &geometry,
@@ -541,7 +229,7 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                 return std::unexpected{imported.error()};
             const auto id = next++;
             const auto link_id = 0x016b1dbcU + static_cast<std::uint32_t>(waveform_index) * 0x100U;
-            auto payload = serialize_smpl(spec, *imported, link_id);
+            auto payload = detail::prepare_smpl_payload(spec, *imported, link_id);
             if (!payload)
                 return std::unexpected{payload.error()};
             smpl_entries.emplace_back(spec.name, id, 16U);
@@ -592,7 +280,7 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                                   sample.target_sample_rate};
                 const auto link_id = 0x016b1dbcU + static_cast<std::uint32_t>(loaded.size()) * 0x100U;
                 auto audio = make_channel(channel);
-                auto payload = serialize_smpl(spec, audio, link_id);
+                auto payload = detail::prepare_smpl_payload(spec, audio, link_id);
                 if (!payload)
                     return std::unexpected{payload.error()};
                 const auto id = next++;
@@ -628,8 +316,17 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                 return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                   "stereo SBNK members require matching rate and frame "
                                                   "count")};
-            auto payload = serialize_sbnk(sample, left->second, right == loaded.end() ? nullptr : &right->second,
-                                          banked_samples.contains(sample.name), linked_programs[sample.name]);
+            const detail::PreparedWaveformMember left_member{
+                left->second.spec.name, left->second.link_id, left->second.audio.output_sample_rate,
+                static_cast<std::uint32_t>(left->second.audio.output_frames)};
+            std::optional<detail::PreparedWaveformMember> right_member;
+            if (right != loaded.end()) {
+                right_member.emplace(detail::PreparedWaveformMember{
+                    right->second.spec.name, right->second.link_id, right->second.audio.output_sample_rate,
+                    static_cast<std::uint32_t>(right->second.audio.output_frames)});
+            }
+            auto payload = detail::prepare_sbnk_payload(
+                sample, left_member, right_member, banked_samples.contains(sample.name), linked_programs[sample.name]);
             if (!payload)
                 return std::unexpected{payload.error()};
             const auto id = next++;
@@ -638,7 +335,7 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             samples.emplace(sample.name, sample);
         }
         for (const auto &sample_bank : volume.sample_banks) {
-            auto payload = serialize_sbac(sample_bank, samples);
+            auto payload = detail::prepare_sbac_payload(sample_bank, samples);
             if (!payload)
                 return std::unexpected{payload.error()};
             const auto id = next++;
@@ -646,7 +343,7 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             objects.push_back({id, std::move(*payload), RecordKind::object});
         }
         for (const auto &program : volume.programs) {
-            auto payload = serialize_prog(program);
+            auto payload = detail::prepare_prog_payload(program);
             if (!payload)
                 return std::unexpected{payload.error()};
             const auto id = next++;
@@ -722,31 +419,6 @@ Result<std::size_t> detail::checked_directory_index_size(std::span<const Prepare
 
 namespace {
 
-std::vector<std::byte> index_record(const PreparedRecord &record) {
-    std::vector<std::byte> result(72);
-    if (record.kind != RecordKind::system) {
-        be16(result, 0, 1);
-        be16(result, 4, static_cast<std::uint16_t>(record.clusters));
-        be32(result, 6, static_cast<std::uint32_t>(record.payload.size()));
-        be32(result, 0x0a, record.cluster);
-        be32(result, 0x0e, record.clusters);
-        be32(result, 0x12, static_cast<std::uint32_t>(record.payload.size()));
-    }
-    std::fill(result.begin() + 0x3a, result.begin() + 0x42, std::byte{0xff});
-    result[0x42] = record.kind == RecordKind::object ? std::byte{0x9e} : std::byte{0x94};
-    if (record.kind == RecordKind::directory) {
-        result[0x43] = std::byte{'d'};
-        result[0x44] = std::byte{'i'};
-        result[0x45] = std::byte{'r'};
-        be16(result, 0x46, record.tail);
-    } else if (record.kind == RecordKind::object) {
-        result[0x47] = std::byte{1};
-    } else {
-        result[0x47] = std::byte{1};
-    }
-    return result;
-}
-
 class TemporaryFileCleanup {
   public:
     explicit TemporaryFileCleanup(std::filesystem::path path) : path_(std::move(path)) {}
@@ -801,13 +473,25 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
     std::ranges::transform(magic, superblock.begin(), [](char value) { return static_cast<std::byte>(value); });
     constexpr std::array<std::uint32_t, 7> residue{0xa1e00152, 0xa22c0000, 0x17,      0x09100000,
                                                    0x17,       0x09100000, 0x01000152};
-    for (std::size_t index = 0; index < residue.size(); ++index)
-        be32(superblock, 0x80 + index * 4U, residue[index]);
-    be32(superblock, 0x9c, 512);
-    be32(superblock, 0xa0, static_cast<std::uint32_t>(manifest.size_bytes / 512U));
+    ByteWriter superblock_writer{superblock};
+    for (std::size_t index = 0; index < residue.size(); ++index) {
+        if (auto written = superblock_writer.write_be32(0x80 + index * 4U, residue[index]); !written)
+            return std::unexpected{written.error()};
+    }
+    if (auto written = superblock_writer.write_be32(0x9c, 512); !written)
+        return std::unexpected{written.error()};
+    if (auto written = superblock_writer.write_be32(0xa0, static_cast<std::uint32_t>(manifest.size_bytes / 512U));
+        !written)
+        return std::unexpected{written.error()};
     for (const auto &geometry : *geometries) {
-        be32(superblock, 0xa8 + geometry.index * 8U, static_cast<std::uint32_t>(geometry.start_sector));
-        be32(superblock, 0xac + geometry.index * 8U, static_cast<std::uint32_t>(geometry.filesystem_sector_count));
+        if (auto written = superblock_writer.write_be32(0xa8 + geometry.index * 8U,
+                                                        static_cast<std::uint32_t>(geometry.start_sector));
+            !written)
+            return std::unexpected{written.error()};
+        if (auto written = superblock_writer.write_be32(0xac + geometry.index * 8U,
+                                                        static_cast<std::uint32_t>(geometry.filesystem_sector_count));
+            !written)
+            return std::unexpected{written.error()};
     }
     if (!detail::write_temporary_file_at(*temporary, 0, superblock) ||
         !detail::write_temporary_file_at(*temporary, 512, superblock)) {
@@ -836,16 +520,23 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
         std::ranges::copy(*name, header.begin() + 0x40);
         if (geometry.index > 0 && geometries->size() > 1)
             header[0x4f] = static_cast<std::byte>('0' + geometry.index);
-        be32(header, 0x80, 2);
-        be32(header, 0x84, 200);
+        ByteWriter header_writer{header};
+        if (auto written = header_writer.write_be32(0x80, 2); !written)
+            return std::unexpected{written.error()};
+        if (auto written = header_writer.write_be32(0x84, 200); !written)
+            return std::unexpected{written.error()};
         std::fill(header.begin() + 0x88, header.begin() + 0x90, std::byte{0xff});
-        be32(header, 0x90, static_cast<std::uint32_t>(geometry.cluster_count));
-        be32(header, 0x94, 2);
-        be32(header, 0x98, 2);
-        be32(header, 0x9c, static_cast<std::uint32_t>(geometry.bitmap_cluster));
-        be32(header, 0xa0, 5012);
-        be32(header, 0xa4, static_cast<std::uint32_t>(geometry.directory_index_cluster));
-        be32(header, 0xa8, 358);
+        for (const auto &[offset, value] : std::array<std::pair<std::size_t, std::uint32_t>, 7>{
+                 {{0x90, static_cast<std::uint32_t>(geometry.cluster_count)},
+                  {0x94, 2},
+                  {0x98, 2},
+                  {0x9c, static_cast<std::uint32_t>(geometry.bitmap_cluster)},
+                  {0xa0, detail::sfs_directory_index_capacity},
+                  {0xa4, static_cast<std::uint32_t>(geometry.directory_index_cluster)},
+                  {0xa8, detail::sfs_directory_index_page_capacity}}}) {
+            if (auto written = header_writer.write_be32(offset, value); !written)
+                return std::unexpected{written.error()};
+        }
         const auto dynamic = 0x0152a3fcU + geometry.index * 0x11U;
         const auto total_sectors = manifest.size_bytes / 512U;
         if (geometries->size() == 2U)
@@ -868,8 +559,10 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
                   {0x17c, static_cast<std::uint32_t>(geometry.filesystem_sector_count)},
                   {0x184, dynamic},
                   {0x194, geometries->size() >= 3U ? 0U : static_cast<std::uint32_t>(geometries->size())},
-                  {0x1a8, geometry.index}}})
-            be32(header, offset, value);
+                  {0x1a8, geometry.index}}}) {
+            if (auto written = header_writer.write_be32(offset, value); !written)
+                return std::unexpected{written.error()};
+        }
         const auto start = geometry.start_sector * 512U;
         if (!detail::write_temporary_file_at(*temporary, start, header) ||
             !detail::write_temporary_file_at(*temporary, start + 1024U, header))
@@ -901,12 +594,14 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
             const auto offset =
                 (record.id / detail::sfs_directory_index_records_per_page) * detail::sfs_directory_index_page_bytes +
                 (record.id % detail::sfs_directory_index_records_per_page) * detail::sfs_directory_index_record_bytes;
-            const auto bytes = index_record(record);
-            if (offset > index.size() || bytes.size() > index.size() - offset) {
+            auto bytes = detail::encode_sfs_index_record(record);
+            if (!bytes)
+                return std::unexpected{bytes.error()};
+            if (offset > index.size() || bytes->size() > index.size() - offset) {
                 return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
                                                   "prepared SFS directory record exceeds the index")};
             }
-            std::ranges::copy(bytes, std::span{index}.subspan(offset, bytes.size()).begin());
+            std::ranges::copy(*bytes, std::span{index}.subspan(offset, bytes->size()).begin());
             if (!record.payload.empty() &&
                 !detail::write_temporary_file_at(*temporary, (geometry.start_sector + record.cluster * 2U) * 512U,
                                                  record.payload))

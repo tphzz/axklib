@@ -30,7 +30,7 @@ std::vector<std::byte> read_bytes(const std::filesystem::path &path) {
 
 void write_empty_target(const std::filesystem::path &path, std::string_view partition_name = "Target") {
     const auto manifest = axk::parse_hds_build_manifest(
-        std::string{R"({"schema_version":"1.1","size_bytes":1048576,"partitions":[{"name":")"} +
+        std::string{R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":")"} +
         std::string{partition_name} + R"(","volumes":[{"name":"Imported","waveforms":[],"samples":[]}]}]})");
     ASSERT_TRUE(manifest) << manifest.error().message;
     const auto written = axk::write_hds_image(*manifest, path);
@@ -188,7 +188,7 @@ TEST_F(PackageOperationsTest, RejectsSequenceRootsAndUploadOwnershipMismatch) {
     EXPECT_EQ(denied.error().code, "upload_not_found");
 }
 
-TEST_F(PackageOperationsTest, MapsCanonicalAndDeprecatedFriendlyRootNamesToRawObjectKinds) {
+TEST_F(PackageOperationsTest, MapsCanonicalFriendlyRootNamesAndRejectsObsoleteNames) {
     const auto export_kind = [&](std::string_view kind, std::string_view name, std::string_view output) {
         return registry_.invoke(
             "package.export",
@@ -202,9 +202,9 @@ TEST_F(PackageOperationsTest, MapsCanonicalAndDeprecatedFriendlyRootNamesToRawOb
     ASSERT_TRUE(sample_bank) << sample_bank.error().message;
     EXPECT_EQ(sample_bank->at("packageKind"), "sbac");
 
-    const auto legacy_bank_group = export_kind("bank-group", "New SmpBank", "bank-group");
-    ASSERT_TRUE(legacy_bank_group) << legacy_bank_group.error().message;
-    EXPECT_EQ(legacy_bank_group->at("packageKind"), "sbac");
+    const auto obsolete_bank_group = export_kind("bank-group", "New SmpBank", "bank-group");
+    ASSERT_FALSE(obsolete_bank_group);
+    EXPECT_EQ(obsolete_bank_group.error().code, "unsupported_package_root");
 
     const auto sample = export_kind("sample", "sine wave", "sample");
     ASSERT_TRUE(sample) << sample.error().message;

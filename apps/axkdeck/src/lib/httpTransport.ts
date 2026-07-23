@@ -36,6 +36,7 @@ import type {
     ValidationSummary,
     VolumeMutation,
 } from './transport';
+
 import {
     locationKey,
     inputLocationKey,
@@ -52,6 +53,8 @@ import {
     type ServerFileLocation,
     type UploadKind,
 } from './storageLocations';
+
+const ALTERATION_MANIFEST_SCHEMA_VERSION = '1.0';
 
 type HttpImageTransportConnection = AxklibApiConnection;
 
@@ -296,7 +299,7 @@ export class HttpImageTransport implements ImageTransport {
                 type: 'insert_sbnk',
                 partition_index: target.partitionIndex,
                 volume_name: target.volumeName,
-                sample_bank: {
+                sample: {
                     name: item.sampleName,
                     waveform_name: item.waveformNames[0],
                     ...(item.waveformNames[1] ? { right_waveform_name: item.waveformNames[1] } : {}),
@@ -312,7 +315,12 @@ export class HttpImageTransport implements ImageTransport {
             'alter.hds',
             {
                 source: sourceFile.reference,
-                manifest: { inline: { schema_version: '1.0', operations } },
+                manifest: {
+                    inline: {
+                        schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,
+                        operations,
+                    },
+                },
                 inputBindings,
                 output: sourceFile.reference,
                 replaceSource: true,
@@ -557,7 +565,12 @@ export class HttpImageTransport implements ImageTransport {
             'alter.hds',
             {
                 source: sourceFile.reference,
-                manifest: { inline: { schema_version: '1.0', operations: [operation] } },
+                manifest: {
+                    inline: {
+                        schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,
+                        operations: [operation],
+                    },
+                },
                 inputBindings: [],
                 output: sourceFile.reference,
                 replaceSource: true,
@@ -1042,7 +1055,7 @@ export class HttpImageTransport implements ImageTransport {
                 volume: {
                     name: mutation.volumeName,
                     waveforms: [],
-                    sample_banks: [],
+                    samples: [],
                 },
             };
         }

@@ -24,51 +24,6 @@ Error manifest_error(std::string message) {
     return make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, std::move(message));
 }
 
-void rename_field(Json &object, std::string_view old_name, std::string_view new_name) {
-    if (!object.is_object() || !object.contains(old_name))
-        return;
-    object[std::string{new_name}] = std::move(object[std::string{old_name}]);
-    object.erase(std::string{old_name});
-}
-
-void migrate_legacy_volume(Json &volume) {
-    rename_field(volume, "sample_banks", "samples");
-    rename_field(volume, "sample_bank_groups", "sample_banks");
-    if (volume.contains("sample_banks") && volume["sample_banks"].is_array()) {
-        for (auto &sample_bank : volume["sample_banks"]) {
-            rename_field(sample_bank, "member_sample_bank", "member_sample");
-            rename_field(sample_bank, "member_sample_banks", "member_samples");
-        }
-    }
-    if (volume.contains("programs") && volume["programs"].is_array()) {
-        for (auto &program : volume["programs"]) {
-            if (!program.contains("assignments") || !program["assignments"].is_array())
-                continue;
-            for (auto &assignment : program["assignments"]) {
-                rename_field(assignment, "sample_bank", "sample");
-                rename_field(assignment, "sample_bank_group", "sample_bank");
-            }
-        }
-    }
-}
-
-bool migrate_legacy_manifest(Json &root) {
-    if (!root.is_object() || root.value("schema_version", "") != "1.0")
-        return false;
-    if (root.contains("partitions") && root["partitions"].is_array()) {
-        for (auto &partition : root["partitions"]) {
-            if (!partition.contains("volumes") || !partition["volumes"].is_array())
-                continue;
-            for (auto &volume : partition["volumes"])
-                migrate_legacy_volume(volume);
-        }
-    }
-    if (root.contains("authored_volume"))
-        migrate_legacy_volume(root["authored_volume"]);
-    root["schema_version"] = "1.1";
-    return true;
-}
-
 OrderedJson empty_volume(std::string_view name) {
     OrderedJson result = OrderedJson::object();
     result["name"] = name;
@@ -93,7 +48,7 @@ OrderedJson authored_starter_volume(std::string_view name) {
 
 Result<OrderedJson> manifest_template(BuildManifestKind kind) {
     OrderedJson result = OrderedJson::object();
-    result["schema_version"] = "1.1";
+    result["schema_version"] = build_manifest_schema_version;
     switch (kind) {
     case BuildManifestKind::hds: {
         result["size_bytes"] = 536'870'912;
@@ -429,8 +384,8 @@ Result<HdsBuildManifest> parse(const Json &root, const std::filesystem::path &ba
     auto version = text(root["schema_version"], "manifest.schema_version");
     if (!version)
         return std::unexpected{version.error()};
-    if (*version != "1.1")
-        return std::unexpected{manifest_error("manifest.schema_version must be '1.0' or '1.1'")};
+    if (*version != build_manifest_schema_version)
+        return std::unexpected{manifest_error("manifest.schema_version must be '1.0'")};
     auto size = integer(root["size_bytes"], "manifest.size_bytes", minimum_hds_size, maximum_hds_size);
     if (!size)
         return std::unexpected{size.error()};
@@ -473,8 +428,8 @@ Result<MediaBuildManifest> parse_media(const Json &root, const std::filesystem::
         return std::unexpected{version.error()};
     if (!format)
         return std::unexpected{format.error()};
-    if (*version != "1.1")
-        return std::unexpected{manifest_error("manifest.schema_version must be '1.0' or '1.1'")};
+    if (*version != build_manifest_schema_version)
+        return std::unexpected{manifest_error("manifest.schema_version must be '1.0'")};
     const bool transfer = root.contains("transfer");
     const bool authored = root.contains("authored_volume");
     if (transfer == authored) {
@@ -578,11 +533,7 @@ Result<MediaBuildManifest> parse_media(const Json &root, const std::filesystem::
 Result<HdsBuildManifest> parse_hds_build_manifest(std::string_view json, const std::filesystem::path &base_directory) {
     try {
         auto root = Json::parse(json);
-        const bool legacy = migrate_legacy_manifest(root);
-        auto result = parse(root, base_directory);
-        if (result && legacy)
-            result->schema_version = "1.0";
-        return result;
+        return parse(root, base_directory);
     } catch (const Json::exception &error) {
         return std::unexpected{manifest_error(std::string{"invalid HDS manifest JSON: "} + error.what())};
     }
@@ -603,11 +554,7 @@ Result<MediaBuildManifest> parse_media_build_manifest(std::string_view json,
                                                       const std::filesystem::path &base_directory) {
     try {
         auto root = Json::parse(json);
-        const bool legacy = migrate_legacy_manifest(root);
-        auto result = parse_media(root, base_directory);
-        if (result && legacy)
-            result->schema_version = "1.0";
-        return result;
+        return parse_media(root, base_directory);
     } catch (const Json::exception &error) {
         return std::unexpected{manifest_error(std::string{"invalid media manifest JSON: "} + error.what())};
     }
@@ -734,7 +681,7 @@ const std::vector<HdsCreationProfile> &hds_creation_profiles() {
         for (const auto &[id, size_bytes, default_partition_count] : definitions) {
             HdsCreationProfile profile{id, size_bytes, default_partition_count, {}};
             for (std::uint8_t count = 1; count <= 8; ++count) {
-                HdsBuildManifest manifest{"1.1", size_bytes, {}};
+                HdsBuildManifest manifest{std::string{build_manifest_schema_version}, size_bytes, {}};
                 for (std::uint8_t index = 0; index < count; ++index)
                     manifest.partitions.push_back({"PARTITION " + std::to_string(index + 1U), {}});
                 auto geometry = plan_hds_geometry(manifest);
@@ -763,7 +710,7 @@ Result<HdsCreationPlan> plan_hds_creation(const HdsCreationRequest &request, con
     if (option == profile->partition_options.end())
         return std::unexpected{manifest_error("partition count is not available for the HDS creation profile")};
 
-    HdsBuildManifest manifest{"1.1", profile->size_bytes, {}};
+    HdsBuildManifest manifest{std::string{build_manifest_schema_version}, profile->size_bytes, {}};
     for (std::uint8_t index = 0; index < request.partition_count; ++index)
         manifest.partitions.push_back({"PARTITION " + std::to_string(index + 1U), {}});
     auto summary = plan_hds_build(manifest, cancellation);

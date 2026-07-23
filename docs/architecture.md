@@ -65,3 +65,21 @@ Fresh-image and alteration operations use manifests and plans. Applying a plan
 writes a temporary destination, validates the result, and then completes the
 replacement. The output path must differ from the source image. Existing source
 images therefore remain unchanged.
+
+The private write/package implementation is split by invariant ownership:
+
+- `alteration_manifest_json.cpp` owns canonical JSON serialization and typed
+  parsing, while
+  `alteration_manifest.cpp` validates a complete typed transaction before any
+  image I/O. `alteration.cpp` owns stateful planning and mutation.
+- `object_write_codec.cpp` and `sfs_write_codec.cpp` own bounded object-payload
+  and directory-index encoding. `writer_image.cpp` owns HDS geometry,
+  allocation, and publication.
+- `package_manifest.cpp` owns canonical package JSON serialization and
+  relocation bindings. `package_import_plan.cpp` owns immutable import-plan
+  identity and verification; media-specific capacity planning remains in
+  `package_import.cpp`.
+
+These are private source boundaries, not installed APIs. Binary fields are
+encoded through checked writers, and callers propagate an error instead of
+indexing past a malformed or incorrectly sized buffer.

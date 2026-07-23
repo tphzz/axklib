@@ -14,6 +14,7 @@
 
 namespace axk {
 
+inline constexpr std::string_view build_manifest_schema_version = "1.0";
 inline constexpr std::uint64_t minimum_hds_size = 1'048'576;
 inline constexpr std::uint64_t maximum_hds_size = 2'147'483'648;
 inline constexpr std::uint64_t maximum_wave_data_frames_per_channel = 1ULL << 24U;
@@ -55,9 +56,6 @@ struct SampleBankSpec {
     std::string name;
     std::vector<std::string> member_samples;
 };
-
-using LegacySampleBankSpec [[deprecated("use SampleSpec for Sample (SBNK)")]] = SampleSpec;
-using SampleBankGroupSpec [[deprecated("use SampleBankSpec for Sample Bank (SBAC)")]] = SampleBankSpec;
 
 struct ProgramAssignmentSpec {
     std::string target_kind;

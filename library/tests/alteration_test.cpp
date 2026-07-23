@@ -26,7 +26,7 @@ std::vector<char> bytes(const std::filesystem::path &path) {
 }
 
 axk::HdsBuildManifest source_manifest() {
-    axk::HdsBuildManifest result{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest result{"1.0", 4U * 1024U * 1024U, {}};
     axk::VolumeSpec retained;
     retained.name = "Retained";
     axk::VolumeSpec removed;
@@ -36,7 +36,7 @@ axk::HdsBuildManifest source_manifest() {
 }
 
 axk::HdsBuildManifest sample_source_manifest(const std::filesystem::path &audio_path) {
-    axk::HdsBuildManifest result{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest result{"1.0", 4U * 1024U * 1024U, {}};
     axk::VolumeSpec volume;
     volume.name = "Samples";
     volume.waveforms.push_back({"wave", "Wave", audio_path, 60U, {}});
@@ -242,7 +242,7 @@ void patch_record_name(const std::filesystem::path &path, const axk::Partition &
 
 TEST(AlterationManifest, RequiresStrictOrderedBackwardReferences) {
     constexpr std::string_view valid = R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"first","type":"delete_volume","partition_index":0,"volume_name":"Removed"},
       {"id":"second","type":"delete_volume","partition_index":{"operation_ref":"first"},"volume_name":"Retained"}
     ]})";
@@ -250,10 +250,43 @@ TEST(AlterationManifest, RequiresStrictOrderedBackwardReferences) {
     ASSERT_TRUE(parsed);
     EXPECT_EQ(parsed->operations.size(), 2U);
     EXPECT_FALSE(axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"first","type":"delete_volume","partition_index":{"operation_ref":"later"},"volume_name":"Removed"},
       {"id":"later","type":"delete_volume","partition_index":0,"volume_name":"Retained"}
     ]})"));
+}
+
+TEST(AlterationManifest, RejectsInvalidTypedManifestBeforeOpeningTheSourceImage) {
+    axk::AlterationManifest manifest{
+        "1.0",
+        {
+            {"duplicate", axk::DeleteVolumeOperation{axk::PartitionIndex{0U}, "Removed"}},
+            {"duplicate", axk::DeleteVolumeOperation{axk::PartitionIndex{0U}, "Retained"}},
+        },
+    };
+    const auto missing = std::filesystem::temp_directory_path() / "axklib-missing-alteration-source.hds";
+    const auto output = std::filesystem::temp_directory_path() / "axklib-unused-alteration-output.hds";
+
+    const auto altered = axk::alter_hds(missing, manifest, output);
+
+    ASSERT_FALSE(altered);
+    EXPECT_EQ(altered.error().code, axk::ErrorCode::transaction_rejected);
+    EXPECT_EQ(altered.error().message, "duplicate operation id");
+
+    axk::SampleSpec invalid_sample;
+    invalid_sample.name = "Sample";
+    invalid_sample.waveform_id = "Wave Data";
+    invalid_sample.interleaved_audio_path = "audio.wav";
+    manifest.operations = {
+        {"insert", axk::InsertSampleOperation{axk::PartitionIndex{0U}, "Volume", std::move(invalid_sample)}},
+    };
+
+    const auto invalid_sample_result = axk::alter_hds(missing, manifest, output);
+
+    ASSERT_FALSE(invalid_sample_result);
+    EXPECT_EQ(invalid_sample_result.error().code, axk::ErrorCode::transaction_rejected);
+    EXPECT_EQ(invalid_sample_result.error().message,
+              "inserted Sample must reference existing Wave Data without authored-audio fields");
 }
 
 TEST(AlterationManifestTemplate, EmitsParseableStarterAndPublishesAtomically) {
@@ -261,6 +294,7 @@ TEST(AlterationManifestTemplate, EmitsParseableStarterAndPublishesAtomically) {
     ASSERT_TRUE(serialized) << serialized.error().message;
     const auto parsed = axk::parse_alteration_manifest(*serialized);
     ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_EQ(parsed->schema_version, axk::alteration_manifest_schema_version);
     ASSERT_EQ(parsed->operations.size(), 1U);
     EXPECT_EQ(axk::operation_type_name(parsed->operations.front().data), "rename_waveform");
 
@@ -279,7 +313,7 @@ TEST(AlterationManifestTemplate, EmitsParseableStarterAndPublishesAtomically) {
 
 TEST(AlterationManifest, ParsesStrictSampleOperations) {
     const auto parsed = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"delete","type":"delete_sbnk","partition_index":0,
        "volume_name":"Samples","sample_name":"Old Sample"},
       {"id":"insert","type":"insert_sbnk","partition_index":{"operation_ref":"delete"},
@@ -291,30 +325,29 @@ TEST(AlterationManifest, ParsesStrictSampleOperations) {
     ASSERT_NE(insert, nullptr);
     EXPECT_EQ(insert->sample.level, 100U);
     EXPECT_FALSE(axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"insert","type":"insert_sbnk","partition_index":0,
        "volume_name":"Samples","sample":{"name":"New Sample","waveform_name":"Wave",
        "root_key":64,"key_low":100,"key_high":10}}
     ]})"));
 }
 
-TEST(AlterationManifest, MigratesLegacySampleAndSampleBankFields) {
-    const auto parsed = axk::parse_alteration_manifest(R"({
+TEST(AlterationManifest, RejectsObsoleteSampleAndSampleBankFields) {
+    EXPECT_FALSE(axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
       {"id":"sample","type":"insert_sbnk","partition_index":0,
        "volume_name":"Volume","sample_bank":{"name":"Sample","waveform_name":"Wave",
        "root_key":60,"key_low":0,"key_high":127}},
       {"id":"bank","type":"insert_sbac","partition_index":0,
        "volume_name":"Volume","sample_bank_group":{"name":"Bank","member_sample_banks":["Sample"]}}
+    ]})"));
+
+    const auto rejected = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.1","operations":[
+      {"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Volume"}
     ]})");
-    ASSERT_TRUE(parsed) << parsed.error().message;
-    EXPECT_EQ(parsed->schema_version, "1.0");
-    const auto *sample = std::get_if<axk::InsertSampleOperation>(&parsed->operations[0].data);
-    ASSERT_NE(sample, nullptr);
-    EXPECT_EQ(sample->sample.name, "Sample");
-    const auto *sample_bank = std::get_if<axk::InsertSampleBankOperation>(&parsed->operations[1].data);
-    ASSERT_NE(sample_bank, nullptr);
-    EXPECT_EQ(sample_bank->sample_bank.member_samples, std::vector<std::string>{"Sample"});
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().message, "manifest schema version must be 1.0");
 }
 
 TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
@@ -341,7 +374,7 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
 
 TEST(AlterationManifest, ParsesStrictVolumeRename) {
     const auto parsed = axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_volume","partition_index":0,
          "volume_name":"Retained","new_volume_name":"Renamed"}
       ]})");
@@ -352,7 +385,7 @@ TEST(AlterationManifest, ParsesStrictVolumeRename) {
     EXPECT_EQ(rename->new_volume_name, "Renamed");
 
     EXPECT_FALSE(axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_volume","partition_index":0,
          "volume_name":"Retained","new_volume_name":"Renamed","extra":true}
       ]})"));
@@ -360,7 +393,7 @@ TEST(AlterationManifest, ParsesStrictVolumeRename) {
 
 TEST(AlterationManifest, ParsesStrictPartitionRename) {
     const auto parsed = axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_partition","partition_index":1,
          "partition_name":"PARTITION 2","new_partition_name":"Samples"}
       ]})");
@@ -371,12 +404,12 @@ TEST(AlterationManifest, ParsesStrictPartitionRename) {
     EXPECT_EQ(rename->new_partition_name, "Samples");
 
     EXPECT_FALSE(axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_partition","partition_index":1,
          "partition_name":"PARTITION 2","new_partition_name":"Samples","extra":true}
       ]})"));
     EXPECT_FALSE(axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_partition","partition_index":1,
          "partition_name":"PARTITION 2","new_partition_name":"PARTITION 2"}
       ]})"));
@@ -392,7 +425,7 @@ TEST(Alteration, DeleteVolumeDryRunMatchesApplyAndPreservesSource) {
     ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
     const auto source_before = bytes(source);
     const auto manifest = axk::parse_alteration_manifest(
-        R"({"schema_version":"1.1","operations":[{"id":"remove","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
+        R"({"schema_version":"1.0","operations":[{"id":"remove","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
     ASSERT_TRUE(manifest);
     const auto inspected = axk::inspect_hds_alteration(source, *manifest);
     ASSERT_TRUE(inspected);
@@ -421,12 +454,12 @@ TEST(Alteration, InsertsFirstVolumeIntoEmptyPartition) {
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
-    axk::HdsBuildManifest source_spec{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest source_spec{"1.0", 4U * 1024U * 1024U, {}};
     source_spec.partitions.push_back({"hd1", {}});
     ASSERT_TRUE(axk::write_hds_image(source_spec, source));
 
     const auto manifest = axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"insert","type":"insert_volume","partition_index":0,
          "volume":{"name":"First Volume","waveforms":[],"samples":[]}}
       ]})");
@@ -472,7 +505,7 @@ TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
     ASSERT_TRUE(before_pcm) << before_pcm.error().message;
 
     const auto manifest = axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_volume","partition_index":0,
          "volume_name":"Chain","new_volume_name":"Renamed"}
       ]})");
@@ -518,13 +551,13 @@ TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
     EXPECT_EQ(after_pcm->pcm, before_pcm->pcm);
 
     const auto duplicate = axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_volume","partition_index":0,
          "volume_name":"Chain","new_volume_name":"Chain"}
       ]})");
     EXPECT_FALSE(duplicate);
     const auto too_long = axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_volume","partition_index":0,
          "volume_name":"Chain","new_volume_name":"This name is too long"}
       ]})");
@@ -540,7 +573,7 @@ TEST(Alteration, RenamePartitionChangesOnlySelectedMirroredHeaderName) {
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
 
-    axk::HdsBuildManifest manifest{"1.1", 8U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.0", 8U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"PARTITION 1", {}});
     manifest.partitions.push_back({"PARTITION 2", {}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source));
@@ -550,7 +583,7 @@ TEST(Alteration, RenamePartitionChangesOnlySelectedMirroredHeaderName) {
     const auto before_bytes = bytes(source);
 
     const auto alteration = axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_partition","partition_index":1,
          "partition_name":"PARTITION 2    1","new_partition_name":"Samples"}
       ]})");
@@ -577,7 +610,7 @@ TEST(Alteration, RenamePartitionChangesOnlySelectedMirroredHeaderName) {
     }
 
     const auto stale = axk::parse_alteration_manifest(R"({
-      "schema_version":"1.1","operations":[
+      "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_partition","partition_index":1,
          "partition_name":"Wrong","new_partition_name":"Other"}
       ]})");
@@ -596,7 +629,7 @@ TEST(Alteration, CancellationPublishesNothing) {
     std::filesystem::create_directories(root);
     ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
     const auto manifest = axk::parse_alteration_manifest(
-        R"({"schema_version":"1.1","operations":[{"id":"remove","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
+        R"({"schema_version":"1.0","operations":[{"id":"remove","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
     ASSERT_TRUE(manifest);
     axk::CancellationSource cancellation;
     cancellation.cancel();
@@ -614,7 +647,7 @@ TEST(Alteration, CancellationAfterEveryQueuedOperationPublishesNothing) {
     ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
     const auto source_before = bytes(source);
     const auto manifest = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"first","type":"delete_volume","partition_index":0,"volume_name":"Removed"},
       {"id":"second","type":"delete_volume","partition_index":{"operation_ref":"first"},"volume_name":"Retained"}
     ]})");
@@ -641,7 +674,7 @@ TEST(Alteration, ConcurrentPublishersUseUniqueTemporarySiblings) {
     std::filesystem::create_directories(root);
     ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
     const auto manifest = axk::parse_alteration_manifest(
-        R"({"schema_version":"1.1","operations":[{"id":"remove","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
+        R"({"schema_version":"1.0","operations":[{"id":"remove","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
     ASSERT_TRUE(manifest);
     auto first = std::async(std::launch::async, [&] { return axk::alter_hds(source, *manifest, output).has_value(); });
     auto second = std::async(std::launch::async, [&] { return axk::alter_hds(source, *manifest, output).has_value(); });
@@ -669,7 +702,7 @@ TEST(Alteration, RejectsSourceBitmapThatExposesLiveExtentsAsFree) {
     ASSERT_NE(live, partition.records.end());
     mark_cluster_free(source, partition, live->extents[0].cluster_offset);
     const auto manifest = axk::parse_alteration_manifest(
-        R"({"schema_version":"1.1","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
+        R"({"schema_version":"1.0","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
     ASSERT_TRUE(manifest);
     EXPECT_FALSE(axk::alter_hds(source, *manifest, output));
     EXPECT_FALSE(std::filesystem::exists(output));
@@ -689,7 +722,7 @@ TEST(Alteration, RejectsOutputAliasesThroughASymlinkedParent) {
     std::filesystem::create_directory_symlink(real, alias);
     const auto original = bytes(source);
     const auto manifest = axk::parse_alteration_manifest(
-        R"({"schema_version":"1.1","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
+        R"({"schema_version":"1.0","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
     ASSERT_TRUE(manifest);
 
     const auto altered = axk::alter_hds(source, *manifest, alias / "source.hds", {}, nullptr, true);
@@ -741,7 +774,7 @@ TEST(Alteration, RejectsBitmapGeometryThatTargetsANeighboringPartitionWithoutPub
     const auto original = bytes(source);
 
     const auto manifest = axk::parse_alteration_manifest(
-        R"({"schema_version":"1.1","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
+        R"({"schema_version":"1.0","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
     ASSERT_TRUE(manifest);
     const auto altered = axk::alter_hds(source, *manifest, output);
     ASSERT_FALSE(altered);
@@ -786,7 +819,7 @@ TEST(Alteration, RejectsSourceWithCrossLinkedRecordAllocation) {
     EXPECT_NE(corrupted->partitions().front().allocation.conflicting_cluster_count, 0U);
 
     const auto manifest = axk::parse_alteration_manifest(
-        R"({"schema_version":"1.1","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
+        R"({"schema_version":"1.0","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"}]})");
     ASSERT_TRUE(manifest);
     const auto altered = axk::alter_hds(source, *manifest, output);
     ASSERT_FALSE(altered);
@@ -806,7 +839,7 @@ TEST(Alteration, RejectsSharedSampleBankMemberAndNonzeroRenameHandle) {
     ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
     ASSERT_TRUE(axk::write_hds_image(chain_source_manifest(audio), source));
     const auto shared = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Chain",
        "sample_bank":{"name":"Other Bank","member_samples":["Banked Sample"]}}
     ]})");
@@ -822,7 +855,7 @@ TEST(Alteration, RejectsSharedSampleBankMemberAndNonzeroRenameHandle) {
     ASSERT_NE(program, partition.records.end());
     patch_record_byte(source, partition, *program, 0x133U, std::byte{1});
     const auto rename = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"rename","type":"rename_sbac","partition_index":0,"volume_name":"Chain",
        "sample_bank_name":"Bank","new_sample_bank_name":"Renamed"}
     ]})");
@@ -840,7 +873,7 @@ TEST(Alteration, QueueReusesDeletedIdsAndAllocationForInsertedVolume) {
     std::filesystem::create_directories(root);
     ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
     const auto manifest = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Removed"},
       {"id":"insert","type":"insert_volume","partition_index":{"operation_ref":"delete"},
        "volume":{"name":"Replacement","waveforms":[],"samples":[]}}
@@ -871,7 +904,7 @@ TEST(Alteration, DeleteThenInsertSampleReusesRecordAndAllocation) {
     ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
     ASSERT_TRUE(axk::write_hds_image(sample_source_manifest(audio), source));
     const auto manifest = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"delete","type":"delete_sbnk","partition_index":0,
        "volume_name":"Samples","sample_name":"Old Sample"},
       {"id":"insert","type":"insert_sbnk","partition_index":{"operation_ref":"delete"},
@@ -913,13 +946,13 @@ TEST(Alteration, QueuedWaveformAndSampleInsertionUsesEvolvingState) {
     std::filesystem::create_directories(root);
     const auto expected_waveform = test_waveform();
     ASSERT_TRUE(axk::write_wav_atomic(audio, expected_waveform));
-    axk::HdsBuildManifest source_spec{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest source_spec{"1.0", 4U * 1024U * 1024U, {}};
     axk::VolumeSpec volume;
     volume.name = "Queue";
     source_spec.partitions.push_back({"hd1", {std::move(volume)}});
     ASSERT_TRUE(axk::write_hds_image(source_spec, source));
     const auto manifest = axk::parse_alteration_manifest(
-        R"({"schema_version":"1.1","operations":[
+        R"({"schema_version":"1.0","operations":[
         {"id":"wave","type":"insert_waveform","partition_index":0,
          "volume_name":"Queue","audio":{"path":"tone.wav","waveform_names":["Wave"],
          "root_key":60}},
@@ -962,14 +995,14 @@ TEST(Alteration, WaveformDeletionRequiresPriorSampleDeletion) {
     ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
     ASSERT_TRUE(axk::write_hds_image(sample_source_manifest(audio), source));
     const auto rejected = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"wave","type":"delete_waveform","partition_index":0,
        "volume_name":"Samples","waveform_name":"Wave"}
     ]})");
     ASSERT_TRUE(rejected);
     EXPECT_FALSE(axk::inspect_hds_alteration(source, *rejected));
     const auto accepted = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"sample","type":"delete_sbnk","partition_index":0,
        "volume_name":"Samples","sample_name":"Old Sample"},
       {"id":"wave","type":"delete_waveform","partition_index":{"operation_ref":"sample"},
@@ -990,7 +1023,7 @@ TEST(Alteration, VolumeDeletionRejectsKnownCrossVolumeWaveformDependency) {
     std::filesystem::create_directories(root);
     ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
 
-    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     axk::VolumeSpec volume_a;
     volume_a.name = "Volume A";
     volume_a.waveforms.push_back({"shared-a", "Shared Wave", audio, 60U, {}});
@@ -1046,7 +1079,7 @@ TEST(Alteration, VolumeDeletionRejectsKnownCrossVolumeWaveformDependency) {
     patch_record_be32(source, partition, *record_b, 0xa0U, decoded_wave_data->link_id.value);
 
     const auto remove_duplicate = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"wave","type":"delete_waveform","partition_index":0,
        "volume_name":"Volume B","waveform_name":"Unused Wave"}
     ]})");
@@ -1080,7 +1113,7 @@ TEST(Alteration, VolumeDeletionRejectsKnownCrossVolumeWaveformDependency) {
     ASSERT_NE(cross_volume, graph.relationships.end());
 
     const auto delete_owner = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.1","operations":[
+    "schema_version":"1.0","operations":[
       {"id":"volume","type":"delete_volume","partition_index":0,
        "volume_name":"Volume A"}
     ]})");
@@ -1104,7 +1137,7 @@ TEST(Alteration, WritesAndReopensFortyEightExtentContinuationList) {
     waveform.frame_count = 24'000U;
     waveform.pcm.resize(static_cast<std::size_t>(waveform.frame_count) * 2U);
     ASSERT_TRUE(axk::write_wav_atomic(audio, waveform));
-    axk::HdsBuildManifest source_spec{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest source_spec{"1.0", 4U * 1024U * 1024U, {}};
     axk::VolumeSpec volume;
     volume.name = "Fragmented";
     source_spec.partitions.push_back({"hd1", {std::move(volume)}});
@@ -1131,7 +1164,7 @@ TEST(Alteration, WritesAndReopensFortyEightExtentContinuationList) {
         used_ids.insert(next_id++);
     }
     const auto manifest = axk::parse_alteration_manifest(
-        R"({"schema_version":"1.1","operations":[
+        R"({"schema_version":"1.0","operations":[
         {"id":"wave","type":"insert_waveform","partition_index":0,
          "volume_name":"Fragmented","audio":{"path":"large.wav",
          "waveform_names":["Large Wave"],"root_key":60}}

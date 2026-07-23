@@ -1,4 +1,4 @@
-#include "writer_internal.hpp"
+#include "axklib/writer_internal.hpp"
 
 #include "axklib/file_publication.hpp"
 

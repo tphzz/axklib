@@ -4,11 +4,13 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
 #include "axklib/object.hpp"
+#include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
 
 namespace axk::detail {
@@ -73,6 +75,10 @@ Result<std::vector<std::byte>> prepare_sbnk_payload(const SampleSpec &spec, cons
 Result<std::vector<std::byte>> prepare_sbac_payload(const SampleBankSpec &sample_bank,
                                                     const std::map<std::string, SampleSpec> &samples);
 Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program);
+Result<std::vector<std::byte>> encode_sfs_index_record(const PreparedRecord &record);
+Result<std::vector<std::byte>> encode_sfs_index_record(const PreparedRecord &record, std::span<const Extent> extents,
+                                                       std::uint32_t size,
+                                                       std::span<const std::uint32_t> continuation_clusters = {});
 
 Result<std::vector<PreparedRecord>> prepare_partition_records(const PartitionSpec &partition,
                                                               const PartitionGeometry &geometry,

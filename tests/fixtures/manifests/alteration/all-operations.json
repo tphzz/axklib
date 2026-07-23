@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.0",
   "operations": [
     {"id":"delete-volume","type":"delete_volume","partition_index":0,"volume_name":"Delete Volume"},
     {"id":"insert-volume","type":"insert_volume","partition_index":{"operation_ref":"delete-volume"},"volume":{"name":"Insert Volume","waveforms":[],"samples":[]}},

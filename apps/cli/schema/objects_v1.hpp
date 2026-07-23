@@ -11,7 +11,7 @@
 
 namespace axk::cli::schema::objects_v1 {
 
-inline constexpr std::string_view schema_version{"1.1"};
+inline constexpr std::string_view schema_version{"1.0"};
 
 enum class ContainerShape : std::uint8_t { media, sfs };
 

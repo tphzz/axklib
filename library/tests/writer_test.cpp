@@ -14,17 +14,17 @@
 
 #include <gtest/gtest.h>
 
-#include "../src/writer_internal.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
+#include "axklib/writer_internal.hpp"
 
 namespace {
 
 constexpr std::string_view manifest = R"json({
-  "schema_version":"1.1",
+  "schema_version":"1.0",
   "size_bytes":536870912,
   "partitions":[{
     "name":"P1",
@@ -88,7 +88,7 @@ TEST(HdsManifest, ParsesStrictSchemaAndResolvesRelativeAudioPaths) {
 
 TEST(HdsManifest, AcceptsPartitionsWithoutVolumes) {
     constexpr std::string_view empty = R"json({
-      "schema_version":"1.1",
+      "schema_version":"1.0",
       "size_bytes":1048576,
       "partitions":[{"name":"P1","volumes":[]}]
     })json";
@@ -98,8 +98,8 @@ TEST(HdsManifest, AcceptsPartitionsWithoutVolumes) {
     EXPECT_TRUE(parsed->partitions.front().volumes.empty());
 }
 
-TEST(HdsManifest, MigratesLegacySampleAndSampleBankFields) {
-    constexpr std::string_view legacy = R"json({
+TEST(HdsManifest, RejectsObsoleteSampleAndSampleBankFields) {
+    constexpr std::string_view obsolete = R"json({
       "schema_version":"1.0",
       "size_bytes":1048576,
       "partitions":[{"name":"P1","volumes":[{
@@ -113,17 +113,16 @@ TEST(HdsManifest, MigratesLegacySampleAndSampleBankFields) {
         ]}]
       }]}]
     })json";
-    const auto parsed = axk::parse_hds_build_manifest(legacy, "/project");
-    ASSERT_TRUE(parsed) << parsed.error().message;
-    EXPECT_EQ(parsed->schema_version, "1.0");
-    const auto &volume = parsed->partitions[0].volumes[0];
-    ASSERT_EQ(volume.samples.size(), 1U);
-    EXPECT_EQ(volume.samples[0].name, "Sample");
-    ASSERT_EQ(volume.sample_banks.size(), 1U);
-    EXPECT_EQ(volume.sample_banks[0].member_samples, std::vector<std::string>{"Sample"});
-    ASSERT_EQ(volume.programs[0].assignments.size(), 2U);
-    EXPECT_EQ(volume.programs[0].assignments[0].target_kind, "SBAC");
-    EXPECT_EQ(volume.programs[0].assignments[1].target_kind, "SBNK");
+    EXPECT_FALSE(axk::parse_hds_build_manifest(obsolete, "/project"));
+
+    constexpr std::string_view unsupported_version = R"json({
+      "schema_version":"1.1",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[]}]
+    })json";
+    const auto rejected = axk::parse_hds_build_manifest(unsupported_version);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().message, "manifest.schema_version must be '1.0'");
 }
 
 TEST(HdsManifest, RejectsUnknownFieldsReferencesAndInvalidGeometry) {
@@ -145,6 +144,7 @@ TEST(BuildManifestTemplate, EmitsParseableHdsFloppyAndIsoStarters) {
     ASSERT_TRUE(hds) << hds.error().message;
     const auto parsed_hds = axk::parse_hds_build_manifest(*hds);
     ASSERT_TRUE(parsed_hds) << parsed_hds.error().message;
+    EXPECT_EQ(parsed_hds->schema_version, axk::build_manifest_schema_version);
     ASSERT_EQ(parsed_hds->partitions.size(), 1U);
     EXPECT_TRUE(parsed_hds->partitions.front().volumes.empty());
     EXPECT_EQ(parsed_hds->size_bytes, 536'870'912U);
@@ -153,6 +153,7 @@ TEST(BuildManifestTemplate, EmitsParseableHdsFloppyAndIsoStarters) {
     ASSERT_TRUE(floppy) << floppy.error().message;
     const auto parsed_floppy = axk::parse_media_build_manifest(*floppy, "manifest-root");
     ASSERT_TRUE(parsed_floppy) << parsed_floppy.error().message;
+    EXPECT_EQ(parsed_floppy->schema_version, axk::build_manifest_schema_version);
     ASSERT_TRUE(parsed_floppy->authored_volume);
     EXPECT_EQ(parsed_floppy->format, axk::MediaImageFormat::fat12_floppy);
     ASSERT_EQ(parsed_floppy->authored_volume->waveforms.size(), 1U);
@@ -162,6 +163,7 @@ TEST(BuildManifestTemplate, EmitsParseableHdsFloppyAndIsoStarters) {
     ASSERT_TRUE(iso) << iso.error().message;
     const auto parsed_iso = axk::parse_media_build_manifest(*iso);
     ASSERT_TRUE(parsed_iso) << parsed_iso.error().message;
+    EXPECT_EQ(parsed_iso->schema_version, axk::build_manifest_schema_version);
     ASSERT_TRUE(parsed_iso->authored_volume);
     EXPECT_EQ(parsed_iso->format, axk::MediaImageFormat::iso9660);
     EXPECT_TRUE(parsed_iso->authored_volume->waveforms.empty());
@@ -190,7 +192,7 @@ TEST(BuildManifestTemplate, PublishesAtomicallyAndRequiresExplicitOverwrite) {
 
 TEST(HdsGeometry, CoversEveryPartitionCountAtOneAndTwoGiBBoundaries) {
     for (std::uint8_t count = 1; count <= 8; ++count) {
-        axk::HdsBuildManifest value{"1.1", count == 1 ? axk::minimum_hds_size : axk::maximum_hds_size, {}};
+        axk::HdsBuildManifest value{"1.0", count == 1 ? axk::minimum_hds_size : axk::maximum_hds_size, {}};
         for (std::uint8_t index = 0; index < count; ++index) {
             axk::VolumeSpec volume;
             volume.name = "V";
@@ -304,7 +306,7 @@ TEST(AudioImport, SmplSerializationRejectsWaveDataPastTheHardwareAddressLimit) {
 }
 
 TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {
-    axk::HdsBuildManifest manifest_value{"1.1", axk::minimum_hds_size, {}};
+    axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {}};
     axk::VolumeSpec volume;
     volume.name = "Empty Volume";
     manifest_value.partitions.push_back({"hd1", {std::move(volume)}});
@@ -348,7 +350,7 @@ TEST(HdsWriter, SizesDirectoryIndexFromRecordIdsAndEnforcesFixedCapacity) {
 }
 
 TEST(HdsWriter, RejectsAValidTypedManifestThatExceedsTheFixedDirectoryIndex) {
-    axk::HdsBuildManifest value{"1.1", axk::maximum_hds_size, {{"hd1", {}}}};
+    axk::HdsBuildManifest value{"1.0", axk::maximum_hds_size, {{"hd1", {}}}};
     for (std::size_t index = 0; index < 835U; ++index)
         value.partitions.front().volumes.push_back({"V" + std::to_string(index), {}, {}, {}, {}});
     const auto geometry = axk::plan_hds_geometry(value);
@@ -373,8 +375,37 @@ TEST(HdsWriter, DirectSampleBankPreparationRequiresOneToThreeUniqueMembers) {
         {"Oversized", {"A", "B", "C", "D", "A", "B", "C", "D", "A", "B", "C"}}, samples));
 }
 
+TEST(HdsWriter, PrivateObjectCodecsRejectValuesOutsideTheirEncodedFields) {
+    axk::ImportedAudio audio;
+    audio.output_sample_rate = 44'100U;
+    audio.output_sample_width_bits = axk::sampler_output_sample_width_bits;
+    audio.output_frames = 1U;
+    audio.pcm_channels = {{std::byte{}, std::byte{}}};
+    axk::WaveformSpec waveform;
+    waveform.name = "Wave Data";
+    const auto low_link = axk::detail::prepare_smpl_payload(waveform, audio, 0xb9U);
+    ASSERT_FALSE(low_link);
+    EXPECT_EQ(low_link.error().code, axk::ErrorCode::internal_invariant);
+    audio.output_sample_rate = 0U;
+    EXPECT_FALSE(axk::detail::prepare_smpl_payload(waveform, audio, 0x100U));
+    audio.output_sample_rate = 44'100U;
+
+    axk::SampleSpec sample;
+    sample.name = "Sample";
+    const axk::detail::PreparedWaveformMember member{"Wave Data", 0x100U, 44'100U, 1U};
+    EXPECT_FALSE(axk::detail::prepare_sbnk_payload(sample, member, {}, false, {0U}));
+    EXPECT_FALSE(axk::detail::prepare_sbnk_payload(sample, member, {}, false, {129U}));
+
+    axk::ProgramSpec program;
+    program.number = 1U;
+    program.assignments.resize(12U);
+    const auto oversized_program = axk::detail::prepare_prog_payload(program);
+    ASSERT_FALSE(oversized_program);
+    EXPECT_EQ(oversized_program.error().code, axk::ErrorCode::unsupported_profile);
+}
+
 TEST(HdsWriter, AtomicallyWritesAndReopensPartitionWithoutVolumes) {
-    axk::HdsBuildManifest manifest_value{"1.1", axk::minimum_hds_size, {{"hd1", {}}}};
+    axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {{"hd1", {}}}};
     const auto path = std::filesystem::temp_directory_path() / "axklib-native-empty-partition.hds";
     std::error_code error;
     std::filesystem::remove(path, error);
@@ -417,7 +448,7 @@ TEST(HdsWriter, WritesMonoSampleAndRoundTripsExactPhysicalPcm) {
     volume.name = "Volume";
     volume.waveforms.push_back(std::move(waveform));
     volume.samples.push_back(std::move(sample));
-    axk::HdsBuildManifest manifest_value{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest_value{"1.0", 4U * 1024U * 1024U, {}};
     manifest_value.partitions.push_back({"hd1", {std::move(volume)}});
     ASSERT_TRUE(axk::write_hds_image(manifest_value, image_path));
     const auto reopened = axk::open_image(image_path);
@@ -437,7 +468,7 @@ TEST(HdsWriter, WritesMonoSampleAndRoundTripsExactPhysicalPcm) {
 }
 
 TEST(HdsWriter, CancellationPublishesNoImageOrTemporarySibling) {
-    axk::HdsBuildManifest manifest_value{"1.1", axk::minimum_hds_size, {}};
+    axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {}};
     axk::VolumeSpec volume;
     volume.name = "Volume";
     manifest_value.partitions.push_back({"hd1", {std::move(volume)}});
@@ -457,7 +488,7 @@ TEST(HdsWriter, CancellationPublishesNoImageOrTemporarySibling) {
 }
 
 TEST(HdsWriter, OverwriteReplacesSymlinkWithoutFollowingItsTarget) {
-    axk::HdsBuildManifest manifest_value{"1.1", axk::minimum_hds_size, {}};
+    axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {}};
     axk::VolumeSpec volume;
     volume.name = "Volume";
     manifest_value.partitions.push_back({"hd1", {std::move(volume)}});
@@ -482,7 +513,7 @@ TEST(HdsWriter, OverwriteReplacesSymlinkWithoutFollowingItsTarget) {
 }
 
 TEST(ImageBuildPlanning, PreparesEveryInputWithoutPublishingAnOutput) {
-    axk::HdsBuildManifest hds{"1.1", axk::minimum_hds_size, {}};
+    axk::HdsBuildManifest hds{"1.0", axk::minimum_hds_size, {}};
     axk::VolumeSpec volume;
     volume.name = "Volume";
     volume.waveforms.push_back({"missing", "Missing", "missing.wav", 60U, {}});
@@ -499,7 +530,7 @@ TEST(ImageBuildPlanning, PreparesEveryInputWithoutPublishingAnOutput) {
     EXPECT_EQ(valid_hds->object_count, 0U);
 
     axk::MediaBuildManifest iso;
-    iso.schema_version = "1.1";
+    iso.schema_version = "1.0";
     iso.format = axk::MediaImageFormat::iso9660;
     iso.authored_volume = volume;
     const auto invalid_iso = axk::plan_media_build(iso);
@@ -514,7 +545,7 @@ TEST(ImageBuildPlanning, PreparesEveryInputWithoutPublishingAnOutput) {
 
 TEST(MediaManifest, ParsesStrictAuthoredAndTransferModes) {
     constexpr std::string_view authored = R"json({
-    "schema_version":"1.1",
+    "schema_version":"1.0",
     "format":"iso9660",
     "iso":{
       "volume_id":"AXK_TEST",
@@ -539,7 +570,7 @@ TEST(MediaManifest, ParsesStrictAuthoredAndTransferModes) {
     EXPECT_EQ(parsed->volume_name, "Test Volume");
 
     constexpr std::string_view whole_source = R"json({
-    "schema_version":"1.1",
+    "schema_version":"1.0",
     "format":"iso9660",
     "iso":{
       "volume_id":"AXK_TEST",
@@ -593,7 +624,7 @@ TEST(MediaWriter, WritesDeterministicFat12AndIso9660ImagesAndReopensExactPcm) {
 
     for (const auto format : {axk::MediaImageFormat::fat12_floppy, axk::MediaImageFormat::iso9660}) {
         axk::MediaBuildManifest manifest_value;
-        manifest_value.schema_version = "1.1";
+        manifest_value.schema_version = "1.0";
         manifest_value.format = format;
         manifest_value.authored_volume = volume;
         manifest_value.iso_volume_id = "AXK_TEST";
@@ -770,7 +801,7 @@ TEST(MediaWriter, AuthoredIsoReopensCompleteProgramHierarchy) {
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, source));
 
     axk::MediaBuildManifest value;
-    value.schema_version = "1.1";
+    value.schema_version = "1.0";
     value.format = axk::MediaImageFormat::iso9660;
     value.authored_volume = graph_volume(audio_path);
     value.iso_volume_id = "AXK_GRAPH";
@@ -814,7 +845,7 @@ TEST(MediaWriter, AllowsObjectEmptyIsoPackageStagingTargetOnly) {
     axk::VolumeSpec volume;
     volume.name = "Import Target";
     axk::MediaBuildManifest media_manifest;
-    media_manifest.schema_version = "1.1";
+    media_manifest.schema_version = "1.0";
     media_manifest.format = axk::MediaImageFormat::iso9660;
     media_manifest.authored_volume = volume;
     media_manifest.iso_volume_id = "AXK_STAGING";
@@ -849,7 +880,7 @@ TEST(MediaWriter, EnforcesAggregatePayloadAndProjectedOutputLimits) {
     axk::VolumeSpec empty_volume;
     empty_volume.name = "Empty";
     axk::MediaBuildManifest empty_iso;
-    empty_iso.schema_version = "1.1";
+    empty_iso.schema_version = "1.0";
     empty_iso.format = axk::MediaImageFormat::iso9660;
     empty_iso.authored_volume = empty_volume;
     empty_iso.iso_volume_id = "AXK_LIMIT";
@@ -897,7 +928,7 @@ TEST(MediaWriter, SavedObjectTransferAddsKnownSampleDependencies) {
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, source));
 
     auto volume = graph_volume(audio_path);
-    axk::HdsBuildManifest hds{"1.1", 4U * 1024U * 1024U, {{"hd1", {volume}}}};
+    axk::HdsBuildManifest hds{"1.0", 4U * 1024U * 1024U, {{"hd1", {volume}}}};
     ASSERT_TRUE(axk::write_hds_image(hds, source_path));
     const auto source_media = axk::open_media(source_path);
     ASSERT_TRUE(source_media);
@@ -908,7 +939,7 @@ TEST(MediaWriter, SavedObjectTransferAddsKnownSampleDependencies) {
     ASSERT_NE(sample_object, source_objects->end());
 
     axk::MediaBuildManifest transfer;
-    transfer.schema_version = "1.1";
+    transfer.schema_version = "1.0";
     transfer.format = axk::MediaImageFormat::fat12_floppy;
     transfer.transfer = axk::SavedObjectTransferSpec{source_path, {sample_object->key}};
     const auto written = axk::write_media_image(transfer, output_path);
@@ -938,7 +969,7 @@ TEST(MediaWriter, SavedObjectTransferAddsKnownSampleDependencies) {
     EXPECT_EQ(program_objects->size(), 5U);
 
     axk::MediaBuildManifest whole;
-    whole.schema_version = "1.1";
+    whole.schema_version = "1.0";
     whole.format = axk::MediaImageFormat::iso9660;
     whole.transfer = axk::SavedObjectTransferSpec{program_path, {}, axk::SavedObjectSelection::all};
     whole.iso_volume_id = "AXK_TRANSFER";
@@ -976,7 +1007,7 @@ TEST(MediaWriter, SavedObjectTransferAddsKnownSampleDependencies) {
 
 #if defined(__unix__)
 TEST(HdsWriter, DiskFullRemovesTemporaryOutputAndPublishesNothing) {
-    axk::HdsBuildManifest manifest_value{"1.1", axk::minimum_hds_size, {}};
+    axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {}};
     axk::VolumeSpec volume;
     volume.name = "Volume";
     manifest_value.partitions.push_back({"hd1", {std::move(volume)}});
@@ -1007,7 +1038,7 @@ TEST(HdsWriter, PermissionLossLeavesNoTemporaryOutput) {
     if (::geteuid() == 0)
         GTEST_SKIP() << "permission checks are not meaningful as root";
 
-    axk::HdsBuildManifest manifest_value{"1.1", axk::minimum_hds_size, {}};
+    axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {}};
     axk::VolumeSpec volume;
     volume.name = "Volume";
     manifest_value.partitions.push_back({"hd1", {std::move(volume)}});

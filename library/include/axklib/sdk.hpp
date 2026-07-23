@@ -157,7 +157,6 @@ enum class package_root_kind : std::uint8_t {
     sample_bank = 2,
     sample = 3,
     wave_data = 4,
-    bank_group [[deprecated("use sample_bank")]] = sample_bank,
 };
 
 struct package_root_selector {

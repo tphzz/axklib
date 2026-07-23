@@ -115,12 +115,12 @@ axk::HdsBuildManifest all_action_source_manifest(const std::filesystem::path &au
 
     axk::VolumeSpec deleted_volume;
     deleted_volume.name = "Delete Volume";
-    return {"1.1", 8U * 1024U * 1024U, {{"hd1", {std::move(volume), std::move(deleted_volume)}}}};
+    return {"1.0", 8U * 1024U * 1024U, {{"hd1", {std::move(volume), std::move(deleted_volume)}}}};
 }
 
 nlohmann::json all_action_alteration_manifest() {
     return {
-        {"schema_version", "1.1"},
+        {"schema_version", "1.0"},
         {"operations",
          nlohmann::json::array({
              {{"id", "delete-volume"},
@@ -446,7 +446,7 @@ TEST_F(WriteOperationsTest, WholeSourceTransferRequiresPersistentFileRef) {
         registry_.invoke("create.floppy", {{"planToken", floppy_plan->at("planToken").get<std::string>()}}, context()));
 
     const nlohmann::json manifest = {
-        {"schema_version", "1.1"},
+        {"schema_version", "1.0"},
         {"format", "iso9660"},
         {"iso",
          {{"volume_id", "AXK_TEST"},

@@ -13,6 +13,8 @@
 
 namespace axk {
 
+inline constexpr std::string_view alteration_manifest_schema_version = "1.0";
+
 struct OperationReference {
     std::string operation_id;
 };
@@ -92,19 +94,6 @@ struct RenameSampleBankOperation {
     std::string sample_bank_name;
     std::string new_sample_bank_name;
 };
-
-using LegacyDeleteSampleBankOperation [[deprecated("use DeleteSampleOperation for Sample (SBNK)")]] =
-    DeleteSampleOperation;
-using LegacyInsertSampleBankOperation [[deprecated("use InsertSampleOperation for Sample (SBNK)")]] =
-    InsertSampleOperation;
-using LegacyRenameSampleBankOperation [[deprecated("use RenameSampleOperation for Sample (SBNK)")]] =
-    RenameSampleOperation;
-using DeleteSampleBankGroupOperation [[deprecated("use DeleteSampleBankOperation for Sample Bank (SBAC)")]] =
-    DeleteSampleBankOperation;
-using InsertSampleBankGroupOperation [[deprecated("use InsertSampleBankOperation for Sample Bank (SBAC)")]] =
-    InsertSampleBankOperation;
-using RenameSampleBankGroupOperation [[deprecated("use RenameSampleBankOperation for Sample Bank (SBAC)")]] =
-    RenameSampleBankOperation;
 
 struct DeleteProgramOperation {
     PartitionSelector partition;

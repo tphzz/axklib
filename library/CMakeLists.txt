@@ -111,6 +111,8 @@ add_library(
   src/package.cpp
   src/package_archive.cpp
   src/package_import.cpp
+  src/package_import_plan.cpp
+  src/package_manifest.cpp
   src/package_relocation.cpp
   src/relationship.cpp
   src/report.cpp
@@ -173,9 +175,13 @@ add_library(
   adapters/audio_resample_soxr.cpp
   adapters/pcm16_quantizer.cpp
   src/alteration.cpp
+  src/alteration_manifest.cpp
+  src/alteration_manifest_json.cpp
   src/media_build.cpp
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
+  src/object_write_codec.cpp
+  src/sfs_write_codec.cpp
   src/writer.cpp
   src/writer_image.cpp
 )
@@ -419,6 +425,7 @@ if(BUILD_TESTING)
     tests/package_test.cpp
     tests/report_test.cpp
     tests/sfs_test.cpp
+    tests/sfs_write_codec_test.cpp
     tests/utf8_test.cpp
     tests/native_contract_test.cpp
     tests/version_test.cpp
@@ -480,7 +487,7 @@ if(BUILD_TESTING)
 
     add_executable(axk_large_media_memory_test tests/large_media_memory_test.cpp)
     target_compile_features(axk_large_media_memory_test PRIVATE cxx_std_23)
-    target_include_directories(axk_large_media_memory_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_include_directories(axk_large_media_memory_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/internal")
     target_link_libraries(axk_large_media_memory_test PRIVATE axklib::audio)
     axk_set_project_warnings(axk_large_media_memory_test)
     add_test(NAME Hardening.LargeMediaMemory COMMAND axk_large_media_memory_test)

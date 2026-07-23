@@ -1,4 +1,4 @@
-#include "writer_internal.hpp"
+#include "axklib/writer_internal.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -329,7 +329,7 @@ Result<detail::PreparedMediaImage> detail::prepare_media_image(const MediaBuildM
         return std::unexpected{
             make_error(ErrorCode::invalid_argument, ErrorCategory::io, "media build limits are invalid")};
     }
-    if ((manifest.schema_version != "1.0" && manifest.schema_version != "1.1") ||
+    if (manifest.schema_version != build_manifest_schema_version ||
         manifest.transfer.has_value() == manifest.authored_volume.has_value()) {
         return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                           "invalid media build manifest content mode")};

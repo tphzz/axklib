@@ -13,7 +13,7 @@ int main(int argc, char **argv) {
 
     axk::VolumeSpec volume;
     volume.name = "Fuzz Volume";
-    axk::HdsBuildManifest manifest{"1.1", axk::minimum_hds_size, {}};
+    axk::HdsBuildManifest manifest{std::string{axk::build_manifest_schema_version}, axk::minimum_hds_size, {}};
     manifest.partitions.push_back({"hd1", {std::move(volume)}});
     const auto written = axk::write_hds_image(manifest, std::filesystem::path{argv[1]}, true);
     if (!written) {

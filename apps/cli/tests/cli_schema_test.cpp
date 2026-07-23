@@ -20,8 +20,8 @@ namespace package_schema = axk::cli::schema::package_v1;
 TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
     EXPECT_EQ(info_schema::schema_version, "compat-v1");
     EXPECT_EQ(schema::alteration_schema_version, "compat-v1");
-    EXPECT_EQ(export_schema::volume_graph_schema_version, "axklib.volume_graph.v2");
-    EXPECT_EQ(object_schema::schema_version, "1.1");
+    EXPECT_EQ(export_schema::volume_graph_schema_version, "axklib.volume_graph.v1");
+    EXPECT_EQ(object_schema::schema_version, "1.0");
 
     axk::RelationshipGraph graph;
     graph.relationships.push_back({

@@ -23,8 +23,8 @@
 #include "axklib/writer.hpp"
 
 #include "../src/package_internal.hpp"
-#include "../src/writer_internal.hpp"
 #include "axklib/file_publication.hpp"
+#include "axklib/writer_internal.hpp"
 #include "media_test_fixtures.hpp"
 
 namespace {
@@ -156,7 +156,7 @@ axk::Result<std::vector<axk::PortablePackage>> mixed_source_packages(const std::
     if (const auto written = axk::write_wav_atomic(iso_audio, tiny_waveform(2000)); !written)
         return std::unexpected{written.error()};
 
-    axk::HdsBuildManifest sfs_manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest sfs_manifest{"1.0", 4U * 1024U * 1024U, {}};
     sfs_manifest.partitions.push_back({"P1", {graph_volume(graph_audio)}});
     if (const auto written = axk::write_hds_image(sfs_manifest, sfs_path); !written)
         return std::unexpected{written.error()};
@@ -173,7 +173,7 @@ axk::Result<std::vector<axk::PortablePackage>> mixed_source_packages(const std::
         return std::unexpected{fat.error()};
 
     axk::MediaBuildManifest iso_manifest;
-    iso_manifest.schema_version = "1.1";
+    iso_manifest.schema_version = "1.0";
     iso_manifest.format = axk::MediaImageFormat::iso9660;
     iso_manifest.iso_volume_id = "MIXED_SOURCE";
     iso_manifest.group_name = "ISO Group";
@@ -470,7 +470,7 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     waveform.pcm = {std::byte{},     std::byte{},     std::byte{0xe8}, std::byte{0x03},
                     std::byte{0x18}, std::byte{0xfc}, std::byte{},     std::byte{}};
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
-    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     auto authored_volume = graph_volume(audio_path);
     axk::SampleSpec banked_two;
     banked_two.name = "Grouped Sample 2";
@@ -616,7 +616,7 @@ TEST(PortablePackage, SbacRelationshipOrdinalsPreserveSourceSlotOrder) {
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Ordered Bank", {"Z Sample", "A Sample"}});
     volume.programs.push_back({1U, {{"SBAC", "Ordered Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
-    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume)}});
     const auto written = axk::write_hds_image(manifest, source_path);
     ASSERT_TRUE(written) << written.error().message;
@@ -654,7 +654,7 @@ TEST(PortablePackage, NormativeJsonSchemaMatchesCanonicalManifestShapeAndEnums) 
     std::filesystem::remove_all(output_root, error);
     std::filesystem::create_directories(output_root);
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1000)));
-    axk::HdsBuildManifest source_manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest source_manifest{"1.0", 4U * 1024U * 1024U, {}};
     source_manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
     ASSERT_TRUE(axk::write_hds_image(source_manifest, source_path));
     auto source = axk::open_media(source_path);
@@ -997,7 +997,7 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
     std::filesystem::remove_all(output_root, error);
     ASSERT_TRUE(std::filesystem::create_directories(output_root));
     ASSERT_TRUE(axk::write_wav_atomic(audio, tiny_waveform(1234)));
-    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {graph_volume(audio)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, image_path));
     auto media = axk::open_media(image_path);
@@ -1535,13 +1535,13 @@ TEST(PackageImportPlanner, ReportsInsufficientSfsAndFat12CapacityBeforeApply) {
     axk::VolumeSpec source_volume;
     source_volume.name = "Source";
     source_volume.waveforms.push_back({"large", "Large Wave", audio_path, 60U, {}});
-    axk::HdsBuildManifest source_manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest source_manifest{"1.0", 4U * 1024U * 1024U, {}};
     source_manifest.partitions.push_back({"P1", {std::move(source_volume)}});
     ASSERT_TRUE(axk::write_hds_image(source_manifest, source_path));
 
     axk::VolumeSpec target_volume;
     target_volume.name = "Target";
-    axk::HdsBuildManifest target_manifest{"1.1", 1024U * 1024U, {}};
+    axk::HdsBuildManifest target_manifest{"1.0", 1024U * 1024U, {}};
     target_manifest.partitions.push_back({"P1", {std::move(target_volume)}});
     ASSERT_TRUE(axk::write_hds_image(target_manifest, target_path));
 
@@ -1583,7 +1583,7 @@ TEST(PackageImportPlanner, RejectsFat12RootExhaustionAndInvalidExistingChains) {
     std::filesystem::create_directories(output_root);
 
     axk::detail::PreparedMediaImage full;
-    full.manifest.schema_version = "1.1";
+    full.manifest.schema_version = "1.0";
     full.manifest.format = axk::MediaImageFormat::fat12_floppy;
     for (std::size_t index = 0U; index < 224U; ++index)
         full.retained_files.push_back({std::format("R{:07}.DAT", index), {static_cast<std::byte>(index)}});
@@ -1650,7 +1650,7 @@ TEST(PackageImportPlanner, ReportsIsoDirectoryCapacityBeforeApply) {
     std::filesystem::create_directories(output_root);
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1000)));
     axk::MediaBuildManifest target_manifest;
-    target_manifest.schema_version = "1.1";
+    target_manifest.schema_version = "1.0";
     target_manifest.format = axk::MediaImageFormat::iso9660;
     target_manifest.iso_volume_id = "CAPACITY_TEST";
     target_manifest.group_name = "Target Group";
@@ -1797,7 +1797,7 @@ TEST(PackageImportApply, AppliesVolumeLocalReuseAndPartitionIsolationInOnePlan) 
     volume_b.name = "Volume B";
     axk::VolumeSpec volume_c;
     volume_c.name = "Volume C";
-    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume_a), std::move(volume_b)}});
     manifest.partitions.push_back({"P2", {std::move(volume_c)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, target_path));
@@ -1957,7 +1957,7 @@ TEST(PackageImportApply, PreservesStereoClosureAndExactPhysicalPcm) {
     sample.root_key = 60U;
     sample.key_high = 127U;
     volume.samples.push_back(std::move(sample));
-    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
 
@@ -2126,7 +2126,7 @@ TEST(PackageImportApply, ImportsACompleteProgramSampleBankSampleAndWaveDataGraph
     waveform.pcm = {std::byte{},     std::byte{},     std::byte{0xe8}, std::byte{0x03},
                     std::byte{0x18}, std::byte{0xfc}, std::byte{},     std::byte{}};
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
-    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
     auto source = axk::open_media(source_path);
@@ -2239,7 +2239,7 @@ TEST(PackageImportApply, CancellationAtEveryGraphBoundaryPublishesNothing) {
     waveform.pcm = {std::byte{},     std::byte{},     std::byte{0xe8}, std::byte{0x03},
                     std::byte{0x18}, std::byte{0xfc}, std::byte{},     std::byte{}};
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
-    axk::HdsBuildManifest manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
     const auto source_before = read_file(source_path);
@@ -2294,14 +2294,14 @@ TEST(PackageImportApply, MergesPlannedGraphMetadataIntoReusedSamples) {
                     std::byte{0x18}, std::byte{0xfc}, std::byte{},     std::byte{}};
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
 
-    axk::HdsBuildManifest source_manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest source_manifest{"1.0", 4U * 1024U * 1024U, {}};
     source_manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
     ASSERT_TRUE(axk::write_hds_image(source_manifest, source_path));
     auto target_volume = graph_volume(audio_path);
     target_volume.name = "Target Volume";
     target_volume.sample_banks.clear();
     target_volume.programs.clear();
-    axk::HdsBuildManifest target_manifest{"1.1", 4U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest target_manifest{"1.0", 4U * 1024U * 1024U, {}};
     target_manifest.partitions.push_back({"P1", {std::move(target_volume)}});
     ASSERT_TRUE(axk::write_hds_image(target_manifest, target_path));
 
@@ -2454,7 +2454,7 @@ TEST(PackageRegressionMatrix, MixesSfsFat12AndIsoSourcesIntoSfsDeterministically
 
     axk::VolumeSpec target_volume;
     target_volume.name = "Mixed";
-    axk::HdsBuildManifest target_manifest{"1.1", 8U * 1024U * 1024U, {}};
+    axk::HdsBuildManifest target_manifest{"1.0", 8U * 1024U * 1024U, {}};
     target_manifest.partitions.push_back({"P1", {std::move(target_volume)}});
     ASSERT_TRUE(axk::write_hds_image(target_manifest, target_path));
 
@@ -2536,7 +2536,7 @@ TEST(PackageRegressionMatrix, MixesSfsFat12AndIsoSourcesIntoFat12Deterministical
     ASSERT_TRUE(seed_objects) << seed_objects.error().message;
     ASSERT_EQ(seed_objects->size(), 1U);
     axk::detail::PreparedMediaImage target_prepared;
-    target_prepared.manifest.schema_version = "1.1";
+    target_prepared.manifest.schema_version = "1.0";
     target_prepared.manifest.format = axk::MediaImageFormat::fat12_floppy;
     target_prepared.objects.push_back({seed_objects->front().decoded.header.type,
                                        seed_objects->front().decoded.header.name, seed_objects->front().raw_payload});
@@ -2727,7 +2727,7 @@ TEST(PackageRegressionMatrix, MixesSfsFat12AndIsoSourcesIntoIso9660Deterministic
     ASSERT_TRUE(axk::write_wav_atomic(target_audio, tiny_waveform(3000)));
 
     axk::MediaBuildManifest target_manifest;
-    target_manifest.schema_version = "1.1";
+    target_manifest.schema_version = "1.0";
     target_manifest.format = axk::MediaImageFormat::iso9660;
     target_manifest.iso_volume_id = "MIXED_TARGET";
     target_manifest.group_name = "Target Group";
@@ -2869,7 +2869,7 @@ TEST(PackageImportApply, RebuildsIsoWithVolumeLocalReuseAndByteIdenticalRepeat) 
                     std::byte{0x18}, std::byte{0xfc}, std::byte{},     std::byte{}};
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
     axk::MediaBuildManifest target_manifest;
-    target_manifest.schema_version = "1.1";
+    target_manifest.schema_version = "1.0";
     target_manifest.format = axk::MediaImageFormat::iso9660;
     target_manifest.iso_volume_id = "PACKAGE_TEST";
     target_manifest.group_name = "Target Group";

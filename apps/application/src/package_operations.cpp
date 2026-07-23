@@ -238,7 +238,7 @@ axk::app::Result<axk::PackageRootKind> parse_root_kind(std::string_view value) {
         return axk::PackageRootKind::volume;
     if (value == "program" || value == "prog")
         return axk::PackageRootKind::prog;
-    if (value == "sbac" || value == "sample-bank" || value == "bank-group")
+    if (value == "sbac" || value == "sample-bank")
         return axk::PackageRootKind::sbac;
     if (value == "sbnk" || value == "sample")
         return axk::PackageRootKind::sbnk;

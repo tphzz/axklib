@@ -12,7 +12,7 @@
 #include <mach/mach.h>
 #endif
 
-#include "writer_internal.hpp"
+#include "axklib/writer_internal.hpp"
 
 int main() {
     constexpr std::uint64_t kibibyte = 1024U;
@@ -21,7 +21,7 @@ int main() {
     constexpr std::uint64_t memory_budget_bytes = 128U * mebibyte;
 
     axk::MediaBuildManifest manifest;
-    manifest.schema_version = "1.1";
+    manifest.schema_version = "1.0";
     manifest.format = axk::MediaImageFormat::iso9660;
     axk::detail::PreparedMediaImage prepared{manifest,
                                              axk::MediaBuildLimits{64U * mebibyte, 64U * mebibyte, 64U * mebibyte},

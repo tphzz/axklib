@@ -17,7 +17,7 @@
 int main() {
     constexpr std::uint64_t kibibyte = 1024U;
     constexpr std::uint64_t memory_budget_bytes = 256U * 1024U * kibibyte;
-    axk::HdsBuildManifest manifest{"1.1", axk::maximum_hds_size, {}};
+    axk::HdsBuildManifest manifest{"1.0", axk::maximum_hds_size, {}};
     for (std::uint8_t index = 0; index < 8U; ++index) {
         axk::VolumeSpec volume;
         volume.name = "Volume " + std::to_string(index + 1U);

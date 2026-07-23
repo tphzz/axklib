@@ -48,7 +48,7 @@ The generated HDS document is:
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.0",
   "size_bytes": 536870912,
   "partitions": [
     {
@@ -205,7 +205,7 @@ Place `tone.wav` next to `cdrom.json` and write:
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.0",
   "format": "iso9660",
   "iso": {
     "volume_id": "AXK_AUDIO",
@@ -281,7 +281,7 @@ Place `tone.wav` next to `floppy.json` and write:
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.0",
   "format": "fat12_floppy",
   "authored_volume": {
     "name": "FAT ROOT",
@@ -334,7 +334,7 @@ Given `source.ima` next to `floppy-to-iso.json`:
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.0",
   "format": "iso9660",
   "iso": {
     "volume_id": "FLOPPY_COPY",
@@ -409,7 +409,7 @@ Then reference one or more reported object keys:
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.0",
   "format": "fat12_floppy",
   "transfer": {
     "source_path": "source.hds",
@@ -432,7 +432,7 @@ Top-level HDS fields:
 
 | Field | Rule |
 | --- | --- |
-| `schema_version` | Required; canonical output is `"1.1"`; legacy `"1.0"` input is migrated during parsing. |
+| `schema_version` | Required; the only accepted value is `"1.0"`. |
 | `size_bytes` | Required integer from 1 MiB through 2 GiB, divisible by 512. The starter uses 512 MiB. |
 | `partitions` | Required array containing `1..8` partition objects. |
 
@@ -452,7 +452,7 @@ Top-level removable-media fields:
 
 | Field | Rule |
 | --- | --- |
-| `schema_version` | Required; canonical output is `"1.1"`; legacy `"1.0"` input is migrated during parsing. |
+| `schema_version` | Required; the only accepted value is `"1.0"`. |
 | `format` | Required; `"fat12_floppy"` or `"iso9660"`. |
 | `authored_volume` / `transfer` | Exactly one is required. |
 | `iso` | Required for `iso9660`; omitted for `fat12_floppy`. |
@@ -526,7 +526,7 @@ The starter contains one valid rename operation with placeholder names:
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.0",
   "operations": [
     {
       "id": "rename-waveform",
@@ -602,24 +602,18 @@ Deletion checks live relationships. Delete a Program or Sample Bank before delet
 objects it owns, and delete a Sample before deleting its Wave Data. The
 engine rejects an operation that would leave a known dangling relationship.
 
-## Terminology Migration
+## Canonical Terminology
 
-Schema `1.1` is the canonical authored and alteration format. It uses `samples`
+Schema `1.0` is the canonical authored and alteration format. It uses `samples`
 for Sample (`SBNK`) objects, `sample_banks` for Sample Bank (`SBAC`) objects,
 `member_samples` for bank membership, and Program targets `sample` and
-`sample_bank`. Parsers continue to accept schema `1.0` documents with the former
-`sample_banks`, `sample_bank_groups`, `member_sample_banks`,
-`sample_bank`, and `sample_bank_group` meanings and migrate them at the input
-boundary. Generated manifests always use `1.1`.
+`sample_bank`. Obsolete pre-release field meanings are rejected rather than
+translated.
 
 The C++ writer API follows the same terminology: `SampleSpec` models `SBNK`,
 `SampleBankSpec` models `SBAC`, and `VolumeSpec` exposes `samples` and
-`sample_banks`. `LegacySampleBankSpec` names the former `SBNK` model during
-migration. `SampleBankGroupSpec` remains a deprecated alias for the canonical
-`SBAC` model. The equivalent alteration and export aliases are deprecated on the
-same basis. Because the old `SampleBankSpec` name had the wrong `SBNK` meaning
-and now has the correct `SBAC` meaning, callers must rename old declarations to
-`SampleSpec` or `LegacySampleBankSpec` when upgrading.
+`sample_banks`. No transitional C++ aliases are provided for superseded
+pre-release names.
 
 ## Publication And Validation Guarantees
 

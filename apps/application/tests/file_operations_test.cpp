@@ -12,19 +12,21 @@
 
 namespace {
 
-void write_legacy_sidecar(const std::filesystem::path &path, const std::string &wav_path) {
+void write_wave_sidecar(const std::filesystem::path &path, const std::string &wav_path) {
     std::ofstream output{path};
-    output << nlohmann::json({{"source_container", "fixture.hds"},
-                              {"object_key", "smpl:1"},
-                              {"wav_path", wav_path},
-                              {"sample_rate", 44'100U},
-                              {"channels", 1U},
-                              {"sample_width_bytes", 2U},
-                              {"frames", 0U},
-                              {"stored_payload_size", 0U},
-                              {"extraction_quality", "Known"},
-                              {"extraction_basis", "test"},
-                              {"field_quality", nlohmann::json::object()}})
+    output << nlohmann::json({{"schema", "axklib.wave_sidecar.v1"},
+                              {"identity", {{"object_key", "smpl:1"}}},
+                              {"audio",
+                               {{"wav_path", wav_path},
+                                {"sample_rate", 44'100U},
+                                {"channels", 1U},
+                                {"sample_width_bytes", 2U},
+                                {"frames", 0U}}},
+                              {"playback", nlohmann::json::object()},
+                              {"relationships", nlohmann::json::object()},
+                              {"parameters", nlohmann::json::object()},
+                              {"conversion", nlohmann::json::object()},
+                              {"origin", nlohmann::json::object()}})
                   .dump();
 }
 
@@ -200,7 +202,7 @@ TEST_F(FileOperationsTest, ExportValidationAllowsParentTraversalThatStaysInsideT
     std::filesystem::create_directories(graph_path.parent_path());
     const auto write_graph = [&](std::string_view wav_path) {
         std::ofstream output{graph_path};
-        output << nlohmann::json({{"schema", "axklib.volume_graph.v2"},
+        output << nlohmann::json({{"schema", "axklib.volume_graph.v1"},
                                   {"objects", {{"smpl", {{{"object_key", "smpl:1"}, {"wav_path", wav_path}}}}}}})
                       .dump();
     };
@@ -232,7 +234,7 @@ TEST_F(FileOperationsTest, ExportValidationAllowsParentTraversalThatStaysInsideT
     EXPECT_TRUE(escaped->at("failed").get<bool>());
 }
 
-TEST_F(FileOperationsTest, ExportValidationRejectsLegacyPathsOutsideTheRetainedExportTree) {
+TEST_F(FileOperationsTest, ExportValidationRejectsWaveSidecarPathsOutsideTheRetainedExportTree) {
     std::filesystem::create_directories(root_ / "exports");
     write_minimal_wav(root_ / "outside.wav", 1U, 16U);
     auto registry = axk::app::make_operation_registry();
@@ -243,7 +245,7 @@ TEST_F(FileOperationsTest, ExportValidationRejectsLegacyPathsOutsideTheRetainedE
     const std::array<std::pair<std::string, std::string>, 2U> paths{
         std::pair{"absolute", (root_ / "outside.wav").string()}, std::pair{"traversal", "../outside.wav"}};
     for (const auto &[name, wav_path] : paths) {
-        write_legacy_sidecar(root_ / "exports" / "tone.json", wav_path);
+        write_wave_sidecar(root_ / "exports" / "tone.json", wav_path);
         const auto result = registry.invoke(
             "report.validate",
             {{"exports", {{"rootId", "workspace"}, {"relativePath", "exports"}}},
@@ -259,6 +261,26 @@ TEST_F(FileOperationsTest, ExportValidationRejectsLegacyPathsOutsideTheRetainedE
     }
 }
 
+TEST_F(FileOperationsTest, ExportValidationRejectsObsoleteSchemaLessWaveSidecars) {
+    std::filesystem::create_directories(root_ / "exports");
+    std::ofstream{root_ / "exports" / "tone.json"}
+        << nlohmann::json({{"object_key", "smpl:1"}, {"wav_path", "tone.wav"}}).dump();
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_validation_operations(registry, *sandbox_));
+    const auto result = registry.invoke(
+        "report.validate",
+        {{"exports", {{"rootId", "workspace"}, {"relativePath", "exports"}}},
+         {"destination", {{"rootId", "workspace"}, {"relativePath", "reports/obsolete-sidecar"}}},
+         {"policy", "strict"}},
+        {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_TRUE(result->at("failed").get<bool>());
+    std::ifstream input{root_ / "reports" / "obsolete-sidecar" / "validation_issues.json"};
+    const auto issues = nlohmann::json::parse(input);
+    ASSERT_EQ(issues.size(), 1U);
+    EXPECT_EQ(issues.front().at("code"), "EXPORT_SIDECAR_UNSUPPORTED_SCHEMA");
+}
+
 TEST_F(FileOperationsTest, ExportValidationRejectsMalformedWavFormatWithoutUnsafeArithmetic) {
     std::filesystem::create_directories(root_ / "exports");
     auto registry = axk::app::make_operation_registry();
@@ -268,7 +290,7 @@ TEST_F(FileOperationsTest, ExportValidationRejectsMalformedWavFormatWithoutUnsaf
         const auto wav = root_ / "exports" / "tone.wav";
         write_minimal_wav(wav, 1U, 16U);
         mutate(wav);
-        write_legacy_sidecar(root_ / "exports" / "tone.json", "tone.wav");
+        write_wave_sidecar(root_ / "exports" / "tone.json", "tone.wav");
         const auto report_path = std::format("reports/malformed-wav-{}", name);
         const auto result = registry.invoke("report.validate",
                                             {{"exports", {{"rootId", "workspace"}, {"relativePath", "exports"}}},

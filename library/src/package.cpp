@@ -26,6 +26,7 @@
 #include "axklib/utf8.hpp"
 
 #include "package_internal.hpp"
+#include "package_manifest_internal.hpp"
 
 namespace axk {
 
@@ -475,106 +476,6 @@ std::string edge_id(std::string_view source, std::string_view target, std::strin
     return "e-" + digest_text(identity);
 }
 
-Json relocation_json(const PackageRelocation &relocation) {
-    return Json{{"edge_ids", relocation.edge_ids}, {"expected_hex", relocation.expected_hex},
-                {"mask_hex", relocation.mask_hex}, {"offset", relocation.offset},
-                {"role", relocation.role},         {"width", relocation.width}};
-}
-
-Json node_json(const PackageNode &node) {
-    Json relocations = Json::array();
-    for (const auto &relocation : node.relocations)
-        relocations.push_back(relocation_json(relocation));
-    const auto optional_digest = [](const std::optional<std::string> &value) -> Json {
-        return value ? Json(*value) : Json(nullptr);
-    };
-    return Json{{"audio_sha256", optional_digest(node.audio_sha256)},
-                {"name", node.name},
-                {"node_id", node.node_id},
-                {"normalized_sha256", node.normalized_sha256},
-                {"object_format", node.object_format},
-                {"object_type", node.object_type},
-                {"payload_path", node.payload_path},
-                {"payload_sha256", node.payload_sha256},
-                {"placement_hint",
-                 {{"category_name", node.placement_hint.category_name},
-                  {"entry_name", node.placement_hint.entry_name},
-                  {"group_name", node.placement_hint.group_name},
-                  {"volume_name", node.placement_hint.volume_name}}},
-                {"relocations", std::move(relocations)},
-                {"semantic_sha256", optional_digest(node.semantic_sha256)}};
-}
-
-Json manifest_json(const PortablePackage &package, bool include_id) {
-    Json roots = Json::array();
-    for (const auto &root : package.roots)
-        roots.push_back({{"display_name", root.display_name},
-                         {"kind", package_root_kind_name(root.kind)},
-                         {"node_ids", root.node_ids}});
-    Json objects = Json::array();
-    for (const auto &node : package.nodes)
-        objects.push_back(node_json(node));
-    Json relationships = Json::array();
-    for (const auto &edge : package.relationships) {
-        relationships.push_back({{"edge_id", edge.edge_id},
-                                 {"ordinal", edge.ordinal},
-                                 {"role", edge.role},
-                                 {"source_node_id", edge.source_node_id},
-                                 {"target_node_id", edge.target_node_id}});
-    }
-    std::map<std::string, std::pair<std::string, std::uint64_t>, std::less<>> payload_map;
-    for (const auto &node : package.nodes)
-        payload_map.emplace(node.payload_path,
-                            std::pair{node.payload_sha256, static_cast<std::uint64_t>(node.raw_payload.size())});
-    Json payloads = Json::array();
-    for (const auto &[path, digest_and_size] : payload_map) {
-        payloads.push_back({{"media_type", "application/vnd.axklib.yamaha-object"},
-                            {"path", path},
-                            {"sha256", digest_and_size.first},
-                            {"size_bytes", digest_and_size.second}});
-    }
-    Json result{{"objects", std::move(objects)},
-                {"package_kind", package_kind_name(package.kind)},
-                {"payloads", std::move(payloads)},
-                {"provenance", {{"source_media_kind", package.source_media_kind}}},
-                {"relationships", std::move(relationships)},
-                {"roots", std::move(roots)},
-                {"schema_version", package.schema_version}};
-    if (include_id)
-        result["package_id"] = package.package_id;
-    return result;
-}
-
-std::string canonical_json(const Json &value) {
-    return value.dump(-1, ' ', false, Json::error_handler_t::strict) + '\n';
-}
-
-void bind_relocations(PortablePackage &package) {
-    for (auto &node : package.nodes) {
-        for (auto &relocation : node.relocations) {
-            for (const auto &edge : package.relationships) {
-                const bool binds =
-                    (relocation.role == "SBNK_LEFT_MEMBER_LINK" && edge.source_node_id == node.node_id &&
-                     edge.role == "SBNK_LEFT_MEMBER_TO_SMPL") ||
-                    (relocation.role == "SBNK_RIGHT_MEMBER_LINK" && edge.source_node_id == node.node_id &&
-                     edge.role == "SBNK_RIGHT_MEMBER_TO_SMPL") ||
-                    (relocation.role == "SBNK_GROUP_MEMBERSHIP" && edge.target_node_id == node.node_id &&
-                     edge.role == "SBAC_SLOT_TO_SBNK") ||
-                    (relocation.role == "SBAC_SLOT_HANDLE" && edge.source_node_id == node.node_id &&
-                     edge.role == "SBAC_SLOT_TO_SBNK" && relocation.offset == 0x15cU + edge.ordinal * 0x14U) ||
-                    (relocation.role == "PROG_ASSIGNMENT_HANDLE" && edge.source_node_id == node.node_id &&
-                     (edge.role == "PROG_ASSIGNMENT_TO_SBAC" || edge.role == "PROG_ASSIGNMENT_TO_SBNK") &&
-                     relocation.offset == 0x130U + edge.ordinal * 0x38U) ||
-                    (relocation.role == "SBNK_PROGRAM_BITMAP" && edge.target_node_id == node.node_id &&
-                     edge.role == "PROG_ASSIGNMENT_TO_SBNK");
-                if (binds)
-                    relocation.edge_ids.push_back(edge.edge_id);
-            }
-            std::ranges::sort(relocation.edge_ids);
-        }
-    }
-}
-
 bool json_has_only_integer_numbers(const Json &value) {
     if (value.is_number_float())
         return false;
@@ -800,7 +701,7 @@ Result<void> validate_relocation_bindings(const PortablePackage &package) {
         for (auto &relocation : node.relocations)
             relocation.edge_ids.clear();
     }
-    bind_relocations(expected);
+    package_internal::bind_manifest_relocations(expected);
     for (std::size_t node_index = 0; node_index < package.nodes.size(); ++node_index) {
         for (std::size_t relocation_index = 0; relocation_index < package.nodes[node_index].relocations.size();
              ++relocation_index) {
@@ -1144,12 +1045,13 @@ Result<PortablePackage> parse_package_manifest(std::span<const std::byte> manife
     }
     try {
         const auto manifest = Json::parse(manifest_text);
-        if (!json_has_only_integer_numbers(manifest) || canonical_json(manifest) != manifest_text)
+        if (!json_has_only_integer_numbers(manifest) || package_internal::canonical_json(manifest) != manifest_text)
             return std::unexpected{package_error("package manifest JSON is not canonical")};
         auto identity_manifest = manifest;
         identity_manifest.erase("package_id");
         const auto declared_id = manifest.at("package_id").get<std::string>();
-        if (!lowercase_sha256(declared_id) || digest_text(canonical_json(identity_manifest)) != declared_id) {
+        if (!lowercase_sha256(declared_id) ||
+            digest_text(package_internal::canonical_json(identity_manifest)) != declared_id) {
             return std::unexpected{package_error("package ID does not match the canonical manifest")};
         }
         auto package = parse_manifest(manifest, entries, verify_payloads);
@@ -1254,14 +1156,14 @@ Result<void> verify_portable_package(const PortablePackage &package) {
             return std::unexpected{package_error("package payloads have not been fully verified")};
         if (std::ranges::any_of(package.issues, &PackageIssue::fatal))
             return std::unexpected{package_error("package contains a fatal verification issue")};
-        auto manifest = manifest_json(package, true);
+        auto manifest = package_internal::manifest_json(package, true);
         auto identity_manifest = manifest;
         identity_manifest.erase("package_id");
-        if (digest_text(canonical_json(identity_manifest)) != package.package_id)
+        if (digest_text(package_internal::canonical_json(identity_manifest)) != package.package_id)
             return std::unexpected{package_error("package identity does not match its manifest")};
 
         std::map<std::string, std::vector<std::byte>, std::less<>> entry_bytes;
-        entry_bytes.emplace("manifest.json", string_bytes(canonical_json(manifest)));
+        entry_bytes.emplace("manifest.json", string_bytes(package_internal::canonical_json(manifest)));
         for (const auto &node : package.nodes) {
             const auto [found, inserted] = entry_bytes.emplace(node.payload_path, node.raw_payload);
             if (!inserted && found->second != node.raw_payload)
@@ -1273,7 +1175,7 @@ Result<void> verify_portable_package(const PortablePackage &package) {
         auto reparsed = parse_manifest(manifest, entries, true);
         if (!reparsed)
             return std::unexpected{reparsed.error()};
-        if (manifest_json(*reparsed, true) != manifest)
+        if (package_internal::manifest_json(*reparsed, true) != manifest)
             return std::unexpected{package_error("package verification changed its manifest")};
         return {};
     } catch (const Json::exception &) {
@@ -1397,7 +1299,7 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
                                          target_id, relationship->type, ordinal});
     }
     std::ranges::sort(package.relationships, {}, &PackageRelationship::edge_id);
-    bind_relocations(package);
+    package_internal::bind_manifest_relocations(package);
 
     for (const auto &root : *selected) {
         PackageRoot packaged{root.kind, root.display_name, {}};
@@ -1406,11 +1308,11 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
         package.roots.push_back(std::move(packaged));
     }
     package.kind = derive_kind(package.roots);
-    package.package_id = digest_text(canonical_json(manifest_json(package, false)));
+    package.package_id = digest_text(package_internal::canonical_json(package_internal::manifest_json(package, false)));
     package.payloads_verified = true;
     if (const auto verified = verify_portable_package(package); !verified)
         return std::unexpected{verified.error()};
-    const auto manifest = canonical_json(manifest_json(package, true));
+    const auto manifest = package_internal::canonical_json(package_internal::manifest_json(package, true));
 
     std::map<std::string, std::vector<std::byte>, std::less<>> payloads;
     for (const auto &node : package.nodes) {

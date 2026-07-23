@@ -66,7 +66,7 @@ void write_program_iso(const std::filesystem::path &root) {
     volume.programs.push_back({1U, {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
 
     axk::MediaBuildManifest manifest;
-    manifest.schema_version = "1.1";
+    manifest.schema_version = "1.0";
     manifest.format = axk::MediaImageFormat::iso9660;
     manifest.authored_volume = std::move(volume);
     manifest.iso_volume_id = "AXK_GRAPH";

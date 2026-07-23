@@ -7,6 +7,8 @@
 #include <set>
 #include <utility>
 
+#include "axklib/bytes.hpp"
+
 namespace axk::package_internal {
 namespace {
 
@@ -70,13 +72,6 @@ Result<void> put_name(std::span<std::byte> payload, std::size_t offset, std::str
     std::ranges::transform(name, payload.begin() + static_cast<std::ptrdiff_t>(offset),
                            [](char value) { return static_cast<std::byte>(value); });
     return {};
-}
-
-void put_be32(std::span<std::byte> payload, std::size_t offset, std::uint32_t value) {
-    payload[offset] = static_cast<std::byte>(value >> 24U);
-    payload[offset + 1U] = static_cast<std::byte>(value >> 16U);
-    payload[offset + 2U] = static_cast<std::byte>(value >> 8U);
-    payload[offset + 3U] = static_cast<std::byte>(value);
 }
 
 Result<std::string_view> target_name(const PackageNode &node, const PackageNodeRelocationContext &context,
@@ -255,6 +250,12 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
     if (!projected)
         return std::unexpected{projected.error()};
     auto result = *projected;
+    ByteWriter writer{result};
+    const auto write_be32 = [&](std::size_t offset, std::uint32_t value) -> Result<void> {
+        if (auto written = writer.write_be32(offset, value); !written)
+            return std::unexpected{relocation_error(node, "package relocation field is out of bounds")};
+        return {};
+    };
     for (const auto &relocation : node.relocations)
         allowed.push_back({relocation.offset, relocation.width});
 
@@ -262,8 +263,10 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
         if (!context.smpl_link_id || *context.smpl_link_id < 0xbaU || result.size() < 0x7cU) {
             return std::unexpected{relocation_error(node, "SMPL relocation requires a valid destination link ID")};
         }
-        put_be32(result, 0x6cU, *context.smpl_link_id - 0xbaU);
-        put_be32(result, 0x78U, *context.smpl_link_id);
+        if (auto written = write_be32(0x6cU, *context.smpl_link_id - 0xbaU); !written)
+            return std::unexpected{written.error()};
+        if (auto written = write_be32(0x78U, *context.smpl_link_id); !written)
+            return std::unexpected{written.error()};
     } else if (node.object_type == "SBNK") {
         if (result.size() < 0xd1U) {
             return std::unexpected{relocation_error(node, "SBNK relocation payload is truncated")};
@@ -288,17 +291,21 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
         if (!left_link) {
             return std::unexpected{relocation_error(node, "SBNK relocation requires its left SMPL relationship")};
         }
-        put_be32(result, 0xa0U, *left_link);
+        if (auto written = write_be32(0xa0U, *left_link); !written)
+            return std::unexpected{written.error()};
         if (right_link) {
-            put_be32(result, 0xa4U, *right_link);
+            if (auto written = write_be32(0xa4U, *right_link); !written)
+                return std::unexpected{written.error()};
         } else {
             const auto *source = std::get_if<CurrentSbnk>(&source_decoded->payload);
             if (source == nullptr)
                 return std::unexpected{relocation_error(node, "SBNK source payload is not decoded")};
             if (source->inactive_right.smpl_link_id == 0U) {
-                put_be32(result, 0xa4U, 0U);
+                if (auto written = write_be32(0xa4U, 0U); !written)
+                    return std::unexpected{written.error()};
             } else if (source->inactive_right.smpl_link_id == source->left.smpl_link_id) {
-                put_be32(result, 0xa4U, *left_link);
+                if (auto written = write_be32(0xa4U, *left_link); !written)
+                    return std::unexpected{written.error()};
             } else {
                 return std::unexpected{relocation_error(node, "inactive SBNK right lane has an "
                                                               "unsupported nonzero link ID")};
@@ -316,7 +323,8 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
                               (std::to_integer<std::uint32_t>(result[word_offset + 1U]) << 16U) |
                               (std::to_integer<std::uint32_t>(result[word_offset + 2U]) << 8U) |
                               std::to_integer<std::uint32_t>(result[word_offset + 3U]);
-            put_be32(result, word_offset, word | bit);
+            if (auto written = write_be32(word_offset, word | bit); !written)
+                return std::unexpected{written.error()};
         }
         auto flags = std::to_integer<std::uint8_t>(result[0xd0U]);
         flags = context.sample_bank_member ? static_cast<std::uint8_t>(flags | 1U)
@@ -326,16 +334,20 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
         const auto *sample_bank = std::get_if<CurrentSbac>(&source_decoded->payload);
         if (sample_bank == nullptr)
             return std::unexpected{relocation_error(node, "SBAC source payload is not decoded")};
-        for (const auto &slot : sample_bank->slots)
-            put_be32(result, slot.offset + 16U, 0U);
+        for (const auto &slot : sample_bank->slots) {
+            if (auto written = write_be32(slot.offset + 16U, 0U); !written)
+                return std::unexpected{written.error()};
+        }
     } else if (node.object_type == "PROG") {
         const auto *program = std::get_if<CurrentProg>(&source_decoded->payload);
         if (program == nullptr)
             return std::unexpected{relocation_error(node, "Program source payload is not decoded")};
         for (std::size_t index = 0; index < program->assignments.size(); ++index) {
             const auto &assignment = program->assignments[index];
-            if (!assignment.name.empty() && (assignment.kind == 0x10U || assignment.kind == 0x11U))
-                put_be32(result, 0x130U + index * 0x38U, 0U);
+            if (!assignment.name.empty() && (assignment.kind == 0x10U || assignment.kind == 0x11U)) {
+                if (auto written = write_be32(0x130U + index * 0x38U, 0U); !written)
+                    return std::unexpected{written.error()};
+            }
         }
     } else {
         return std::unexpected{relocation_error(node, "package node type has no admitted relocation implementation")};

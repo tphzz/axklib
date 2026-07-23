@@ -616,7 +616,7 @@ describe('HttpImageTransport', () => {
                                 id: 'volume-add',
                                 type: 'insert_volume',
                                 partition_index: 2,
-                                volume: { name: 'New Volume', waveforms: [], sample_banks: [] },
+                                volume: { name: 'New Volume', waveforms: [], samples: [] },
                             },
                         ],
                     },
@@ -783,7 +783,7 @@ describe('HttpImageTransport', () => {
                             type: 'insert_sbnk',
                             partition_index: 3,
                             volume_name: 'Imported',
-                            sample_bank: {
+                            sample: {
                                 name: 'Mono',
                                 waveform_name: 'Mono Wave',
                                 root_key: 60,
@@ -809,7 +809,7 @@ describe('HttpImageTransport', () => {
                             type: 'insert_sbnk',
                             partition_index: 3,
                             volume_name: 'Imported',
-                            sample_bank: {
+                            sample: {
                                 name: 'Stereo',
                                 waveform_name: 'Stereo-L',
                                 right_waveform_name: 'Stereo-R',

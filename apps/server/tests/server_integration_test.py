@@ -441,12 +441,12 @@ def prepare_cross_format_sources(root: Path, cli: Path, sfs_fixture: Path) -> li
     }
     manifests = {
         "authored.ima": {
-            "schema_version": "1.1",
+            "schema_version": "1.0",
             "format": "fat12_floppy",
             "authored_volume": authored_volume,
         },
         "authored.iso": {
-            "schema_version": "1.1",
+            "schema_version": "1.0",
             "format": "iso9660",
             "iso": {
                 "volume_id": "AXK_TEST",
@@ -544,7 +544,7 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
         for name in sample_names
     ]
     source_manifest = {
-        "schema_version": "1.1",
+        "schema_version": "1.0",
         "size_bytes": 8 * 1024 * 1024,
         "partitions": [
             {
@@ -599,7 +599,7 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
         ],
     }
     alteration_manifest = {
-        "schema_version": "1.1",
+        "schema_version": "1.0",
         "operations": [
             {
                 "id": "delete-volume",
@@ -786,7 +786,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
         target_manifest.write_text(
             json.dumps(
                 {
-                    "schema_version": "1.1",
+                    "schema_version": "1.0",
                     "size_bytes": 1048576,
                     "partitions": [
                         {
@@ -2186,7 +2186,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
 
             transfer_manifest = {
-                "schema_version": "1.1",
+                "schema_version": "1.0",
                 "format": "iso9660",
                 "iso": {
                     "volume_id": "AXK_TEST",

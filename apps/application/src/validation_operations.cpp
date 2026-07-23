@@ -1012,7 +1012,7 @@ std::vector<axk::ReportRow> validate_export_directory(const axk::app::SandboxTre
         if (!record.is_object())
             continue;
         const auto schema = record.value("schema", std::string{});
-        if (schema == "axklib.volume_graph.v1" || schema == "axklib.volume_graph.v2") {
+        if (schema == "axklib.volume_graph.v1") {
             const auto inspect_path = [&](const Json &value, std::string_view object_key) {
                 if (!value.is_string())
                     return;
@@ -1030,78 +1030,47 @@ std::vector<axk::ReportRow> validate_export_directory(const axk::app::SandboxTre
             }
             continue;
         }
-        auto object_key = record.value("object_key", std::string{});
-        Json header = record;
-        std::filesystem::path wav_path;
-        if (schema == "axklib.wave_sidecar.v2") {
-            static constexpr std::array sections{"identity",   "audio",      "playback", "relationships",
-                                                 "parameters", "conversion", "origin"};
-            std::vector<std::string> missing;
-            for (const auto section : sections) {
-                if (!record.contains(section))
-                    missing.emplace_back(section);
+        if (schema != "axklib.wave_sidecar.v1") {
+            if (record.contains("wav_path") || schema.starts_with("axklib.wave_sidecar.")) {
+                issues.push_back(export_validation_issue(
+                    "error", "EXPORT_SIDECAR_UNSUPPORTED_SCHEMA",
+                    "Wave sidecar must use the current axklib.wave_sidecar.v1 schema.", "sidecar", *sidecar_path));
             }
-            if (record.contains("identity") && record["identity"].is_object())
-                object_key = record["identity"].value("object_key", object_key);
-            if (!missing.empty()) {
-                std::string section_names;
-                for (const auto &section : missing) {
-                    if (!section_names.empty())
-                        section_names += ", ";
-                    section_names += section;
-                }
-                issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_MISSING_FIELD",
-                                                         "Sidecar missing required sections: " + section_names,
-                                                         "sidecar", *sidecar_path, object_key));
-            }
-            if (!record.contains("audio") || !record["audio"].is_object())
-                continue;
-            header = record["audio"];
-            const auto normalized =
-                normalized_export_path(header.value("wav_path", std::string{}), *sidecar_path, true);
-            if (!normalized) {
-                issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_PATH_ESCAPE",
-                                                         "v2 sidecar audio.wav_path must be relative and stay inside "
-                                                         "the export root.",
-                                                         "sidecar", *sidecar_path, object_key));
-                continue;
-            }
-            wav_path = axk::text::path_from_utf8(*normalized).value_or(std::filesystem::path{});
-        } else {
-            if (!record.contains("wav_path"))
-                continue;
-            static constexpr std::array required{
-                "source_container",   "object_key",         "wav_path",     "sample_rate",
-                "channels",           "sample_width_bytes", "frames",       "stored_payload_size",
-                "extraction_quality", "extraction_basis",   "field_quality"};
-            std::vector<std::string> missing;
-            for (const auto field : required) {
-                if (!record.contains(field))
-                    missing.emplace_back(field);
-            }
-            std::ranges::sort(missing);
-            if (!missing.empty()) {
-                std::string fields;
-                for (const auto &field : missing) {
-                    if (!fields.empty())
-                        fields += ", ";
-                    fields += field;
-                }
-                issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_MISSING_FIELD",
-                                                         "Sidecar missing required fields: " + fields, "sidecar",
-                                                         *sidecar_path, object_key));
-            }
-            const auto normalized =
-                normalized_export_path(record.value("wav_path", std::string{}), *sidecar_path, false);
-            if (!normalized) {
-                issues.push_back(
-                    export_validation_issue("error", "EXPORT_SIDECAR_PATH_ESCAPE",
-                                            "Legacy sidecar wav_path must be relative and stay inside the export root.",
-                                            "sidecar", *sidecar_path, object_key));
-                continue;
-            }
-            wav_path = axk::text::path_from_utf8(*normalized).value_or(std::filesystem::path{});
+            continue;
         }
+        auto object_key = std::string{};
+        static constexpr std::array sections{"identity",   "audio",      "playback", "relationships",
+                                             "parameters", "conversion", "origin"};
+        std::vector<std::string> missing;
+        for (const auto section : sections) {
+            if (!record.contains(section))
+                missing.emplace_back(section);
+        }
+        if (record.contains("identity") && record["identity"].is_object())
+            object_key = record["identity"].value("object_key", object_key);
+        if (!missing.empty()) {
+            std::string section_names;
+            for (const auto &section : missing) {
+                if (!section_names.empty())
+                    section_names += ", ";
+                section_names += section;
+            }
+            issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_MISSING_FIELD",
+                                                     "Sidecar missing required sections: " + section_names, "sidecar",
+                                                     *sidecar_path, object_key));
+        }
+        if (!record.contains("audio") || !record["audio"].is_object())
+            continue;
+        const auto &header = record["audio"];
+        const auto normalized = normalized_export_path(header.value("wav_path", std::string{}), *sidecar_path, true);
+        if (!normalized) {
+            issues.push_back(export_validation_issue("error", "EXPORT_SIDECAR_PATH_ESCAPE",
+                                                     "Sidecar audio.wav_path must be relative and stay inside the "
+                                                     "export root.",
+                                                     "sidecar", *sidecar_path, object_key));
+            continue;
+        }
+        const auto wav_path = axk::text::path_from_utf8(*normalized).value_or(std::filesystem::path{});
         const auto wav_key = axk::text::path_to_utf8(wav_path);
         const auto wav_file = by_path.find(wav_key);
         if (wav_file == by_path.end()) {
