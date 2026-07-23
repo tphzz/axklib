@@ -32,6 +32,7 @@ export interface AuditionSequenceResult {
 interface AuditionControllerOptions {
     cacheBudgetBytes?: number;
     maximumCacheEntries?: number;
+    maximumWorkingSetBytes?: number;
 }
 
 interface PlaybackRun {
@@ -77,6 +78,7 @@ interface ResumeAttempt {
 type AuditionDiagnosticSink = (event: AuditionDiagnosticEvent) => void;
 
 const defaultCacheBudgetBytes = 128 * 1024 * 1024;
+const defaultMaximumWorkingSetBytes = 128 * 1024 * 1024;
 const defaultMaximumCacheEntries = 8;
 const startLeadSeconds = 0.01;
 const fadeSeconds = 0.005;
@@ -126,6 +128,7 @@ function bufferLevelSummary(buffer: AudioBuffer): { peak: number; rms: number; s
 export class AuditionController {
     private readonly cacheBudgetBytes: number;
     private readonly maximumCacheEntries: number;
+    private readonly maximumWorkingSetBytes: number;
     private readonly cache = new Map<string, CachedAudition>();
     private readonly pending = new Map<string, PendingAudition>();
     private context?: AudioContext;
@@ -148,6 +151,7 @@ export class AuditionController {
     ) {
         this.cacheBudgetBytes = Math.max(0, options.cacheBudgetBytes ?? defaultCacheBudgetBytes);
         this.maximumCacheEntries = Math.max(0, options.maximumCacheEntries ?? defaultMaximumCacheEntries);
+        this.maximumWorkingSetBytes = Math.max(0, options.maximumWorkingSetBytes ?? defaultMaximumWorkingSetBytes);
     }
 
     async warmup(): Promise<void> {
@@ -433,6 +437,10 @@ export class AuditionController {
 
             const decoder = context ?? new OfflineAudioContext(descriptor.channels, 1, descriptor.sampleRate);
             const estimatedBytes = this.estimatedDecodedBytes(descriptor, decoder.sampleRate);
+            const workingSetBytes = descriptor.wavSizeBytes + estimatedBytes;
+            if (!Number.isSafeInteger(workingSetBytes) || workingSetBytes > this.maximumWorkingSetBytes) {
+                throw new Error('Audio is too large to audition safely');
+            }
             if (pending.speculative && estimatedBytes > this.cacheBudgetBytes) {
                 if (run) this.emit(run, 'audio_prefetch_skipped', { estimatedDecodedBytes: estimatedBytes });
                 return null;

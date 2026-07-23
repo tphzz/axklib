@@ -3,6 +3,7 @@
     import { serverFileLocation, type DirectoryLocation, type FileLocation } from '../storageLocations';
     import type { HardDiskCreationProfile, HardDiskCreationProfileId, ImageTransport, JobState } from '../transport';
     import { userFacingMessage } from '../userFacingMessage';
+    import { modal } from '../modal';
     import Icon from './Icon.svelte';
 
     interface Props {
@@ -19,6 +20,7 @@
     let fileName = $state('New disk');
     let loading = $state(true);
     let busy = $state(false);
+    let cancelling = $state(false);
     let activeJob = $state<JobState | null>(null);
     let error = $state('');
     const partitionCounts = [1, 2, 3, 4, 5, 6, 7, 8] as const;
@@ -97,6 +99,10 @@
             if (!plan.planToken) throw new Error('The server did not return a build plan token');
             activeJob = await transport.startHardDiskCreation(plan.planToken);
             const completed = await transport.waitForJob(activeJob.jobId, (job) => (activeJob = job));
+            if (completed.status === 'cancelled') {
+                oncancel();
+                return;
+            }
             if (completed.status === 'failed') throw new Error(completed.error ?? 'Hard-disk image creation failed');
             if (completed.status !== 'completed') throw new Error('Hard-disk image creation did not complete');
             onsuccess(output);
@@ -110,7 +116,16 @@
 
     async function cancel(): Promise<void> {
         if (activeJob) {
-            await transport.cancelJob(activeJob.jobId);
+            if (cancelling) return;
+            cancelling = true;
+            error = '';
+            try {
+                await transport.cancelJob(activeJob.jobId);
+            } catch (reason) {
+                cancelling = false;
+                error = userFacingMessage(reason);
+            }
+            return;
         }
         oncancel();
     }
@@ -123,7 +138,13 @@
 </script>
 
 <div class="dialog-backdrop dialog-backdrop-raised" role="presentation">
-    <div class="dialog-shell create-hds-dialog" role="dialog" aria-modal="true" aria-label="Create HD image">
+    <div
+        class="dialog-shell create-hds-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Create HD image"
+        use:modal={{ onescape: () => void cancel() }}
+    >
         <header class="dialog-header">
             <h2>Create HD image</h2>
             <button
@@ -197,7 +218,7 @@
                     class="secondary-button"
                     type="button"
                     disabled={busy && !activeJob}
-                    onclick={() => void cancel()}>Cancel</button
+                    onclick={() => void cancel()}>{cancelling ? 'Cancelling' : 'Cancel'}</button
                 >
                 <button
                     class="primary-button"

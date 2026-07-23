@@ -21,7 +21,7 @@ export interface UploadRef {
     uploadId: string;
 }
 
-export type UploadKind = 'audio' | 'package' | 'manifest';
+export type UploadKind = 'AUDIO' | 'PACKAGE' | 'MANIFEST';
 
 export interface ClientUploadLocation {
     kind: 'client-upload';
@@ -43,7 +43,7 @@ export interface SandboxRoot {
 export interface SandboxEntry {
     name: string;
     relativePath: string;
-    kind: 'file' | 'directory';
+    kind: 'FILE' | 'DIRECTORY';
     size: number | null;
 }
 

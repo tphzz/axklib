@@ -29,8 +29,10 @@
         type RemoteServerSettingsView,
     } from './lib/serverSettings';
     import { audioExtensions, isSupportedAudioFile } from './lib/audioImport';
+    import { browserUploadSource, type ClientUploadSource } from './lib/clientUploadSource';
     import { reportDiagnostic, reportError } from './lib/diagnostics';
     import { listenForNativeAudioDrops, type NativeDropPosition } from './lib/nativeAudioDrop';
+    import { collectPages } from './lib/pagination';
     import {
         locationKey,
         serverFileLocation,
@@ -152,7 +154,7 @@
     let volumeActionBusy = $state(false);
     let volumeActionError = $state('');
     let audioFileInput: HTMLInputElement;
-    let audioImportRequest = $state<{ files: File[]; target: AudioImportTarget } | null>(null);
+    let audioImportRequest = $state<{ files: ClientUploadSource[]; target: AudioImportTarget } | null>(null);
     let audioDragActive = $state(false);
     let audioDragTarget = $state<AudioImportTarget | null>(null);
     let activeVolumeId = $state('');
@@ -185,7 +187,11 @@
     onDestroy(() => {
         stopInterfaceScaleSubscription?.();
         void interfaceScaling?.dispose();
-        void auditionController.dispose();
+        ++imageOpenGeneration;
+        const sessionId = openSessionId;
+        openSessionId = null;
+        void auditionController.dispose().catch(() => undefined);
+        if (sessionId !== null) void transport.closeImage(sessionId).catch(() => undefined);
     });
 
     function setInterfaceScale(mode: InterfaceScaleMode): void {
@@ -241,7 +247,7 @@
             : null;
     }
 
-    async function requestAudioImport(files: File[], target = activeAudioTarget()): Promise<void> {
+    async function requestAudioImport(files: ClientUploadSource[], target = activeAudioTarget()): Promise<void> {
         const admitted = files.filter(isSupportedAudioFile);
         if (files.length > 0 && admitted.length === 0) {
             sourceStatus = 'No supported audio files were dropped';
@@ -275,7 +281,7 @@
 
     function filesChosen(event: Event): void {
         const input = event.currentTarget as HTMLInputElement;
-        void requestAudioImport(Array.from(input.files ?? []));
+        void requestAudioImport(Array.from(input.files ?? []).map(browserUploadSource));
         input.value = '';
     }
 
@@ -332,7 +338,7 @@
         audioDragActive = false;
         const target = droppedAudioTarget(event);
         audioDragTarget = null;
-        const files = Array.from(dataTransfer.files);
+        const files = Array.from(dataTransfer.files).map(browserUploadSource);
         if (files.length === 0) return;
         void requestAudioImport(files, target);
     }
@@ -512,14 +518,10 @@
     }
 
     async function allContentChildren(sessionId: number, parentId: string): Promise<DiskTreeItem[]> {
-        const items: DiskTreeItem[] = [];
-        let totalCount = 1;
-        while (items.length < totalCount) {
-            const page = await transport.contentChildren(sessionId, parentId, items.length, 256);
-            items.push(...page.items);
-            totalCount = page.totalCount;
-        }
-        return items;
+        return collectPages((offset, limit) => transport.contentChildren(sessionId, parentId, offset, limit), {
+            key: (item) => item.id,
+            cancelled: () => openSessionId !== sessionId,
+        });
     }
 
     async function visibleObjectNames(sessionId: number, volumeId: string): Promise<Map<string, string>> {
@@ -539,25 +541,26 @@
     }
 
     async function allObjects(sessionId: number, volumeId: string): Promise<SamplerObject[]> {
-        const objects: SamplerObject[] = [];
-        let totalCount = 1;
-        while (objects.length < totalCount) {
-            const page = await transport.objectPage(sessionId, objects.length, 256, { scopeId: volumeId });
-            objects.push(...page.objects);
-            totalCount = page.totalCount;
-        }
-        return objects;
+        return collectPages(
+            async (offset, limit) => {
+                const page = await transport.objectPage(sessionId, offset, limit, { scopeId: volumeId });
+                return { items: page.objects, totalCount: page.totalCount };
+            },
+            { key: (item) => item.key, cancelled: () => openSessionId !== sessionId },
+        );
     }
 
     async function allRelationships(sessionId: number, volumeId: string): Promise<SamplerRelationship[]> {
-        const items: SamplerRelationship[] = [];
-        let totalCount = 1;
-        while (items.length < totalCount) {
-            const page = await transport.relationshipPage(sessionId, items.length, 256, { scopeId: volumeId });
-            items.push(...page.relationships);
-            totalCount = page.totalCount;
-        }
-        return items;
+        return collectPages(
+            async (offset, limit) => {
+                const page = await transport.relationshipPage(sessionId, offset, limit, { scopeId: volumeId });
+                return { items: page.relationships, totalCount: page.totalCount };
+            },
+            {
+                key: (item) => item.id,
+                cancelled: () => openSessionId !== sessionId,
+            },
+        );
     }
 
     async function loadVolume(volumeId: string): Promise<void> {

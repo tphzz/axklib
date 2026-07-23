@@ -25,6 +25,10 @@ Error planner_error(std::string message) {
     return make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction, std::move(message));
 }
 
+Error stale_plan_error(std::string message) {
+    return make_error(ErrorCode::transaction_stale, ErrorCategory::transaction, std::move(message));
+}
+
 std::string digest_text(std::string_view value) {
     return package_internal::hex_digest(package_internal::sha256(std::as_bytes(std::span{value})));
 }
@@ -792,7 +796,7 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
     if (!after)
         return std::unexpected{after.error()};
     if (*after != before)
-        return std::unexpected{planner_error("target image changed while its import plan was built")};
+        return std::unexpected{stale_plan_error("target image changed while its import plan was built")};
     std::ranges::sort(plan.conflicts, [](const auto &left, const auto &right) {
         return std::tie(left.code, left.package_index, left.root_index, left.package_id, left.node_id,
                         left.partition_index, left.group_name, left.volume_name, left.raw_group, left.raw_volume,
@@ -1460,7 +1464,7 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
     if (!after)
         return std::unexpected{after.error()};
     if (*after != before)
-        return std::unexpected{planner_error("target image changed while its import plan was built")};
+        return std::unexpected{stale_plan_error("target image changed while its import plan was built")};
     std::ranges::sort(plan.conflicts, [](const auto &left, const auto &right) {
         return std::tie(left.code, left.package_index, left.root_index, left.package_id, left.node_id,
                         left.partition_index, left.group_name, left.volume_name, left.raw_group, left.raw_volume,
@@ -2087,7 +2091,7 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
     if (!after)
         return std::unexpected{after.error()};
     if (*after != *before)
-        return std::unexpected{planner_error("target image changed while its import plan was built")};
+        return std::unexpected{stale_plan_error("target image changed while its import plan was built")};
 
     std::ranges::sort(plan.conflicts, [](const auto &left, const auto &right) {
         return std::tie(left.code, left.package_index, left.root_index, left.package_id, left.node_id,

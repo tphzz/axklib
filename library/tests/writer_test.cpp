@@ -115,6 +115,30 @@ TEST(HdsManifest, RejectsObsoleteSampleAndSampleBankFields) {
     })json";
     EXPECT_FALSE(axk::parse_hds_build_manifest(obsolete, "/project"));
 
+    constexpr std::string_view singular_member = R"json({
+      "schema_version":"1.0",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[{
+        "name":"V1",
+        "waveforms":[{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}],
+        "samples":[{"name":"Sample","waveform_id":"wave","root_key":60,"key_low":0,"key_high":127}],
+        "sample_banks":[{"name":"Bank","member_sample":"Sample"}]
+      }]}]
+    })json";
+    EXPECT_FALSE(axk::parse_hds_build_manifest(singular_member, "/project"));
+
+    constexpr std::string_view canonical_single_member = R"json({
+      "schema_version":"1.0",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[{
+        "name":"V1",
+        "waveforms":[{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}],
+        "samples":[{"name":"Sample","waveform_id":"wave","root_key":60,"key_low":0,"key_high":127}],
+        "sample_banks":[{"name":"Bank","member_samples":["Sample"]}]
+      }]}]
+    })json";
+    EXPECT_TRUE(axk::parse_hds_build_manifest(canonical_single_member, "/project"));
+
     constexpr std::string_view unsupported_version = R"json({
       "schema_version":"1.1",
       "size_bytes":1048576,
@@ -1030,7 +1054,7 @@ TEST(HdsWriter, DiskFullRemovesTemporaryOutputAndPublishesNothing) {
 
     ASSERT_FALSE(written);
     EXPECT_FALSE(std::filesystem::exists(output));
-    EXPECT_TRUE(std::filesystem::is_empty(root));
+    EXPECT_TRUE(std::filesystem::is_empty(root / ".axklib-publication"));
     std::filesystem::remove_all(root, error);
 }
 

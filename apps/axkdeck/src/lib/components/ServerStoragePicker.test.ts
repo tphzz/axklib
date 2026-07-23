@@ -21,11 +21,11 @@ function transport(): ImageTransport {
         sandboxDirectory: vi.fn().mockImplementation(async (directory) => ({
             directory,
             entries: directory.relativePath
-                ? [{ name: 'nested.hds', relativePath: 'images/nested.hds', kind: 'file', size: 2048 }]
+                ? [{ name: 'nested.hds', relativePath: 'images/nested.hds', kind: 'FILE', size: 2048 }]
                 : [
-                      { name: 'images', relativePath: 'images', kind: 'directory', size: null },
-                      { name: 'disk.hds', relativePath: 'disk.hds', kind: 'file', size: 1024 },
-                      { name: 'notes.txt', relativePath: 'notes.txt', kind: 'file', size: 20 },
+                      { name: 'images', relativePath: 'images', kind: 'DIRECTORY', size: null },
+                      { name: 'disk.hds', relativePath: 'disk.hds', kind: 'FILE', size: 1024 },
+                      { name: 'notes.txt', relativePath: 'notes.txt', kind: 'FILE', size: 20 },
                   ],
             truncated: false,
             nextCursor: null,

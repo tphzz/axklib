@@ -2,6 +2,7 @@
     import Icon from './Icon.svelte';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from '../serverSettings';
     import { userFacingMessage } from '../userFacingMessage';
+    import { modal } from '../modal';
 
     interface Props {
         settings: RemoteServerSettingsView;
@@ -56,6 +57,7 @@
         role="dialog"
         aria-modal="true"
         aria-labelledby="connection-settings-title"
+        use:modal={{ onescape: oncancel }}
     >
         <header class="dialog-header">
             <div>

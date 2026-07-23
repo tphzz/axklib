@@ -2,6 +2,7 @@
     import { onMount } from 'svelte';
     import type { ImageTransport } from '../transport';
     import { userFacingMessage } from '../userFacingMessage';
+    import { modal } from '../modal';
     import {
         serverDirectoryLocation,
         serverFileLocation,
@@ -69,7 +70,7 @@
     const normalizedExtensions = $derived(extensions.map((extension) => extension.toLocaleLowerCase()));
     const visibleEntries = $derived(
         entries.filter((entry) => {
-            if (entry.kind === 'directory') return true;
+            if (entry.kind === 'DIRECTORY') return true;
             if (mode !== 'file') return false;
             if (normalizedExtensions.length === 0) return true;
             const extension = entry.name.split('.').pop()?.toLocaleLowerCase() ?? '';
@@ -144,7 +145,7 @@
         if (!activeRoot) return;
         menuEntryPath = null;
         const reference = { rootId: activeRoot.id, relativePath: entry.relativePath };
-        if (entry.kind === 'directory') {
+        if (entry.kind === 'DIRECTORY') {
             void openDirectory(reference);
             return;
         }
@@ -310,7 +311,13 @@
         if (event.target === event.currentTarget) oncancel();
     }}
 >
-    <div class="dialog-shell dialog-shell-wide storage-picker" role="dialog" aria-modal="true" aria-label={title}>
+    <div
+        class="dialog-shell dialog-shell-wide storage-picker"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        use:modal={{ onescape: oncancel }}
+    >
         <header class="dialog-header">
             <h2>{title}</h2>
             <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}>×</button>
@@ -367,18 +374,18 @@
                 {#each visibleEntries as entry (`${entry.kind}:${entry.relativePath}`)}
                     <div class="storage-picker-entry">
                         <button
-                            class:storage-picker-file-row={entry.kind === 'file'}
+                            class:storage-picker-file-row={entry.kind === 'FILE'}
                             class="storage-picker-row"
                             type="button"
                             onclick={() => activate(entry)}
                         >
-                            {#if entry.kind === 'directory'}<Icon name="folder" size={16} />{/if}
+                            {#if entry.kind === 'DIRECTORY'}<Icon name="folder" size={16} />{/if}
                             <span
                                 ><strong>{entry.name}</strong><small
-                                    >{entry.kind === 'directory' ? 'Directory' : `${entry.size ?? 0} bytes`}</small
+                                    >{entry.kind === 'DIRECTORY' ? 'Directory' : `${entry.size ?? 0} bytes`}</small
                                 ></span
                             >
-                            {#if entry.kind === 'directory'}<Icon name="chevron" size={14} />{/if}
+                            {#if entry.kind === 'DIRECTORY'}<Icon name="chevron" size={14} />{/if}
                         </button>
                         {#if activeRoot.writable}
                             <div class="storage-picker-entry-actions">
@@ -448,6 +455,7 @@
                 : entryAction.kind === 'rename'
                   ? `Rename ${entryAction.entry.name}`
                   : `Delete ${entryAction.entry.name}`}
+            use:modal={{ onescape: closeEntryAction }}
         >
             <header class="dialog-header">
                 <h2>

@@ -326,31 +326,9 @@ matches the bounded contract, otherwise the server generates one. Collection
 pages use a bounded `limit` and an opaque cursor. Clients must not parse or
 construct cursor values.
 
-Compatible v1 releases may add routes, schemas, enum values, response statuses,
-and optional object fields. They do not remove routes, statuses, media types,
-fields, or enum values; change field types; make optional request data required;
-or tighten accepted numeric and size ranges. The checked-in compatibility
-baseline is enforced against the generated OpenAPI document during native
-tests.
-
-### Deprecation Policy
-
-Deprecation does not change route behavior. A deprecated resource remains
-available for at least 180 calendar days after notice, and a v1 resource is not
-removed from v1. Removal requires a new API major version and published
-migration guidance.
-
-Responses from a deprecated resource include all of these headers:
-
-- `Deprecation`, using the structured date defined by
-  [RFC 9745](https://datatracker.ietf.org/doc/rfc9745/);
-- `Sunset`, using the HTTP date defined by
-  [RFC 8594](https://datatracker.ietf.org/doc/rfc8594/); and
-- `Link`, with `rel="deprecation"`, pointing to migration guidance.
-
-The OpenAPI operation is also marked `deprecated: true`. The contract's
-`x-axklib-deprecation-policy` extension exposes the minimum notice period and
-required headers to generated clients.
+Until the first supported public release, the checked-in contract is corrected
+in place and every in-repository consumer is updated with it. Compatibility
+baselines and deprecation policy begin only after a contract has shipped.
 
 ## Sidecar Shutdown
 

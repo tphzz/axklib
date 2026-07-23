@@ -189,6 +189,90 @@ TEST(JobManager, RetainsReferencedUploadsWhileWorkWaitsInTheQueue) {
     release_first = true;
     EXPECT_EQ(wait_terminal(jobs, first->job_id).state, axk::app::JobState::completed);
     EXPECT_EQ(wait_terminal(jobs, queued->job_id).state, axk::app::JobState::completed);
+    EXPECT_TRUE(uploads.remove(created->reference, "owner"));
+    jobs.shutdown();
+    std::filesystem::remove_all(directory, error);
+}
+
+TEST(JobManager, ReleasesUploadLeasesForFailureAndBothCancellationPaths) {
+    const auto directory = std::filesystem::temp_directory_path() / "axklib-job-terminal-upload-lease-test";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    axk::app::UploadStore uploads{directory, 64U, 16U, 4U, 16U, 5min};
+    const std::string payload{"{}"};
+    const auto create_upload = [&](std::string filename) {
+        auto created = uploads.create({.owner_id = "owner",
+                                       .filename = std::move(filename),
+                                       .kind = axk::app::UploadKind::manifest,
+                                       .media_type = "application/json",
+                                       .declared_size = payload.size(),
+                                       .sha256 = std::nullopt});
+        EXPECT_TRUE(created) << created.error().message;
+        if (!created)
+            return axk::app::UploadRef{};
+        EXPECT_TRUE(uploads.append(created->reference, "owner", 0U, std::as_bytes(std::span{payload})));
+        EXPECT_TRUE(uploads.complete(created->reference, "owner"));
+        return created->reference;
+    };
+    const auto failed_upload = create_upload("failed.json");
+    const auto running_upload = create_upload("running.json");
+    const auto queued_upload = create_upload("queued.json");
+
+    std::atomic_bool running{};
+    std::atomic_bool occupying{};
+    std::atomic_bool release_occupier{};
+    auto registry = test_registry([&](const nlohmann::json &request, const axk::app::OperationContext &context) {
+        const auto mode = request.value("mode", "");
+        if (mode == "fail")
+            return axk::app::Result<nlohmann::json>{std::unexpected(axk::app::Error{"injected", "failed"})};
+        if (mode == "cancel") {
+            running = true;
+            while (!context.cancellation.is_cancelled())
+                std::this_thread::sleep_for(1ms);
+            return axk::app::Result<nlohmann::json>{
+                std::unexpected(axk::app::Error{"operation_cancelled", "cancelled"})};
+        }
+        if (mode == "occupy") {
+            occupying = true;
+            while (!release_occupier.load())
+                std::this_thread::sleep_for(1ms);
+        }
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::JobManager jobs{registry, 1U, 1U, 4U, 8U, 16U, 15min, [] { return axk::app::JobManager::Clock::now(); },
+                              &uploads};
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const auto upload_request = [](std::string mode, const axk::app::UploadRef &reference) {
+        return nlohmann::json{{"mode", std::move(mode)},
+                              {"manifest", {{"uploadRef", {{"uploadId", reference.upload_id}}}}}};
+    };
+
+    const auto failed = jobs.submit("test.job", upload_request("fail", failed_upload), context);
+    ASSERT_TRUE(failed) << failed.error().message;
+    EXPECT_EQ(wait_terminal(jobs, failed->job_id).state, axk::app::JobState::failed);
+    EXPECT_TRUE(uploads.remove(failed_upload, "owner"));
+
+    const auto cancelled = jobs.submit("test.job", upload_request("cancel", running_upload), context);
+    ASSERT_TRUE(cancelled) << cancelled.error().message;
+    while (!running.load())
+        std::this_thread::sleep_for(1ms);
+    ASSERT_TRUE(jobs.cancel(cancelled->job_id, "owner"));
+    EXPECT_EQ(wait_terminal(jobs, cancelled->job_id).state, axk::app::JobState::cancelled);
+    EXPECT_TRUE(uploads.remove(running_upload, "owner"));
+
+    const auto occupier = jobs.submit("test.job", {{"mode", "occupy"}}, context);
+    ASSERT_TRUE(occupier) << occupier.error().message;
+    while (!occupying.load())
+        std::this_thread::sleep_for(1ms);
+    const auto queued = jobs.submit("test.job", upload_request("queued", queued_upload), context);
+    ASSERT_TRUE(queued) << queued.error().message;
+    ASSERT_TRUE(jobs.cancel(queued->job_id, "owner"));
+    EXPECT_EQ(wait_terminal(jobs, queued->job_id).state, axk::app::JobState::cancelled);
+    EXPECT_TRUE(uploads.remove(queued_upload, "owner"));
+    release_occupier = true;
+    EXPECT_EQ(wait_terminal(jobs, occupier->job_id).state, axk::app::JobState::completed);
+
     jobs.shutdown();
     std::filesystem::remove_all(directory, error);
 }

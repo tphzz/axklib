@@ -416,6 +416,8 @@ crow::response error_response(int status, const axk::app::Error &error, std::str
 }
 
 int status_for_error(const axk::app::Error &error, int fallback = 422) {
+    if (error.code == "upload_storage_unavailable" || error.code == "archive_storage_unavailable")
+        return 503;
     if (error.code == "request_too_large" || error.code == "json_structure_too_large")
         return 413;
     if (error.code == "job_not_found")
@@ -515,11 +517,11 @@ std::optional<std::uint64_t> parse_unsigned(std::string_view value) {
 }
 
 std::optional<axk::app::UploadKind> parse_upload_kind(std::string_view value) {
-    if (value == "audio")
+    if (value == "AUDIO")
         return axk::app::UploadKind::audio;
-    if (value == "package")
+    if (value == "PACKAGE")
         return axk::app::UploadKind::package;
-    if (value == "manifest")
+    if (value == "MANIFEST")
         return axk::app::UploadKind::manifest;
     return std::nullopt;
 }

@@ -532,7 +532,7 @@ TEST_F(SandboxTest, RequiresUniqueValidExistingDirectoryRoots) {
     EXPECT_EQ(file_root.error().code, "invalid_sandbox_root");
 }
 
-TEST_F(SandboxTest, RemovesOnlyAbandonedAxklibPublicationSiblings) {
+TEST_F(SandboxTest, PreservesUnregisteredPublicationLikeWorkspaceEntries) {
     const auto abandoned_file = root_ / "images" / ".result.axklib-publication.p4294967295.1.tmp";
     const auto abandoned_directory = root_ / "images" / ".export.axklib-publication.p4294967295.2.tmp";
     const auto ordinary_file = root_ / "images" / ".result.tmp";
@@ -543,9 +543,10 @@ TEST_F(SandboxTest, RemovesOnlyAbandonedAxklibPublicationSiblings) {
 
     const auto removed = sandbox().cleanup_abandoned_publications();
     ASSERT_TRUE(removed) << removed.error().message;
-    EXPECT_EQ(*removed, 2U);
-    EXPECT_FALSE(std::filesystem::exists(abandoned_file));
-    EXPECT_FALSE(std::filesystem::exists(abandoned_directory));
+    EXPECT_EQ(*removed, 0U);
+    EXPECT_TRUE(std::filesystem::exists(abandoned_file));
+    EXPECT_TRUE(std::filesystem::exists(abandoned_directory));
+    EXPECT_TRUE(std::filesystem::exists(abandoned_directory / "partial.wav"));
     EXPECT_TRUE(std::filesystem::exists(ordinary_file));
 }
 

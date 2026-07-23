@@ -2,12 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "axklib-server API",
-    "version": "1.0.0",
-    "x-axklib-deprecation-policy": {
-      "minimumNoticeDays": 180,
-      "removalRequiresNewApiMajor": true,
-      "headers": ["Deprecation", "Sunset", "Link"]
-    }
+    "version": "1.0.0"
   },
   "servers": [{"url": "/api/v1"}],
   "paths": {
@@ -436,17 +431,14 @@
   },
   "components": {
     "headers": {
-      "Deprecation": {
-        "description": "RFC 9745 structured date indicating when this resource is or will be deprecated",
-        "schema": {"type": "string", "pattern": "^@[0-9]+$"}
-      },
-      "Sunset": {
-        "description": "RFC 8594 HTTP date after which this resource may become unavailable",
-        "schema": {"type": "string"}
-      },
-      "DeprecationLink": {
-        "description": "Link to migration guidance using rel=deprecation",
-        "schema": {"type": "string"}
+      "XRequestId": {
+        "description": "Request correlation identifier",
+        "schema": {
+          "maxLength": 96,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.-]+$",
+          "type": "string"
+        }
       }
     },
     "parameters": {
@@ -491,7 +483,7 @@
         "properties": {
           "rootId": {"type": "string", "minLength": 1},
           "relativePath": {"type": "string"},
-          "kind": {"type": "string", "description": "file or directory"},
+          "kind": {"enum": ["FILE", "DIRECTORY"]},
           "size": {"type": ["integer", "null"], "minimum": 0},
           "writable": {"type": "boolean"}
         }
@@ -703,7 +695,7 @@
             "required": ["directory", "entries", "truncated", "nextCursor"],
             "properties": {
               "directory": {"$ref": "#/components/schemas/DirectoryRef"},
-              "entries": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "relativePath", "kind", "size"], "properties": {"name": {"type": "string"}, "relativePath": {"type": "string"}, "kind": {"enum": ["file", "directory"], "x-axklib-wire-enum-style": "legacy-lowercase"}, "size": {"type": ["integer", "null"], "minimum": 0}}}},
+              "entries": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "relativePath", "kind", "size"], "properties": {"name": {"type": "string"}, "relativePath": {"type": "string"}, "kind": {"enum": ["FILE", "DIRECTORY"]}, "size": {"type": ["integer", "null"], "minimum": 0}}}},
               "truncated": {"type": "boolean"},
               "nextCursor": {"type": ["string", "null"]}
             }
@@ -717,7 +709,7 @@
         "required": ["filename", "kind", "mediaType", "size"],
         "properties": {
           "filename": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["audio", "package", "manifest"], "x-axklib-wire-enum-style": "legacy-lowercase"},
+          "kind": {"enum": ["AUDIO", "PACKAGE", "MANIFEST"]},
           "mediaType": {"type": "string", "minLength": 1},
           "size": {"type": "integer", "minimum": 0},
           "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
@@ -730,11 +722,11 @@
         "properties": {
           "uploadId": {"type": "string", "minLength": 1},
           "filename": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["audio", "package", "manifest"], "x-axklib-wire-enum-style": "legacy-lowercase"},
+          "kind": {"enum": ["AUDIO", "PACKAGE", "MANIFEST"]},
           "mediaType": {"type": "string", "minLength": 1},
           "declaredSize": {"type": "integer", "minimum": 0},
           "receivedSize": {"type": "integer", "minimum": 0},
-          "state": {"enum": ["receiving", "ready"], "x-axklib-wire-enum-style": "legacy-lowercase"},
+          "state": {"enum": ["RECEIVING", "READY"]},
           "expiresInSeconds": {"type": "integer", "minimum": 0}
         }
       },

@@ -950,6 +950,10 @@ TEST(PortablePackage, ConcurrentNoOverwritePublishersProduceOneCompletePackage) 
     EXPECT_EQ(reopened->package_id, built->package.package_id);
     std::size_t file_count{};
     for (const auto &entry : std::filesystem::directory_iterator(output_root)) {
+        if (entry.path().filename() == ".axklib-publication") {
+            EXPECT_TRUE(std::filesystem::is_empty(entry.path()));
+            continue;
+        }
         ++file_count;
         EXPECT_EQ(entry.path().filename(), "shared.axksmpl");
     }
@@ -2272,6 +2276,10 @@ TEST(PackageImportApply, CancellationAtEveryGraphBoundaryPublishesNothing) {
         EXPECT_EQ(read_file(source_path), source_before);
     }
     for (const auto &entry : std::filesystem::directory_iterator(output_root)) {
+        if (entry.path().filename() == ".axklib-publication") {
+            EXPECT_TRUE(std::filesystem::is_empty(entry.path()));
+            continue;
+        }
         EXPECT_TRUE(entry.path() == audio_path || entry.path() == source_path) << entry.path().string();
     }
     std::filesystem::remove_all(output_root, error);

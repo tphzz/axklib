@@ -31,6 +31,100 @@
 namespace axk {
 namespace {
 
+error_code public_error_code(ErrorCode code) noexcept {
+    switch (code) {
+    case ErrorCode::invalid_argument:
+        return error_code::invalid_argument;
+    case ErrorCode::out_of_bounds:
+        return error_code::out_of_bounds;
+    case ErrorCode::integer_overflow:
+        return error_code::integer_overflow;
+    case ErrorCode::invalid_ascii:
+        return error_code::invalid_ascii;
+    case ErrorCode::io_open_failed:
+        return error_code::io_open_failed;
+    case ErrorCode::io_read_failed:
+        return error_code::io_read_failed;
+    case ErrorCode::io_short_read:
+        return error_code::io_short_read;
+    case ErrorCode::io_unsupported_size:
+        return error_code::io_unsupported_size;
+    case ErrorCode::container_unrecognized:
+        return error_code::container_unrecognized;
+    case ErrorCode::container_truncated:
+        return error_code::container_truncated;
+    case ErrorCode::container_invalid_geometry:
+        return error_code::container_invalid_geometry;
+    case ErrorCode::container_backup_mismatch:
+        return error_code::container_backup_mismatch;
+    case ErrorCode::container_partition_out_of_range:
+        return error_code::container_partition_out_of_range;
+    case ErrorCode::allocation_invalid_extent:
+        return error_code::allocation_invalid_extent;
+    case ErrorCode::allocation_cycle:
+        return error_code::allocation_cycle;
+    case ErrorCode::allocation_mismatch:
+        return error_code::allocation_mismatch;
+    case ErrorCode::allocation_cross_link:
+        return error_code::allocation_cross_link;
+    case ErrorCode::object_malformed:
+        return error_code::object_malformed;
+    case ErrorCode::object_missing:
+        return error_code::object_missing;
+    case ErrorCode::relationship_unresolved:
+        return error_code::relationship_unresolved;
+    case ErrorCode::relationship_ambiguous:
+        return error_code::relationship_ambiguous;
+    case ErrorCode::relationship_cycle:
+        return error_code::relationship_cycle;
+    case ErrorCode::audio_unsupported_format:
+        return error_code::audio_unsupported_format;
+    case ErrorCode::audio_wave_data_too_large:
+        return error_code::audio_wave_data_too_large;
+    case ErrorCode::manifest_invalid:
+        return error_code::manifest_invalid;
+    case ErrorCode::transaction_rejected:
+        return error_code::transaction_rejected;
+    case ErrorCode::transaction_stale:
+        return error_code::transaction_stale;
+    case ErrorCode::unsupported_profile:
+        return error_code::unsupported_profile;
+    case ErrorCode::operation_cancelled:
+        return error_code::operation_cancelled;
+    case ErrorCode::internal_invariant:
+        return error_code::internal_invariant;
+    }
+    return error_code::internal_invariant;
+}
+
+error_category public_error_category(ErrorCategory category) noexcept {
+    switch (category) {
+    case ErrorCategory::io:
+        return error_category::io;
+    case ErrorCategory::container:
+        return error_category::container;
+    case ErrorCategory::allocation:
+        return error_category::allocation;
+    case ErrorCategory::object:
+        return error_category::object;
+    case ErrorCategory::relationship:
+        return error_category::relationship;
+    case ErrorCategory::audio:
+        return error_category::audio;
+    case ErrorCategory::manifest:
+        return error_category::manifest;
+    case ErrorCategory::transaction:
+        return error_category::transaction;
+    case ErrorCategory::unsupported:
+        return error_category::unsupported;
+    case ErrorCategory::cancelled:
+        return error_category::cancelled;
+    case ErrorCategory::internal:
+        return error_category::internal;
+    }
+    return error_category::internal;
+}
+
 error public_error(const Error &failure) {
     error_context context;
     context.source_path = failure.context.source_path;
@@ -40,8 +134,8 @@ error public_error(const Error &failure) {
     context.object_name = failure.context.object_name;
     context.raw_offset = failure.context.raw_offset;
     return {
-        static_cast<error_code>(failure.code),
-        static_cast<error_category>(failure.category),
+        public_error_code(failure.code),
+        public_error_category(failure.category),
         failure.message,
         std::move(context),
     };

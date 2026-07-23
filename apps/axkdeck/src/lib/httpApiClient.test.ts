@@ -2,6 +2,30 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AxklibApiError, AxklibHttpApiClient, type OperationCapability } from './httpApiClient';
 
+class ProtocolWebSocket {
+    static readonly instances: ProtocolWebSocket[] = [];
+    readonly close = vi.fn();
+    private readonly listeners = new Map<string, EventListener[]>();
+
+    constructor() {
+        ProtocolWebSocket.instances.push(this);
+        setTimeout(() => this.dispatch('open', new Event('open')), 0);
+    }
+
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+        const callback = typeof listener === 'function' ? listener : listener.handleEvent.bind(listener);
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), callback]);
+    }
+
+    message(data: unknown): void {
+        this.dispatch('message', new MessageEvent('message', { data }));
+    }
+
+    private dispatch(type: string, event: Event): void {
+        for (const listener of this.listeners.get(type) ?? []) listener(event);
+    }
+}
+
 function operation(overrides: Partial<OperationCapability>): OperationCapability {
     return {
         id: 'report.info',
@@ -153,7 +177,7 @@ describe('AxklibHttpApiClient', () => {
                 jsonResponse({
                     data: {
                         directory: { rootId: 'workspace', relativePath: '' },
-                        entries: [{ name: 'disks', relativePath: 'disks', kind: 'directory', size: null }],
+                        entries: [{ name: 'disks', relativePath: 'disks', kind: 'DIRECTORY', size: null }],
                         truncated: false,
                         nextCursor: null,
                     },
@@ -163,7 +187,7 @@ describe('AxklibHttpApiClient', () => {
 
         await expect(client.roots()).resolves.toEqual([{ id: 'workspace', displayName: 'Workspace', writable: true }]);
         await expect(client.listDirectory({ rootId: 'workspace', relativePath: '' })).resolves.toMatchObject({
-            entries: [{ relativePath: 'disks', kind: 'directory' }],
+            entries: [{ relativePath: 'disks', kind: 'DIRECTORY' }],
         });
         expect(fetchMock).toHaveBeenNthCalledWith(
             2,
@@ -182,7 +206,7 @@ describe('AxklibHttpApiClient', () => {
         const metadata = {
             rootId: 'workspace',
             relativePath: 'Imports',
-            kind: 'directory',
+            kind: 'DIRECTORY',
             size: null,
             writable: true,
         };
@@ -289,7 +313,7 @@ describe('AxklibHttpApiClient', () => {
                         data: {
                             uploadId: 'upload-1',
                             filename: 'sample.wav',
-                            kind: 'audio',
+                            kind: 'AUDIO',
                             mediaType: 'audio/wav',
                             declaredSize: 5,
                             receivedSize: 0,
@@ -305,7 +329,7 @@ describe('AxklibHttpApiClient', () => {
                     data: {
                         uploadId: 'upload-1',
                         filename: 'sample.wav',
-                        kind: 'audio',
+                        kind: 'AUDIO',
                         mediaType: 'audio/wav',
                         declaredSize: 5,
                         receivedSize: 3,
@@ -319,7 +343,7 @@ describe('AxklibHttpApiClient', () => {
                     data: {
                         uploadId: 'upload-1',
                         filename: 'sample.wav',
-                        kind: 'audio',
+                        kind: 'AUDIO',
                         mediaType: 'audio/wav',
                         declaredSize: 5,
                         receivedSize: 5,
@@ -333,7 +357,7 @@ describe('AxklibHttpApiClient', () => {
                     data: {
                         uploadId: 'upload-1',
                         filename: 'sample.wav',
-                        kind: 'audio',
+                        kind: 'AUDIO',
                         mediaType: 'audio/wav',
                         declaredSize: 5,
                         receivedSize: 5,
@@ -349,7 +373,7 @@ describe('AxklibHttpApiClient', () => {
             new Blob(['12345'], { type: 'audio/wav' }),
             {
                 filename: 'sample.wav',
-                kind: 'audio',
+                kind: 'AUDIO',
             },
             { chunkBytes: 3, onProgress: progress },
         );
@@ -431,5 +455,59 @@ describe('AxklibHttpApiClient', () => {
             'http://localhost/api/v1/download-archives/archive-1/content',
             expect.objectContaining({ method: 'DELETE' }),
         );
+    });
+
+    it.each([
+        ['invalid JSON', '{'],
+        ['binary data', new Blob(['event'])],
+        [
+            'invalid sequence',
+            JSON.stringify({
+                schemaVersion: '1',
+                eventId: 'event-1',
+                sequence: 0,
+                jobId: 'job-1',
+                operationId: 'create.hds',
+                type: 'progress',
+                timestampUnixMs: 1,
+                state: 'RUNNING',
+                progress: null,
+                jobUrl: '/api/v1/jobs/job-1',
+            }),
+        ],
+        [
+            'malformed terminal event',
+            JSON.stringify({
+                schemaVersion: '1',
+                sequence: 1,
+                jobId: 'job-1',
+                operationId: 'create.hds',
+                type: 'completed',
+                timestampUnixMs: 1,
+                state: 'COMPLETED',
+                progress: null,
+                jobUrl: '/api/v1/jobs/job-1',
+            }),
+        ],
+    ])('closes the event socket on %s', async (_, payload) => {
+        ProtocolWebSocket.instances.length = 0;
+        vi.stubGlobal('WebSocket', ProtocolWebSocket as unknown as typeof WebSocket);
+        vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+            jsonResponse({
+                data: {
+                    ticket: 'ticket-1',
+                    websocketUrl: '/api/v1/events',
+                    subprotocol: 'axklib.events.v1',
+                },
+            }),
+        );
+        const client = new AxklibHttpApiClient({ baseUrl: 'http://localhost/api/v1', bearerToken: 'token' });
+
+        const connection = await client.connectEvents(() => undefined);
+        await connection.opened;
+        const socket = ProtocolWebSocket.instances[0]!;
+        socket.message(payload);
+
+        expect(socket.close).toHaveBeenCalledWith(1002, 'Invalid job event');
     });
 });

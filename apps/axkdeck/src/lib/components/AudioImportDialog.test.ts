@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { describe, expect, it, vi } from 'vitest';
 
 import { clientUploadLocation } from '../storageLocations';
+import type { ClientUploadSource } from '../clientUploadSource';
 import type { AudioImportCapabilities, AudioSourceInfo, ImageTransport } from '../transport';
 import AudioImportDialog from './AudioImportDialog.svelte';
 
@@ -41,9 +42,9 @@ function sourceInfo(overrides: Partial<AudioSourceInfo> = {}): AudioSourceInfo {
 function transport(): ImageTransport {
     return {
         audioImportCapabilities: vi.fn().mockResolvedValue(capabilities),
-        uploadClientFile: vi.fn(async (file: File, _kind, onProgress) => {
+        uploadClientFile: vi.fn(async (file: ClientUploadSource, _kind, onProgress) => {
             onProgress?.(file.size, file.size);
-            return clientUploadLocation({ uploadId: 'audio-stereo' }, 'audio', file.name);
+            return clientUploadLocation({ uploadId: 'audio-stereo' }, 'AUDIO', file.name);
         }),
         inspectAudio: vi.fn().mockResolvedValue(sourceInfo()),
         releaseClientUpload: vi.fn().mockResolvedValue(undefined),
@@ -53,9 +54,9 @@ function transport(): ImageTransport {
 describe('AudioImportDialog', () => {
     it('aligns mixed mono and stereo files in stable channel columns', async () => {
         const imageTransport = transport();
-        imageTransport.uploadClientFile = vi.fn(async (file: File, _kind, onProgress) => {
+        imageTransport.uploadClientFile = vi.fn(async (file: ClientUploadSource, _kind, onProgress) => {
             onProgress?.(file.size, file.size);
-            return clientUploadLocation({ uploadId: file.name }, 'audio', file.name);
+            return clientUploadLocation({ uploadId: file.name }, 'AUDIO', file.name);
         });
         imageTransport.inspectAudio = vi.fn(async (source) => {
             const channels: 1 | 2 = source.displayName.startsWith('Mono') ? 1 : 2;
@@ -259,9 +260,9 @@ describe('AudioImportDialog', () => {
 
     it('removes a rejected file while retaining valid staged files', async () => {
         const imageTransport = transport();
-        imageTransport.uploadClientFile = vi.fn(async (file: File, _kind, onProgress) => {
+        imageTransport.uploadClientFile = vi.fn(async (file: ClientUploadSource, _kind, onProgress) => {
             onProgress?.(file.size, file.size);
-            return clientUploadLocation({ uploadId: file.name }, 'audio', file.name);
+            return clientUploadLocation({ uploadId: file.name }, 'AUDIO', file.name);
         });
         imageTransport.inspectAudio = vi.fn(async (source) => {
             const invalid = source.displayName === 'Too large.wav';

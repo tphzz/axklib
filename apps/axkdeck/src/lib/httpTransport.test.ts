@@ -736,8 +736,8 @@ describe('HttpImageTransport', () => {
             baseUrl: 'http://localhost/api/v1',
             bearerToken: 'secret',
         });
-        const mono = clientUploadLocation({ uploadId: 'upload-mono' }, 'audio', 'mono.wav');
-        const stereo = clientUploadLocation({ uploadId: 'upload-stereo' }, 'audio', 'stereo.flac');
+        const mono = clientUploadLocation({ uploadId: 'upload-mono' }, 'AUDIO', 'mono.wav');
+        const stereo = clientUploadLocation({ uploadId: 'upload-stereo' }, 'AUDIO', 'stereo.flac');
         const job = await transport.startAudioImport(
             serverFile('images/base.hds'),
             { partitionIndex: 3, volumeName: 'Imported' },
@@ -866,8 +866,8 @@ describe('HttpImageTransport', () => {
                         manifest: { uploadRef: { uploadId: 'upload-manifest' } },
                         inputBindings: [
                             {
-                                logicalPath: 'audio/tone.wav',
-                                source: { uploadRef: { uploadId: 'upload-audio' } },
+                                manifestPath: 'audio/tone.wav',
+                                input: { uploadRef: { uploadId: 'upload-audio' } },
                             },
                         ],
                         output: { rootId: 'workspace', relativePath: 'images/from-upload.hds' },
@@ -883,8 +883,8 @@ describe('HttpImageTransport', () => {
         );
 
         const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
-        const manifest = clientUploadLocation({ uploadId: 'upload-manifest' }, 'manifest', 'build.json');
-        const audio = clientUploadLocation({ uploadId: 'upload-audio' }, 'audio', 'tone.wav');
+        const manifest = clientUploadLocation({ uploadId: 'upload-manifest' }, 'MANIFEST', 'build.json');
+        const audio = clientUploadLocation({ uploadId: 'upload-audio' }, 'AUDIO', 'tone.wav');
         await expect(
             transport.planCreate(manifest, serverFile('images/from-upload.hds'), false, [
                 {
@@ -1064,7 +1064,7 @@ describe('HttpImageTransport', () => {
         );
 
         const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
-        const uploaded = clientUploadLocation({ uploadId: 'upload-package' }, 'package', 'volume.axkvol');
+        const uploaded = clientUploadLocation({ uploadId: 'upload-package' }, 'PACKAGE', 'volume.axkvol');
         await expect(transport.inspectPackage(uploaded, true)).resolves.toMatchObject({
             packageId: 'package-one',
             valid: true,
@@ -1174,8 +1174,8 @@ describe('HttpImageTransport', () => {
                         manifest: { fileRef: { rootId: 'workspace', relativePath: 'authoring/alter.json' } },
                         inputBindings: [
                             {
-                                logicalPath: 'audio/tone.wav',
-                                source: { uploadRef: { uploadId: 'audio-upload' } },
+                                manifestPath: 'audio/tone.wav',
+                                input: { uploadRef: { uploadId: 'audio-upload' } },
                             },
                         ],
                     });
@@ -1190,8 +1190,8 @@ describe('HttpImageTransport', () => {
                         manifest: { fileRef: { rootId: 'workspace', relativePath: 'authoring/alter.json' } },
                         inputBindings: [
                             {
-                                logicalPath: 'audio/tone.wav',
-                                source: { uploadRef: { uploadId: 'audio-upload' } },
+                                manifestPath: 'audio/tone.wav',
+                                input: { uploadRef: { uploadId: 'audio-upload' } },
                             },
                         ],
                         output: { rootId: 'workspace', relativePath: 'images/altered.hds' },
@@ -1256,7 +1256,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'remote-secret',
         });
         const opened = await transport.openImage(serverFile('images/base.hds'));
-        const audio = clientUploadLocation({ uploadId: 'audio-upload' }, 'audio', 'tone.wav');
+        const audio = clientUploadLocation({ uploadId: 'audio-upload' }, 'AUDIO', 'tone.wav');
         await expect(
             transport.planAlter(
                 serverFile('images/base.hds'),

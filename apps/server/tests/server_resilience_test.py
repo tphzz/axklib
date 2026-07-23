@@ -47,7 +47,7 @@ def create_upload(port: int, token: str, size: int = 12) -> str:
         "/api/v1/uploads",
         {
             "filename": "input.json",
-            "kind": "manifest",
+            "kind": "MANIFEST",
             "mediaType": "application/json",
             "size": size,
         },
@@ -222,7 +222,7 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             "/api/v1/uploads",
             {
                 "filename": "other.json",
-                "kind": "manifest",
+                "kind": "MANIFEST",
                 "mediaType": "application/json",
                 "size": 12,
             },

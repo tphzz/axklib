@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { DiskTreeItem, ImageTreeAction } from '../types';
+    import { modal } from '../modal';
 
     interface Props {
         action: ImageTreeAction;
@@ -62,7 +63,13 @@
 </script>
 
 <div class="dialog-backdrop dialog-backdrop-raised" role="presentation">
-    <div class="dialog-shell volume-action-dialog" role="dialog" aria-modal="true" aria-label={title}>
+    <div
+        class="dialog-shell volume-action-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        use:modal={{ onescape: oncancel }}
+    >
         <form class="volume-action-form" onsubmit={submit}>
             <header class="dialog-header">
                 <h2>{title}</h2>

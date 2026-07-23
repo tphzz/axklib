@@ -35,6 +35,7 @@ import type {
     SandboxRoot,
     UploadKind,
 } from '../storageLocations';
+import type { ClientUploadSource } from '../clientUploadSource';
 
 export interface InMemoryImageTransportOptions {
     storageMode?: ImageTransport['storageMode'];
@@ -144,7 +145,7 @@ export class InMemoryImageTransport implements ImageTransport {
     }
 
     uploadClientFile(
-        file: File,
+        file: ClientUploadSource,
         kind: UploadKind,
         onProgress?: (sent: number, total: number) => void,
         signal?: AbortSignal,

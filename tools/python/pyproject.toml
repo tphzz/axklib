@@ -13,7 +13,6 @@ axk-check-production-boundary = "check_production_boundary:main"
 axk-desktop-release = "desktop_release:main"
 axk-generate-sbom = "generate_sbom:main"
 axk-inspect-package = "inspect_package:main"
-axk-openapi-compat = "openapi_compat:main"
 axk-release-metadata = "release_metadata:main"
 
 [dependency-groups]
@@ -35,7 +34,6 @@ py-modules = [
   "generate_sbom",
   "inspect_package",
   "native_build_cache",
-  "openapi_compat",
   "release_metadata",
   "version_metadata",
 ]

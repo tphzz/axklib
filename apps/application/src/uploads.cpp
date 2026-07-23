@@ -402,21 +402,21 @@ std::size_t axk::app::UploadStore::maximum_chunk_bytes() const noexcept { return
 std::string_view axk::app::upload_kind_name(UploadKind kind) noexcept {
     switch (kind) {
     case UploadKind::audio:
-        return "audio";
+        return "AUDIO";
     case UploadKind::package:
-        return "package";
+        return "PACKAGE";
     case UploadKind::manifest:
-        return "manifest";
+        return "MANIFEST";
     }
-    return "audio";
+    return "AUDIO";
 }
 
 std::string_view axk::app::upload_state_name(UploadState state) noexcept {
     switch (state) {
     case UploadState::receiving:
-        return "receiving";
+        return "RECEIVING";
     case UploadState::ready:
-        return "ready";
+        return "READY";
     }
-    return "receiving";
+    return "RECEIVING";
 }

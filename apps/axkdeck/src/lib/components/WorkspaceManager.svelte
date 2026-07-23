@@ -9,6 +9,7 @@
     } from '../httpApiClient';
     import { reportError } from '../diagnostics';
     import { userFacingMessage } from '../userFacingMessage';
+    import { modal } from '../modal';
     import Icon from './Icon.svelte';
 
     interface Props {
@@ -185,7 +186,13 @@
 
 {#if visible && connection}
     <div class="dialog-backdrop dialog-backdrop-top" role="presentation">
-        <div class="dialog-shell workspace-dialog" role="dialog" aria-modal="true" aria-label="Workspaces">
+        <div
+            class="dialog-shell workspace-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Workspaces"
+            use:modal={{ onescape: close }}
+        >
             <header class="dialog-header">
                 <h2>Workspaces</h2>
                 {#if !forced}<button class="icon-button" type="button" aria-label="Close" onclick={close}>×</button
@@ -297,6 +304,7 @@
                 role="dialog"
                 aria-modal="true"
                 aria-label="Add workspace"
+                use:modal={{ onescape: cancelAdd }}
             >
                 <header class="dialog-header">
                     <h2>Add workspace</h2>

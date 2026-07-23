@@ -59,6 +59,7 @@ enum class ErrorCode : std::uint32_t {
     // Manifest and transaction errors: 700-799.
     manifest_invalid = 700,
     transaction_rejected = 750,
+    transaction_stale = 751,
     // Unsupported writer/profile errors: 800-899.
     unsupported_profile = 800,
     operation_cancelled = 900,

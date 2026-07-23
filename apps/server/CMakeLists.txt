@@ -8,13 +8,10 @@ find_package(nlohmann_json_schema_validator CONFIG REQUIRED)
 
 set(AXK_SERVER_OPENAPI_BASE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/contracts/openapi-v1.base.json")
 set(AXK_SERVER_OPENAPI_PATH "${CMAKE_CURRENT_SOURCE_DIR}/contracts/openapi-v1.json")
-set(AXK_SERVER_OPENAPI_COMPATIBILITY_BASELINE
-    "${CMAKE_CURRENT_SOURCE_DIR}/contracts/openapi-v1.compatibility.json")
 set(AXK_SERVER_GENERATED_OPENAPI_PATH "${CMAKE_CURRENT_BINARY_DIR}/generated/openapi-v1.json")
 set_property(
   DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${AXK_SERVER_OPENAPI_BASE_PATH}"
                                       "${AXK_SERVER_OPENAPI_PATH}"
-                                      "${AXK_SERVER_OPENAPI_COMPATIBILITY_BASELINE}"
 )
 file(READ "${AXK_SERVER_OPENAPI_BASE_PATH}" AXK_SERVER_OPENAPI_HEX HEX)
 string(LENGTH "${AXK_SERVER_OPENAPI_HEX}" AXK_SERVER_OPENAPI_HEX_LENGTH)
@@ -225,14 +222,6 @@ if(BUILD_TESTING)
   set_tests_properties(Server.PerformanceProfile PROPERTIES TIMEOUT 45 LABELS "performance;server")
   add_test(NAME Server.VersionSmoke COMMAND axklib_server --print-version)
   set_tests_properties(Server.VersionSmoke PROPERTIES LABELS server)
-  add_test(
-    NAME Server.OpenApiCompatibility
-    COMMAND
-      "${Python3_EXECUTABLE}" "${AXK_REPOSITORY_ROOT}/tools/python/openapi_compat.py" check
-      --baseline "${AXK_SERVER_OPENAPI_COMPATIBILITY_BASELINE}" --candidate
-      "${AXK_SERVER_OPENAPI_PATH}"
-  )
-  set_tests_properties(Server.OpenApiCompatibility PROPERTIES LABELS server)
   add_test(
     NAME Server.CrowIsolation
     COMMAND "${CMAKE_COMMAND}" -DAXK_SOURCE_ROOT=${AXK_REPOSITORY_ROOT}

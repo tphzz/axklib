@@ -64,4 +64,28 @@ describe('TreeNode', () => {
         await fireEvent.keyDown(item, { key: 'F10', shiftKey: true });
         expect(onrequestmenu).toHaveBeenCalledTimes(2);
     });
+
+    it('shows a retry action when lazy loading fails and preserves recovery', async () => {
+        const onloadchildren = vi
+            .fn()
+            .mockRejectedValueOnce(new Error('Storage unavailable'))
+            .mockResolvedValueOnce({
+                items: [{ id: 'v0', name: 'Recovered', kind: 'volume', childCount: 0 }],
+                totalCount: 1,
+            });
+        render(TreeNode, {
+            props: {
+                item: { id: 'p0', name: 'Partition 0', kind: 'partition', childCount: 1 },
+                selectedId: '',
+                onselect: vi.fn(),
+                onloadchildren,
+            },
+        });
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Expand Partition 0' }));
+        expect((await screen.findByRole('alert')).textContent).toContain('Storage unavailable');
+        await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        expect(await screen.findByText('Recovered')).toBeTruthy();
+        expect(onloadchildren).toHaveBeenCalledTimes(2);
+    });
 });

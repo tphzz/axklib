@@ -38,8 +38,8 @@ describe('App panel layout', () => {
             directory,
             entries:
                 directory.relativePath === 'images'
-                    ? [{ name: 'nested.hds', relativePath: 'images/nested.hds', kind: 'file', size: 2048 }]
-                    : [{ name: 'images', relativePath: 'images', kind: 'directory', size: null }],
+                    ? [{ name: 'nested.hds', relativePath: 'images/nested.hds', kind: 'FILE', size: 2048 }]
+                    : [{ name: 'images', relativePath: 'images', kind: 'DIRECTORY', size: null }],
             truncated: false,
             nextCursor: null,
         }));
@@ -226,6 +226,58 @@ describe('App panel layout', () => {
 
         await vi.waitFor(() => expect(mocks.closeImage).toHaveBeenCalledWith(23));
         expect(screen.getByRole('button', { name: 'Open disk image' }).textContent).toContain('No disk image selected');
+    });
+
+    it('closes the active image session when the application is unmounted', async () => {
+        const desktop = render(App);
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
+        await fireEvent.click(await screen.findByText('Yamaha'));
+        await fireEvent.click(await screen.findByText('images'));
+        await fireEvent.click(await screen.findByText('nested.hds'));
+        await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
+        await mocks.openImage.mock.results[0].value;
+
+        desktop.unmount();
+
+        await vi.waitFor(() => expect(mocks.closeImage).toHaveBeenCalledWith(17));
+    });
+
+    it('closes an image session that finishes opening after the application is unmounted', async () => {
+        let finishOpening: ((value: Awaited<ReturnType<typeof mocks.openImage>>) => void) | undefined;
+        mocks.openImage.mockReturnValueOnce(
+            new Promise((resolve) => {
+                finishOpening = resolve;
+            }),
+        );
+        const desktop = render(App);
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
+        await fireEvent.click(await screen.findByText('Yamaha'));
+        await fireEvent.click(await screen.findByText('images'));
+        await fireEvent.click(await screen.findByText('nested.hds'));
+        await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
+        desktop.unmount();
+
+        finishOpening?.({
+            sessionId: 29,
+            tree: [{ id: 'disk-29', name: 'nested.hds', kind: 'disk', childCount: 0 }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 0,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: null,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+        });
+
+        await vi.waitFor(() => expect(mocks.closeImage).toHaveBeenCalledWith(29));
     });
 
     it('ejects an open image before permanently deleting its backing file', async () => {

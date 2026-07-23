@@ -389,7 +389,7 @@ def upload_bytes(port: int, filename: str, kind: str, content: bytes) -> str:
         "/api/v1/uploads",
         {
             "filename": filename,
-            "kind": kind,
+            "kind": kind.upper(),
             "mediaType": media_types[kind],
             "size": len(content),
             "sha256": hashlib.sha256(content).hexdigest(),
@@ -408,7 +408,7 @@ def upload_bytes(port: int, filename: str, kind: str, content: bytes) -> str:
     status, completed = http_request(
         port, "POST", f"/api/v1/uploads/{upload_id}/complete"
     )
-    assert status == 200 and completed["data"]["state"] == "ready", completed
+    assert status == 200 and completed["data"]["state"] == "READY", completed
     return upload_id
 
 
@@ -877,7 +877,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 == f"ws://127.0.0.1:{port}/api/v1/events"
             )
             wait_until_ready(port, process)
-            assert not abandoned_publication.exists()
+            assert (abandoned_publication / "partial.wav").read_bytes() == b"partial"
             assert ordinary_temporary_file.read_bytes() == b"ordinary"
             status, denied_body, _ = raw_http_request(
                 port,
@@ -978,7 +978,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert created_directory["data"] == {
                 "rootId": "workspace",
                 "relativePath": "managed",
-                "kind": "directory",
+                "kind": "DIRECTORY",
                 "size": None,
                 "writable": True,
             }
@@ -1278,7 +1278,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "/api/v1/uploads",
                 {
                     "filename": "manifest.json",
-                    "kind": "manifest",
+                    "kind": "MANIFEST",
                     "mediaType": "application/json",
                     "size": 2,
                 },
@@ -1306,7 +1306,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, completed = http_request(
                 port, "POST", f"/api/v1/uploads/{upload_id}/complete"
             )
-            assert status == 200 and completed["data"]["state"] == "ready"
+            assert status == 200 and completed["data"]["state"] == "READY"
             status, materialized = http_request(
                 port,
                 "POST",

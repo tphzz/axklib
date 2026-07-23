@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tarfile
 import zipfile
 from pathlib import Path
@@ -11,6 +12,15 @@ import generate_sbom
 import inspect_package
 import release_metadata
 import version_metadata
+
+
+def action_reference_count(workflow: str, action: str, version: str) -> int:
+    return len(
+        re.findall(
+            rf"uses:\s+{re.escape(action)}@[0-9a-f]{{40}}\s+#\s+{re.escape(version)}(?:\s|$)",
+            workflow,
+        )
+    )
 
 
 def metadata(
@@ -498,7 +508,7 @@ def test_native_workflow_creates_only_release_drafts() -> None:
     assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.." not in workflow
     assert "draft-release:" in workflow
     assert "if: ${{ !inputs.debug }}" in workflow
-    assert "uses: actions/download-artifact@v8" in workflow
+    assert action_reference_count(workflow, "actions/download-artifact", "v8") == 1
     assert "gh release create" in workflow
     assert "--draft" in workflow
     assert "version_metadata.json" in workflow
@@ -510,7 +520,7 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
 
-    assert workflow.count("uses: actions/cache@v6") == 4
+    assert action_reference_count(workflow, "actions/cache", "v6") == 4
     assert "sccache" not in workflow.lower()
     assert "cold_build" not in workflow
     assert "git rev-parse HEAD:external/vcpkg" in workflow
@@ -519,7 +529,7 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert "library/cmake/ports/**" in workflow
     assert "key: vcpkg-v2-${{ matrix.triplet }}-" in workflow
     assert "vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-" in workflow
-    assert "key: native-v1-${{ matrix.triplet }}-" in workflow
+    assert "key: native-v2-${{ matrix.triplet }}-" in workflow
     assert "key: axkdeck-rust-v1-${{ matrix.artifact }}-" in workflow
     assert "key: axkdeck-rust-v1-macos-universal-" in workflow
     assert "${{ steps.native-toolchain.outputs.toolchain_fingerprint }}" in workflow
@@ -528,7 +538,7 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**" in workflow
     assert "tools/python/native_build_cache.py fingerprint" in workflow
     assert "tools/python/native_build_cache.py prepare" in workflow
-    assert workflow.count("uses: actions/cache/save@v6") == 3
+    assert action_reference_count(workflow, "actions/cache/save", "v6") == 3
     assert "Save vcpkg binary cache after failure" in workflow
     assert "Save native incremental build cache after failure" in workflow
     assert workflow.count("steps.configure-native.outcome == 'success'") == 2
@@ -541,7 +551,7 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
 
     assert "desktop-static:" in workflow
     assert "needs:\n      - release-tools\n      - desktop-static" in workflow
-    assert workflow.count("uses: astral-sh/setup-uv@v8.3.2") == 3
+    assert action_reference_count(workflow, "astral-sh/setup-uv", "v8.3.2") == 3
     assert (
         workflow.count("uv --project tools/python run python tools/python/generate_sbom.py") == 5
     )
@@ -567,8 +577,10 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert "combined Linux or Windows distribution" not in workflow
     assert "pnpm desktop:build -- --target universal-apple-darwin" in workflow
     assert "lipo \"$sidecar\" -verify_arch x86_64 arm64" in workflow
-    assert workflow.count("pnpm/action-setup@v6") == 3
-    assert "pnpm/action-setup@v4" not in workflow
+    assert action_reference_count(workflow, "pnpm/action-setup", "v6") == 3
+    assert "# v4" not in "\n".join(
+        line for line in workflow.splitlines() if "pnpm/action-setup@" in line
+    )
     assert "if-no-files-found: error" in workflow
 
 
@@ -687,9 +699,9 @@ def test_native_workflow_checks_contract_and_generates_source_aware_server_sbom(
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
 
-    assert "tools/python/openapi_compat.py check" in workflow
-    assert "apps/server/contracts/openapi-v1.compatibility.json" in workflow
-    assert "apps/server/contracts/openapi-v1.json" in workflow
+    assert "tools/python/openapi_compat.py" not in workflow
+    assert "openapi-v1.compatibility.json" not in workflow
+    assert "pnpm contract:check" in workflow
     assert '--package-basename-file "$root/package_basename.txt" --profile server' in workflow
     assert '--output "$root/axklib-server.spdx.json"' in workflow
 
@@ -698,13 +710,22 @@ def test_docs_workflow_renders_mermaid_and_publishes_one_pages_artifact() -> Non
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/publish-docs.yml").read_text(encoding="utf-8")
 
-    assert "uses: actions/setup-node@v7" in workflow
+    assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7" in workflow
     assert 'node-version: "24"' in workflow
     assert "npm ci" in workflow
     assert 'PATH="$PWD/node_modules/.bin:$PATH"' in workflow
     assert "mkdocs build --strict --config-file mkdocs.yml" in workflow
-    assert workflow.count("actions/upload-pages-artifact@v5") == 1
-    assert workflow.count("actions/deploy-pages@v5") == 1
+    assert workflow.count("actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5") == 1
+    assert workflow.count("actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5") == 1
+
+
+def test_privileged_workflows_pin_every_action_to_a_full_commit() -> None:
+    root = Path(__file__).resolve().parents[3]
+    for relative in (".github/workflows/native.yml", ".github/workflows/publish-docs.yml"):
+        workflow = (root / relative).read_text(encoding="utf-8")
+        references = re.findall(r"uses:\s+[^\s@]+@([^\s#]+)", workflow)
+        assert references
+        assert all(re.fullmatch(r"[0-9a-f]{40}", reference) for reference in references)
 
 
 @pytest.mark.parametrize(

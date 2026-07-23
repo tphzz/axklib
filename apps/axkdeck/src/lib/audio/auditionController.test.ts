@@ -452,6 +452,25 @@ describe('AuditionController', () => {
         await controller.dispose();
     });
 
+    it('rejects explicit playback above the encoded and decoded working-set budget before fetching', async () => {
+        installAudio();
+        const transport = transportFor(descriptor({ frameCount: 4, wavSizeBytes: 52 }));
+        const states: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => states.push(state), undefined, undefined, {
+            maximumWorkingSetBytes: 60,
+        });
+
+        await controller.play(1, 'SMPL-1');
+
+        expect(transport.readAuditionAudio).not.toHaveBeenCalled();
+        expect(states.at(-1)).toMatchObject({
+            objectId: 'SMPL-1',
+            status: 'failed',
+            error: 'Audio is too large to audition safely',
+        });
+        await controller.dispose();
+    });
+
     it('reuses selected-object prefetches and invalidates them when the image session closes', async () => {
         installAudio();
         const transport = transportFor(descriptor());

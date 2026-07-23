@@ -46,13 +46,16 @@ struct RetainedFile {
     }
 #else
     int descriptor{-1};
-    int parent_descriptor{-1};
+    int candidate_parent_descriptor{-1};
+    int output_parent_descriptor{-1};
     struct stat identity{};
     ~RetainedFile() {
         if (descriptor >= 0)
             ::close(descriptor);
-        if (parent_descriptor >= 0)
-            ::close(parent_descriptor);
+        if (candidate_parent_descriptor >= 0)
+            ::close(candidate_parent_descriptor);
+        if (output_parent_descriptor >= 0)
+            ::close(output_parent_descriptor);
     }
 #endif
 };
@@ -138,6 +141,29 @@ Result<void> identity_error() {
                                       "temporary output identity changed before publication")};
 }
 
+#if !defined(_WIN32)
+Result<int> open_private_staging_directory(int output_parent_descriptor) {
+    constexpr std::string_view staging_name{".axklib-publication"};
+    if (::mkdirat(output_parent_descriptor, staging_name.data(), 0700) != 0 && errno != EEXIST) {
+        return std::unexpected{
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create private publication staging")};
+    }
+    struct stat status{};
+    if (::fstatat(output_parent_descriptor, staging_name.data(), &status, AT_SYMLINK_NOFOLLOW) != 0 ||
+        !S_ISDIR(status.st_mode) || status.st_uid != ::geteuid() || (status.st_mode & 0777U) != 0700U) {
+        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                                          "publication staging is not an owner-only directory")};
+    }
+    const auto descriptor =
+        ::openat(output_parent_descriptor, staging_name.data(), O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
+    if (descriptor < 0) {
+        return std::unexpected{
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not open private publication staging")};
+    }
+    return descriptor;
+}
+#endif
+
 } // namespace
 
 Result<std::filesystem::path> reserve_temporary_file(const std::filesystem::path &output) {
@@ -183,16 +209,23 @@ Result<std::filesystem::path> reserve_temporary_file(const std::filesystem::path
         }
 #else
         const auto parent = output.parent_path().empty() ? std::filesystem::path{"."} : output.parent_path();
-        const auto parent_descriptor = ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
-        if (parent_descriptor < 0)
+        const auto output_parent_descriptor = ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
+        if (output_parent_descriptor < 0)
             return std::unexpected{identity_error().error()};
-        const auto descriptor = ::openat(parent_descriptor, temporary->filename().c_str(),
+        auto candidate_parent = open_private_staging_directory(output_parent_descriptor);
+        if (!candidate_parent) {
+            ::close(output_parent_descriptor);
+            return std::unexpected{candidate_parent.error()};
+        }
+        *temporary = parent / ".axklib-publication" / temporary->filename();
+        const auto descriptor = ::openat(*candidate_parent, temporary->filename().c_str(),
                                          O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (descriptor >= 0) {
             auto retained = std::make_shared<RetainedFile>();
             retained->output_filename = output.filename();
             retained->descriptor = descriptor;
-            retained->parent_descriptor = parent_descriptor;
+            retained->candidate_parent_descriptor = *candidate_parent;
+            retained->output_parent_descriptor = output_parent_descriptor;
             if (::fstat(descriptor, &retained->identity) != 0) {
                 return std::unexpected{
                     make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not identify a temporary output")};
@@ -200,7 +233,8 @@ Result<std::filesystem::path> reserve_temporary_file(const std::filesystem::path
             retain(*temporary, std::move(retained));
             return *temporary;
         }
-        ::close(parent_descriptor);
+        ::close(*candidate_parent);
+        ::close(output_parent_descriptor);
         if (errno != EEXIST) {
             return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                               "could not exclusively reserve a temporary output")};
@@ -267,13 +301,20 @@ Result<std::filesystem::path> write_temporary_file(const std::filesystem::path &
         }
 #else
         const auto parent = output.parent_path().empty() ? std::filesystem::path{"."} : output.parent_path();
-        const auto parent_descriptor = ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
-        if (parent_descriptor < 0)
+        const auto output_parent_descriptor = ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
+        if (output_parent_descriptor < 0)
             return std::unexpected{identity_error().error()};
-        const auto descriptor = ::openat(parent_descriptor, temporary->filename().c_str(),
+        auto candidate_parent = open_private_staging_directory(output_parent_descriptor);
+        if (!candidate_parent) {
+            ::close(output_parent_descriptor);
+            return std::unexpected{candidate_parent.error()};
+        }
+        *temporary = parent / ".axklib-publication" / temporary->filename();
+        const auto descriptor = ::openat(*candidate_parent, temporary->filename().c_str(),
                                          O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (descriptor < 0) {
-            ::close(parent_descriptor);
+            ::close(*candidate_parent);
+            ::close(output_parent_descriptor);
             if (errno == EEXIST)
                 continue;
             return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
@@ -297,7 +338,8 @@ Result<std::filesystem::path> write_temporary_file(const std::filesystem::path &
         auto retained = std::make_shared<RetainedFile>();
         retained->output_filename = output.filename();
         retained->descriptor = descriptor;
-        retained->parent_descriptor = parent_descriptor;
+        retained->candidate_parent_descriptor = *candidate_parent;
+        retained->output_parent_descriptor = output_parent_descriptor;
         if (::fstat(descriptor, &retained->identity) != 0) {
             produced = std::unexpected{
                 make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not identify a temporary output")};
@@ -436,8 +478,8 @@ void discard_temporary_file(const std::filesystem::path &path) noexcept {
         return;
     }
 #else
-    if (retained && retained->parent_descriptor >= 0 &&
-        ::unlinkat(retained->parent_descriptor, path.filename().c_str(), 0) == 0) {
+    if (retained && retained->candidate_parent_descriptor >= 0 &&
+        ::unlinkat(retained->candidate_parent_descriptor, path.filename().c_str(), 0) == 0) {
         return;
     }
 #endif
@@ -477,35 +519,37 @@ Result<void> publish_temporary_file(const std::filesystem::path &temporary, cons
                                           "could not atomically publish output: " + error.message())};
     }
 #else
-    const auto descriptor = retained->parent_descriptor;
-    if (descriptor < 0)
+    const auto candidate_parent = retained->candidate_parent_descriptor;
+    const auto output_parent = retained->output_parent_descriptor;
+    if (candidate_parent < 0 || output_parent < 0)
         return identity_error();
     struct stat candidate_identity{};
     const auto temporary_name = temporary.filename();
     const auto output_name = output.filename();
-    const auto valid = ::fstatat(descriptor, temporary_name.c_str(), &candidate_identity, AT_SYMLINK_NOFOLLOW) == 0 &&
-                       S_ISREG(candidate_identity.st_mode) && candidate_identity.st_dev == retained->identity.st_dev &&
-                       candidate_identity.st_ino == retained->identity.st_ino;
+    const auto valid =
+        ::fstatat(candidate_parent, temporary_name.c_str(), &candidate_identity, AT_SYMLINK_NOFOLLOW) == 0 &&
+        S_ISREG(candidate_identity.st_mode) && candidate_identity.st_dev == retained->identity.st_dev &&
+        candidate_identity.st_ino == retained->identity.st_ino;
     if (!valid) {
         static_cast<void>(release_retained(temporary));
         return identity_error();
     }
     if (overwrite) {
-        if (::renameat(descriptor, temporary_name.c_str(), descriptor, output_name.c_str()) != 0) {
+        if (::renameat(candidate_parent, temporary_name.c_str(), output_parent, output_name.c_str()) != 0) {
             return std::unexpected{
                 make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not atomically replace output")};
         }
     } else {
-        if (::linkat(descriptor, temporary_name.c_str(), descriptor, output_name.c_str(), 0) != 0) {
+        if (::linkat(candidate_parent, temporary_name.c_str(), output_parent, output_name.c_str(), 0) != 0) {
             return std::unexpected{
                 make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not atomically publish output")};
         }
-        if (::unlinkat(descriptor, temporary_name.c_str(), 0) != 0) {
+        if (::unlinkat(candidate_parent, temporary_name.c_str(), 0) != 0) {
             return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
                                               "output was published but temporary cleanup failed")};
         }
     }
-    if (::fsync(descriptor) != 0) {
+    if (::fsync(output_parent) != 0 || ::fsync(candidate_parent) != 0) {
         return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
                                           "output was published but its directory could not be synchronized")};
     }

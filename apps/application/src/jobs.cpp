@@ -288,11 +288,13 @@ struct axk::app::JobManager::Impl {
     void transition(const std::shared_ptr<Record> &record, JobState state, std::string type,
                     std::optional<Json> result = std::nullopt, std::optional<Error> error = std::nullopt) {
         std::optional<JobEvent> event;
+        std::vector<UploadLease> released_upload_leases;
         if (is_terminal(state)) {
             const std::scoped_lock lock{mutex, record->mutex};
             if (is_terminal(record->state))
                 return;
             record->path_lease = {};
+            released_upload_leases = std::move(record->upload_leases);
             for (const auto &key : record->destination_keys) {
                 const auto found = destination_reservations.find(key);
                 if (found != destination_reservations.end() && found->second == record->job_id)
@@ -316,6 +318,7 @@ struct axk::app::JobManager::Impl {
             record_transition_locked(*record, previous, state);
             event = append_event_locked(*record, std::move(type), record->progress);
         }
+        released_upload_leases.clear();
         emit(*event);
     }
 
@@ -677,6 +680,7 @@ axk::app::Result<void> axk::app::JobManager::cancel(std::string_view job_id, std
     }
 
     std::optional<JobEvent> event;
+    std::vector<UploadLease> released_upload_leases;
     {
         const std::scoped_lock lock{impl_->mutex, record->mutex};
         if (is_terminal(record->state) || record->cancellation_requested)
@@ -686,6 +690,7 @@ axk::app::Result<void> axk::app::JobManager::cancel(std::string_view job_id, std
         record->cancellation.cancel();
         if (record->state == JobState::queued) {
             record->path_lease = {};
+            released_upload_leases = std::move(record->upload_leases);
             for (const auto &key : record->destination_keys) {
                 const auto found = impl_->destination_reservations.find(key);
                 if (found != impl_->destination_reservations.end() && found->second == record->job_id)
@@ -700,6 +705,7 @@ axk::app::Result<void> axk::app::JobManager::cancel(std::string_view job_id, std
             event = impl_->append_event_locked(*record, "cancellation_requested", record->progress);
         }
     }
+    released_upload_leases.clear();
     impl_->emit(*event);
     impl_->condition.notify_all();
     return {};

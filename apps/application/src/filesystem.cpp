@@ -25,7 +25,6 @@ extern "C" NTSYSAPI NTSTATUS NTAPI NtSetInformationFile(HANDLE file_handle, PIO_
                                                         FILE_INFORMATION_CLASS file_information_class);
 #else
 #include <cerrno>
-#include <csignal>
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -146,56 +145,6 @@ axk::app::Result<void> verify_no_link_components(const std::filesystem::path &ro
     }
     ::close(descriptor);
     return {};
-#endif
-}
-
-std::optional<std::uint64_t> publication_owner_process(const std::filesystem::path &path) {
-    const auto name = axk::text::path_to_utf8(path.filename());
-    constexpr std::string_view marker{".axklib-publication.p"};
-    const auto marker_offset = name.rfind(marker);
-    if (marker_offset == std::string::npos || marker_offset == 0U || !name.ends_with(".tmp"))
-        return std::nullopt;
-    const auto process_begin = marker_offset + marker.size();
-    const auto process_end = name.find('.', process_begin);
-    if (process_end == std::string::npos || process_end == process_begin)
-        return std::nullopt;
-    const auto sequence_end = name.find('.', process_end + 1U);
-    if (sequence_end == std::string::npos || sequence_end == process_end + 1U || name.substr(sequence_end) != ".tmp") {
-        return std::nullopt;
-    }
-    std::uint64_t process{};
-    std::uint64_t sequence{};
-    const auto process_text = std::string_view{name}.substr(process_begin, process_end - process_begin);
-    const auto sequence_text = std::string_view{name}.substr(process_end + 1U, sequence_end - process_end - 1U);
-    const auto [process_tail, process_error] =
-        std::from_chars(process_text.data(), process_text.data() + process_text.size(), process);
-    const auto [sequence_tail, sequence_error] =
-        std::from_chars(sequence_text.data(), sequence_text.data() + sequence_text.size(), sequence);
-    if (process_error != std::errc{} || process_tail != process_text.data() + process_text.size() || process == 0U ||
-        sequence_error != std::errc{} || sequence_tail != sequence_text.data() + sequence_text.size() ||
-        sequence == 0U) {
-        return std::nullopt;
-    }
-    return process;
-}
-
-bool process_is_active(std::uint64_t process) {
-#if defined(_WIN32)
-    if (process > std::numeric_limits<DWORD>::max())
-        return false;
-    const auto handle =
-        OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(process));
-    if (handle == nullptr)
-        return GetLastError() == ERROR_ACCESS_DENIED;
-    const auto state = WaitForSingleObject(handle, 0U);
-    CloseHandle(handle);
-    return state == WAIT_TIMEOUT;
-#else
-    if (process > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max()))
-        return false;
-    if (::kill(static_cast<pid_t>(process), 0) == 0)
-        return true;
-    return errno == EPERM;
 #endif
 }
 
@@ -2014,60 +1963,17 @@ axk::app::Result<void> axk::app::Sandbox::require_distinct(const FileRef &source
 }
 
 axk::app::Result<std::size_t> axk::app::Sandbox::cleanup_abandoned_publications() const {
-    std::vector<std::filesystem::path> abandoned;
-    const auto roots = [this] {
-        const std::shared_lock lock{state_->mutex};
-        return state_->roots;
-    }();
-    for (const auto &root : roots) {
-        if (!root.info.writable)
-            continue;
-        std::error_code error;
-        for (std::filesystem::recursive_directory_iterator
-                 iterator{root.canonical_path, std::filesystem::directory_options::skip_permission_denied, error},
-             end;
-             !error && iterator != end; iterator.increment(error)) {
-            const auto status = iterator->symlink_status(error);
-            if (error)
-                break;
-            if (std::filesystem::is_symlink(status)) {
-                if (iterator->is_directory(error))
-                    iterator.disable_recursion_pending();
-                error.clear();
-                continue;
-            }
-            const auto process = publication_owner_process(iterator->path());
-            if (process && !process_is_active(*process) &&
-                (std::filesystem::is_regular_file(status) || std::filesystem::is_directory(status))) {
-                if (std::filesystem::is_directory(status))
-                    iterator.disable_recursion_pending();
-                abandoned.push_back(iterator->path());
-            }
-        }
-        if (error)
-            return std::unexpected(root_error("sandbox publication cleanup could not enumerate a writable root"));
-    }
-    std::ranges::sort(abandoned, [](const auto &left, const auto &right) {
-        return std::distance(left.begin(), left.end()) > std::distance(right.begin(), right.end());
-    });
-    std::size_t removed{};
-    for (const auto &path : abandoned) {
-        std::error_code error;
-        const auto count = std::filesystem::remove_all(path, error);
-        if (error)
-            return std::unexpected(root_error("sandbox publication cleanup could not remove an abandoned output"));
-        if (count != 0U)
-            ++removed;
-    }
-    return removed;
+    // Publication candidates are not authenticated workspace entries. Retain
+    // unknown files rather than infer deletion authority from their names.
+    return 0U;
 }
 
 std::string_view axk::app::directory_entry_kind_name(DirectoryEntryKind kind) noexcept {
     switch (kind) {
     case DirectoryEntryKind::file:
-        return "file";
+        return "FILE";
     case DirectoryEntryKind::directory:
-        return "directory";
+        return "DIRECTORY";
     }
-    return "unknown";
+    return "UNKNOWN";
 }

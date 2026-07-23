@@ -282,13 +282,8 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
     for (std::size_t index = 0; index < sample_banks_json.size(); ++index) {
         const auto sample_bank_context = context + ".sample_banks[" + std::to_string(index) + "]";
         const auto &row = sample_banks_json[index];
-        if (auto valid = fields(row, sample_bank_context, {"name"}, {"member_sample", "member_samples"}); !valid) {
+        if (auto valid = fields(row, sample_bank_context, {"name", "member_samples"}); !valid) {
             return std::unexpected{valid.error()};
-        }
-        const bool singular = row.contains("member_sample");
-        const bool plural = row.contains("member_samples");
-        if (singular == plural) {
-            return std::unexpected{manifest_error(sample_bank_context + " must contain exactly one member field")};
         }
         auto sample_bank_name = text(row["name"], sample_bank_context + ".name");
         if (!sample_bank_name)
@@ -297,22 +292,15 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
             return std::unexpected{manifest_error(context + " has duplicate Sample Bank names")};
         }
         SampleBankSpec sample_bank{*sample_bank_name, {}};
-        if (singular) {
-            auto member = text(row["member_sample"], sample_bank_context + ".member_sample");
+        if (!row["member_samples"].is_array()) {
+            return std::unexpected{manifest_error(sample_bank_context + ".member_samples must be an array")};
+        }
+        for (std::size_t member_index = 0; member_index < row["member_samples"].size(); ++member_index) {
+            auto member = text(row["member_samples"][member_index],
+                               sample_bank_context + ".member_samples[" + std::to_string(member_index) + "]");
             if (!member)
                 return std::unexpected{member.error()};
             sample_bank.member_samples.push_back(*member);
-        } else {
-            if (!row["member_samples"].is_array()) {
-                return std::unexpected{manifest_error(sample_bank_context + ".member_samples must be an array")};
-            }
-            for (std::size_t member_index = 0; member_index < row["member_samples"].size(); ++member_index) {
-                auto member = text(row["member_samples"][member_index],
-                                   sample_bank_context + ".member_samples[" + std::to_string(member_index) + "]");
-                if (!member)
-                    return std::unexpected{member.error()};
-                sample_bank.member_samples.push_back(*member);
-            }
         }
         const std::set<std::string> unique_members{sample_bank.member_samples.begin(),
                                                    sample_bank.member_samples.end()};

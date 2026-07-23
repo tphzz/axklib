@@ -99,10 +99,7 @@ axk::app::Error core_error(const axk::Error &error, std::optional<std::string> r
     std::string code = "package_operation_failed";
     if (error.code == axk::ErrorCode::operation_cancelled) {
         code = "operation_cancelled";
-    } else if (error.code == axk::ErrorCode::transaction_rejected &&
-               (error.message == "target image changed while its import plan was built" ||
-                error.message == "package import plan is stale for this target" ||
-                error.message == "package import target changed before transaction preparation")) {
+    } else if (error.code == axk::ErrorCode::transaction_stale) {
         code = "package_plan_stale";
     }
     return {std::move(code), error.message, std::move(context)};

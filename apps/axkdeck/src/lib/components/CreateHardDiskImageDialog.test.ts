@@ -96,4 +96,36 @@ describe('CreateHardDiskImageDialog', () => {
         await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
         expect(await screen.findByText('Destination already exists')).toBeTruthy();
     });
+
+    it('keeps the dialog open until a cancelled job reaches its terminal state', async () => {
+        const imageTransport = transport();
+        let finishJob!: (job: { jobId: number; kind: string; status: 'cancelled' }) => void;
+        vi.mocked(imageTransport.waitForJob).mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    finishJob = resolve;
+                }),
+        );
+        const oncancel = vi.fn();
+        render(CreateHardDiskImageDialog, {
+            props: {
+                transport: imageTransport,
+                directory: serverDirectoryLocation({ rootId: 'workspace', relativePath: '' }, 'Yamaha'),
+                onsuccess: vi.fn(),
+                oncancel,
+            },
+        });
+
+        await screen.findByRole('button', { name: 'Floppy-scale' });
+        await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+        await waitFor(() => expect(imageTransport.waitForJob).toHaveBeenCalledOnce());
+        await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+        expect(imageTransport.cancelJob).toHaveBeenCalledWith(7);
+        expect(oncancel).not.toHaveBeenCalled();
+        expect(screen.getByRole('button', { name: 'Cancelling' })).toBeTruthy();
+
+        finishJob({ jobId: 7, kind: 'create.hds', status: 'cancelled' });
+        await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
+    });
 });

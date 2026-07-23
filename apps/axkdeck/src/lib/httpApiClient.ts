@@ -1,4 +1,5 @@
 import type { components } from './generated/axklibApiV1';
+import type { ClientUploadSource } from './clientUploadSource';
 
 export interface AxklibApiConnection {
     baseUrl: string;
@@ -14,7 +15,7 @@ export type ApiJobEvent = components['schemas']['JobEvent'];
 import type { DirectoryListing, DirectoryRef, FileRef, SandboxRoot, UploadKind, UploadRef } from './storageLocations';
 
 export interface EntryMetadata extends FileRef {
-    kind: 'file' | 'directory';
+    kind: 'FILE' | 'DIRECTORY';
     size: number | null;
     writable: boolean;
 }
@@ -112,6 +113,52 @@ export type JobEventListener = (event: ApiJobEvent) => void;
 export interface EventConnection {
     opened: Promise<void>;
     close(): void;
+}
+
+function isJobProgress(value: unknown): boolean {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    const progress = value as Record<string, unknown>;
+    return (
+        Object.keys(progress).every((key) => ['phase', 'completed', 'total', 'message'].includes(key)) &&
+        typeof progress.phase === 'string' &&
+        Number.isSafeInteger(progress.completed) &&
+        Number(progress.completed) >= 0 &&
+        (progress.total === null || (Number.isSafeInteger(progress.total) && Number(progress.total) >= 0)) &&
+        typeof progress.message === 'string'
+    );
+}
+
+function isJobEvent(value: unknown): value is ApiJobEvent {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    const event = value as Record<string, unknown>;
+    return (
+        Object.keys(event).every((key) =>
+            [
+                'schemaVersion',
+                'eventId',
+                'sequence',
+                'jobId',
+                'operationId',
+                'type',
+                'timestampUnixMs',
+                'state',
+                'progress',
+                'jobUrl',
+            ].includes(key),
+        ) &&
+        event.schemaVersion === '1' &&
+        typeof event.eventId === 'string' &&
+        typeof event.jobId === 'string' &&
+        typeof event.jobUrl === 'string' &&
+        typeof event.operationId === 'string' &&
+        typeof event.type === 'string' &&
+        Number.isSafeInteger(event.sequence) &&
+        Number(event.sequence) > 0 &&
+        Number.isSafeInteger(event.timestampUnixMs) &&
+        Number(event.timestampUnixMs) >= 0 &&
+        ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'].includes(String(event.state)) &&
+        (event.progress === null || isJobProgress(event.progress))
+    );
 }
 
 export class AxklibHttpApiClient {
@@ -307,16 +354,30 @@ export class AxklibHttpApiClient {
         input: { filename: string; kind: UploadKind; mediaType?: string; sha256?: string },
         options: { chunkBytes?: number; onProgress?: (sent: number, total: number) => void; signal?: AbortSignal } = {},
     ): Promise<UploadSnapshot> {
+        const source: ClientUploadSource = {
+            name: input.filename,
+            type: input.mediaType ?? blob.type,
+            size: blob.size,
+            readChunk: async (start, end) => blob.slice(start, end),
+        };
+        return this.uploadSource(source, input, options);
+    }
+
+    async uploadSource(
+        source: ClientUploadSource,
+        input: { filename: string; kind: UploadKind; mediaType?: string; sha256?: string },
+        options: { chunkBytes?: number; onProgress?: (sent: number, total: number) => void; signal?: AbortSignal } = {},
+    ): Promise<UploadSnapshot> {
         options.signal?.throwIfAborted();
         const limits = options.chunkBytes === undefined ? await this.serverLimits() : undefined;
-        if (limits && blob.size > limits.maximumUploadBytes) {
+        if (limits && source.size > limits.maximumUploadBytes) {
             throw new AxklibApiError('upload_too_large', 'File exceeds the server upload limit', 413);
         }
         const created = await this.createUpload({
             filename: input.filename,
             kind: input.kind,
-            mediaType: input.mediaType ?? (blob.type || 'application/octet-stream'),
-            size: blob.size,
+            mediaType: input.mediaType ?? (source.type || 'application/octet-stream'),
+            size: source.size,
             sha256: input.sha256,
         });
         const reference = { uploadId: created.uploadId };
@@ -327,9 +388,12 @@ export class AxklibHttpApiClient {
         }
         try {
             let offset = created.receivedSize;
-            while (offset < blob.size) {
+            while (offset < source.size) {
                 options.signal?.throwIfAborted();
-                const chunk = blob.slice(offset, Math.min(blob.size, offset + chunkBytes));
+                const chunk = await source.readChunk(offset, Math.min(source.size, offset + chunkBytes));
+                if (chunk.size === 0 || chunk.size > source.size - offset) {
+                    throw new AxklibApiError('invalid_upload_source', 'upload source returned an invalid chunk', 0);
+                }
                 const response = await this.fetchResponse(
                     'PUT',
                     `/uploads/${encodeURIComponent(reference.uploadId)}`,
@@ -338,7 +402,7 @@ export class AxklibHttpApiClient {
                     options.signal,
                 );
                 const snapshot = await this.readEnvelope<UploadSnapshot>(response);
-                if (snapshot.receivedSize <= offset || snapshot.receivedSize > blob.size) {
+                if (snapshot.receivedSize <= offset || snapshot.receivedSize > source.size) {
                     throw new AxklibApiError(
                         'invalid_upload_offset',
                         'server returned an invalid upload offset',
@@ -346,7 +410,7 @@ export class AxklibHttpApiClient {
                     );
                 }
                 offset = snapshot.receivedSize;
-                options.onProgress?.(offset, blob.size);
+                options.onProgress?.(offset, source.size);
             }
             return await this.completeUpload(reference);
         } catch (error) {
@@ -446,7 +510,14 @@ export class AxklibHttpApiClient {
             );
         });
         socket.addEventListener('message', (event) => {
-            if (typeof event.data === 'string') listener(JSON.parse(event.data) as ApiJobEvent);
+            try {
+                if (typeof event.data !== 'string') throw new Error('binary job event');
+                const value: unknown = JSON.parse(event.data);
+                if (!isJobEvent(value)) throw new Error('invalid job event');
+                listener(value);
+            } catch {
+                socket.close(1002, 'Invalid job event');
+            }
         });
         if (onDisconnect) socket.addEventListener('close', onDisconnect);
         return { opened, close: () => socket.close() };

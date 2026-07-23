@@ -46,6 +46,10 @@ Error transaction_error(std::string message) {
     return make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction, std::move(message));
 }
 
+Error stale_transaction_error(std::string message) {
+    return make_error(ErrorCode::transaction_stale, ErrorCategory::transaction, std::move(message));
+}
+
 Result<void> require_distinct_source_and_output(const std::filesystem::path &source,
                                                 const std::filesystem::path &output, std::string_view operation) {
     std::error_code error;
@@ -2205,6 +2209,10 @@ Result<void> validate_mutable_partition_geometry(const Partition &partition, std
         partition.directory_index_span_clusters == 0U) {
         return std::unexpected{transaction_error("source partition has incomplete allocation geometry")};
     }
+    if (partition.sectors_per_cluster != 2U) {
+        return std::unexpected{
+            transaction_error("source partition geometry is outside the supported alteration profile")};
+    }
     const auto bitmap_bytes = (static_cast<std::uint64_t>(partition.cluster_count) + 7U) / 8U;
     const auto cluster_bytes = static_cast<std::uint64_t>(partition.sectors_per_cluster) * 512U;
     const auto bitmap_span = (bitmap_bytes + cluster_bytes - 1U) / cluster_bytes;
@@ -3113,7 +3121,7 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
         if (!snapshot)
             return std::unexpected{snapshot.error()};
         if (*snapshot != plan.target_snapshot_id)
-            return std::unexpected{transaction_error("package import plan is stale for this target")};
+            return std::unexpected{stale_transaction_error("package import plan is stale for this target")};
 
         if (plan.target_kind == MediaKind::fat12_floppy) {
             return apply_fat12_package_import(target_path, packages, plan, output_path, overwrite, cancellation,

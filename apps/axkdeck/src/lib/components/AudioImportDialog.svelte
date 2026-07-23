@@ -1,7 +1,9 @@
 <script lang="ts">
     import { onDestroy, untrack } from 'svelte';
     import { defaultAudioImportNames, defaultRootKey, noteName, validSamplerName } from '../audioImport';
+    import { browserUploadSource, type ClientUploadSource } from '../clientUploadSource';
     import { formatStoredSize } from '../formatBytes';
+    import { modal } from '../modal';
     import type { ClientUploadLocation } from '../storageLocations';
     import type {
         AudioImportCapabilities,
@@ -14,7 +16,7 @@
 
     interface Props {
         transport: ImageTransport;
-        files: File[];
+        files: (File | ClientUploadSource)[];
         target: AudioImportTarget;
         existingSampleNames: string[];
         existingWaveformNames: string[];
@@ -24,7 +26,7 @@
 
     interface Row {
         id: number;
-        file: File;
+        file: ClientUploadSource;
         upload?: ClientUploadLocation;
         inspection?: AudioSourceInfo;
         targetSampleRate?: number;
@@ -54,17 +56,20 @@
     );
 
     $effect(() => {
-        rows = files.map((file) => ({
-            id: nextRowId++,
-            file,
-            sampleName: '',
-            waveformNames: [],
-            rootKey: defaultRootKey,
-            inspectionRevision: 0,
-            progress: 0,
-            status: 'waiting',
-            error: '',
-        }));
+        rows = files.map((input) => {
+            const file = 'readChunk' in input ? input : browserUploadSource(input);
+            return {
+                id: nextRowId++,
+                file,
+                sampleName: '',
+                waveformNames: [],
+                rootKey: defaultRootKey,
+                inspectionRevision: 0,
+                progress: 0,
+                status: 'waiting',
+                error: '',
+            };
+        });
         untrack(() => {
             stagingPromise = stageFiles();
         });
@@ -88,7 +93,7 @@
         try {
             const upload = await transport.uploadClientFile(
                 row.file,
-                'audio',
+                'AUDIO',
                 (sent, total) => replaceRow(id, { progress: total === 0 ? 0 : sent / total }),
                 abortController.signal,
             );
@@ -260,6 +265,7 @@
         role="dialog"
         aria-modal="true"
         aria-label="Import audio"
+        use:modal={{ onescape: () => void cancel() }}
     >
         <header class="dialog-header">
             <div>

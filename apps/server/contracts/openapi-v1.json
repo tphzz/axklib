@@ -1,25 +1,6 @@
 {
   "components": {
     "headers": {
-      "Deprecation": {
-        "description": "RFC 9745 structured date indicating when this resource is or will be deprecated",
-        "schema": {
-          "pattern": "^@[0-9]+$",
-          "type": "string"
-        }
-      },
-      "DeprecationLink": {
-        "description": "Link to migration guidance using rel=deprecation",
-        "schema": {
-          "type": "string"
-        }
-      },
-      "Sunset": {
-        "description": "RFC 8594 HTTP date after which this resource may become unavailable",
-        "schema": {
-          "type": "string"
-        }
-      },
       "XRequestId": {
         "description": "Request correlation identifier",
         "schema": {
@@ -900,10 +881,9 @@
                   "properties": {
                     "kind": {
                       "enum": [
-                        "file",
-                        "directory"
-                      ],
-                      "x-axklib-wire-enum-style": "legacy-lowercase"
+                        "FILE",
+                        "DIRECTORY"
+                      ]
                     },
                     "name": {
                       "type": "string"
@@ -1034,8 +1014,10 @@
         "additionalProperties": false,
         "properties": {
           "kind": {
-            "description": "file or directory",
-            "type": "string"
+            "enum": [
+              "FILE",
+              "DIRECTORY"
+            ]
           },
           "relativePath": {
             "type": "string"
@@ -4741,11 +4723,10 @@
           },
           "kind": {
             "enum": [
-              "audio",
-              "package",
-              "manifest"
-            ],
-            "x-axklib-wire-enum-style": "legacy-lowercase"
+              "AUDIO",
+              "PACKAGE",
+              "MANIFEST"
+            ]
           },
           "mediaType": {
             "minLength": 1,
@@ -4757,10 +4738,9 @@
           },
           "state": {
             "enum": [
-              "receiving",
-              "ready"
-            ],
-            "x-axklib-wire-enum-style": "legacy-lowercase"
+              "RECEIVING",
+              "READY"
+            ]
           },
           "uploadId": {
             "minLength": 1,
@@ -4788,11 +4768,10 @@
           },
           "kind": {
             "enum": [
-              "audio",
-              "package",
-              "manifest"
-            ],
-            "x-axklib-wire-enum-style": "legacy-lowercase"
+              "AUDIO",
+              "PACKAGE",
+              "MANIFEST"
+            ]
           },
           "mediaType": {
             "minLength": 1,
@@ -5297,16 +5276,7 @@
   },
   "info": {
     "title": "axklib-server API",
-    "version": "1.0.0",
-    "x-axklib-deprecation-policy": {
-      "headers": [
-        "Deprecation",
-        "Sunset",
-        "Link"
-      ],
-      "minimumNoticeDays": 180,
-      "removalRequiresNewApiMajor": true
-    }
+    "version": "1.0.0"
   },
   "openapi": "3.1.0",
   "paths": {

@@ -32,6 +32,7 @@
     let children = $state<DiskTreeItem[]>([]);
     let totalCount = $state(0);
     let loading = $state(false);
+    let loadError = $state('');
     let initialized = false;
     const hasChildren = $derived(item.kind !== 'volume' && totalCount > 0);
     const metadata = $derived(
@@ -58,10 +59,19 @@
     async function loadMore(): Promise<void> {
         if (loading || children.length >= totalCount) return;
         loading = true;
+        loadError = '';
         try {
             const page = await onloadchildren(item.id, children.length, 64);
+            if (!Number.isSafeInteger(page.totalCount) || page.totalCount < children.length + page.items.length) {
+                throw new Error('The server returned an invalid tree page');
+            }
+            if (page.items.length === 0 && children.length < page.totalCount) {
+                throw new Error('The server returned an incomplete tree page');
+            }
             children = [...children, ...page.items];
             totalCount = page.totalCount;
+        } catch (reason) {
+            loadError = reason instanceof Error ? reason.message : String(reason);
         } finally {
             loading = false;
         }
@@ -141,6 +151,12 @@
 
     {#if expanded && hasChildren}
         <div class="tree-children">
+            {#if loadError}
+                <div class="tree-load-error" role="alert">
+                    <span>{loadError}</span>
+                    <button type="button" onclick={() => void loadMore()}>Retry</button>
+                </div>
+            {/if}
             {#each children as child (child.id)}
                 <TreeNode
                     item={child}

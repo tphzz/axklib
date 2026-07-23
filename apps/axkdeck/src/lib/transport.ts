@@ -10,6 +10,7 @@ import type {
     ClientUploadLocation,
     UploadKind,
 } from './storageLocations';
+import type { ClientUploadSource } from './clientUploadSource';
 
 export interface ValidationSummary {
     valid: boolean;
@@ -274,7 +275,7 @@ export interface ImageTransport {
     readAuditionAudio(auditionId: string, wavSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer>;
     deleteAudition(auditionId: string): Promise<void>;
     uploadClientFile(
-        file: File,
+        file: ClientUploadSource,
         kind: UploadKind,
         onProgress?: (sent: number, total: number) => void,
         signal?: AbortSignal,

@@ -15,6 +15,9 @@ from pathlib import Path
 
 STATE_SCHEMA_VERSION = 1
 STATE_FILENAME = ".axklib-native-cache-state.json"
+OWNERSHIP_SCHEMA_VERSION = 1
+OWNERSHIP_FILENAME = ".axklib-native-cache-owner.json"
+OWNERSHIP_PURPOSE = "axklib-native-build-cache"
 NORMALIZED_MTIME_NS = 946_684_800_000_000_000
 TOOLCHAIN_ENVIRONMENT = (
     "CC",
@@ -107,8 +110,67 @@ def read_state(path: Path) -> dict[str, IndexEntry] | None:
         return None
 
 
+def _ownership_document() -> dict[str, object]:
+    return {
+        "schema_version": OWNERSHIP_SCHEMA_VERSION,
+        "purpose": OWNERSHIP_PURPOSE,
+    }
+
+
+def has_valid_ownership_marker(build_directory: Path) -> bool:
+    marker = build_directory / OWNERSHIP_FILENAME
+    try:
+        return (
+            not marker.is_symlink()
+            and json.loads(marker.read_text(encoding="utf-8")) == _ownership_document()
+        )
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def create_ownership_marker(build_directory: Path) -> None:
+    build_directory.mkdir(parents=True, exist_ok=True)
+    marker = build_directory / OWNERSHIP_FILENAME
+    if marker.exists() or marker.is_symlink():
+        if not has_valid_ownership_marker(build_directory):
+            raise ValueError("native build cache ownership marker is invalid")
+        return
+    marker.write_text(
+        json.dumps(_ownership_document(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _validated_build_directory(source_root: Path, build_directory: Path) -> Path:
+    source_root = source_root.resolve(strict=True)
+    candidate = Path(os.path.abspath(build_directory))
+    native_root = source_root / "build" / "native"
+    if candidate == native_root or not candidate.is_relative_to(native_root):
+        raise ValueError(
+            "build directory must be a strict descendant of the source build/native directory"
+        )
+
+    current = source_root
+    for component in candidate.relative_to(source_root).parts:
+        current /= component
+        if current.is_symlink():
+            raise ValueError("build directory must not contain a symbolic link")
+        if current.exists() and not current.is_dir():
+            raise ValueError("build directory path contains a non-directory component")
+    if candidate.resolve(strict=False) != candidate:
+        raise ValueError("build directory resolves outside its lexical location")
+    return candidate
+
+
 def prepare_build_cache(source_root: Path, build_directory: Path) -> PreparationReport:
     source_root = source_root.resolve()
+    build_directory = _validated_build_directory(source_root, build_directory)
+    existed = build_directory.exists()
+    if existed and not has_valid_ownership_marker(build_directory):
+        raise ValueError("native build cache directory has no valid ownership marker")
+    if not existed:
+        create_ownership_marker(build_directory)
+
     current = read_git_index(source_root)
     state_path = build_directory / STATE_FILENAME
     previous = read_state(state_path) if state_path.is_file() else None
@@ -116,7 +178,7 @@ def prepare_build_cache(source_root: Path, build_directory: Path) -> Preparation
 
     if build_directory.exists() and not restored:
         shutil.rmtree(build_directory)
-    build_directory.mkdir(parents=True, exist_ok=True)
+        create_ownership_marker(build_directory)
 
     unchanged = 0
     if previous is not None:

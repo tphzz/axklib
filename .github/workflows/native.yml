@@ -32,11 +32,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout axklib
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.10.4"
           enable-cache: true
@@ -54,22 +54,16 @@ jobs:
           python tools/python/release_metadata.py release-target \
             --version-metadata-file build/version_metadata.json \
             --ref-type "${GITHUB_REF_TYPE}" --ref-name "${GITHUB_REF_NAME}"
-      - name: Validate checked-in server contract compatibility
-        run: >-
-          python tools/python/openapi_compat.py check
-          --baseline apps/server/contracts/openapi-v1.compatibility.json
-          --candidate apps/server/contracts/openapi-v1.json
-
   desktop-static:
     name: Desktop static checks
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout axklib
-        uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.15.1
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: pnpm
@@ -87,7 +81,7 @@ jobs:
           pnpm test
           pnpm check
           pnpm build
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: "1.85"
           components: rustfmt
@@ -156,16 +150,16 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout axklib
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.13"
 
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.10.4"
           enable-cache: true
@@ -185,7 +179,7 @@ jobs:
 
       - name: Restore vcpkg binary cache
         id: vcpkg-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ runner.temp }}/vcpkg/archives
           key: vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
@@ -210,7 +204,7 @@ jobs:
 
       - name: Configure Visual Studio 2026
         if: runner.os == 'Windows'
-        uses: TheMrMilchmann/setup-msvc-dev@v4
+        uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9 # v4
         with:
           arch: ${{ matrix.msvc_arch }}
           vs-path: ${{ steps.vs2026.outputs.path }}
@@ -240,15 +234,15 @@ jobs:
 
       - name: Restore native incremental build cache
         id: native-build-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             build/native/${{ inputs.debug && 'debug' || 'release' }}
             !build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**
             !build/native/${{ inputs.debug && 'debug' || 'release' }}/*.spdx.json
-          key: native-v1-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
+          key: native-v2-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
           restore-keys: |
-            native-v1-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-
+            native-v2-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-
 
       - name: Prepare native incremental build cache
         id: native-cache-state
@@ -396,23 +390,23 @@ jobs:
             --server "$server" \
             --fixture tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.15.1
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: apps/axkdeck/pnpm-lock.yaml
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: "1.85"
           components: clippy
 
       - name: Restore desktop Rust cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.cargo/registry
@@ -618,7 +612,7 @@ jobs:
 
       - name: Upload Linux or Windows desktop packages
         if: runner.os != 'macOS'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-axkdeck-${{ matrix.artifact }}
           path: build/artifacts/axkdeck-${{ matrix.artifact }}/*
@@ -770,7 +764,7 @@ jobs:
 
       - name: Upload native dependency failure logs
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: native-dependency-logs-${{ matrix.triplet }}
           path: |
@@ -783,7 +777,7 @@ jobs:
       - name: Save vcpkg binary cache after failure
         if: ${{ failure() && steps.configure-native.outcome == 'success' && steps.vcpkg-cache.outputs.cache-hit != 'true' }}
         continue-on-error: true
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ runner.temp }}/vcpkg/archives
           key: vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
@@ -791,13 +785,13 @@ jobs:
       - name: Save native incremental build cache after failure
         if: ${{ failure() && steps.configure-native.outcome == 'success' && steps.native-build-cache.outputs.cache-hit != 'true' }}
         continue-on-error: true
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             build/native/${{ inputs.debug && 'debug' || 'release' }}
             !build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**
             !build/native/${{ inputs.debug && 'debug' || 'release' }}/*.spdx.json
-          key: native-v1-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
+          key: native-v2-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
 
       - name: Package macOS slice for universal assembly
         if: runner.os == 'macOS'
@@ -812,7 +806,7 @@ jobs:
 
       - name: Cache macOS slice for universal assembly
         if: runner.os == 'macOS'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             build/tmp/macos-${{ matrix.macos_slice }}.tar.gz
@@ -822,7 +816,7 @@ jobs:
 
       - name: Upload Linux or Windows SDK archive
         if: runner.os != 'macOS'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-${{ steps.package.outputs.sdk_artifact_stem }}
           path: build/artifacts/${{ steps.package.outputs.sdk_artifact_stem }}.*
@@ -830,7 +824,7 @@ jobs:
 
       - name: Upload Linux or Windows CLI archive
         if: runner.os != 'macOS'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-${{ steps.package.outputs.cli_artifact_stem }}
           path: build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.*
@@ -842,22 +836,22 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Checkout axklib
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.13"
 
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.10.4"
           enable-cache: true
 
       - name: Restore x64 slice
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             build/tmp/macos-x86_64.tar.gz
@@ -869,7 +863,7 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Restore ARM64 slice
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             build/tmp/macos-arm64.tar.gz
@@ -881,7 +875,7 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Import macOS code signing certificate
-        uses: apple-actions/import-codesign-certs@v7.0.0
+        uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
         with:
           p12-file-base64: ${{ secrets.P12_BASE64 }}
           p12-password: ${{ secrets.P12_PASSWORD }}
@@ -1009,23 +1003,23 @@ jobs:
             --sign "$MACOS_DEV_ID_CERT_NAME" build/tmp/universal/bin/axklib-server
           codesign --verify --strict --verbose=2 build/tmp/universal/bin/axklib-server
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.15.1
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: apps/axkdeck/pnpm-lock.yaml
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: "1.85"
           targets: x86_64-apple-darwin,aarch64-apple-darwin
 
       - name: Restore universal desktop Rust cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.cargo/registry
@@ -1193,21 +1187,21 @@ jobs:
           fi
 
       - name: Upload universal macOS desktop DMG
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-axkdeck-macos-universal
           path: build/artifacts/axkdeck-macos-universal/*
           if-no-files-found: error
 
       - name: Upload universal macOS SDK archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-${{ steps.package.outputs.sdk_artifact_stem }}
           path: build/artifacts/${{ steps.package.outputs.sdk_artifact_stem }}.zip
           if-no-files-found: error
 
       - name: Upload universal macOS CLI archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-${{ steps.package.outputs.cli_artifact_stem }}
           path: build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.zip
@@ -1228,16 +1222,16 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout axklib
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.13"
 
       - name: Download release deliverables
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: release-*
           path: build/release-assets

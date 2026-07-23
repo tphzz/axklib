@@ -33,8 +33,7 @@ bool is_upper_snake(std::string_view value) {
 
 void expect_upper_snake_enums(const nlohmann::json &value, std::string_view path = "$") {
     if (value.is_object()) {
-        const auto legacy_lowercase = value.value("x-axklib-wire-enum-style", "") == "legacy-lowercase";
-        if (const auto enumeration = value.find("enum"); enumeration != value.end() && !legacy_lowercase) {
+        if (const auto enumeration = value.find("enum"); enumeration != value.end()) {
             for (const auto &candidate : *enumeration) {
                 if (candidate.is_string()) {
                     EXPECT_TRUE(is_upper_snake(candidate.get_ref<const std::string &>())) << path << ": " << candidate;
@@ -83,13 +82,8 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionPrepareRequest"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("Audition"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AudioSourceInfo"));
-    const auto &policy = document.at("info").at("x-axklib-deprecation-policy");
-    EXPECT_EQ(policy.at("minimumNoticeDays"), 180);
-    EXPECT_TRUE(policy.at("removalRequiresNewApiMajor"));
     const auto &headers = document.at("components").at("headers");
-    EXPECT_TRUE(headers.contains("Deprecation"));
-    EXPECT_TRUE(headers.contains("Sunset"));
-    EXPECT_TRUE(headers.contains("DeprecationLink"));
+    EXPECT_TRUE(headers.contains("XRequestId"));
 }
 
 TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {

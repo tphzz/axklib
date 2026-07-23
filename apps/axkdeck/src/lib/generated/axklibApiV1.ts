@@ -1227,7 +1227,7 @@ export interface components {
                 directory: components['schemas']['DirectoryRef'];
                 entries: {
                     /** @enum {unknown} */
-                    kind: 'file' | 'directory';
+                    kind: 'FILE' | 'DIRECTORY';
                     name: string;
                     relativePath: string;
                     size: number | null;
@@ -1254,8 +1254,8 @@ export interface components {
         };
         EmptyRequest: Record<string, never>;
         EntryMetadata: {
-            /** @description file or directory */
-            kind: string;
+            /** @enum {unknown} */
+            kind: 'FILE' | 'DIRECTORY';
             relativePath: string;
             rootId: string;
             size: number | null;
@@ -2072,17 +2072,17 @@ export interface components {
             expiresInSeconds: number;
             filename: string;
             /** @enum {unknown} */
-            kind: 'audio' | 'package' | 'manifest';
+            kind: 'AUDIO' | 'PACKAGE' | 'MANIFEST';
             mediaType: string;
             receivedSize: number;
             /** @enum {unknown} */
-            state: 'receiving' | 'ready';
+            state: 'RECEIVING' | 'READY';
             uploadId: string;
         };
         UploadCreateRequest: {
             filename: string;
             /** @enum {unknown} */
-            kind: 'audio' | 'package' | 'manifest';
+            kind: 'AUDIO' | 'PACKAGE' | 'MANIFEST';
             mediaType: string;
             sha256?: string | null;
             size: number;
@@ -2202,12 +2202,6 @@ export interface components {
     };
     requestBodies: never;
     headers: {
-        /** @description RFC 9745 structured date indicating when this resource is or will be deprecated */
-        Deprecation: string;
-        /** @description Link to migration guidance using rel=deprecation */
-        DeprecationLink: string;
-        /** @description RFC 8594 HTTP date after which this resource may become unavailable */
-        Sunset: string;
         /** @description Request correlation identifier */
         XRequestId: string;
     };

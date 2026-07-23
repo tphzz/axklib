@@ -12,13 +12,18 @@ def entry(object_id: str, mode: str = "100644") -> native_build_cache.IndexEntry
     return native_build_cache.IndexEntry(mode, object_id)
 
 
+def owned_build_directory(source: Path) -> Path:
+    build = source / "build" / "native" / "release"
+    native_build_cache.create_ownership_marker(build)
+    return build
+
+
 def test_prepare_reuses_unchanged_inputs_and_marks_changed_inputs_newer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "source"
-    build = tmp_path / "build"
     source.mkdir()
-    build.mkdir()
+    build = owned_build_directory(source)
     unchanged = source / "unchanged.cpp"
     changed = source / "changed.cpp"
     added = source / "added.hpp"
@@ -57,9 +62,8 @@ def test_prepare_discards_build_tree_without_valid_state(
     state_contents: str | None,
 ) -> None:
     source = tmp_path / "source"
-    build = tmp_path / "build"
     source.mkdir()
-    build.mkdir()
+    build = owned_build_directory(source)
     tracked = source / "tracked.cpp"
     tracked.write_text("source", encoding="utf-8")
     sentinel = build / "stale.o"
@@ -76,6 +80,82 @@ def test_prepare_discards_build_tree_without_valid_state(
     assert not sentinel.exists()
     assert tracked.stat().st_mtime_ns == original_mtime
     assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) == current
+
+
+def test_prepare_creates_a_marker_for_a_new_owned_build_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    build = source / "build" / "native" / "release"
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: {})
+
+    report = native_build_cache.prepare_build_cache(source, build)
+
+    assert report == native_build_cache.PreparationReport(False, 0, 0)
+    assert native_build_cache.has_valid_ownership_marker(build)
+
+
+def test_prepare_refuses_to_delete_an_unowned_build_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    build = source / "build" / "native" / "release"
+    build.mkdir(parents=True)
+    sentinel = build / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: {})
+
+    with pytest.raises(ValueError, match="ownership marker"):
+        native_build_cache.prepare_build_cache(source, build)
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize("target", ["source", "native-root", "outside"])
+def test_prepare_rejects_unsafe_build_targets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    native_root = source / "build" / "native"
+    native_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    build = {"source": source, "native-root": native_root, "outside": outside}[target]
+    sentinel = build / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: {})
+
+    with pytest.raises(ValueError, match="build directory"):
+        native_build_cache.prepare_build_cache(source, build)
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+def test_prepare_rejects_a_symlinked_build_component_without_touching_its_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    native_root = source / "build" / "native"
+    native_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    link = native_root / "release"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: {})
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        native_build_cache.prepare_build_cache(source, link)
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
 
 
 def test_read_state_rejects_malformed_entries(tmp_path: Path) -> None:

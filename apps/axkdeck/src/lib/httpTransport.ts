@@ -53,10 +53,13 @@ import {
     type ServerFileLocation,
     type UploadKind,
 } from './storageLocations';
+import type { ClientUploadSource } from './clientUploadSource';
 
 const ALTERATION_MANIFEST_SCHEMA_VERSION = '1.0';
 
 type HttpImageTransportConnection = AxklibApiConnection;
+type WireInputBinding = components['schemas']['InputBinding'];
+type WireInputRef = components['schemas']['InputRef'];
 
 interface ApiImageSummary {
     imageId: string;
@@ -236,12 +239,12 @@ export class HttpImageTransport implements ImageTransport {
     }
 
     async uploadClientFile(
-        file: File,
+        file: ClientUploadSource,
         kind: UploadKind,
         onProgress?: (sent: number, total: number) => void,
         signal?: AbortSignal,
     ): Promise<ClientUploadLocation> {
-        const uploaded = await this.client.uploadBlob(
+        const uploaded = await this.client.uploadSource(
             file,
             {
                 filename: file.name,
@@ -1022,17 +1025,17 @@ export class HttpImageTransport implements ImageTransport {
         return location;
     }
 
-    private serverInput(location: InputFileLocation): Record<string, unknown> {
+    private serverInput(location: InputFileLocation): WireInputRef {
         if (location.kind === 'client-upload') {
             return { uploadRef: location.reference };
         }
         return { fileRef: this.serverFile(location).reference };
     }
 
-    private serverInputBindings(inputBindings: InputBinding[]): Record<string, unknown>[] {
+    private serverInputBindings(inputBindings: InputBinding[]): WireInputBinding[] {
         return inputBindings.map((binding) => ({
-            logicalPath: binding.logicalPath,
-            source: this.serverInput(binding.source),
+            manifestPath: binding.logicalPath,
+            input: this.serverInput(binding.source),
         }));
     }
 

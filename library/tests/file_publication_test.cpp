@@ -129,12 +129,11 @@ TEST(FilePublication, ProducerFailureRemovesTheExclusiveCandidateAndPreservesThe
 
     ASSERT_FALSE(temporary);
     EXPECT_EQ(read_text(output), "original");
-    std::size_t sibling_count{};
-    for (const auto &entry : std::filesystem::directory_iterator{root}) {
-        static_cast<void>(entry);
-        ++sibling_count;
-    }
-    EXPECT_EQ(sibling_count, 1U);
+#if !defined(_WIN32)
+    EXPECT_TRUE(std::filesystem::is_empty(root / ".axklib-publication"));
+#else
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator{root}, std::filesystem::directory_iterator{}), 1);
+#endif
     std::filesystem::remove_all(root, error);
 }
 
