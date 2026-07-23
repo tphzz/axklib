@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { SampleStructureItem, WaveDataItem } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
+    import Icon from './Icon.svelte';
 
     type ContainedView = 'sample-banks' | 'samples';
     type LaneId = 'primary' | 'secondary' | 'tertiary';
@@ -24,7 +25,14 @@
         onsamplebankselect: (item: SampleStructureItem) => void;
         onsampleselect: (item: SampleStructureItem) => void;
         onwavedataselect: (item: WaveDataItem) => void;
+        onplaysamplebank?: (item: SampleStructureItem) => void;
+        onplaysample?: (item: SampleStructureItem) => void;
+        onplaywavedata?: (item: WaveDataItem) => void;
+        onstop?: () => void;
         onimportaudio?: () => void;
+        playingSampleBankId?: string;
+        playingObjectId?: string | null;
+        preparingObjectId?: string | null;
     }
 
     let {
@@ -40,7 +48,14 @@
         onsamplebankselect,
         onsampleselect,
         onwavedataselect,
+        onplaysamplebank = () => undefined,
+        onplaysample = () => undefined,
+        onplaywavedata = () => undefined,
+        onstop = () => undefined,
         onimportaudio = () => undefined,
+        playingSampleBankId = '',
+        playingObjectId = null,
+        preparingObjectId = null,
     }: Props = $props();
 
     function matches(name: string, query: string): boolean {
@@ -63,26 +78,40 @@
     {#if view === 'sample-banks'}
         <section class="contained-lane">
             <CollectionToolbar
-                title="Sample Banks (SBAC)"
+                title="Sample Banks"
                 count={sampleBanks.length}
                 query={queries.primary}
-                placeholder="Search Sample Banks (SBAC)"
                 onquerychange={(value) => onquerychange('primary', value)}
             />
             <div class="contained-list">
                 {#each filteredBanks as item (item.id)}
-                    <button
-                        type="button"
-                        class:active={activeSampleBankId === item.objectId}
-                        aria-pressed={activeSampleBankId === item.objectId}
-                        onclick={() => onsamplebankselect(item)}
-                    >
-                        <span>
+                    <div class="contained-row" class:active={activeSampleBankId === item.objectId}>
+                        <button
+                            class="contained-identity"
+                            type="button"
+                            aria-label={`Inspect ${item.name}`}
+                            aria-pressed={activeSampleBankId === item.objectId}
+                            onclick={() => onsamplebankselect(item)}
+                        >
                             <strong>{item.name}</strong>
                             <small>{item.memberCount ?? 0} {(item.memberCount ?? 0) === 1 ? 'Sample' : 'Samples'}</small
                             >
-                        </span>
-                    </button>
+                        </button>
+                        <button
+                            class="contained-playback icon-button"
+                            type="button"
+                            aria-label={playingSampleBankId === item.objectId
+                                ? `Stop ${item.name}`
+                                : `Play ${item.name}`}
+                            title={playingSampleBankId === item.objectId ? 'Stop' : 'Play'}
+                            onclick={() => {
+                                if (playingSampleBankId === item.objectId) onstop();
+                                else onplaysamplebank(item);
+                            }}
+                        >
+                            <Icon name={playingSampleBankId === item.objectId ? 'stop' : 'play'} size={13} />
+                        </button>
+                    </div>
                 {:else}
                     <p class="empty-copy">No matching Sample Banks</p>
                 {/each}
@@ -92,27 +121,44 @@
 
     <section class="contained-lane">
         <CollectionToolbar
-            title="Samples (SBNK)"
+            title="Samples"
             count={samples.length}
             query={sampleQuery}
-            placeholder="Search Samples"
             onquerychange={(value) => onquerychange(view === 'sample-banks' ? 'secondary' : 'primary', value)}
             actionLabel={view === 'samples' ? 'Import audio' : undefined}
             onaction={onimportaudio}
         />
         <div class="contained-list">
             {#each filteredSamples as item (item.id)}
-                <button
-                    type="button"
-                    class:active={activeSampleId === item.objectId}
-                    aria-pressed={activeSampleId === item.objectId}
-                    onclick={() => onsampleselect(item)}
-                >
-                    <span>
+                <div class="contained-row" class:active={activeSampleId === item.objectId}>
+                    <button
+                        class="contained-identity"
+                        type="button"
+                        aria-label={`Inspect ${item.name}`}
+                        aria-pressed={activeSampleId === item.objectId}
+                        onclick={() => onsampleselect(item)}
+                    >
                         <strong>{item.name}</strong>
                         {#if view === 'samples'}<small>{item.membershipLabel ?? 'Standalone'}</small>{/if}
-                    </span>
-                </button>
+                    </button>
+                    <button
+                        class="contained-playback icon-button"
+                        type="button"
+                        aria-label={playingObjectId === item.objectId ? `Stop ${item.name}` : `Play ${item.name}`}
+                        title={preparingObjectId === item.objectId
+                            ? 'Preparing audio'
+                            : playingObjectId === item.objectId
+                              ? 'Stop'
+                              : 'Play'}
+                        disabled={preparingObjectId === item.objectId}
+                        onclick={() => {
+                            if (playingObjectId === item.objectId) onstop();
+                            else onplaysample(item);
+                        }}
+                    >
+                        <Icon name={playingObjectId === item.objectId ? 'stop' : 'play'} size={13} />
+                    </button>
+                </div>
             {:else}
                 <p class="empty-copy">
                     {view === 'sample-banks' && !activeSampleBankId
@@ -125,22 +171,41 @@
 
     <section class="contained-lane">
         <CollectionToolbar
-            title="Wave Data (SMPL)"
+            title="Wave Data"
             count={waveData.length}
             query={waveDataQuery}
-            placeholder="Search Wave Data"
             onquerychange={(value) => onquerychange(view === 'sample-banks' ? 'tertiary' : 'secondary', value)}
         />
         <div class="contained-list">
             {#each filteredWaveData as item (item.id)}
-                <button
-                    type="button"
-                    class:active={activeWaveDataId === item.objectKey}
-                    aria-pressed={activeWaveDataId === item.objectKey}
-                    onclick={() => onwavedataselect(item)}
-                >
-                    <span><strong>{item.name}</strong><small>{item.note} · {item.duration}</small></span>
-                </button>
+                <div class="contained-row" class:active={activeWaveDataId === item.objectKey}>
+                    <button
+                        class="contained-identity"
+                        type="button"
+                        aria-label={`Inspect ${item.name}`}
+                        aria-pressed={activeWaveDataId === item.objectKey}
+                        onclick={() => onwavedataselect(item)}
+                    >
+                        <strong>{item.name}</strong><small>{item.note} · {item.duration}</small>
+                    </button>
+                    <button
+                        class="contained-playback icon-button"
+                        type="button"
+                        aria-label={playingObjectId === item.objectKey ? `Stop ${item.name}` : `Play ${item.name}`}
+                        title={preparingObjectId === item.objectKey
+                            ? 'Preparing audio'
+                            : playingObjectId === item.objectKey
+                              ? 'Stop'
+                              : 'Play'}
+                        disabled={preparingObjectId === item.objectKey}
+                        onclick={() => {
+                            if (playingObjectId === item.objectKey) onstop();
+                            else onplaywavedata(item);
+                        }}
+                    >
+                        <Icon name={playingObjectId === item.objectKey ? 'stop' : 'play'} size={13} />
+                    </button>
+                </div>
             {:else}
                 <p class="empty-copy">
                     {!activeSampleId ? 'Select a Sample to inspect its Wave Data' : 'No matching Wave Data'}

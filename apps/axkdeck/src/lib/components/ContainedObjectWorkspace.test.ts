@@ -85,14 +85,14 @@ describe('ContainedObjectWorkspace', () => {
             },
         });
 
-        expect(screen.getByRole('heading', { name: 'Sample Banks (SBAC)' })).toBeTruthy();
-        expect(screen.getByRole('heading', { name: 'Samples (SBNK)' })).toBeTruthy();
-        expect(screen.getByRole('heading', { name: 'Wave Data (SMPL)' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Sample Banks' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Samples' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Wave Data' })).toBeTruthy();
         expect(document.querySelectorAll('.contained-lane')).toHaveLength(3);
 
-        await fireEvent.click(screen.getByRole('button', { name: /B Strings/ }));
-        await fireEvent.click(screen.getByRole('button', { name: /^Violin C3$/ }));
-        await fireEvent.click(screen.getByRole('button', { name: /^Violin C3 L/ }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Inspect B Strings' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Inspect Violin C3' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Inspect Violin C3 L' }));
         expect(onsamplebankselect).toHaveBeenCalledWith(bank);
         expect(onsampleselect).toHaveBeenCalledWith(sample);
         expect(onwavedataselect).toHaveBeenCalledWith(waveData);
@@ -116,7 +116,7 @@ describe('ContainedObjectWorkspace', () => {
             },
         });
 
-        expect(screen.queryByRole('heading', { name: 'Sample Banks (SBAC)' })).toBeNull();
+        expect(screen.queryByRole('heading', { name: 'Sample Banks' })).toBeNull();
         expect(document.querySelectorAll('.contained-lane')).toHaveLength(2);
         expect(screen.getByText('Piano C3')).toBeTruthy();
         expect(screen.queryByText('Brass C3')).toBeNull();
@@ -128,5 +128,44 @@ describe('ContainedObjectWorkspace', () => {
         await fireEvent.input(searches[1]!, { target: { value: 'piano' } });
         expect(callbacks.onquerychange).toHaveBeenCalledWith('primary', 'brass');
         expect(callbacks.onquerychange).toHaveBeenCalledWith('secondary', 'piano');
+    });
+
+    it('places playback beside each playable row and exposes active stop states', async () => {
+        const bank = structure('SBAC', 'B Strings');
+        const sample = structure('SBNK', 'Violin C3');
+        const waveData = waveform('Violin C3 L');
+        const onplaysamplebank = vi.fn();
+        const onplaysample = vi.fn();
+        const onplaywavedata = vi.fn();
+        const onstop = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                view: 'sample-banks',
+                sampleBanks: [bank],
+                samples: [sample],
+                waveData: [waveData],
+                activeSampleBankId: bank.objectId,
+                activeSampleId: sample.objectId,
+                activeWaveDataId: waveData.objectKey,
+                queries: { primary: '', secondary: '', tertiary: '' },
+                onplaysamplebank,
+                onplaysample,
+                onplaywavedata,
+                onstop,
+                playingSampleBankId: bank.objectId,
+                playingObjectId: sample.objectId,
+            },
+        });
+
+        expect(document.querySelector('button button')).toBeNull();
+        await fireEvent.click(screen.getByRole('button', { name: 'Stop B Strings' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Stop Violin C3' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Play Violin C3 L' }));
+
+        expect(onstop).toHaveBeenCalledTimes(2);
+        expect(onplaysamplebank).not.toHaveBeenCalled();
+        expect(onplaysample).not.toHaveBeenCalled();
+        expect(onplaywavedata).toHaveBeenCalledWith(waveData);
     });
 });

@@ -105,7 +105,6 @@
                     title="Assignments"
                     count={selection.assignments.length}
                     query={assignmentQuery}
-                    placeholder="Search assignments"
                     onquerychange={onassignmentquerychange}
                 />
                 <div class="editor-body">
@@ -134,7 +133,7 @@
         </div>
     {:else if selection?.kind === 'sample'}
         <header class="editor-header">
-            <div class="editor-object-title"><span>Sample (SBNK)</span><strong>{selection.item.name}</strong></div>
+            <div class="editor-object-title"><span>Sample</span><strong>{selection.item.name}</strong></div>
             <div class="editor-tabs" role="tablist" aria-label="Sample editor">
                 {#each sampleTabs as tab (tab.id)}
                     <button

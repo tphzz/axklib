@@ -272,9 +272,9 @@
         </header>
         <div class="audio-import-body">
             <p class="audio-import-summary">
-                Each file creates one standalone Sample (SBNK) and {rows.some((row) => row.inspection?.channels === 2)
+                Each file creates one standalone Sample and {rows.some((row) => row.inspection?.channels === 2)
                     ? 'mono or stereo'
-                    : 'mono'} Wave Data (SMPL). Imported wave data uses the proven full-waveform forward loop.
+                    : 'mono'} Wave Data. Imported wave data uses the proven full-waveform forward loop.
             </p>
             <div class="audio-import-rows">
                 <table class="audio-import-table">

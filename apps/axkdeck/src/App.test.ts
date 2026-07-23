@@ -118,6 +118,15 @@ describe('App panel layout', () => {
         expect(screen.queryByText('Sample pool')).toBeNull();
     });
 
+    it('keeps autoplay session-local and disabled until the user enables it', async () => {
+        render(App);
+
+        const autoplay = screen.getByRole('checkbox', { name: 'Autoplay' }) as HTMLInputElement;
+        expect(autoplay.checked).toBe(false);
+        await fireEvent.click(autoplay);
+        expect(autoplay.checked).toBe(true);
+    });
+
     it('uses contained-object lanes above the editor for SBAC and SBNK views', async () => {
         const { container } = render(App);
 

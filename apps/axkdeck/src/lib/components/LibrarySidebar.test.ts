@@ -34,6 +34,7 @@ describe('LibrarySidebar', () => {
 
         expect(screen.getByRole('button', { name: 'PARTITION 1 [Partition 0]' })).toBeTruthy();
         expect(screen.getByRole('button', { name: 'drumloops [Volume]' })).toBeTruthy();
+        expect(screen.getByRole('searchbox', { name: 'Search volumes' }).getAttribute('placeholder')).toBe('Search');
     });
 
     it('offers partition rename independently from volume mutations', async () => {

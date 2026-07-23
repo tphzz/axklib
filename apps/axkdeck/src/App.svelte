@@ -16,7 +16,11 @@
     import { AuditionController, type AuditionState } from './lib/audio/auditionController';
     import { inspectorSelectionStopsPlayback } from './lib/audio/playbackSelection';
     import { createTransport } from './lib/createTransport';
-    import { distinctWaveDataForSample, linkedWaveDataForSample } from './lib/sampleRelationships';
+    import {
+        distinctWaveDataForSample,
+        linkedWaveDataForSample,
+        orderedSamplesForBank,
+    } from './lib/sampleRelationships';
     import {
         configureRemoteServer,
         remoteServerSettings,
@@ -154,6 +158,10 @@
     let activeVolumeId = $state('');
     let volumeLoadGeneration = 0;
     let auditionState = $state<AuditionState>({ objectId: null, status: 'idle', playheadFrame: 0 });
+    let autoplay = $state(false);
+    let playingSampleBankId = $state('');
+    let sampleBankPreviewMemberId = $state('');
+    let sampleBankPlaybackGeneration = 0;
     const previewQueue: { item: WaveDataItem; generation: number }[] = [];
     const previewPending = new Set<string>();
     const previewFailed = new Set<string>();
@@ -163,6 +171,14 @@
     let stopInterfaceScaleSubscription: (() => void) | undefined;
     const auditionController = new AuditionController(transport, (state) => {
         auditionState = state;
+        if (
+            state.status === 'playing' &&
+            state.objectId &&
+            playingSampleBankId &&
+            membersForBank(playingSampleBankId).some((member) => member.objectId === state.objectId)
+        ) {
+            sampleBankPreviewMemberId = state.objectId;
+        }
         if (state.status === 'failed' && state.error) sourceStatus = state.error;
     });
 
@@ -333,7 +349,7 @@
                 if (update.progress?.label) sourceStatus = update.progress.label;
             });
             if (completed.status !== 'completed') throw new Error(completed.error ?? 'Audio import did not complete');
-            workspaceView = 'samples';
+            selectWorkspaceView('samples');
             await openSource(target);
             const inserted = samples.find((sample) => sample.name === firstName);
             if (inserted) selectSample(inserted);
@@ -367,7 +383,22 @@
         const program = programs.find((item) => item.objectId === objectId);
         if (program) return { kind: 'program', program, assignments: assignmentsForProgram(program.objectId) };
         const bank = sampleBanks.find((item) => item.objectId === objectId);
-        if (bank) return { kind: 'sample-bank', item: bank, members: membersForBank(bank.objectId) };
+        if (bank) {
+            const members = membersForBank(bank.objectId);
+            const displayedMemberId = members.some((member) => member.objectId === sampleBankPreviewMemberId)
+                ? sampleBankPreviewMemberId
+                : (members[0]?.objectId ?? '');
+            return {
+                kind: 'sample-bank',
+                item: bank,
+                members,
+                memberPreviews: members.map((item) => ({
+                    item,
+                    waveData: linkedWaveDataForSample(item.objectId, relationships, waveData),
+                })),
+                displayedMemberId,
+            };
+        }
         const sample = samples.find((item) => item.objectId === objectId);
         if (sample) {
             return {
@@ -382,8 +413,15 @@
     }
 
     $effect(() => {
-        if (inspectorSelection?.kind !== 'sample') return;
-        for (const member of inspectorSelection.waveData) requestWaveformPreview(member.waveData);
+        const previews =
+            inspectorSelection?.kind === 'sample'
+                ? [inspectorSelection.waveData]
+                : inspectorSelection?.kind === 'sample-bank'
+                  ? inspectorSelection.memberPreviews.map((member) => member.waveData)
+                  : [];
+        for (const preview of previews) {
+            for (const member of preview) requestWaveformPreview(member.waveData);
+        }
     });
 
     $effect(() => {
@@ -391,9 +429,11 @@
         const objectId =
             inspectorSelection?.kind === 'sample'
                 ? inspectorSelection.item.objectId
-                : inspectorSelection?.kind === 'wave-data'
-                  ? inspectorSelection.waveData.objectKey
-                  : null;
+                : inspectorSelection?.kind === 'sample-bank'
+                  ? inspectorSelection.displayedMemberId
+                  : inspectorSelection?.kind === 'wave-data'
+                    ? inspectorSelection.waveData.objectKey
+                    : null;
         if (sessionId !== null && objectId) void auditionController.prefetch(sessionId, objectId);
     });
 
@@ -407,13 +447,7 @@
     }
 
     function membersForBank(bankId: string): SampleStructureItem[] {
-        const ids = new Set(
-            relationships
-                .filter((item) => item.sourceObjectId === bankId && item.relationshipType === 'SBAC_SLOT_TO_SBNK')
-                .map((item) => item.targetObjectId)
-                .filter((id): id is string => Boolean(id)),
-        );
-        return [...ids].map((id) => samples.find((item) => item.objectId === id)).filter((item) => item !== undefined);
+        return orderedSamplesForBank(bankId, relationships, samples);
     }
 
     function banksForSample(sampleId: string): SampleStructureItem[] {
@@ -528,7 +562,7 @@
 
     async function loadVolume(volumeId: string): Promise<void> {
         if (openSessionId === null) return;
-        void auditionController.stop();
+        void stopPlaybackNow();
         resetPreviewQueue();
         activeVolumeId = volumeId;
         const sessionId = openSessionId;
@@ -599,6 +633,7 @@
             sourceObjectCount = objects.length;
             selectedProgramId = '';
             selectedBankId = '';
+            sampleBankPreviewMemberId = '';
             selectedBankMemberId = '';
             selectedSampleId = '';
             selectedBankWaveDataId = '';
@@ -615,7 +650,7 @@
     }
 
     function clearVolume(): void {
-        void auditionController.stop();
+        void stopPlaybackNow();
         resetPreviewQueue();
         ++volumeLoadGeneration;
         programs = [];
@@ -627,6 +662,7 @@
         inspectorObjectId = '';
         selectedProgramId = '';
         selectedBankId = '';
+        sampleBankPreviewMemberId = '';
         selectedBankMemberId = '';
         selectedSampleId = '';
         selectedBankWaveDataId = '';
@@ -745,26 +781,36 @@
         void inspectObject(program.objectId);
     }
 
-    function selectBank(item: SampleStructureItem): void {
+    async function selectBank(item: SampleStructureItem, playAfterSelection = autoplay): Promise<void> {
         selectedBankId = item.objectId;
+        resetSampleBankPreview(item.objectId);
         selectedBankMemberId = '';
         selectedBankWaveDataId = '';
         setEditorObject(item.objectId);
-        void inspectObject(item.objectId);
+        await inspectObject(item.objectId);
+        if (playAfterSelection && workspaceView === 'sample-banks' && selectedBankId === item.objectId) {
+            playSampleBank(item);
+        }
     }
 
-    function selectSample(item: SampleStructureItem): void {
+    async function selectSample(item: SampleStructureItem, playAfterSelection = autoplay): Promise<void> {
         selectedSampleId = item.objectId;
         selectedSampleWaveDataId = '';
         setEditorObject(item.objectId);
-        void inspectObject(item.objectId);
+        await inspectObject(item.objectId);
+        if (playAfterSelection && workspaceView === 'samples' && selectedSampleId === item.objectId) {
+            playObject(item.objectId);
+        }
     }
 
-    function selectBankMember(item: SampleStructureItem): void {
+    async function selectBankMember(item: SampleStructureItem, playAfterSelection = autoplay): Promise<void> {
         selectedBankMemberId = item.objectId;
         selectedBankWaveDataId = '';
         setEditorObject(item.objectId);
-        void inspectObject(item.objectId);
+        await inspectObject(item.objectId);
+        if (playAfterSelection && workspaceView === 'sample-banks' && selectedBankMemberId === item.objectId) {
+            playObject(item.objectId);
+        }
     }
 
     function setEditorObject(objectId: string): void {
@@ -777,19 +823,25 @@
     }
 
     function inspectObject(objectId: string): Promise<void> {
-        const stopPlayback = inspectorSelectionStopsPlayback(auditionState.objectId, objectId);
+        const stopPlayback =
+            Boolean(playingSampleBankId) || inspectorSelectionStopsPlayback(auditionState.objectId, objectId);
         inspectorObjectId = objectId;
         inspectorOpen = true;
-        return stopPlayback ? auditionController.stop() : Promise.resolve();
+        return stopPlayback ? stopPlaybackNow() : Promise.resolve();
     }
 
-    function selectWaveData(item: WaveDataItem): Promise<void> {
+    async function selectWaveData(item: WaveDataItem, playAfterSelection = autoplay): Promise<void> {
         if (workspaceView === 'sample-banks') selectedBankWaveDataId = item.objectKey;
         else if (workspaceView === 'samples') selectedSampleWaveDataId = item.objectKey;
         else if (workspaceView === 'wave-data') selectedWaveDataId = item.objectKey;
         setEditorObject(item.objectKey);
         requestWaveformPreview(item);
-        return inspectObject(item.objectKey);
+        await inspectObject(item.objectKey);
+        const selectionStillActive =
+            (workspaceView === 'sample-banks' && selectedBankWaveDataId === item.objectKey) ||
+            (workspaceView === 'samples' && selectedSampleWaveDataId === item.objectKey) ||
+            (workspaceView === 'wave-data' && selectedWaveDataId === item.objectKey);
+        if (playAfterSelection && selectionStillActive) playObject(item.objectKey);
     }
 
     function resetPreviewQueue(): void {
@@ -849,16 +901,67 @@
         }
     }
 
-    function playWaveData(item: WaveDataItem): void {
-        if (workspaceView === 'wave-data') selectedWaveDataId = item.objectKey;
-        requestWaveformPreview(item);
-        inspectorObjectId = item.objectKey;
-        inspectorOpen = true;
+    async function playWaveData(item: WaveDataItem): Promise<void> {
+        await selectWaveData(item, false);
+        playObject(item.objectKey);
+    }
+
+    async function playSample(item: SampleStructureItem): Promise<void> {
+        await (workspaceView === 'sample-banks' ? selectBankMember(item, false) : selectSample(item, false));
+        playObject(item.objectId);
+    }
+
+    async function playSampleBank(item: SampleStructureItem): Promise<void> {
+        if (openSessionId === null) return;
+        if (selectedBankId !== item.objectId) await selectBank(item, false);
+        if (openSessionId === null) return;
+        const memberIds = membersForBank(item.objectId).map((member) => member.objectId);
+        if (memberIds.length === 0) {
+            sampleBankPreviewMemberId = '';
+            sourceStatus = 'This Sample Bank has no playable Samples';
+            return;
+        }
+        const generation = ++sampleBankPlaybackGeneration;
+        playingSampleBankId = item.objectId;
+        sampleBankPreviewMemberId = memberIds[0] ?? '';
+        auditionController.playSequence(openSessionId, memberIds, ({ playedCount }) => {
+            if (generation !== sampleBankPlaybackGeneration) return;
+            playingSampleBankId = '';
+            resetSampleBankPreview(item.objectId);
+            if (playedCount === 0) sourceStatus = 'This Sample Bank has no playable Samples';
+        });
+    }
+
+    function resetSampleBankPreview(bankId = selectedBankId): void {
+        sampleBankPreviewMemberId = bankId ? (membersForBank(bankId)[0]?.objectId ?? '') : '';
+    }
+
+    function cancelSampleBankPlayback(): void {
+        const bankId = playingSampleBankId || selectedBankId;
+        sampleBankPlaybackGeneration += 1;
+        playingSampleBankId = '';
+        resetSampleBankPreview(bankId);
+    }
+
+    function stopPlaybackNow(): Promise<void> {
+        cancelSampleBankPlayback();
+        return auditionController.stop();
+    }
+
+    function selectWorkspaceView(view: WorkspaceView): void {
+        if (workspaceView === view) return;
+        if (playingSampleBankId) void stopPlaybackNow();
+        workspaceView = view;
+    }
+
+    async function playContainedWaveData(item: WaveDataItem): Promise<void> {
+        await selectWaveData(item, false);
         playObject(item.objectKey);
     }
 
     function playObject(objectId: string): void {
         if (openSessionId === null) return;
+        cancelSampleBankPlayback();
         void auditionController.play(openSessionId, objectId);
     }
 
@@ -1065,11 +1168,19 @@
         </div>
         <nav class="workspace-tabs" aria-label="Workspace views">
             {#each workspaceTabs as tab (tab.id)}
-                <button class:active={workspaceView === tab.id} type="button" onclick={() => (workspaceView = tab.id)}>
+                <button
+                    class:active={workspaceView === tab.id}
+                    type="button"
+                    onclick={() => selectWorkspaceView(tab.id)}
+                >
                     <Icon name={tab.icon} size={16} /><span>{tab.label}</span>
                 </button>
             {/each}
         </nav>
+        <label class="autoplay-control">
+            <input bind:checked={autoplay} type="checkbox" />
+            <span>Autoplay</span>
+        </label>
         <button
             class="source-open"
             type="button"
@@ -1157,7 +1268,14 @@
                 onsamplebankselect={selectBank}
                 onsampleselect={workspaceView === 'sample-banks' ? selectBankMember : selectSample}
                 onwavedataselect={selectWaveData}
+                onplaysamplebank={playSampleBank}
+                onplaysample={playSample}
+                onplaywavedata={playContainedWaveData}
+                onstop={() => void stopPlaybackNow()}
                 onimportaudio={chooseAudioFiles}
+                {playingSampleBankId}
+                playingObjectId={auditionState.status === 'playing' ? auditionState.objectId : null}
+                preparingObjectId={auditionState.status === 'preparing' ? auditionState.objectId : null}
             />
         {:else}
             <ObjectWorkspace
@@ -1172,7 +1290,7 @@
                 onpreviewrequest={requestWaveformPreview}
                 onplay={playWaveData}
                 onprefetch={(item) => prefetchObject(item.objectKey)}
-                onstop={() => void auditionController.stop()}
+                onstop={() => void stopPlaybackNow()}
                 onseek={seekWaveData}
                 playingObjectId={auditionState.status === 'playing' ? auditionState.objectId : null}
                 preparingObjectId={auditionState.status === 'preparing' ? auditionState.objectId : null}
@@ -1210,10 +1328,7 @@
     {#if inspectorOpen}
         <ObjectInspector
             selection={inspectorSelection}
-            onplay={playObject}
-            onstop={() => void auditionController.stop()}
             playingObjectId={auditionState.status === 'playing' ? auditionState.objectId : null}
-            preparingObjectId={auditionState.status === 'preparing' ? auditionState.objectId : null}
             playheadFrame={auditionState.playheadFrame}
         />
     {/if}

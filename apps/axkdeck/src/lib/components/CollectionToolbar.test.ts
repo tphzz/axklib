@@ -7,10 +7,9 @@ describe('CollectionToolbar', () => {
     it('keeps search as the rightmost collection action', () => {
         render(CollectionToolbar, {
             props: {
-                title: 'Samples (SBNK)',
+                title: 'Samples',
                 count: 1,
                 query: '',
-                placeholder: 'Search Samples',
                 onquerychange: vi.fn(),
                 actionLabel: 'Import audio',
                 onaction: vi.fn(),
@@ -18,6 +17,7 @@ describe('CollectionToolbar', () => {
         });
 
         const search = screen.getByRole('searchbox', { name: 'Search Samples' });
+        expect(search.getAttribute('placeholder')).toBe('Search');
         const actions = search.closest('.collection-actions');
         expect(actions?.lastElementChild).toBe(search.closest('label'));
     });

@@ -1,26 +1,16 @@
 <script lang="ts">
     import { formatStoredSize } from '../formatBytes';
     import type { InspectorSelection } from '../types';
-    import Icon from './Icon.svelte';
+    import SampleWaveformStack from './SampleWaveformStack.svelte';
     import Waveform from './Waveform.svelte';
 
     interface Props {
         selection: InspectorSelection;
-        onplay?: (objectId: string) => void;
-        onstop?: () => void;
         playingObjectId?: string | null;
-        preparingObjectId?: string | null;
         playheadFrame?: number;
     }
 
-    let {
-        selection,
-        onplay = () => undefined,
-        onstop = () => undefined,
-        playingObjectId = null,
-        preparingObjectId = null,
-        playheadFrame = 0,
-    }: Props = $props();
+    let { selection, playingObjectId = null, playheadFrame = 0 }: Props = $props();
     const heading = $derived(
         selection?.kind === 'program'
             ? 'Program details'
@@ -68,9 +58,27 @@
             </dl>
         </div>
     {:else if selection?.kind === 'sample-bank'}
+        {@const displayedMember =
+            selection.memberPreviews.find((member) => member.item.objectId === selection.displayedMemberId) ??
+            selection.memberPreviews[0]}
+        {@const displayedMemberIndex = displayedMember ? selection.memberPreviews.indexOf(displayedMember) : -1}
         <div class="inspector-content">
+            {#if displayedMember}
+                <div class="inspector-bank-sample-heading">
+                    <span>Sample {displayedMemberIndex + 1} of {selection.memberPreviews.length}</span>
+                    <strong title={displayedMember.item.name}>{displayedMember.item.name}</strong>
+                </div>
+                <SampleWaveformStack
+                    waveData={displayedMember.waveData}
+                    sampleObjectId={displayedMember.item.objectId}
+                    {playingObjectId}
+                    {playheadFrame}
+                />
+            {:else}
+                <div class="inspector-wave-missing">No Samples</div>
+            {/if}
             <div class="inspector-title">
-                <span>Sample Bank (SBAC)</span>
+                <span>Sample Bank</span>
                 <h3>{selection.item.name}</h3>
             </div>
             <dl class="metadata-list">
@@ -93,70 +101,16 @@
             </dl>
         </div>
     {:else if selection?.kind === 'sample'}
-        {@const timelineFrameCount = Math.max(
-            1,
-            ...selection.waveData.map((member) => member.waveData.object.frameCount),
-        )}
         <div class="inspector-content">
-            {#if selection.waveData.length > 0}
-                <div class="inspector-wave-stack">
-                    {#each selection.waveData as member}
-                        {@const laneLabel =
-                            selection.waveData.length === 1 ? 'Wave Data' : member.role === 'left' ? 'Left' : 'Right'}
-                        {@const laneAriaLabel =
-                            selection.waveData.length === 1
-                                ? `Wave Data ${member.waveData.name}`
-                                : `${laneLabel} Wave Data ${member.waveData.name}`}
-                        <div class="inspector-wave-lane" role="group" aria-label={laneAriaLabel}>
-                            <div class="inspector-wave-label">
-                                <span>{laneLabel}</span>
-                                <strong title={member.waveData.name}>{member.waveData.name}</strong>
-                            </div>
-                            <div class="inspector-wave-canvas">
-                                <Waveform
-                                    values={member.waveData.waveform}
-                                    sourceFrameCount={member.waveData.object.frameCount}
-                                    {timelineFrameCount}
-                                    playheadRatio={playingObjectId === selection.item.objectId
-                                        ? playheadFrame / timelineFrameCount
-                                        : 0}
-                                />
-                                {#if member.waveData.previewState === 'loading'}
-                                    <span class="inspector-wave-state">Loading waveform</span>
-                                {:else if member.waveData.previewState === 'failed'}
-                                    <span class="inspector-wave-state error">Waveform unavailable</span>
-                                {/if}
-                            </div>
-                        </div>
-                    {/each}
-                </div>
-            {:else}
-                <div class="inspector-wave-missing">No resolved Wave Data</div>
-            {/if}
-            <div class="inspector-title-row">
-                <div class="inspector-title">
-                    <span>Sample (SBNK)</span>
-                    <h3>{selection.item.name}</h3>
-                </div>
-                <button
-                    class="icon-button"
-                    type="button"
-                    aria-label={playingObjectId === selection.item.objectId
-                        ? `Stop ${selection.item.name}`
-                        : `Play ${selection.item.name}`}
-                    title={preparingObjectId === selection.item.objectId
-                        ? 'Preparing audio'
-                        : playingObjectId === selection.item.objectId
-                          ? 'Stop'
-                          : 'Play'}
-                    disabled={preparingObjectId === selection.item.objectId}
-                    onclick={() => {
-                        if (playingObjectId === selection.item.objectId) onstop();
-                        else onplay(selection.item.objectId);
-                    }}
-                >
-                    <Icon name={playingObjectId === selection.item.objectId ? 'stop' : 'play'} size={13} />
-                </button>
+            <SampleWaveformStack
+                waveData={selection.waveData}
+                sampleObjectId={selection.item.objectId}
+                {playingObjectId}
+                {playheadFrame}
+            />
+            <div class="inspector-title">
+                <span>Sample</span>
+                <h3>{selection.item.name}</h3>
             </div>
             <dl class="metadata-list">
                 <div>
@@ -191,28 +145,9 @@
                         : 0}
                 />
             </div>
-            <div class="inspector-title-row">
-                <div class="inspector-title">
-                    <span>Wave Data (SMPL)</span>
-                    <h3>{item.name}</h3>
-                </div>
-                <button
-                    class="icon-button"
-                    type="button"
-                    aria-label={playingObjectId === item.objectKey ? `Stop ${item.name}` : `Play ${item.name}`}
-                    title={preparingObjectId === item.objectKey
-                        ? 'Preparing audio'
-                        : playingObjectId === item.objectKey
-                          ? 'Stop'
-                          : 'Play'}
-                    disabled={preparingObjectId === item.objectKey}
-                    onclick={() => {
-                        if (playingObjectId === item.objectKey) onstop();
-                        else onplay(item.objectKey);
-                    }}
-                >
-                    <Icon name={playingObjectId === item.objectKey ? 'stop' : 'play'} size={13} />
-                </button>
+            <div class="inspector-title">
+                <span>Wave Data</span>
+                <h3>{item.name}</h3>
             </div>
             <dl class="metadata-list">
                 <div>

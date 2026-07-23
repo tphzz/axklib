@@ -69,7 +69,7 @@
 
     <label class="search-field mx-3 mb-2">
         <Icon name="search" size={15} />
-        <input bind:value={filter} type="search" placeholder="Filter volumes" aria-label="Filter volumes" />
+        <input bind:value={filter} type="search" placeholder="Search" aria-label="Search volumes" />
     </label>
 
     <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-4">

@@ -128,7 +128,13 @@ describe('ObjectEditor', () => {
         };
         render(ObjectEditor, {
             props: {
-                selection: { kind: 'sample-bank', item: bank, members: [] },
+                selection: {
+                    kind: 'sample-bank',
+                    item: bank,
+                    members: [],
+                    memberPreviews: [],
+                    displayedMemberId: '',
+                },
                 assignmentQuery: '',
                 onassignmentquerychange: vi.fn(),
                 onassignmentselect: vi.fn(),

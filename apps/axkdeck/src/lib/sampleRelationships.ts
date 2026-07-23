@@ -1,5 +1,5 @@
 import type { SamplerRelationship } from './transport';
-import type { LinkedWaveDataItem, WaveDataItem } from './types';
+import type { LinkedWaveDataItem, SampleStructureItem, WaveDataItem } from './types';
 
 const memberRelationships = [
     { relationshipType: 'SBNK_LEFT_MEMBER_TO_SMPL', role: 'left' },
@@ -47,4 +47,35 @@ export function distinctWaveDataForSample(
             seen.add(item.objectKey);
             return true;
         });
+}
+
+export function orderedSamplesForBank(
+    bankId: string,
+    relationships: readonly SamplerRelationship[],
+    samples: readonly SampleStructureItem[],
+): SampleStructureItem[] {
+    const samplesById = new Map(samples.map((item) => [item.objectId, item]));
+    const seen = new Set<string>();
+    return relationships
+        .map((relationship, responseIndex) => ({ relationship, responseIndex }))
+        .filter(
+            ({ relationship }) =>
+                relationship.sourceObjectId === bankId &&
+                relationship.relationshipType === 'SBAC_SLOT_TO_SBNK' &&
+                Boolean(relationship.targetObjectId),
+        )
+        .toSorted(
+            (left, right) =>
+                (left.relationship.assignmentIndex ?? Number.MAX_SAFE_INTEGER) -
+                    (right.relationship.assignmentIndex ?? Number.MAX_SAFE_INTEGER) ||
+                left.responseIndex - right.responseIndex,
+        )
+        .map(({ relationship }) => relationship.targetObjectId!)
+        .filter((objectId) => {
+            if (seen.has(objectId)) return false;
+            seen.add(objectId);
+            return true;
+        })
+        .map((objectId) => samplesById.get(objectId))
+        .filter((item) => item !== undefined);
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SamplerObject, SamplerRelationship } from './transport';
-import type { WaveDataItem } from './types';
-import { distinctWaveDataForSample, linkedWaveDataForSample } from './sampleRelationships';
+import type { SampleStructureItem, WaveDataItem } from './types';
+import { distinctWaveDataForSample, linkedWaveDataForSample, orderedSamplesForBank } from './sampleRelationships';
 
 function relationship(id: string, type: string, targetObjectId?: string): SamplerRelationship {
     return {
@@ -49,6 +49,16 @@ function waveData(id: string): WaveDataItem {
         waveform: [],
         previewState: 'idle',
     };
+}
+
+function sample(id: string): SampleStructureItem {
+    const value = {
+        ...waveData(id).object,
+        key: id,
+        name: id,
+        objectType: 'SBNK',
+    };
+    return { id, objectId: id, objectType: 'SBNK', object: value, name: id };
 }
 
 describe('linkedWaveDataForSample', () => {
@@ -115,5 +125,32 @@ describe('linkedWaveDataForSample', () => {
         );
 
         expect(result).toEqual([shared]);
+    });
+});
+
+describe('orderedSamplesForBank', () => {
+    it('uses assignment order, preserves unindexed response order, and removes duplicate members', () => {
+        const makeMember = (id: string, targetObjectId: string, assignmentIndex?: number): SamplerRelationship => ({
+            ...relationship(id, 'SBAC_SLOT_TO_SBNK', targetObjectId),
+            sourceObjectId: 'SBAC-1',
+            assignmentIndex,
+        });
+        const first = sample('SBNK-1');
+        const second = sample('SBNK-2');
+        const unindexed = sample('SBNK-3');
+
+        expect(
+            orderedSamplesForBank(
+                'SBAC-1',
+                [
+                    makeMember('unindexed', unindexed.objectId),
+                    makeMember('second', second.objectId, 2),
+                    makeMember('first', first.objectId, 1),
+                    makeMember('duplicate', first.objectId, 3),
+                    makeMember('missing', 'SBNK-MISSING', 4),
+                ],
+                [first, second, unindexed],
+            ),
+        ).toEqual([first, second, unindexed]);
     });
 });

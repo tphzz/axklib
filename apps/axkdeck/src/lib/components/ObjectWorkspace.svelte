@@ -81,7 +81,7 @@
         onseek(item, Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)));
     }
 
-    const title = $derived(view === 'programs' ? 'Programs' : 'Wave Data (SMPL)');
+    const title = $derived(view === 'programs' ? 'Programs' : 'Wave Data');
     const count = $derived(view === 'programs' ? programs.length : waveData.length);
     const normalizedQuery = $derived(query.trim().toLocaleLowerCase());
     const filteredPrograms = $derived(
@@ -96,7 +96,7 @@
 </script>
 
 <section class="collection-panel" aria-label={title}>
-    <CollectionToolbar {title} {count} {query} placeholder={`Search ${title}`} {onquerychange} />
+    <CollectionToolbar {title} {count} {query} {onquerychange} />
     <div
         class:object-grid={view !== 'wave-data'}
         class:wave-data-list={view === 'wave-data'}

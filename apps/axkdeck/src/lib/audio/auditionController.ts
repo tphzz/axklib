@@ -24,6 +24,11 @@ export interface AuditionDiagnosticEvent extends Record<string, unknown> {
     elapsedMs: number;
 }
 
+export interface AuditionSequenceResult {
+    playedCount: number;
+    skippedCount: number;
+}
+
 interface AuditionControllerOptions {
     cacheBudgetBytes?: number;
     maximumCacheEntries?: number;
@@ -34,6 +39,8 @@ interface PlaybackRun {
     objectId: string;
     startedAt: number;
     diagnosticsEnabled: boolean;
+    oneShot: boolean;
+    onfinish?: (played: boolean) => void;
 }
 
 interface CachedAudition {
@@ -58,6 +65,7 @@ interface ActivePlayback {
     gain: GainNode;
     startFrame: number;
     startTime: number;
+    timelineDescriptor: AuditionDescriptor;
     animationFrame?: number;
 }
 
@@ -128,6 +136,7 @@ export class AuditionController {
     private activeRequestKey?: string;
     private cacheBytes = 0;
     private generation = 0;
+    private sequenceGeneration = 0;
     private run?: PlaybackRun;
 
     constructor(
@@ -164,6 +173,61 @@ export class AuditionController {
     }
 
     async play(sessionId: number, objectId: string): Promise<void> {
+        this.sequenceGeneration += 1;
+        await this.playOne(sessionId, objectId, false);
+    }
+
+    playSequence(
+        sessionId: number,
+        objectIds: readonly string[],
+        oncomplete: (result: AuditionSequenceResult) => void = () => undefined,
+    ): void {
+        const sequenceGeneration = ++this.sequenceGeneration;
+        if (objectIds.length === 0) {
+            this.generation += 1;
+            this.cancelActiveRequest();
+            this.releaseActive('replaced');
+            this.run = undefined;
+        }
+        this.playSequenceItem(sessionId, objectIds, sequenceGeneration, 0, 0, 0, oncomplete);
+    }
+
+    private playSequenceItem(
+        sessionId: number,
+        objectIds: readonly string[],
+        sequenceGeneration: number,
+        index: number,
+        playedCount: number,
+        skippedCount: number,
+        oncomplete: (result: AuditionSequenceResult) => void,
+    ): void {
+        if (sequenceGeneration !== this.sequenceGeneration) return;
+        const objectId = objectIds[index];
+        if (!objectId) {
+            this.run = undefined;
+            this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
+            oncomplete({ playedCount, skippedCount });
+            return;
+        }
+        void this.playOne(sessionId, objectId, true, (played) => {
+            this.playSequenceItem(
+                sessionId,
+                objectIds,
+                sequenceGeneration,
+                index + 1,
+                playedCount + (played ? 1 : 0),
+                skippedCount + (played ? 0 : 1),
+                oncomplete,
+            );
+        });
+    }
+
+    private async playOne(
+        sessionId: number,
+        objectId: string,
+        oneShot: boolean,
+        onfinish?: (played: boolean) => void,
+    ): Promise<void> {
         const generation = ++this.generation;
         const requestKey = this.cacheKey(sessionId, objectId);
         this.cancelActiveRequest(requestKey);
@@ -173,6 +237,8 @@ export class AuditionController {
             objectId,
             startedAt: monotonicNow(),
             diagnosticsEnabled: this.detailedDiagnosticsEnabled(),
+            oneShot,
+            onfinish,
         };
         this.run = run;
         this.activeRequestKey = requestKey;
@@ -208,6 +274,7 @@ export class AuditionController {
     }
 
     async stop(): Promise<void> {
+        this.sequenceGeneration += 1;
         this.generation += 1;
         this.cancelActiveRequest();
         const run = this.run;
@@ -429,7 +496,7 @@ export class AuditionController {
         const source = context.createBufferSource();
         const gain = context.createGain();
         source.buffer = entry.buffer;
-        if (isForwardLoop(entry.descriptor)) {
+        if (!run.oneShot && isForwardLoop(entry.descriptor)) {
             source.loop = true;
             source.loopStart = entry.descriptor.loopStartFrame / entry.descriptor.sampleRate;
             source.loopEnd =
@@ -442,7 +509,18 @@ export class AuditionController {
         gain.gain.setValueAtTime(0, context.currentTime);
         gain.gain.setValueAtTime(0, startTime);
         gain.gain.linearRampToValueAtTime(1, startTime + fadeSeconds);
-        const active: ActivePlayback = { entry, source, gain, startFrame: sourceFrame, startTime };
+        const timelineDescriptor =
+            run.oneShot && isForwardLoop(entry.descriptor)
+                ? { ...entry.descriptor, loopMode: 0, loopStartFrame: 0, loopLengthFrames: 0 }
+                : entry.descriptor;
+        const active: ActivePlayback = {
+            entry,
+            source,
+            gain,
+            startFrame: sourceFrame,
+            startTime,
+            timelineDescriptor,
+        };
         this.active = active;
         source.onended = () => this.handleEnded(active, run);
         source.start(startTime, playbackOffsetSeconds(entry.descriptor, sourceFrame));
@@ -470,7 +548,7 @@ export class AuditionController {
         const tick = () => {
             if (this.active !== active) return;
             const elapsed = Math.max(0, this.audibleContextTime() - active.startTime);
-            const frame = playbackFrameAtTime(active.entry.descriptor, active.startFrame, elapsed);
+            const frame = playbackFrameAtTime(active.timelineDescriptor, active.startFrame, elapsed);
             if (frame !== null) {
                 this.update({ objectId: active.entry.objectId, status: 'playing', playheadFrame: frame });
             }
@@ -533,6 +611,7 @@ export class AuditionController {
         this.emit(run, 'playback_ended');
         this.run = undefined;
         this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
+        run.onfinish?.(true);
     }
 
     private releaseOutputGraph(): void {
@@ -603,6 +682,11 @@ export class AuditionController {
         const message = userFacingMessage(error);
         this.emit(run, 'playback_failed', { message }, 'error');
         this.run = undefined;
+        if (run.onfinish) {
+            this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
+            run.onfinish(false);
+            return;
+        }
         this.update({ objectId, status: 'failed', playheadFrame: 0, error: message });
     }
 

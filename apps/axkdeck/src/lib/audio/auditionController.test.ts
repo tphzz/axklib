@@ -351,6 +351,70 @@ describe('AuditionController', () => {
         await controller.dispose();
     });
 
+    it('plays Sample Bank members once in order without repeating forward loops', async () => {
+        installAudio();
+        const transport = transportFor(
+            descriptor({
+                frameCount: 100,
+                sampleRate: 100,
+                wavSizeBytes: 244,
+                loopMode: 1,
+                loopStartFrame: 10,
+                loopLengthFrames: 20,
+            }),
+        );
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
+        expect(MockAudioBufferSourceNode.instances[0]?.loop).toBe(false);
+
+        MockAudioBufferSourceNode.instances[0]?.onended?.();
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+        expect(MockAudioBufferSourceNode.instances[1]?.loop).toBe(false);
+
+        MockAudioBufferSourceNode.instances[1]?.onended?.();
+        expect(completed).toHaveBeenCalledWith({ playedCount: 2, skippedCount: 0 });
+        expect(transport.prepareAudition).toHaveBeenNthCalledWith(1, 1, 'SBNK-1');
+        expect(transport.prepareAudition).toHaveBeenNthCalledWith(2, 1, 'SBNK-2');
+        expect(MockAudioContext.instances).toHaveLength(1);
+        await controller.dispose();
+    });
+
+    it('skips unplayable Sample Bank members and continues the sequence', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        vi.mocked(transport.prepareAudition).mockRejectedValueOnce(new Error('Unsupported Sample'));
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-BROKEN', 'SBNK-OK'], completed);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
+        MockAudioBufferSourceNode.instances[0]?.onended?.();
+
+        expect(completed).toHaveBeenCalledWith({ playedCount: 1, skippedCount: 1 });
+        expect(transport.prepareAudition).toHaveBeenCalledTimes(2);
+        await controller.dispose();
+    });
+
+    it('does not advance a Sample Bank sequence after explicit stop', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
+        await controller.stop();
+        MockAudioBufferSourceNode.instances[0]?.onended?.();
+        await Promise.resolve();
+
+        expect(transport.prepareAudition).toHaveBeenCalledTimes(1);
+        expect(completed).not.toHaveBeenCalled();
+        await controller.dispose();
+    });
+
     it('reverses reverse-mode buffers once and plays them from the beginning', async () => {
         installAudio();
         const buffer = new MockAudioBuffer(3, 1, 3, [1, 2, 3]);

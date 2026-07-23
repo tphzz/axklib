@@ -5,13 +5,12 @@
         title: string;
         count: number;
         query: string;
-        placeholder: string;
         onquerychange: (value: string) => void;
         actionLabel?: string;
         onaction?: () => void;
     }
 
-    let { title, count, query, placeholder, onquerychange, actionLabel, onaction = () => undefined }: Props = $props();
+    let { title, count, query, onquerychange, actionLabel, onaction = () => undefined }: Props = $props();
 </script>
 
 <header class="collection-toolbar">
@@ -31,8 +30,8 @@
                 value={query}
                 oninput={(event) => onquerychange(event.currentTarget.value)}
                 type="search"
-                {placeholder}
-                aria-label={placeholder}
+                placeholder="Search"
+                aria-label={`Search ${title}`}
             />
         </label>
     </div>

@@ -55,6 +55,11 @@ export interface LinkedWaveDataItem {
     waveData: WaveDataItem;
 }
 
+export interface SampleWaveformPreview {
+    item: SampleStructureItem;
+    waveData: LinkedWaveDataItem[];
+}
+
 export interface WaveformBin {
     minimum: number;
     maximum: number;
@@ -69,7 +74,13 @@ export interface ProgramAssignmentRow {
 
 export type InspectorSelection =
     | { kind: 'program'; program: Program; assignments: ProgramAssignmentRow[] }
-    | { kind: 'sample-bank'; item: SampleStructureItem; members: SampleStructureItem[] }
+    | {
+          kind: 'sample-bank';
+          item: SampleStructureItem;
+          members: SampleStructureItem[];
+          memberPreviews: SampleWaveformPreview[];
+          displayedMemberId: string;
+      }
     | {
           kind: 'sample';
           item: SampleStructureItem;

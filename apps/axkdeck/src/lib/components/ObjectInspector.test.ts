@@ -1,6 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import { vi } from 'vitest';
 import type { SamplerObject } from '../transport';
 import type { LinkedWaveDataItem, WaveDataItem } from '../types';
 import ObjectInspector from './ObjectInspector.svelte';
@@ -75,13 +74,153 @@ describe('ObjectInspector', () => {
                             object: sampleObject,
                         },
                     ],
+                    memberPreviews: [
+                        {
+                            item: {
+                                id: sampleObject.key,
+                                objectId: sampleObject.key,
+                                name: 'Strings C3',
+                                objectType: 'SBNK',
+                                object: sampleObject,
+                            },
+                            waveData: [member('left', waveData('Strings C3 Wave', 44_100, 'ready'))],
+                        },
+                    ],
+                    displayedMemberId: sampleObject.key,
                 },
             },
         });
 
         expect(screen.getByRole('heading', { name: 'Sample Bank details' })).toBeTruthy();
         expect(screen.getByText('B STRINGS')).toBeTruthy();
+        expect(screen.getByText('Sample 1 of 1')).toBeTruthy();
+        expect(screen.getByRole('group', { name: 'Wave Data Strings C3 Wave' })).toBeTruthy();
         expect(screen.getByText('1')).toBeTruthy();
+    });
+
+    it('switches the Sample Bank waveform to the currently playing member', async () => {
+        const bankObject = object('SBAC', 'B DRUMS');
+        const firstObject = object('SBNK', 'Kick');
+        const secondObject = object('SBNK', 'Snare');
+        const item = {
+            id: bankObject.key,
+            objectId: bankObject.key,
+            name: bankObject.name,
+            objectType: 'SBAC' as const,
+            object: bankObject,
+        };
+        const first = {
+            id: firstObject.key,
+            objectId: firstObject.key,
+            name: firstObject.name,
+            objectType: 'SBNK' as const,
+            object: firstObject,
+        };
+        const second = {
+            id: secondObject.key,
+            objectId: secondObject.key,
+            name: secondObject.name,
+            objectType: 'SBNK' as const,
+            object: secondObject,
+        };
+        const memberPreviews = [
+            { item: first, waveData: [member('left', waveData('Kick Wave', 44_100, 'ready'))] },
+            { item: second, waveData: [member('left', waveData('Snare Wave', 22_050, 'ready'))] },
+        ];
+        const { rerender } = render(ObjectInspector, {
+            props: {
+                selection: {
+                    kind: 'sample-bank',
+                    item,
+                    members: [first, second],
+                    memberPreviews,
+                    displayedMemberId: first.objectId,
+                },
+                playingObjectId: first.objectId,
+                playheadFrame: 11_025,
+            },
+        });
+
+        expect(screen.getByText('Sample 1 of 2')).toBeTruthy();
+        expect(screen.getByRole('group', { name: 'Wave Data Kick Wave' })).toBeTruthy();
+        expect(document.querySelector('[data-playhead-ratio="0.25"]')).toBeTruthy();
+
+        await rerender({
+            selection: {
+                kind: 'sample-bank',
+                item,
+                members: [first, second],
+                memberPreviews,
+                displayedMemberId: second.objectId,
+            },
+            playingObjectId: second.objectId,
+            playheadFrame: 5_512.5,
+        });
+
+        expect(screen.getByText('Sample 2 of 2')).toBeTruthy();
+        expect(screen.getByRole('group', { name: 'Wave Data Snare Wave' })).toBeTruthy();
+        expect(screen.queryByRole('group', { name: 'Wave Data Kick Wave' })).toBeNull();
+        expect(document.querySelector('[data-playhead-ratio="0.25"]')).toBeTruthy();
+
+        await rerender({
+            selection: {
+                kind: 'sample-bank',
+                item,
+                members: [first, second],
+                memberPreviews,
+                displayedMemberId: first.objectId,
+            },
+            playingObjectId: null,
+            playheadFrame: 0,
+        });
+
+        expect(screen.getByText('Sample 1 of 2')).toBeTruthy();
+        expect(screen.getByRole('group', { name: 'Wave Data Kick Wave' })).toBeTruthy();
+        expect(document.querySelector('[data-playhead-ratio="0"]')).toBeTruthy();
+    });
+
+    it('distinguishes empty Sample Banks from members with unresolved Wave Data', async () => {
+        const bankObject = object('SBAC', 'B EMPTY');
+        const item = {
+            id: bankObject.key,
+            objectId: bankObject.key,
+            name: bankObject.name,
+            objectType: 'SBAC' as const,
+            object: bankObject,
+        };
+        const sampleObject = object('SBNK', 'Unresolved');
+        const sample = {
+            id: sampleObject.key,
+            objectId: sampleObject.key,
+            name: sampleObject.name,
+            objectType: 'SBNK' as const,
+            object: sampleObject,
+        };
+        const { rerender } = render(ObjectInspector, {
+            props: {
+                selection: {
+                    kind: 'sample-bank',
+                    item,
+                    members: [],
+                    memberPreviews: [],
+                    displayedMemberId: '',
+                },
+            },
+        });
+
+        expect(screen.getByText('No Samples')).toBeTruthy();
+
+        await rerender({
+            selection: {
+                kind: 'sample-bank',
+                item,
+                members: [sample],
+                memberPreviews: [{ item: sample, waveData: [] }],
+                displayedMemberId: sample.objectId,
+            },
+        });
+
+        expect(screen.getByText('No resolved Wave Data')).toBeTruthy();
     });
 
     it('keeps the inspector visible without a selection', () => {
@@ -93,8 +232,7 @@ describe('ObjectInspector', () => {
         expect(emptyState.closest('.inspector-empty')?.querySelector('svg')).toBeNull();
     });
 
-    it('auditions a selected SBNK through the shared playback control', async () => {
-        const onplay = vi.fn();
+    it('keeps playback controls out of the inspector', () => {
         const sampleObject = object('SBNK', 'Stereo Pad');
         render(ObjectInspector, {
             props: {
@@ -110,12 +248,11 @@ describe('ObjectInspector', () => {
                     memberships: [],
                     waveData: [],
                 },
-                onplay,
             },
         });
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Play Stereo Pad' }));
-        expect(onplay).toHaveBeenCalledWith(sampleObject.key);
+        expect(screen.queryByRole('button', { name: 'Play Stereo Pad' })).toBeNull();
+        expect(screen.getByText('Sample')).toBeTruthy();
     });
 
     it('shows linked stereo Wave Data in separate role-labelled lanes on one timeline', () => {
