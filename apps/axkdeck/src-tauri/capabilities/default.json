@@ -3,5 +3,12 @@
   "identifier": "default",
   "description": "Core permissions for the main axkdeck window.",
   "windows": ["main"],
-  "permissions": ["core:default", "log:default", "fs:allow-read-file"]
+  "permissions": [
+    "core:default",
+    "core:webview:allow-set-webview-zoom",
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-size",
+    "log:default",
+    "fs:allow-read-file"
+  ]
 }

@@ -214,6 +214,19 @@ corepack pnpm desktop:dev
 Use `corepack pnpm desktop:dev:fresh` to incrementally build the native server
 target before launching the desktop shell.
 
+### Interface scale
+
+Desktop builds adjust the webview scale before mounting the interface. Auto
+mode uses the active monitor's physical resolution together with its operating
+system scale factor, so a 4K display at 100% receives a larger interface while
+a display that is already scaled by the operating system is not enlarged
+twice. The scale is recalculated when the window moves to another monitor or
+the monitor scale changes.
+
+Use the sliders menu beside the panel layout controls to select Auto, 100%,
+125%, or 150%. The selected mode is stored locally and restored on the next
+launch. Manual modes remain fixed when the window moves between displays.
+
 ### Local workspaces
 
 The sidecar starts without inventing a workspace. On first launch, axkdeck asks

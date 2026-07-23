@@ -44,6 +44,7 @@
         VolumeMutation,
     } from './lib/transport';
     import { userFacingMessage } from './lib/userFacingMessage';
+    import type { InterfaceScaleController, InterfaceScaleMode, InterfaceScaleState } from './lib/interfaceScale';
     import type {
         DiskTreeItem,
         InspectorSelection,
@@ -54,6 +55,12 @@
         ImageTreeAction,
         WorkspaceView,
     } from './lib/types';
+
+    interface Props {
+        interfaceScaling?: InterfaceScaleController | null;
+    }
+
+    let { interfaceScaling = null }: Props = $props();
 
     const workspaceTabs: {
         id: WorkspaceView;
@@ -152,16 +159,28 @@
     const previewFailed = new Set<string>();
     let previewInflight = 0;
     let previewGeneration = 0;
+    let interfaceScaleState = $state<InterfaceScaleState | null>(null);
+    let stopInterfaceScaleSubscription: (() => void) | undefined;
     const auditionController = new AuditionController(transport, (state) => {
         auditionState = state;
         if (state.status === 'failed' && state.error) sourceStatus = state.error;
     });
 
     onDestroy(() => {
+        stopInterfaceScaleSubscription?.();
+        void interfaceScaling?.dispose();
         void auditionController.dispose();
     });
 
+    function setInterfaceScale(mode: InterfaceScaleMode): void {
+        void interfaceScaling?.setMode(mode);
+    }
+
     onMount(() => {
+        interfaceScaleState = interfaceScaling?.state() ?? null;
+        stopInterfaceScaleSubscription = interfaceScaling?.subscribe((state) => {
+            interfaceScaleState = state;
+        });
         void auditionController.warmup();
         if (!isDesktop) return;
         let disposed = false;
@@ -1094,9 +1113,11 @@
             editorOpen={lowerPanelOpen && lowerPanelAvailable}
             editorAvailable={lowerPanelAvailable}
             {inspectorOpen}
+            interfaceScale={interfaceScaleState}
             ontogglelibrary={() => (sidebarOpen = !sidebarOpen)}
             ontoggleeditor={() => (lowerPanelOpen = !lowerPanelOpen)}
             ontoggleinspector={() => (inspectorOpen = !inspectorOpen)}
+            oninterfacescalechange={setInterfaceScale}
         />
     </header>
 

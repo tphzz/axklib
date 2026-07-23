@@ -2,7 +2,9 @@ import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
 import { invoke } from '@tauri-apps/api/core';
-import { installDiagnostics, reportError, reportInfo } from './lib/diagnostics';
+import { installDiagnostics, reportDiagnostic, reportError, reportInfo } from './lib/diagnostics';
+import { createInterfaceScaleController, type InterfaceScaleController } from './lib/interfaceScale';
+import { createTauriInterfaceScaleAdapter } from './lib/tauriInterfaceScale';
 
 const target = document.getElementById('app');
 
@@ -12,7 +14,20 @@ if (!target) {
 
 async function bootstrap(mountTarget: HTMLElement): Promise<void> {
     await installDiagnostics();
-    if ('__TAURI_INTERNALS__' in window) {
+    const isDesktop = '__TAURI_INTERNALS__' in window;
+    let interfaceScaling: InterfaceScaleController | null = null;
+    if (isDesktop) {
+        try {
+            interfaceScaling = await createInterfaceScaleController(
+                createTauriInterfaceScaleAdapter(),
+                window.localStorage,
+                reportDiagnostic,
+            );
+        } catch (error) {
+            reportDiagnostic('interface_scale_initialization_failed', { message: String(error) }, 'warn');
+        }
+    }
+    if (isDesktop) {
         try {
             window.__AXKLIB_SERVER__ =
                 (await invoke<Window['__AXKLIB_SERVER__'] | null>('server_connection')) ?? undefined;
@@ -26,7 +41,7 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
             reportError('axklib-server is unavailable', error);
         }
     }
-    mount(App, { target: mountTarget });
+    mount(App, { target: mountTarget, props: { interfaceScaling } });
 }
 
 void bootstrap(target);
