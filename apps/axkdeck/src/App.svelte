@@ -61,9 +61,9 @@
         icon: 'music' | 'layers' | 'archive' | 'waveform';
     }[] = [
         { id: 'programs', label: 'Programs', icon: 'music' },
-        { id: 'sample-banks', label: 'Sample Banks (SBAC)', icon: 'layers' },
-        { id: 'samples', label: 'Samples (SBNK)', icon: 'archive' },
-        { id: 'wave-data', label: 'Wave Data (SMPL)', icon: 'waveform' },
+        { id: 'sample-banks', label: 'Sample Banks', icon: 'layers' },
+        { id: 'samples', label: 'Samples', icon: 'archive' },
+        { id: 'wave-data', label: 'Wave Data', icon: 'waveform' },
     ];
 
     const transport = createTransport();
@@ -162,6 +162,7 @@
     });
 
     onMount(() => {
+        void auditionController.warmup();
         if (!isDesktop) return;
         let disposed = false;
         let unlisten: (() => void) | null = null;

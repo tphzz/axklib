@@ -112,21 +112,21 @@ describe('App panel layout', () => {
     it('uses canonical Yamaha object terminology', () => {
         render(App);
 
-        expect(screen.getByRole('button', { name: 'Sample Banks (SBAC)' })).toBeTruthy();
-        expect(screen.getByRole('button', { name: 'Samples (SBNK)' })).toBeTruthy();
-        expect(screen.getByRole('button', { name: 'Wave Data (SMPL)' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Sample Banks' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Samples' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Wave Data' })).toBeTruthy();
         expect(screen.queryByText('Sample pool')).toBeNull();
     });
 
     it('uses contained-object lanes above the editor for SBAC and SBNK views', async () => {
         const { container } = render(App);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks (SBAC)' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
         expect(screen.getByRole('region', { name: 'Sample Bank hierarchy' })).toBeTruthy();
         expect(document.querySelectorAll('.contained-lane')).toHaveLength(3);
         expect(container.querySelector('.object-editor')?.textContent).toContain('No object selected');
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Samples (SBNK)' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
         expect(screen.getByRole('region', { name: 'Sample hierarchy' })).toBeTruthy();
         expect(document.querySelectorAll('.contained-lane')).toHaveLength(2);
         expect(container.querySelector('.object-editor')?.textContent).toContain('No object selected');

@@ -61,6 +61,11 @@ interface ActivePlayback {
     animationFrame?: number;
 }
 
+interface ResumeAttempt {
+    context: AudioContext;
+    promise: Promise<void>;
+}
+
 type AuditionDiagnosticSink = (event: AuditionDiagnosticEvent) => void;
 
 const defaultCacheBudgetBytes = 128 * 1024 * 1024;
@@ -116,6 +121,9 @@ export class AuditionController {
     private readonly cache = new Map<string, CachedAudition>();
     private readonly pending = new Map<string, PendingAudition>();
     private context?: AudioContext;
+    private output?: GainNode;
+    private keepalive?: ConstantSourceNode;
+    private resumeAttempt?: ResumeAttempt;
     private active?: ActivePlayback;
     private activeRequestKey?: string;
     private cacheBytes = 0;
@@ -131,6 +139,14 @@ export class AuditionController {
     ) {
         this.cacheBudgetBytes = Math.max(0, options.cacheBudgetBytes ?? defaultCacheBudgetBytes);
         this.maximumCacheEntries = Math.max(0, options.maximumCacheEntries ?? defaultMaximumCacheEntries);
+    }
+
+    async warmup(): Promise<void> {
+        try {
+            await this.resumeOutput(this.ensureContext());
+        } catch (error) {
+            reportDiagnostic('audio_output_warmup_failed', { message: userFacingMessage(error) }, 'warn');
+        }
     }
 
     async prefetch(sessionId: number, objectId: string): Promise<void> {
@@ -152,7 +168,6 @@ export class AuditionController {
         const requestKey = this.cacheKey(sessionId, objectId);
         this.cancelActiveRequest(requestKey);
         this.releaseActive('replaced');
-        const context = this.ensureContext();
         const run: PlaybackRun = {
             id: newPlaybackId(),
             objectId,
@@ -165,6 +180,7 @@ export class AuditionController {
         this.update({ objectId, status: 'preparing', playheadFrame: 0 });
 
         try {
+            const context = this.ensureContext();
             // Resume synchronously from the click handler before any network await.
             const resumed = this.resumeContext(context, run);
             const loaded = this.loadAudition(sessionId, objectId, context, false, run);
@@ -199,7 +215,6 @@ export class AuditionController {
         this.releaseActive('stopped');
         this.run = undefined;
         this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
-        await this.closeOutputContext('stopped', run, fadeSeconds);
     }
 
     async invalidateSession(sessionId: number): Promise<void> {
@@ -226,17 +241,45 @@ export class AuditionController {
         await Promise.allSettled(pending.map((item) => item.promise));
         this.cache.clear();
         this.cacheBytes = 0;
+        await this.resumeAttempt?.promise.catch(() => undefined);
         const context = this.context;
         this.context = undefined;
+        this.releaseOutputGraph();
         if (context) context.onstatechange = null;
         if (context && context.state !== 'closed') await context.close();
     }
 
     private ensureContext(): AudioContext {
-        if (this.context && this.context.state !== 'closed') return this.context;
+        if (this.context && this.context.state !== 'closed' && this.output && this.keepalive) return this.context;
+        this.releaseOutputGraph();
         const context = new AudioContext();
-        this.context = context;
-        return context;
+        try {
+            const output = context.createGain();
+            output.gain.value = 1;
+            output.connect(context.destination);
+            const keepalive = context.createConstantSource();
+            keepalive.offset.value = 0;
+            keepalive.connect(output);
+            keepalive.start();
+            this.context = context;
+            this.output = output;
+            this.keepalive = keepalive;
+            return context;
+        } catch (error) {
+            if (context.state !== 'closed') void context.close();
+            throw error;
+        }
+    }
+
+    private resumeOutput(context: AudioContext): Promise<void> {
+        if (context.state === 'running') return Promise.resolve();
+        if (this.resumeAttempt?.context === context) return this.resumeAttempt.promise;
+        const attempt: ResumeAttempt = { context, promise: Promise.resolve() };
+        attempt.promise = context.resume().finally(() => {
+            if (this.resumeAttempt === attempt) this.resumeAttempt = undefined;
+        });
+        this.resumeAttempt = attempt;
+        return attempt.promise;
     }
 
     private async resumeContext(context: AudioContext, run: PlaybackRun): Promise<void> {
@@ -247,7 +290,7 @@ export class AuditionController {
             outputLatencySeconds: 'outputLatency' in context ? context.outputLatency : null,
         });
         const started = monotonicNow();
-        await context.resume();
+        await this.resumeOutput(context);
         this.emit(run, 'audio_context_resumed', {
             state: context.state,
             resumeDurationMs: Math.round(monotonicNow() - started),
@@ -393,7 +436,7 @@ export class AuditionController {
                 (entry.descriptor.loopStartFrame + entry.descriptor.loopLengthFrames) / entry.descriptor.sampleRate;
         }
         source.connect(gain);
-        gain.connect(context.destination);
+        gain.connect(this.output ?? context.destination);
         const startTime = context.currentTime + startLeadSeconds;
         gain.gain.value = 0;
         gain.gain.setValueAtTime(0, context.currentTime);
@@ -490,20 +533,22 @@ export class AuditionController {
         this.emit(run, 'playback_ended');
         this.run = undefined;
         this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
-        void this.closeOutputContext('ended', run);
     }
 
-    private async closeOutputContext(reason: string, run?: PlaybackRun, delaySeconds = 0): Promise<void> {
-        const context = this.context;
-        if (!context) return;
-        if (delaySeconds > 0) {
-            await new Promise<void>((resolve) => window.setTimeout(resolve, delaySeconds * 1000));
+    private releaseOutputGraph(): void {
+        const keepalive = this.keepalive;
+        const output = this.output;
+        this.keepalive = undefined;
+        this.output = undefined;
+        if (keepalive) {
+            try {
+                keepalive.stop();
+            } catch {
+                // The context may already have closed externally.
+            }
+            keepalive.disconnect();
         }
-        if (this.context !== context || this.active) return;
-        this.context = undefined;
-        context.onstatechange = null;
-        if (context.state !== 'closed') await context.close();
-        if (run) this.emit(run, 'audio_context_closed', { reason });
+        output?.disconnect();
     }
 
     private addCacheEntry(entry: CachedAudition): void {
@@ -559,7 +604,6 @@ export class AuditionController {
         this.emit(run, 'playback_failed', { message }, 'error');
         this.run = undefined;
         this.update({ objectId, status: 'failed', playheadFrame: 0, error: message });
-        void this.closeOutputContext('failed', run);
     }
 
     private emit(
