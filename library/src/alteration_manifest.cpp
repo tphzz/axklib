@@ -304,16 +304,22 @@ Result<void> validate_alteration_manifest(const AlterationManifest &manifest) {
         if (!seen.insert(operation.id).second)
             return std::unexpected{manifest_error("duplicate operation id")};
 
-        const auto &selector =
-            std::visit([](const auto &value) -> const PartitionSelector & { return value.partition; }, operation.data);
-        if (const auto *partition = std::get_if<PartitionIndex>(&selector)) {
-            if (partition->value > 7U)
-                return std::unexpected{manifest_error("partition index must be 0..7")};
-        } else {
-            const auto &reference = std::get<OperationReference>(selector).operation_id;
-            if (reference.empty() || !seen.contains(reference) || reference == operation.id)
-                return std::unexpected{manifest_error("operation_ref must name an earlier operation")};
-        }
+        auto selector_valid = std::visit(
+            [&](const auto &value) -> Result<void> {
+                if (const auto *partition = std::get_if<PartitionIndex>(&value.partition)) {
+                    if (partition->value > 7U)
+                        return std::unexpected{manifest_error("partition index must be 0..7")};
+                    return {};
+                }
+
+                const auto &reference = std::get<OperationReference>(value.partition).operation_id;
+                if (reference.empty() || !seen.contains(reference) || reference == operation.id)
+                    return std::unexpected{manifest_error("operation_ref must name an earlier operation")};
+                return {};
+            },
+            operation.data);
+        if (!selector_valid)
+            return selector_valid;
 
         if (auto valid = validate_operation_data(operation.data); !valid)
             return valid;
