@@ -67,7 +67,17 @@ async function exerciseReadContract(transport: ImageTransport, source: FileLocat
     });
 
     const preview = await transport.preview(image.sessionId, objects.objects[0]!.key, 16);
-    expect(preview).toEqual({ frameCount: 4, bins: [{ minimum: -1, maximum: 1 }] });
+    expect(preview).toEqual({
+        frameCount: 4,
+        lanes: [
+            {
+                role: 'MONO',
+                sourceObjectId: 'wave-1',
+                frameCount: 4,
+                bins: [{ minimum: -1, maximum: 1 }],
+            },
+        ],
+    });
     await transport.closeImage(image.sessionId);
 }
 
@@ -86,7 +96,17 @@ describe('ImageTransport shared read contract', () => {
     it('passes through the in-memory UI conformance transport', async () => {
         const transport = new InMemoryImageTransport({
             opened,
-            preview: { frameCount: 4, bins: [{ minimum: -1, maximum: 1 }] },
+            preview: {
+                frameCount: 4,
+                lanes: [
+                    {
+                        role: 'MONO',
+                        sourceObjectId: 'wave-1',
+                        frameCount: 4,
+                        bins: [{ minimum: -1, maximum: 1 }],
+                    },
+                ],
+            },
             operations: {
                 contentChildren: async () => ({
                     items: [{ id: 'volume-1', name: 'Volume', kind: 'volume', childCount: 1 }],
@@ -190,7 +210,17 @@ describe('ImageTransport shared read contract', () => {
                     });
                 }
                 if (url.pathname.endsWith('/preview')) {
-                    return json({ frameCount: 4, bins: [{ minimum: -1, maximum: 1 }] });
+                    return json({
+                        frameCount: 4,
+                        lanes: [
+                            {
+                                role: 'MONO',
+                                sourceObjectId: 'wave-1',
+                                frameCount: 4,
+                                bins: [{ minimum: -1, maximum: 1 }],
+                            },
+                        ],
+                    });
                 }
                 if (url.pathname.endsWith('/images/image-1') && init?.method === 'DELETE') {
                     return new Response(null, { status: 204 });

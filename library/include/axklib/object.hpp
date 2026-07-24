@@ -84,6 +84,7 @@ struct CurrentSbnkMember {
     std::uint16_t sample_rate{};
     std::int8_t fine_tune_cents{};
     std::uint16_t pitch_base_word{};
+    std::uint32_t wave_start_frame{};
     std::uint32_t wave_length_frames{};
     std::uint32_t loop_start_frame{};
     std::uint32_t loop_length_frames{};
@@ -120,6 +121,8 @@ struct CurrentSbnk {
     std::int8_t pan{};
     std::uint8_t velocity_range_high{};
     std::uint8_t velocity_range_low{};
+    std::uint8_t loop_mode{};
+    std::string loop_mode_label;
     std::vector<SbnkControlRecord> control_records;
     std::vector<NumericField> numeric_fields;
     std::vector<std::byte> raw_parameter_window;

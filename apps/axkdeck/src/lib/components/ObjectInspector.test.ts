@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import type { SamplerObject } from '../transport';
-import type { LinkedWaveDataItem, WaveDataItem } from '../types';
+import type { LinkedWaveDataItem, SampleStructureItem, SampleWaveformPreview, WaveDataItem } from '../types';
 import ObjectInspector from './ObjectInspector.svelte';
 
 function object(objectType: string, name: string): SamplerObject {
@@ -50,10 +50,43 @@ function member(role: LinkedWaveDataItem['role'], item: WaveDataItem): LinkedWav
     return { role, waveData: item };
 }
 
+function samplePreview(
+    item: SampleStructureItem,
+    waveData: LinkedWaveDataItem[],
+    previewState: SampleWaveformPreview['previewState'] = 'ready',
+    frameCount = Math.max(0, ...waveData.map((entry) => entry.waveData.object.frameCount)),
+    laneFrameCounts = waveData.map((entry) => entry.waveData.object.frameCount),
+): SampleWaveformPreview {
+    return {
+        item,
+        waveData,
+        previewState,
+        preview:
+            previewState === 'ready'
+                ? {
+                      frameCount,
+                      lanes: waveData.map((entry, index) => ({
+                          role: entry.role === 'left' ? 'LEFT' : 'RIGHT',
+                          sourceObjectId: entry.waveData.objectKey,
+                          frameCount: laneFrameCounts[index] ?? frameCount,
+                          bins: entry.waveData.waveform,
+                      })),
+                  }
+                : null,
+    };
+}
+
 describe('ObjectInspector', () => {
     it('shows structural metadata for a selected SBAC', () => {
         const bankObject = object('SBAC', 'STRINGS');
         const sampleObject = object('SBNK', 'Strings C3');
+        const sampleItem: SampleStructureItem = {
+            id: sampleObject.key,
+            objectId: sampleObject.key,
+            name: 'Strings C3',
+            objectType: 'SBNK',
+            object: sampleObject,
+        };
         render(ObjectInspector, {
             props: {
                 selection: {
@@ -65,26 +98,13 @@ describe('ObjectInspector', () => {
                         objectType: 'SBAC',
                         object: bankObject,
                     },
-                    members: [
-                        {
-                            id: sampleObject.key,
-                            objectId: sampleObject.key,
-                            name: 'Strings C3',
-                            objectType: 'SBNK',
-                            object: sampleObject,
-                        },
-                    ],
+                    members: [sampleItem],
                     memberPreviews: [
-                        {
-                            item: {
-                                id: sampleObject.key,
-                                objectId: sampleObject.key,
-                                name: 'Strings C3',
-                                objectType: 'SBNK',
-                                object: sampleObject,
-                            },
-                            waveData: [member('left', waveData('Strings C3 Wave', 44_100, 'ready'))],
-                        },
+                        samplePreview(
+                            sampleItem,
+                            [member('left', waveData('Strings C3 Wave', 44_100, 'ready'))],
+                            'ready',
+                        ),
                     ],
                     displayedMemberId: sampleObject.key,
                 },
@@ -125,8 +145,8 @@ describe('ObjectInspector', () => {
             object: secondObject,
         };
         const memberPreviews = [
-            { item: first, waveData: [member('left', waveData('Kick Wave', 44_100, 'ready'))] },
-            { item: second, waveData: [member('left', waveData('Snare Wave', 22_050, 'ready'))] },
+            samplePreview(first, [member('left', waveData('Kick Wave', 44_100, 'ready'))]),
+            samplePreview(second, [member('left', waveData('Snare Wave', 22_050, 'ready'))]),
         ];
         const { rerender } = render(ObjectInspector, {
             props: {
@@ -216,7 +236,7 @@ describe('ObjectInspector', () => {
                 kind: 'sample-bank',
                 item,
                 members: [sample],
-                memberPreviews: [{ item: sample, waveData: [] }],
+                memberPreviews: [samplePreview(sample, [], 'idle')],
                 displayedMemberId: sample.objectId,
             },
         });
@@ -235,19 +255,20 @@ describe('ObjectInspector', () => {
 
     it('keeps playback controls out of the inspector', () => {
         const sampleObject = object('SBNK', 'Stereo Pad');
+        const item: SampleStructureItem = {
+            id: sampleObject.key,
+            objectId: sampleObject.key,
+            name: sampleObject.name,
+            objectType: 'SBNK',
+            object: sampleObject,
+        };
         render(ObjectInspector, {
             props: {
                 selection: {
                     kind: 'sample',
-                    item: {
-                        id: sampleObject.key,
-                        objectId: sampleObject.key,
-                        name: sampleObject.name,
-                        objectType: 'SBNK',
-                        object: sampleObject,
-                    },
+                    item,
                     memberships: [],
-                    waveData: [],
+                    preview: samplePreview(item, [], 'idle'),
                 },
             },
         });
@@ -258,22 +279,24 @@ describe('ObjectInspector', () => {
 
     it('shows linked stereo Wave Data in separate role-labelled lanes on one timeline', () => {
         const sampleObject = object('SBNK', 'Stereo Pad');
+        const item: SampleStructureItem = {
+            id: sampleObject.key,
+            objectId: sampleObject.key,
+            name: sampleObject.name,
+            objectType: 'SBNK',
+            object: sampleObject,
+        };
+        const linked = [
+            member('left', waveData('Stereo Pad L', 44_100, 'ready')),
+            member('right', waveData('Stereo Pad R', 22_050, 'ready')),
+        ];
         render(ObjectInspector, {
             props: {
                 selection: {
                     kind: 'sample',
-                    item: {
-                        id: sampleObject.key,
-                        objectId: sampleObject.key,
-                        name: sampleObject.name,
-                        objectType: 'SBNK',
-                        object: sampleObject,
-                    },
+                    item,
                     memberships: [],
-                    waveData: [
-                        member('left', waveData('Stereo Pad L', 44_100, 'ready')),
-                        member('right', waveData('Stereo Pad R', 22_050, 'ready')),
-                    ],
+                    preview: samplePreview(item, linked),
                 },
                 playingObjectId: sampleObject.key,
                 playheadFrame: 11_025,
@@ -287,21 +310,53 @@ describe('ObjectInspector', () => {
         expect(document.querySelectorAll('[data-playhead-ratio="0.25"]')).toHaveLength(2);
     });
 
-    it('uses a neutral lane label for mono SBNK Wave Data', () => {
-        const sampleObject = object('SBNK', 'Mono Bass');
+    it('uses the Sample preview timeline instead of the full physical Wave Data length', () => {
+        const sampleObject = object('SBNK', 'Loop Divide 10');
+        const item: SampleStructureItem = {
+            id: sampleObject.key,
+            objectId: sampleObject.key,
+            name: sampleObject.name,
+            objectType: 'SBNK',
+            object: sampleObject,
+        };
+        const linked = [member('left', waveData('Shared Loop Wave', 81_419, 'ready'))];
         render(ObjectInspector, {
             props: {
                 selection: {
                     kind: 'sample',
-                    item: {
-                        id: sampleObject.key,
-                        objectId: sampleObject.key,
-                        name: sampleObject.name,
-                        objectType: 'SBNK',
-                        object: sampleObject,
-                    },
+                    item,
                     memberships: [],
-                    waveData: [member('left', waveData('Mono Bass Wave', 44_100, 'loading'))],
+                    preview: samplePreview(item, linked, 'ready', 20_352, [20_352]),
+                },
+                playingObjectId: sampleObject.key,
+                playheadFrame: 10_176,
+            },
+        });
+
+        expect(document.querySelector('[data-playhead-ratio="0.5"]')).toBeTruthy();
+        expect(document.querySelector('[data-content-ratio="1"]')).toBeTruthy();
+    });
+
+    it('uses a neutral lane label for mono SBNK Wave Data', () => {
+        const sampleObject = object('SBNK', 'Mono Bass');
+        const item: SampleStructureItem = {
+            id: sampleObject.key,
+            objectId: sampleObject.key,
+            name: sampleObject.name,
+            objectType: 'SBNK',
+            object: sampleObject,
+        };
+        render(ObjectInspector, {
+            props: {
+                selection: {
+                    kind: 'sample',
+                    item,
+                    memberships: [],
+                    preview: samplePreview(
+                        item,
+                        [member('left', waveData('Mono Bass Wave', 44_100, 'loading'))],
+                        'loading',
+                    ),
                 },
             },
         });
@@ -312,19 +367,24 @@ describe('ObjectInspector', () => {
 
     it('reports an unavailable SBNK waveform without hiding the member identity', () => {
         const sampleObject = object('SBNK', 'Broken Sample');
+        const item: SampleStructureItem = {
+            id: sampleObject.key,
+            objectId: sampleObject.key,
+            name: sampleObject.name,
+            objectType: 'SBNK',
+            object: sampleObject,
+        };
         render(ObjectInspector, {
             props: {
                 selection: {
                     kind: 'sample',
-                    item: {
-                        id: sampleObject.key,
-                        objectId: sampleObject.key,
-                        name: sampleObject.name,
-                        objectType: 'SBNK',
-                        object: sampleObject,
-                    },
+                    item,
                     memberships: [],
-                    waveData: [member('left', waveData('Known Wave Name', 44_100, 'failed'))],
+                    preview: samplePreview(
+                        item,
+                        [member('left', waveData('Known Wave Name', 44_100, 'failed'))],
+                        'failed',
+                    ),
                 },
             },
         });
@@ -335,19 +395,20 @@ describe('ObjectInspector', () => {
 
     it('explains when an SBNK has no resolved Wave Data', () => {
         const sampleObject = object('SBNK', 'Unresolved Sample');
+        const item: SampleStructureItem = {
+            id: sampleObject.key,
+            objectId: sampleObject.key,
+            name: sampleObject.name,
+            objectType: 'SBNK',
+            object: sampleObject,
+        };
         render(ObjectInspector, {
             props: {
                 selection: {
                     kind: 'sample',
-                    item: {
-                        id: sampleObject.key,
-                        objectId: sampleObject.key,
-                        name: sampleObject.name,
-                        objectType: 'SBNK',
-                        object: sampleObject,
-                    },
+                    item,
                     memberships: [],
-                    waveData: [],
+                    preview: samplePreview(item, [], 'idle'),
                 },
             },
         });

@@ -79,7 +79,10 @@
     data-playhead-ratio={normalizedPlayheadRatio}
 >
     <canvas bind:this={canvas} class:large class="waveform"></canvas>
-    {#if normalizedPlayheadRatio > 0 && normalizedPlayheadRatio < 1}
-        <span class="waveform-playhead" style:left={`${normalizedPlayheadRatio * 100}%`}></span>
+    {#if normalizedPlayheadRatio > 0}
+        <span
+            class="waveform-playhead"
+            style:left={normalizedPlayheadRatio === 1 ? 'calc(100% - 1px)' : `${normalizedPlayheadRatio * 100}%`}
+        ></span>
     {/if}
 </div>

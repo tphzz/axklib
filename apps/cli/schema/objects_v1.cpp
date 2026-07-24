@@ -25,6 +25,7 @@ OrderedJson member_json(const CurrentSbnkMember &member) {
             {"sample_rate", member.sample_rate},
             {"fine_tune_cents", member.fine_tune_cents},
             {"pitch_base_word", member.pitch_base_word},
+            {"wave_start_frame", member.wave_start_frame},
             {"wave_length_frames", member.wave_length_frames},
             {"loop_start_frame", member.loop_start_frame},
             {"loop_length_frames", member.loop_length_frames}};
@@ -64,6 +65,8 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"instrument_name", sample->instrument_name},
                 {"right_slot_present", sample->right_slot_present},
                 {"right_link_role", sample->right_link_role},
+                {"loop_mode", sample->loop_mode},
+                {"loop_mode_label", sample->loop_mode_label},
                 {"left", member_json(sample->left)},
                 {"right", sample->right ? member_json(*sample->right) : OrderedJson(nullptr)},
                 {"inactive_right", member_json(sample->inactive_right)},

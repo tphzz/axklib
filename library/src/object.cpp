@@ -103,14 +103,25 @@ Result<CurrentSbnkMember> decode_sbnk_member(const ByteReader &reader, bool righ
     const auto rate = reader.be16(right ? 0xdaU : 0xd8U);
     const auto fine = reader.s8(right ? 0xddU : 0xdcU);
     const auto pitch = reader.be16(right ? 0xe0U : 0xdeU);
+    const auto start = reader.be32(right ? 0xecU : 0xe8U);
     const auto length = reader.be32(right ? 0xf4U : 0xf0U);
     const auto loop_start = reader.be32(right ? 0xfcU : 0xf8U);
     const auto loop_length = reader.be32(right ? 0x104U : 0x100U);
-    if (!name || !cached_reference || !root || !rate || !fine || !pitch || !length || !loop_start || !loop_length) {
+    if (!name || !cached_reference || !root || !rate || !fine || !pitch || !start || !length || !loop_start ||
+        !loop_length) {
         return std::unexpected{
             make_error(ErrorCode::container_truncated, ErrorCategory::object, "current SBNK member lane is truncated")};
     }
-    return CurrentSbnkMember{*name, *cached_reference, *root, *rate, *fine, *pitch, *length, *loop_start, *loop_length};
+    return CurrentSbnkMember{.wave_data_name = *name,
+                             .cached_wave_data_reference_value = *cached_reference,
+                             .root_key = *root,
+                             .sample_rate = *rate,
+                             .fine_tune_cents = *fine,
+                             .pitch_base_word = *pitch,
+                             .wave_start_frame = *start,
+                             .wave_length_frames = *length,
+                             .loop_start_frame = *loop_start,
+                             .loop_length_frames = *loop_length};
 }
 
 Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
@@ -165,7 +176,9 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
     const auto pan = reader.s8(0x117);
     const auto velocity_high = reader.u8(0x11a);
     const auto velocity_low = reader.u8(0x11b);
-    if (!sample_flags || !mapout_flags || !key_high || !key_low || !level || !pan || !velocity_high || !velocity_low) {
+    const auto loop_mode = reader.u8(0xe5);
+    if (!sample_flags || !mapout_flags || !key_high || !key_low || !level || !pan || !velocity_high || !velocity_low ||
+        !loop_mode) {
         return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
                                           "current SBNK parameter window is truncated")};
     }
@@ -177,6 +190,8 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
     result.pan = *pan;
     result.velocity_range_high = *velocity_high;
     result.velocity_range_low = *velocity_low;
+    result.loop_mode = *loop_mode;
+    result.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, *loop_mode);
     constexpr std::size_t control_count = 6;
     for (std::size_t index = 0; index < control_count; ++index) {
         const auto offset = 0x164U + index * 4U;

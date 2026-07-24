@@ -2340,34 +2340,73 @@
         ],
         "type": "object"
       },
+      "ImagePreviewBin": {
+        "additionalProperties": false,
+        "properties": {
+          "maximum": {
+            "type": "integer"
+          },
+          "minimum": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "minimum",
+          "maximum"
+        ],
+        "type": "object"
+      },
+      "ImagePreviewLane": {
+        "additionalProperties": false,
+        "properties": {
+          "bins": {
+            "items": {
+              "$ref": "#/components/schemas/ImagePreviewBin"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "frameCount": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "MONO",
+              "LEFT",
+              "RIGHT"
+            ]
+          },
+          "sourceObjectId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "sourceObjectId",
+          "frameCount",
+          "bins"
+        ],
+        "type": "object"
+      },
       "ImagePreviewResponse": {
         "additionalProperties": false,
         "properties": {
           "data": {
             "additionalProperties": false,
             "properties": {
-              "bins": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "maximum": {
-                      "type": "integer"
-                    },
-                    "minimum": {
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "minimum",
-                    "maximum"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
               "frameCount": {
-                "minimum": 0,
+                "minimum": 1,
                 "type": "integer"
+              },
+              "lanes": {
+                "items": {
+                  "$ref": "#/components/schemas/ImagePreviewLane"
+                },
+                "maxItems": 2,
+                "minItems": 1,
+                "type": "array"
               },
               "objectId": {
                 "minLength": 1,
@@ -2377,7 +2416,7 @@
             "required": [
               "objectId",
               "frameCount",
-              "bins"
+              "lanes"
             ],
             "type": "object"
           },
@@ -11096,7 +11135,7 @@
                 }
               }
             },
-            "description": "Bounded waveform min/max envelope",
+            "description": "Bounded physical Wave Data or Sample playback-window min/max lanes",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"

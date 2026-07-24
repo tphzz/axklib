@@ -326,6 +326,13 @@ matches the bounded contract, otherwise the server generates one. Collection
 pages use a bounded `limit` and an opaque cursor. Clients must not parse or
 construct cursor values.
 
+`images.preview` accepts either a Wave Data (`SMPL`) or Sample (`SBNK`) object
+identifier. A Wave Data preview returns one `MONO` lane over its physical PCM
+extent. A Sample preview applies its member start and length fields and returns
+one `LEFT` lane plus an optional `RIGHT` lane. Each lane identifies its source
+Wave Data and its own frame count; the response-level frame count is the
+playback timeline used for audition and playhead positioning.
+
 Until the first supported public release, the checked-in contract is corrected
 in place and every in-repository consumer is updated with it. Compatibility
 baselines and deprecation policy begin only after a contract has shipped.

@@ -1562,13 +1562,21 @@ export interface components {
         ImageOpenRequest: {
             source: components['schemas']['FileRef'];
         };
+        ImagePreviewBin: {
+            maximum: number;
+            minimum: number;
+        };
+        ImagePreviewLane: {
+            bins: components['schemas']['ImagePreviewBin'][];
+            frameCount: number;
+            /** @enum {unknown} */
+            role: 'MONO' | 'LEFT' | 'RIGHT';
+            sourceObjectId: string;
+        };
         ImagePreviewResponse: {
             data: {
-                bins: {
-                    maximum: number;
-                    minimum: number;
-                }[];
                 frameCount: number;
+                lanes: components['schemas']['ImagePreviewLane'][];
                 objectId: string;
             };
             meta: components['schemas']['ResponseMeta'];
@@ -4341,7 +4349,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Bounded waveform min/max envelope */
+            /** @description Bounded physical Wave Data or Sample playback-window min/max lanes */
             200: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];

@@ -69,7 +69,7 @@
                     <strong title={displayedMember.item.name}>{displayedMember.item.name}</strong>
                 </div>
                 <SampleWaveformStack
-                    waveData={displayedMember.waveData}
+                    preview={displayedMember}
                     sampleObjectId={displayedMember.item.objectId}
                     {playingObjectId}
                     {playheadFrame}
@@ -103,7 +103,7 @@
     {:else if selection?.kind === 'sample'}
         <div class="inspector-content">
             <SampleWaveformStack
-                waveData={selection.waveData}
+                preview={selection.preview}
                 sampleObjectId={selection.item.objectId}
                 {playingObjectId}
                 {playheadFrame}
@@ -119,7 +119,7 @@
                 </div>
                 <div>
                     <dt>Wave Data</dt>
-                    <dd>{selection.waveData.length}</dd>
+                    <dd>{selection.preview.waveData.length}</dd>
                 </div>
                 <div>
                     <dt>Partition</dt>

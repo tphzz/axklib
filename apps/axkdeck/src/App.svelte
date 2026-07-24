@@ -54,6 +54,7 @@
         Program,
         ProgramAssignmentRow,
         SampleStructureItem,
+        SampleWaveformPreview,
         WaveDataItem,
         ImageTreeAction,
         WorkspaceView,
@@ -157,7 +158,9 @@
     let playingSampleBankId = $state('');
     let sampleBankPreviewMemberId = $state('');
     let sampleBankPlaybackGeneration = 0;
-    const previewQueue: { item: WaveDataItem; generation: number }[] = [];
+    let samplePreviewStates = $state<Record<string, Pick<SampleWaveformPreview, 'preview' | 'previewState'>>>({});
+    type PreviewTarget = { kind: 'wave-data'; objectId: string; itemId: string } | { kind: 'sample'; objectId: string };
+    const previewQueue: { target: PreviewTarget; generation: number }[] = [];
     const previewPending = new Set<string>();
     const previewFailed = new Set<string>();
     let previewInflight = 0;
@@ -415,10 +418,7 @@
                 kind: 'sample-bank',
                 item: bank,
                 members,
-                memberPreviews: members.map((item) => ({
-                    item,
-                    waveData: linkedWaveDataForSample(item.objectId, relationships, waveData),
-                })),
+                memberPreviews: members.map(sampleWaveformPreview),
                 displayedMemberId,
             };
         }
@@ -428,23 +428,33 @@
                 kind: 'sample',
                 item: sample,
                 memberships: banksForSample(sample.objectId),
-                waveData: linkedWaveDataForSample(sample.objectId, relationships, waveData),
+                preview: sampleWaveformPreview(sample),
             };
         }
         const waveform = waveData.find((item) => item.objectKey === objectId);
         return waveform ? { kind: 'wave-data', waveData: waveform } : null;
     }
 
+    function sampleWaveformPreview(item: SampleStructureItem): SampleWaveformPreview {
+        const stored = samplePreviewStates[item.objectId];
+        return {
+            item,
+            waveData: linkedWaveDataForSample(item.objectId, relationships, waveData),
+            preview: stored?.preview ?? null,
+            previewState: stored?.previewState ?? 'idle',
+        };
+    }
+
     $effect(() => {
-        const previews =
+        const preview =
             inspectorSelection?.kind === 'sample'
-                ? [inspectorSelection.waveData]
+                ? inspectorSelection.preview
                 : inspectorSelection?.kind === 'sample-bank'
-                  ? inspectorSelection.memberPreviews.map((member) => member.waveData)
-                  : [];
-        for (const preview of previews) {
-            for (const member of preview) requestWaveformPreview(member.waveData);
-        }
+                  ? inspectorSelection.memberPreviews.find(
+                        (member) => member.item.objectId === inspectorSelection.displayedMemberId,
+                    )
+                  : null;
+        if (preview && preview.waveData.length > 0) requestSampleWaveformPreview(preview.item);
     });
 
     $effect(() => {
@@ -882,6 +892,7 @@
         previewQueue.length = 0;
         previewPending.clear();
         previewFailed.clear();
+        samplePreviewStates = {};
     }
 
     function requestWaveformPreview(item: WaveDataItem): void {
@@ -897,7 +908,32 @@
         waveData = waveData.map((candidate) =>
             candidate.id === item.id ? { ...candidate, previewState: 'loading' } : candidate,
         );
-        previewQueue.push({ item, generation: previewGeneration });
+        previewQueue.push({
+            target: { kind: 'wave-data', objectId: item.objectKey, itemId: item.id },
+            generation: previewGeneration,
+        });
+        drainPreviewQueue();
+    }
+
+    function requestSampleWaveformPreview(item: SampleStructureItem): void {
+        const state = samplePreviewStates[item.objectId];
+        if (
+            openSessionId === null ||
+            state?.previewState === 'ready' ||
+            previewPending.has(item.objectId) ||
+            previewFailed.has(item.objectId)
+        ) {
+            return;
+        }
+        previewPending.add(item.objectId);
+        samplePreviewStates = {
+            ...samplePreviewStates,
+            [item.objectId]: { preview: null, previewState: 'loading' },
+        };
+        previewQueue.push({
+            target: { kind: 'sample', objectId: item.objectId },
+            generation: previewGeneration,
+        });
         drainPreviewQueue();
     }
 
@@ -905,29 +941,47 @@
         while (previewInflight < 2 && previewQueue.length > 0 && openSessionId !== null) {
             const queued = previewQueue.shift();
             if (!queued) return;
-            const { item, generation } = queued;
+            const { target, generation } = queued;
             const sessionId = openSessionId;
             previewInflight += 1;
             void transport
-                .preview(sessionId, item.objectKey, 1024)
+                .preview(sessionId, target.objectId, 1024)
                 .then((preview) => {
                     if (openSessionId !== sessionId || previewGeneration !== generation) return;
-                    waveData = waveData.map((candidate) =>
-                        candidate.id === item.id
-                            ? { ...candidate, waveform: preview.bins, previewState: 'ready' }
-                            : candidate,
-                    );
+                    if (target.kind === 'wave-data') {
+                        const lane = preview.lanes[0];
+                        if (!lane || lane.sourceObjectId !== target.objectId) {
+                            throw new Error('Wave Data preview did not return its physical waveform lane');
+                        }
+                        waveData = waveData.map((candidate) =>
+                            candidate.id === target.itemId
+                                ? { ...candidate, waveform: lane.bins, previewState: 'ready' }
+                                : candidate,
+                        );
+                    } else {
+                        samplePreviewStates = {
+                            ...samplePreviewStates,
+                            [target.objectId]: { preview, previewState: 'ready' },
+                        };
+                    }
                 })
                 .catch((error) => {
                     if (openSessionId !== sessionId || previewGeneration !== generation) return;
-                    previewFailed.add(item.objectKey);
-                    waveData = waveData.map((candidate) =>
-                        candidate.id === item.id ? { ...candidate, previewState: 'failed' } : candidate,
-                    );
+                    previewFailed.add(target.objectId);
+                    if (target.kind === 'wave-data') {
+                        waveData = waveData.map((candidate) =>
+                            candidate.id === target.itemId ? { ...candidate, previewState: 'failed' } : candidate,
+                        );
+                    } else {
+                        samplePreviewStates = {
+                            ...samplePreviewStates,
+                            [target.objectId]: { preview: null, previewState: 'failed' },
+                        };
+                    }
                     sourceStatus = userFacingMessage(error);
                 })
                 .finally(() => {
-                    if (previewGeneration === generation) previewPending.delete(item.objectKey);
+                    if (previewGeneration === generation) previewPending.delete(target.objectId);
                     previewInflight -= 1;
                     drainPreviewQueue();
                 });

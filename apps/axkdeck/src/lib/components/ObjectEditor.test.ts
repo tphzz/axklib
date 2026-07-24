@@ -62,7 +62,12 @@ function sampleSelection(): Extract<InspectorSelection, { kind: 'sample' }> {
         object: sampleObject,
         name: sampleObject.name,
     };
-    return { kind: 'sample', item, memberships: [], waveData: [] };
+    return {
+        kind: 'sample',
+        item,
+        memberships: [],
+        preview: { item, waveData: [], preview: null, previewState: 'idle' },
+    };
 }
 
 describe('ObjectEditor', () => {

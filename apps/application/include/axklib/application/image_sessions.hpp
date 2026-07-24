@@ -114,10 +114,17 @@ struct ImagePreviewBin {
     std::int32_t maximum{};
 };
 
+struct ImageWaveformPreviewLane {
+    std::string role;
+    std::string source_object_id;
+    std::uint64_t frame_count{};
+    std::vector<ImagePreviewBin> bins;
+};
+
 struct ImageWaveformPreview {
     std::string object_id;
     std::uint64_t frame_count{};
-    std::vector<ImagePreviewBin> bins;
+    std::vector<ImageWaveformPreviewLane> lanes;
 };
 
 struct ImageAudition {

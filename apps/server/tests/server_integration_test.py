@@ -1427,7 +1427,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, preview = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/preview?{preview_query}"
             )
-            assert status == 200 and len(preview["data"]["bins"]) == 16, preview
+            assert status == 200 and preview["data"]["frameCount"] > 0, preview
+            assert len(preview["data"]["lanes"]) == 1, preview
+            assert preview["data"]["lanes"][0]["role"] == "MONO", preview
+            assert len(preview["data"]["lanes"][0]["bins"]) == 16, preview
             status, submitted = http_request(
                 port,
                 "POST",

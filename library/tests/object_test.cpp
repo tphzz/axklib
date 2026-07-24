@@ -104,7 +104,10 @@ TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
     EXPECT_EQ(sample.left.root_key, 66U);
     EXPECT_EQ(sample.left.sample_rate, 48000U);
     EXPECT_EQ(sample.left.fine_tune_cents, -20);
+    EXPECT_EQ(sample.left.wave_start_frame, 0U);
     EXPECT_EQ(sample.left.wave_length_frames, 128U);
+    EXPECT_EQ(sample.loop_mode, 1U);
+    EXPECT_EQ(sample.loop_mode_label, "->0");
     EXPECT_EQ(sample.inactive_right.wave_data_name, "");
     EXPECT_EQ(sample.inactive_right.root_key, 66U);
     EXPECT_EQ(sample.inactive_right.pitch_base_word, 5442U);

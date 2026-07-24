@@ -22,6 +22,7 @@ OrderedJson member_json(const CurrentSbnkMember &member) {
             {"sample_rate", member.sample_rate},
             {"fine_tune_cents", member.fine_tune_cents},
             {"pitch_base_word", member.pitch_base_word},
+            {"wave_start_frame", member.wave_start_frame},
             {"wave_length_frames", member.wave_length_frames},
             {"loop_start_frame", member.loop_start_frame},
             {"loop_length_frames", member.loop_length_frames}};

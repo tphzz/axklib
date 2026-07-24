@@ -1491,13 +1491,20 @@ class ServerApplication {
             images_.preview(image_id, request_owner(request), object_id, static_cast<std::size_t>(*bins));
         if (!preview)
             return error_response(status_for_error(preview.error()), preview.error(), id);
-        Json values = Json::array();
-        for (const auto &bin : preview->bins)
-            values.push_back({{"minimum", bin.minimum}, {"maximum", bin.maximum}});
+        Json lanes = Json::array();
+        for (const auto &lane : preview->lanes) {
+            Json values = Json::array();
+            for (const auto &bin : lane.bins)
+                values.push_back({{"minimum", bin.minimum}, {"maximum", bin.maximum}});
+            lanes.push_back({{"role", lane.role},
+                             {"sourceObjectId", lane.source_object_id},
+                             {"frameCount", lane.frame_count},
+                             {"bins", std::move(values)}});
+        }
         return json_response(
             200,
             {{"data",
-              {{"objectId", preview->object_id}, {"frameCount", preview->frame_count}, {"bins", std::move(values)}}},
+              {{"objectId", preview->object_id}, {"frameCount", preview->frame_count}, {"lanes", std::move(lanes)}}},
              {"meta", {{"requestId", id}}}},
             id);
     }

@@ -108,7 +108,14 @@ export interface SamplerObject {
 
 export interface PreviewEnvelope {
     frameCount: number;
-    bins: { minimum: number; maximum: number }[];
+    lanes: readonly PreviewLane[];
+}
+
+export interface PreviewLane {
+    role: 'MONO' | 'LEFT' | 'RIGHT';
+    sourceObjectId: string;
+    frameCount: number;
+    bins: readonly { minimum: number; maximum: number }[];
 }
 
 export interface AuditionDescriptor {

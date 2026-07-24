@@ -13,6 +13,7 @@
 #include "axklib/application/secure_random.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/lookups.hpp"
 #include "axklib/media.hpp"
 #include "axklib/object.hpp"
 #include "axklib/relationship.hpp"
@@ -106,8 +107,10 @@ struct axk::app::ImageSessionManager::Implementation {
 
     struct PcmMember {
         std::string object_id;
+        std::string role;
         bool alternating_byte{};
         std::uint16_t output_width{};
+        std::uint64_t physical_first_frame{};
         std::uint64_t frame_count{};
     };
 
@@ -120,6 +123,7 @@ struct axk::app::ImageSessionManager::Implementation {
         std::string loop_mode_label;
         std::uint64_t loop_start{};
         std::uint64_t loop_length{};
+        std::vector<std::string> warnings;
     };
 
     struct AuditionEntry {
@@ -237,7 +241,9 @@ struct axk::app::ImageSessionManager::Implementation {
                                       payload.begin() + static_cast<std::ptrdiff_t>(offset + size)};
     }
 
-    Result<PcmMember> prepare_member(Session &session, std::string object_id,
+    Result<PcmMember> prepare_member(Session &session, std::string object_id, std::string role,
+                                     std::optional<std::uint64_t> first_frame,
+                                     std::optional<std::uint64_t> requested_frame_count,
                                      const CancellationToken &cancellation) const {
         const auto snapshot = session.snapshots_by_id.find(object_id);
         if (snapshot == session.snapshots_by_id.end())
@@ -249,6 +255,17 @@ struct axk::app::ImageSessionManager::Implementation {
             return std::unexpected(session_error("audition_unsupported", "Wave Data contains no playable PCM"));
         if (smpl->stored_sample_width_bytes.value != 1U && smpl->stored_sample_width_bytes.value != 2U)
             return std::unexpected(session_error("audition_unsupported", "Wave Data sample width is unsupported"));
+        if (smpl->stored_pcm_bytes % smpl->stored_sample_width_bytes.value != 0U)
+            return std::unexpected(
+                session_error("invalid_audio_range", "Wave Data PCM size is not aligned to its sample width"));
+        const auto physical_frame_count = smpl->stored_pcm_bytes / smpl->stored_sample_width_bytes.value;
+        const auto used_first_frame = first_frame.value_or(0U);
+        const auto used_frame_count = requested_frame_count.value_or(physical_frame_count);
+        if (used_frame_count == 0U)
+            return std::unexpected(session_error("audition_unsupported", "Sample playback window is empty"));
+        if (used_first_frame > physical_frame_count || used_frame_count > physical_frame_count - used_first_frame)
+            return std::unexpected(
+                session_error("invalid_audio_range", "Sample playback window exceeds the linked Wave Data"));
         bool alternating = smpl->stored_sample_width_bytes.value == 2U && smpl->stored_pcm_bytes >= 2U;
         constexpr std::size_t chunk_size = 64U * 1024U;
         for (std::uint64_t offset = 0U; alternating && offset < smpl->stored_pcm_bytes; offset += chunk_size) {
@@ -267,8 +284,8 @@ struct axk::app::ImageSessionManager::Implementation {
             }
         }
         const auto output_width = static_cast<std::uint16_t>(alternating ? 1U : smpl->stored_sample_width_bytes.value);
-        return PcmMember{std::move(object_id), alternating, output_width,
-                         smpl->stored_pcm_bytes / smpl->stored_sample_width_bytes.value};
+        return PcmMember{std::move(object_id), std::move(role),  alternating,
+                         output_width,         used_first_frame, used_frame_count};
     }
 
     Result<PcmSource> prepare_source(Session &session, std::string_view object_id,
@@ -276,11 +293,20 @@ struct axk::app::ImageSessionManager::Implementation {
         const auto snapshot = session.snapshots_by_id.find(std::string{object_id});
         if (snapshot == session.snapshots_by_id.end())
             return std::unexpected(session_error("object_not_found", "image object does not exist"));
-        std::vector<std::string> member_ids;
+        struct PendingMember {
+            std::string object_id;
+            std::string role;
+            const CurrentSbnkMember *sample_member{};
+        };
+        std::vector<PendingMember> pending_members;
+        const CurrentSbnk *sample = nullptr;
         if (std::holds_alternative<CurrentSmpl>(snapshot->second.object.payload)) {
-            member_ids.emplace_back(object_id);
+            pending_members.push_back({std::string{object_id}, "MONO", nullptr});
         } else if (std::holds_alternative<CurrentSbnk>(snapshot->second.object.payload)) {
-            for (const auto relationship_type : {"SBNK_LEFT_MEMBER_TO_SMPL", "SBNK_RIGHT_MEMBER_TO_SMPL"}) {
+            sample = &std::get<CurrentSbnk>(snapshot->second.object.payload);
+            const auto append_member = [&](std::string_view relationship_type, std::string role,
+                                           const CurrentSbnkMember &member) -> Result<void> {
+                std::optional<std::string> resolved_id;
                 for (const auto &relationship : session.relationships) {
                     if (relationship.source_object_id != object_id || relationship.type != relationship_type ||
                         !relationship.target_object_id || relationship.quality != "Known") {
@@ -288,42 +314,103 @@ struct axk::app::ImageSessionManager::Implementation {
                     }
                     const auto target = session.snapshots_by_id.find(*relationship.target_object_id);
                     if (target != session.snapshots_by_id.end() &&
-                        std::holds_alternative<CurrentSmpl>(target->second.object.payload) &&
-                        !std::ranges::contains(member_ids, *relationship.target_object_id)) {
-                        member_ids.push_back(*relationship.target_object_id);
+                        std::holds_alternative<CurrentSmpl>(target->second.object.payload)) {
+                        if (resolved_id && *resolved_id != *relationship.target_object_id)
+                            return std::unexpected(session_error(
+                                "audition_relationship_ambiguous",
+                                "Sample audition requires one confirmed linked Wave Data object per member lane"));
+                        resolved_id = *relationship.target_object_id;
                     }
                 }
-            }
-            if (member_ids.empty() || member_ids.size() > 2U) {
-                return std::unexpected(
-                    session_error("audition_relationship_ambiguous",
-                                  "Sample audition requires one or two confirmed linked SMPL Wave Data objects"));
+                if (!resolved_id)
+                    return std::unexpected(session_error(
+                        "audition_relationship_ambiguous",
+                        "Sample audition requires one confirmed linked Wave Data object per member lane"));
+                pending_members.push_back({std::move(*resolved_id), std::move(role), &member});
+                return {};
+            };
+            auto left = append_member("SBNK_LEFT_MEMBER_TO_SMPL", "LEFT", sample->left);
+            if (!left)
+                return std::unexpected(left.error());
+            if (sample->right_slot_present) {
+                if (!sample->right)
+                    return std::unexpected(
+                        session_error("audition_relationship_ambiguous", "Sample right member metadata is missing"));
+                auto right = append_member("SBNK_RIGHT_MEMBER_TO_SMPL", "RIGHT", *sample->right);
+                if (!right)
+                    return std::unexpected(right.error());
             }
         } else {
             return std::unexpected(session_error("audition_unsupported", "audition requires SMPL or SBNK content"));
         }
 
         PcmSource source;
-        for (auto &member_id : member_ids) {
-            auto member = prepare_member(session, std::move(member_id), cancellation);
+        for (auto &pending : pending_members) {
+            const auto first_frame = pending.sample_member
+                                         ? std::optional<std::uint64_t>{pending.sample_member->wave_start_frame}
+                                         : std::nullopt;
+            const auto frame_count = pending.sample_member
+                                         ? std::optional<std::uint64_t>{pending.sample_member->wave_length_frames}
+                                         : std::nullopt;
+            auto member = prepare_member(session, std::move(pending.object_id), std::move(pending.role), first_frame,
+                                         frame_count, cancellation);
             if (!member)
                 return std::unexpected(member.error());
             const auto &member_snapshot = session.snapshots_by_id.at(member->object_id);
             const auto &smpl = std::get<CurrentSmpl>(member_snapshot.object.payload);
+            const auto sample_rate =
+                pending.sample_member ? pending.sample_member->sample_rate : smpl.sample_rate.value;
+            if (sample_rate == 0U)
+                return std::unexpected(session_error("audition_unsupported", "Sample playback rate is zero"));
             if (source.members.empty()) {
-                source.sample_rate = smpl.sample_rate.value;
+                source.sample_rate = sample_rate;
                 source.sample_width = member->output_width;
-                source.loop_mode = smpl.loop_mode.value;
-                source.loop_mode_label = smpl.loop_mode_label;
-                source.loop_start = smpl.loop_start_frame.value;
-                source.loop_length = smpl.loop_length_frames.value;
-            } else if (source.sample_rate != smpl.sample_rate.value || source.sample_width != member->output_width) {
+                source.loop_mode = sample ? sample->loop_mode : smpl.loop_mode.value;
+                source.loop_mode_label = sample ? sample->loop_mode_label : smpl.loop_mode_label;
+                if (pending.sample_member) {
+                    if (pending.sample_member->loop_start_frame < pending.sample_member->wave_start_frame) {
+                        source.warnings.emplace_back(
+                            "Sample loop starts before its playback window; playback will use one-shot mode");
+                        source.loop_mode = 0U;
+                        source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
+                    } else {
+                        source.loop_start =
+                            pending.sample_member->loop_start_frame - pending.sample_member->wave_start_frame;
+                        source.loop_length = pending.sample_member->loop_length_frames;
+                    }
+                } else {
+                    source.loop_start = smpl.loop_start_frame.value;
+                    source.loop_length = smpl.loop_length_frames.value;
+                }
+            } else if (source.sample_rate != sample_rate || source.sample_width != member->output_width) {
                 return std::unexpected(
                     session_error("audition_stereo_incompatible",
                                   "linked Wave Data must have matching sample rates and decoded sample widths"));
+            } else if (pending.sample_member && source.loop_mode != 0U) {
+                const auto loop_start =
+                    pending.sample_member->loop_start_frame >= pending.sample_member->wave_start_frame
+                        ? pending.sample_member->loop_start_frame - pending.sample_member->wave_start_frame
+                        : std::numeric_limits<std::uint64_t>::max();
+                if (loop_start != source.loop_start ||
+                    pending.sample_member->loop_length_frames != source.loop_length) {
+                    source.warnings.emplace_back("Sample member loop windows differ; playback will use one-shot mode");
+                    source.loop_mode = 0U;
+                    source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
+                    source.loop_start = 0U;
+                    source.loop_length = 0U;
+                }
             }
             source.frame_count = std::max(source.frame_count, member->frame_count);
             source.members.push_back(std::move(*member));
+        }
+        if ((source.loop_mode == 1U || source.loop_mode == 2U) &&
+            (source.loop_length == 0U || source.loop_start >= source.frame_count ||
+             source.loop_length > source.frame_count - source.loop_start)) {
+            source.warnings.emplace_back("Invalid loop bounds; playback will use one-shot mode");
+            source.loop_mode = 0U;
+            source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
+            source.loop_start = 0U;
+            source.loop_length = 0U;
         }
         return source;
     }
@@ -337,8 +424,10 @@ struct axk::app::ImageSessionManager::Implementation {
             return std::vector<std::byte>{};
         frame_count = static_cast<std::size_t>(std::min<std::uint64_t>(frame_count, member.frame_count - first_frame));
         const auto stored_width = smpl.stored_sample_width_bytes.value;
-        auto stored = read_object_range(session, member.object_id, smpl.stored_pcm_offset + first_frame * stored_width,
-                                        frame_count * stored_width, cancellation);
+        const auto physical_first_frame = member.physical_first_frame + first_frame;
+        auto stored =
+            read_object_range(session, member.object_id, smpl.stored_pcm_offset + physical_first_frame * stored_width,
+                              frame_count * stored_width, cancellation);
         if (!stored)
             return std::unexpected(stored.error());
         if (member.alternating_byte) {
@@ -504,15 +593,17 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
             item.entry_name = object.placement->entry_name;
         }
         if (const auto *waveform = std::get_if<axk::CurrentSmpl>(&object.object.payload)) {
-            item.waveform = WaveformMetadata{.sample_rate = waveform->sample_rate.value,
-                                             .sample_width_bytes = waveform->stored_sample_width_bytes.value,
-                                             .root_key = waveform->root_key.value,
-                                             .fine_tune_cents = waveform->fine_tune_cents.value,
-                                             .loop_mode = waveform->loop_mode.value,
-                                             .loop_mode_label = waveform->loop_mode_label,
-                                             .frame_count = waveform->wave_length_frames.value,
-                                             .loop_start_frame = waveform->loop_start_frame.value,
-                                             .loop_length_frames = waveform->loop_length_frames.value};
+            const auto stored_width = waveform->stored_sample_width_bytes.value;
+            item.waveform =
+                WaveformMetadata{.sample_rate = waveform->sample_rate.value,
+                                 .sample_width_bytes = waveform->stored_sample_width_bytes.value,
+                                 .root_key = waveform->root_key.value,
+                                 .fine_tune_cents = waveform->fine_tune_cents.value,
+                                 .loop_mode = waveform->loop_mode.value,
+                                 .loop_mode_label = waveform->loop_mode_label,
+                                 .frame_count = stored_width == 0U ? 0U : waveform->stored_pcm_bytes / stored_width,
+                                 .loop_start_frame = waveform->loop_start_frame.value,
+                                 .loop_length_frames = waveform->loop_length_frames.value};
         }
         session->object_indices_by_id[item.id] = session->objects.size();
         session->object_indices_by_type[item.type].push_back(session->objects.size());
@@ -826,33 +917,38 @@ axk::app::ImageSessionManager::preview(std::string_view image_id, std::string_vi
     auto source = implementation_->prepare_source(**session, object_id, cancellation);
     if (!source)
         return std::unexpected(source.error());
-    const auto used_bins = static_cast<std::size_t>(std::min<std::uint64_t>(bin_count, source->frame_count));
-    ImageWaveformPreview result{.object_id = std::string{object_id}, .frame_count = source->frame_count, .bins = {}};
-    result.bins.assign(used_bins, {std::numeric_limits<std::int32_t>::max(), std::numeric_limits<std::int32_t>::min()});
+    ImageWaveformPreview result{.object_id = std::string{object_id}, .frame_count = source->frame_count, .lanes = {}};
+    result.lanes.reserve(source->members.size());
     constexpr std::size_t chunk_frames = 16U * 1024U;
-    const auto channels = source->members.size();
-    for (std::uint64_t first = 0U; first < source->frame_count; first += chunk_frames) {
-        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(chunk_frames, source->frame_count - first));
-        auto pcm = implementation_->read_pcm(**session, *source, first, count, cancellation);
-        if (!pcm)
-            return std::unexpected(pcm.error());
-        for (std::size_t frame = 0U; frame < count; ++frame) {
-            const auto absolute_frame = first + frame;
-            const auto bin = static_cast<std::size_t>(absolute_frame * used_bins / source->frame_count);
-            for (std::size_t channel = 0U; channel < channels; ++channel) {
-                const auto offset = (frame * channels + channel) * source->sample_width;
+    for (const auto &member : source->members) {
+        const auto used_bins = static_cast<std::size_t>(std::min<std::uint64_t>(bin_count, member.frame_count));
+        ImageWaveformPreviewLane lane{
+            .role = member.role, .source_object_id = member.object_id, .frame_count = member.frame_count, .bins = {}};
+        lane.bins.assign(used_bins,
+                         {std::numeric_limits<std::int32_t>::max(), std::numeric_limits<std::int32_t>::min()});
+        for (std::uint64_t first = 0U; first < member.frame_count; first += chunk_frames) {
+            const auto count =
+                static_cast<std::size_t>(std::min<std::uint64_t>(chunk_frames, member.frame_count - first));
+            auto pcm = implementation_->read_member_pcm(**session, member, first, count, cancellation);
+            if (!pcm)
+                return std::unexpected(pcm.error());
+            for (std::size_t frame = 0U; frame < count; ++frame) {
+                const auto absolute_frame = first + frame;
+                const auto bin = static_cast<std::size_t>(absolute_frame * used_bins / member.frame_count);
+                const auto offset = frame * member.output_width;
                 std::int32_t value{};
-                if (source->sample_width == 1U) {
+                if (member.output_width == 1U) {
                     value = std::to_integer<std::uint8_t>((*pcm)[offset]) - 128;
                 } else {
                     const auto low = std::to_integer<std::uint8_t>((*pcm)[offset]);
                     const auto high = std::to_integer<std::uint8_t>((*pcm)[offset + 1U]);
                     value = static_cast<std::int16_t>(static_cast<std::uint16_t>(low | (high << 8U)));
                 }
-                result.bins[bin].minimum = std::min(result.bins[bin].minimum, value);
-                result.bins[bin].maximum = std::max(result.bins[bin].maximum, value);
+                lane.bins[bin].minimum = std::min(lane.bins[bin].minimum, value);
+                lane.bins[bin].maximum = std::max(lane.bins[bin].maximum, value);
             }
         }
+        result.lanes.push_back(std::move(lane));
     }
     return result;
 }
@@ -883,12 +979,7 @@ axk::app::ImageSessionManager::prepare_audition(std::string_view image_id, std::
                              .loop_mode_label = source->loop_mode_label,
                              .loop_start_frame = source->loop_start,
                              .loop_length_frames = source->loop_length,
-                             .warnings = {}};
-    if ((source->loop_mode == 1U || source->loop_mode == 2U) &&
-        (source->loop_length == 0U || source->loop_start >= source->frame_count ||
-         source->loop_length > source->frame_count - source->loop_start)) {
-        descriptor.warnings.emplace_back("Invalid loop bounds; playback will use one-shot mode");
-    }
+                             .warnings = source->warnings};
     const std::scoped_lock lock{(*session)->access_mutex};
     const auto now = implementation_->clock();
     std::erase_if((*session)->auditions,

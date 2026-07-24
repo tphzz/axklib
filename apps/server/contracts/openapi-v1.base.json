@@ -301,7 +301,7 @@
         {"name": "objectId", "in": "query", "required": true, "schema": {"type": "string"}},
         {"name": "bins", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1}}
       ],
-      "get": {"operationId": "images.preview", "responses": {"200": {"description": "Bounded waveform min/max envelope", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImagePreviewResponse"}}}}}}
+      "get": {"operationId": "images.preview", "responses": {"200": {"description": "Bounded physical Wave Data or Sample playback-window min/max lanes", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImagePreviewResponse"}}}}}}
     },
     "/auditions/{auditionId}": {
       "parameters": [
@@ -856,12 +856,29 @@
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },
+      "ImagePreviewBin": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["minimum", "maximum"],
+        "properties": {"minimum": {"type": "integer"}, "maximum": {"type": "integer"}}
+      },
+      "ImagePreviewLane": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "sourceObjectId", "frameCount", "bins"],
+        "properties": {
+          "role": {"enum": ["MONO", "LEFT", "RIGHT"]},
+          "sourceObjectId": {"type": "string", "minLength": 1},
+          "frameCount": {"type": "integer", "minimum": 1},
+          "bins": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/ImagePreviewBin"}}
+        }
+      },
       "ImagePreviewResponse": {
         "type": "object",
         "additionalProperties": false,
         "required": ["data", "meta"],
         "properties": {
-          "data": {"type": "object", "additionalProperties": false, "required": ["objectId", "frameCount", "bins"], "properties": {"objectId": {"type": "string", "minLength": 1}, "frameCount": {"type": "integer", "minimum": 0}, "bins": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["minimum", "maximum"], "properties": {"minimum": {"type": "integer"}, "maximum": {"type": "integer"}}}}}},
+          "data": {"type": "object", "additionalProperties": false, "required": ["objectId", "frameCount", "lanes"], "properties": {"objectId": {"type": "string", "minLength": 1}, "frameCount": {"type": "integer", "minimum": 1}, "lanes": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/ImagePreviewLane"}}}},
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },

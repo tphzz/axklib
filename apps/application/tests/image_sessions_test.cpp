@@ -3,6 +3,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <optional>
+#include <string_view>
 
 #include <gtest/gtest.h>
 
@@ -39,6 +41,66 @@ void patch_sample_cached_reference(const std::filesystem::path &path, std::uint3
     image.seekp(static_cast<std::streamoff>(absolute));
     image.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     ASSERT_TRUE(image);
+}
+
+void patch_sample_window(const std::filesystem::path &path, std::uint32_t first_frame, std::uint32_t frame_count,
+                         std::uint32_t loop_start, std::uint32_t loop_length,
+                         std::optional<std::array<std::uint32_t, 4>> right_window = std::nullopt) {
+    const auto media = axk::open_media(path);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto &partition = sfs->partitions().front();
+    const auto sample =
+        std::ranges::find_if(partition.records, [](const auto &record) { return record.object_type == "SBNK"; });
+    ASSERT_NE(sample, partition.records.end());
+    ASSERT_EQ(sample->extents.size(), 1U);
+    const auto absolute =
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(sample->extents.front().cluster_offset) * partition.sectors_per_cluster) *
+        512U;
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    const auto write_be32 = [&](std::uint64_t offset, std::uint32_t value) {
+        const std::array bytes{static_cast<char>(value >> 24U), static_cast<char>(value >> 16U),
+                               static_cast<char>(value >> 8U), static_cast<char>(value)};
+        image.seekp(static_cast<std::streamoff>(absolute + offset));
+        image.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        ASSERT_TRUE(image);
+    };
+    const auto write_be16 = [&](std::uint64_t offset, std::uint16_t value) {
+        const std::array bytes{static_cast<char>(value >> 8U), static_cast<char>(value)};
+        image.seekp(static_cast<std::streamoff>(absolute + offset));
+        image.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        ASSERT_TRUE(image);
+    };
+    const auto write_u8 = [&](std::uint64_t offset, std::uint8_t value) {
+        image.seekp(static_cast<std::streamoff>(absolute + offset));
+        image.put(static_cast<char>(value));
+        ASSERT_TRUE(image);
+    };
+    write_be32(0xe8U, first_frame);
+    write_be32(0xf0U, frame_count);
+    write_be32(0xf8U, loop_start);
+    write_be32(0x100U, loop_length);
+    if (right_window) {
+        std::array<char, 16> name{};
+        constexpr std::string_view wave_name = "sine wave";
+        std::ranges::copy(wave_name, name.begin());
+        image.seekp(static_cast<std::streamoff>(absolute + 0x88U));
+        image.write(name.data(), static_cast<std::streamsize>(name.size()));
+        ASSERT_TRUE(image);
+        write_be32(0xa4U, 23'797'180U);
+        write_u8(0xd7U, 66U);
+        write_be16(0xdaU, 48'000U);
+        write_u8(0xddU, static_cast<std::uint8_t>(-20));
+        write_be16(0xe0U, 5'442U);
+        write_be32(0xecU, (*right_window)[0]);
+        write_be32(0xf4U, (*right_window)[1]);
+        write_be32(0xfcU, (*right_window)[2]);
+        write_be32(0x104U, (*right_window)[3]);
+    }
 }
 
 class ImageSessionTest : public testing::Test {
@@ -354,7 +416,8 @@ TEST_F(ImageSessionTest, BuildsBoundedPreviewForOpaqueWaveformIdentifier) {
     const auto preview = sessions.preview(opened->image_id, "owner-a", waveform->id, 32U);
     ASSERT_TRUE(preview) << preview.error().message;
     EXPECT_EQ(preview->object_id, waveform->id);
-    EXPECT_EQ(preview->bins.size(), 32U);
+    ASSERT_EQ(preview->lanes.size(), 1U);
+    EXPECT_EQ(preview->lanes.front().bins.size(), 32U);
     EXPECT_GT(preview->frame_count, 0U);
     EXPECT_TRUE(sessions.preview(opened->image_id, "owner-a", waveform->id, 1024U));
     EXPECT_FALSE(sessions.preview(opened->image_id, "owner-a", waveform->id, 4097U));
@@ -408,6 +471,105 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     const auto header = sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U);
     ASSERT_TRUE(header) << header.error().message;
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
+}
+
+TEST_F(ImageSessionTest, UsesTheSamplePlaybackWindowForPreviewAndAudition) {
+    patch_sample_window(root_ / "fixture.hds", 32U, 32U, 40U, 8U);
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto sample_objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto wave_objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(sample_objects) << sample_objects.error().message;
+    ASSERT_TRUE(wave_objects) << wave_objects.error().message;
+    ASSERT_FALSE(sample_objects->items.empty());
+    ASSERT_FALSE(wave_objects->items.empty());
+    const auto &sample = sample_objects->items.front();
+    const auto wave = std::ranges::find(wave_objects->items, sample.name, &axk::app::ImageObjectItem::name);
+    ASSERT_NE(wave, wave_objects->items.end());
+
+    const auto sample_preview = sessions.preview(opened->image_id, "owner-a", sample.id, 32U);
+    ASSERT_TRUE(sample_preview) << sample_preview.error().message;
+    EXPECT_EQ(sample_preview->frame_count, 32U);
+    ASSERT_EQ(sample_preview->lanes.size(), 1U);
+    EXPECT_EQ(sample_preview->lanes.front().role, "LEFT");
+    EXPECT_EQ(sample_preview->lanes.front().source_object_id, wave->id);
+    EXPECT_EQ(sample_preview->lanes.front().frame_count, 32U);
+    EXPECT_EQ(sample_preview->lanes.front().bins.size(), 32U);
+
+    const auto sample_audition = sessions.prepare_audition(opened->image_id, "owner-a", sample.id);
+    const auto wave_audition = sessions.prepare_audition(opened->image_id, "owner-a", wave->id);
+    ASSERT_TRUE(sample_audition) << sample_audition.error().message;
+    ASSERT_TRUE(wave_audition) << wave_audition.error().message;
+    EXPECT_EQ(sample_audition->frame_count, 32U);
+    EXPECT_EQ(sample_audition->loop_mode, 1U);
+    EXPECT_EQ(sample_audition->loop_start_frame, 8U);
+    EXPECT_EQ(sample_audition->loop_length_frames, 8U);
+    EXPECT_EQ(wave_audition->frame_count, 132U);
+
+    const auto sample_pcm = sessions.audition_range(sample_audition->audition_id, "owner-a", 44U,
+                                                    32U * sample_audition->sample_width_bytes);
+    const auto wave_pcm =
+        sessions.audition_range(wave_audition->audition_id, "owner-a",
+                                44U + 32U * static_cast<std::uint64_t>(wave_audition->sample_width_bytes),
+                                32U * wave_audition->sample_width_bytes);
+    ASSERT_TRUE(sample_pcm) << sample_pcm.error().message;
+    ASSERT_TRUE(wave_pcm) << wave_pcm.error().message;
+    EXPECT_EQ(sample_pcm->bytes, wave_pcm->bytes);
+
+    const auto wave_preview = sessions.preview(opened->image_id, "owner-a", wave->id, 32U);
+    ASSERT_TRUE(wave_preview) << wave_preview.error().message;
+    EXPECT_EQ(wave_preview->frame_count, 132U);
+    ASSERT_EQ(wave_preview->lanes.size(), 1U);
+    EXPECT_EQ(wave_preview->lanes.front().role, "MONO");
+    EXPECT_EQ(wave_preview->lanes.front().frame_count, 132U);
+}
+
+TEST_F(ImageSessionTest, RejectsSamplePlaybackWindowsOutsideStoredWaveData) {
+    patch_sample_window(root_ / "fixture.hds", 120U, 16U, 120U, 16U);
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(objects) << objects.error().message;
+    ASSERT_FALSE(objects->items.empty());
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    ASSERT_FALSE(audition);
+    EXPECT_EQ(audition.error().code, "invalid_audio_range");
+}
+
+TEST_F(ImageSessionTest, UsesIndependentStereoMemberWindowsAndPadsTheShorterLane) {
+    patch_sample_window(root_ / "fixture.hds", 32U, 32U, 40U, 8U, std::array{64U, 16U, 72U, 8U});
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(objects) << objects.error().message;
+    ASSERT_FALSE(objects->items.empty());
+
+    const auto preview = sessions.preview(opened->image_id, "owner-a", objects->items.front().id, 32U);
+    ASSERT_TRUE(preview) << preview.error().message;
+    EXPECT_EQ(preview->frame_count, 32U);
+    ASSERT_EQ(preview->lanes.size(), 2U);
+    EXPECT_EQ(preview->lanes[0].role, "LEFT");
+    EXPECT_EQ(preview->lanes[0].frame_count, 32U);
+    EXPECT_EQ(preview->lanes[1].role, "RIGHT");
+    EXPECT_EQ(preview->lanes[1].frame_count, 16U);
+
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    ASSERT_TRUE(audition) << audition.error().message;
+    EXPECT_EQ(audition->channels, 2U);
+    EXPECT_EQ(audition->frame_count, 32U);
+    EXPECT_EQ(audition->loop_start_frame, 8U);
+    EXPECT_EQ(audition->loop_length_frames, 8U);
+    EXPECT_TRUE(audition->warnings.empty());
+    const auto pcm = sessions.audition_range(audition->audition_id, "owner-a", 44U, 32U * 2U * 2U);
+    ASSERT_TRUE(pcm) << pcm.error().message;
+    ASSERT_EQ(pcm->bytes.size(), 128U);
+    for (std::size_t frame = 16U; frame < 32U; ++frame) {
+        EXPECT_EQ(pcm->bytes[frame * 4U + 2U], std::byte{0});
+        EXPECT_EQ(pcm->bytes[frame * 4U + 3U], std::byte{0});
+    }
 }
 
 TEST_F(ImageSessionTest, PreparesSampleAuditionWhenTheNamedWaveDataHasAStaleCachedReference) {

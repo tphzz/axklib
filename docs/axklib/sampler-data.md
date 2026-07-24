@@ -243,6 +243,7 @@ field names currently exposed by the decoder.
 | `0x0e0` | u16be | secondary_pitch_base_word_0x0e0 |
 | `0x0e2` | u8 | key_range_high_0x0e2 |
 | `0x0e3` | u8 | key_range_low_0x0e3 |
+| `0x0e5` | u8 | loop mode |
 | `0x0e6` | u16be | loop_tempo_0x0e6 |
 
 Key-range values `0..127` are concrete MIDI key limits. The sampler also
@@ -283,6 +284,22 @@ as inactive compatibility fields rather than as a second playback region.
 | `0x114` | u8 | expand_width_0x114 |
 | `0x115` | u8 | random_pitch_0x115 |
 | `0x116` | u8 | sample_level_0x116 |
+
+The member start, length, and loop fields are frame addresses in the linked
+physical Wave Data object. They define the Sample's playable window and can
+select only one segment of a larger shared `SMPL` payload. Loop Divide media is
+a common example: several Samples have different start frames while referencing
+the same Wave Data. Sample preview and audition therefore:
+
+1. resolve each active member to one confirmed `SMPL`;
+2. read `wave_length_frames` beginning at `wave_start_frame`;
+3. normalize `loop_start_frame` relative to that member start; and
+4. use the `SBNK` loop mode rather than the physical Wave Data loop selector.
+
+Direct Wave Data preview remains physical and covers the stored PCM extent.
+Sample-owned preview returns one lane per active member, including each lane's
+role, source object identifier, and frame count. Invalid member windows are
+rejected instead of being clamped to the physical payload.
 
 Generated direct single-member `SBNK` objects have been hardware-tested with
 sample level values in the normal `0..127` range. The writer also carries a

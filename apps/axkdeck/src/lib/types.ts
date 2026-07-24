@@ -1,4 +1,4 @@
-import type { SamplerObject, SamplerRelationship } from './transport';
+import type { PreviewEnvelope, SamplerObject, SamplerRelationship } from './transport';
 
 export type WorkspaceView = 'programs' | 'sample-banks' | 'samples' | 'wave-data';
 
@@ -58,6 +58,8 @@ export interface LinkedWaveDataItem {
 export interface SampleWaveformPreview {
     item: SampleStructureItem;
     waveData: LinkedWaveDataItem[];
+    preview: PreviewEnvelope | null;
+    previewState: 'idle' | 'loading' | 'ready' | 'failed';
 }
 
 export interface WaveformBin {
@@ -85,7 +87,7 @@ export type InspectorSelection =
           kind: 'sample';
           item: SampleStructureItem;
           memberships: SampleStructureItem[];
-          waveData: LinkedWaveDataItem[];
+          preview: SampleWaveformPreview;
       }
     | { kind: 'wave-data'; waveData: WaveDataItem }
     | null;
