@@ -32,7 +32,7 @@ TEST(ApplicationOperations, ComposesStatelessOperationsAndLeavesInteractiveSessi
     const auto registry = axk::app::make_application_registry(*sandbox, uploads);
     ASSERT_TRUE(registry) << registry.error().message;
     for (const auto &entry : registry->entries()) {
-        if (entry.descriptor.id == "auditions.prepare") {
+        if (entry.descriptor.id == "auditions.prepare" || entry.descriptor.id == "images.alter") {
             EXPECT_FALSE(entry.implemented);
             continue;
         }
@@ -59,7 +59,8 @@ TEST(ApplicationOperations, ProducesTheSameStatelessCallableInventoryForEveryTra
     ASSERT_EQ(first_entries.size(), second_entries.size());
     for (std::size_t index = 0; index < first_entries.size(); ++index) {
         EXPECT_EQ(first_entries[index].descriptor.id, second_entries[index].descriptor.id);
-        const auto interactive_session_operation = first_entries[index].descriptor.id == "auditions.prepare";
+        const auto interactive_session_operation = first_entries[index].descriptor.id == "auditions.prepare" ||
+                                                   first_entries[index].descriptor.id == "images.alter";
         EXPECT_EQ(first_entries[index].implemented, !interactive_session_operation)
             << first_entries[index].descriptor.id;
         EXPECT_EQ(second_entries[index].implemented, !interactive_session_operation)

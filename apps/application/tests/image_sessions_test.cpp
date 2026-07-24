@@ -210,6 +210,28 @@ TEST_F(ImageSessionTest, HoldsPathReservationFromBeforeOpenUntilClose) {
         axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::exclusive}));
 }
 
+TEST_F(ImageSessionTest, MutationAdmissionUpgradesAndAbortRestoresTheSessionLease) {
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::ImageSessionManager sessions{
+        *sandbox_, 4U, 100U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    EXPECT_EQ(opened->revision, 1U);
+    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    ASSERT_TRUE(mutation) << mutation.error().message;
+    EXPECT_FALSE(
+        reservations.try_acquire(axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::shared}));
+    const auto closed = sessions.close(opened->image_id, "owner-a");
+    ASSERT_FALSE(closed);
+    EXPECT_EQ(closed.error().code, "entry_in_use");
+    sessions.abort_mutation(opened->image_id, "owner-a", opened->revision);
+    const auto inspected = sessions.inspect(opened->image_id, "owner-a");
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->revision, opened->revision);
+    EXPECT_TRUE(
+        reservations.try_acquire(axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::shared}));
+}
+
 TEST_F(ImageSessionTest, PagesDeterministicallyAndRejectsForeignOrInvalidCursors) {
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 2U};
     const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");

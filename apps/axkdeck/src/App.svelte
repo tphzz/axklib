@@ -34,7 +34,7 @@
     } from './lib/serverSettings';
     import { audioExtensions, isSupportedAudioFile } from './lib/audioImport';
     import { browserUploadSource, type ClientUploadSource } from './lib/clientUploadSource';
-    import { reportDiagnostic, reportError } from './lib/diagnostics';
+    import { diagnosticsEnabled, reportDiagnostic, reportError } from './lib/diagnostics';
     import { listenForNativeAudioDrops, type NativeDropPosition } from './lib/nativeAudioDrop';
     import { collectPages } from './lib/pagination';
     import { type DirectoryLocation, type DirectoryRef, type FileLocation } from './lib/storageLocations';
@@ -339,23 +339,26 @@
     }
 
     async function commitAudioImport(items: AudioImportItem[]): Promise<void> {
-        if (!audioImportRequest || !imageLocation) throw new Error('Audio import target is no longer available');
+        if (!audioImportRequest || openSessionId === null)
+            throw new Error('Audio import target is no longer available');
         const target = audioImportRequest.target;
         const firstName = items[0]?.sampleName;
+        const sessionId = openSessionId;
+        const started = performance.now();
         sourceStatus = 'Importing audio';
         try {
-            await closeOpenImageSession();
-            const job = await transport.startAudioImport(imageLocation, target, items);
+            await auditionController.invalidateSession(sessionId);
+            const job = await transport.startAudioImport(sessionId, target, items);
             const completed = await transport.waitForJob(job.jobId, (update) => {
                 if (update.progress?.label) sourceStatus = update.progress.label;
             });
             if (completed.status !== 'completed') throw new Error(completed.error ?? 'Audio import did not complete');
             selectWorkspaceView('samples');
-            await openSource(target);
+            await refreshOpenImageSession(target);
             const inserted = samples.find((sample) => sample.name === firstName);
             if (inserted) selectSample(inserted);
+            reportMutationTiming('audio-import', started, items.length);
         } catch (error) {
-            if (openSessionId === null) await openSource(target);
             sourceStatus = userFacingMessage(error);
             throw error;
         }
@@ -779,11 +782,18 @@
                   : requested.action === 'rename-partition'
                     ? 'Renaming partition'
                     : 'Renaming volume';
+        if (openSessionId === null) {
+            volumeActionError = 'Image session is no longer available';
+            volumeActionBusy = false;
+            return;
+        }
+        const sessionId = openSessionId;
+        const started = performance.now();
         try {
-            await closeOpenImageSession();
+            await auditionController.invalidateSession(sessionId);
             const job = partitionMutation
-                ? await transport.startPartitionMutation(imageLocation, partitionMutation)
-                : await transport.startVolumeMutation(imageLocation, volumeMutation!);
+                ? await transport.startPartitionMutation(sessionId, partitionMutation)
+                : await transport.startVolumeMutation(sessionId, volumeMutation!);
             const completed = await transport.waitForJob(job.jobId, (update) => {
                 if (update.progress?.label) sourceStatus = update.progress.label;
             });
@@ -791,13 +801,15 @@
                 throw new Error(completed.error ?? 'Image change did not complete');
             }
             volumeAction = null;
-            await openSource({ partitionIndex, volumeName: preferredVolumeName });
+            await refreshOpenImageSession({ partitionIndex, volumeName: preferredVolumeName });
+            reportMutationTiming(requested.action, started, 1);
         } catch (error) {
             volumeActionError = userFacingMessage(error);
             sourceStatus = volumeActionError;
-            if (openSessionId === null) {
-                await openSource({ partitionIndex, volumeName: previousVolumeName });
-            }
+            if (openSessionId !== null)
+                await refreshOpenImageSession({ partitionIndex, volumeName: previousVolumeName }).catch(
+                    () => undefined,
+                );
         } finally {
             volumeActionBusy = false;
         }
@@ -1205,6 +1217,33 @@
 
     async function openSource(preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
         if (imageLocation) await openImageLocation(imageLocation, preferred);
+    }
+
+    async function refreshOpenImageSession(preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
+        if (openSessionId === null) throw new Error('Image session is no longer available');
+        const sessionId = openSessionId;
+        const opened = await transport.refreshImage(sessionId);
+        if (openSessionId !== sessionId) return;
+        volumeMutationsAvailable = opened.volumeMutationsAvailable;
+        partitionMutationsAvailable = opened.partitionMutationsAvailable;
+        sourceItems = opened.tree;
+        const preferredItem = preferred
+            ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
+            : null;
+        selectedSource = preferredItem ?? opened.initialVolume ?? opened.tree[0] ?? selectedSource;
+        if (selectedSource.kind === 'volume') await loadVolume(selectedSource.id);
+        else clearVolume();
+        sourceStatus = opened.validation.valid ? 'Ready' : `${opened.validation.errorCount} validation errors`;
+    }
+
+    function reportMutationTiming(operation: string, started: number, itemCount: number): void {
+        if (!diagnosticsEnabled()) return;
+        reportDiagnostic('image_mutation_completed', {
+            operation,
+            itemCount,
+            durationMs: Math.round(performance.now() - started),
+            strategy: 'journaled-in-place',
+        });
     }
 
     async function closeOpenImageSession(): Promise<void> {

@@ -30,6 +30,9 @@
 #include <openssl/evp.h>
 
 #include "axklib/alteration.hpp"
+#include "axklib/alteration_transaction.hpp"
+#include "axklib/application/alteration_journal.hpp"
+#include "axklib/application/image_sessions.hpp"
 #include "axklib/application/secure_random.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
@@ -601,6 +604,19 @@ axk::app::Result<std::vector<FileFingerprint>> fingerprint_files(std::span<const
         result.push_back({path, std::move(*digest), after->first, after->second});
     }
     return result;
+}
+
+axk::app::Result<void> verify_fingerprints(std::span<const FileFingerprint> fingerprints,
+                                           const axk::CancellationToken &cancellation) {
+    for (const auto &input : fingerprints) {
+        auto state = file_state(input.path);
+        if (!state || state->first != input.size || state->second != input.last_write_time)
+            return std::unexpected(operation_error("input_changed", "an alteration input changed during execution"));
+        auto digest = file_sha256(input.path, cancellation);
+        if (!digest || *digest != input.sha256)
+            return std::unexpected(operation_error("input_changed", "an alteration input changed during execution"));
+    }
+    return {};
 }
 
 std::optional<std::string> known_fingerprint(std::span<const FileFingerprint> fingerprints,
@@ -1505,4 +1521,157 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             return bound;
     }
     return {};
+}
+
+axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry &registry, const Sandbox &sandbox,
+                                                               UploadStore &uploads, ImageSessionManager &images,
+                                                               AlterationJournalStore &journals) {
+    if (registry.is_implemented("images.alter"))
+        return {};
+    return registry.bind(
+        "images.alter",
+        [&sandbox, &uploads, &images, &journals](const Json &input, const OperationContext &context) -> Result<Json> {
+            const auto operation_started = Clock::now();
+            const auto diagnostic = [&](std::string_view phase, Clock::time_point started,
+                                        const Json &details = Json::object()) {
+                if (!context.diagnostic)
+                    return;
+                auto event = details;
+                event["event"] = "image_mutation_phase";
+                event["requestId"] = context.request_id;
+                event["phase"] = phase;
+                event["durationMs"] =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
+                event["strategy"] = "journaled-in-place";
+                context.diagnostic(event);
+            };
+
+            std::string image_id;
+            std::uint64_t expected_revision{};
+            try {
+                image_id = input.at("imageId").get<std::string>();
+                expected_revision = input.at("expectedRevision").get<std::uint64_t>();
+            } catch (const Json::exception &) {
+                return std::unexpected(operation_error("invalid_request", "imageId and expectedRevision are required"));
+            }
+
+            const auto admission_started = Clock::now();
+            auto mutation = images.begin_mutation(image_id, context.owner_id, expected_revision);
+            if (!mutation)
+                return std::unexpected(mutation.error());
+            bool mutation_finished{};
+            struct AbortGuard {
+                ImageSessionManager &images;
+                std::string_view image_id;
+                std::string_view owner_id;
+                std::uint64_t revision;
+                bool &finished;
+                ~AbortGuard() {
+                    if (!finished)
+                        images.abort_mutation(image_id, owner_id, revision);
+                }
+            } guard{images, image_id, context.owner_id, expected_revision, mutation_finished};
+            diagnostic("admission", admission_started, {{"imageId", image_id}, {"revision", expected_revision}});
+
+            const auto manifest_started = Clock::now();
+            auto document = load_manifest(input, context, sandbox, uploads);
+            if (!document)
+                return std::unexpected(document.error());
+            auto manifest = axk::parse_alteration_manifest(document->json.dump());
+            if (!manifest)
+                return std::unexpected(core_error(manifest.error(), mutation->source.relative_path));
+            const auto required_paths = external_paths(*manifest);
+            if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
+                return std::unexpected(admitted.error());
+            auto fingerprints = fingerprint_files(document->observed_paths, context.cancellation);
+            if (!fingerprints)
+                return std::unexpected(fingerprints.error());
+            diagnostic("manifest", manifest_started,
+                       {{"imageId", image_id},
+                        {"operationCount", manifest->operations.size()},
+                        {"inputCount", fingerprints->size()}});
+
+            const auto planning_started = Clock::now();
+            auto prepared = axk::detail::prepare_hds_alteration(mutation->target,
+                                                                std::filesystem::path{mutation->source.relative_path},
+                                                                *manifest, context.cancellation, context.progress);
+            if (!prepared)
+                return std::unexpected(core_error(prepared.error(), mutation->source.relative_path));
+            std::uint64_t patch_bytes{};
+            std::vector<AlterationJournalPatch> patches;
+            patches.reserve(prepared->patches.size());
+            for (auto &patch : prepared->patches) {
+                if (patch.replacement.size() > std::numeric_limits<std::uint64_t>::max() - patch_bytes)
+                    return std::unexpected(operation_error("image_operation_failed", "alteration patch size overflow"));
+                patch_bytes += patch.replacement.size();
+                patches.push_back({patch.offset, std::move(patch.original), std::move(patch.replacement)});
+            }
+            diagnostic("planning", planning_started,
+                       {{"imageId", image_id},
+                        {"imageBytes", prepared->image_size_bytes},
+                        {"patchCount", patches.size()},
+                        {"patchBytes", patch_bytes}});
+
+            const auto verification_started = Clock::now();
+            if (auto verified = verify_fingerprints(*fingerprints, context.cancellation); !verified)
+                return std::unexpected(verified.error());
+            if (auto verified = verify_sandbox_files(document->file_inputs, document->file_input_sha256, sandbox,
+                                                     context.cancellation);
+                !verified) {
+                return std::unexpected(verified.error());
+            }
+            diagnostic("input-verification", verification_started, {{"imageId", image_id}});
+
+            if (context.progress) {
+                context.progress->report(
+                    {axk::ProgressPhase::publishing, 0U, 1U, "Committing image changes", std::nullopt});
+            }
+            const auto journal_started = Clock::now();
+            if (auto applied =
+                    journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation);
+                !applied) {
+                return std::unexpected(applied.error());
+            }
+            diagnostic("journal-commit", journal_started,
+                       {{"imageId", image_id},
+                        {"patchCount", patches.size()},
+                        {"patchBytes", patch_bytes},
+                        {"cleanupPending", !journals.storage_ready()}});
+
+            const auto refresh_started = Clock::now();
+            mutation->target.reset();
+            auto summary = images.commit_mutation(image_id, context.owner_id, expected_revision, CancellationToken{});
+            if (!summary)
+                return std::unexpected(summary.error());
+            mutation_finished = true;
+            diagnostic(
+                "session-refresh", refresh_started,
+                {{"imageId", image_id}, {"revision", summary->revision}, {"objectCount", summary->object_count}});
+            if (context.progress) {
+                context.progress->report(
+                    {axk::ProgressPhase::publishing, 1U, 1U, "Image changes committed", std::nullopt});
+            }
+
+            auto operations = Json::array();
+            for (const auto &operation : prepared->operations)
+                operations.push_back(operation_report_json(operation, document->logical_input_paths));
+            const auto issue_count =
+                summary->validation.info_count + summary->validation.warning_count + summary->validation.error_count;
+            diagnostic("total", operation_started,
+                       {{"imageId", image_id},
+                        {"revision", summary->revision},
+                        {"imageBytes", prepared->image_size_bytes},
+                        {"patchCount", patches.size()},
+                        {"patchBytes", patch_bytes}});
+            return Json{{"schemaVersion", "1.0"},
+                        {"kind", "ALTERATION"},
+                        {"imageId", image_id},
+                        {"revision", summary->revision},
+                        {"summary", alteration_summary(prepared->operations)},
+                        {"objectCount", summary->object_count},
+                        {"validation", {{"valid", summary->validation.valid()}, {"issueCount", issue_count}}},
+                        {"warnings", Json::array()},
+                        {"applied", !patches.empty()},
+                        {"operations", std::move(operations)}};
+        });
 }

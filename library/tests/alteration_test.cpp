@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/alteration.hpp"
+#include "axklib/alteration_transaction.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/package.hpp"
@@ -444,6 +445,43 @@ TEST(Alteration, DeleteVolumeDryRunMatchesApplyAndPreservesSource) {
     EXPECT_FALSE(
         std::ranges::any_of(root_record.directory_entries, [](const auto &entry) { return entry.name == "Removed"; }));
     EXPECT_FALSE(axk::alter_hds(source, *manifest, output));
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, PreparedPatchesReproducePublishedMetadataAlteration) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-patches";
+    const auto source = root / "source.hds";
+    const auto expected = root / "expected.hds";
+    const auto patched = root / "patched.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
+    const auto manifest = axk::parse_alteration_manifest(
+        R"({"schema_version":"1.0","operations":[{"id":"rename","type":"rename_volume","partition_index":0,"volume_name":"Retained","new_volume_name":"Renamed"}]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto reader = axk::FileReader::open(source);
+    ASSERT_TRUE(reader) << reader.error().message;
+    const auto prepared = axk::detail::prepare_hds_alteration(*reader, source, *manifest);
+    ASSERT_TRUE(prepared) << prepared.error().message;
+    ASSERT_FALSE(prepared->patches.empty());
+    ASSERT_TRUE(axk::alter_hds(source, *manifest, expected));
+
+    std::filesystem::copy_file(source, patched);
+    std::fstream output{patched, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(output);
+    std::uint64_t previous_end{};
+    for (const auto &patch : prepared->patches) {
+        EXPECT_GE(patch.offset, previous_end);
+        EXPECT_EQ(patch.original.size(), patch.replacement.size());
+        output.seekp(static_cast<std::streamoff>(patch.offset));
+        output.write(reinterpret_cast<const char *>(patch.replacement.data()),
+                     static_cast<std::streamsize>(patch.replacement.size()));
+        ASSERT_TRUE(output);
+        previous_end = patch.offset + patch.replacement.size();
+    }
+    output.close();
+    EXPECT_EQ(bytes(patched), bytes(expected));
     std::filesystem::remove_all(root, error);
 }
 

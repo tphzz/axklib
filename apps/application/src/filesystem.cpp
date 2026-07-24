@@ -653,6 +653,151 @@ struct axk::app::SandboxTree::Implementation {
     std::vector<NativeIdentity> identities;
 };
 
+struct axk::app::SandboxMutation::Implementation {
+    FileRef reference;
+    std::filesystem::path filename;
+    NativeHandle parent;
+    NativeHandle file;
+    NativeIdentity identity;
+    std::uint64_t size{};
+    std::unique_lock<std::mutex> mutation_lock;
+    mutable std::mutex io_mutex;
+};
+
+axk::app::SandboxMutation::SandboxMutation(std::unique_ptr<Implementation> implementation)
+    : implementation_(std::move(implementation)) {}
+
+axk::app::SandboxMutation::~SandboxMutation() = default;
+
+std::uint64_t axk::app::SandboxMutation::size() const noexcept {
+    return implementation_ == nullptr ? 0U : implementation_->size;
+}
+
+const axk::app::FileRef &axk::app::SandboxMutation::reference() const noexcept { return implementation_->reference; }
+
+axk::Result<void> axk::app::SandboxMutation::read_exact_at(std::uint64_t offset,
+                                                           std::span<std::byte> destination) const {
+    if (!implementation_ || offset > size() || destination.size() > size() - offset) {
+        return std::unexpected{axk::make_error(axk::ErrorCode::io_short_read, axk::ErrorCategory::io,
+                                               "sandbox mutation read exceeds available data")};
+    }
+    const std::scoped_lock lock{implementation_->io_mutex};
+    auto remaining = destination;
+#if defined(_WIN32)
+    if (offset > static_cast<std::uint64_t>(std::numeric_limits<LONGLONG>::max())) {
+        return std::unexpected{axk::make_error(axk::ErrorCode::io_unsupported_size, axk::ErrorCategory::io,
+                                               "sandbox mutation offset exceeds the platform range")};
+    }
+    LARGE_INTEGER position{};
+    position.QuadPart = static_cast<LONGLONG>(offset);
+    if (SetFilePointerEx(implementation_->file.get(), position, nullptr, FILE_BEGIN) == 0)
+        return std::unexpected{
+            axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io, "sandbox mutation seek failed")};
+    while (!remaining.empty()) {
+        const auto chunk =
+            static_cast<DWORD>(std::min<std::size_t>(remaining.size(), std::numeric_limits<DWORD>::max()));
+        DWORD read{};
+        if (ReadFile(implementation_->file.get(), remaining.data(), chunk, &read, nullptr) == 0 || read == 0U)
+            return std::unexpected{axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
+                                                   "sandbox mutation read failed")};
+        remaining = remaining.subspan(static_cast<std::size_t>(read));
+    }
+#else
+    if (offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max())) {
+        return std::unexpected{axk::make_error(axk::ErrorCode::io_unsupported_size, axk::ErrorCategory::io,
+                                               "sandbox mutation offset exceeds the platform range")};
+    }
+    auto position = static_cast<off_t>(offset);
+    while (!remaining.empty()) {
+        const auto read = ::pread(*implementation_->file, remaining.data(), remaining.size(), position);
+        if (read < 0 && errno == EINTR)
+            continue;
+        if (read <= 0)
+            return std::unexpected{axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
+                                                   "sandbox mutation read failed")};
+        remaining = remaining.subspan(static_cast<std::size_t>(read));
+        position += read;
+    }
+#endif
+    return {};
+}
+
+axk::app::Result<void> axk::app::SandboxMutation::write_exact_at(std::uint64_t offset,
+                                                                 std::span<const std::byte> source) {
+    if (!implementation_ || offset > size() || source.size() > size() - offset)
+        return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation exceeds the file", {}));
+    const std::scoped_lock lock{implementation_->io_mutex};
+    auto remaining = source;
+#if defined(_WIN32)
+    if (offset > static_cast<std::uint64_t>(std::numeric_limits<LONGLONG>::max()))
+        return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation offset is unsupported", {}));
+    LARGE_INTEGER position{};
+    position.QuadPart = static_cast<LONGLONG>(offset);
+    if (SetFilePointerEx(implementation_->file.get(), position, nullptr, FILE_BEGIN) == 0)
+        return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation seek failed", {}));
+    while (!remaining.empty()) {
+        const auto chunk =
+            static_cast<DWORD>(std::min<std::size_t>(remaining.size(), std::numeric_limits<DWORD>::max()));
+        DWORD written{};
+        if (WriteFile(implementation_->file.get(), remaining.data(), chunk, &written, nullptr) == 0 || written == 0U)
+            return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation write failed", {}));
+        remaining = remaining.subspan(static_cast<std::size_t>(written));
+    }
+#else
+    if (offset > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()))
+        return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation offset is unsupported", {}));
+    auto position = static_cast<off_t>(offset);
+    while (!remaining.empty()) {
+        const auto written = ::pwrite(*implementation_->file, remaining.data(), remaining.size(), position);
+        if (written < 0 && errno == EINTR)
+            continue;
+        if (written <= 0)
+            return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation write failed", {}));
+        remaining = remaining.subspan(static_cast<std::size_t>(written));
+        position += written;
+    }
+#endif
+    return {};
+}
+
+axk::app::Result<void> axk::app::SandboxMutation::flush() {
+    if (!implementation_)
+        return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation is closed", {}));
+#if defined(_WIN32)
+    if (FlushFileBuffers(implementation_->file.get()) == 0)
+#else
+    if (::fsync(*implementation_->file) != 0)
+#endif
+        return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation could not be flushed",
+                                           implementation_->reference.relative_path));
+    return {};
+}
+
+axk::app::Result<void> axk::app::SandboxMutation::verify_bound() const {
+    if (!implementation_)
+        return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation is closed", {}));
+#if defined(_WIN32)
+    auto current = open_relative(implementation_->parent.get(), implementation_->filename, FILE_READ_ATTRIBUTES,
+                                 FILE_OPEN, FILE_NON_DIRECTORY_FILE, implementation_->reference.relative_path);
+    if (!current)
+        return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation target changed",
+                                           implementation_->reference.relative_path));
+    auto identity = native_identity(current->get(), implementation_->reference.relative_path);
+    const auto same = identity && identity->volume_serial == implementation_->identity.volume_serial &&
+                      identity->file_id == implementation_->identity.file_id;
+#else
+    struct stat status{};
+    const auto same =
+        ::fstatat(*implementation_->parent, implementation_->filename.c_str(), &status, AT_SYMLINK_NOFOLLOW) == 0 &&
+        S_ISREG(status.st_mode) && static_cast<std::uint64_t>(status.st_dev) == implementation_->identity.device &&
+        static_cast<std::uint64_t>(status.st_ino) == implementation_->identity.inode;
+#endif
+    if (!same)
+        return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation target changed",
+                                           implementation_->reference.relative_path));
+    return {};
+}
+
 axk::app::SandboxTree::SandboxTree() = default;
 axk::app::SandboxTree::~SandboxTree() = default;
 axk::app::SandboxTree::SandboxTree(SandboxTree &&) noexcept = default;
@@ -826,6 +971,66 @@ axk::app::Result<axk::app::SandboxFile> axk::app::Sandbox::open_file(const FileR
     auto reader = std::make_shared<NativeFileReader>(std::move(handle), size, reference.relative_path);
 #endif
     return SandboxFile{reference, filename, size, std::move(reader)};
+}
+
+axk::app::Result<std::shared_ptr<axk::app::SandboxMutation>>
+axk::app::Sandbox::open_mutation(const FileRef &reference) const {
+    auto mutation_lock = std::unique_lock{state_->mutation_mutex};
+    const auto root = find_root(reference.root_id);
+    if (!root)
+        return std::unexpected(reference_error("sandbox root does not exist", reference.relative_path));
+    if (!root->info.writable)
+        return std::unexpected(entry_error("read_only_root", "sandbox root is read-only", reference.relative_path));
+    if (reference.relative_path.empty())
+        return std::unexpected(reference_error("file reference requires a relative path", reference.relative_path));
+    auto relative = relative_path_from_utf8(reference.relative_path);
+    if (!relative || relative->filename().empty())
+        return std::unexpected(relative ? reference_error("file reference requires a filename", reference.relative_path)
+                                        : relative.error());
+    auto parent =
+#if defined(_WIN32)
+        open_parent(root->native->handle, relative->parent_path(), reference.relative_path);
+#else
+        open_parent(root->native->descriptor, relative->parent_path(), reference.relative_path);
+#endif
+    if (!parent)
+        return std::unexpected(parent.error());
+
+#if defined(_WIN32)
+    auto file =
+        open_relative(parent->get(), relative->filename(), FILE_READ_DATA | FILE_WRITE_DATA | FILE_READ_ATTRIBUTES,
+                      FILE_OPEN, FILE_NON_DIRECTORY_FILE, reference.relative_path);
+    if (!file)
+        return std::unexpected(file.error());
+    auto identity = native_identity(file->get(), reference.relative_path);
+#else
+    const auto descriptor =
+        ::openat(**parent, relative->filename().c_str(), O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (descriptor < 0)
+        return std::unexpected(entry_error("entry_mutation_failed", "sandbox file cannot be opened for mutation",
+                                           reference.relative_path));
+    auto file = descriptor_handle(descriptor);
+    struct stat status{};
+    if (::fstat(*file, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size < 0)
+        return std::unexpected(
+            entry_error("entry_mutation_failed", "mutation target is not a regular file", reference.relative_path));
+    auto identity = native_identity(*file, reference.relative_path);
+#endif
+    if (!identity)
+        return std::unexpected(identity.error());
+    auto implementation = std::make_unique<SandboxMutation::Implementation>();
+    implementation->reference = reference;
+    implementation->filename = relative->filename();
+    implementation->parent = std::move(*parent);
+#if defined(_WIN32)
+    implementation->file = std::move(*file);
+#else
+    implementation->file = std::move(file);
+#endif
+    implementation->identity = *identity;
+    implementation->size = identity->size;
+    implementation->mutation_lock = std::move(mutation_lock);
+    return std::shared_ptr<SandboxMutation>{new SandboxMutation{std::move(implementation)}};
 }
 
 axk::app::Result<axk::app::SandboxTree> axk::app::Sandbox::open_tree(const DirectoryRef &reference,

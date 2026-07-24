@@ -1002,9 +1002,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert (root_path / "managed" / "after.txt").read_text(
                 encoding="utf-8"
             ) == "managed"
-            delete_query = urlencode(
-                {"rootId": "workspace", "relativePath": "managed"}
-            )
+            delete_query = urlencode({"rootId": "workspace", "relativePath": "managed"})
             status, nonempty = http_request(
                 port, "DELETE", f"/api/v1/filesystem/entries?{delete_query}"
             )
@@ -1017,15 +1015,11 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 port, "DELETE", f"/api/v1/filesystem/entries?{delete_query}"
             )
             assert status == 200 and deleted_file["data"]["deleted"] is True
-            delete_query = urlencode(
-                {"rootId": "workspace", "relativePath": "managed"}
-            )
+            delete_query = urlencode({"rootId": "workspace", "relativePath": "managed"})
             status, deleted_directory = http_request(
                 port, "DELETE", f"/api/v1/filesystem/entries?{delete_query}"
             )
-            assert (
-                status == 200 and deleted_directory["data"]["deleted"] is True
-            )
+            assert status == 200 and deleted_directory["data"]["deleted"] is True
             for traversal in (
                 "../download.bin",
                 "%2e%2e/download.bin",
@@ -1356,7 +1350,11 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "application/x-tar"
             ), headers
             with tarfile.open(fileobj=io.BytesIO(content), mode="r:") as downloaded:
-                assert downloaded.getnames() == ["alpha.txt", "nested", "nested/beta.bin"]
+                assert downloaded.getnames() == [
+                    "alpha.txt",
+                    "nested",
+                    "nested/beta.bin",
+                ]
                 alpha = downloaded.extractfile("alpha.txt")
                 beta = downloaded.extractfile("nested/beta.bin")
                 assert alpha is not None and alpha.read() == b"alpha"
@@ -1366,16 +1364,23 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, _, _ = raw_http_request(port, "GET", archive_path)
             assert status == 404
 
+            session_fixture = root_path / "session-fixture.hds"
+            session_fixture.write_bytes((root_path / "fixture.hds").read_bytes())
             status, opened = http_request(
                 port,
                 "POST",
                 "/api/v1/images",
-                {"source": {"rootId": "workspace", "relativePath": "fixture.hds"}},
+                {
+                    "source": {
+                        "rootId": "workspace",
+                        "relativePath": session_fixture.name,
+                    }
+                },
             )
             assert status == 201, opened
             image_id = str(opened["data"]["imageId"])
             fixture_query = urlencode(
-                {"rootId": "workspace", "relativePath": "fixture.hds"}
+                {"rootId": "workspace", "relativePath": session_fixture.name}
             )
             status, in_use = http_request(
                 port, "DELETE", f"/api/v1/filesystem/entries?{fixture_query}"
@@ -1383,6 +1388,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert status == 409, in_use
             assert in_use["error"]["code"] == "entry_in_use"
             assert opened["data"]["format"] == "sfs"
+            assert opened["data"]["revision"] == 1
             assert opened["data"]["availableOperations"] == [
                 "images.content",
                 "images.objects",
@@ -1438,9 +1444,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 {"imageId": image_id, "objectId": waveform["id"]},
             )
             assert status == 202, submitted
-            audition_job = wait_for_job(
-                port, str(submitted["data"]["jobId"]), process
-            )
+            audition_job = wait_for_job(port, str(submitted["data"]["jobId"]), process)
             assert audition_job["state"] == "COMPLETED", audition_job
             audition = audition_job["result"]
             audition_id = str(audition["auditionId"])
@@ -1526,6 +1530,92 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 port, "GET", f"/api/v1/images/{image_id}/validation/issues?limit=2"
             )
             assert status == 200 and "items" in validation["data"], validation
+
+            original_object_ids = {
+                (item["type"], item["name"]): item["id"]
+                for item in objects["data"]["items"]
+            }
+            session_alteration = {
+                "imageId": image_id,
+                "expectedRevision": 1,
+                "manifest": {
+                    "inline": {
+                        "schema_version": "1.0",
+                        "operations": [
+                            {
+                                "id": "rename-session-volume",
+                                "type": "rename_volume",
+                                "partition_index": 0,
+                                "volume_name": "New Volume",
+                                "new_volume_name": "Session Renamed",
+                            }
+                        ],
+                    }
+                },
+            }
+            status, submitted_alteration = http_request(
+                port,
+                "POST",
+                "/api/v1/image-session-alterations",
+                session_alteration,
+                {"Idempotency-Key": "session-alteration"},
+            )
+            assert status == 202, submitted_alteration
+            alteration_job = wait_for_job(
+                port, str(submitted_alteration["data"]["jobId"]), process
+            )
+            assert alteration_job["state"] == "COMPLETED", alteration_job
+            assert alteration_job["result"]["imageId"] == image_id, alteration_job
+            assert alteration_job["result"]["revision"] == 2, alteration_job
+            assert alteration_job["result"]["applied"] is True, alteration_job
+
+            status, refreshed = http_request(port, "GET", f"/api/v1/images/{image_id}")
+            assert status == 200 and refreshed["data"]["revision"] == 2, refreshed
+            status, refreshed_objects = http_request(
+                port, "GET", f"/api/v1/images/{image_id}/objects?limit=100"
+            )
+            assert status == 200, refreshed_objects
+            assert {
+                (item["type"], item["name"]): item["id"]
+                for item in refreshed_objects["data"]["items"]
+            } == original_object_ids, refreshed_objects
+            assert all(
+                item["volumeName"] == "Session Renamed"
+                for item in refreshed_objects["data"]["items"]
+            ), refreshed_objects
+            status, refreshed_roots = http_request(
+                port, "GET", f"/api/v1/images/{image_id}/content?limit=100"
+            )
+            assert status == 200 and refreshed_roots["data"]["items"], refreshed_roots
+            refreshed_parent = refreshed_roots["data"]["items"][0]["id"]
+            refreshed_child_query = urlencode(
+                {"limit": 100, "parentId": refreshed_parent}
+            )
+            status, refreshed_children = http_request(
+                port,
+                "GET",
+                f"/api/v1/images/{image_id}/content?{refreshed_child_query}",
+            )
+            assert status == 200, refreshed_children
+            assert any(
+                item["name"] == "Session Renamed"
+                for item in refreshed_children["data"]["items"]
+            ), refreshed_children
+
+            status, stale_alteration = http_request(
+                port,
+                "POST",
+                "/api/v1/image-session-alterations",
+                session_alteration,
+                {"Idempotency-Key": "stale-session-alteration"},
+            )
+            assert status == 202, stale_alteration
+            stale_job = wait_for_job(
+                port, str(stale_alteration["data"]["jobId"]), process
+            )
+            assert stale_job["state"] == "FAILED", stale_job
+            assert stale_job["error"]["code"] == "image_revision_stale", stale_job
+
             status, closed = http_request(port, "DELETE", f"/api/v1/images/{image_id}")
             assert status == 200 and closed["data"]["closed"] is True
             status, closed_again = http_request(
@@ -2869,9 +2959,9 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 entry for entry in request_logs if entry["method"] == "OPTIONS"
             ]
             assert preflight_logs
-            assert all(
-                0 <= entry["durationMs"] < 10_000 for entry in preflight_logs
-            ), preflight_logs
+            assert all(0 <= entry["durationMs"] < 10_000 for entry in preflight_logs), (
+                preflight_logs
+            )
             audit_logs = [
                 json.loads(line)
                 for line in server_output.splitlines()

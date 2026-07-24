@@ -6,7 +6,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(unofficial-hash-library CONFIG REQUIRED)
 
-add_library(axk_application STATIC src/application_operations.cpp src/audio_operations.cpp src/content_id.cpp src/download_archives.cpp
+add_library(axk_application STATIC src/alteration_journal.cpp src/application_operations.cpp src/audio_operations.cpp src/content_id.cpp src/download_archives.cpp
                                    src/extraction_operations.cpp src/extraction_selection.cpp src/file_operations.cpp
                                    src/filesystem.cpp src/image_sessions.cpp src/jobs.cpp
                                    src/operation_registry.cpp src/package_operations.cpp src/path_reservations.cpp
@@ -36,7 +36,7 @@ axk_enable_coverage(axk_application)
 if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
-  add_executable(axk_application_tests tests/application_operations_test.cpp tests/audio_operations_test.cpp
+  add_executable(axk_application_tests tests/alteration_journal_test.cpp tests/application_operations_test.cpp tests/audio_operations_test.cpp
                                        tests/download_archives_test.cpp
                                        tests/extraction_operations_test.cpp tests/file_operations_test.cpp
                                        tests/filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp

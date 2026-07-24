@@ -150,7 +150,10 @@ struct axk::app::ImageSessionManager::Implementation {
         std::unordered_map<std::string, ObjectSnapshot> snapshots_by_id;
         std::unordered_map<std::string, AuditionEntry> auditions;
         std::size_t root_count{};
+        std::uint64_t revision{1U};
+        bool mutating{};
         std::mutex access_mutex;
+        std::optional<std::unique_lock<std::mutex>> mutation_guard;
         std::chrono::steady_clock::time_point last_access;
         CursorSet content_cursors;
         CursorSet object_cursors;
@@ -178,7 +181,9 @@ struct axk::app::ImageSessionManager::Implementation {
         const auto now = clock();
         std::erase_if(sessions, [&](const auto &item) {
             const auto &session = item.second;
-            const std::scoped_lock access_lock{session->access_mutex};
+            const std::unique_lock access_lock{session->access_mutex, std::try_to_lock};
+            if (!access_lock)
+                return false;
             return session->last_access + idle_retention <= now;
         });
     }
@@ -198,6 +203,113 @@ struct axk::app::ImageSessionManager::Implementation {
             result->last_access = clock();
         }
         return result;
+    }
+
+    static void preserve_object_ids(const Session &current, Session &fresh) {
+        const auto stable_key = [](const Session &session, const ObjectSnapshot &snapshot) {
+            if (session.format == "sfs") {
+                return std::format("{}:{}:{}", snapshot.partition.value, snapshot.sfs_id.value,
+                                   snapshot.object.header.raw_type);
+            }
+            return snapshot.key;
+        };
+        std::unordered_map<std::string, std::string> current_ids_by_key;
+        current_ids_by_key.reserve(current.snapshots_by_id.size());
+        for (const auto &[id, snapshot] : current.snapshots_by_id)
+            current_ids_by_key.emplace(stable_key(current, snapshot), id);
+        std::unordered_map<std::string, std::string> remapped;
+        remapped.reserve(fresh.snapshots_by_id.size());
+        for (const auto &[id, snapshot] : fresh.snapshots_by_id) {
+            if (const auto found = current_ids_by_key.find(stable_key(fresh, snapshot));
+                found != current_ids_by_key.end()) {
+                remapped.emplace(id, found->second);
+            } else {
+                remapped.emplace(id, id);
+            }
+        }
+        const auto map_id = [&](std::string &id) {
+            if (const auto found = remapped.find(id); found != remapped.end())
+                id = found->second;
+        };
+        for (auto &object : fresh.objects)
+            map_id(object.id);
+        for (auto &content : fresh.content) {
+            if (content.object_id)
+                map_id(*content.object_id);
+        }
+        for (auto &relationship : fresh.relationships) {
+            map_id(relationship.source_object_id);
+            if (relationship.target_object_id)
+                map_id(*relationship.target_object_id);
+            for (auto &candidate : relationship.candidate_object_ids)
+                map_id(candidate);
+        }
+        for (auto &issue : fresh.validation) {
+            if (issue.object_id)
+                map_id(*issue.object_id);
+        }
+        decltype(fresh.descriptors_by_id) descriptors;
+        descriptors.reserve(fresh.descriptors_by_id.size());
+        for (auto &[id, descriptor] : fresh.descriptors_by_id) {
+            auto mapped = id;
+            map_id(mapped);
+            descriptors.emplace(std::move(mapped), std::move(descriptor));
+        }
+        fresh.descriptors_by_id = std::move(descriptors);
+        decltype(fresh.snapshots_by_id) snapshots;
+        snapshots.reserve(fresh.snapshots_by_id.size());
+        for (auto &[id, snapshot] : fresh.snapshots_by_id) {
+            auto mapped = id;
+            map_id(mapped);
+            snapshots.emplace(std::move(mapped), std::move(snapshot));
+        }
+        fresh.snapshots_by_id = std::move(snapshots);
+        fresh.object_indices_by_id.clear();
+        fresh.object_indices_by_type.clear();
+        for (std::size_t index = 0U; index < fresh.objects.size(); ++index) {
+            fresh.object_indices_by_id.emplace(fresh.objects[index].id, index);
+            fresh.object_indices_by_type[fresh.objects[index].type].push_back(index);
+        }
+    }
+
+    static void adopt_refreshed_state(Session &current, Session &fresh) {
+        preserve_object_ids(current, fresh);
+        current.source = std::move(fresh.source);
+        current.format = std::move(fresh.format);
+        current.content = std::move(fresh.content);
+        current.content_children = std::move(fresh.content_children);
+        current.objects = std::move(fresh.objects);
+        current.object_indices_by_id = std::move(fresh.object_indices_by_id);
+        current.object_indices_by_type = std::move(fresh.object_indices_by_type);
+        current.object_indices_by_content_scope = std::move(fresh.object_indices_by_content_scope);
+        current.relationships = std::move(fresh.relationships);
+        current.validation = std::move(fresh.validation);
+        current.media = std::move(fresh.media);
+        current.descriptors_by_id = std::move(fresh.descriptors_by_id);
+        current.snapshots_by_id = std::move(fresh.snapshots_by_id);
+        current.auditions.clear();
+        current.root_count = fresh.root_count;
+        current.last_access = fresh.last_access;
+        {
+            const std::scoped_lock lock{current.content_cursors.mutex};
+            current.content_cursors.positions.clear();
+            current.content_cursors.cursors.clear();
+        }
+        {
+            const std::scoped_lock lock{current.object_cursors.mutex};
+            current.object_cursors.positions.clear();
+            current.object_cursors.cursors.clear();
+        }
+        {
+            const std::scoped_lock lock{current.relationship_cursors.mutex};
+            current.relationship_cursors.positions.clear();
+            current.relationship_cursors.cursors.clear();
+        }
+        {
+            const std::scoped_lock lock{current.validation_cursors.mutex};
+            current.validation_cursors.positions.clear();
+            current.validation_cursors.cursors.clear();
+        }
     }
 
     Result<std::vector<std::byte>> read_object_range(const Session &session, std::string_view object_id,
@@ -779,6 +891,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
         available_operations.emplace_back("images.alter.partitions");
     }
     return ImageSessionSummary{.image_id = (*session)->image_id,
+                               .revision = (*session)->revision,
                                .source = (*session)->source,
                                .format = (*session)->format,
                                .available_operations = std::move(available_operations),
@@ -786,6 +899,86 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
                                .object_count = (*session)->objects.size(),
                                .relationship_count = (*session)->relationships.size(),
                                .validation = validation};
+}
+
+axk::app::Result<axk::app::ImageSessionMutation>
+axk::app::ImageSessionManager::begin_mutation(std::string_view image_id, std::string_view owner_id,
+                                              std::uint64_t expected_revision) {
+    const auto session = implementation_->owned(image_id, owner_id);
+    if (!session)
+        return std::unexpected(session.error());
+    auto access = std::unique_lock{(*session)->access_mutex};
+    if ((*session)->revision != expected_revision)
+        return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
+    if ((*session)->format != "sfs")
+        return std::unexpected(session_error("image_mutation_unsupported", "only SFS image sessions can be altered"));
+    if ((*session)->mutating)
+        return std::unexpected(session_error("entry_in_use", "image session mutation is already active", true));
+    if (auto upgraded = (*session)->path_lease.try_upgrade(); !upgraded)
+        return std::unexpected(upgraded.error());
+    auto target = implementation_->sandbox.open_mutation((*session)->source);
+    if (!target) {
+        (*session)->path_lease.downgrade();
+        return std::unexpected(target.error());
+    }
+    (*session)->mutating = true;
+    (*session)->mutation_guard.emplace(std::move(access));
+    return ImageSessionMutation{(*session)->image_id, (*session)->revision, (*session)->source, std::move(*target)};
+}
+
+axk::app::Result<axk::app::ImageSessionSummary>
+axk::app::ImageSessionManager::commit_mutation(std::string_view image_id, std::string_view owner_id,
+                                               std::uint64_t expected_revision, const CancellationToken &cancellation) {
+    std::shared_ptr<Implementation::Session> session;
+    {
+        const std::scoped_lock lock{implementation_->mutex};
+        const auto found = implementation_->sessions.find(std::string{image_id});
+        if (found == implementation_->sessions.end() || found->second->owner_id != owner_id)
+            return std::unexpected(session_error("image_not_found", "image session does not exist"));
+        session = found->second;
+    }
+    const auto release_mutation = [&] {
+        session->mutating = false;
+        session->path_lease.downgrade();
+        session->mutation_guard.reset();
+    };
+    if (!session->mutating || !session->mutation_guard || session->revision != expected_revision) {
+        return std::unexpected(session_error("image_revision_stale", "image session mutation is not current", true));
+    }
+
+    ImageSessionManager refreshed{implementation_->sandbox, 1U, implementation_->maximum_page_size,
+                                  implementation_->idle_retention, implementation_->clock};
+    auto opened = refreshed.open(session->source, std::string{owner_id}, cancellation);
+    if (!opened) {
+        release_mutation();
+        return std::unexpected(opened.error());
+    }
+    std::shared_ptr<Implementation::Session> fresh;
+    {
+        const std::scoped_lock lock{refreshed.implementation_->mutex};
+        fresh = refreshed.implementation_->sessions.at(opened->image_id);
+    }
+    Implementation::adopt_refreshed_state(*session, *fresh);
+    ++session->revision;
+    release_mutation();
+    return inspect(image_id, owner_id);
+}
+
+void axk::app::ImageSessionManager::abort_mutation(std::string_view image_id, std::string_view owner_id,
+                                                   std::uint64_t expected_revision) noexcept {
+    std::shared_ptr<Implementation::Session> session;
+    {
+        const std::scoped_lock lock{implementation_->mutex};
+        const auto found = implementation_->sessions.find(std::string{image_id});
+        if (found == implementation_->sessions.end() || found->second->owner_id != owner_id)
+            return;
+        session = found->second;
+    }
+    if (!session->mutating || !session->mutation_guard || session->revision != expected_revision)
+        return;
+    session->mutating = false;
+    session->path_lease.downgrade();
+    session->mutation_guard.reset();
 }
 
 axk::app::Result<void> axk::app::ImageSessionManager::close(std::string_view image_id, std::string_view owner_id) {
@@ -796,6 +989,9 @@ axk::app::Result<void> axk::app::ImageSessionManager::close(std::string_view ima
         return {};
     if (found->second->owner_id != owner_id)
         return std::unexpected(session_error("image_not_found", "image session does not exist"));
+    const std::unique_lock access{found->second->access_mutex, std::try_to_lock};
+    if (!access)
+        return std::unexpected(session_error("entry_in_use", "image session mutation is active", true));
     implementation_->sessions.erase(found);
     return {};
 }

@@ -63,6 +63,7 @@ type WireInputRef = components['schemas']['InputRef'];
 
 interface ApiImageSummary {
     imageId: string;
+    revision: number;
     source: { rootId: string; relativePath: string };
     format: string;
     rootCount: number;
@@ -106,6 +107,7 @@ interface ApiAlterationInspection {
 
 interface SessionState {
     remoteId: string;
+    revision: number;
     source: ServerFileLocation;
     contentCursors: Map<string, Map<number, string | null>>;
     contentItems: Map<string, DiskTreeItem>;
@@ -275,12 +277,8 @@ export class HttpImageTransport implements ImageTransport {
         return result;
     }
 
-    async startAudioImport(
-        source: FileLocation,
-        target: AudioImportTarget,
-        items: AudioImportItem[],
-    ): Promise<JobState> {
-        const sourceFile = this.serverFile(source);
+    async startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState> {
+        const session = this.session(sessionId);
         const operations: Record<string, unknown>[] = [];
         const inputBindings: Record<string, unknown>[] = [];
         items.forEach((item, index) => {
@@ -315,9 +313,10 @@ export class HttpImageTransport implements ImageTransport {
             inputBindings.push({ manifestPath: logicalPath, input: this.serverInput(item.source) });
         });
         const job = await this.client.invoke<never>(
-            'alter.hds',
+            'images.alter',
             {
-                source: sourceFile.reference,
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
                 manifest: {
                     inline: {
                         schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,
@@ -325,12 +324,10 @@ export class HttpImageTransport implements ImageTransport {
                     },
                 },
                 inputBindings,
-                output: sourceFile.reference,
-                replaceSource: true,
             },
             { idempotencyKey: randomIdempotencyKey() },
         );
-        if (!this.isJob(job)) throw new Error('alter.hds did not return a job');
+        if (!this.isJob(job)) throw new Error('images.alter did not return a job');
         return this.mapJob(job);
     }
 
@@ -399,6 +396,7 @@ export class HttpImageTransport implements ImageTransport {
         const sessionId = this.nextSessionId++;
         this.sessions.set(sessionId, {
             remoteId: summary.imageId,
+            revision: summary.revision,
             source,
             contentCursors: new Map(),
             contentItems: new Map(),
@@ -406,29 +404,48 @@ export class HttpImageTransport implements ImageTransport {
             relationshipCursors: new Map(),
         });
         try {
-            const roots = await this.allContentChildren(sessionId, '');
-            const disk: DiskTreeItem = {
-                id: `session:${sessionId}`,
-                name: source.displayName,
-                kind: 'disk',
-                children: roots.items,
-                childCount: roots.totalCount,
-            };
-            const initialVolume = await this.loadVolumeHierarchy(sessionId, roots.items);
-            return {
-                sessionId,
-                validation: validationSummary(summary),
-                objects: [],
-                objectTotalCount: 0,
-                initialVolume,
-                volumeMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.volumes'),
-                partitionMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.partitions'),
-                tree: [disk],
-            };
+            return await this.openedImage(sessionId, summary);
         } catch (error) {
             await this.closeImage(sessionId).catch(() => undefined);
             throw error;
         }
+    }
+
+    async refreshImage(sessionId: number): Promise<OpenedImage> {
+        const session = this.session(sessionId);
+        const summary = await this.client.request<ApiImageSummary>(
+            'GET',
+            `/images/${encodeURIComponent(session.remoteId)}`,
+        );
+        session.revision = summary.revision;
+        session.contentCursors.clear();
+        session.contentItems.clear();
+        session.objectCursors.clear();
+        session.relationshipCursors.clear();
+        return this.openedImage(sessionId, summary);
+    }
+
+    private async openedImage(sessionId: number, summary: ApiImageSummary): Promise<OpenedImage> {
+        const session = this.session(sessionId);
+        const roots = await this.allContentChildren(sessionId, '');
+        const disk: DiskTreeItem = {
+            id: `session:${sessionId}`,
+            name: session.source.displayName,
+            kind: 'disk',
+            children: roots.items,
+            childCount: roots.totalCount,
+        };
+        const initialVolume = await this.loadVolumeHierarchy(sessionId, roots.items);
+        return {
+            sessionId,
+            validation: validationSummary(summary),
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume,
+            volumeMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.volumes'),
+            partitionMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.partitions'),
+            tree: [disk],
+        };
     }
 
     async contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage> {
@@ -548,12 +565,12 @@ export class HttpImageTransport implements ImageTransport {
         this.sessions.delete(sessionId);
     }
 
-    async startVolumeMutation(source: FileLocation, mutation: VolumeMutation): Promise<JobState> {
-        return this.startImageMutation(source, this.volumeMutationOperation(mutation));
+    async startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState> {
+        return this.startImageMutation(sessionId, this.volumeMutationOperation(mutation));
     }
 
-    async startPartitionMutation(source: FileLocation, mutation: PartitionMutation): Promise<JobState> {
-        return this.startImageMutation(source, {
+    async startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState> {
+        return this.startImageMutation(sessionId, {
             id: 'partition-rename',
             type: 'rename_partition',
             partition_index: mutation.partitionIndex,
@@ -562,12 +579,13 @@ export class HttpImageTransport implements ImageTransport {
         });
     }
 
-    private async startImageMutation(source: FileLocation, operation: Record<string, unknown>): Promise<JobState> {
-        const sourceFile = this.serverFile(source);
+    private async startImageMutation(sessionId: number, operation: Record<string, unknown>): Promise<JobState> {
+        const session = this.session(sessionId);
         const job = await this.client.invoke<never>(
-            'alter.hds',
+            'images.alter',
             {
-                source: sourceFile.reference,
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
                 manifest: {
                     inline: {
                         schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,
@@ -575,12 +593,10 @@ export class HttpImageTransport implements ImageTransport {
                     },
                 },
                 inputBindings: [],
-                output: sourceFile.reference,
-                replaceSource: true,
             },
             { idempotencyKey: randomIdempotencyKey() },
         );
-        if (!this.isJob(job)) throw new Error('alter.hds did not return a job');
+        if (!this.isJob(job)) throw new Error('images.alter did not return a job');
         return this.mapJob(job);
     }
 

@@ -809,9 +809,10 @@
       "ImageSession": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["imageId", "source", "format", "availableOperations", "rootCount", "objectCount", "relationshipCount", "validation"],
+        "required": ["imageId", "revision", "source", "format", "availableOperations", "rootCount", "objectCount", "relationshipCount", "validation"],
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
           "source": {"$ref": "#/components/schemas/FileRef"},
           "format": {"type": "string", "minLength": 1},
           "availableOperations": {"type": "array", "items": {"type": "string", "minLength": 1}},
@@ -2044,6 +2045,34 @@
           "output": {"$ref": "#/components/schemas/FileRef"},
           "sizeBytes": {"type": "integer", "minimum": 0},
           "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "validation": {"$ref": "#/components/schemas/ImageBuildResult/properties/validation"},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "applied": {"type": "boolean"},
+          "operations": {"type": "array", "items": {"$ref": "#/components/schemas/AlterationOperationReport"}}
+        }
+      },
+      "ImageSessionAlterationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "manifest"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "manifest": {"$ref": "#/components/schemas/ManifestInput"},
+          "inputBindings": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/components/schemas/InputBinding"}}
+        }
+      },
+      "ImageSessionAlterationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "kind", "imageId", "revision", "summary", "objectCount", "validation", "warnings", "applied", "operations"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "kind": {"const": "ALTERATION"},
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 2},
+          "summary": {"$ref": "#/components/schemas/AlterationSummary"},
           "objectCount": {"type": "integer", "minimum": 0},
           "validation": {"$ref": "#/components/schemas/ImageBuildResult/properties/validation"},
           "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},

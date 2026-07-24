@@ -27,6 +27,7 @@ struct ImageValidationSummary {
 
 struct ImageSessionSummary {
     std::string image_id;
+    std::uint64_t revision{};
     FileRef source;
     std::string format;
     std::vector<std::string> available_operations;
@@ -34,6 +35,13 @@ struct ImageSessionSummary {
     std::size_t object_count{};
     std::size_t relationship_count{};
     ImageValidationSummary validation;
+};
+
+struct ImageSessionMutation {
+    std::string image_id;
+    std::uint64_t revision{};
+    FileRef source;
+    std::shared_ptr<SandboxMutation> target;
 };
 
 struct ImageContentItem {
@@ -171,6 +179,12 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageSessionSummary> open(const FileRef &source, std::string owner_id,
                                                    const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageSessionSummary> inspect(std::string_view image_id, std::string_view owner_id);
+    [[nodiscard]] Result<ImageSessionMutation> begin_mutation(std::string_view image_id, std::string_view owner_id,
+                                                              std::uint64_t expected_revision);
+    [[nodiscard]] Result<ImageSessionSummary> commit_mutation(std::string_view image_id, std::string_view owner_id,
+                                                              std::uint64_t expected_revision,
+                                                              const CancellationToken &cancellation = {});
+    void abort_mutation(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision) noexcept;
     [[nodiscard]] Result<void> close(std::string_view image_id, std::string_view owner_id);
     [[nodiscard]] Result<ImagePage<ImageContentItem>> content(std::string_view image_id, std::string_view owner_id,
                                                               std::size_t limit,

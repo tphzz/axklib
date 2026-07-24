@@ -28,6 +28,7 @@
 #endif
 
 #include "alteration_manifest_internal.hpp"
+#include "axklib/alteration_transaction.hpp"
 #include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/file_publication.hpp"
@@ -101,6 +102,7 @@ struct MutablePartition {
 };
 
 struct TransactionState {
+    std::shared_ptr<const RandomAccessReader> source;
     Container container;
     ObjectCatalog catalog;
     RelationshipGraph graph;
@@ -208,14 +210,18 @@ Result<std::vector<ParsedDirectoryEntry>> parse_directory(std::span<const std::b
     return result;
 }
 
+Result<std::vector<std::byte>> read_raw(const RandomAccessReader &reader, std::uint64_t offset, std::size_t size) {
+    std::vector<std::byte> result(size);
+    if (auto read = reader.read_exact_at(offset, result); !read)
+        return std::unexpected{read.error()};
+    return result;
+}
+
 Result<std::vector<std::byte>> read_raw(const std::filesystem::path &path, std::uint64_t offset, std::size_t size) {
     auto reader = FileReader::open(path);
     if (!reader)
         return std::unexpected{reader.error()};
-    std::vector<std::byte> result(size);
-    if (auto read = (*reader)->read_exact_at(offset, result); !read)
-        return std::unexpected{read.error()};
-    return result;
+    return read_raw(**reader, offset, size);
 }
 
 void set_bitmap(std::vector<std::byte> &bitmap, std::uint32_t cluster, bool used) {
@@ -244,9 +250,8 @@ Result<void> set_root_payload(TransactionState &state, MutablePartition &partiti
         payload.size() > static_cast<std::size_t>(root->extents[0].cluster_count) * 1024U) {
         return std::unexpected{transaction_error("partition root relocation is not enabled for this transaction")};
     }
-    Result<std::vector<std::byte>> raw = partition.root_index
-                                             ? Result<std::vector<std::byte>>{*partition.root_index}
-                                             : read_raw(state.container.source_path(), root->record_offset.value, 72);
+    Result<std::vector<std::byte>> raw = partition.root_index ? Result<std::vector<std::byte>>{*partition.root_index}
+                                                              : read_raw(*state.source, root->record_offset.value, 72);
     if (!raw)
         return std::unexpected{raw.error()};
     if (const auto check = cancellation.check(); !check)
@@ -280,7 +285,7 @@ Result<void> replace_record_payload(TransactionState &state, MutablePartition &p
         if (source == nullptr) {
             return std::unexpected{transaction_error("cannot change a missing SFS record")};
         }
-        auto raw = read_raw(state.container.source_path(), source->record_offset.value, 72U);
+        auto raw = read_raw(*state.source, source->record_offset.value, 72U);
         if (!raw)
             return std::unexpected{raw.error()};
         auto original = current_payload(state, partition, id, cancellation);
@@ -2054,6 +2059,159 @@ Result<void> write_continuation_lists(const std::filesystem::path &output, const
     return {};
 }
 
+Result<std::vector<std::byte>> continuation_list_bytes(const MutablePartition::InsertedRecord &record,
+                                                       std::size_t list_index) {
+    constexpr std::size_t extents_per_cluster = (1024U - 12U) / 12U;
+    const auto extent_begin = list_index * extents_per_cluster;
+    if (extent_begin >= record.extents.size())
+        return std::unexpected{transaction_error("continuation list has no extents")};
+    const auto extent_count = std::min(extents_per_cluster, record.extents.size() - extent_begin);
+    std::vector<std::byte> block(1024U);
+    ByteWriter writer{block};
+    if (auto written = writer.write_be32(0U, static_cast<std::uint32_t>(extent_count)); !written)
+        return std::unexpected{written.error()};
+    const auto next =
+        list_index + 1U < record.continuation_clusters.size() ? record.continuation_clusters[list_index + 1U] : 0U;
+    if (auto written = writer.write_be32(8U, next); !written)
+        return std::unexpected{written.error()};
+    for (std::size_t index = 0; index < extent_count; ++index) {
+        const auto &extent = record.extents[extent_begin + index];
+        const auto offset = 12U + index * 12U;
+        if (auto written = writer.write_be32(offset, extent.cluster_offset); !written)
+            return std::unexpected{written.error()};
+        if (auto written = writer.write_be32(offset + 4U, extent.cluster_count); !written)
+            return std::unexpected{written.error()};
+        if (auto written = writer.write_be32(offset + 8U, extent.byte_count); !written)
+            return std::unexpected{written.error()};
+    }
+    return block;
+}
+
+Result<void> append_patch(std::vector<detail::AlterationPatch> &patches, const TransactionState &state,
+                          std::uint64_t offset, std::span<const std::byte> replacement) {
+    if (offset > state.source->size() || replacement.size() > state.source->size() - offset)
+        return std::unexpected{transaction_error("alteration patch exceeds the source image")};
+    std::vector<std::byte> original(replacement.size());
+    if (auto read = state.source->read_exact_at(offset, original); !read)
+        return std::unexpected{read.error()};
+    if (std::ranges::equal(original, replacement))
+        return {};
+    patches.push_back(detail::AlterationPatch{offset, std::move(original), {replacement.begin(), replacement.end()}});
+    return {};
+}
+
+Result<std::vector<detail::AlterationPatch>> collect_patches(const TransactionState &state,
+                                                             const CancellationToken &cancellation) {
+    std::vector<detail::AlterationPatch> patches;
+    for (const auto &[index, item] : state.partitions) {
+        static_cast<void>(index);
+        if (const auto checked = cancellation.check(); !checked)
+            return std::unexpected{checked.error()};
+        const auto &partition = *item.source;
+        if (item.renamed_name) {
+            std::array<std::byte, 16> encoded_name{};
+            std::ranges::fill(encoded_name, std::byte{' '});
+            for (std::size_t name_index = 0; name_index < item.renamed_name->size(); ++name_index)
+                encoded_name[name_index] = static_cast<std::byte>((*item.renamed_name)[name_index]);
+            const auto header_offset = static_cast<std::uint64_t>(partition.start_sector) * 512U + 0x40U;
+            if (auto appended = append_patch(patches, state, header_offset, encoded_name); !appended)
+                return std::unexpected{appended.error()};
+            if (auto appended = append_patch(patches, state, header_offset + 1024U, encoded_name); !appended)
+                return std::unexpected{appended.error()};
+        }
+        for (const auto id : item.deleted) {
+            const auto *source_record = record(partition, id);
+            if (source_record == nullptr)
+                continue;
+            const std::array<std::byte, 72> zero{};
+            if (auto appended = append_patch(patches, state, source_record->record_offset.value, zero); !appended)
+                return std::unexpected{appended.error()};
+        }
+        if (item.root_index && item.root_payload) {
+            const auto *root = record(partition, SfsId{1});
+            if (root == nullptr)
+                return std::unexpected{transaction_error("partition root record is missing")};
+            if (auto appended = append_patch(patches, state, root->record_offset.value, *item.root_index); !appended)
+                return std::unexpected{appended.error()};
+            const auto payload_offset =
+                (static_cast<std::uint64_t>(partition.start_sector) +
+                 static_cast<std::uint64_t>(root->extents[0].cluster_offset) * partition.sectors_per_cluster) *
+                512U;
+            if (auto appended = append_patch(patches, state, payload_offset, *item.root_payload); !appended)
+                return std::unexpected{appended.error()};
+        }
+        const auto index_base =
+            (static_cast<std::uint64_t>(partition.start_sector) +
+             static_cast<std::uint64_t>(partition.directory_index_cluster) * partition.sectors_per_cluster) *
+            512U;
+        const auto append_record = [&](const MutablePartition::InsertedRecord &changed,
+                                       std::uint64_t index_offset) -> Result<void> {
+            if (auto appended = append_patch(patches, state, index_offset, changed.raw_index); !appended)
+                return appended;
+            std::size_t payload_offset{};
+            for (const auto &extent : changed.extents) {
+                const auto capacity = static_cast<std::size_t>(extent.cluster_count) * 1024U;
+                const auto count = std::min(capacity, changed.payload.size() - payload_offset);
+                const auto absolute =
+                    (static_cast<std::uint64_t>(partition.start_sector) +
+                     static_cast<std::uint64_t>(extent.cluster_offset) * partition.sectors_per_cluster) *
+                    512U;
+                if (auto appended = append_patch(patches, state, absolute,
+                                                 std::span{changed.payload}.subspan(payload_offset, count));
+                    !appended) {
+                    return appended;
+                }
+                payload_offset += count;
+                if (payload_offset == changed.payload.size())
+                    break;
+            }
+            for (std::size_t list_index = 0; list_index < changed.continuation_clusters.size(); ++list_index) {
+                auto bytes = continuation_list_bytes(changed, list_index);
+                if (!bytes)
+                    return std::unexpected{bytes.error()};
+                const auto absolute = (static_cast<std::uint64_t>(partition.start_sector) +
+                                       static_cast<std::uint64_t>(changed.continuation_clusters[list_index]) *
+                                           partition.sectors_per_cluster) *
+                                      512U;
+                if (auto appended = append_patch(patches, state, absolute, *bytes); !appended)
+                    return appended;
+            }
+            return {};
+        };
+        for (const auto &[id, changed] : item.changed) {
+            const auto *source_record = record(partition, id);
+            if (source_record == nullptr)
+                return std::unexpected{transaction_error("changed record has no source index location")};
+            if (auto appended = append_record(changed, source_record->record_offset.value); !appended)
+                return std::unexpected{appended.error()};
+        }
+        for (const auto &[id, inserted] : item.inserted) {
+            const auto index_offset = index_base + (id.value / 14U) * 1024U + (id.value % 14U) * 72U;
+            if (auto appended = append_record(inserted, index_offset); !appended)
+                return std::unexpected{appended.error()};
+        }
+        const auto bitmap_offset =
+            (static_cast<std::uint64_t>(partition.start_sector) +
+             static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
+            512U;
+        if (auto appended = append_patch(patches, state, bitmap_offset, item.bitmap); !appended)
+            return std::unexpected{appended.error()};
+        const auto mirror_offset = static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U;
+        if (auto appended = append_patch(patches, state, mirror_offset,
+                                         std::span{item.bitmap}.first(std::min<std::size_t>(512U, item.bitmap.size())));
+            !appended) {
+            return std::unexpected{appended.error()};
+        }
+    }
+    std::ranges::sort(patches, {}, &detail::AlterationPatch::offset);
+    for (std::size_t index = 1U; index < patches.size(); ++index) {
+        const auto &previous = patches[index - 1U];
+        if (previous.offset + previous.replacement.size() > patches[index].offset)
+            return std::unexpected{transaction_error("alteration patch ranges overlap")};
+    }
+    return patches;
+}
+
 Result<std::filesystem::path> copy_to_unique_temporary(const std::filesystem::path &source,
                                                        const std::filesystem::path &output) {
     auto input = FileReader::open(source);
@@ -2228,16 +2386,19 @@ Result<void> validate_mutable_partition_geometry(const Partition &partition, std
     return {};
 }
 
-Result<TransactionState> open_transaction_state(const std::filesystem::path &source_path,
+Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAccessReader> source,
+                                                const std::filesystem::path &source_path,
                                                 const CancellationToken &cancellation, ProgressSink *progress,
                                                 bool include_object_graph) {
+    if (!source)
+        return std::unexpected{transaction_error("alteration source reader is required")};
     OpenOptions options;
     options.cancellation = cancellation;
     options.progress = progress;
-    auto container = open_image(source_path, options);
+    auto container = open_image(source, source_path, options);
     if (!container)
         return std::unexpected{container.error()};
-    TransactionState state{std::move(*container), {}, {}, {}, {}, {}};
+    TransactionState state{std::move(source), std::move(*container), {}, {}, {}, {}, {}};
     if (std::ranges::any_of(state.container.diagnostics(), [](const Error &error) {
             return error.code == ErrorCode::container_invalid_geometry ||
                    error.code == ErrorCode::container_partition_out_of_range;
@@ -2283,15 +2444,24 @@ Result<TransactionState> open_transaction_state(const std::filesystem::path &sou
             (static_cast<std::uint64_t>(partition.start_sector) +
              static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
             512U;
-        auto bitmap = read_raw(source_path, bitmap_offset, bitmap_size);
-        if (!bitmap)
-            return std::unexpected{bitmap.error()};
+        std::vector<std::byte> bitmap(bitmap_size);
+        if (auto read = state.source->read_exact_at(bitmap_offset, bitmap); !read)
+            return std::unexpected{read.error()};
         MutablePartition mutable_partition;
         mutable_partition.source = &partition;
-        mutable_partition.bitmap = std::move(*bitmap);
+        mutable_partition.bitmap = std::move(bitmap);
         state.partitions.emplace(partition.index.value, std::move(mutable_partition));
     }
     return state;
+}
+
+Result<TransactionState> open_transaction_state(const std::filesystem::path &source_path,
+                                                const CancellationToken &cancellation, ProgressSink *progress,
+                                                bool include_object_graph) {
+    auto source = FileReader::open(source_path);
+    if (!source)
+        return std::unexpected{source.error()};
+    return open_transaction_state(*source, source_path, cancellation, progress, include_object_graph);
 }
 
 Result<void> publish(const TransactionState &state, const std::filesystem::path &output_path,
@@ -2996,13 +3166,15 @@ Result<std::string> file_snapshot_id(const std::filesystem::path &path, const Ca
     return package_internal::hex_digest(*digest);
 }
 
-Result<TransactionState> prepare_alteration(const std::filesystem::path &source_path,
+Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessReader> source,
+                                            const std::filesystem::path &source_path,
                                             const AlterationManifest &manifest, const CancellationToken &cancellation,
                                             ProgressSink *progress, std::string_view initial_message,
                                             std::optional<std::string> progress_path = std::nullopt) {
     if (auto valid = detail::validate_alteration_manifest(manifest); !valid)
         return std::unexpected{valid.error()};
-    auto opened = open_transaction_state(source_path, cancellation, progress, requires_object_graph(manifest));
+    auto opened =
+        open_transaction_state(std::move(source), source_path, cancellation, progress, requires_object_graph(manifest));
     if (!opened)
         return std::unexpected{opened.error()};
     auto state = std::move(*opened);
@@ -3060,7 +3232,34 @@ Result<TransactionState> prepare_alteration(const std::filesystem::path &source_
     return state;
 }
 
+Result<TransactionState> prepare_alteration(const std::filesystem::path &source_path,
+                                            const AlterationManifest &manifest, const CancellationToken &cancellation,
+                                            ProgressSink *progress, std::string_view initial_message,
+                                            std::optional<std::string> progress_path = std::nullopt) {
+    auto source = FileReader::open(source_path);
+    if (!source)
+        return std::unexpected{source.error()};
+    return prepare_alteration(*source, source_path, manifest, cancellation, progress, initial_message,
+                              std::move(progress_path));
+}
+
 } // namespace
+
+Result<detail::PreparedAlteration> detail::prepare_hds_alteration(std::shared_ptr<const RandomAccessReader> source,
+                                                                  std::filesystem::path source_path,
+                                                                  const AlterationManifest &manifest,
+                                                                  const CancellationToken &cancellation,
+                                                                  ProgressSink *progress) {
+    auto prepared = prepare_alteration(std::move(source), source_path, manifest, cancellation, progress,
+                                       "planning alteration", text::path_to_utf8(source_path));
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    auto patches = collect_patches(*prepared, cancellation);
+    if (!patches)
+        return std::unexpected{patches.error()};
+    return PreparedAlteration{std::move(source_path), prepared->container.image_size_bytes(),
+                              std::move(prepared->reports), std::move(*patches)};
+}
 
 Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, const AlterationManifest &manifest,
                                    const std::filesystem::path &output_path, const CancellationToken &cancellation,

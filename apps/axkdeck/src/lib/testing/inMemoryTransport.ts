@@ -92,6 +92,18 @@ export class InMemoryImageTransport implements ImageTransport {
         };
     }
 
+    async refreshImage(sessionId: number): Promise<OpenedImage> {
+        this.calls.push('refreshImage');
+        const configured = this.options.operations?.refreshImage;
+        if (configured) return configured(sessionId);
+        return {
+            ...this.options.opened,
+            sessionId,
+            volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
+            partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
+        };
+    }
+
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage> {
         return this.invoke('contentChildren', [sessionId, parentId, offset, limit]);
     }
@@ -116,12 +128,12 @@ export class InMemoryImageTransport implements ImageTransport {
         this.options.onClose?.(sessionId);
     }
 
-    startVolumeMutation(source: FileLocation, mutation: VolumeMutation): Promise<JobState> {
-        return this.invoke('startVolumeMutation', [source, mutation]);
+    startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState> {
+        return this.invoke('startVolumeMutation', [sessionId, mutation]);
     }
 
-    startPartitionMutation(source: FileLocation, mutation: PartitionMutation): Promise<JobState> {
-        return this.invoke('startPartitionMutation', [source, mutation]);
+    startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState> {
+        return this.invoke('startPartitionMutation', [sessionId, mutation]);
     }
 
     async preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {
@@ -165,8 +177,8 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('inspectAudio', [source, targetSampleRate]);
     }
 
-    startAudioImport(source: FileLocation, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState> {
-        return this.invoke('startAudioImport', [source, target, items]);
+    startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState> {
+        return this.invoke('startAudioImport', [sessionId, target, items]);
     }
 
     downloadFile(source: FileLocation): Promise<ClientDownload> {

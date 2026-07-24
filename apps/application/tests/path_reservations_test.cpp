@@ -52,6 +52,20 @@ TEST(PathReservationCoordinatorTest, BatchAcquisitionIsAtomicAndReleasedByLeaseL
     EXPECT_TRUE(coordinator.try_acquire(batch));
 }
 
+TEST(PathReservationCoordinatorTest, SessionLeaseUpgradeIsAtomicAndReversible) {
+    PathReservationCoordinator coordinator;
+    auto session = coordinator.try_acquire(PathAccess{{"workspace", "images/disk.hds"}, PathAccessMode::shared});
+    ASSERT_TRUE(session) << session.error().message;
+    auto reader = coordinator.try_acquire(PathAccess{{"workspace", "images/disk.hds"}, PathAccessMode::shared});
+    ASSERT_TRUE(reader) << reader.error().message;
+    EXPECT_FALSE(session->try_upgrade());
+    reader = {};
+    ASSERT_TRUE(session->try_upgrade());
+    EXPECT_FALSE(coordinator.try_acquire(PathAccess{{"workspace", "images/disk.hds"}, PathAccessMode::shared}));
+    session->downgrade();
+    EXPECT_TRUE(coordinator.try_acquire(PathAccess{{"workspace", "images/disk.hds"}, PathAccessMode::shared}));
+}
+
 TEST(PathReservationCoordinatorTest, AllRootsReservationSerializesWorkspaceCatalogChanges) {
     PathReservationCoordinator coordinator;
     auto image = coordinator.try_acquire(PathAccess{{"workspace-a", "image.hds"}, PathAccessMode::shared});

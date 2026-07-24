@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <mutex>
+#include <ranges>
 
 namespace {
 
@@ -53,6 +54,27 @@ struct axk::app::PathReservationCoordinator::State {
         });
     }
 
+    Result<void> set_mode(std::span<const std::uint64_t> ids, PathAccessMode mode) {
+        const std::scoped_lock lock{mutex};
+        const auto owned = [&](const Reservation &reservation) {
+            return std::ranges::find(ids, reservation.id) != ids.end();
+        };
+        if (mode == PathAccessMode::exclusive) {
+            for (const auto &candidate : reservations | std::views::filter(owned)) {
+                const auto conflict = std::ranges::any_of(reservations, [&](const Reservation &active) {
+                    return !owned(active) &&
+                           (active.all_roots || candidate.all_roots || active.root_id == candidate.root_id) &&
+                           paths_overlap(active.relative_path, candidate.relative_path);
+                });
+                if (conflict)
+                    return std::unexpected(conflict_error());
+            }
+        }
+        for (auto &reservation : reservations | std::views::filter(owned))
+            reservation.mode = mode;
+        return {};
+    }
+
     std::mutex mutex;
     std::vector<Reservation> reservations;
     std::uint64_t next_id{1U};
@@ -75,6 +97,17 @@ axk::app::PathReservationCoordinator::Lease::operator=(Lease &&other) noexcept {
 axk::app::PathReservationCoordinator::Lease::~Lease() {
     if (state_)
         state_->release(reservations_);
+}
+
+axk::app::Result<void> axk::app::PathReservationCoordinator::Lease::try_upgrade() {
+    if (!state_)
+        return std::unexpected(conflict_error());
+    return state_->set_mode(reservations_, PathAccessMode::exclusive);
+}
+
+void axk::app::PathReservationCoordinator::Lease::downgrade() noexcept {
+    if (state_)
+        static_cast<void>(state_->set_mode(reservations_, PathAccessMode::shared));
 }
 
 axk::app::PathReservationCoordinator::PathReservationCoordinator() : state_(std::make_shared<State>()) {}

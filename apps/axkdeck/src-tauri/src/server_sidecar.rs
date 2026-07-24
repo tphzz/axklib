@@ -99,13 +99,16 @@ pub fn create_workspace(
 pub struct ServerSidecar {
     child: Mutex<Option<Child>>,
     log_threads: Vec<JoinHandle<()>>,
-    state_directory: PathBuf,
+    runtime_directory: PathBuf,
     connection: FrontendConnection,
     shutdown_timeout: Duration,
 }
 
 impl ServerSidecar {
-    pub fn launch_if_available(log_directory: &Path) -> Result<Option<Self>, String> {
+    pub fn launch_if_available(
+        log_directory: &Path,
+        state_directory: &Path,
+    ) -> Result<Option<Self>, String> {
         if std::env::var("AXKDECK_HTTP_SERVER").is_ok_and(|value| {
             matches!(
                 value.trim().to_ascii_lowercase().as_str(),
@@ -117,21 +120,25 @@ impl ServerSidecar {
         let Some(binary) = server_binary() else {
             return Ok(None);
         };
-        Self::launch(&binary, log_directory).map(Some)
+        Self::launch(&binary, log_directory, state_directory).map(Some)
     }
 
-    fn launch(binary: &Path, log_directory: &Path) -> Result<Self, String> {
-        let state_directory =
+    fn launch(binary: &Path, log_directory: &Path, state_directory: &Path) -> Result<Self, String> {
+        prepare_persistent_state_directory(state_directory)?;
+        let runtime_directory =
             std::env::temp_dir().join(format!("axkdeck-server-{}", std::process::id()));
-        prepare_state_directory(&state_directory)?;
-        let connection_path = state_directory.join("connection.json");
-        let arguments = sidecar_arguments(&state_directory, &connection_path);
+        prepare_state_directory(&runtime_directory)?;
+        let connection_path = runtime_directory.join("connection.json");
+        let arguments = sidecar_arguments(state_directory, &connection_path);
         let mut command = Command::new(binary);
         command
             .args(arguments)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Ok(level) = std::env::var("AXKDECK_LOG_LEVEL") {
+            command.env("AXKLIB_SERVER_LOG_LEVEL", level);
+        }
         suppress_child_console(&mut command);
         let mut child = command
             .spawn()
@@ -141,7 +148,7 @@ impl ServerSidecar {
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                let _ = std::fs::remove_dir_all(&state_directory);
+                let _ = std::fs::remove_dir_all(&runtime_directory);
                 return Err(error);
             }
         };
@@ -153,7 +160,7 @@ impl ServerSidecar {
                     let _ = child.kill();
                     let _ = child.wait();
                     join_log_threads(log_threads);
-                    let _ = std::fs::remove_dir_all(&state_directory);
+                    let _ = std::fs::remove_dir_all(&runtime_directory);
                     return Err(error);
                 }
             };
@@ -170,7 +177,7 @@ impl ServerSidecar {
             let _ = child.kill();
             let _ = child.wait();
             join_log_threads(log_threads);
-            let _ = std::fs::remove_dir_all(&state_directory);
+            let _ = std::fs::remove_dir_all(&runtime_directory);
             return Err(error);
         }
         let connection = FrontendConnection {
@@ -181,7 +188,7 @@ impl ServerSidecar {
         Ok(Self {
             child: Mutex::new(Some(child)),
             log_threads,
-            state_directory,
+            runtime_directory,
             connection,
             shutdown_timeout: SHUTDOWN_TIMEOUT,
         })
@@ -231,7 +238,7 @@ impl Drop for ServerSidecar {
             }
         }
         join_log_threads(std::mem::take(&mut self.log_threads));
-        let _ = std::fs::remove_dir_all(&self.state_directory);
+        let _ = std::fs::remove_dir_all(&self.runtime_directory);
     }
 }
 
@@ -428,6 +435,17 @@ fn prepare_state_directory(state_directory: &Path) -> Result<(), String> {
         .map_err(|error| format!("create sidecar state directory: {error}"))
 }
 
+fn prepare_persistent_state_directory(state_directory: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(state_directory)
+        .map_err(|error| format!("create persistent sidecar state directory: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(state_directory, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("secure persistent sidecar state directory: {error}"))?;
+    }
+    Ok(())
+}
 fn request_shutdown(connection: &FrontendConnection) -> Result<(), String> {
     let authority = connection
         .base_url
@@ -568,8 +586,8 @@ fn server_binary() -> Option<PathBuf> {
 mod tests {
     use super::{
         ConnectionFile, FrontendConnection, RotatingLogWriter, ServerSidecar,
-        prepare_state_directory, request_shutdown, require_http_status, sidecar_arguments,
-        validate_connection, wait_for_connection,
+        prepare_persistent_state_directory, prepare_state_directory, request_shutdown,
+        require_http_status, sidecar_arguments, validate_connection, wait_for_connection,
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -722,6 +740,34 @@ mod tests {
     }
 
     #[test]
+    fn persistent_state_is_secured_without_removing_recovery_data() {
+        let directory = temporary_directory("persistent");
+        std::fs::create_dir_all(&directory).expect("create persistent state");
+        std::fs::write(directory.join("pending.axkjournal"), b"recovery")
+            .expect("write recovery state");
+
+        prepare_persistent_state_directory(&directory).expect("prepare persistent state");
+
+        assert_eq!(
+            std::fs::read(directory.join("pending.axkjournal")).expect("read recovery state"),
+            b"recovery"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&directory)
+                    .expect("inspect state directory")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+        std::fs::remove_dir_all(directory).expect("remove test state");
+    }
+
+    #[test]
     fn readiness_reports_timeout_and_child_exit_separately() {
         let directory = temporary_directory("readiness");
         std::fs::create_dir_all(&directory).expect("create readiness state");
@@ -754,7 +800,7 @@ mod tests {
         let sidecar = ServerSidecar {
             child: Mutex::new(Some(child)),
             log_threads: Vec::new(),
-            state_directory: directory.clone(),
+            runtime_directory: directory.clone(),
             connection: FrontendConnection {
                 base_url: "http://127.0.0.1:1/api/v1".to_owned(),
                 bearer_token: "0123456789abcdef0123456789abcdef".to_owned(),

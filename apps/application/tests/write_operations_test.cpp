@@ -12,6 +12,9 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "axklib/application/alteration_journal.hpp"
+#include "axklib/application/image_sessions.hpp"
+#include "axklib/application/path_reservations.hpp"
 #include "axklib/application/write_operations.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
@@ -222,9 +225,18 @@ class WriteOperationsTest : public testing::Test {
                                                            [this] { return now_; });
         registry_ = axk::app::make_operation_registry();
         ASSERT_TRUE(axk::app::bind_write_operations(registry_, *sandbox_, *uploads_));
+        reservations_ = std::make_unique<axk::app::PathReservationCoordinator>();
+        images_ = std::make_unique<axk::app::ImageSessionManager>(*sandbox_, 4U, 500U, std::chrono::minutes{15},
+                                                                  std::chrono::steady_clock::now, reservations_.get());
+        journals_ = std::make_unique<axk::app::AlterationJournalStore>(root_ / "journals");
+        ASSERT_TRUE(journals_->storage_ready());
+        ASSERT_TRUE(axk::app::bind_session_write_operations(registry_, *sandbox_, *uploads_, *images_, *journals_));
     }
 
     void TearDown() override {
+        images_.reset();
+        journals_.reset();
+        reservations_.reset();
         uploads_.reset();
         std::error_code error;
         std::filesystem::remove_all(root_, error);
@@ -239,6 +251,9 @@ class WriteOperationsTest : public testing::Test {
     std::chrono::steady_clock::time_point now_;
     std::unique_ptr<axk::app::Sandbox> sandbox_;
     std::unique_ptr<axk::app::UploadStore> uploads_;
+    std::unique_ptr<axk::app::PathReservationCoordinator> reservations_;
+    std::unique_ptr<axk::app::ImageSessionManager> images_;
+    std::unique_ptr<axk::app::AlterationJournalStore> journals_;
     axk::app::OperationRegistry registry_;
 };
 
@@ -699,6 +714,67 @@ TEST_F(WriteOperationsTest, AlterationInspectionCreatesNoApplyAuthority) {
     ASSERT_FALSE(incomplete);
     EXPECT_EQ(incomplete.error().code, "invalid_request");
     EXPECT_FALSE(std::filesystem::exists(root_ / "stale.hds"));
+}
+
+TEST_F(WriteOperationsTest, SessionAlterationCommitsInPlaceAndRefreshesTheExistingSession) {
+    const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->revision, 1U);
+    const auto objects_before = images_->objects(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(objects_before) << objects_before.error().message;
+
+    std::vector<nlohmann::json> diagnostics;
+    auto mutation_context = context();
+    mutation_context.diagnostic = [&](const nlohmann::json &event) { diagnostics.push_back(event); };
+    const nlohmann::json manifest = {
+        {"schema_version", "1.0"},
+        {"operations", nlohmann::json::array({{{"id", "rename"},
+                                               {"type", "rename_volume"},
+                                               {"partition_index", 0U},
+                                               {"volume_name", "New Volume"},
+                                               {"new_volume_name", "Renamed Volume"}}})},
+    };
+    const auto altered = registry_.invoke(
+        "images.alter",
+        {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"manifest", {{"inline", manifest}}}},
+        mutation_context);
+    ASSERT_TRUE(altered) << altered.error().message;
+    EXPECT_EQ(altered->at("imageId"), opened->image_id);
+    EXPECT_EQ(altered->at("revision"), 2U);
+    EXPECT_TRUE(altered->at("applied").get<bool>());
+
+    const auto inspected = images_->inspect(opened->image_id, "owner");
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->revision, 2U);
+    const auto roots = images_->content(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    ASSERT_EQ(roots->items.size(), 1U);
+    const auto volumes = images_->content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes) << volumes.error().message;
+    EXPECT_TRUE(std::ranges::contains(volumes->items, "Renamed Volume", &axk::app::ImageContentItem::name));
+    const auto objects_after = images_->objects(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(objects_after) << objects_after.error().message;
+    ASSERT_EQ(objects_after->items.size(), objects_before->items.size());
+    for (const auto &before : objects_before->items) {
+        const auto after = std::ranges::find_if(objects_after->items, [&](const auto &candidate) {
+            return candidate.type == before.type && candidate.name == before.name;
+        });
+        ASSERT_NE(after, objects_after->items.end());
+        EXPECT_EQ(after->id, before.id);
+        EXPECT_EQ(after->volume_name, "Renamed Volume");
+    }
+
+    const auto planning = std::ranges::find(diagnostics, "planning",
+                                            [](const auto &event) { return event.value("phase", std::string{}); });
+    ASSERT_NE(planning, diagnostics.end());
+    EXPECT_GT(planning->at("patchCount").get<std::size_t>(), 0U);
+    EXPECT_LT(planning->at("patchBytes").get<std::uint64_t>(), planning->at("imageBytes").get<std::uint64_t>());
+
+    const auto stale = registry_.invoke(
+        "images.alter", {{"imageId", opened->image_id}, {"expectedRevision", 1U}, {"manifest", {{"inline", manifest}}}},
+        context());
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, "image_revision_stale");
 }
 
 TEST_F(WriteOperationsTest, AlterationRechecksInputsBeforePublishing) {

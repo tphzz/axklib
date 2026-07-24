@@ -61,6 +61,28 @@ struct SandboxFile {
     std::shared_ptr<const axk::RandomAccessReader> reader;
 };
 
+class SandboxMutation final : public axk::RandomAccessReader {
+  public:
+    ~SandboxMutation() override;
+    SandboxMutation(const SandboxMutation &) = delete;
+    SandboxMutation &operator=(const SandboxMutation &) = delete;
+
+    [[nodiscard]] std::uint64_t size() const noexcept override;
+    [[nodiscard]] axk::Result<void> read_exact_at(std::uint64_t offset,
+                                                  std::span<std::byte> destination) const override;
+    [[nodiscard]] Result<void> write_exact_at(std::uint64_t offset, std::span<const std::byte> source);
+    [[nodiscard]] Result<void> flush();
+    [[nodiscard]] Result<void> verify_bound() const;
+    [[nodiscard]] const FileRef &reference() const noexcept;
+
+  private:
+    struct Implementation;
+    explicit SandboxMutation(std::unique_ptr<Implementation> implementation);
+
+    std::unique_ptr<Implementation> implementation_;
+    friend class Sandbox;
+};
+
 enum class SandboxTreeEntryKind : std::uint8_t { file, directory };
 
 struct SandboxTreeEntry {
@@ -108,6 +130,7 @@ class Sandbox {
 
     [[nodiscard]] std::vector<RootInfo> roots() const;
     [[nodiscard]] Result<SandboxFile> open_file(const FileRef &reference) const;
+    [[nodiscard]] Result<std::shared_ptr<SandboxMutation>> open_mutation(const FileRef &reference) const;
     [[nodiscard]] Result<SandboxTree> open_tree(const DirectoryRef &reference, const SandboxTreeLimits &limits) const;
     [[nodiscard]] Result<void> publish_file(const FileRef &destination, bool overwrite,
                                             const axk::RandomAccessReader &source) const;

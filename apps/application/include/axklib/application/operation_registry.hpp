@@ -39,6 +39,7 @@ struct OperationContext {
     CancellationToken cancellation;
     ProgressSink *progress{};
     std::function<std::string(const FileRef &)> display_path;
+    std::function<void(const nlohmann::json &)> diagnostic{};
 };
 
 struct OperationEntry {

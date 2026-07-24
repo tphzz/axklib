@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -154,6 +155,22 @@ TEST_F(SandboxTest, ResolvesMetadataAndWritableOutputsWithoutAcceptingAliases) {
     const auto alias = value.require_distinct({"workspace", "images/disk.hds"}, {"workspace", "images/disk.hds"});
     ASSERT_FALSE(alias);
     EXPECT_EQ(alias.error().code, "invalid_file_reference");
+}
+
+TEST_F(SandboxTest, RetainsWritableFileIdentityAcrossBoundedMutation) {
+    const auto value = sandbox();
+    const auto mutation = value.open_mutation({"workspace", "images/disk.hds"});
+    ASSERT_TRUE(mutation) << mutation.error().message;
+    EXPECT_EQ((*mutation)->size(), 5U);
+    ASSERT_TRUE((*mutation)->verify_bound());
+    const std::array replacement{std::byte{'I'}, std::byte{'M'}};
+    ASSERT_TRUE((*mutation)->write_exact_at(0U, replacement));
+    ASSERT_TRUE((*mutation)->flush());
+    ASSERT_TRUE((*mutation)->verify_bound());
+    std::array<std::byte, 2> read{};
+    ASSERT_TRUE((*mutation)->read_exact_at(0U, read));
+    EXPECT_EQ(read, replacement);
+    EXPECT_FALSE((*mutation)->write_exact_at(4U, replacement));
 }
 
 TEST_F(SandboxTest, RejectsOutputsInReadOnlyRootsAndEscapingParents) {

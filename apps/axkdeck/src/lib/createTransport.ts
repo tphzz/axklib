@@ -85,6 +85,9 @@ class UnavailableTransport implements ImageTransport {
     openImage(): Promise<OpenedImage> {
         return this.unavailable();
     }
+    refreshImage(): Promise<OpenedImage> {
+        return this.unavailable();
+    }
     contentChildren(): Promise<ContentPage> {
         return this.unavailable();
     }

@@ -532,7 +532,7 @@ describe('HttpImageTransport', () => {
         expect(job).toMatchObject({ kind: 'create.hds', status: 'queued' });
     });
 
-    it('starts typed volume changes as atomic source replacements', async () => {
+    it('starts typed volume changes through the retained image session', async () => {
         const alterationBodies: unknown[] = [];
         vi.stubGlobal(
             'fetch',
@@ -544,26 +544,55 @@ describe('HttpImageTransport', () => {
                         limits: {},
                         operations: [
                             {
-                                id: 'alter.hds',
+                                id: 'images.alter',
                                 method: 'POST',
-                                route: '/api/v1/image-alterations',
+                                route: '/api/v1/image-session-alterations',
                                 mode: 'job',
                                 operationClass: 'write',
                                 requiresIdempotency: true,
                                 variant: null,
-                                requestSchema: 'ImageAlterationRequest',
-                                resultSchema: 'ImageAlterationResult',
+                                requestSchema: 'ImageSessionAlterationRequest',
+                                resultSchema: 'ImageSessionAlterationResult',
                                 implemented: true,
                             },
                         ],
                     });
                 }
-                if (url.pathname.endsWith('/image-alterations')) {
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return json({
+                        imageId: 'image-retained',
+                        revision: 1,
+                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        format: 'sfs',
+                        rootCount: 0,
+                        objectCount: 0,
+                        relationshipCount: 0,
+                        availableOperations: ['images.alter.volumes', 'images.alter.partitions'],
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/images/image-retained') && init?.method !== 'POST') {
+                    return json({
+                        imageId: 'image-retained',
+                        revision: 2,
+                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        format: 'sfs',
+                        rootCount: 0,
+                        objectCount: 0,
+                        relationshipCount: 0,
+                        availableOperations: ['images.alter.volumes', 'images.alter.partitions'],
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                if (url.pathname.endsWith('/image-session-alterations')) {
                     alterationBodies.push(JSON.parse(String(init?.body)));
                     return json(
                         {
                             jobId: `job-${alterationBodies.length}`,
-                            operationId: 'alter.hds',
+                            operationId: 'images.alter',
                             state: 'QUEUED',
                             latestSequence: 0,
                             progress: null,
@@ -582,23 +611,26 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
         });
         const source = serverFile('images/base.hds');
-        await transport.startVolumeMutation(source, {
+        const opened = await transport.openImage(source);
+        await transport.startVolumeMutation(opened.sessionId, {
             kind: 'add',
             partitionIndex: 2,
             volumeName: 'New Volume',
         });
-        await transport.startVolumeMutation(source, {
+        const refreshed = await transport.refreshImage(opened.sessionId);
+        expect(refreshed.sessionId).toBe(opened.sessionId);
+        await transport.startVolumeMutation(opened.sessionId, {
             kind: 'rename',
             partitionIndex: 2,
             volumeName: 'Old Volume',
             newVolumeName: 'Renamed Volume',
         });
-        await transport.startVolumeMutation(source, {
+        await transport.startVolumeMutation(opened.sessionId, {
             kind: 'delete',
             partitionIndex: 2,
             volumeName: 'Renamed Volume',
         });
-        await transport.startPartitionMutation(source, {
+        await transport.startPartitionMutation(opened.sessionId, {
             kind: 'rename',
             partitionIndex: 2,
             partitionName: 'PARTITION 3',
@@ -607,7 +639,8 @@ describe('HttpImageTransport', () => {
 
         expect(alterationBodies).toEqual([
             {
-                source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                imageId: 'image-retained',
+                expectedRevision: 1,
                 manifest: {
                     inline: {
                         schema_version: '1.0',
@@ -622,11 +655,10 @@ describe('HttpImageTransport', () => {
                     },
                 },
                 inputBindings: [],
-                output: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                replaceSource: true,
             },
             {
-                source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                imageId: 'image-retained',
+                expectedRevision: 2,
                 manifest: {
                     inline: {
                         schema_version: '1.0',
@@ -642,11 +674,10 @@ describe('HttpImageTransport', () => {
                     },
                 },
                 inputBindings: [],
-                output: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                replaceSource: true,
             },
             {
-                source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                imageId: 'image-retained',
+                expectedRevision: 2,
                 manifest: {
                     inline: {
                         schema_version: '1.0',
@@ -661,11 +692,10 @@ describe('HttpImageTransport', () => {
                     },
                 },
                 inputBindings: [],
-                output: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                replaceSource: true,
             },
             {
-                source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                imageId: 'image-retained',
+                expectedRevision: 2,
                 manifest: {
                     inline: {
                         schema_version: '1.0',
@@ -681,8 +711,6 @@ describe('HttpImageTransport', () => {
                     },
                 },
                 inputBindings: [],
-                output: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                replaceSource: true,
             },
         ]);
     });
@@ -699,26 +727,42 @@ describe('HttpImageTransport', () => {
                         limits: {},
                         operations: [
                             {
-                                id: 'alter.hds',
+                                id: 'images.alter',
                                 method: 'POST',
-                                route: '/api/v1/image-alterations',
+                                route: '/api/v1/image-session-alterations',
                                 mode: 'job',
                                 operationClass: 'write',
                                 requiresIdempotency: true,
                                 variant: null,
-                                requestSchema: 'ImageAlterationRequest',
-                                resultSchema: 'ImageAlterationResult',
+                                requestSchema: 'ImageSessionAlterationRequest',
+                                resultSchema: 'ImageSessionAlterationResult',
                                 implemented: true,
                             },
                         ],
                     });
                 }
-                if (url.pathname.endsWith('/image-alterations')) {
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return json({
+                        imageId: 'image-audio',
+                        revision: 1,
+                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        format: 'sfs',
+                        rootCount: 0,
+                        objectCount: 0,
+                        relationshipCount: 0,
+                        availableOperations: ['images.alter.volumes'],
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                if (url.pathname.endsWith('/image-session-alterations')) {
                     alterationBody = JSON.parse(String(init?.body));
                     return json(
                         {
                             jobId: 'job-audio-import',
-                            operationId: 'alter.hds',
+                            operationId: 'images.alter',
                             state: 'QUEUED',
                             latestSequence: 0,
                             progress: null,
@@ -738,30 +782,28 @@ describe('HttpImageTransport', () => {
         });
         const mono = clientUploadLocation({ uploadId: 'upload-mono' }, 'AUDIO', 'mono.wav');
         const stereo = clientUploadLocation({ uploadId: 'upload-stereo' }, 'AUDIO', 'stereo.flac');
-        const job = await transport.startAudioImport(
-            serverFile('images/base.hds'),
-            { partitionIndex: 3, volumeName: 'Imported' },
-            [
-                {
-                    source: mono,
-                    sampleName: 'Mono',
-                    waveformNames: ['Mono Wave'],
-                    rootKey: 60,
-                    targetSampleRate: 44_100,
-                },
-                {
-                    source: stereo,
-                    sampleName: 'Stereo',
-                    waveformNames: ['Stereo-L', 'Stereo-R'],
-                    rootKey: 69,
-                    targetSampleRate: 22_050,
-                },
-            ],
-        );
+        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const job = await transport.startAudioImport(opened.sessionId, { partitionIndex: 3, volumeName: 'Imported' }, [
+            {
+                source: mono,
+                sampleName: 'Mono',
+                waveformNames: ['Mono Wave'],
+                rootKey: 60,
+                targetSampleRate: 44_100,
+            },
+            {
+                source: stereo,
+                sampleName: 'Stereo',
+                waveformNames: ['Stereo-L', 'Stereo-R'],
+                rootKey: 69,
+                targetSampleRate: 22_050,
+            },
+        ]);
 
-        expect(job).toMatchObject({ jobId: 1, kind: 'alter.hds', status: 'queued' });
+        expect(job).toMatchObject({ jobId: 1, kind: 'images.alter', status: 'queued' });
         expect(alterationBody).toEqual({
-            source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+            imageId: 'image-audio',
+            expectedRevision: 1,
             manifest: {
                 inline: {
                     schema_version: '1.0',
@@ -826,8 +868,6 @@ describe('HttpImageTransport', () => {
                 { manifestPath: 'audio/import-0', input: { uploadRef: { uploadId: 'upload-mono' } } },
                 { manifestPath: 'audio/import-1', input: { uploadRef: { uploadId: 'upload-stereo' } } },
             ],
-            output: { rootId: 'workspace', relativePath: 'images/base.hds' },
-            replaceSource: true,
         });
     });
 

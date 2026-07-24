@@ -33,6 +33,8 @@ class PathReservationCoordinator {
         ~Lease();
 
         [[nodiscard]] explicit operator bool() const noexcept { return state_ != nullptr; }
+        [[nodiscard]] Result<void> try_upgrade();
+        void downgrade() noexcept;
 
       private:
         friend class PathReservationCoordinator;

@@ -201,3 +201,10 @@ axk::app::make_application_registry(const Sandbox &sandbox, UploadStore &uploads
         return std::unexpected(bound.error());
     return registry;
 }
+
+axk::app::Result<void> axk::app::bind_session_application_operations(OperationRegistry &registry,
+                                                                     const Sandbox &sandbox, UploadStore &uploads,
+                                                                     ImageSessionManager &images,
+                                                                     AlterationJournalStore &journals) {
+    return bind_session_write_operations(registry, sandbox, uploads, images, journals);
+}

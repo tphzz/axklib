@@ -266,6 +266,7 @@ export interface ImageTransport {
     renameSandboxEntry(entry: FileRef, name: string): Promise<void>;
     deleteSandboxEntry(entry: FileRef): Promise<void>;
     openImage(source: FileLocation): Promise<OpenedImage>;
+    refreshImage(sessionId: number): Promise<OpenedImage>;
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage>;
     objectPage(sessionId: number, offset: number, limit: number, filter?: ObjectPageFilter): Promise<ObjectPage>;
     relationshipPage(
@@ -275,8 +276,8 @@ export interface ImageTransport {
         filter?: RelationshipPageFilter,
     ): Promise<RelationshipPage>;
     closeImage(sessionId: number): Promise<void>;
-    startVolumeMutation(source: FileLocation, mutation: VolumeMutation): Promise<JobState>;
-    startPartitionMutation(source: FileLocation, mutation: PartitionMutation): Promise<JobState>;
+    startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState>;
+    startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState>;
     preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope>;
     prepareAudition(sessionId: number, objectKey: string): Promise<AuditionDescriptor>;
     readAuditionAudio(auditionId: string, wavSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer>;
@@ -290,7 +291,7 @@ export interface ImageTransport {
     releaseClientUpload(source: ClientUploadLocation): Promise<void>;
     audioImportCapabilities(): Promise<AudioImportCapabilities>;
     inspectAudio(source: InputFileLocation, targetSampleRate?: number): Promise<AudioSourceInfo>;
-    startAudioImport(source: FileLocation, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState>;
+    startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState>;
     downloadFile(source: FileLocation): Promise<ClientDownload>;
     downloadDirectory(source: DirectoryLocation): Promise<ClientDownload>;
     inspectPackage(source: InputFileLocation, verify: boolean): Promise<PackageInspection>;

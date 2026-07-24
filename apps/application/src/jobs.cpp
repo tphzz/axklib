@@ -391,10 +391,10 @@ struct axk::app::JobManager::Impl {
             } catch (...) {
                 result = std::unexpected(job_error("operation_exception", "operation raised an unexpected exception"));
             }
-            if (record->cancellation.token().is_cancelled()) {
-                transition(record, JobState::cancelled, "cancelled");
-            } else if (result) {
+            if (result) {
                 transition(record, JobState::completed, "completed", std::optional<Json>{std::move(*result)});
+            } else if (record->cancellation.token().is_cancelled() || result.error().code == "operation_cancelled") {
+                transition(record, JobState::cancelled, "cancelled");
             } else {
                 transition(record, JobState::failed, "failed", std::nullopt, result.error());
             }

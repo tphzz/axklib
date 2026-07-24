@@ -7,6 +7,9 @@
 
 namespace axk::app {
 
+class AlterationJournalStore;
+class ImageSessionManager;
+
 // Composes every stateful domain-operation family. Transport adapters should
 // depend on this function rather than knowing the individual service modules.
 [[nodiscard]] Result<void> bind_application_operations(OperationRegistry &registry, const Sandbox &sandbox,
@@ -16,5 +19,8 @@ namespace axk::app {
 make_application_registry(const Sandbox &sandbox, UploadStore &uploads,
                           OperationRegistry registry = make_operation_registry(),
                           const axk::MediaBuildLimits &media_limits = {});
+[[nodiscard]] Result<void> bind_session_application_operations(OperationRegistry &registry, const Sandbox &sandbox,
+                                                               UploadStore &uploads, ImageSessionManager &images,
+                                                               AlterationJournalStore &journals);
 
 } // namespace axk::app

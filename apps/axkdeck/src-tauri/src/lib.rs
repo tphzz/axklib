@@ -316,12 +316,23 @@ pub fn run() {
                 .path()
                 .app_log_dir()
                 .map_err(|error| format!("resolve application log directory: {error}"))?;
-            let manager =
-                remote_settings::ServerConnectionManager::initialize(log_directory.clone())
-                    .unwrap_or_else(|error| {
-                        log::error!("local axklib-server initialization failed: {error}");
-                        remote_settings::ServerConnectionManager::unavailable(error, log_directory)
-                    });
+            let state_directory = app
+                .path()
+                .app_local_data_dir()
+                .map_err(|error| format!("resolve application state directory: {error}"))?
+                .join("server-state");
+            let manager = remote_settings::ServerConnectionManager::initialize(
+                log_directory.clone(),
+                state_directory.clone(),
+            )
+            .unwrap_or_else(|error| {
+                log::error!("local axklib-server initialization failed: {error}");
+                remote_settings::ServerConnectionManager::unavailable(
+                    error,
+                    log_directory,
+                    state_directory,
+                )
+            });
             app.manage(Mutex::new(manager));
             let build = current_build_info();
             log::info!(

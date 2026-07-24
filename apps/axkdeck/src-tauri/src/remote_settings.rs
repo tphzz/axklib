@@ -37,39 +37,47 @@ pub struct ServerConnectionManager {
     connection: Option<FrontendConnection>,
     secure_storage_error: Option<String>,
     log_directory: PathBuf,
+    state_directory: PathBuf,
 }
 
 impl ServerConnectionManager {
-    pub fn initialize(log_directory: PathBuf) -> Result<Self, String> {
+    pub fn initialize(log_directory: PathBuf, state_directory: PathBuf) -> Result<Self, String> {
         match load_remote_settings() {
             Ok(Some(settings)) => Ok(Self {
                 sidecar: None,
                 connection: Some(frontend_connection(&settings)),
                 secure_storage_error: None,
                 log_directory,
+                state_directory,
             }),
-            Ok(None) => Self::local(log_directory, None),
-            Err(error) => Self::local(log_directory, Some(error)),
+            Ok(None) => Self::local(log_directory, state_directory, None),
+            Err(error) => Self::local(log_directory, state_directory, Some(error)),
         }
     }
 
-    fn local(log_directory: PathBuf, secure_storage_error: Option<String>) -> Result<Self, String> {
-        let sidecar = ServerSidecar::launch_if_available(&log_directory)?;
+    fn local(
+        log_directory: PathBuf,
+        state_directory: PathBuf,
+        secure_storage_error: Option<String>,
+    ) -> Result<Self, String> {
+        let sidecar = ServerSidecar::launch_if_available(&log_directory, &state_directory)?;
         let connection = sidecar.as_ref().map(|server| server.connection().clone());
         Ok(Self {
             sidecar,
             connection,
             secure_storage_error,
             log_directory,
+            state_directory,
         })
     }
 
-    pub fn unavailable(error: String, log_directory: PathBuf) -> Self {
+    pub fn unavailable(error: String, log_directory: PathBuf, state_directory: PathBuf) -> Self {
         Self {
             sidecar: None,
             connection: None,
             secure_storage_error: Some(error),
             log_directory,
+            state_directory,
         }
     }
 
@@ -113,7 +121,8 @@ impl ServerConnectionManager {
     }
 
     pub fn use_local(&mut self) -> Result<RemoteServerSettingsView, String> {
-        let sidecar = ServerSidecar::launch_if_available(&self.log_directory)?;
+        let sidecar =
+            ServerSidecar::launch_if_available(&self.log_directory, &self.state_directory)?;
         let connection = sidecar.as_ref().map(|server| server.connection().clone());
         delete_remote_settings()?;
         self.connection = connection;

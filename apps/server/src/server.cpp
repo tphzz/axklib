@@ -31,6 +31,7 @@
 #include <nlohmann/json.hpp>
 
 #include "archive_download_budget.hpp"
+#include "axklib/application/alteration_journal.hpp"
 #include "axklib/application/application_operations.hpp"
 #include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_sessions.hpp"
@@ -48,6 +49,7 @@
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 #include "axklib/writer.hpp"
+#include "environment.hpp"
 #include "http_headers.hpp"
 
 #ifdef _WIN32
@@ -75,6 +77,21 @@ void write_structured_log(std::string line) {
     static std::mutex mutex;
     const std::scoped_lock lock{mutex};
     std::clog << line << '\n';
+}
+
+std::function<void(const Json &)> operation_diagnostic_sink() {
+    static const bool enabled = [] {
+        const auto level = axk::server::detail::environment_variable("AXKLIB_SERVER_LOG_LEVEL");
+        if (!level)
+            return false;
+        auto normalized = *level;
+        std::ranges::transform(normalized, normalized.begin(),
+                               [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+        return normalized == "debug" || normalized == "trace";
+    }();
+    if (!enabled)
+        return {};
+    return [](const Json &event) { write_structured_log(event.dump()); };
 }
 
 std::uint64_t process_id() {
@@ -580,11 +597,12 @@ class ServerApplication {
                               config_.maximum_download_archive_path_bytes},
                              std::chrono::seconds{config_.download_archive_retention_seconds}),
           archive_download_budget_(config_.maximum_concurrent_archive_downloads),
+          alteration_journals_(alteration_journal_directory()),
           images_(sandbox_, config_.maximum_image_sessions, config_.maximum_page_size,
                   std::chrono::seconds{config_.image_idle_seconds}, std::chrono::steady_clock::now,
                   &path_reservations_),
           registry_(
-              prepare_registry(std::move(registry), sandbox_, uploads_, images_,
+              prepare_registry(std::move(registry), sandbox_, uploads_, images_, alteration_journals_,
                                {config_.maximum_media_build_object_bytes, config_.maximum_media_build_payload_bytes,
                                 config_.maximum_media_build_output_bytes})),
           openapi_document_(axk::server::build_openapi_document(axk::server::embedded_openapi(), registry_)),
@@ -599,9 +617,11 @@ class ServerApplication {
                             [this](const axk::app::JobEvent &event) { broadcast(event); }) {
         app_.template get_middleware<CorsMiddleware>().allowed_origins = config_.allowed_origins;
         app_.template get_middleware<RequestTelemetryMiddleware>().telemetry = &request_telemetry_;
-        state_storage_ready_ = uploads_.storage_ready() && download_archives_.storage_ready() &&
-                               writable_directory(upload_directory()) &&
-                               writable_directory(download_archive_directory());
+        const auto journal_recovery = alteration_journals_.recover(sandbox_);
+        state_storage_ready_ =
+            uploads_.storage_ready() && download_archives_.storage_ready() && alteration_journals_.storage_ready() &&
+            journal_recovery && writable_directory(upload_directory()) &&
+            writable_directory(download_archive_directory()) && writable_directory(alteration_journal_directory());
         const auto publication_cleanup = sandbox_.cleanup_abandoned_publications();
         startup_cleanup_ready_ = publication_cleanup && state_storage_ready_;
         job_subscription_ = jobs_.subscribe(
@@ -704,11 +724,10 @@ class ServerApplication {
     }
 
   private:
-    static axk::app::OperationRegistry prepare_registry(axk::app::OperationRegistry registry,
-                                                        const axk::app::Sandbox &sandbox,
-                                                        axk::app::UploadStore &uploads,
-                                                        axk::app::ImageSessionManager &images,
-                                                        const axk::MediaBuildLimits &media_limits) {
+    static axk::app::OperationRegistry
+    prepare_registry(axk::app::OperationRegistry registry, const axk::app::Sandbox &sandbox,
+                     axk::app::UploadStore &uploads, axk::app::ImageSessionManager &images,
+                     axk::app::AlterationJournalStore &journals, const axk::MediaBuildLimits &media_limits) {
         auto prepared = axk::app::make_application_registry(sandbox, uploads, std::move(registry), media_limits);
         if (!prepared)
             std::terminate();
@@ -746,6 +765,11 @@ class ServerApplication {
             });
         if (!bound)
             std::terminate();
+        if (const auto session_operations =
+                axk::app::bind_session_application_operations(*prepared, sandbox, uploads, images, journals);
+            !session_operations) {
+            std::terminate();
+        }
         return std::move(*prepared);
     }
 
@@ -771,6 +795,12 @@ class ServerApplication {
         if (!config_.state_directory.empty())
             return config_.state_directory / "download-archives";
         return std::filesystem::temp_directory_path() / "axklib-server" / "download-archives";
+    }
+
+    [[nodiscard]] std::filesystem::path alteration_journal_directory() const {
+        if (!config_.state_directory.empty())
+            return config_.state_directory / "alteration-journals";
+        return std::filesystem::temp_directory_path() / "axklib-server" / "alteration-journals";
     }
 
     std::optional<std::string> authenticated_principal(const crow::request &request) const {
@@ -1279,6 +1309,7 @@ class ServerApplication {
 
     Json image_summary_json(const axk::app::ImageSessionSummary &summary) const {
         return {{"imageId", summary.image_id},
+                {"revision", summary.revision},
                 {"source", {{"rootId", summary.source.root_id}, {"relativePath", summary.source.relative_path}}},
                 {"format", summary.format},
                 {"availableOperations", summary.available_operations},
@@ -1891,7 +1922,8 @@ class ServerApplication {
                                                  .request_id = id,
                                                  .cancellation = {},
                                                  .progress = nullptr,
-                                                 .display_path = {}},
+                                                 .display_path = {},
+                                                 .diagnostic = operation_diagnostic_sink()},
                                                 std::move(idempotency_key));
             if (!submitted)
                 return error_response(status_for_error(submitted.error()), submitted.error(), id);
@@ -1907,7 +1939,8 @@ class ServerApplication {
                                                  .request_id = id,
                                                  .cancellation = {},
                                                  .progress = nullptr,
-                                                 .display_path = {}};
+                                                 .display_path = {},
+                                                 .diagnostic = operation_diagnostic_sink()};
         const auto accesses = registry_.path_accesses(selected, input, context);
         if (!accesses)
             return error_response(status_for_error(accesses.error(), 400), accesses.error(), id);
@@ -2013,8 +2046,8 @@ class ServerApplication {
             const auto upload_cleanup = uploads_.cleanup_snapshot();
             const auto startup_cleanup_ready = startup_cleanup_ready_ && cleanup_complete(upload_directory()) &&
                                                cleanup_complete(download_archive_directory());
-            const auto ready =
-                state_storage_ready_ && startup_cleanup_ready && upload_cleanup.healthy && executor_ready;
+            const auto state_storage_ready = state_storage_ready_ && alteration_journals_.storage_ready();
+            const auto ready = state_storage_ready && startup_cleanup_ready && upload_cleanup.healthy && executor_ready;
             const auto workspace_snapshot = workspaces_.snapshot();
             const auto state = [](bool value) { return value ? "READY" : "NOT_READY"; };
             return json_response(ready ? 200 : 503,
@@ -2025,7 +2058,7 @@ class ServerApplication {
                                       {"sandbox", "READY"},
                                       {"workspaceConfiguration",
                                        axk::server::workspace_configuration_state_name(workspace_snapshot.state)},
-                                      {"stateStorage", state(state_storage_ready_)},
+                                      {"stateStorage", state(state_storage_ready)},
                                       {"startupCleanup", state(startup_cleanup_ready)},
                                       {"uploadCleanup", state(upload_cleanup.healthy)},
                                       {"executorAdmission", state(executor_ready)}}}}}},
@@ -2290,6 +2323,7 @@ class ServerApplication {
     axk::app::UploadStore uploads_;
     axk::app::DownloadArchiveStore download_archives_;
     axk::server::ArchiveDownloadBudget archive_download_budget_;
+    axk::app::AlterationJournalStore alteration_journals_;
     axk::app::ImageSessionManager images_;
     axk::app::OperationRegistry registry_;
     Json openapi_document_;

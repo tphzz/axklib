@@ -36,8 +36,12 @@ export function reportInfo(message: string): void {
 
 export type DiagnosticLevel = 'info' | 'warn' | 'error';
 
-export function audioDiagnosticsEnabled(): boolean {
+export function diagnosticsEnabled(): boolean {
     return configuredLogLevel === 'debug' || configuredLogLevel === 'trace';
+}
+
+export function audioDiagnosticsEnabled(): boolean {
+    return diagnosticsEnabled();
 }
 
 export function reportDiagnostic(
