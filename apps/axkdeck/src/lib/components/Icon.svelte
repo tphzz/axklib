@@ -6,7 +6,9 @@
         | 'close'
         | 'disc'
         | 'eject'
+        | 'file-plus'
         | 'folder'
+        | 'folder-open'
         | 'folder-plus'
         | 'grid'
         | 'hard-drive'
@@ -23,6 +25,7 @@
         | 'rename'
         | 'save'
         | 'search'
+        | 'settings'
         | 'sliders'
         | 'server'
         | 'sparkles'
@@ -63,8 +66,12 @@
         <path d="m5 14 7-9 7 9H5Z" /><path d="M5 19h14" />
     {:else if name === 'folder'}
         <path d="M3 7.5V19h18V8H11l-2-3H3v2.5Z" />
+    {:else if name === 'folder-open'}
+        <path d="M3 7.5V6h6l2 3h9l1 2" /><path d="m3 9 2 10h14l2-8H5" />
     {:else if name === 'folder-plus'}
         <path d="M3 7.5V19h18V8H11l-2-3H3v2.5Z" /><path d="M12 11v5M9.5 13.5h5" />
+    {:else if name === 'file-plus'}
+        <path d="M6 3h8l4 4v14H6V3Z" /><path d="M14 3v5h5M12 11v6M9 14h6" />
     {:else if name === 'hard-drive'}
         <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 13h18" /><circle cx="17" cy="16" r="1" />
     {:else if name === 'chevron'}
@@ -101,6 +108,10 @@
             cy="12"
             r="2"
         /><circle cx="15" cy="18" r="2" />
+    {:else if name === 'settings'}
+        <circle cx="12" cy="12" r="3" /><path
+            d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"
+        />
     {:else if name === 'play'}
         <path d="m8 5 11 7-11 7V5Z" />
     {:else if name === 'stop'}

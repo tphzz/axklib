@@ -77,7 +77,7 @@
                 adding = true;
             } catch (reason) {
                 error = userFacingMessage(reason);
-                reportError('Choose local workspace failed', reason);
+                reportError('Choose local storage location failed', reason);
             } finally {
                 choosing = false;
             }
@@ -107,7 +107,7 @@
     function chooseRemoteDirectory(path: string): void {
         selectedPath = path;
         const segments = path.replace(/[\\/]+$/, '').split(/[\\/]/);
-        displayName = segments.at(-1) || 'Workspace';
+        displayName = segments.at(-1) || 'Storage location';
     }
 
     function cancelAdd(): void {
@@ -121,7 +121,7 @@
 
     async function saveWorkspace(): Promise<void> {
         if (!snapshot || !displayName.trim()) {
-            error = 'Enter a workspace name';
+            error = 'Enter a storage location name';
             return;
         }
         loading = true;
@@ -190,11 +190,11 @@
             class="dialog-shell workspace-dialog"
             role="dialog"
             aria-modal="true"
-            aria-label="Workspaces"
+            aria-label="Storage locations"
             use:modal={{ onescape: close }}
         >
             <header class="dialog-header">
-                <h2>Workspaces</h2>
+                <h2>Storage locations</h2>
                 {#if !forced}<button class="icon-button" type="button" aria-label="Close" onclick={close}>×</button
                     >{/if}
             </header>
@@ -203,7 +203,7 @@
                 <p class="workspace-notice">Choose a directory before opening or creating sampler images.</p>
             {:else if snapshot?.state === 'CONFIGURATION_ERROR'}
                 <div class="workspace-error" role="alert">
-                    <strong>Workspace configuration cannot be read</strong>
+                    <strong>Storage location configuration cannot be read</strong>
                     <span>{snapshot.configurationIssue}</span>
                     <button class="secondary-button" type="button" onclick={() => void resetConfiguration()}
                         >Archive and reset</button
@@ -213,7 +213,12 @@
 
             {#if snapshot?.state !== 'CONFIGURATION_ERROR'}
                 {#if (snapshot?.workspaces.length ?? 0) > 0}
-                    <div class="workspace-list" role="list" aria-label="Configured workspaces" aria-busy={loading}>
+                    <div
+                        class="workspace-list"
+                        role="list"
+                        aria-label="Configured storage locations"
+                        aria-busy={loading}
+                    >
                         {#each snapshot?.workspaces ?? [] as workspace (workspace.id)}
                             <div class="workspace-row" role="listitem">
                                 <Icon name="folder" size={17} />
@@ -231,7 +236,7 @@
                                     class="icon-button"
                                     type="button"
                                     aria-label={`Remove ${workspace.displayName}`}
-                                    title="Remove workspace"
+                                    title="Remove storage location"
                                     onclick={() => void removeWorkspace(workspace.id)}>×</button
                                 >
                             </div>
@@ -288,7 +293,8 @@
                             class="primary-button"
                             type="button"
                             disabled={loading || choosing}
-                            onclick={() => void beginAdd()}>{choosing ? 'Choosing folder…' : 'Add workspace'}</button
+                            onclick={() => void beginAdd()}
+                            >{choosing ? 'Choosing folder…' : 'Add storage location'}</button
                         >
                     {/if}
                     {#if !forced}<button class="secondary-button" type="button" onclick={close}>Close</button>{/if}
@@ -303,16 +309,16 @@
                 class="dialog-shell workspace-confirm-dialog"
                 role="dialog"
                 aria-modal="true"
-                aria-label="Add workspace"
+                aria-label="Add storage location"
                 use:modal={{ onescape: cancelAdd }}
             >
                 <header class="dialog-header">
-                    <h2>Add workspace</h2>
+                    <h2>Add storage location</h2>
                     <button class="icon-button" type="button" aria-label="Close" onclick={cancelAdd}>×</button>
                 </header>
                 <div class="workspace-form">
                     {#if selectedPath}<p class="selected-path" title={selectedPath}>{selectedPath}</p>{/if}
-                    <label>Workspace name<input type="text" bind:value={displayName} /></label>
+                    <label>Location name<input type="text" bind:value={displayName} /></label>
                     <label class="workspace-toggle"
                         ><input type="checkbox" bind:checked={writable} /> Allow image creation and changes</label
                     >
@@ -321,7 +327,7 @@
                 <footer class="dialog-footer">
                     <button class="secondary-button" type="button" onclick={cancelAdd}>Cancel</button>
                     <button class="primary-button" type="button" disabled={loading} onclick={() => void saveWorkspace()}
-                        >Add workspace</button
+                        >Add storage location</button
                     >
                 </footer>
             </div>

@@ -52,7 +52,7 @@ function member(role: LinkedWaveDataItem['role'], item: WaveDataItem): LinkedWav
 
 describe('ObjectInspector', () => {
     it('shows structural metadata for a selected SBAC', () => {
-        const bankObject = object('SBAC', 'B STRINGS');
+        const bankObject = object('SBAC', 'STRINGS');
         const sampleObject = object('SBNK', 'Strings C3');
         render(ObjectInspector, {
             props: {
@@ -61,7 +61,7 @@ describe('ObjectInspector', () => {
                     item: {
                         id: bankObject.key,
                         objectId: bankObject.key,
-                        name: 'B STRINGS',
+                        name: 'STRINGS',
                         objectType: 'SBAC',
                         object: bankObject,
                     },
@@ -92,14 +92,15 @@ describe('ObjectInspector', () => {
         });
 
         expect(screen.getByRole('heading', { name: 'Sample Bank details' })).toBeTruthy();
-        expect(screen.getByText('B STRINGS')).toBeTruthy();
+        expect(screen.getByText('STRINGS')).toBeTruthy();
         expect(screen.getByText('Sample 1 of 1')).toBeTruthy();
         expect(screen.getByRole('group', { name: 'Wave Data Strings C3 Wave' })).toBeTruthy();
+        expect(document.querySelectorAll('.inspector-inline-heading')).toHaveLength(2);
         expect(screen.getByText('1')).toBeTruthy();
     });
 
     it('switches the Sample Bank waveform to the currently playing member', async () => {
-        const bankObject = object('SBAC', 'B DRUMS');
+        const bankObject = object('SBAC', 'DRUMS');
         const firstObject = object('SBNK', 'Kick');
         const secondObject = object('SBNK', 'Snare');
         const item = {
@@ -180,7 +181,7 @@ describe('ObjectInspector', () => {
     });
 
     it('distinguishes empty Sample Banks from members with unresolved Wave Data', async () => {
-        const bankObject = object('SBAC', 'B EMPTY');
+        const bankObject = object('SBAC', 'EMPTY');
         const item = {
             id: bankObject.key,
             objectId: bankObject.key,

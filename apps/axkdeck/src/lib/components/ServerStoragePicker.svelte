@@ -7,7 +7,6 @@
         serverDirectoryLocation,
         serverFileLocation,
         type DirectoryRef,
-        type FileRef,
         type FileLocation,
         type DirectoryLocation,
         type SandboxEntry,
@@ -16,14 +15,6 @@
     import Icon from './Icon.svelte';
 
     type PickerMode = 'file' | 'directory' | 'save-file';
-    type EntryAction =
-        { kind: 'create' } | { kind: 'rename'; entry: SandboxEntry } | { kind: 'delete'; entry: SandboxEntry };
-    interface DirectoryAction {
-        label: string;
-        icon: 'hard-drive' | 'folder-plus';
-        onactivate: (directory: DirectoryLocation) => void;
-    }
-
     interface Props {
         transport: ImageTransport;
         mode: PickerMode;
@@ -32,8 +23,7 @@
         suggestedName?: string;
         initialDirectory?: DirectoryRef | null;
         ondirectorychange?: (directory: DirectoryRef | null) => void;
-        directoryAction?: DirectoryAction;
-        onbeforedelete?: (entry: FileRef) => Promise<void>;
+        onmanagelocations?: () => void;
         onselect: (selection: FileLocation | DirectoryLocation) => void;
         oncancel: () => void;
     }
@@ -46,8 +36,7 @@
         suggestedName = '',
         initialDirectory = null,
         ondirectorychange,
-        directoryAction,
-        onbeforedelete = async () => undefined,
+        onmanagelocations,
         onselect,
         oncancel,
     }: Props = $props();
@@ -60,9 +49,7 @@
     let outputName = $state('');
     let loading = $state(true);
     let error = $state('');
-    let menuEntryPath = $state<string | null>(null);
-    let menuPosition = $state({ top: 0, left: 0 });
-    let entryAction = $state<EntryAction | null>(null);
+    let creatingDirectory = $state(false);
     let entryActionName = $state('');
     let entryActionBusy = $state(false);
     let entryActionError = $state('');
@@ -143,7 +130,6 @@
 
     function activate(entry: SandboxEntry): void {
         if (!activeRoot) return;
-        menuEntryPath = null;
         const reference = { rootId: activeRoot.id, relativePath: entry.relativePath };
         if (entry.kind === 'DIRECTORY') {
             void openDirectory(reference);
@@ -177,16 +163,6 @@
         );
     }
 
-    function activateDirectoryAction(): void {
-        if (!directoryAction || !activeRoot || !directory) return;
-        directoryAction.onactivate(
-            serverDirectoryLocation(
-                directory,
-                directory.relativePath ? `${activeRoot.displayName}/${directory.relativePath}` : activeRoot.displayName,
-            ),
-        );
-    }
-
     function selectOutput(): void {
         if (!activeRoot || !directory) return;
         const filename = outputName.trim();
@@ -208,60 +184,14 @@
     }
 
     function beginCreateDirectory(): void {
-        entryAction = { kind: 'create' };
+        creatingDirectory = true;
         entryActionName = '';
         entryActionError = '';
-        menuEntryPath = null;
-    }
-
-    function beginRename(entry: SandboxEntry): void {
-        entryAction = { kind: 'rename', entry };
-        entryActionName = entry.name;
-        entryActionError = '';
-        menuEntryPath = null;
-    }
-
-    function beginDelete(entry: SandboxEntry): void {
-        entryAction = { kind: 'delete', entry };
-        entryActionName = '';
-        entryActionError = '';
-        menuEntryPath = null;
-    }
-
-    function toggleEntryMenu(entry: SandboxEntry, event: MouseEvent): void {
-        if (menuEntryPath === entry.relativePath) {
-            menuEntryPath = null;
-            return;
-        }
-
-        const trigger = event.currentTarget;
-        if (!(trigger instanceof HTMLElement)) return;
-
-        const triggerBounds = trigger.getBoundingClientRect();
-        const dialogBounds = trigger.closest('.storage-picker')?.getBoundingClientRect();
-        const menuWidth = 118;
-        const menuHeight = 64;
-        const gap = 2;
-        const margin = 8;
-        const boundaryTop = Math.max(margin, dialogBounds?.top ?? margin);
-        const boundaryRight = Math.min(window.innerWidth - margin, (dialogBounds?.right ?? window.innerWidth) - margin);
-        const boundaryBottom = Math.min(
-            window.innerHeight - margin,
-            (dialogBounds?.bottom ?? window.innerHeight) - margin,
-        );
-        const top =
-            triggerBounds.bottom + gap + menuHeight <= boundaryBottom
-                ? triggerBounds.bottom + gap
-                : Math.max(boundaryTop, triggerBounds.top - gap - menuHeight);
-        const left = Math.max(margin, Math.min(triggerBounds.right - menuWidth, boundaryRight - menuWidth));
-
-        menuPosition = { top, left };
-        menuEntryPath = entry.relativePath;
     }
 
     function closeEntryAction(): void {
         if (entryActionBusy) return;
-        entryAction = null;
+        creatingDirectory = false;
         entryActionError = '';
     }
 
@@ -270,10 +200,9 @@
     }
 
     async function submitEntryAction(): Promise<void> {
-        if (!entryAction || !directory || entryActionBusy) return;
-        const action = entryAction;
+        if (!creatingDirectory || !directory || entryActionBusy) return;
         const name = entryActionName.trim();
-        if (action.kind !== 'delete' && !validEntryName(name)) {
+        if (!validEntryName(name)) {
             entryActionError = 'Enter a name without directory separators';
             return;
         }
@@ -281,18 +210,8 @@
         entryActionBusy = true;
         entryActionError = '';
         try {
-            if (action.kind === 'create') {
-                await transport.createSandboxDirectory(directory, name);
-            } else {
-                const reference = { rootId: directory.rootId, relativePath: action.entry.relativePath };
-                if (action.kind === 'rename') {
-                    await transport.renameSandboxEntry(reference, name);
-                } else {
-                    await onbeforedelete(reference);
-                    await transport.deleteSandboxEntry(reference);
-                }
-            }
-            entryAction = null;
+            await transport.createSandboxDirectory(directory, name);
+            creatingDirectory = false;
             await openDirectory(directory);
         } catch (reason) {
             entryActionError = userFacingMessage(reason);
@@ -301,8 +220,6 @@
         }
     }
 </script>
-
-<svelte:window onresize={() => (menuEntryPath = null)} />
 
 <div
     class="dialog-backdrop"
@@ -329,17 +246,7 @@
                 <span class="storage-picker-path"
                     >{activeRoot.displayName}{directory.relativePath ? `/${directory.relativePath}` : ''}</span
                 >
-                {#if activeRoot.writable}
-                    {#if directoryAction}
-                        <button
-                            class="secondary-button storage-picker-directory-action"
-                            type="button"
-                            onclick={activateDirectoryAction}
-                        >
-                            <Icon name={directoryAction.icon} size={14} />
-                            {directoryAction.label}
-                        </button>
-                    {/if}
+                {#if activeRoot.writable && mode !== 'file'}
                     <button
                         class="secondary-button storage-picker-directory-action"
                         type="button"
@@ -352,7 +259,7 @@
             </div>
         {/if}
 
-        <div class="storage-picker-list" aria-busy={loading} onscroll={() => (menuEntryPath = null)}>
+        <div class="storage-picker-list" aria-busy={loading}>
             {#if !activeRoot}
                 {#each roots as root (root.id)}
                     <button
@@ -364,43 +271,37 @@
                         <Icon name="folder" size={16} />
                         <span
                             ><strong>{root.displayName}</strong><small
-                                >{root.writable ? 'Writable root' : 'Read-only root'}</small
+                                >{root.writable ? 'Writable location' : 'Read-only location'}</small
                             ></span
                         >
                         <Icon name="chevron" size={14} />
                     </button>
+                {:else}
+                    <div class="storage-location-empty">
+                        <p>No storage locations are configured.</p>
+                        {#if onmanagelocations}
+                            <button class="primary-button" type="button" onclick={onmanagelocations}
+                                >Manage storage locations</button
+                            >
+                        {/if}
+                    </div>
                 {/each}
             {:else}
                 {#each visibleEntries as entry (`${entry.kind}:${entry.relativePath}`)}
-                    <div class="storage-picker-entry">
-                        <button
-                            class:storage-picker-file-row={entry.kind === 'FILE'}
-                            class="storage-picker-row"
-                            type="button"
-                            onclick={() => activate(entry)}
+                    <button
+                        class:storage-picker-file-row={entry.kind === 'FILE'}
+                        class="storage-picker-row"
+                        type="button"
+                        onclick={() => activate(entry)}
+                    >
+                        {#if entry.kind === 'DIRECTORY'}<Icon name="folder" size={16} />{/if}
+                        <span
+                            ><strong>{entry.name}</strong><small
+                                >{entry.kind === 'DIRECTORY' ? 'Directory' : `${entry.size ?? 0} bytes`}</small
+                            ></span
                         >
-                            {#if entry.kind === 'DIRECTORY'}<Icon name="folder" size={16} />{/if}
-                            <span
-                                ><strong>{entry.name}</strong><small
-                                    >{entry.kind === 'DIRECTORY' ? 'Directory' : `${entry.size ?? 0} bytes`}</small
-                                ></span
-                            >
-                            {#if entry.kind === 'DIRECTORY'}<Icon name="chevron" size={14} />{/if}
-                        </button>
-                        {#if activeRoot.writable}
-                            <div class="storage-picker-entry-actions">
-                                <button
-                                    class="icon-button"
-                                    type="button"
-                                    aria-label={`More actions for ${entry.name}`}
-                                    aria-expanded={menuEntryPath === entry.relativePath}
-                                    onclick={(event) => toggleEntryMenu(entry, event)}
-                                >
-                                    <Icon name="more" size={15} />
-                                </button>
-                            </div>
-                        {/if}
-                    </div>
+                        {#if entry.kind === 'DIRECTORY'}<Icon name="chevron" size={14} />{/if}
+                    </button>
                 {/each}
                 {#if visibleEntries.length === 0 && !loading}<p class="empty-copy">No matching entries</p>{/if}
             {/if}
@@ -424,63 +325,26 @@
             <button class="secondary-button" type="button" onclick={oncancel}>Cancel</button>
         </footer>
     </div>
-
-    {#if menuEntryPath}
-        {@const menuEntry = entries.find((entry) => entry.relativePath === menuEntryPath)}
-        {#if menuEntry}
-            <div
-                class="storage-picker-entry-menu"
-                role="menu"
-                style={`top: ${menuPosition.top}px; left: ${menuPosition.left}px;`}
-            >
-                <button type="button" role="menuitem" onclick={() => beginRename(menuEntry)}>
-                    <Icon name="rename" size={14} /> Rename
-                </button>
-                <button type="button" role="menuitem" onclick={() => beginDelete(menuEntry)}>
-                    <Icon name="trash" size={14} /> Delete
-                </button>
-            </div>
-        {/if}
-    {/if}
 </div>
 
-{#if entryAction}
+{#if creatingDirectory}
     <div class="dialog-backdrop dialog-backdrop-raised" role="presentation">
         <div
             class="dialog-shell entry-action-dialog"
             role="dialog"
             aria-modal="true"
-            aria-label={entryAction.kind === 'create'
-                ? 'Create folder'
-                : entryAction.kind === 'rename'
-                  ? `Rename ${entryAction.entry.name}`
-                  : `Delete ${entryAction.entry.name}`}
+            aria-label="Create folder"
             use:modal={{ onescape: closeEntryAction }}
         >
             <header class="dialog-header">
-                <h2>
-                    {entryAction.kind === 'create'
-                        ? 'New folder'
-                        : entryAction.kind === 'rename'
-                          ? 'Rename entry'
-                          : 'Delete entry'}
-                </h2>
+                <h2>New folder</h2>
                 <button class="icon-button" type="button" aria-label="Close" onclick={closeEntryAction}>×</button>
             </header>
             <div class="entry-action-content">
-                {#if entryAction.kind === 'delete'}
-                    <strong>Delete “{entryAction.entry.name}”?</strong>
-                    <p>This action cannot be undone.</p>
-                {:else}
-                    <label>
-                        <span>{entryAction.kind === 'create' ? 'Folder name' : 'Entry name'}</span>
-                        <input
-                            aria-label={entryAction.kind === 'create' ? 'Folder name' : 'Entry name'}
-                            bind:value={entryActionName}
-                            disabled={entryActionBusy}
-                        />
-                    </label>
-                {/if}
+                <label>
+                    <span>Folder name</span>
+                    <input aria-label="Folder name" bind:value={entryActionName} disabled={entryActionBusy} />
+                </label>
                 {#if entryActionError}<p class="storage-picker-error" role="alert">{entryActionError}</p>{/if}
             </div>
             <footer class="dialog-footer">
@@ -488,16 +352,12 @@
                     >Cancel</button
                 >
                 <button
-                    class={entryAction.kind === 'delete' ? 'danger-button' : 'primary-button'}
+                    class="primary-button"
                     type="button"
                     disabled={entryActionBusy}
                     onclick={() => void submitEntryAction()}
                 >
-                    {entryAction.kind === 'create'
-                        ? 'Create'
-                        : entryAction.kind === 'rename'
-                          ? 'Rename entry'
-                          : 'Delete permanently'}
+                    Create
                 </button>
             </footer>
         </div>

@@ -62,7 +62,7 @@ const callbacks = {
 
 describe('ContainedObjectWorkspace', () => {
     it('renders the SBAC hierarchy as three simultaneous list lanes', async () => {
-        const bank = structure('SBAC', 'B Strings');
+        const bank = structure('SBAC', 'Strings');
         const sample = structure('SBNK', 'Violin C3');
         const waveData = waveform('Violin C3 L');
         const onsamplebankselect = vi.fn();
@@ -90,7 +90,7 @@ describe('ContainedObjectWorkspace', () => {
         expect(screen.getByRole('heading', { name: 'Wave Data' })).toBeTruthy();
         expect(document.querySelectorAll('.contained-lane')).toHaveLength(3);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Inspect B Strings' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Inspect Strings' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Inspect Violin C3' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Inspect Violin C3 L' }));
         expect(onsamplebankselect).toHaveBeenCalledWith(bank);
@@ -131,7 +131,7 @@ describe('ContainedObjectWorkspace', () => {
     });
 
     it('places playback beside each playable row and exposes active stop states', async () => {
-        const bank = structure('SBAC', 'B Strings');
+        const bank = structure('SBAC', 'Strings');
         const sample = structure('SBNK', 'Violin C3');
         const waveData = waveform('Violin C3 L');
         const onplaysamplebank = vi.fn();
@@ -159,7 +159,7 @@ describe('ContainedObjectWorkspace', () => {
         });
 
         expect(document.querySelector('button button')).toBeNull();
-        await fireEvent.click(screen.getByRole('button', { name: 'Stop B Strings' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Stop Strings' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Stop Violin C3' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Play Violin C3 L' }));
 
@@ -167,5 +167,34 @@ describe('ContainedObjectWorkspace', () => {
         expect(onplaysamplebank).not.toHaveBeenCalled();
         expect(onplaysample).not.toHaveBeenCalled();
         expect(onplaywavedata).toHaveBeenCalledWith(waveData);
+    });
+
+    it('keeps a preparing row cancellable from its playback control', async () => {
+        const sample = structure('SBNK', 'Violin C3');
+        const onplaysample = vi.fn();
+        const onstop = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                view: 'samples',
+                sampleBanks: [],
+                samples: [sample],
+                waveData: [],
+                activeSampleBankId: '',
+                activeSampleId: sample.objectId,
+                activeWaveDataId: '',
+                queries: { primary: '', secondary: '', tertiary: '' },
+                onplaysample,
+                onstop,
+                preparingObjectId: sample.objectId,
+            },
+        });
+
+        const stop = screen.getByRole('button', { name: 'Stop Violin C3' });
+        expect(stop.hasAttribute('disabled')).toBe(false);
+        await fireEvent.click(stop);
+
+        expect(onstop).toHaveBeenCalledOnce();
+        expect(onplaysample).not.toHaveBeenCalled();
     });
 });

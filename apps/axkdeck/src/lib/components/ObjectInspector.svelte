@@ -64,7 +64,7 @@
         {@const displayedMemberIndex = displayedMember ? selection.memberPreviews.indexOf(displayedMember) : -1}
         <div class="inspector-content">
             {#if displayedMember}
-                <div class="inspector-bank-sample-heading">
+                <div class="inspector-bank-sample-heading inspector-inline-heading">
                     <span>Sample {displayedMemberIndex + 1} of {selection.memberPreviews.length}</span>
                     <strong title={displayedMember.item.name}>{displayedMember.item.name}</strong>
                 </div>

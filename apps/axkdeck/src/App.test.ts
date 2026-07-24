@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -29,6 +29,16 @@ vi.mock('./lib/nativeAudioDrop', () => ({
 }));
 
 import App from './App.svelte';
+
+async function chooseNestedImage(buttonName: 'Open image' | 'Open another image' = 'Open image'): Promise<void> {
+    await fireEvent.click(screen.getByRole('button', { name: buttonName }));
+    const picker = await screen.findByRole('dialog', { name: 'Open image' });
+    if (buttonName === 'Open image') {
+        await fireEvent.click(await within(picker).findByText('Yamaha'));
+        await fireEvent.click(await within(picker).findByText('images'));
+    }
+    await fireEvent.click(await within(picker).findByText('nested.hds'));
+}
 
 describe('App panel layout', () => {
     beforeEach(() => {
@@ -121,6 +131,8 @@ describe('App panel layout', () => {
     it('keeps autoplay session-local and disabled until the user enables it', async () => {
         render(App);
 
+        expect(screen.queryByRole('checkbox', { name: 'Autoplay' })).toBeNull();
+        await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
         const autoplay = screen.getByRole('checkbox', { name: 'Autoplay' }) as HTMLInputElement;
         expect(autoplay.checked).toBe(false);
         await fireEvent.click(autoplay);
@@ -149,92 +161,65 @@ describe('App panel layout', () => {
         );
     });
 
-    it('does not expose the temporary save commands in the top toolbar', () => {
+    it('keeps image management commands out of the top toolbar', async () => {
         render(App);
 
         expect(screen.queryByRole('button', { name: 'Save file' })).toBeNull();
         expect(screen.queryByRole('button', { name: 'Save directory' })).toBeNull();
-        expect(screen.getByRole('button', { name: 'Manage workspaces' })).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Open disk image' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Storage locations' })).toBeNull();
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Image options' }));
+        expect(screen.getByRole('menuitem', { name: 'Storage locations' })).toBeTruthy();
     });
 
-    it('uses one non-editable image chooser button instead of a selectable path input', () => {
+    it('keeps image lifecycle commands in the image navigator', () => {
         render(App);
 
-        const chooser = screen.getByRole('button', { name: 'Open disk image' });
-        expect(chooser.textContent).toContain('No disk image selected');
+        const navigator = screen.getByRole('complementary', { name: 'Image navigator' });
+        expect(screen.getByRole('button', { name: 'Open image' }).closest('aside')).toBe(navigator);
+        expect(screen.getByRole('button', { name: 'Create image' }).closest('aside')).toBe(navigator);
         expect(screen.queryByRole('textbox', { name: 'Disk image path' })).toBeNull();
-        expect((screen.getByRole('button', { name: 'Eject disk image' }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.queryByRole('button', { name: 'Eject image' })).toBeNull();
+        expect(screen.getByText('Partitions, volumes and objects')).toBeTruthy();
     });
 
-    it('ejects the active image and returns to the initial empty state', async () => {
+    it('closes the active image and returns to the initial empty state', async () => {
         render(App);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
-        await fireEvent.click(await screen.findByText('Yamaha'));
-        await fireEvent.click(await screen.findByText('images'));
-        await fireEvent.click(await screen.findByText('nested.hds'));
+        await chooseNestedImage();
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
         await mocks.openImage.mock.results[0].value;
         await Promise.resolve();
 
-        const eject = screen.getByRole('button', { name: 'Eject disk image' });
-        expect((eject as HTMLButtonElement).disabled).toBe(false);
-        await fireEvent.click(eject);
+        expect(screen.getAllByText('nested.hds')).not.toHaveLength(0);
+        await fireEvent.click(screen.getByRole('button', { name: 'Eject image' }));
 
         await vi.waitFor(() => expect(mocks.closeImage).toHaveBeenCalledWith(17));
-        await vi.waitFor(() =>
-            expect(screen.getByRole('button', { name: 'Open disk image' }).textContent).toContain(
-                'No disk image selected',
-            ),
-        );
-        expect((eject as HTMLButtonElement).disabled).toBe(true);
+        await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Open image' })).toBeTruthy());
+        expect(screen.queryByRole('button', { name: 'Eject image' })).toBeNull();
     });
 
-    it('closes an image session that finishes opening after it was ejected', async () => {
-        let finishOpening: ((value: Awaited<ReturnType<typeof mocks.openImage>>) => void) | undefined;
-        mocks.openImage.mockReturnValueOnce(
-            new Promise((resolve) => {
-                finishOpening = resolve;
-            }),
-        );
+    it('preserves the active image when opening a replacement fails', async () => {
         render(App);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
-        await fireEvent.click(await screen.findByText('Yamaha'));
-        await fireEvent.click(await screen.findByText('images'));
-        await fireEvent.click(await screen.findByText('nested.hds'));
+        await chooseNestedImage();
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
-        await fireEvent.click(screen.getByRole('button', { name: 'Eject disk image' }));
+        await mocks.openImage.mock.results[0].value;
+        mocks.openImage.mockRejectedValueOnce(new Error('Replacement is invalid'));
 
-        finishOpening?.({
-            sessionId: 23,
-            tree: [{ id: 'disk-23', name: 'nested.hds', kind: 'disk', childCount: 0 }],
-            validation: {
-                valid: true,
-                issueCount: 0,
-                errorCount: 0,
-                warningCount: 0,
-                objectCount: 0,
-                relationshipCount: 0,
-            },
-            objects: [],
-            objectTotalCount: 0,
-            initialVolume: null,
-            volumeMutationsAvailable: true,
-            partitionMutationsAvailable: true,
-        });
+        await chooseNestedImage('Open another image');
 
-        await vi.waitFor(() => expect(mocks.closeImage).toHaveBeenCalledWith(23));
-        expect(screen.getByRole('button', { name: 'Open disk image' }).textContent).toContain('No disk image selected');
+        await vi.waitFor(() => expect(screen.getByText('Replacement is invalid')).toBeTruthy());
+        expect(screen.getAllByText('nested.hds')).not.toHaveLength(0);
+        expect(screen.getByRole('button', { name: 'Eject image' })).toBeTruthy();
+        expect(mocks.closeImage).not.toHaveBeenCalledWith(17);
     });
 
     it('closes the active image session when the application is unmounted', async () => {
         const desktop = render(App);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
-        await fireEvent.click(await screen.findByText('Yamaha'));
-        await fireEvent.click(await screen.findByText('images'));
-        await fireEvent.click(await screen.findByText('nested.hds'));
+        await chooseNestedImage();
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
         await mocks.openImage.mock.results[0].value;
 
@@ -252,10 +237,7 @@ describe('App panel layout', () => {
         );
         const desktop = render(App);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
-        await fireEvent.click(await screen.findByText('Yamaha'));
-        await fireEvent.click(await screen.findByText('images'));
-        await fireEvent.click(await screen.findByText('nested.hds'));
+        await chooseNestedImage();
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
         desktop.unmount();
 
@@ -280,27 +262,15 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(mocks.closeImage).toHaveBeenCalledWith(29));
     });
 
-    it('ejects an open image before permanently deleting its backing file', async () => {
+    it('keeps open-image selection free of destructive file-management commands', async () => {
         render(App);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
         await fireEvent.click(await screen.findByText('Yamaha'));
         await fireEvent.click(await screen.findByText('images'));
-        await fireEvent.click(await screen.findByText('nested.hds'));
-        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
-        await fireEvent.click(await screen.findByRole('button', { name: 'More actions for nested.hds' }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
-        await fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }));
-
-        await vi.waitFor(() =>
-            expect(mocks.deleteSandboxEntry).toHaveBeenCalledWith({
-                rootId: 'workspace',
-                relativePath: 'images/nested.hds',
-            }),
-        );
-        expect(mocks.closeImage.mock.invocationCallOrder[0]).toBeLessThan(
-            mocks.deleteSandboxEntry.mock.invocationCallOrder[0],
-        );
+        expect(screen.queryByRole('button', { name: /More actions/ })).toBeNull();
+        expect(screen.queryByRole('menuitem', { name: 'Delete' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'New folder' })).toBeNull();
     });
 
     it('suppresses context menus only in the desktop runtime', async () => {
@@ -383,13 +353,13 @@ describe('App panel layout', () => {
     it('restores the last image-picker directory after cancelling', async () => {
         render(App);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
         await fireEvent.click(await screen.findByText('Yamaha'));
         await fireEvent.click(await screen.findByText('images'));
         expect(await screen.findByText('nested.hds')).toBeTruthy();
         await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
         expect(await screen.findByText('nested.hds')).toBeTruthy();
         expect(mocks.sandboxDirectory).toHaveBeenLastCalledWith({
             rootId: 'workspace',
@@ -397,13 +367,13 @@ describe('App panel layout', () => {
         });
     });
 
-    it('starts hard-disk image creation in the directory currently shown by the image browser', async () => {
+    it('starts hard-disk image creation through a dedicated destination picker', async () => {
         render(App);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Open disk image' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Create image' }));
         await fireEvent.click(await screen.findByText('Yamaha'));
         await fireEvent.click(await screen.findByText('images'));
-        await fireEvent.click(screen.getByRole('button', { name: 'New HD image' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Select directory' }));
 
         const dialog = await screen.findByRole('dialog', { name: 'Create HD image' });
         expect(dialog.querySelector('output')?.textContent).toBe('Yamaha/images');

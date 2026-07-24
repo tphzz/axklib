@@ -85,7 +85,9 @@
     const count = $derived(view === 'programs' ? programs.length : waveData.length);
     const normalizedQuery = $derived(query.trim().toLocaleLowerCase());
     const filteredPrograms = $derived(
-        normalizedQuery ? programs.filter((item) => item.name.toLocaleLowerCase().includes(normalizedQuery)) : programs,
+        normalizedQuery
+            ? programs.filter((item) => `${item.slot} ${item.name}`.toLocaleLowerCase().includes(normalizedQuery))
+            : programs,
     );
     const filteredWaveData = $derived(
         normalizedQuery ? waveData.filter((item) => item.name.toLocaleLowerCase().includes(normalizedQuery)) : waveData,
@@ -98,7 +100,7 @@
 <section class="collection-panel" aria-label={title}>
     <CollectionToolbar {title} {count} {query} {onquerychange} />
     <div
-        class:object-grid={view !== 'wave-data'}
+        class:program-list={view === 'programs'}
         class:wave-data-list={view === 'wave-data'}
         class:empty-collection={emptyCollection}
         class="collection-body"
@@ -108,7 +110,8 @@
                 <button
                     type="button"
                     class:active={activeObjectId === program.objectId}
-                    class="object-card"
+                    class="program-row"
+                    aria-pressed={activeObjectId === program.objectId}
                     onclick={() => onprogramselect(program)}
                 >
                     <span class="object-slot">{program.slot}</span>
@@ -150,13 +153,14 @@
                     <button
                         class="wave-data-playback icon-button"
                         type="button"
-                        aria-label={playingObjectId === item.objectKey ? `Stop ${item.name}` : `Play ${item.name}`}
+                        aria-label={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
+                            ? `Stop ${item.name}`
+                            : `Play ${item.name}`}
                         title={preparingObjectId === item.objectKey
-                            ? 'Preparing audio'
+                            ? 'Stop preparing audio'
                             : playingObjectId === item.objectKey
                               ? 'Stop'
                               : 'Play'}
-                        disabled={preparingObjectId === item.objectKey}
                         onpointerenter={() => schedulePrefetch(item)}
                         onpointerleave={clearPrefetch}
                         onfocus={() => schedulePrefetch(item)}
@@ -164,11 +168,16 @@
                         onclick={(event) => {
                             event.stopPropagation();
                             clearPrefetch();
-                            if (playingObjectId === item.objectKey) onstop();
+                            if (playingObjectId === item.objectKey || preparingObjectId === item.objectKey) onstop();
                             else onplay(item);
                         }}
                     >
-                        <Icon name={playingObjectId === item.objectKey ? 'stop' : 'play'} size={13} />
+                        <Icon
+                            name={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
+                                ? 'stop'
+                                : 'play'}
+                            size={13}
+                        />
                     </button>
                 </div>
             {:else}

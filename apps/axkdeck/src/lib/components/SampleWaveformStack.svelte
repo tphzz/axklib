@@ -22,7 +22,7 @@
                     ? `Wave Data ${member.waveData.name}`
                     : `${laneLabel} Wave Data ${member.waveData.name}`}
             <div class="inspector-wave-lane" role="group" aria-label={laneAriaLabel}>
-                <div class="inspector-wave-label">
+                <div class="inspector-wave-label inspector-inline-heading">
                     <span>{laneLabel}</span>
                     <strong title={member.waveData.name}>{member.waveData.name}</strong>
                 </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { matchesSearch } from '../auditionVisibility';
     import type { SampleStructureItem, WaveDataItem } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
@@ -58,15 +59,11 @@
         preparingObjectId = null,
     }: Props = $props();
 
-    function matches(name: string, query: string): boolean {
-        return name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
-    }
-
     const sampleQuery = $derived(view === 'sample-banks' ? queries.secondary : queries.primary);
     const waveDataQuery = $derived(view === 'sample-banks' ? queries.tertiary : queries.secondary);
-    const filteredBanks = $derived(sampleBanks.filter((item) => matches(item.name, queries.primary)));
-    const filteredSamples = $derived(samples.filter((item) => matches(item.name, sampleQuery)));
-    const filteredWaveData = $derived(waveData.filter((item) => matches(item.name, waveDataQuery)));
+    const filteredBanks = $derived(sampleBanks.filter((item) => matchesSearch(item.name, queries.primary)));
+    const filteredSamples = $derived(samples.filter((item) => matchesSearch(item.name, sampleQuery)));
+    const filteredWaveData = $derived(waveData.filter((item) => matchesSearch(item.name, waveDataQuery)));
 </script>
 
 <section
@@ -144,19 +141,25 @@
                     <button
                         class="contained-playback icon-button"
                         type="button"
-                        aria-label={playingObjectId === item.objectId ? `Stop ${item.name}` : `Play ${item.name}`}
+                        aria-label={playingObjectId === item.objectId || preparingObjectId === item.objectId
+                            ? `Stop ${item.name}`
+                            : `Play ${item.name}`}
                         title={preparingObjectId === item.objectId
-                            ? 'Preparing audio'
+                            ? 'Stop preparing audio'
                             : playingObjectId === item.objectId
                               ? 'Stop'
                               : 'Play'}
-                        disabled={preparingObjectId === item.objectId}
                         onclick={() => {
-                            if (playingObjectId === item.objectId) onstop();
+                            if (playingObjectId === item.objectId || preparingObjectId === item.objectId) onstop();
                             else onplaysample(item);
                         }}
                     >
-                        <Icon name={playingObjectId === item.objectId ? 'stop' : 'play'} size={13} />
+                        <Icon
+                            name={playingObjectId === item.objectId || preparingObjectId === item.objectId
+                                ? 'stop'
+                                : 'play'}
+                            size={13}
+                        />
                     </button>
                 </div>
             {:else}
@@ -191,19 +194,25 @@
                     <button
                         class="contained-playback icon-button"
                         type="button"
-                        aria-label={playingObjectId === item.objectKey ? `Stop ${item.name}` : `Play ${item.name}`}
+                        aria-label={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
+                            ? `Stop ${item.name}`
+                            : `Play ${item.name}`}
                         title={preparingObjectId === item.objectKey
-                            ? 'Preparing audio'
+                            ? 'Stop preparing audio'
                             : playingObjectId === item.objectKey
                               ? 'Stop'
                               : 'Play'}
-                        disabled={preparingObjectId === item.objectKey}
                         onclick={() => {
-                            if (playingObjectId === item.objectKey) onstop();
+                            if (playingObjectId === item.objectKey || preparingObjectId === item.objectKey) onstop();
                             else onplaywavedata(item);
                         }}
                     >
-                        <Icon name={playingObjectId === item.objectKey ? 'stop' : 'play'} size={13} />
+                        <Icon
+                            name={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
+                                ? 'stop'
+                                : 'play'}
+                            size={13}
+                        />
                     </button>
                 </div>
             {:else}

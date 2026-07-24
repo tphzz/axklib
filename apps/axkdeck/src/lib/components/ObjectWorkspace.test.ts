@@ -43,7 +43,7 @@ describe('ObjectWorkspace', () => {
         expect(emptyState.parentElement?.classList.contains('empty-collection')).toBe(true);
     });
 
-    it('renders factual Program cards without fabricated keyboard metadata', () => {
+    it('renders Programs as factual list rows without fabricated keyboard metadata', () => {
         const programObject = object('PROG', '001');
         render(ObjectWorkspace, {
             props: {
@@ -66,6 +66,9 @@ describe('ObjectWorkspace', () => {
         expect(screen.queryByText('PROG')).toBeNull();
         expect(document.querySelector('.object-code')).toBeNull();
         expect(document.querySelector('.program-keyboard')).toBeNull();
+        expect(document.querySelector('.program-list')).toBeTruthy();
+        expect(document.querySelector('.program-row')).toBeTruthy();
+        expect(document.querySelector('.object-card')).toBeNull();
         expect(screen.getByRole('searchbox', { name: 'Search Programs' })).toBeTruthy();
     });
 
@@ -156,6 +159,48 @@ describe('ObjectWorkspace', () => {
 
         expect(onplay).toHaveBeenCalledWith(waveData);
         expect(onwavedataselect).not.toHaveBeenCalled();
+    });
+
+    it('keeps preparing Wave Data cancellable from its row', async () => {
+        const waveObject = {
+            ...object('SMPL', 'SMP 001'),
+            sampleRate: 44_100,
+            sampleWidthBytes: 2,
+            frameCount: 1,
+        };
+        const waveData = {
+            id: waveObject.key,
+            objectKey: waveObject.key,
+            name: waveObject.name,
+            note: 'C3',
+            duration: '0.00 s',
+            sampleRate: '44.1 kHz',
+            bitDepth: '16-bit',
+            channels: 'Mono' as const,
+            storedSizeBytes: 2,
+            waveform: [],
+            previewState: 'idle' as const,
+            object: waveObject,
+        };
+        const onplay = vi.fn();
+        const onstop = vi.fn();
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                waveData: [waveData],
+                view: 'wave-data',
+                onplay,
+                onstop,
+                preparingObjectId: waveData.objectKey,
+            },
+        });
+
+        const stop = screen.getByRole('button', { name: 'Stop SMP 001' });
+        expect(stop.hasAttribute('disabled')).toBe(false);
+        await fireEvent.click(stop);
+
+        expect(onstop).toHaveBeenCalledOnce();
+        expect(onplay).not.toHaveBeenCalled();
     });
 
     it('prefetches Wave Data only after a deliberate playback-button hover', async () => {

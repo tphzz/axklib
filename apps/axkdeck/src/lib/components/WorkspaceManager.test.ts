@@ -37,9 +37,9 @@ describe('WorkspaceManager', () => {
     it('uses the shared compact dialog without a server storage eyebrow', async () => {
         render(WorkspaceManager, { props: { open: true, onclose: vi.fn() } });
 
-        expect((await screen.findByRole('dialog', { name: 'Workspaces' })).classList.contains('dialog-shell')).toBe(
-            true,
-        );
+        expect(
+            (await screen.findByRole('dialog', { name: 'Storage locations' })).classList.contains('dialog-shell'),
+        ).toBe(true);
         expect(screen.queryByText('Server storage')).toBeNull();
     });
 
@@ -47,17 +47,15 @@ describe('WorkspaceManager', () => {
         mocks.invoke.mockResolvedValue({ candidateId: 'candidate-1', suggestedName: 'Samples' });
         render(WorkspaceManager, { props: { open: false, onclose: vi.fn() } });
 
-        await fireEvent.click(await screen.findByRole('button', { name: 'Add workspace' }));
+        await fireEvent.click(await screen.findByRole('button', { name: 'Add storage location' }));
 
         expect(mocks.invoke).toHaveBeenCalledWith('select_local_workspace');
-        await waitFor(() =>
-            expect((screen.getByLabelText('Workspace name') as HTMLInputElement).value).toBe('Samples'),
-        );
-        const confirmation = screen.getByRole('dialog', { name: 'Add workspace' });
+        await waitFor(() => expect((screen.getByLabelText('Location name') as HTMLInputElement).value).toBe('Samples'));
+        const confirmation = screen.getByRole('dialog', { name: 'Add storage location' });
         expect(confirmation.closest('.dialog-backdrop')?.classList.contains('dialog-backdrop-raised')).toBe(true);
-        expect(screen.getByRole('dialog', { name: 'Workspaces' })).toBeTruthy();
+        expect(screen.getByRole('dialog', { name: 'Storage locations' })).toBeTruthy();
         expect(confirmation.querySelectorAll('button')).toHaveLength(3);
-        expect(screen.queryByRole('list', { name: 'Configured workspaces' })).toBeNull();
+        expect(screen.queryByRole('list', { name: 'Configured storage locations' })).toBeNull();
     });
 
     it('shows that the operating-system picker is pending', async () => {
@@ -70,11 +68,13 @@ describe('WorkspaceManager', () => {
         );
         render(WorkspaceManager, { props: { open: false, onclose: vi.fn() } });
 
-        await fireEvent.click(await screen.findByRole('button', { name: 'Add workspace' }));
+        await fireEvent.click(await screen.findByRole('button', { name: 'Add storage location' }));
         expect((screen.getByRole('button', { name: 'Choosing folder…' }) as HTMLButtonElement).disabled).toBe(true);
         resolvePicker(null);
         await waitFor(() =>
-            expect((screen.getByRole('button', { name: 'Add workspace' }) as HTMLButtonElement).disabled).toBe(false),
+            expect((screen.getByRole('button', { name: 'Add storage location' }) as HTMLButtonElement).disabled).toBe(
+                false,
+            ),
         );
     });
 
@@ -83,7 +83,7 @@ describe('WorkspaceManager', () => {
         mocks.invoke.mockRejectedValue(new Error('native dialog unavailable'));
         render(WorkspaceManager, { props: { open: false, onclose: vi.fn() } });
 
-        await fireEvent.click(await screen.findByRole('button', { name: 'Add workspace' }));
+        await fireEvent.click(await screen.findByRole('button', { name: 'Add storage location' }));
 
         expect((await screen.findByRole('alert')).textContent).toContain('Native dialog unavailable');
     });

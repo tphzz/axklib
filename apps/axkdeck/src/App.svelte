@@ -1,9 +1,10 @@
 <script lang="ts">
     import { onDestroy, onMount } from 'svelte';
+    import AuditionBar from './lib/components/AuditionBar.svelte';
     import ContainedObjectWorkspace from './lib/components/ContainedObjectWorkspace.svelte';
     import Icon from './lib/components/Icon.svelte';
+    import ImageNavigator from './lib/components/ImageNavigator.svelte';
     import LayoutControls from './lib/components/LayoutControls.svelte';
-    import LibrarySidebar from './lib/components/LibrarySidebar.svelte';
     import ObjectInspector from './lib/components/ObjectInspector.svelte';
     import ObjectEditor from './lib/components/ObjectEditor.svelte';
     import ObjectWorkspace from './lib/components/ObjectWorkspace.svelte';
@@ -15,7 +16,9 @@
     import WorkspaceManager from './lib/components/WorkspaceManager.svelte';
     import { AuditionController, type AuditionState } from './lib/audio/auditionController';
     import { inspectorSelectionStopsPlayback } from './lib/audio/playbackSelection';
+    import { matchesSearch, playbackRowVisible } from './lib/auditionVisibility';
     import { createTransport } from './lib/createTransport';
+    import { objectPresentationName } from './lib/objectPresentation';
     import {
         distinctWaveDataForSample,
         linkedWaveDataForSample,
@@ -33,14 +36,7 @@
     import { reportDiagnostic, reportError } from './lib/diagnostics';
     import { listenForNativeAudioDrops, type NativeDropPosition } from './lib/nativeAudioDrop';
     import { collectPages } from './lib/pagination';
-    import {
-        locationKey,
-        serverFileLocation,
-        type DirectoryLocation,
-        type DirectoryRef,
-        type FileLocation,
-        type FileRef,
-    } from './lib/storageLocations';
+    import { type DirectoryLocation, type DirectoryRef, type FileLocation } from './lib/storageLocations';
     import type {
         AudioImportItem,
         AudioImportTarget,
@@ -89,11 +85,6 @@
         suggestedName: string;
         initialDirectory?: DirectoryRef | null;
         ondirectorychange?: (directory: DirectoryRef | null) => void;
-        directoryAction?: {
-            label: string;
-            icon: 'hard-drive';
-            onactivate: (directory: DirectoryLocation) => void;
-        };
         resolve: (selection: FileLocation | DirectoryLocation | null) => void;
     }
 
@@ -110,6 +101,7 @@
     let hardDiskCreationDirectory = $state<DirectoryLocation | null>(null);
     let lastImageDirectory = $state<DirectoryRef | null>(null);
     let openSessionId = $state<number | null>(null);
+    let imageOpening = $state(false);
     let imageOpenGeneration = 0;
     let sourceStatus = $state('Ready');
     let sourceObjectCount = $state(0);
@@ -203,7 +195,6 @@
         stopInterfaceScaleSubscription = interfaceScaling?.subscribe((state) => {
             interfaceScaleState = state;
         });
-        void auditionController.warmup();
         if (!isDesktop) return;
         let disposed = false;
         let unlisten: (() => void) | null = null;
@@ -373,6 +364,18 @@
     const bankMemberWaveData = $derived(selectedBankMemberId ? waveDataForSample(selectedBankMemberId) : []);
     const sampleWaveData = $derived(selectedSample ? waveDataForSample(selectedSample.objectId) : []);
     const lowerPanelAvailable = $derived(workspaceView !== 'wave-data');
+    const auditionAvailable = $derived(workspaceView !== 'programs');
+    const auditionActive = $derived(auditionState.status === 'preparing' || auditionState.status === 'playing');
+    const auditionBarVisible = $derived(auditionAvailable);
+    const auditionLabel = $derived.by(() => {
+        if (!auditionState.objectId) return '';
+        const sample = samples.find((item) => item.objectId === auditionState.objectId);
+        if (playingSampleBankId) {
+            const bank = sampleBanks.find((item) => item.objectId === playingSampleBankId);
+            return [bank?.name, sample?.name].filter(Boolean).join(' / ');
+        }
+        return sample?.name ?? waveData.find((item) => item.objectKey === auditionState.objectId)?.name ?? '';
+    });
     const activeCollectionObjectId = $derived(
         workspaceView === 'programs'
             ? selectedProgramId
@@ -448,10 +451,6 @@
         return `${names[key % 12]}${Math.floor(key / 12) - 2}`;
     }
 
-    function displayName(object: SamplerObject, names: Map<string, string>): string {
-        return names.get(object.key) ?? object.name;
-    }
-
     function membersForBank(bankId: string): SampleStructureItem[] {
         return orderedSamplesForBank(bankId, relationships, samples);
     }
@@ -503,7 +502,7 @@
                     id: object.key,
                     objectKey: object.key,
                     object,
-                    name: displayName(object, names),
+                    name: objectPresentationName(object, names),
                     note: noteName(object.rootKey),
                     duration:
                         object.sampleRate > 0 ? `${(object.frameCount / object.sampleRate).toFixed(2)} s` : 'Unknown',
@@ -584,7 +583,7 @@
             programs = objects
                 .filter((object) => object.objectType === 'PROG')
                 .map((object) => {
-                    const name = displayName(object, names);
+                    const name = objectPresentationName(object, names);
                     const match = /^(\d{3})(?::\s*)?(.*)$/.exec(name);
                     return {
                         id: object.key,
@@ -600,7 +599,7 @@
                 objectId: object.key,
                 object,
                 objectType: 'SBAC',
-                name: displayName(object, names),
+                name: objectPresentationName(object, names),
                 memberCount: scopedRelationships.filter(
                     (item) => item.sourceObjectId === object.key && item.relationshipType === 'SBAC_SLOT_TO_SBNK',
                 ).length,
@@ -615,7 +614,7 @@
                 const bankNames = bankIds
                     .map((id) => {
                         const bank = bankObjects.find((candidate) => candidate.key === id);
-                        return bank ? displayName(bank, names) : undefined;
+                        return bank ? objectPresentationName(bank, names) : undefined;
                     })
                     .filter((name): name is string => Boolean(name));
                 return {
@@ -623,7 +622,7 @@
                     objectId: object.key,
                     object,
                     objectType: 'SBNK',
-                    name: displayName(object, names),
+                    name: objectPresentationName(object, names),
                     membershipLabel:
                         bankNames.length === 0
                             ? 'Standalone'
@@ -951,9 +950,48 @@
         return auditionController.stop();
     }
 
+    function currentPlaybackRowVisible(): boolean {
+        const queries = laneQueries[workspaceView];
+        const visibleSampleBankIds =
+            workspaceView === 'sample-banks'
+                ? sampleBanks.filter((item) => matchesSearch(item.name, queries.primary)).map((item) => item.objectId)
+                : [];
+        const visibleSampleIds =
+            workspaceView === 'sample-banks'
+                ? bankMembers.filter((item) => matchesSearch(item.name, queries.secondary)).map((item) => item.objectId)
+                : workspaceView === 'samples'
+                  ? samples.filter((item) => matchesSearch(item.name, queries.primary)).map((item) => item.objectId)
+                  : [];
+        const visibleWaveDataIds =
+            workspaceView === 'sample-banks'
+                ? bankMemberWaveData
+                      .filter((item) => matchesSearch(item.name, queries.tertiary))
+                      .map((item) => item.objectKey)
+                : workspaceView === 'samples'
+                  ? sampleWaveData
+                        .filter((item) => matchesSearch(item.name, queries.secondary))
+                        .map((item) => item.objectKey)
+                  : workspaceView === 'wave-data'
+                    ? waveData.filter((item) => matchesSearch(item.name, queries.primary)).map((item) => item.objectKey)
+                    : [];
+        return playbackRowVisible({
+            view: workspaceView,
+            playingSampleBankId,
+            playingObjectId: auditionState.objectId,
+            visibleSampleBankIds,
+            visibleSampleIds,
+            visibleWaveDataIds,
+        });
+    }
+
+    function updateLaneQuery(view: WorkspaceView, lane: keyof LaneQueries, value: string): void {
+        laneQueries[view][lane] = value;
+        if (view === workspaceView && auditionActive && !currentPlaybackRowVisible()) void stopPlaybackNow();
+    }
+
     function selectWorkspaceView(view: WorkspaceView): void {
         if (workspaceView === view) return;
-        if (playingSampleBankId) void stopPlaybackNow();
+        if (auditionActive) void stopPlaybackNow();
         workspaceView = view;
     }
 
@@ -980,7 +1018,7 @@
 
     function resizeSplit(clientY: number): void {
         const bounds = mainStage.getBoundingClientRect();
-        const available = Math.max(1, bounds.height - 6);
+        const available = Math.max(1, bounds.height - (auditionBarVisible ? 34 : 4));
         const minimum = Math.min(180, available / 2);
         const top = Math.min(available - minimum, Math.max(minimum, clientY - bounds.top));
         splitRatio = top / available;
@@ -1003,24 +1041,42 @@
     function resizeWithKeyboard(event: KeyboardEvent): void {
         if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
         event.preventDefault();
-        const available = Math.max(1, mainStage.getBoundingClientRect().height - 6);
+        const available = Math.max(1, mainStage.getBoundingClientRect().height - (auditionBarVisible ? 34 : 4));
         const delta = (event.shiftKey ? 64 : 16) / available;
         splitRatio = Math.min(0.8, Math.max(0.2, splitRatio + (event.key === 'ArrowDown' ? delta : -delta)));
     }
 
-    async function openSource(preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
-        if (!imageLocation) return;
+    async function openImageLocation(
+        location: FileLocation,
+        preferred?: { partitionIndex: number; volumeName?: string },
+    ): Promise<void> {
         const generation = ++imageOpenGeneration;
-        const location = imageLocation;
+        const previousSessionId = openSessionId;
+        let candidateSessionId: number | null = null;
+        imageOpening = true;
         sourceStatus = 'Opening image';
         try {
-            await closeOpenImageSession();
             const opened = await transport.openImage(location);
+            candidateSessionId = opened.sessionId;
             if (generation !== imageOpenGeneration) {
                 await transport.closeImage(opened.sessionId);
+                candidateSessionId = null;
                 return;
             }
+
+            if (previousSessionId !== null) {
+                await auditionController.invalidateSession(previousSessionId);
+                await transport.closeImage(previousSessionId);
+            }
+            if (generation !== imageOpenGeneration) {
+                await transport.closeImage(opened.sessionId);
+                candidateSessionId = null;
+                return;
+            }
+
+            imageLocation = location;
             openSessionId = opened.sessionId;
+            candidateSessionId = null;
             volumeMutationsAvailable = opened.volumeMutationsAvailable;
             partitionMutationsAvailable = opened.partitionMutationsAvailable;
             sourceItems = opened.tree;
@@ -1033,10 +1089,17 @@
             sourceStatus = opened.validation.valid ? 'Ready' : `${opened.validation.errorCount} validation errors`;
         } catch (error) {
             if (generation !== imageOpenGeneration) return;
-            volumeMutationsAvailable = false;
-            partitionMutationsAvailable = false;
+            if (candidateSessionId !== null) {
+                await transport.closeImage(candidateSessionId).catch(() => undefined);
+            }
             sourceStatus = userFacingMessage(error);
+        } finally {
+            if (generation === imageOpenGeneration) imageOpening = false;
         }
+    }
+
+    async function openSource(preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
+        if (imageLocation) await openImageLocation(imageLocation, preferred);
     }
 
     async function closeOpenImageSession(): Promise<void> {
@@ -1049,10 +1112,11 @@
         partitionMutationsAvailable = false;
     }
 
-    async function ejectImage(): Promise<void> {
+    async function closeImage(): Promise<void> {
         if (!imageLocation && openSessionId === null) return;
         ++imageOpenGeneration;
-        sourceStatus = 'Ejecting image';
+        imageOpening = false;
+        sourceStatus = 'Closing image';
         try {
             await closeOpenImageSession();
             imageLocation = null;
@@ -1066,37 +1130,34 @@
         }
     }
 
-    async function preparePickerDeletion(reference: FileRef): Promise<void> {
-        if (!imageLocation) return;
-        if (locationKey(imageLocation) !== locationKey(serverFileLocation(reference))) return;
-        await ejectImage();
-    }
-
     async function chooseAndOpenSource(): Promise<void> {
         const selected = await chooseImageLocation();
         if (selected === null) return;
-        imageLocation = selected;
-        await openSource();
+        await openImageLocation(selected);
     }
 
     async function chooseImageLocation(): Promise<FileLocation | null> {
         if (transport.storageMode !== 'server') return null;
         const selection = await chooseServerLocation(
             'file',
-            'Disk images',
+            'Open image',
             ['hds', 'hda', 'ima', 'img', 'iso', 'a3k'],
             '',
             {
                 initialDirectory: lastImageDirectory,
                 ondirectorychange: (directory) => (lastImageDirectory = directory),
-                directoryAction: {
-                    label: 'New HD image',
-                    icon: 'hard-drive',
-                    onactivate: (directory) => (hardDiskCreationDirectory = directory),
-                },
             },
         );
         return selection?.kind === 'server-file' ? selection : null;
+    }
+
+    async function chooseHardDiskCreationDirectory(): Promise<void> {
+        if (transport.storageMode !== 'server') return;
+        const selection = await chooseServerLocation('directory', 'Choose image location', [], '', {
+            initialDirectory: lastImageDirectory,
+            ondirectorychange: (directory) => (lastImageDirectory = directory),
+        });
+        if (selection?.kind === 'server-directory') hardDiskCreationDirectory = selection;
     }
 
     function suppressDesktopContextMenu(event: MouseEvent): void {
@@ -1108,7 +1169,7 @@
         title: string,
         extensions: string[] = [],
         suggestedName = '',
-        navigation?: Pick<PickerRequest, 'initialDirectory' | 'ondirectorychange' | 'directoryAction'>,
+        navigation?: Pick<PickerRequest, 'initialDirectory' | 'ondirectorychange'>,
     ): Promise<FileLocation | DirectoryLocation | null> {
         return new Promise((resolve) => {
             pickerRequest?.resolve(null);
@@ -1124,7 +1185,7 @@
 
     function finishHardDiskCreation(file: FileLocation): void {
         hardDiskCreationDirectory = null;
-        finishPicker(file);
+        void openImageLocation(file);
     }
 
     async function openConnectionSettings(): Promise<void> {
@@ -1180,65 +1241,41 @@
                 </button>
             {/each}
         </nav>
-        <label class="autoplay-control">
-            <input bind:checked={autoplay} type="checkbox" />
-            <span>Autoplay</span>
-        </label>
-        <button
-            class="source-open"
-            type="button"
-            aria-label="Open disk image"
-            title={imageLocation?.displayName ?? 'Open disk image'}
-            onclick={() => void chooseAndOpenSource()}
-        >
-            <span>{imageLocation?.displayName ?? 'No disk image selected'}</span>
-            <Icon name="folder" size={17} />
-        </button>
-        <button
-            class="icon-button"
-            type="button"
-            aria-label="Eject disk image"
-            title="Eject disk image"
-            disabled={!imageLocation}
-            onclick={() => void ejectImage().catch(() => undefined)}
-        >
-            <Icon name="eject" size={17} />
-        </button>
-        {#if transport.storageMode === 'server'}
-            <button
-                class="icon-button"
-                type="button"
-                aria-label="Manage workspaces"
-                title="Manage workspaces"
-                onclick={() => (workspaceManagerOpen = true)}><Icon name="folder" size={17} /></button
-            >
-        {/if}
-        {#if isDesktop}
-            <button
-                class="icon-button"
-                type="button"
-                aria-label="Server connection settings"
-                title="Server connection settings"
-                onclick={() => void openConnectionSettings()}><Icon name="server" size={17} /></button
-            >
-        {/if}
-        <LayoutControls
-            libraryOpen={sidebarOpen}
-            editorOpen={lowerPanelOpen && lowerPanelAvailable}
-            editorAvailable={lowerPanelAvailable}
-            {inspectorOpen}
-            interfaceScale={interfaceScaleState}
-            ontogglelibrary={() => (sidebarOpen = !sidebarOpen)}
-            ontoggleeditor={() => (lowerPanelOpen = !lowerPanelOpen)}
-            ontoggleinspector={() => (inspectorOpen = !inspectorOpen)}
-            oninterfacescalechange={setInterfaceScale}
-        />
+        <div class="global-controls">
+            {#if isDesktop}
+                <button
+                    class="icon-button"
+                    type="button"
+                    aria-label="Server connection settings"
+                    title="Server connection settings"
+                    onclick={() => void openConnectionSettings()}><Icon name="server" size={17} /></button
+                >
+            {/if}
+            <LayoutControls
+                libraryOpen={sidebarOpen}
+                editorOpen={lowerPanelOpen && lowerPanelAvailable}
+                editorAvailable={lowerPanelAvailable}
+                {inspectorOpen}
+                interfaceScale={interfaceScaleState}
+                ontogglelibrary={() => (sidebarOpen = !sidebarOpen)}
+                ontoggleeditor={() => (lowerPanelOpen = !lowerPanelOpen)}
+                ontoggleinspector={() => (inspectorOpen = !inspectorOpen)}
+                oninterfacescalechange={setInterfaceScale}
+            />
+        </div>
     </header>
 
     {#if sidebarOpen}
-        <LibrarySidebar
+        <ImageNavigator
+            image={imageLocation}
             items={sourceItems}
             selectedId={selectedSource.id}
+            opening={imageOpening}
+            storageLocationsAvailable={transport.storageMode === 'server'}
+            onopen={() => void chooseAndOpenSource()}
+            oncreate={() => void chooseHardDiskCreationDirectory()}
+            onclose={() => void closeImage().catch(() => undefined)}
+            onmanagelocations={() => (workspaceManagerOpen = true)}
             onselect={selectSource}
             volumeActionsEnabled={volumeMutationsAvailable}
             partitionActionsEnabled={partitionMutationsAvailable}
@@ -1253,6 +1290,7 @@
     <main
         bind:this={mainStage}
         class:lower-panel-closed={!lowerPanelOpen || !lowerPanelAvailable}
+        class:has-audition-bar={auditionBarVisible}
         class="main-stage"
         style:--split-position={`${splitRatio * 100}%`}
         data-audio-drop-main={activeAudioTarget() ? 'true' : undefined}
@@ -1267,7 +1305,7 @@
                 activeSampleId={workspaceView === 'sample-banks' ? selectedBankMemberId : selectedSampleId}
                 activeWaveDataId={workspaceView === 'sample-banks' ? selectedBankWaveDataId : selectedSampleWaveDataId}
                 queries={laneQueries[workspaceView]}
-                onquerychange={(lane, value) => (laneQueries[workspaceView][lane] = value)}
+                onquerychange={(lane, value) => updateLaneQuery(workspaceView, lane, value)}
                 onsamplebankselect={selectBank}
                 onsampleselect={workspaceView === 'sample-banks' ? selectBankMember : selectSample}
                 onwavedataselect={selectWaveData}
@@ -1287,7 +1325,7 @@
                 view={workspaceView}
                 activeObjectId={activeCollectionObjectId}
                 query={laneQueries[workspaceView].primary}
-                onquerychange={(value) => (laneQueries[workspaceView].primary = value)}
+                onquerychange={(value) => updateLaneQuery(workspaceView, 'primary', value)}
                 onprogramselect={selectProgram}
                 onwavedataselect={selectWaveData}
                 onpreviewrequest={requestWaveformPreview}
@@ -1300,6 +1338,13 @@
                 playheadFrame={auditionState.playheadFrame}
             />
         {/if}
+        <AuditionBar
+            available={auditionAvailable}
+            {autoplay}
+            state={auditionState}
+            label={auditionLabel}
+            onautoplaychange={(enabled) => (autoplay = enabled)}
+        />
         {#if lowerPanelOpen && lowerPanelAvailable}
             <!-- Svelte does not model the ARIA separator interaction pattern; pointer and keyboard handlers are intentional. -->
             <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -1337,7 +1382,7 @@
     {/if}
     <footer class="status-bar">
         <span><span class="status-dot"></span> {sourceStatus}</span><span class="ml-auto"
-            >{sourceObjectCount} objects in current volume</span
+            >{sourceObjectCount} objects</span
         >
     </footer>
 </div>
@@ -1351,8 +1396,10 @@
         suggestedName={pickerRequest.suggestedName}
         initialDirectory={pickerRequest.initialDirectory}
         ondirectorychange={pickerRequest.ondirectorychange}
-        directoryAction={pickerRequest.directoryAction}
-        onbeforedelete={preparePickerDeletion}
+        onmanagelocations={() => {
+            finishPicker(null);
+            workspaceManagerOpen = true;
+        }}
         onselect={(selection) => finishPicker(selection)}
         oncancel={() => finishPicker(null)}
     />

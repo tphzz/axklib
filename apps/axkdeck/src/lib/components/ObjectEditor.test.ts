@@ -34,13 +34,13 @@ function programSelection(): Extract<InspectorSelection, { kind: 'program' }> {
     const relationship: SamplerRelationship = {
         id: 'assignment-1',
         sourceObjectId: program.objectId,
-        targetObjectId: 'SBAC-B Strings',
+        targetObjectId: 'SBAC-String Bank',
         candidateObjectIds: [],
         relationshipType: 'PROG_ASSIGNMENT_TO_SBAC',
         quality: 'Known',
         basis: 'test',
         notes: [],
-        assignmentName: 'B Strings',
+        assignmentName: 'String Bank',
         assignmentState: 'confirmed-active',
         receiveChannelDisplay: '05',
     };
@@ -48,7 +48,7 @@ function programSelection(): Extract<InspectorSelection, { kind: 'program' }> {
         relationship,
         targetObjectId: relationship.targetObjectId,
         targetType: 'SBAC',
-        targetName: 'B Strings',
+        targetName: 'String Bank',
     };
     return { kind: 'program', program, assignments: [assignment] };
 }
@@ -80,13 +80,13 @@ describe('ObjectEditor', () => {
         const expectedTabs = ['Sample Select', 'Easy Edit', 'Effect Setup', 'Setup', 'Control'];
         expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(expectedTabs);
         expect(screen.getByRole('tab', { name: 'Sample Select' }).getAttribute('aria-selected')).toBe('true');
-        expect(screen.getByText('B Strings')).toBeTruthy();
+        expect(screen.getByText('String Bank')).toBeTruthy();
         expect(screen.getByText('05')).toBeTruthy();
 
-        await fireEvent.click(screen.getByRole('button', { name: /B Strings/ }));
+        await fireEvent.click(screen.getByRole('button', { name: /String Bank/ }));
         expect(onassignmentselect).toHaveBeenCalledOnce();
         await fireEvent.click(screen.getByRole('tab', { name: 'Easy Edit' }));
-        expect(screen.queryByText('B Strings')).toBeNull();
+        expect(screen.queryByText('String Bank')).toBeNull();
         expect(screen.getByRole('tabpanel', { name: 'Easy Edit' })).toBeTruthy();
     });
 
@@ -118,7 +118,7 @@ describe('ObjectEditor', () => {
     });
 
     it('uses neutral placeholders for unsupported editor selections', () => {
-        const bankObject = object('SBAC', 'B Strings');
+        const bankObject = object('SBAC', 'String Bank');
         const bank: SampleStructureItem = {
             id: bankObject.key,
             objectId: bankObject.key,
