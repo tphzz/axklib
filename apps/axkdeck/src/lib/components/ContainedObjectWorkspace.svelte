@@ -1,8 +1,10 @@
 <script lang="ts">
     import { matchesSearch } from '../auditionVisibility';
+    import type { SamplerObject } from '../transport';
     import type { SampleStructureItem, WaveDataItem } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
+    import ObjectContextMenu from './ObjectContextMenu.svelte';
 
     type ContainedView = 'sample-banks' | 'samples';
     type LaneId = 'primary' | 'secondary' | 'tertiary';
@@ -36,6 +38,8 @@
         preparingObjectId?: string | null;
         auditionableSampleIds: ReadonlySet<string>;
         auditionableSampleBankIds: ReadonlySet<string>;
+        objectDeletionAvailable?: boolean;
+        ondeleteobject?: (object: SamplerObject) => void;
     }
 
     let {
@@ -61,13 +65,40 @@
         preparingObjectId = null,
         auditionableSampleIds,
         auditionableSampleBankIds,
+        objectDeletionAvailable = false,
+        ondeleteobject = () => undefined,
     }: Props = $props();
+    let objectMenu = $state<{ object: SamplerObject; left: number; top: number } | null>(null);
 
     const sampleQuery = $derived(view === 'sample-banks' ? queries.secondary : queries.primary);
     const waveDataQuery = $derived(view === 'sample-banks' ? queries.tertiary : queries.secondary);
     const filteredBanks = $derived(sampleBanks.filter((item) => matchesSearch(item.name, queries.primary)));
     const filteredSamples = $derived(samples.filter((item) => matchesSearch(item.name, sampleQuery)));
     const filteredWaveData = $derived(waveData.filter((item) => matchesSearch(item.name, waveDataQuery)));
+
+    function openObjectMenu(event: MouseEvent, object: SamplerObject): void {
+        if (!objectDeletionAvailable) return;
+        event.preventDefault();
+        objectMenu = {
+            object,
+            left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
+            top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
+        };
+    }
+
+    function openObjectMenuFromKeyboard(event: KeyboardEvent, object: SamplerObject): void {
+        if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+        if (!objectDeletionAvailable) return;
+        event.preventDefault();
+        const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+        openObjectMenu(
+            new MouseEvent('contextmenu', {
+                clientX: bounds.left + Math.min(24, bounds.width / 2),
+                clientY: bounds.top + Math.min(24, bounds.height / 2),
+            }),
+            object,
+        );
+    }
 </script>
 
 <section
@@ -95,6 +126,8 @@
                             aria-label={`Inspect ${item.name}`}
                             aria-pressed={activeSampleBankId === item.objectId}
                             onclick={() => onsamplebankselect(item)}
+                            oncontextmenu={(event) => openObjectMenu(event, item.object)}
+                            onkeydown={(event) => openObjectMenuFromKeyboard(event, item.object)}
                         >
                             <strong>{item.name}</strong>
                             <small>{item.memberCount ?? 0} {(item.memberCount ?? 0) === 1 ? 'Sample' : 'Samples'}</small
@@ -149,6 +182,8 @@
                         aria-label={`Inspect ${item.name}`}
                         aria-pressed={activeSampleId === item.objectId}
                         onclick={() => onsampleselect(item)}
+                        oncontextmenu={(event) => openObjectMenu(event, item.object)}
+                        onkeydown={(event) => openObjectMenuFromKeyboard(event, item.object)}
                     >
                         <strong>{item.name}</strong>
                         {#if view === 'samples'}<small>{item.membershipLabel ?? 'Standalone'}</small>{/if}
@@ -203,6 +238,8 @@
                         aria-label={`Inspect ${item.name}`}
                         aria-pressed={activeWaveDataId === item.objectKey}
                         onclick={() => onwavedataselect(item)}
+                        oncontextmenu={(event) => openObjectMenu(event, item.object)}
+                        onkeydown={(event) => openObjectMenuFromKeyboard(event, item.object)}
                     >
                         <strong>{item.name}</strong><small>{item.note} · {item.duration}</small>
                     </button>
@@ -238,3 +275,13 @@
         </div>
     </section>
 </section>
+
+{#if objectMenu}
+    <ObjectContextMenu
+        objectName={objectMenu.object.name}
+        left={objectMenu.left}
+        top={objectMenu.top}
+        onclose={() => (objectMenu = null)}
+        ondelete={() => ondeleteobject(objectMenu!.object)}
+    />
+{/if}

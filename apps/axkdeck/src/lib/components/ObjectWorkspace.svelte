@@ -1,9 +1,11 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
     import { formatStoredSize } from '../formatBytes';
+    import type { SamplerObject } from '../transport';
     import type { Program, WaveDataItem, WorkspaceView } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
+    import ObjectContextMenu from './ObjectContextMenu.svelte';
     import Waveform from './Waveform.svelte';
 
     interface Props {
@@ -23,6 +25,8 @@
         playingObjectId?: string | null;
         preparingObjectId?: string | null;
         playheadFrame?: number;
+        objectDeletionAvailable?: boolean;
+        ondeleteobject?: (object: SamplerObject) => void;
     }
 
     let {
@@ -42,8 +46,11 @@
         playingObjectId = null,
         preparingObjectId = null,
         playheadFrame = 0,
+        objectDeletionAvailable = false,
+        ondeleteobject = () => undefined,
     }: Props = $props();
     let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
+    let objectMenu = $state<{ object: SamplerObject; left: number; top: number } | null>(null);
 
     onDestroy(() => clearPrefetch());
 
@@ -79,6 +86,30 @@
         event.stopPropagation();
         const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
         onseek(item, Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)));
+    }
+
+    function openObjectMenu(event: MouseEvent, object: SamplerObject): void {
+        if (!objectDeletionAvailable) return;
+        event.preventDefault();
+        objectMenu = {
+            object,
+            left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
+            top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
+        };
+    }
+
+    function openObjectMenuFromKeyboard(event: KeyboardEvent, object: SamplerObject): void {
+        if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+        if (!objectDeletionAvailable) return;
+        event.preventDefault();
+        const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+        openObjectMenu(
+            new MouseEvent('contextmenu', {
+                clientX: bounds.left + Math.min(24, bounds.width / 2),
+                clientY: bounds.top + Math.min(24, bounds.height / 2),
+            }),
+            object,
+        );
     }
 
     const title = $derived(view === 'programs' ? 'Programs' : 'Wave Data');
@@ -128,6 +159,8 @@
                         type="button"
                         aria-label={`Inspect ${item.name}`}
                         onclick={() => onwavedataselect(item)}
+                        oncontextmenu={(event) => openObjectMenu(event, item.object)}
+                        onkeydown={(event) => openObjectMenuFromKeyboard(event, item.object)}
                     ></button>
                     <strong class="wave-data-identity">{item.name}</strong>
                     <span class="wave-data-meta">{item.note} · {item.duration}</span>
@@ -186,3 +219,13 @@
         {/if}
     </div>
 </section>
+
+{#if objectMenu}
+    <ObjectContextMenu
+        objectName={objectMenu.object.name}
+        left={objectMenu.left}
+        top={objectMenu.top}
+        onclose={() => (objectMenu = null)}
+        ondelete={() => ondeleteobject(objectMenu!.object)}
+    />
+{/if}

@@ -1398,6 +1398,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "auditions.prepare",
                 "images.alter.volumes",
                 "images.alter.partitions",
+                "images.alter.objects",
             ]
             assert opened["data"]["objectCount"] > 0
             status, objects = http_request(
@@ -1601,6 +1602,68 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 item["name"] == "Session Renamed"
                 for item in refreshed_children["data"]["items"]
             ), refreshed_children
+
+            sample = next(
+                item
+                for item in refreshed_objects["data"]["items"]
+                if item["type"] == "SBNK"
+            )
+            deletion_request = {
+                "imageId": image_id,
+                "expectedRevision": 2,
+                "targetObjectId": sample["id"],
+                "includedDependentObjectIds": [],
+            }
+            status, deletion_inspection = http_request(
+                port,
+                "POST",
+                "/api/v1/image-object-deletion-inspections",
+                deletion_request,
+            )
+            assert status == 200 and deletion_inspection["data"]["valid"], (
+                deletion_inspection
+            )
+            optional_wave_data = [
+                impact["objectId"]
+                for impact in deletion_inspection["data"]["impacts"]
+                if impact["objectType"] == "SMPL" and impact["status"] == "OPTIONAL"
+            ]
+            assert optional_wave_data, deletion_inspection
+            deletion_request["includedDependentObjectIds"] = optional_wave_data
+            status, reviewed_deletion = http_request(
+                port,
+                "POST",
+                "/api/v1/image-object-deletion-inspections",
+                deletion_request,
+            )
+            assert status == 200 and reviewed_deletion["data"]["valid"], (
+                reviewed_deletion
+            )
+            status, submitted_deletion = http_request(
+                port,
+                "POST",
+                "/api/v1/image-object-deletions",
+                deletion_request,
+                {"Idempotency-Key": "session-object-deletion"},
+            )
+            assert status == 202, submitted_deletion
+            deletion_job = wait_for_job(
+                port, str(submitted_deletion["data"]["jobId"]), process
+            )
+            assert deletion_job["state"] == "COMPLETED", deletion_job
+            assert deletion_job["result"]["imageId"] == image_id, deletion_job
+            assert deletion_job["result"]["revision"] == 3, deletion_job
+            deleted_object_ids = {sample["id"], *optional_wave_data}
+            assert set(deletion_job["result"]["deletedObjectIds"]) == (
+                deleted_object_ids
+            ), deletion_job
+            status, after_deletion = http_request(
+                port, "GET", f"/api/v1/images/{image_id}/objects?limit=100"
+            )
+            assert status == 200, after_deletion
+            assert deleted_object_ids.isdisjoint(
+                item["id"] for item in after_deletion["data"]["items"]
+            ), after_deletion
 
             status, stale_alteration = http_request(
                 port,

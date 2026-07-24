@@ -122,6 +122,43 @@ describe('ObjectWorkspace', () => {
         expect(onwavedataselect).toHaveBeenCalledOnce();
     });
 
+    it('offers Wave Data deletion from the selection target without changing playback behavior', async () => {
+        const waveObject = {
+            ...object('SMPL', 'SMP 001'),
+            sampleRate: 44_100,
+            sampleWidthBytes: 2,
+            frameCount: 1,
+        };
+        const waveData = {
+            id: waveObject.key,
+            objectKey: waveObject.key,
+            name: waveObject.name,
+            note: 'C3',
+            duration: '0.00 s',
+            sampleRate: '44.1 kHz',
+            bitDepth: '16-bit',
+            channels: 'Mono' as const,
+            storedSizeBytes: 2,
+            waveform: [],
+            previewState: 'idle' as const,
+            object: waveObject,
+        };
+        const ondeleteobject = vi.fn();
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                waveData: [waveData],
+                view: 'wave-data',
+                objectDeletionAvailable: true,
+                ondeleteobject,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect SMP 001' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+        expect(ondeleteobject).toHaveBeenCalledWith(waveObject);
+    });
+
     it('delegates play and selection as one coordinated action', async () => {
         const waveObject = {
             ...object('SMPL', 'SMP 001'),

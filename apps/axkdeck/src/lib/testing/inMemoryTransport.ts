@@ -13,6 +13,7 @@ import type {
     JobState,
     ObjectPage,
     ObjectPageFilter,
+    ObjectDeletionInspection,
     OpenedImage,
     PackageImportDestination,
     PackageImportPlan,
@@ -40,9 +41,13 @@ import type { ClientUploadSource } from '../clientUploadSource';
 export interface InMemoryImageTransportOptions {
     storageMode?: ImageTransport['storageMode'];
     supportsClientUploads?: boolean;
-    opened: Omit<OpenedImage, 'sessionId' | 'volumeMutationsAvailable' | 'partitionMutationsAvailable'> & {
+    opened: Omit<
+        OpenedImage,
+        'sessionId' | 'volumeMutationsAvailable' | 'partitionMutationsAvailable' | 'objectDeletionAvailable'
+    > & {
         volumeMutationsAvailable?: boolean;
         partitionMutationsAvailable?: boolean;
+        objectDeletionAvailable?: boolean;
     };
     preview?: PreviewEnvelope;
     onClose?: (sessionId: number) => void;
@@ -89,6 +94,7 @@ export class InMemoryImageTransport implements ImageTransport {
             sessionId: this.nextSessionId++,
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
+            objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
         };
     }
 
@@ -101,6 +107,7 @@ export class InMemoryImageTransport implements ImageTransport {
             sessionId,
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
+            objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
         };
     }
 
@@ -134,6 +141,22 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState> {
         return this.invoke('startPartitionMutation', [sessionId, mutation]);
+    }
+
+    inspectObjectDeletion(
+        sessionId: number,
+        targetObjectId: string,
+        includedDependentObjectIds: string[],
+    ): Promise<ObjectDeletionInspection> {
+        return this.invoke('inspectObjectDeletion', [sessionId, targetObjectId, includedDependentObjectIds]);
+    }
+
+    startObjectDeletion(
+        sessionId: number,
+        targetObjectId: string,
+        includedDependentObjectIds: string[],
+    ): Promise<JobState> {
+        return this.invoke('startObjectDeletion', [sessionId, targetObjectId, includedDependentObjectIds]);
     }
 
     async preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {

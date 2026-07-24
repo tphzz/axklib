@@ -175,6 +175,7 @@ add_library(
   adapters/audio_resample_soxr.cpp
   adapters/pcm16_quantizer.cpp
   src/alteration.cpp
+  src/deletion.cpp
   src/alteration_manifest.cpp
   src/alteration_manifest_json.cpp
   src/media_build.cpp
@@ -413,6 +414,7 @@ if(BUILD_TESTING)
     tests/audio_test.cpp
     tests/audio_export_test.cpp
     tests/catalog_test.cpp
+    tests/deletion_test.cpp
     tests/effects_test.cpp
     tests/file_publication_test.cpp
     tests/io_test.cpp

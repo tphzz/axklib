@@ -8,6 +8,7 @@ import type {
     HardDiskCreationProfile,
     JobState,
     ObjectPage,
+    ObjectDeletionInspection,
     OpenedImage,
     PackageImportPlan,
     PackageInspection,
@@ -104,6 +105,12 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startPartitionMutation(): Promise<JobState> {
+        return this.unavailable();
+    }
+    inspectObjectDeletion(): Promise<ObjectDeletionInspection> {
+        return this.unavailable();
+    }
+    startObjectDeletion(): Promise<JobState> {
         return this.unavailable();
     }
     preview(): Promise<PreviewEnvelope> {

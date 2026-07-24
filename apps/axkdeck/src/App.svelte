@@ -7,6 +7,7 @@
     import LayoutControls from './lib/components/LayoutControls.svelte';
     import ObjectInspector from './lib/components/ObjectInspector.svelte';
     import ObjectEditor from './lib/components/ObjectEditor.svelte';
+    import ObjectDeletionDialog from './lib/components/ObjectDeletionDialog.svelte';
     import ObjectWorkspace from './lib/components/ObjectWorkspace.svelte';
     import ServerConnectionSettings from './lib/components/ServerConnectionSettings.svelte';
     import CreateHardDiskImageDialog from './lib/components/CreateHardDiskImageDialog.svelte';
@@ -41,6 +42,7 @@
     import type {
         AudioImportItem,
         AudioImportTarget,
+        ObjectDeletionInspection,
         SamplerObject,
         SamplerRelationship,
         PartitionMutation,
@@ -144,9 +146,19 @@
     let workspaceManagerOpen = $state(false);
     let volumeMutationsAvailable = $state(false);
     let partitionMutationsAvailable = $state(false);
+    let objectDeletionAvailable = $state(false);
     let volumeAction = $state<{ item: DiskTreeItem; action: ImageTreeAction } | null>(null);
     let volumeActionBusy = $state(false);
     let volumeActionError = $state('');
+    let objectDeletionRequest = $state<{
+        target: SamplerObject;
+        includedDependentObjectIds: string[];
+        inspection: ObjectDeletionInspection | null;
+        loading: boolean;
+        busy: boolean;
+        error: string;
+    } | null>(null);
+    let objectDeletionGeneration = 0;
     let audioFileInput: HTMLInputElement;
     let audioImportRequest = $state<{ files: ClientUploadSource[]; target: AudioImportTarget } | null>(null);
     let audioDragActive = $state(false);
@@ -741,6 +753,217 @@
         volumeAction = { item, action };
     }
 
+    function cancelObjectDeletion(): void {
+        if (objectDeletionRequest?.busy) return;
+        ++objectDeletionGeneration;
+        objectDeletionRequest = null;
+    }
+
+    function requestObjectDeletion(target: SamplerObject): void {
+        if (
+            !objectDeletionAvailable ||
+            openSessionId === null ||
+            !['SBAC', 'SBNK', 'SMPL'].includes(target.objectType)
+        ) {
+            return;
+        }
+        const generation = ++objectDeletionGeneration;
+        objectDeletionRequest = {
+            target,
+            includedDependentObjectIds: [],
+            inspection: null,
+            loading: true,
+            busy: false,
+            error: '',
+        };
+        void stopPlaybackNow();
+        void inspectObjectDeletion(generation);
+    }
+
+    async function inspectObjectDeletion(generation = objectDeletionGeneration): Promise<void> {
+        const request = objectDeletionRequest;
+        const sessionId = openSessionId;
+        if (!request || sessionId === null) return;
+        try {
+            const inspection = await transport.inspectObjectDeletion(
+                sessionId,
+                request.target.key,
+                request.includedDependentObjectIds,
+            );
+            if (
+                generation !== objectDeletionGeneration ||
+                objectDeletionRequest?.target.key !== request.target.key ||
+                openSessionId !== sessionId
+            ) {
+                return;
+            }
+            objectDeletionRequest = {
+                ...objectDeletionRequest,
+                inspection,
+                loading: false,
+                error: '',
+            };
+        } catch (error) {
+            if (generation !== objectDeletionGeneration || objectDeletionRequest?.target.key !== request.target.key) {
+                return;
+            }
+            objectDeletionRequest = {
+                ...objectDeletionRequest,
+                inspection: null,
+                loading: false,
+                error: userFacingMessage(error),
+            };
+        }
+    }
+
+    function updateObjectDeletionSelection(objectId: string, selected: boolean): void {
+        const request = objectDeletionRequest;
+        const inspection = request?.inspection;
+        if (!request || !inspection || request.busy) return;
+        const included = new Set(
+            inspection.selectedObjectIds.filter((selectedObjectId) => selectedObjectId !== inspection.targetObjectId),
+        );
+        if (selected) {
+            included.add(objectId);
+        } else {
+            included.delete(objectId);
+            let changed = true;
+            while (changed) {
+                changed = false;
+                for (const impact of inspection.impacts) {
+                    if (
+                        included.has(impact.objectId) &&
+                        impact.prerequisiteObjectIds.some(
+                            (prerequisite) => prerequisite !== inspection.targetObjectId && !included.has(prerequisite),
+                        )
+                    ) {
+                        included.delete(impact.objectId);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        const generation = ++objectDeletionGeneration;
+        objectDeletionRequest = {
+            ...request,
+            includedDependentObjectIds: [...included],
+            loading: true,
+            error: '',
+        };
+        void inspectObjectDeletion(generation);
+    }
+
+    function updateAllObjectDeletionDependencies(selected: boolean): void {
+        const request = objectDeletionRequest;
+        const inspection = request?.inspection;
+        if (!request || !inspection || request.busy) return;
+        const includedDependentObjectIds = selected
+            ? inspection.impacts
+                  .filter((impact) => impact.role === 'DEPENDENCY' && impact.status === 'OPTIONAL')
+                  .map((impact) => impact.objectId)
+            : [];
+        const generation = ++objectDeletionGeneration;
+        objectDeletionRequest = {
+            ...request,
+            includedDependentObjectIds,
+            loading: true,
+            error: '',
+        };
+        void inspectObjectDeletion(generation);
+    }
+
+    async function submitObjectDeletion(): Promise<void> {
+        const request = objectDeletionRequest;
+        const sessionId = openSessionId;
+        if (!request || !request.inspection?.valid || request.loading || request.busy || sessionId === null) return;
+        const generation = objectDeletionGeneration;
+        const preferred =
+            selectedSource.kind === 'volume' && selectedSource.partitionIndex !== undefined
+                ? { partitionIndex: selectedSource.partitionIndex, volumeName: selectedSource.name }
+                : undefined;
+        const started = performance.now();
+        objectDeletionRequest = { ...request, busy: true, error: '' };
+        sourceStatus = `Deleting ${request.target.name}`;
+        try {
+            await auditionController.invalidateSession(sessionId);
+            const finalInspection = await transport.inspectObjectDeletion(
+                sessionId,
+                request.target.key,
+                request.includedDependentObjectIds,
+            );
+            if (!finalInspection.valid) {
+                objectDeletionRequest = {
+                    ...objectDeletionRequest,
+                    inspection: finalInspection,
+                    busy: false,
+                };
+                sourceStatus = 'Deletion is blocked; review the affected references';
+                return;
+            }
+            const expectedSelection = new Set([request.target.key, ...request.includedDependentObjectIds]);
+            if (
+                finalInspection.selectedObjectIds.length !== expectedSelection.size ||
+                finalInspection.selectedObjectIds.some((objectId) => !expectedSelection.has(objectId))
+            ) {
+                objectDeletionRequest = {
+                    ...objectDeletionRequest,
+                    inspection: finalInspection,
+                    includedDependentObjectIds: finalInspection.selectedObjectIds.filter(
+                        (objectId) => objectId !== finalInspection.targetObjectId,
+                    ),
+                    busy: false,
+                    error: 'The deletion impact changed. Review the affected objects before confirming again.',
+                };
+                sourceStatus = 'Deletion impact changed; review before confirming again';
+                return;
+            }
+            const job = await transport.startObjectDeletion(
+                sessionId,
+                request.target.key,
+                request.includedDependentObjectIds,
+            );
+            const completed = await transport.waitForJob(job.jobId, (update) => {
+                if (update.progress?.label) sourceStatus = update.progress.label;
+            });
+            if (completed.status !== 'completed') {
+                throw new Error(completed.error ?? 'Object deletion did not complete');
+            }
+            await refreshOpenImageSession(preferred);
+            ++objectDeletionGeneration;
+            objectDeletionRequest = null;
+            reportMutationTiming('delete-object', started, finalInspection.selectedObjectIds.length);
+        } catch (error) {
+            const message = userFacingMessage(error);
+            sourceStatus = message;
+            if (openSessionId === sessionId) {
+                await refreshOpenImageSession(preferred).catch(() => undefined);
+            }
+            if (
+                generation === objectDeletionGeneration &&
+                objectDeletionRequest?.target.key === request.target.key &&
+                openSessionId === sessionId
+            ) {
+                objectDeletionRequest = {
+                    ...objectDeletionRequest,
+                    busy: false,
+                    loading: true,
+                    error: `${message} The image has been refreshed; review the deletion again.`,
+                };
+                const nextGeneration = ++objectDeletionGeneration;
+                await inspectObjectDeletion(nextGeneration);
+                if (
+                    nextGeneration === objectDeletionGeneration &&
+                    objectDeletionRequest?.target.key === request.target.key
+                ) {
+                    objectDeletionRequest = {
+                        ...objectDeletionRequest,
+                        error: `${message} The image has been refreshed; review the deletion again.`,
+                    };
+                }
+            }
+        }
+    }
+
     async function submitVolumeAction(name: string): Promise<void> {
         if (!volumeAction || !imageLocation || volumeAction.item.partitionIndex === undefined) return;
         const requested = volumeAction;
@@ -1196,6 +1419,7 @@
             candidateSessionId = null;
             volumeMutationsAvailable = opened.volumeMutationsAvailable;
             partitionMutationsAvailable = opened.partitionMutationsAvailable;
+            objectDeletionAvailable = opened.objectDeletionAvailable;
             sourceItems = opened.tree;
             const preferredItem = preferred
                 ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -1226,6 +1450,7 @@
         if (openSessionId !== sessionId) return;
         volumeMutationsAvailable = opened.volumeMutationsAvailable;
         partitionMutationsAvailable = opened.partitionMutationsAvailable;
+        objectDeletionAvailable = opened.objectDeletionAvailable;
         sourceItems = opened.tree;
         const preferredItem = preferred
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -1254,6 +1479,9 @@
         openSessionId = null;
         volumeMutationsAvailable = false;
         partitionMutationsAvailable = false;
+        objectDeletionAvailable = false;
+        ++objectDeletionGeneration;
+        objectDeletionRequest = null;
     }
 
     async function closeImage(): Promise<void> {
@@ -1463,6 +1691,8 @@
                 preparingObjectId={auditionState.status === 'preparing' ? auditionState.objectId : null}
                 auditionableSampleIds={auditionableSampleObjectIds}
                 auditionableSampleBankIds={auditionableSampleBankObjectIds}
+                {objectDeletionAvailable}
+                ondeleteobject={requestObjectDeletion}
             />
         {:else}
             <ObjectWorkspace
@@ -1482,6 +1712,8 @@
                 playingObjectId={auditionState.status === 'playing' ? auditionState.objectId : null}
                 preparingObjectId={auditionState.status === 'preparing' ? auditionState.objectId : null}
                 playheadFrame={auditionState.playheadFrame}
+                {objectDeletionAvailable}
+                ondeleteobject={requestObjectDeletion}
             />
         {/if}
         <AuditionBar
@@ -1578,6 +1810,19 @@
             onsubmit={(name) => void submitVolumeAction(name)}
         />
     {/key}
+{/if}
+{#if objectDeletionRequest}
+    <ObjectDeletionDialog
+        targetName={objectDeletionRequest.target.name}
+        inspection={objectDeletionRequest.inspection}
+        loading={objectDeletionRequest.loading}
+        busy={objectDeletionRequest.busy}
+        error={objectDeletionRequest.error}
+        onselectionchange={updateObjectDeletionSelection}
+        onselectall={updateAllObjectDeletionDependencies}
+        oncancel={cancelObjectDeletion}
+        onconfirm={() => void submitObjectDeletion()}
+    />
 {/if}
 {#if audioImportRequest}
     <AudioImportDialog

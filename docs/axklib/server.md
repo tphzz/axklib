@@ -178,6 +178,16 @@ sequence numbers. After a disconnect, replay retained events through REST and
 fetch the job snapshot; WebSocket delivery is an update hint, not the source of
 truth.
 
+Writable SFS image sessions advertise `images.alter.objects`. Use
+`images.deletion.inspect` with the image ID, expected revision, target object
+ID, and explicit dependent object IDs to obtain the complete deletion impact.
+If the inspection is valid, submit the same selection to `images.delete`.
+Deletion is a write job: clients must wait for a terminal job snapshot, then
+refresh the retained image session. The delete operation replans at admission
+and the underlying alteration revalidates the image under the mutation lease,
+so an outdated revision or changed relationship graph fails without publishing
+a partial result.
+
 Each WebSocket connection has bounded lifetime delivery budgets for both event
 count and serialized bytes. The defaults are 1,024 events and 4 MiB. When
 either budget is exhausted, the server closes the connection with status 1013;

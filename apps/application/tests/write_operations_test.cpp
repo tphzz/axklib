@@ -777,6 +777,55 @@ TEST_F(WriteOperationsTest, SessionAlterationCommitsInPlaceAndRefreshesTheExisti
     EXPECT_EQ(stale.error().code, "image_revision_stale");
 }
 
+TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedClosure) {
+    const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto samples = images_->objects(opened->image_id, "owner", 100U, std::nullopt, "SBNK");
+    ASSERT_TRUE(samples) << samples.error().message;
+    const auto sample = std::ranges::find(samples->items, "sine wave", &axk::app::ImageObjectItem::name);
+    ASSERT_NE(sample, samples->items.end());
+    const auto object_count = opened->object_count;
+
+    const auto inspection = registry_.invoke("images.deletion.inspect",
+                                             {{"imageId", opened->image_id},
+                                              {"expectedRevision", opened->revision},
+                                              {"targetObjectId", sample->id},
+                                              {"includedDependentObjectIds", nlohmann::json::array()}},
+                                             context());
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    EXPECT_TRUE(inspection->at("valid").get<bool>());
+    const auto optional_wave = std::ranges::find(inspection->at("impacts"), "SMPL", [](const auto &impact) {
+        return impact.at("objectType").template get<std::string>();
+    });
+    ASSERT_NE(optional_wave, inspection->at("impacts").end());
+    EXPECT_EQ(optional_wave->at("status"), "OPTIONAL");
+    EXPECT_TRUE(optional_wave->at("partitionIndex").is_number_unsigned());
+    ASSERT_FALSE(inspection->at("references").empty());
+    EXPECT_TRUE(inspection->at("references").front().at("targetObjectId").is_string());
+    EXPECT_TRUE(inspection->at("references").front().at("targetObjectType").is_string());
+    EXPECT_TRUE(inspection->at("references").front().at("targetObjectName").is_string());
+
+    const std::vector included{optional_wave->at("objectId").get<std::string>()};
+    auto moved_registry = std::move(registry_);
+    const auto deleted = moved_registry.invoke("images.delete",
+                                               {{"imageId", opened->image_id},
+                                                {"expectedRevision", opened->revision},
+                                                {"targetObjectId", sample->id},
+                                                {"includedDependentObjectIds", included}},
+                                               context());
+    ASSERT_TRUE(deleted) << deleted.error().message;
+    EXPECT_EQ(deleted->at("kind"), "DELETION");
+    EXPECT_EQ(deleted->at("revision"), 2U);
+    EXPECT_EQ(deleted->at("deletedObjectIds").size(), 2U);
+    EXPECT_GT(deleted->at("freedClusters").get<std::uint64_t>(), 0U);
+    EXPECT_EQ(deleted->at("objectCount"), object_count - 2U);
+
+    const auto remaining = images_->objects(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(remaining) << remaining.error().message;
+    EXPECT_FALSE(std::ranges::contains(remaining->items, sample->id, &axk::app::ImageObjectItem::id));
+    EXPECT_FALSE(std::ranges::contains(remaining->items, included.front(), &axk::app::ImageObjectItem::id));
+}
+
 TEST_F(WriteOperationsTest, AlterationRechecksInputsBeforePublishing) {
     const auto starter = registry_.invoke("alter.manifest", nlohmann::json::object(), context());
     ASSERT_TRUE(starter) << starter.error().message;

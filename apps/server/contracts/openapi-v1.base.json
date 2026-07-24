@@ -2080,6 +2080,118 @@
           "operations": {"type": "array", "items": {"$ref": "#/components/schemas/AlterationOperationReport"}}
         }
       },
+      "ImageObjectDeletionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "targetObjectId", "includedDependentObjectIds"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "targetObjectId": {"type": "string", "minLength": 1},
+          "includedDependentObjectIds": {
+            "type": "array",
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      },
+      "ImageObjectDeletionNotice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "objectIds"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "objectIds": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      },
+      "ImageObjectDeletionImpact": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["objectId", "objectType", "objectName", "partitionIndex", "partitionName", "volumeName", "role", "status", "selected", "storedSizeBytes", "freedClusters", "prerequisiteObjectIds", "reason"],
+        "properties": {
+          "objectId": {"type": "string", "minLength": 1},
+          "objectType": {"enum": ["SBAC", "SBNK", "SMPL"]},
+          "objectName": {"type": "string"},
+          "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
+          "partitionName": {"type": "string"},
+          "volumeName": {"type": "string"},
+          "role": {"enum": ["TARGET", "DEPENDENCY"]},
+          "status": {"enum": ["REQUIRED", "OPTIONAL", "PRESERVED", "BLOCKED"]},
+          "selected": {"type": "boolean"},
+          "storedSizeBytes": {"type": "integer", "minimum": 0},
+          "freedClusters": {"type": "integer", "minimum": 0},
+          "prerequisiteObjectIds": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "reason": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageObjectDeletionReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sourceObjectId", "sourceObjectType", "sourceObjectName", "targetObjectId", "targetObjectType", "targetObjectName", "type", "quality", "effect"],
+        "properties": {
+          "sourceObjectId": {"type": "string", "minLength": 1},
+          "sourceObjectType": {"enum": ["PROG", "SBAC", "SBNK", "SMPL", "SEQU", "PRF3", "UNKNOWN"]},
+          "sourceObjectName": {"type": "string"},
+          "targetObjectId": {"type": ["string", "null"]},
+          "targetObjectType": {
+            "oneOf": [
+              {"enum": ["PROG", "SBAC", "SBNK", "SMPL", "SEQU", "PRF3", "UNKNOWN"]},
+              {"type": "null"}
+            ]
+          },
+          "targetObjectName": {"type": ["string", "null"]},
+          "type": {"type": "string", "minLength": 1},
+          "quality": {"type": "string", "minLength": 1},
+          "effect": {"enum": ["BLOCKING", "REMOVED", "PRESERVED"]}
+        }
+      },
+      "ImageObjectDeletionInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["valid", "imageId", "revision", "targetObjectId", "selectedObjectIds", "impacts", "references", "blockers", "warnings", "estimatedFreedBytes", "estimatedFreedClusters"],
+        "properties": {
+          "valid": {"type": "boolean"},
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "targetObjectId": {"type": "string", "minLength": 1},
+          "selectedObjectIds": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "impacts": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/ImageObjectDeletionImpact"}},
+          "references": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDeletionReference"}},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDeletionNotice"}},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDeletionNotice"}},
+          "estimatedFreedBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Allocated storage bytes expected to become free for the selected deletion closure"
+          },
+          "estimatedFreedClusters": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Allocated storage clusters expected to become free for the selected deletion closure"
+          }
+        }
+      },
+      "ImageObjectDeletionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "kind", "imageId", "revision", "summary", "deletedObjectIds", "freedClusters", "objectCount", "validation", "warnings", "applied", "operations"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "kind": {"const": "DELETION"},
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 2},
+          "summary": {"$ref": "#/components/schemas/AlterationSummary"},
+          "deletedObjectIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "freedClusters": {"type": "integer", "minimum": 0},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "validation": {"$ref": "#/components/schemas/ImageBuildResult/properties/validation"},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "applied": {"const": true},
+          "operations": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/AlterationOperationReport"}}
+        }
+      },
       "ErrorContext": {
         "type": "object",
         "additionalProperties": false,

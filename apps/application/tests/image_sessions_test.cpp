@@ -135,7 +135,7 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     EXPECT_EQ(opened->available_operations,
               (std::vector<std::string>{"images.content", "images.objects", "images.relationships",
                                         "images.validation.issues", "images.preview", "auditions.prepare",
-                                        "images.alter.volumes", "images.alter.partitions"}));
+                                        "images.alter.volumes", "images.alter.partitions", "images.alter.objects"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
@@ -187,6 +187,39 @@ TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {
         std::ranges::find(objects->items, catalog_object->object.header.name, &axk::app::ImageObjectItem::name);
     ASSERT_NE(object, objects->items.end());
     EXPECT_EQ(object->stored_size_bytes, descriptor->size);
+}
+
+TEST_F(ImageSessionTest, PlansOpaqueIdDeletionWithOptionalWaveDataCleanup) {
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(samples) << samples.error().message;
+    const auto sample = std::ranges::find(samples->items, "sine wave", &axk::app::ImageObjectItem::name);
+    ASSERT_NE(sample, samples->items.end());
+
+    const auto inspected = sessions.plan_deletion(opened->image_id, "owner-a", opened->revision, sample->id, {});
+
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_TRUE(inspected->inspection.valid);
+    EXPECT_EQ(inspected->inspection.target_object_id, sample->id);
+    ASSERT_EQ(inspected->manifest.operations.size(), 1U);
+    EXPECT_TRUE(std::holds_alternative<axk::DeleteSampleOperation>(inspected->manifest.operations.front().data));
+    const auto optional_wave = std::ranges::find(inspected->inspection.impacts, std::string{"SMPL"},
+                                                 &axk::app::ImageObjectDeletionImpact::object_type);
+    ASSERT_NE(optional_wave, inspected->inspection.impacts.end());
+    EXPECT_EQ(optional_wave->status, "OPTIONAL");
+    EXPECT_FALSE(optional_wave->selected);
+
+    const auto selected =
+        sessions.plan_deletion(opened->image_id, "owner-a", opened->revision, sample->id, {optional_wave->object_id});
+    ASSERT_TRUE(selected) << selected.error().message;
+    ASSERT_EQ(selected->manifest.operations.size(), 2U);
+    EXPECT_GT(selected->inspection.estimated_freed_bytes, 0U);
+
+    const auto stale = sessions.plan_deletion(opened->image_id, "owner-a", opened->revision + 1U, sample->id, {});
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, "image_revision_stale");
 }
 
 TEST_F(ImageSessionTest, HoldsPathReservationFromBeforeOpenUntilClose) {

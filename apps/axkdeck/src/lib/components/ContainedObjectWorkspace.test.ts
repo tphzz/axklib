@@ -104,6 +104,35 @@ describe('ContainedObjectWorkspace', () => {
         expect(onwavedataselect).toHaveBeenCalledWith(waveData);
     });
 
+    it('offers deletion from mouse and keyboard context menus only when the session supports it', async () => {
+        const bank = structure('SBAC', 'Strings');
+        const ondeleteobject = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'sample-banks',
+                sampleBanks: [bank],
+                samples: [],
+                waveData: [],
+                activeSampleBankId: '',
+                activeSampleId: '',
+                activeWaveDataId: '',
+                queries: { primary: '', secondary: '', tertiary: '' },
+                objectDeletionAvailable: true,
+                ondeleteobject,
+            },
+        });
+
+        const row = screen.getByRole('button', { name: 'Inspect Strings' });
+        await fireEvent.contextMenu(row, { clientX: 80, clientY: 120 });
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+        expect(ondeleteobject).toHaveBeenCalledWith(bank.object);
+
+        await fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
+        expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();
+    });
+
     it('renders the SBNK hierarchy as two lanes and filters each lane independently', async () => {
         const piano = structure('SBNK', 'Piano C3');
         const brass = structure('SBNK', 'Brass C3');

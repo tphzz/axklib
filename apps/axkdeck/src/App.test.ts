@@ -5,7 +5,14 @@ const mocks = vi.hoisted(() => ({
     sandboxRoots: vi.fn(),
     sandboxDirectory: vi.fn(),
     openImage: vi.fn(),
+    refreshImage: vi.fn(),
     closeImage: vi.fn(),
+    contentChildren: vi.fn(),
+    objectPage: vi.fn(),
+    relationshipPage: vi.fn(),
+    inspectObjectDeletion: vi.fn(),
+    startObjectDeletion: vi.fn(),
+    waitForJob: vi.fn(),
     deleteSandboxEntry: vi.fn(),
     hardDiskCreationProfiles: vi.fn(),
     listenForNativeAudioDrops: vi.fn(),
@@ -18,7 +25,14 @@ vi.mock('./lib/createTransport', () => ({
         sandboxRoots: mocks.sandboxRoots,
         sandboxDirectory: mocks.sandboxDirectory,
         openImage: mocks.openImage,
+        refreshImage: mocks.refreshImage,
         closeImage: mocks.closeImage,
+        contentChildren: mocks.contentChildren,
+        objectPage: mocks.objectPage,
+        relationshipPage: mocks.relationshipPage,
+        inspectObjectDeletion: mocks.inspectObjectDeletion,
+        startObjectDeletion: mocks.startObjectDeletion,
+        waitForJob: mocks.waitForJob,
         deleteSandboxEntry: mocks.deleteSandboxEntry,
         hardDiskCreationProfiles: mocks.hardDiskCreationProfiles,
     }),
@@ -77,8 +91,16 @@ describe('App panel layout', () => {
             initialVolume: null,
             volumeMutationsAvailable: true,
             partitionMutationsAvailable: true,
+            objectDeletionAvailable: true,
         });
+        mocks.refreshImage.mockReset();
         mocks.closeImage.mockReset().mockResolvedValue(undefined);
+        mocks.contentChildren.mockReset().mockResolvedValue({ items: [], totalCount: 0 });
+        mocks.objectPage.mockReset().mockResolvedValue({ objects: [], totalCount: 0 });
+        mocks.relationshipPage.mockReset().mockResolvedValue({ relationships: [], totalCount: 0 });
+        mocks.inspectObjectDeletion.mockReset();
+        mocks.startObjectDeletion.mockReset();
+        mocks.waitForJob.mockReset();
         mocks.deleteSandboxEntry.mockReset().mockResolvedValue(undefined);
         mocks.listenForNativeAudioDrops.mockReset().mockResolvedValue(() => undefined);
     });
@@ -228,6 +250,143 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(mocks.closeImage).toHaveBeenCalledWith(17));
     });
 
+    it('reinspects, completes, and refreshes one object deletion before closing the dialog', async () => {
+        const sample = {
+            key: 'sample-1',
+            objectType: 'SBNK',
+            name: 'Piano C3',
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: 'Piano',
+            categoryName: 'SBNK',
+            sfsId: 9,
+            storedSizeBytes: 512,
+            sampleRate: 0,
+            rootKey: 60,
+            frameCount: 0,
+            sampleWidthBytes: 0,
+        };
+        const volume = {
+            id: 'volume-1',
+            name: 'Piano',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const opened = {
+            sessionId: 17,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk' as const, childCount: 1, children: [volume] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 1,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectDeletionAvailable: true,
+        };
+        const inspection = {
+            valid: true,
+            imageId: 'image-1',
+            revision: 1,
+            targetObjectId: sample.key,
+            selectedObjectIds: [sample.key],
+            impacts: [
+                {
+                    objectId: sample.key,
+                    objectType: 'SBNK',
+                    objectName: sample.name,
+                    partitionIndex: 0,
+                    partitionName: 'Partition 0',
+                    volumeName: 'Piano',
+                    role: 'TARGET',
+                    status: 'REQUIRED',
+                    selected: true,
+                    storedSizeBytes: 512,
+                    freedClusters: 1,
+                    prerequisiteObjectIds: [],
+                    reason: 'Selected object',
+                },
+                {
+                    objectId: 'wave-1',
+                    objectType: 'SMPL',
+                    objectName: 'Piano C3',
+                    partitionIndex: 0,
+                    partitionName: 'Partition 0',
+                    volumeName: 'Piano',
+                    role: 'DEPENDENCY',
+                    status: 'OPTIONAL',
+                    selected: false,
+                    storedSizeBytes: 4096,
+                    freedClusters: 4,
+                    prerequisiteObjectIds: [sample.key],
+                    reason: 'Wave Data may be removed after its Sample is deleted',
+                },
+            ],
+            references: [],
+            blockers: [],
+            warnings: [],
+            estimatedFreedBytes: 1024,
+            estimatedFreedClusters: 1,
+        };
+        const selectedInspection = {
+            ...inspection,
+            selectedObjectIds: [sample.key, 'wave-1'],
+            impacts: inspection.impacts.map((impact) =>
+                impact.objectId === 'wave-1' ? { ...impact, selected: true } : impact,
+            ),
+            estimatedFreedBytes: 5120,
+            estimatedFreedClusters: 5,
+        };
+        mocks.openImage.mockResolvedValueOnce(opened);
+        mocks.objectPage
+            .mockResolvedValueOnce({ objects: [sample], totalCount: 1 })
+            .mockResolvedValue({ objects: [], totalCount: 0 });
+        mocks.inspectObjectDeletion.mockResolvedValueOnce(inspection).mockResolvedValue(selectedInspection);
+        mocks.startObjectDeletion.mockResolvedValue({ jobId: 55, kind: 'images.delete', status: 'queued' });
+        mocks.waitForJob.mockResolvedValue({
+            jobId: 55,
+            kind: 'images.delete',
+            status: 'completed',
+            result: { deletedObjectIds: [sample.key, 'wave-1'] },
+        });
+        let finishRefresh: ((value: Awaited<ReturnType<typeof mocks.refreshImage>>) => void) | undefined;
+        mocks.refreshImage.mockReturnValue(
+            new Promise((resolve) => {
+                finishRefresh = resolve;
+            }),
+        );
+        render(App);
+
+        await chooseNestedImage();
+        await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
+        await vi.waitFor(() => expect(screen.getByText('Piano C3')).toBeTruthy());
+        const row = screen.getByRole('button', { name: 'Inspect Piano C3' });
+        await fireEvent.contextMenu(row);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+        await vi.waitFor(() => expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy());
+        await fireEvent.click(screen.getByRole('checkbox', { name: 'Also delete all (1)' }));
+        await vi.waitFor(() => expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, sample.key, ['wave-1']));
+        await fireEvent.click(screen.getByRole('button', { name: 'Delete 2 objects' }));
+
+        await vi.waitFor(() => expect(mocks.startObjectDeletion).toHaveBeenCalledOnce());
+        expect(mocks.inspectObjectDeletion).toHaveBeenCalledTimes(3);
+        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, sample.key, ['wave-1']);
+        await vi.waitFor(() => expect(mocks.waitForJob).toHaveBeenCalledWith(55, expect.any(Function)));
+        await vi.waitFor(() => expect(mocks.refreshImage).toHaveBeenCalledWith(17));
+        expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy();
+        expect((screen.getByRole('button', { name: 'Deleting…' }) as HTMLButtonElement).disabled).toBe(true);
+        finishRefresh?.({ ...opened, validation: { ...opened.validation, objectCount: 0 } });
+        await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete Sample' })).toBeNull());
+        expect(screen.queryByText('Piano C3')).toBeNull();
+    });
+
     it('closes an image session that finishes opening after the application is unmounted', async () => {
         let finishOpening: ((value: Awaited<ReturnType<typeof mocks.openImage>>) => void) | undefined;
         mocks.openImage.mockReturnValueOnce(
@@ -257,6 +416,7 @@ describe('App panel layout', () => {
             initialVolume: null,
             volumeMutationsAvailable: true,
             partitionMutationsAvailable: true,
+            objectDeletionAvailable: true,
         });
 
         await vi.waitFor(() => expect(mocks.closeImage).toHaveBeenCalledWith(29));

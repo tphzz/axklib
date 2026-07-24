@@ -12,6 +12,7 @@
 #include "axklib/application/contracts.hpp"
 #include "axklib/application/filesystem.hpp"
 #include "axklib/application/path_reservations.hpp"
+#include "axklib/deletion.hpp"
 #include "axklib/export.hpp"
 #include "axklib/io.hpp"
 
@@ -109,6 +110,59 @@ struct ImageRelationshipFilter {
     std::optional<std::string_view> relationship_type;
 };
 
+struct ImageObjectDeletionNotice {
+    std::string code;
+    std::string message;
+    std::vector<std::string> object_ids;
+};
+
+struct ImageObjectDeletionImpact {
+    std::string object_id;
+    std::string object_type;
+    std::string object_name;
+    std::optional<std::uint8_t> partition_index;
+    std::string partition_name;
+    std::string volume_name;
+    std::string role;
+    std::string status;
+    bool selected{};
+    std::uint64_t stored_size_bytes{};
+    std::uint64_t freed_clusters{};
+    std::vector<std::string> prerequisite_object_ids;
+    std::string reason;
+};
+
+struct ImageObjectDeletionReference {
+    std::string source_object_id;
+    std::string source_object_type;
+    std::string source_object_name;
+    std::optional<std::string> target_object_id;
+    std::optional<std::string> target_object_type;
+    std::optional<std::string> target_object_name;
+    std::string type;
+    std::string quality;
+    std::string effect;
+};
+
+struct ImageObjectDeletionInspection {
+    bool valid{};
+    std::string image_id;
+    std::uint64_t revision{};
+    std::string target_object_id;
+    std::vector<std::string> selected_object_ids;
+    std::vector<ImageObjectDeletionImpact> impacts;
+    std::vector<ImageObjectDeletionReference> references;
+    std::vector<ImageObjectDeletionNotice> blockers;
+    std::vector<ImageObjectDeletionNotice> warnings;
+    std::uint64_t estimated_freed_bytes{};
+    std::uint64_t estimated_freed_clusters{};
+};
+
+struct ImageObjectDeletionPlan {
+    ImageObjectDeletionInspection inspection;
+    axk::AlterationManifest manifest;
+};
+
 struct ImageValidationItem {
     std::string code;
     std::string severity;
@@ -179,6 +233,9 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageSessionSummary> open(const FileRef &source, std::string owner_id,
                                                    const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageSessionSummary> inspect(std::string_view image_id, std::string_view owner_id);
+    [[nodiscard]] Result<ImageObjectDeletionPlan>
+    plan_deletion(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                  std::string_view target_object_id, const std::vector<std::string> &included_dependent_object_ids);
     [[nodiscard]] Result<ImageSessionMutation> begin_mutation(std::string_view image_id, std::string_view owner_id,
                                                               std::uint64_t expected_revision);
     [[nodiscard]] Result<ImageSessionSummary> commit_mutation(std::string_view image_id, std::string_view owner_id,

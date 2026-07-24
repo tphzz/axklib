@@ -26,6 +26,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
     initialVolume: null,
     volumeMutationsAvailable: false,
     partitionMutationsAvailable: false,
+    objectDeletionAvailable: false,
     tree: [
         {
             id: 'disk',

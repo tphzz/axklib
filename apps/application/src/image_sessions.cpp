@@ -69,6 +69,26 @@ std::string object_format_name(axk::ObjectFormat format) {
     return "unknown";
 }
 
+std::string object_type_name(axk::ObjectType type) {
+    switch (type) {
+    case axk::ObjectType::smpl:
+        return "SMPL";
+    case axk::ObjectType::sbnk:
+        return "SBNK";
+    case axk::ObjectType::sbac:
+        return "SBAC";
+    case axk::ObjectType::prog:
+        return "PROG";
+    case axk::ObjectType::sequ:
+        return "SEQU";
+    case axk::ObjectType::prf3:
+        return "PRF3";
+    case axk::ObjectType::unknown:
+        return "UNKNOWN";
+    }
+    return "Unknown";
+}
+
 std::optional<std::string> mapped_id(const std::unordered_map<std::string, std::string> &ids, const std::string &key) {
     if (const auto found = ids.find(key); found != ids.end())
         return found->second;
@@ -148,6 +168,7 @@ struct axk::app::ImageSessionManager::Implementation {
         std::optional<MediaContainer> media;
         std::unordered_map<std::string, MediaObjectDescriptor> descriptors_by_id;
         std::unordered_map<std::string, ObjectSnapshot> snapshots_by_id;
+        std::vector<CatalogIssue> catalog_issues;
         std::unordered_map<std::string, AuditionEntry> auditions;
         std::size_t root_count{};
         std::uint64_t revision{1U};
@@ -287,6 +308,7 @@ struct axk::app::ImageSessionManager::Implementation {
         current.media = std::move(fresh.media);
         current.descriptors_by_id = std::move(fresh.descriptors_by_id);
         current.snapshots_by_id = std::move(fresh.snapshots_by_id);
+        current.catalog_issues = std::move(fresh.catalog_issues);
         current.auditions.clear();
         current.root_count = fresh.root_count;
         current.last_access = fresh.last_access;
@@ -688,6 +710,7 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
     }
     for (const auto &descriptor : inventory->objects)
         session->descriptors_by_id.emplace(object_ids.at(descriptor.key), descriptor);
+    session->catalog_issues = inventory->catalog.issues;
 
     session->objects.reserve(inventory->catalog.objects.size());
     for (const auto &object : inventory->catalog.objects) {
@@ -889,6 +912,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
     if ((*session)->format == "sfs" && source_metadata && source_metadata->writable) {
         available_operations.emplace_back("images.alter.volumes");
         available_operations.emplace_back("images.alter.partitions");
+        available_operations.emplace_back("images.alter.objects");
     }
     return ImageSessionSummary{.image_id = (*session)->image_id,
                                .revision = (*session)->revision,
@@ -899,6 +923,134 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
                                .object_count = (*session)->objects.size(),
                                .relationship_count = (*session)->relationships.size(),
                                .validation = validation};
+}
+
+axk::app::Result<axk::app::ImageObjectDeletionPlan>
+axk::app::ImageSessionManager::plan_deletion(std::string_view image_id, std::string_view owner_id,
+                                             std::uint64_t expected_revision, std::string_view target_object_id,
+                                             const std::vector<std::string> &included_dependent_object_ids) {
+    const auto session = implementation_->owned(image_id, owner_id);
+    if (!session)
+        return std::unexpected(session.error());
+    const std::scoped_lock access{(*session)->access_mutex};
+    if ((*session)->revision != expected_revision)
+        return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
+    if ((*session)->format != "sfs" || !(*session)->media)
+        return std::unexpected(
+            session_error("image_mutation_unsupported", "only SFS image sessions support object deletion"));
+    const auto target = (*session)->snapshots_by_id.find(std::string{target_object_id});
+    if (target == (*session)->snapshots_by_id.end())
+        return std::unexpected(session_error("object_not_found", "deletion target does not exist"));
+
+    std::vector<std::string> included_keys;
+    included_keys.reserve(included_dependent_object_ids.size());
+    for (const auto &object_id : included_dependent_object_ids) {
+        const auto found = (*session)->snapshots_by_id.find(object_id);
+        if (found == (*session)->snapshots_by_id.end()) {
+            return std::unexpected(session_error("object_not_found", "included deletion dependency does not exist"));
+        }
+        included_keys.push_back(found->second.key);
+    }
+    ObjectCatalog catalog;
+    catalog.issues = (*session)->catalog_issues;
+    catalog.objects.reserve((*session)->snapshots_by_id.size());
+    for (const auto &[id, snapshot] : (*session)->snapshots_by_id) {
+        static_cast<void>(id);
+        catalog.objects.push_back(snapshot);
+    }
+    std::ranges::sort(catalog.objects, {}, [](const auto &object) { return object.key; });
+    const auto graph = build_relationship_graph(catalog);
+    const auto *container = std::get_if<Container>(&(*session)->media->storage());
+    if (container == nullptr)
+        return std::unexpected(
+            session_error("image_mutation_unsupported", "object deletion requires an SFS container"));
+    const auto inspected = inspect_object_deletion(
+        *container, catalog, graph,
+        {.target_key = target->second.key, .included_dependency_keys = std::move(included_keys)});
+    if (!inspected)
+        return std::unexpected(session_error("deletion_invalid", inspected.error().message));
+
+    std::unordered_map<std::string, std::string> ids_by_key;
+    ids_by_key.reserve((*session)->snapshots_by_id.size());
+    for (const auto &[id, snapshot] : (*session)->snapshots_by_id)
+        ids_by_key.emplace(snapshot.key, id);
+    const auto id_for = [&](std::string_view key) -> std::optional<std::string> {
+        if (const auto found = ids_by_key.find(std::string{key}); found != ids_by_key.end())
+            return found->second;
+        return std::nullopt;
+    };
+    const auto map_keys = [&](const std::vector<std::string> &keys) {
+        std::vector<std::string> result;
+        result.reserve(keys.size());
+        for (const auto &key : keys) {
+            if (auto id = id_for(key))
+                result.push_back(std::move(*id));
+        }
+        return result;
+    };
+
+    ImageObjectDeletionInspection result;
+    result.valid = inspected->valid;
+    result.image_id = std::string{image_id};
+    result.revision = expected_revision;
+    result.target_object_id = std::string{target_object_id};
+    result.selected_object_ids = map_keys(inspected->selected_keys);
+    result.estimated_freed_bytes = inspected->estimated_freed_bytes;
+    result.estimated_freed_clusters = inspected->estimated_freed_clusters;
+    result.impacts.reserve(inspected->impacts.size());
+    for (const auto &impact : inspected->impacts) {
+        const auto object_id = id_for(impact.object_key);
+        if (!object_id)
+            continue;
+        result.impacts.push_back({.object_id = *object_id,
+                                  .object_type = std::string{object_type_name(impact.object_type)},
+                                  .object_name = impact.object_name,
+                                  .partition_index = impact.partition.value,
+                                  .partition_name = impact.partition_name,
+                                  .volume_name = impact.volume_name,
+                                  .role = std::string{object_deletion_role_name(impact.role)},
+                                  .status = std::string{object_deletion_status_name(impact.status)},
+                                  .selected = impact.selected,
+                                  .stored_size_bytes = impact.stored_size_bytes,
+                                  .freed_clusters = impact.freed_clusters,
+                                  .prerequisite_object_ids = map_keys(impact.prerequisite_keys),
+                                  .reason = impact.reason});
+    }
+    result.references.reserve(inspected->references.size());
+    for (const auto &reference : inspected->references) {
+        const auto source_id = id_for(reference.source_key);
+        if (!source_id)
+            continue;
+        const auto source = std::ranges::find(catalog.objects, reference.source_key, &ObjectSnapshot::key);
+        const auto target_object = reference.target_key.empty()
+                                       ? catalog.objects.end()
+                                       : std::ranges::find(catalog.objects, reference.target_key, &ObjectSnapshot::key);
+        result.references.push_back(
+            {.source_object_id = *source_id,
+             .source_object_type = source == catalog.objects.end()
+                                       ? "Unknown"
+                                       : std::string{object_type_name(source->object.header.type)},
+             .source_object_name = source == catalog.objects.end() ? std::string{} : source->object.header.name,
+             .target_object_id = id_for(reference.target_key),
+             .target_object_type = target_object == catalog.objects.end() ? std::nullopt
+                                                                          : std::optional<std::string>{object_type_name(
+                                                                                target_object->object.header.type)},
+             .target_object_name = target_object == catalog.objects.end()
+                                       ? std::nullopt
+                                       : std::optional<std::string>{target_object->object.header.name},
+             .type = reference.type,
+             .quality = std::string{relationship_quality_name(reference.quality)},
+             .effect = std::string{object_deletion_reference_effect_name(reference.effect)}});
+    }
+    const auto append_notices = [&](const std::vector<ObjectDeletionNotice> &source,
+                                    std::vector<ImageObjectDeletionNotice> &destination) {
+        destination.reserve(source.size());
+        for (const auto &notice : source)
+            destination.push_back({notice.code, notice.message, map_keys(notice.object_keys)});
+    };
+    append_notices(inspected->blockers, result.blockers);
+    append_notices(inspected->warnings, result.warnings);
+    return ImageObjectDeletionPlan{std::move(result), std::move(inspected->manifest)};
 }
 
 axk::app::Result<axk::app::ImageSessionMutation>

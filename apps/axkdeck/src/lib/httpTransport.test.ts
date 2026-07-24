@@ -715,6 +715,152 @@ describe('HttpImageTransport', () => {
         ]);
     });
 
+    it('inspects and starts revision-bound object deletion through typed operations', async () => {
+        const bodies = new Map<string, unknown>();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return json({
+                        apiVersion: 'v1',
+                        limits: {},
+                        operations: [
+                            {
+                                id: 'images.deletion.inspect',
+                                method: 'POST',
+                                route: '/api/v1/image-object-deletion-inspections',
+                                mode: 'read',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageObjectDeletionRequest',
+                                resultSchema: 'ImageObjectDeletionInspection',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.delete',
+                                method: 'POST',
+                                route: '/api/v1/image-object-deletions',
+                                mode: 'job',
+                                operationClass: 'write',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'ImageObjectDeletionRequest',
+                                resultSchema: 'ImageObjectDeletionResult',
+                                implemented: true,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return json({
+                        imageId: 'image-delete',
+                        revision: 7,
+                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        format: 'sfs',
+                        rootCount: 0,
+                        objectCount: 3,
+                        relationshipCount: 2,
+                        availableOperations: ['images.alter.objects'],
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                if (url.pathname.endsWith('/image-object-deletion-inspections')) {
+                    bodies.set('inspect', JSON.parse(String(init?.body)));
+                    return json({
+                        valid: true,
+                        imageId: 'image-delete',
+                        revision: 7,
+                        targetObjectId: 'object-sample',
+                        selectedObjectIds: ['object-sample', 'object-wave'],
+                        impacts: [
+                            {
+                                objectId: 'object-sample',
+                                objectType: 'SBNK',
+                                objectName: 'Tone',
+                                partitionIndex: 0,
+                                partitionName: 'Partition 0',
+                                volumeName: 'Volume',
+                                role: 'TARGET',
+                                status: 'REQUIRED',
+                                selected: true,
+                                storedSizeBytes: 512,
+                                freedClusters: 1,
+                                prerequisiteObjectIds: [],
+                                reason: 'Requested deletion target',
+                            },
+                            {
+                                objectId: 'object-wave',
+                                objectType: 'SMPL',
+                                objectName: 'Tone L',
+                                partitionIndex: 0,
+                                partitionName: 'Partition 0',
+                                volumeName: 'Volume',
+                                role: 'DEPENDENCY',
+                                status: 'OPTIONAL',
+                                selected: true,
+                                storedSizeBytes: 4096,
+                                freedClusters: 4,
+                                prerequisiteObjectIds: ['object-sample'],
+                                reason: 'Referenced only by selected Samples',
+                            },
+                        ],
+                        references: [],
+                        blockers: [],
+                        warnings: [],
+                        estimatedFreedBytes: 4608,
+                        estimatedFreedClusters: 5,
+                    });
+                }
+                if (url.pathname.endsWith('/image-object-deletions')) {
+                    bodies.set('delete', JSON.parse(String(init?.body)));
+                    return json(
+                        {
+                            jobId: 'job-delete',
+                            operationId: 'images.delete',
+                            state: 'QUEUED',
+                            latestSequence: 0,
+                            progress: null,
+                            result: null,
+                            error: null,
+                        },
+                        202,
+                    );
+                }
+                throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+        });
+        const opened = await transport.openImage(serverFile('images/base.hds'));
+        expect(opened.objectDeletionAvailable).toBe(true);
+
+        const inspection = await transport.inspectObjectDeletion(opened.sessionId, 'object-sample', ['object-wave']);
+        expect(inspection).toMatchObject({
+            valid: true,
+            selectedObjectIds: ['object-sample', 'object-wave'],
+            estimatedFreedClusters: 5,
+        });
+        const job = await transport.startObjectDeletion(opened.sessionId, 'object-sample', ['object-wave']);
+        expect(job).toMatchObject({ kind: 'images.delete', status: 'queued' });
+
+        const expected = {
+            imageId: 'image-delete',
+            expectedRevision: 7,
+            targetObjectId: 'object-sample',
+            includedDependentObjectIds: ['object-wave'],
+        };
+        expect(bodies.get('inspect')).toEqual(expected);
+        expect(bodies.get('delete')).toEqual(expected);
+    });
+
     it('imports one audio batch through one atomic alteration job', async () => {
         let alterationBody: unknown;
         vi.stubGlobal(

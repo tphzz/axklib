@@ -396,6 +396,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/image-object-deletion-inspections': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.deletion.inspect'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/image-object-deletions': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.delete'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/image-session-alterations': {
         parameters: {
             query?: never;
@@ -1551,6 +1583,80 @@ export interface components {
         ImageContentPageResponse: {
             data: components['schemas']['ImageContentPage'];
             meta: components['schemas']['ResponseMeta'];
+        };
+        ImageObjectDeletionImpact: {
+            freedClusters: number;
+            objectId: string;
+            objectName: string;
+            /** @enum {unknown} */
+            objectType: 'SBAC' | 'SBNK' | 'SMPL';
+            partitionIndex: number | null;
+            partitionName: string;
+            prerequisiteObjectIds: string[];
+            reason: string;
+            /** @enum {unknown} */
+            role: 'TARGET' | 'DEPENDENCY';
+            selected: boolean;
+            /** @enum {unknown} */
+            status: 'REQUIRED' | 'OPTIONAL' | 'PRESERVED' | 'BLOCKED';
+            storedSizeBytes: number;
+            volumeName: string;
+        };
+        ImageObjectDeletionInspection: {
+            blockers: components['schemas']['ImageObjectDeletionNotice'][];
+            /** @description Allocated storage bytes expected to become free for the selected deletion closure */
+            estimatedFreedBytes: number;
+            /** @description Allocated storage clusters expected to become free for the selected deletion closure */
+            estimatedFreedClusters: number;
+            imageId: string;
+            impacts: components['schemas']['ImageObjectDeletionImpact'][];
+            references: components['schemas']['ImageObjectDeletionReference'][];
+            revision: number;
+            selectedObjectIds: string[];
+            targetObjectId: string;
+            valid: boolean;
+            warnings: components['schemas']['ImageObjectDeletionNotice'][];
+        };
+        ImageObjectDeletionNotice: {
+            code: string;
+            message: string;
+            objectIds: string[];
+        };
+        ImageObjectDeletionReference: {
+            /** @enum {unknown} */
+            effect: 'BLOCKING' | 'REMOVED' | 'PRESERVED';
+            quality: string;
+            sourceObjectId: string;
+            sourceObjectName: string;
+            /** @enum {unknown} */
+            sourceObjectType: 'PROG' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU' | 'PRF3' | 'UNKNOWN';
+            targetObjectId: string | null;
+            targetObjectName: string | null;
+            targetObjectType: ('PROG' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU' | 'PRF3' | 'UNKNOWN') | null;
+            type: string;
+        };
+        ImageObjectDeletionRequest: {
+            expectedRevision: number;
+            imageId: string;
+            includedDependentObjectIds: string[];
+            targetObjectId: string;
+        };
+        ImageObjectDeletionResult: {
+            /** @constant */
+            applied: true;
+            deletedObjectIds: string[];
+            freedClusters: number;
+            imageId: string;
+            /** @constant */
+            kind: 'DELETION';
+            objectCount: number;
+            operations: components['schemas']['AlterationOperationReport'][];
+            revision: number;
+            /** @constant */
+            schemaVersion: '1.0';
+            summary: components['schemas']['AlterationSummary'];
+            validation: components['schemas']['ImageBuildResult']['validation'];
+            warnings: components['schemas']['Issue'][];
         };
         ImageObjectItem: {
             categoryName: string;
@@ -4090,6 +4196,239 @@ export interface operations {
                           operationId: 'create.iso';
                           planToken: string;
                       };
+            };
+        };
+        responses: {
+            /** @description Job accepted */
+            202: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.deletion.inspect': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImageObjectDeletionRequest'];
+            };
+        };
+        responses: {
+            /** @description Operation completed */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': {
+                        data: components['schemas']['ImageObjectDeletionInspection'];
+                        meta: components['schemas']['ResponseMeta'];
+                    };
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.delete': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImageObjectDeletionRequest'];
             };
         };
         responses: {

@@ -30,6 +30,7 @@ export interface OpenedImage {
     initialVolume: DiskTreeItem | null;
     volumeMutationsAvailable: boolean;
     partitionMutationsAvailable: boolean;
+    objectDeletionAvailable: boolean;
 }
 
 export type VolumeMutation =
@@ -42,6 +43,54 @@ export interface PartitionMutation {
     partitionIndex: number;
     partitionName: string;
     newPartitionName: string;
+}
+
+export interface ObjectDeletionNotice {
+    code: string;
+    message: string;
+    objectIds: string[];
+}
+
+export interface ObjectDeletionImpact {
+    objectId: string;
+    objectType: 'SBAC' | 'SBNK' | 'SMPL';
+    objectName: string;
+    partitionIndex: number | null;
+    partitionName: string;
+    volumeName: string;
+    role: 'TARGET' | 'DEPENDENCY';
+    status: 'REQUIRED' | 'OPTIONAL' | 'PRESERVED' | 'BLOCKED';
+    selected: boolean;
+    storedSizeBytes: number;
+    freedClusters: number;
+    prerequisiteObjectIds: string[];
+    reason: string;
+}
+
+export interface ObjectDeletionReference {
+    sourceObjectId: string;
+    sourceObjectType: 'PROG' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU' | 'PRF3' | 'UNKNOWN';
+    sourceObjectName: string;
+    targetObjectId: string | null;
+    targetObjectType: 'PROG' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU' | 'PRF3' | 'UNKNOWN' | null;
+    targetObjectName: string | null;
+    type: string;
+    quality: string;
+    effect: 'BLOCKING' | 'REMOVED' | 'PRESERVED';
+}
+
+export interface ObjectDeletionInspection {
+    valid: boolean;
+    imageId: string;
+    revision: number;
+    targetObjectId: string;
+    selectedObjectIds: string[];
+    impacts: ObjectDeletionImpact[];
+    references: ObjectDeletionReference[];
+    blockers: ObjectDeletionNotice[];
+    warnings: ObjectDeletionNotice[];
+    estimatedFreedBytes: number;
+    estimatedFreedClusters: number;
 }
 
 export interface ContentPage {
@@ -278,6 +327,16 @@ export interface ImageTransport {
     closeImage(sessionId: number): Promise<void>;
     startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState>;
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState>;
+    inspectObjectDeletion(
+        sessionId: number,
+        targetObjectId: string,
+        includedDependentObjectIds: string[],
+    ): Promise<ObjectDeletionInspection>;
+    startObjectDeletion(
+        sessionId: number,
+        targetObjectId: string,
+        includedDependentObjectIds: string[],
+    ): Promise<JobState>;
     preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope>;
     prepareAudition(sessionId: number, objectKey: string): Promise<AuditionDescriptor>;
     readAuditionAudio(auditionId: string, wavSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer>;

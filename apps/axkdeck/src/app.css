@@ -970,6 +970,243 @@ input:focus-visible {
   width: min(430px, calc(100vw - 32px));
 }
 
+.object-deletion-dialog {
+  width: min(680px, calc(100vw - 32px));
+}
+
+.object-deletion-content {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.destructive-summary {
+  display: grid;
+  gap: 4px;
+}
+
+.destructive-summary strong {
+  color: var(--color-text-strong);
+  font-size: 13px;
+}
+
+.destructive-summary p,
+.deletion-notices p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.deletion-notices,
+.deletion-impact-section {
+  display: grid;
+  gap: 6px;
+}
+
+.deletion-notices h3,
+.deletion-impact-section h3 {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: 11px;
+}
+
+.deletion-section-help {
+  margin: -2px 0 0;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.deletion-select-all {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 4px;
+  color: var(--color-text-muted);
+  border-radius: 4px;
+  background: rgb(255 255 255 / 3%);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.deletion-blockers {
+  padding: 8px 10px;
+  border-left: 3px solid var(--color-danger);
+  background: rgb(189 70 70 / 9%);
+}
+
+.deletion-impact-list {
+  display: grid;
+}
+
+.deletion-impact {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  min-height: 52px;
+  padding: 7px 4px;
+}
+
+.deletion-impact + .deletion-impact {
+  border-top: 1px solid var(--color-border);
+}
+
+.deletion-impact-selectable {
+  padding-left: calc(4px + var(--deletion-depth, 0) * 18px);
+  cursor: pointer;
+}
+
+.deletion-impact-selectable:hover {
+  background: rgb(255 255 255 / 3%);
+}
+
+.deletion-impact-selectable.disabled {
+  cursor: default;
+}
+
+.deletion-impact-selectable.disabled:hover {
+  background: transparent;
+}
+
+.deletion-impact.blocked {
+  color: var(--color-text-muted);
+}
+
+.deletion-checkbox {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  flex: none;
+  margin: 1px;
+  padding: 0;
+  appearance: none;
+  place-content: center;
+  color: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-bg-deep);
+  cursor: pointer;
+}
+
+.deletion-checkbox::before {
+  width: 4px;
+  height: 7px;
+  content: "";
+  border: solid currentcolor;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg) scale(0);
+}
+
+.deletion-checkbox:checked {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.deletion-checkbox:checked::before {
+  transform: translateY(-1px) rotate(45deg) scale(1);
+}
+
+.deletion-checkbox:indeterminate::before {
+  width: 8px;
+  height: 2px;
+  border: 0;
+  background: currentcolor;
+  transform: none;
+}
+
+.deletion-checkbox:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.deletion-impact-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  color: var(--color-danger);
+  place-items: center;
+}
+
+.deletion-impact-icon-muted {
+  color: var(--color-text-muted);
+}
+
+.deletion-impact-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.deletion-impact-heading {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.deletion-impact-heading strong {
+  overflow: hidden;
+  color: var(--color-text-strong);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deletion-impact-heading small,
+.deletion-impact-copy > small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.deletion-outcome {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.deletion-reference {
+  color: var(--color-text) !important;
+}
+
+.object-deletion-footer {
+  justify-content: space-between;
+}
+
+.deletion-footer-summary {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  line-height: 1.35;
+}
+
+.deletion-footer-summary strong {
+  overflow: hidden;
+  color: var(--color-text-strong);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deletion-footer-summary span {
+  color: var(--color-text-muted);
+  font-size: 9px;
+}
+
+.object-deletion-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
 .volume-action-form {
   display: contents;
 }

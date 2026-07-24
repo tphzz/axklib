@@ -25,6 +25,28 @@ current-format ownership classifies it as known and unreferenced. Program and
 Sample Bank operations require their raw assignments, membership flags, Program
 bitmaps, and decoded relationships to agree.
 
+## Object deletion planning
+
+Interactive clients should use `inspect_object_deletion()` before deleting a
+Sample Bank, Sample, or Wave Data object. The planner accepts one exact catalog
+object and an explicit list of dependent objects to remove. It returns:
+
+- blockers for incoming Program, Sample Bank, Sample, ambiguous, or
+  allocation-inconsistent references;
+- required, optional, preserved, and blocked object impacts;
+- dependency prerequisites and relationship effects;
+- estimated reclaimed allocation bytes and clusters (distinct from each
+  object's logical stored size); and
+- a typed alteration manifest ordered from Sample Bank to Sample to Wave Data.
+
+Dependent cleanup is never implicit. Deleting a Sample Bank leaves its member
+Samples as standalone objects unless the caller explicitly includes them.
+Deleting a Sample likewise preserves its now-unreferenced Wave Data unless the
+caller includes every safe Wave Data dependency. Direct Wave Data deletion is
+available only for exact current-format objects classified as
+`known_unreferenced`. The apply path replans against the retained image revision
+before executing the typed manifest.
+
 ## Native API
 
 `AlterationManifest` stores `AlterationOperationData`, a `std::variant` with one

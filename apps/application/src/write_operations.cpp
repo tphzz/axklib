@@ -880,6 +880,88 @@ Json alteration_summary(std::span<const axk::OperationReport> operations) {
             {"allocatedClusters", allocated_clusters}};
 }
 
+Json deletion_inspection_json(const axk::app::ImageObjectDeletionInspection &inspection) {
+    Json impacts = Json::array();
+    for (const auto &impact : inspection.impacts) {
+        impacts.push_back({{"objectId", impact.object_id},
+                           {"objectType", impact.object_type},
+                           {"objectName", impact.object_name},
+                           {"partitionIndex", impact.partition_index ? Json(*impact.partition_index) : Json(nullptr)},
+                           {"partitionName", impact.partition_name},
+                           {"volumeName", impact.volume_name},
+                           {"role", impact.role},
+                           {"status", impact.status},
+                           {"selected", impact.selected},
+                           {"storedSizeBytes", impact.stored_size_bytes},
+                           {"freedClusters", impact.freed_clusters},
+                           {"prerequisiteObjectIds", impact.prerequisite_object_ids},
+                           {"reason", impact.reason}});
+    }
+    Json references = Json::array();
+    for (const auto &reference : inspection.references) {
+        references.push_back(
+            {{"sourceObjectId", reference.source_object_id},
+             {"sourceObjectType", reference.source_object_type},
+             {"sourceObjectName", reference.source_object_name},
+             {"targetObjectId", reference.target_object_id ? Json(*reference.target_object_id) : Json(nullptr)},
+             {"targetObjectType", reference.target_object_type ? Json(*reference.target_object_type) : Json(nullptr)},
+             {"targetObjectName", reference.target_object_name ? Json(*reference.target_object_name) : Json(nullptr)},
+             {"type", reference.type},
+             {"quality", reference.quality},
+             {"effect", reference.effect}});
+    }
+    const auto notices_json = [](const std::vector<axk::app::ImageObjectDeletionNotice> &notices) {
+        Json result = Json::array();
+        for (const auto &notice : notices) {
+            result.push_back({{"code", notice.code}, {"message", notice.message}, {"objectIds", notice.object_ids}});
+        }
+        return result;
+    };
+    return {{"valid", inspection.valid},
+            {"imageId", inspection.image_id},
+            {"revision", inspection.revision},
+            {"targetObjectId", inspection.target_object_id},
+            {"selectedObjectIds", inspection.selected_object_ids},
+            {"impacts", std::move(impacts)},
+            {"references", std::move(references)},
+            {"blockers", notices_json(inspection.blockers)},
+            {"warnings", notices_json(inspection.warnings)},
+            {"estimatedFreedBytes", inspection.estimated_freed_bytes},
+            {"estimatedFreedClusters", inspection.estimated_freed_clusters}};
+}
+
+Json deletion_manifest_json(const axk::AlterationManifest &manifest) {
+    Json operations = Json::array();
+    for (const auto &operation : manifest.operations) {
+        operations.push_back(std::visit(
+            [&](const auto &data) -> Json {
+                using T = std::decay_t<decltype(data)>;
+                if constexpr (std::same_as<T, axk::DeleteSampleBankOperation> ||
+                              std::same_as<T, axk::DeleteSampleOperation> ||
+                              std::same_as<T, axk::DeleteWaveformOperation>) {
+                    const auto *partition = std::get_if<axk::PartitionIndex>(&data.partition);
+                    if (partition == nullptr)
+                        return Json::object();
+                    Json result{{"id", operation.id},
+                                {"type", axk::operation_type_name(operation.data)},
+                                {"partition_index", partition->value},
+                                {"volume_name", data.volume_name}};
+                    if constexpr (std::same_as<T, axk::DeleteSampleBankOperation>)
+                        result["sample_bank_name"] = data.sample_bank_name;
+                    else if constexpr (std::same_as<T, axk::DeleteSampleOperation>)
+                        result["sample_name"] = data.sample_name;
+                    else
+                        result["waveform_name"] = data.waveform_name;
+                    return result;
+                } else {
+                    return Json::object();
+                }
+            },
+            operation.data));
+    }
+    return {{"schema_version", manifest.schema_version}, {"operations", std::move(operations)}};
+}
+
 axk::Result<axk::app::PreparedLocalBuildManifest>
 prepare_local_manifest_document(const std::filesystem::path &manifest_path,
                                 std::span<const std::filesystem::path> paths) {
@@ -1526,152 +1608,213 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
 axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry &registry, const Sandbox &sandbox,
                                                                UploadStore &uploads, ImageSessionManager &images,
                                                                AlterationJournalStore &journals) {
-    if (registry.is_implemented("images.alter"))
-        return {};
-    return registry.bind(
-        "images.alter",
-        [&sandbox, &uploads, &images, &journals](const Json &input, const OperationContext &context) -> Result<Json> {
-            const auto operation_started = Clock::now();
-            const auto diagnostic = [&](std::string_view phase, Clock::time_point started,
-                                        const Json &details = Json::object()) {
-                if (!context.diagnostic)
-                    return;
-                auto event = details;
-                event["event"] = "image_mutation_phase";
-                event["requestId"] = context.request_id;
-                event["phase"] = phase;
-                event["durationMs"] =
-                    std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
-                event["strategy"] = "journaled-in-place";
-                context.diagnostic(event);
-            };
+    const auto alter_session = [&sandbox, &uploads, &images,
+                                &journals](const Json &input, const OperationContext &context) -> Result<Json> {
+        const auto operation_started = Clock::now();
+        const auto diagnostic = [&](std::string_view phase, Clock::time_point started,
+                                    const Json &details = Json::object()) {
+            if (!context.diagnostic)
+                return;
+            auto event = details;
+            event["event"] = "image_mutation_phase";
+            event["requestId"] = context.request_id;
+            event["phase"] = phase;
+            event["durationMs"] = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
+            event["strategy"] = "journaled-in-place";
+            context.diagnostic(event);
+        };
 
-            std::string image_id;
-            std::uint64_t expected_revision{};
-            try {
-                image_id = input.at("imageId").get<std::string>();
-                expected_revision = input.at("expectedRevision").get<std::uint64_t>();
-            } catch (const Json::exception &) {
-                return std::unexpected(operation_error("invalid_request", "imageId and expectedRevision are required"));
+        std::string image_id;
+        std::uint64_t expected_revision{};
+        try {
+            image_id = input.at("imageId").get<std::string>();
+            expected_revision = input.at("expectedRevision").get<std::uint64_t>();
+        } catch (const Json::exception &) {
+            return std::unexpected(operation_error("invalid_request", "imageId and expectedRevision are required"));
+        }
+
+        const auto admission_started = Clock::now();
+        auto mutation = images.begin_mutation(image_id, context.owner_id, expected_revision);
+        if (!mutation)
+            return std::unexpected(mutation.error());
+        bool mutation_finished{};
+        struct AbortGuard {
+            ImageSessionManager &images;
+            std::string_view image_id;
+            std::string_view owner_id;
+            std::uint64_t revision;
+            bool &finished;
+            ~AbortGuard() {
+                if (!finished)
+                    images.abort_mutation(image_id, owner_id, revision);
             }
+        } guard{images, image_id, context.owner_id, expected_revision, mutation_finished};
+        diagnostic("admission", admission_started, {{"imageId", image_id}, {"revision", expected_revision}});
 
-            const auto admission_started = Clock::now();
-            auto mutation = images.begin_mutation(image_id, context.owner_id, expected_revision);
-            if (!mutation)
-                return std::unexpected(mutation.error());
-            bool mutation_finished{};
-            struct AbortGuard {
-                ImageSessionManager &images;
-                std::string_view image_id;
-                std::string_view owner_id;
-                std::uint64_t revision;
-                bool &finished;
-                ~AbortGuard() {
-                    if (!finished)
-                        images.abort_mutation(image_id, owner_id, revision);
+        const auto manifest_started = Clock::now();
+        auto document = load_manifest(input, context, sandbox, uploads);
+        if (!document)
+            return std::unexpected(document.error());
+        auto manifest = axk::parse_alteration_manifest(document->json.dump());
+        if (!manifest)
+            return std::unexpected(core_error(manifest.error(), mutation->source.relative_path));
+        const auto required_paths = external_paths(*manifest);
+        if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
+            return std::unexpected(admitted.error());
+        auto fingerprints = fingerprint_files(document->observed_paths, context.cancellation);
+        if (!fingerprints)
+            return std::unexpected(fingerprints.error());
+        diagnostic("manifest", manifest_started,
+                   {{"imageId", image_id},
+                    {"operationCount", manifest->operations.size()},
+                    {"inputCount", fingerprints->size()}});
+
+        const auto planning_started = Clock::now();
+        auto prepared =
+            axk::detail::prepare_hds_alteration(mutation->target, std::filesystem::path{mutation->source.relative_path},
+                                                *manifest, context.cancellation, context.progress);
+        if (!prepared)
+            return std::unexpected(core_error(prepared.error(), mutation->source.relative_path));
+        std::uint64_t patch_bytes{};
+        std::vector<AlterationJournalPatch> patches;
+        patches.reserve(prepared->patches.size());
+        for (auto &patch : prepared->patches) {
+            if (patch.replacement.size() > std::numeric_limits<std::uint64_t>::max() - patch_bytes)
+                return std::unexpected(operation_error("image_operation_failed", "alteration patch size overflow"));
+            patch_bytes += patch.replacement.size();
+            patches.push_back({patch.offset, std::move(patch.original), std::move(patch.replacement)});
+        }
+        diagnostic("planning", planning_started,
+                   {{"imageId", image_id},
+                    {"imageBytes", prepared->image_size_bytes},
+                    {"patchCount", patches.size()},
+                    {"patchBytes", patch_bytes}});
+
+        const auto verification_started = Clock::now();
+        if (auto verified = verify_fingerprints(*fingerprints, context.cancellation); !verified)
+            return std::unexpected(verified.error());
+        if (auto verified =
+                verify_sandbox_files(document->file_inputs, document->file_input_sha256, sandbox, context.cancellation);
+            !verified) {
+            return std::unexpected(verified.error());
+        }
+        diagnostic("input-verification", verification_started, {{"imageId", image_id}});
+
+        if (context.progress) {
+            context.progress->report(
+                {axk::ProgressPhase::publishing, 0U, 1U, "Committing image changes", std::nullopt});
+        }
+        const auto journal_started = Clock::now();
+        if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation);
+            !applied) {
+            return std::unexpected(applied.error());
+        }
+        diagnostic("journal-commit", journal_started,
+                   {{"imageId", image_id},
+                    {"patchCount", patches.size()},
+                    {"patchBytes", patch_bytes},
+                    {"cleanupPending", !journals.storage_ready()}});
+
+        const auto refresh_started = Clock::now();
+        mutation->target.reset();
+        auto summary = images.commit_mutation(image_id, context.owner_id, expected_revision, CancellationToken{});
+        if (!summary)
+            return std::unexpected(summary.error());
+        mutation_finished = true;
+        diagnostic("session-refresh", refresh_started,
+                   {{"imageId", image_id}, {"revision", summary->revision}, {"objectCount", summary->object_count}});
+        if (context.progress) {
+            context.progress->report({axk::ProgressPhase::publishing, 1U, 1U, "Image changes committed", std::nullopt});
+        }
+
+        auto operations = Json::array();
+        for (const auto &operation : prepared->operations)
+            operations.push_back(operation_report_json(operation, document->logical_input_paths));
+        const auto issue_count =
+            summary->validation.info_count + summary->validation.warning_count + summary->validation.error_count;
+        diagnostic("total", operation_started,
+                   {{"imageId", image_id},
+                    {"revision", summary->revision},
+                    {"imageBytes", prepared->image_size_bytes},
+                    {"patchCount", patches.size()},
+                    {"patchBytes", patch_bytes}});
+        return Json{{"schemaVersion", "1.0"},
+                    {"kind", "ALTERATION"},
+                    {"imageId", image_id},
+                    {"revision", summary->revision},
+                    {"summary", alteration_summary(prepared->operations)},
+                    {"objectCount", summary->object_count},
+                    {"validation", {{"valid", summary->validation.valid()}, {"issueCount", issue_count}}},
+                    {"warnings", Json::array()},
+                    {"applied", !patches.empty()},
+                    {"operations", std::move(operations)}};
+    };
+    if (!registry.is_implemented("images.alter")) {
+        auto bound = registry.bind("images.alter", alter_session);
+        if (!bound)
+            return bound;
+    }
+    if (!registry.is_implemented("images.deletion.inspect")) {
+        auto bound = registry.bind(
+            "images.deletion.inspect", [&images](const Json &input, const OperationContext &context) -> Result<Json> {
+                try {
+                    const auto image_id = input.at("imageId").get<std::string>();
+                    const auto revision = input.at("expectedRevision").get<std::uint64_t>();
+                    const auto target = input.at("targetObjectId").get<std::string>();
+                    const auto included = input.at("includedDependentObjectIds").get<std::vector<std::string>>();
+                    auto plan = images.plan_deletion(image_id, context.owner_id, revision, target, included);
+                    if (!plan)
+                        return std::unexpected(plan.error());
+                    return deletion_inspection_json(plan->inspection);
+                } catch (const Json::exception &) {
+                    return std::unexpected(operation_error(
+                        "invalid_request",
+                        "imageId, expectedRevision, targetObjectId, and includedDependentObjectIds are required"));
                 }
-            } guard{images, image_id, context.owner_id, expected_revision, mutation_finished};
-            diagnostic("admission", admission_started, {{"imageId", image_id}, {"revision", expected_revision}});
-
-            const auto manifest_started = Clock::now();
-            auto document = load_manifest(input, context, sandbox, uploads);
-            if (!document)
-                return std::unexpected(document.error());
-            auto manifest = axk::parse_alteration_manifest(document->json.dump());
-            if (!manifest)
-                return std::unexpected(core_error(manifest.error(), mutation->source.relative_path));
-            const auto required_paths = external_paths(*manifest);
-            if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
-                return std::unexpected(admitted.error());
-            auto fingerprints = fingerprint_files(document->observed_paths, context.cancellation);
-            if (!fingerprints)
-                return std::unexpected(fingerprints.error());
-            diagnostic("manifest", manifest_started,
-                       {{"imageId", image_id},
-                        {"operationCount", manifest->operations.size()},
-                        {"inputCount", fingerprints->size()}});
-
-            const auto planning_started = Clock::now();
-            auto prepared = axk::detail::prepare_hds_alteration(mutation->target,
-                                                                std::filesystem::path{mutation->source.relative_path},
-                                                                *manifest, context.cancellation, context.progress);
-            if (!prepared)
-                return std::unexpected(core_error(prepared.error(), mutation->source.relative_path));
-            std::uint64_t patch_bytes{};
-            std::vector<AlterationJournalPatch> patches;
-            patches.reserve(prepared->patches.size());
-            for (auto &patch : prepared->patches) {
-                if (patch.replacement.size() > std::numeric_limits<std::uint64_t>::max() - patch_bytes)
-                    return std::unexpected(operation_error("image_operation_failed", "alteration patch size overflow"));
-                patch_bytes += patch.replacement.size();
-                patches.push_back({patch.offset, std::move(patch.original), std::move(patch.replacement)});
-            }
-            diagnostic("planning", planning_started,
-                       {{"imageId", image_id},
-                        {"imageBytes", prepared->image_size_bytes},
-                        {"patchCount", patches.size()},
-                        {"patchBytes", patch_bytes}});
-
-            const auto verification_started = Clock::now();
-            if (auto verified = verify_fingerprints(*fingerprints, context.cancellation); !verified)
-                return std::unexpected(verified.error());
-            if (auto verified = verify_sandbox_files(document->file_inputs, document->file_input_sha256, sandbox,
-                                                     context.cancellation);
-                !verified) {
-                return std::unexpected(verified.error());
-            }
-            diagnostic("input-verification", verification_started, {{"imageId", image_id}});
-
-            if (context.progress) {
-                context.progress->report(
-                    {axk::ProgressPhase::publishing, 0U, 1U, "Committing image changes", std::nullopt});
-            }
-            const auto journal_started = Clock::now();
-            if (auto applied =
-                    journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation);
-                !applied) {
-                return std::unexpected(applied.error());
-            }
-            diagnostic("journal-commit", journal_started,
-                       {{"imageId", image_id},
-                        {"patchCount", patches.size()},
-                        {"patchBytes", patch_bytes},
-                        {"cleanupPending", !journals.storage_ready()}});
-
-            const auto refresh_started = Clock::now();
-            mutation->target.reset();
-            auto summary = images.commit_mutation(image_id, context.owner_id, expected_revision, CancellationToken{});
-            if (!summary)
-                return std::unexpected(summary.error());
-            mutation_finished = true;
-            diagnostic(
-                "session-refresh", refresh_started,
-                {{"imageId", image_id}, {"revision", summary->revision}, {"objectCount", summary->object_count}});
-            if (context.progress) {
-                context.progress->report(
-                    {axk::ProgressPhase::publishing, 1U, 1U, "Image changes committed", std::nullopt});
-            }
-
-            auto operations = Json::array();
-            for (const auto &operation : prepared->operations)
-                operations.push_back(operation_report_json(operation, document->logical_input_paths));
-            const auto issue_count =
-                summary->validation.info_count + summary->validation.warning_count + summary->validation.error_count;
-            diagnostic("total", operation_started,
-                       {{"imageId", image_id},
-                        {"revision", summary->revision},
-                        {"imageBytes", prepared->image_size_bytes},
-                        {"patchCount", patches.size()},
-                        {"patchBytes", patch_bytes}});
-            return Json{{"schemaVersion", "1.0"},
-                        {"kind", "ALTERATION"},
-                        {"imageId", image_id},
-                        {"revision", summary->revision},
-                        {"summary", alteration_summary(prepared->operations)},
-                        {"objectCount", summary->object_count},
-                        {"validation", {{"valid", summary->validation.valid()}, {"issueCount", issue_count}}},
-                        {"warnings", Json::array()},
-                        {"applied", !patches.empty()},
-                        {"operations", std::move(operations)}};
-        });
+            });
+        if (!bound)
+            return bound;
+    }
+    if (!registry.is_implemented("images.delete")) {
+        auto bound = registry.bind(
+            "images.delete",
+            [&images, alter_session](const Json &input, const OperationContext &context) -> Result<Json> {
+                std::string image_id;
+                std::uint64_t revision{};
+                std::string target;
+                std::vector<std::string> included;
+                try {
+                    image_id = input.at("imageId").get<std::string>();
+                    revision = input.at("expectedRevision").get<std::uint64_t>();
+                    target = input.at("targetObjectId").get<std::string>();
+                    included = input.at("includedDependentObjectIds").get<std::vector<std::string>>();
+                } catch (const Json::exception &) {
+                    return std::unexpected(operation_error(
+                        "invalid_request",
+                        "imageId, expectedRevision, targetObjectId, and includedDependentObjectIds are required"));
+                }
+                auto plan = images.plan_deletion(image_id, context.owner_id, revision, target, included);
+                if (!plan)
+                    return std::unexpected(plan.error());
+                if (!plan->inspection.valid) {
+                    const auto message = plan->inspection.blockers.empty() ? "object deletion is blocked"
+                                                                           : plan->inspection.blockers.front().message;
+                    return std::unexpected(operation_error("deletion_blocked", message));
+                }
+                auto altered = alter_session({{"imageId", image_id},
+                                              {"expectedRevision", revision},
+                                              {"manifest", {{"inline", deletion_manifest_json(plan->manifest)}}},
+                                              {"inputBindings", Json::array()}},
+                                             context);
+                if (!altered)
+                    return std::unexpected(altered.error());
+                (*altered)["kind"] = "DELETION";
+                (*altered)["deletedObjectIds"] = plan->inspection.selected_object_ids;
+                (*altered)["freedClusters"] = plan->inspection.estimated_freed_clusters;
+                return altered;
+            });
+        if (!bound)
+            return bound;
+    }
+    return {};
 }

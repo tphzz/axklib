@@ -22,6 +22,7 @@ import type {
     JobState,
     ObjectPage,
     ObjectPageFilter,
+    ObjectDeletionInspection,
     OpenedImage,
     PackageImportDestination,
     PackageImportPlan,
@@ -87,6 +88,7 @@ interface ApiContentItem {
 
 type ApiObjectItem = components['schemas']['ImageObjectItem'];
 type ApiRelationshipItem = components['schemas']['ImageRelationshipItem'];
+type ApiObjectDeletionInspection = components['schemas']['ImageObjectDeletionInspection'];
 
 interface ApiPage<Item> {
     items: Item[];
@@ -444,6 +446,7 @@ export class HttpImageTransport implements ImageTransport {
             initialVolume,
             volumeMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.volumes'),
             partitionMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.partitions'),
+            objectDeletionAvailable: (summary.availableOperations ?? []).includes('images.alter.objects'),
             tree: [disk],
         };
     }
@@ -577,6 +580,42 @@ export class HttpImageTransport implements ImageTransport {
             partition_name: mutation.partitionName,
             new_partition_name: mutation.newPartitionName,
         });
+    }
+
+    async inspectObjectDeletion(
+        sessionId: number,
+        targetObjectId: string,
+        includedDependentObjectIds: string[],
+    ): Promise<ObjectDeletionInspection> {
+        const session = this.session(sessionId);
+        const result = await this.client.invoke<ApiObjectDeletionInspection>('images.deletion.inspect', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            targetObjectId,
+            includedDependentObjectIds,
+        });
+        if (this.isJob(result)) throw new Error('images.deletion.inspect unexpectedly returned a job');
+        return result;
+    }
+
+    async startObjectDeletion(
+        sessionId: number,
+        targetObjectId: string,
+        includedDependentObjectIds: string[],
+    ): Promise<JobState> {
+        const session = this.session(sessionId);
+        const result = await this.client.invoke<never>(
+            'images.delete',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                targetObjectId,
+                includedDependentObjectIds,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.isJob(result)) throw new Error('images.delete did not return a job');
+        return this.mapJob(result);
     }
 
     private async startImageMutation(sessionId: number, operation: Record<string, unknown>): Promise<JobState> {
