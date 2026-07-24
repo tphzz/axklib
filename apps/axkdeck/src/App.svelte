@@ -1006,9 +1006,14 @@
         if (openSessionId === null) return;
         if (selectedBankId !== item.objectId) await selectBank(item, false);
         if (openSessionId === null) return;
-        const memberIds = membersForBank(item.objectId)
-            .filter((member) => auditionableSampleObjectIds.has(member.objectId))
-            .map((member) => member.objectId);
+        const members = membersForBank(item.objectId);
+        const unavailableMember = members.find((member) => !auditionableSampleObjectIds.has(member.objectId));
+        if (unavailableMember) {
+            sampleBankPreviewMemberId = unavailableMember.objectId;
+            sourceStatus = `Sample Bank audition requires playable Wave Data for ${unavailableMember.name}`;
+            return;
+        }
+        const memberIds = members.map((member) => member.objectId);
         if (memberIds.length === 0) {
             sampleBankPreviewMemberId = '';
             sourceStatus = 'This Sample Bank has no playable Samples';
@@ -1017,11 +1022,14 @@
         const generation = ++sampleBankPlaybackGeneration;
         playingSampleBankId = item.objectId;
         sampleBankPreviewMemberId = memberIds[0] ?? '';
-        auditionController.playSequence(openSessionId, memberIds, ({ playedCount }) => {
+        auditionController.playSequence(openSessionId, memberIds, (result) => {
             if (generation !== sampleBankPlaybackGeneration) return;
             playingSampleBankId = '';
             resetSampleBankPreview(item.objectId);
-            if (playedCount === 0) sourceStatus = 'This Sample Bank has no playable Samples';
+            if (result.status === 'failed') sourceStatus = result.error;
+            else if (result.status === 'completed' && result.playedCount === 0) {
+                sourceStatus = 'This Sample Bank has no playable Samples';
+            }
         });
     }
 

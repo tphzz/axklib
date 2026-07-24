@@ -144,6 +144,7 @@ class MockOfflineAudioContext {
 }
 
 const events: string[] = [];
+const animationCallbacks: FrameRequestCallback[] = [];
 
 function descriptor(overrides: Partial<AuditionDescriptor> = {}): AuditionDescriptor {
     return {
@@ -187,6 +188,7 @@ describe('AuditionController', () => {
 
     function installAudio(): void {
         events.length = 0;
+        animationCallbacks.length = 0;
         MockAudioContext.instances = [];
         MockAudioContext.nextBuffers = [];
         MockAudioContext.initialState = 'suspended';
@@ -198,7 +200,10 @@ describe('AuditionController', () => {
         vi.stubGlobal('OfflineAudioContext', MockOfflineAudioContext);
         vi.stubGlobal(
             'requestAnimationFrame',
-            vi.fn(() => 1),
+            vi.fn((callback: FrameRequestCallback) => {
+                animationCallbacks.push(callback);
+                return animationCallbacks.length;
+            }),
         );
         vi.stubGlobal('cancelAnimationFrame', vi.fn());
     }
@@ -339,7 +344,7 @@ describe('AuditionController', () => {
         await controller.dispose();
     });
 
-    it('plays Sample Bank members once in order without repeating forward loops', async () => {
+    it('schedules Sample Bank members gaplessly on one temporary output context', async () => {
         installAudio();
         const transport = transportFor(
             descriptor({
@@ -351,78 +356,186 @@ describe('AuditionController', () => {
                 loopLengthFrames: 20,
             }),
         );
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(100, 1, 100), new MockAudioBuffer(50, 1, 100)];
         const completed = vi.fn();
         const controller = new AuditionController(transport, () => undefined);
 
         controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
-        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
-        expect(MockAudioBufferSourceNode.instances[0]?.loop).toBe(false);
-
-        MockAudioBufferSourceNode.instances[0]?.onended?.();
         await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+
+        expect(MockAudioContext.instances).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.sources).toHaveLength(2);
+        expect(MockAudioBufferSourceNode.instances[0]?.loop).toBe(false);
         expect(MockAudioBufferSourceNode.instances[1]?.loop).toBe(false);
-        expect(MockAudioContext.instances).toHaveLength(2);
-        expect(MockAudioContext.instances[0]?.state).toBe('closed');
-        expect(MockAudioContext.instances[1]?.state).toBe('running');
-        expect(events.indexOf('close')).toBeLessThan(events.lastIndexOf('context'));
+        expect(MockAudioBufferSourceNode.instances[0]?.start).toHaveBeenCalledWith(1.01);
+        expect(MockAudioBufferSourceNode.instances[1]?.start).toHaveBeenCalledWith(2.01);
+        expect(MockAudioContext.instances[0]?.gains).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.state).toBe('running');
 
         MockAudioBufferSourceNode.instances[1]?.onended?.();
-        await vi.waitFor(() => expect(completed).toHaveBeenCalledWith({ playedCount: 2, skippedCount: 0 }));
+        await vi.waitFor(() =>
+            expect(completed).toHaveBeenCalledWith({ status: 'completed', playedCount: 2, skippedCount: 0 }),
+        );
         expect(transport.prepareAudition).toHaveBeenNthCalledWith(1, 1, 'SBNK-1');
         expect(transport.prepareAudition).toHaveBeenNthCalledWith(2, 1, 'SBNK-2');
-        expect(MockAudioContext.instances[1]?.state).toBe('closed');
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
         await controller.dispose();
     });
 
-    it('skips unplayable Sample Bank members and continues the sequence', async () => {
+    it('moves Sample Bank state and playhead at the audible scheduled boundary', async () => {
+        installAudio();
+        const transport = transportFor(
+            descriptor({
+                frameCount: 100,
+                sampleRate: 100,
+                wavSizeBytes: 244,
+            }),
+        );
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(100, 1, 100), new MockAudioBuffer(100, 1, 100)];
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2']);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+        expect(updates.at(-1)).toEqual({ objectId: 'SBNK-1', status: 'playing', playheadFrame: 0 });
+
+        MockAudioContext.instances[0]!.currentTime = 2.26;
+        animationCallbacks.at(-1)?.(0);
+
+        expect(updates.at(-1)).toEqual({ objectId: 'SBNK-2', status: 'playing', playheadFrame: 25 });
+        await controller.dispose();
+    });
+
+    it('does not let an ending sequence settle the completion callback of its replacement', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        const firstCompleted = vi.fn();
+        const secondCompleted = vi.fn();
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1'], firstCompleted);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
+        MockAudioBufferSourceNode.instances[0]?.onended?.();
+
+        controller.playSequence(1, ['SBNK-2'], secondCompleted);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+        await Promise.resolve();
+
+        expect(firstCompleted).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 1 });
+        expect(secondCompleted).not.toHaveBeenCalled();
+
+        MockAudioBufferSourceNode.instances[1]?.onended?.();
+        await vi.waitFor(() =>
+            expect(secondCompleted).toHaveBeenCalledWith({ status: 'completed', playedCount: 1, skippedCount: 0 }),
+        );
+        await controller.dispose();
+    });
+
+    it('aborts the complete Sample Bank sequence when one member cannot be prepared', async () => {
         installAudio();
         const transport = transportFor(descriptor());
         vi.mocked(transport.prepareAudition).mockRejectedValueOnce(new Error('Unsupported Sample'));
+        const updates: AuditionState[] = [];
         const completed = vi.fn();
-        const controller = new AuditionController(transport, () => undefined);
+        const controller = new AuditionController(transport, (state) => updates.push(state));
 
         controller.playSequence(1, ['SBNK-BROKEN', 'SBNK-OK'], completed);
-        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
-        MockAudioBufferSourceNode.instances[0]?.onended?.();
 
-        await vi.waitFor(() => expect(completed).toHaveBeenCalledWith({ playedCount: 1, skippedCount: 1 }));
-        expect(transport.prepareAudition).toHaveBeenCalledTimes(2);
-        await controller.dispose();
-    });
-
-    it('continues a Sample Bank sequence when closing one member context fails', async () => {
-        installAudio();
-        MockAudioContext.closeFailuresRemaining = 1;
-        const transport = transportFor(descriptor());
-        const completed = vi.fn();
-        const controller = new AuditionController(transport, () => undefined);
-
-        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
-        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
-        MockAudioBufferSourceNode.instances[0]?.onended?.();
-        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
-        MockAudioBufferSourceNode.instances[1]?.onended?.();
-
-        await vi.waitFor(() => expect(completed).toHaveBeenCalledWith({ playedCount: 2, skippedCount: 0 }));
-        expect(MockAudioContext.instances).toHaveLength(2);
-        expect(MockAudioContext.instances[1]?.state).toBe('closed');
-        await controller.dispose();
-    });
-
-    it('does not advance a Sample Bank sequence after explicit stop', async () => {
-        installAudio();
-        const transport = transportFor(descriptor());
-        const completed = vi.fn();
-        const controller = new AuditionController(transport, () => undefined);
-
-        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
-        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
-        await controller.stop();
-        MockAudioBufferSourceNode.instances[0]?.onended?.();
-        await Promise.resolve();
-
+        await vi.waitFor(() =>
+            expect(completed).toHaveBeenCalledWith({
+                status: 'failed',
+                playedCount: 0,
+                skippedCount: 2,
+                error: 'Unsupported Sample',
+                failedObjectId: 'SBNK-BROKEN',
+            }),
+        );
+        expect(MockAudioBufferSourceNode.instances).toHaveLength(0);
         expect(transport.prepareAudition).toHaveBeenCalledTimes(1);
-        expect(completed).not.toHaveBeenCalled();
+        expect(updates.at(-1)).toEqual({
+            objectId: 'SBNK-BROKEN',
+            status: 'failed',
+            playheadFrame: 0,
+            error: 'Unsupported Sample',
+        });
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('rejects a Sample Bank above its aggregate decoded working-set budget before scheduling audio', async () => {
+        installAudio();
+        const transport = transportFor(descriptor({ frameCount: 4, wavSizeBytes: 52 }));
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(4), new MockAudioBuffer(4)];
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, () => undefined, undefined, undefined, {
+            maximumSequenceWorkingSetBytes: 80,
+        });
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
+
+        await vi.waitFor(() =>
+            expect(completed).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    status: 'failed',
+                    playedCount: 0,
+                    skippedCount: 2,
+                    error: 'Sample Bank audio is too large to audition safely',
+                    failedObjectId: 'SBNK-2',
+                }),
+            ),
+        );
+        expect(MockAudioBufferSourceNode.instances).toHaveLength(0);
+        expect(transport.readAuditionAudio).toHaveBeenCalledTimes(1);
+        expect(MockAudioContext.instances).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('stops every scheduled Sample Bank member before closing the sequence context', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+        await controller.stop();
+
+        expect(MockAudioBufferSourceNode.instances[0]?.stop).toHaveBeenCalledWith(1.005);
+        expect(MockAudioBufferSourceNode.instances[1]?.stop).toHaveBeenCalledWith(1.005);
+        expect(transport.prepareAudition).toHaveBeenCalledTimes(2);
+        expect(completed).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 2 });
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('cancels Sample Bank preparation and settles without scheduling audio', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        vi.mocked(transport.readAuditionAudio).mockImplementation(
+            async (_auditionId, _wavSizeBytes, signal): Promise<ArrayBuffer> =>
+                new Promise<ArrayBuffer>((_resolve, reject) => {
+                    signal?.addEventListener(
+                        'abort',
+                        () => {
+                            const error = new Error('cancelled');
+                            error.name = 'AbortError';
+                            reject(error);
+                        },
+                        { once: true },
+                    );
+                }),
+        );
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
+        await vi.waitFor(() => expect(transport.readAuditionAudio).toHaveBeenCalledOnce());
+        await controller.stop();
+
+        expect(completed).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 2 });
+        expect(MockAudioBufferSourceNode.instances).toHaveLength(0);
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
         await controller.dispose();
     });
 

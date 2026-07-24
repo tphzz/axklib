@@ -24,15 +24,16 @@ export interface AuditionDiagnosticEvent extends Record<string, unknown> {
     elapsedMs: number;
 }
 
-export interface AuditionSequenceResult {
-    playedCount: number;
-    skippedCount: number;
-}
+export type AuditionSequenceResult =
+    | { status: 'completed'; playedCount: number; skippedCount: 0 }
+    | { status: 'failed'; playedCount: 0; skippedCount: number; error: string; failedObjectId: string }
+    | { status: 'cancelled'; playedCount: 0; skippedCount: number };
 
 interface AuditionControllerOptions {
     cacheBudgetBytes?: number;
     maximumCacheEntries?: number;
     maximumWorkingSetBytes?: number;
+    maximumSequenceWorkingSetBytes?: number;
 }
 
 interface PlaybackRun {
@@ -41,7 +42,6 @@ interface PlaybackRun {
     startedAt: number;
     diagnosticsEnabled: boolean;
     oneShot: boolean;
-    onfinish?: (played: boolean) => void;
 }
 
 interface CachedAudition {
@@ -68,6 +68,35 @@ interface ActivePlayback {
     startTime: number;
     timelineDescriptor: AuditionDescriptor;
     animationFrame?: number;
+}
+
+interface ScheduledSequenceSegment {
+    entry: CachedAudition;
+    source: AudioBufferSourceNode;
+    startTime: number;
+    endTime: number;
+    startFrame: number;
+    timelineDescriptor: AuditionDescriptor;
+}
+
+interface ActiveSequence {
+    segments: ScheduledSequenceSegment[];
+    gain: GainNode;
+    completionGeneration: number;
+    animationFrame?: number;
+    displayedObjectId?: string;
+}
+
+interface SequenceCompletion {
+    generation: number;
+    memberCount: number;
+    oncomplete: (result: AuditionSequenceResult) => void;
+}
+
+interface WorkingSetPolicy {
+    retainedDecodedBytes: number;
+    maximumBytes: number;
+    overflowMessage: string;
 }
 
 type AuditionDiagnosticSink = (event: AuditionDiagnosticEvent) => void;
@@ -124,11 +153,14 @@ export class AuditionController {
     private readonly cacheBudgetBytes: number;
     private readonly maximumCacheEntries: number;
     private readonly maximumWorkingSetBytes: number;
+    private readonly maximumSequenceWorkingSetBytes: number;
     private readonly cache = new Map<string, CachedAudition>();
     private readonly pending = new Map<string, PendingAudition>();
     private readonly closingContexts = new Set<Promise<void>>();
     private context?: AudioContext;
     private active?: ActivePlayback;
+    private sequence?: ActiveSequence;
+    private sequenceCompletion?: SequenceCompletion;
     private activeRequestKey?: string;
     private cacheBytes = 0;
     private generation = 0;
@@ -145,6 +177,10 @@ export class AuditionController {
         this.cacheBudgetBytes = Math.max(0, options.cacheBudgetBytes ?? defaultCacheBudgetBytes);
         this.maximumCacheEntries = Math.max(0, options.maximumCacheEntries ?? defaultMaximumCacheEntries);
         this.maximumWorkingSetBytes = Math.max(0, options.maximumWorkingSetBytes ?? defaultMaximumWorkingSetBytes);
+        this.maximumSequenceWorkingSetBytes = Math.max(
+            0,
+            options.maximumSequenceWorkingSetBytes ?? this.maximumWorkingSetBytes,
+        );
     }
 
     async prefetch(sessionId: number, objectId: string): Promise<void> {
@@ -163,7 +199,8 @@ export class AuditionController {
 
     async play(sessionId: number, objectId: string): Promise<void> {
         this.sequenceGeneration += 1;
-        await this.playOne(sessionId, objectId, false);
+        this.cancelSequenceCompletion();
+        await this.playOne(sessionId, objectId);
     }
 
     playSequence(
@@ -172,64 +209,118 @@ export class AuditionController {
         oncomplete: (result: AuditionSequenceResult) => void = () => undefined,
     ): void {
         const sequenceGeneration = ++this.sequenceGeneration;
+        this.cancelSequenceCompletion();
+        this.sequenceCompletion = { generation: sequenceGeneration, memberCount: objectIds.length, oncomplete };
         if (objectIds.length === 0) {
             this.generation += 1;
             this.cancelActiveRequest();
+            const run = this.run;
             this.releaseActive('replaced');
+            this.releaseSequence('replaced');
             this.run = undefined;
+            this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
+            void this.retireOutputContext('replaced', run);
+            this.settleSequence(sequenceGeneration, { status: 'completed', playedCount: 0, skippedCount: 0 });
+            return;
         }
-        this.playSequenceItem(sessionId, objectIds, sequenceGeneration, 0, 0, 0, oncomplete);
+        void this.prepareAndStartSequence(sessionId, objectIds, sequenceGeneration);
     }
 
-    private playSequenceItem(
+    private async prepareAndStartSequence(
         sessionId: number,
         objectIds: readonly string[],
         sequenceGeneration: number,
-        index: number,
-        playedCount: number,
-        skippedCount: number,
-        oncomplete: (result: AuditionSequenceResult) => void,
-    ): void {
-        if (sequenceGeneration !== this.sequenceGeneration) return;
-        const objectId = objectIds[index];
-        if (!objectId) {
+    ): Promise<void> {
+        const generation = ++this.generation;
+        this.cancelActiveRequest();
+        const previousRun = this.run;
+        this.releaseActive('replaced');
+        this.releaseSequence('replaced');
+        const previousContextClosed = this.retireOutputContext('replaced', previousRun);
+        const firstObjectId = objectIds[0]!;
+        const run: PlaybackRun = {
+            id: newPlaybackId(),
+            objectId: firstObjectId,
+            startedAt: monotonicNow(),
+            diagnosticsEnabled: this.detailedDiagnosticsEnabled(),
+            oneShot: true,
+        };
+        this.run = run;
+        this.emit(run, 'sequence_requested', { sessionId, memberCount: objectIds.length });
+        this.update({ objectId: firstObjectId, status: 'preparing', playheadFrame: 0 });
+
+        let failedObjectId = firstObjectId;
+        try {
+            const context = this.ensureContext();
+            const resumed = this.resumeContext(context, run);
+            await Promise.all([previousContextClosed, resumed]);
+            const entries: CachedAudition[] = [];
+            let retainedDecodedBytes = 0;
+            for (const objectId of objectIds) {
+                if (generation !== this.generation || sequenceGeneration !== this.sequenceGeneration) return;
+                failedObjectId = objectId;
+                const requestKey = this.cacheKey(sessionId, objectId);
+                this.activeRequestKey = requestKey;
+                const entry = await this.loadAudition(sessionId, objectId, context, false, run, {
+                    retainedDecodedBytes,
+                    maximumBytes: this.maximumSequenceWorkingSetBytes,
+                    overflowMessage: 'Sample Bank audio is too large to audition safely',
+                });
+                if (generation !== this.generation || sequenceGeneration !== this.sequenceGeneration) return;
+                if (!entry) throw new Error('Sample Bank member audio could not be decoded');
+                if (retainedDecodedBytes + entry.weightBytes > this.maximumSequenceWorkingSetBytes) {
+                    throw new Error('Sample Bank audio is too large to audition safely');
+                }
+                retainedDecodedBytes += entry.weightBytes;
+                entries.push(entry);
+            }
+            this.activeRequestKey = undefined;
+            if (generation !== this.generation || sequenceGeneration !== this.sequenceGeneration) return;
+            this.emit(run, 'sequence_prepared', {
+                memberCount: entries.length,
+                decodedBytes: retainedDecodedBytes,
+                preparationDurationMs: Math.round(monotonicNow() - run.startedAt),
+            });
+            this.startSequence(entries, run, context, sequenceGeneration);
+        } catch (error) {
+            if (
+                generation !== this.generation ||
+                sequenceGeneration !== this.sequenceGeneration ||
+                isAbortError(error)
+            ) {
+                return;
+            }
+            this.activeRequestKey = undefined;
+            const message = userFacingMessage(error);
+            this.emit(run, 'sequence_failed', { message, failedObjectId }, 'error');
+            this.releaseSequence('failed');
             this.run = undefined;
-            this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
-            oncomplete({ playedCount, skippedCount });
-            return;
+            await this.retireOutputContext('failed', run);
+            this.update({ objectId: failedObjectId, status: 'failed', playheadFrame: 0, error: message });
+            this.settleSequence(sequenceGeneration, {
+                status: 'failed',
+                playedCount: 0,
+                skippedCount: objectIds.length,
+                error: message,
+                failedObjectId,
+            });
         }
-        void this.playOne(sessionId, objectId, true, (played) => {
-            this.playSequenceItem(
-                sessionId,
-                objectIds,
-                sequenceGeneration,
-                index + 1,
-                playedCount + (played ? 1 : 0),
-                skippedCount + (played ? 0 : 1),
-                oncomplete,
-            );
-        });
     }
 
-    private async playOne(
-        sessionId: number,
-        objectId: string,
-        oneShot: boolean,
-        onfinish?: (played: boolean) => void,
-    ): Promise<void> {
+    private async playOne(sessionId: number, objectId: string): Promise<void> {
         const generation = ++this.generation;
         const requestKey = this.cacheKey(sessionId, objectId);
         this.cancelActiveRequest(requestKey);
         const previousRun = this.run;
         this.releaseActive('replaced');
+        this.releaseSequence('replaced');
         const previousContextClosed = this.retireOutputContext('replaced', previousRun);
         const run: PlaybackRun = {
             id: newPlaybackId(),
             objectId,
             startedAt: monotonicNow(),
             diagnosticsEnabled: this.detailedDiagnosticsEnabled(),
-            oneShot,
-            onfinish,
+            oneShot: false,
         };
         this.run = run;
         this.activeRequestKey = requestKey;
@@ -268,17 +359,23 @@ export class AuditionController {
         this.sequenceGeneration += 1;
         this.generation += 1;
         this.cancelActiveRequest();
+        this.cancelSequenceCompletion();
         const run = this.run;
         if (run) this.emit(run, 'playback_stop_requested');
-        const hadActivePlayback = Boolean(this.active);
+        const hadActivePlayback = Boolean(this.active || this.sequence);
         this.releaseActive('stopped');
+        this.releaseSequence('stopped');
         this.run = undefined;
         this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
         await this.retireOutputContext('stopped', run, hadActivePlayback ? fadeSeconds : 0);
     }
 
     async invalidateSession(sessionId: number): Promise<void> {
-        if (this.active?.entry.sessionId === sessionId || this.activeRequestKey?.startsWith(`${sessionId}:`)) {
+        if (
+            this.active?.entry.sessionId === sessionId ||
+            this.sequence?.segments.some((segment) => segment.entry.sessionId === sessionId) ||
+            this.activeRequestKey?.startsWith(`${sessionId}:`)
+        ) {
             await this.stop();
         }
         const interrupted: Promise<CachedAudition | null>[] = [];
@@ -332,6 +429,7 @@ export class AuditionController {
         context: BaseAudioContext | undefined,
         speculative: boolean,
         run?: PlaybackRun,
+        workingSetPolicy?: WorkingSetPolicy,
     ): Promise<CachedAudition | null> {
         const key = this.cacheKey(sessionId, objectId);
         const cached = this.cache.get(key);
@@ -354,7 +452,15 @@ export class AuditionController {
             abort: new AbortController(),
             promise: Promise.resolve(null),
         };
-        pending.promise = this.fetchAndDecode(sessionId, objectId, key, context, pending, run).finally(() => {
+        pending.promise = this.fetchAndDecode(
+            sessionId,
+            objectId,
+            key,
+            context,
+            pending,
+            run,
+            workingSetPolicy,
+        ).finally(() => {
             if (this.pending.get(key) === pending) this.pending.delete(key);
         });
         this.pending.set(key, pending);
@@ -369,6 +475,7 @@ export class AuditionController {
         context: BaseAudioContext | undefined,
         pending: PendingAudition,
         run?: PlaybackRun,
+        workingSetPolicy?: WorkingSetPolicy,
     ): Promise<CachedAudition | null> {
         let auditionId: string | undefined;
         try {
@@ -395,9 +502,11 @@ export class AuditionController {
 
             const decoder = context ?? new OfflineAudioContext(descriptor.channels, 1, descriptor.sampleRate);
             const estimatedBytes = this.estimatedDecodedBytes(descriptor, decoder.sampleRate);
-            const workingSetBytes = descriptor.wavSizeBytes + estimatedBytes;
-            if (!Number.isSafeInteger(workingSetBytes) || workingSetBytes > this.maximumWorkingSetBytes) {
-                throw new Error('Audio is too large to audition safely');
+            const retainedDecodedBytes = workingSetPolicy?.retainedDecodedBytes ?? 0;
+            const maximumBytes = workingSetPolicy?.maximumBytes ?? this.maximumWorkingSetBytes;
+            const workingSetBytes = retainedDecodedBytes + descriptor.wavSizeBytes + estimatedBytes;
+            if (!Number.isSafeInteger(workingSetBytes) || workingSetBytes > maximumBytes) {
+                throw new Error(workingSetPolicy?.overflowMessage ?? 'Audio is too large to audition safely');
             }
             if (pending.speculative && estimatedBytes > this.cacheBudgetBytes) {
                 if (run) this.emit(run, 'audio_prefetch_skipped', { estimatedDecodedBytes: estimatedBytes });
@@ -511,6 +620,66 @@ export class AuditionController {
         this.scheduleCursor(active);
     }
 
+    private startSequence(
+        entries: readonly CachedAudition[],
+        run: PlaybackRun,
+        context: AudioContext,
+        completionGeneration: number,
+    ): void {
+        if (context !== this.context || context.state === 'closed') {
+            throw new Error('Audio output became unavailable before Sample Bank playback started');
+        }
+        const gain = context.createGain();
+        gain.connect(context.destination);
+        const sequenceStart = context.currentTime + startLeadSeconds;
+        gain.gain.value = 0;
+        gain.gain.setValueAtTime(0, context.currentTime);
+        gain.gain.setValueAtTime(0, sequenceStart);
+        gain.gain.linearRampToValueAtTime(1, sequenceStart + fadeSeconds);
+
+        let memberStart = sequenceStart;
+        const segments = entries.map((entry) => {
+            if (!Number.isFinite(entry.buffer.duration) || entry.buffer.duration <= 0) {
+                throw new Error('Sample Bank member duration is invalid');
+            }
+            const source = context.createBufferSource();
+            source.buffer = entry.buffer;
+            source.loop = false;
+            source.connect(gain);
+            const startFrame = initialPlaybackFrame(entry.descriptor);
+            const timelineDescriptor = isForwardLoop(entry.descriptor)
+                ? { ...entry.descriptor, loopMode: 0, loopStartFrame: 0, loopLengthFrames: 0 }
+                : entry.descriptor;
+            const segment: ScheduledSequenceSegment = {
+                entry,
+                source,
+                startTime: memberStart,
+                endTime: memberStart + entry.buffer.duration,
+                startFrame,
+                timelineDescriptor,
+            };
+            memberStart = segment.endTime;
+            return segment;
+        });
+        const sequence: ActiveSequence = { segments, gain, completionGeneration };
+        this.sequence = sequence;
+        for (const [index, segment] of segments.entries()) {
+            segment.source.onended = () => {
+                segment.source.disconnect();
+                if (index === segments.length - 1) void this.handleSequenceEnded(sequence, run);
+            };
+            segment.source.start(segment.startTime);
+        }
+        this.emit(run, 'sequence_scheduled', {
+            memberCount: segments.length,
+            startLeadMs: startLeadSeconds * 1000,
+            attackMs: fadeSeconds * 1000,
+            durationSeconds: memberStart - sequenceStart,
+        });
+        this.update({ objectId: entries[0]!.objectId, status: 'playing', playheadFrame: segments[0]!.startFrame });
+        this.scheduleSequenceCursor(sequence, run);
+    }
+
     private scheduleCursor(active: ActivePlayback): void {
         if (typeof requestAnimationFrame !== 'function') return;
         const tick = () => {
@@ -523,6 +692,29 @@ export class AuditionController {
             active.animationFrame = requestAnimationFrame(tick);
         };
         active.animationFrame = requestAnimationFrame(tick);
+    }
+
+    private scheduleSequenceCursor(sequence: ActiveSequence, run: PlaybackRun): void {
+        if (typeof requestAnimationFrame !== 'function') return;
+        const tick = () => {
+            if (this.sequence !== sequence) return;
+            const audibleTime = this.audibleContextTime();
+            const segment =
+                sequence.segments.find((candidate) => audibleTime < candidate.endTime) ?? sequence.segments.at(-1);
+            if (segment) {
+                const elapsed = Math.max(0, audibleTime - segment.startTime);
+                const frame = playbackFrameAtTime(segment.timelineDescriptor, segment.startFrame, elapsed);
+                if (frame !== null) {
+                    if (sequence.displayedObjectId !== segment.entry.objectId) {
+                        sequence.displayedObjectId = segment.entry.objectId;
+                        this.emit(run, 'sequence_member_changed', { memberObjectId: segment.entry.objectId });
+                    }
+                    this.update({ objectId: segment.entry.objectId, status: 'playing', playheadFrame: frame });
+                }
+            }
+            sequence.animationFrame = requestAnimationFrame(tick);
+        };
+        sequence.animationFrame = requestAnimationFrame(tick);
     }
 
     private audibleContextTime(): number {
@@ -568,6 +760,31 @@ export class AuditionController {
         if (this.run) this.emit(this.run, 'playback_released', { reason, transient: active.entry.transient });
     }
 
+    private releaseSequence(reason: string): void {
+        const sequence = this.sequence;
+        if (!sequence) return;
+        this.sequence = undefined;
+        if (sequence.animationFrame !== undefined && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(sequence.animationFrame);
+        }
+        const context = this.context;
+        const stopTime = context ? context.currentTime + fadeSeconds : 0;
+        if (context) {
+            sequence.gain.gain.cancelScheduledValues(context.currentTime);
+            sequence.gain.gain.setValueAtTime(sequence.gain.gain.value, context.currentTime);
+            sequence.gain.gain.linearRampToValueAtTime(0, stopTime);
+        }
+        for (const segment of sequence.segments) {
+            segment.source.onended = () => segment.source.disconnect();
+            try {
+                segment.source.stop(stopTime);
+            } catch {
+                segment.source.disconnect();
+            }
+        }
+        if (this.run) this.emit(this.run, 'sequence_released', { reason, memberCount: sequence.segments.length });
+    }
+
     private async handleEnded(active: ActivePlayback, run: PlaybackRun): Promise<void> {
         active.source.disconnect();
         active.gain.disconnect();
@@ -580,7 +797,25 @@ export class AuditionController {
         this.run = undefined;
         this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
         await this.retireOutputContext('ended', run);
-        run.onfinish?.(true);
+    }
+
+    private async handleSequenceEnded(sequence: ActiveSequence, run: PlaybackRun): Promise<void> {
+        if (this.sequence !== sequence) return;
+        this.sequence = undefined;
+        if (sequence.animationFrame !== undefined && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(sequence.animationFrame);
+        }
+        for (const segment of sequence.segments) segment.source.disconnect();
+        sequence.gain.disconnect();
+        this.emit(run, 'sequence_ended', { memberCount: sequence.segments.length });
+        this.run = undefined;
+        this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
+        await this.retireOutputContext('ended', run);
+        this.settleSequence(sequence.completionGeneration, {
+            status: 'completed',
+            playedCount: sequence.segments.length,
+            skippedCount: 0,
+        });
     }
 
     private retireOutputContext(reason: string, run?: PlaybackRun, delaySeconds = 0): Promise<void> {
@@ -627,6 +862,23 @@ export class AuditionController {
         this.cacheBytes -= entry.weightBytes;
     }
 
+    private settleSequence(generation: number, result: AuditionSequenceResult): void {
+        const completion = this.sequenceCompletion;
+        if (!completion || completion.generation !== generation) return;
+        this.sequenceCompletion = undefined;
+        completion.oncomplete(result);
+    }
+
+    private cancelSequenceCompletion(): void {
+        const completion = this.sequenceCompletion;
+        if (!completion) return;
+        this.settleSequence(completion.generation, {
+            status: 'cancelled',
+            playedCount: 0,
+            skippedCount: completion.memberCount,
+        });
+    }
+
     private cancelActiveRequest(replacementKey?: string): void {
         if (!this.activeRequestKey) return;
         if (this.activeRequestKey === replacementKey) return;
@@ -665,11 +917,6 @@ export class AuditionController {
         this.emit(run, 'playback_failed', { message }, 'error');
         this.run = undefined;
         await this.retireOutputContext('failed', run);
-        if (run.onfinish) {
-            this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
-            run.onfinish(false);
-            return;
-        }
         this.update({ objectId, status: 'failed', playheadFrame: 0, error: message });
     }
 
