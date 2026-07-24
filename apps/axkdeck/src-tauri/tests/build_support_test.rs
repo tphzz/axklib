@@ -61,6 +61,33 @@ fn sidecar_name_carries_the_tauri_target_triple() {
 }
 
 #[test]
+fn native_audio_drop_capability_allows_only_bounded_streaming_reads() {
+    let capability_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json");
+    let capability: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(capability_path).expect("read default Tauri capability"),
+    )
+    .expect("parse default Tauri capability");
+    let fs_permissions = capability["permissions"]
+        .as_array()
+        .expect("capability permissions")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|permission| permission.starts_with("fs:"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        fs_permissions,
+        [
+            "fs:allow-lstat",
+            "fs:allow-open",
+            "fs:allow-fstat",
+            "fs:allow-seek",
+            "fs:allow-read",
+        ]
+    );
+}
+
+#[test]
 fn build_identity_comes_from_the_native_generated_contract() {
     let directory = temporary_directory("identity");
     std::fs::create_dir_all(&directory).expect("create test directory");

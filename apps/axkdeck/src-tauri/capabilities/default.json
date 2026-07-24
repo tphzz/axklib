@@ -9,6 +9,10 @@
     "core:window:allow-set-min-size",
     "core:window:allow-set-size",
     "log:default",
-    "fs:allow-read-file"
+    "fs:allow-lstat",
+    "fs:allow-open",
+    "fs:allow-fstat",
+    "fs:allow-seek",
+    "fs:allow-read"
   ]
 }
