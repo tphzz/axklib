@@ -233,6 +233,140 @@ TEST(RelationshipGraph, PrefersUniqueCrossFolderLinkBeforeDuplicateLocalNames) {
     EXPECT_EQ(edges.front()->basis, "sbnk-member-link-id-only-iso-cross-folder-name-mismatch");
 }
 
+TEST(RelationshipGraph, TreatsExactMemberIdentitiesAsKnownWithinEachIsoRawVolume) {
+    axk::ObjectCatalog catalog;
+    const auto add_sample = [&](std::string key, std::string folder) {
+        axk::CurrentSbnk current_sample;
+        current_sample.left.wave_data_name = "PAD-L";
+        current_sample.left.smpl_link_id = 42U;
+        current_sample.right = axk::CurrentSbnkMember{.wave_data_name = "PAD-R", .smpl_link_id = 43U};
+        axk::DecodedObject sample;
+        sample.header.type = axk::ObjectType::sbnk;
+        sample.header.name = "PAD-S";
+        sample.payload = std::move(current_sample);
+        const axk::ObjectPlacement placement{axk::PartitionIndex{0}, "GROUP", axk::SfsId{1}, "Volume", "SBNK", "PAD-S",
+                                             std::move(folder)};
+        catalog.objects.emplace_back(std::move(key), axk::PartitionIndex{0}, axk::SfsId{1}, "iso:GROUP",
+                                     std::move(sample), placement, std::vector<std::byte>{}, std::vector{placement},
+                                     axk::PlacementResolution::exact);
+    };
+    const auto add_wave_data = [&](std::string key, std::string name, std::uint32_t link, std::string folder) {
+        axk::CurrentSmpl current_wave_data{};
+        current_wave_data.link_id.value = link;
+        axk::DecodedObject wave_data;
+        wave_data.header.type = axk::ObjectType::smpl;
+        wave_data.header.name = std::move(name);
+        wave_data.payload = std::move(current_wave_data);
+        const auto entry_name = wave_data.header.name;
+        const axk::ObjectPlacement placement{
+            axk::PartitionIndex{0}, "GROUP", axk::SfsId{1}, "Volume", "SMPL", entry_name, std::move(folder)};
+        catalog.objects.emplace_back(std::move(key), axk::PartitionIndex{0}, axk::SfsId{2}, "iso:GROUP",
+                                     std::move(wave_data), placement, std::vector<std::byte>{}, std::vector{placement},
+                                     axk::PlacementResolution::exact);
+    };
+
+    add_sample("sample-f001", "GROUP/F001");
+    add_sample("sample-f004", "GROUP/F004");
+    add_wave_data("left-f001", "PAD-L", 42U, "GROUP/F001");
+    add_wave_data("right-f001", "PAD-R", 43U, "GROUP/F001");
+    add_wave_data("left-f004", "PAD-L", 42U, "GROUP/F004");
+    add_wave_data("right-f004", "PAD-R", 43U, "GROUP/F004");
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    const auto assert_member = [&](std::string_view source, std::string_view type, std::string_view target) {
+        const auto found = std::ranges::find_if(graph.relationships, [&](const axk::Relationship &relationship) {
+            return relationship.source_key == source && relationship.type == type;
+        });
+        ASSERT_NE(found, graph.relationships.end());
+        ASSERT_TRUE(found->target_key);
+        EXPECT_EQ(*found->target_key, target);
+        EXPECT_EQ(found->quality, axk::RelationshipQuality::known);
+        EXPECT_EQ(found->basis, "sbnk-member-link+name+same-folder");
+        EXPECT_EQ(found->candidate_keys.size(), 2U);
+    };
+    assert_member("sample-f001", "SBNK_LEFT_MEMBER_TO_SMPL", "left-f001");
+    assert_member("sample-f001", "SBNK_RIGHT_MEMBER_TO_SMPL", "right-f001");
+    assert_member("sample-f004", "SBNK_LEFT_MEMBER_TO_SMPL", "left-f004");
+    assert_member("sample-f004", "SBNK_RIGHT_MEMBER_TO_SMPL", "right-f004");
+}
+
+TEST(RelationshipGraph, KeepsDuplicateExactMembersWithinOneIsoRawVolumeTentative) {
+    axk::ObjectCatalog catalog;
+    const axk::ObjectPlacement sample_placement{
+        axk::PartitionIndex{0}, "GROUP", axk::SfsId{1}, "Volume", "SBNK", "Sample", "GROUP/F001"};
+    axk::CurrentSbnk current_sample;
+    current_sample.left.wave_data_name = "DUPLICATE";
+    current_sample.left.smpl_link_id = 42U;
+    axk::DecodedObject sample;
+    sample.header.type = axk::ObjectType::sbnk;
+    sample.header.name = "Sample";
+    sample.payload = std::move(current_sample);
+    catalog.objects.emplace_back("sample", axk::PartitionIndex{0}, axk::SfsId{1}, "iso:GROUP", std::move(sample),
+                                 sample_placement, std::vector<std::byte>{}, std::vector{sample_placement},
+                                 axk::PlacementResolution::exact);
+
+    for (const auto *key : {"wave-a", "wave-b"}) {
+        axk::CurrentSmpl current_wave_data{};
+        current_wave_data.link_id.value = 42U;
+        axk::DecodedObject wave_data;
+        wave_data.header.type = axk::ObjectType::smpl;
+        wave_data.header.name = "DUPLICATE";
+        wave_data.payload = std::move(current_wave_data);
+        const axk::ObjectPlacement placement{
+            axk::PartitionIndex{0}, "GROUP", axk::SfsId{1}, "Volume", "SMPL", "DUPLICATE", "GROUP/F001"};
+        catalog.objects.emplace_back(key, axk::PartitionIndex{0}, axk::SfsId{2}, "iso:GROUP", std::move(wave_data),
+                                     placement, std::vector<std::byte>{}, std::vector{placement},
+                                     axk::PlacementResolution::exact);
+    }
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    EXPECT_FALSE(graph.relationships.front().target_key);
+    EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::tentative);
+    EXPECT_EQ(graph.relationships.front().basis, "sbnk-member-link+name-ambiguous");
+    EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
+}
+
+TEST(RelationshipGraph, KeepsIsoRawVolumeNameOnlyMemberMatchesLikely) {
+    axk::ObjectCatalog catalog;
+    const axk::ObjectPlacement sample_placement{
+        axk::PartitionIndex{0}, "GROUP", axk::SfsId{1}, "Volume", "SBNK", "Sample", "GROUP/F001"};
+    axk::CurrentSbnk current_sample;
+    current_sample.left.wave_data_name = "DUPLICATE";
+    current_sample.left.smpl_link_id = 99U;
+    axk::DecodedObject sample;
+    sample.header.type = axk::ObjectType::sbnk;
+    sample.header.name = "Sample";
+    sample.payload = std::move(current_sample);
+    catalog.objects.emplace_back("sample", axk::PartitionIndex{0}, axk::SfsId{1}, "iso:GROUP", std::move(sample),
+                                 sample_placement, std::vector<std::byte>{}, std::vector{sample_placement},
+                                 axk::PlacementResolution::exact);
+
+    const auto add_wave_data = [&](std::string key, std::uint32_t link, std::string folder) {
+        axk::CurrentSmpl current_wave_data{};
+        current_wave_data.link_id.value = link;
+        axk::DecodedObject wave_data;
+        wave_data.header.type = axk::ObjectType::smpl;
+        wave_data.header.name = "DUPLICATE";
+        wave_data.payload = std::move(current_wave_data);
+        const axk::ObjectPlacement placement{
+            axk::PartitionIndex{0}, "GROUP", axk::SfsId{1}, "Volume", "SMPL", "DUPLICATE", std::move(folder)};
+        catalog.objects.emplace_back(std::move(key), axk::PartitionIndex{0}, axk::SfsId{2}, "iso:GROUP",
+                                     std::move(wave_data), placement, std::vector<std::byte>{}, std::vector{placement},
+                                     axk::PlacementResolution::exact);
+    };
+    add_wave_data("local", 1U, "GROUP/F001");
+    add_wave_data("remote", 2U, "GROUP/F004");
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    ASSERT_TRUE(graph.relationships.front().target_key);
+    EXPECT_EQ(*graph.relationships.front().target_key, "local");
+    EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::likely);
+    EXPECT_EQ(graph.relationships.front().basis, "sbnk-member-name+same-folder");
+    EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
+}
+
 TEST(ProgramRelationships, UsesIsoBasisForMissingVisibleOffSampleBank) {
     axk::ObjectCatalog catalog;
     axk::CurrentProg current_program;

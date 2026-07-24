@@ -68,6 +68,12 @@ bool same_container_folder(const ObjectSnapshot &left, const ObjectSnapshot &rig
            left.placement->container_directory == right.placement->container_directory;
 }
 
+bool same_exact_iso_raw_volume(const ObjectSnapshot &left, const ObjectSnapshot &right) {
+    return left.scope_key.starts_with("iso:") && left.scope_key == right.scope_key &&
+           left.placement_resolution == PlacementResolution::exact &&
+           right.placement_resolution == PlacementResolution::exact && same_container_folder(left, right);
+}
+
 std::vector<const ObjectSnapshot *> named(const ScopeIndex &index, ObjectType type, std::string_view name) {
     if (type == ObjectType::unknown) {
         const auto found = index.names.find(std::string{name});
@@ -112,9 +118,13 @@ Match match_member(const ObjectSnapshot &source, const CurrentSbnkMember &member
     }
     if (exact.size() > 1) {
         if (const auto *local = unique_local(source, exact); local != nullptr) {
-            return {local, exact, RelationshipQuality::likely,
+            const auto exact_raw_volume = same_exact_iso_raw_volume(source, *local);
+            return {local, exact, exact_raw_volume ? RelationshipQuality::known : RelationshipQuality::likely,
                     std::format("sbnk-member-link+name+{}", local_suffix(source)),
-                    "duplicate member identities have one same-volume candidate"};
+                    exact_raw_volume
+                        ? "member name and link ID match one object in the source ISO raw volume; identical "
+                          "cross-volume identities remain candidates"
+                        : "duplicate member identities have one local candidate"};
         }
         return {nullptr, exact, RelationshipQuality::tentative, "sbnk-member-link+name-ambiguous",
                 "member name and link ID match multiple SMPL objects"};
