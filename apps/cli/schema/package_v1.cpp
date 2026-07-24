@@ -148,7 +148,7 @@ PlanOutput project_plan(const std::filesystem::path &target, const std::vector<s
         projected.raw_volume = object.raw_volume;
         projected.canonical_action_id = object.canonical_action_id;
         projected.target_sfs_id = object.target_sfs_id;
-        projected.target_link_id = object.target_link_id;
+        projected.target_wave_data_reference_value = object.target_wave_data_reference_value;
         projected.actions.reserve(object.actions.size());
         std::ranges::transform(
             object.actions, std::back_inserter(projected.actions),
@@ -238,7 +238,7 @@ Result<PlanOutput> project_plan(const std::filesystem::path &target,
                 object.at("actions").get<std::vector<std::string>>(),
                 optional_value<std::string>(object.at("canonicalActionId")),
                 optional_value<std::uint32_t>(object.at("targetSfsId")),
-                optional_value<std::uint32_t>(object.at("targetLinkId")),
+                optional_value<std::uint32_t>(object.at("targetWaveDataReferenceValue")),
             });
         }
         for (const auto &allocation : service_plan.at("allocation")) {
@@ -354,7 +354,7 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
                 {"actions", object.actions},
                 {"canonical_action_id", optional_string(object.canonical_action_id)},
                 {"target_sfs_id", optional_number(object.target_sfs_id)},
-                {"target_link_id", optional_number(object.target_link_id)},
+                {"target_wave_data_reference_value", optional_number(object.target_wave_data_reference_value)},
             });
         }
         auto allocation = OrderedJson::array();

@@ -17,7 +17,7 @@ namespace {
 
 OrderedJson member_json(const CurrentSbnkMember &member) {
     return {{"wave_data_name", member.wave_data_name},
-            {"smpl_link_id", member.smpl_link_id},
+            {"cached_wave_data_reference_value", member.cached_wave_data_reference_value},
             {"root_key", member.root_key},
             {"sample_rate", member.sample_rate},
             {"fine_tune_cents", member.fine_tune_cents},

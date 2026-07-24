@@ -248,7 +248,7 @@ struct package_action_info {
     std::vector<std::string> actions;
     std::optional<std::string> canonical_action_id;
     std::optional<std::uint32_t> target_sfs_id;
-    std::optional<std::uint32_t> target_link_id;
+    std::optional<std::uint32_t> target_wave_data_reference_value;
 };
 
 struct package_allocation_info {

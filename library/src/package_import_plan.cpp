@@ -77,7 +77,7 @@ std::string plan_identity(const PackageImportPlan &plan) {
         append_field(source, object.canonical_action_id.value_or(""));
         append_field(source, object.existing_object_key.value_or(""));
         append_integer(source, object.target_sfs_id.value_or(0U));
-        append_integer(source, object.target_link_id.value_or(0U));
+        append_integer(source, object.target_wave_data_reference_value.value_or(0U));
         for (const auto number : object.target_program_numbers)
             append_integer(source, number);
         append_integer(source, object.target_sample_bank_member);
@@ -191,7 +191,7 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
                  : object.payload_sectors != 0U) ||
             (inserts && !conflicts &&
              ((plan.target_kind == MediaKind::sfs && !object.target_sfs_id) ||
-              (object.object_type == "SMPL" && !object.target_link_id))) ||
+              (object.object_type == "SMPL" && !object.target_wave_data_reference_value))) ||
             (reuses && !conflicts && !object.existing_object_key && !object.canonical_action_id)) {
             return std::unexpected{planner_error("package import plan action decision is "
                                                  "incomplete or contradictory")};
@@ -212,7 +212,7 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
             object.destination_name != canonical->second->destination_name ||
             object.normalized_sha256 != canonical->second->normalized_sha256 ||
             object.target_sfs_id != canonical->second->target_sfs_id ||
-            object.target_link_id != canonical->second->target_link_id ||
+            object.target_wave_data_reference_value != canonical->second->target_wave_data_reference_value ||
             object.target_program_numbers != canonical->second->target_program_numbers ||
             object.target_sample_bank_member != canonical->second->target_sample_bank_member) {
             return std::unexpected{planner_error("package import plan canonical reuse binding is invalid")};

@@ -99,7 +99,7 @@ using Entry = std::tuple<std::string, std::uint32_t, std::optional<std::size_t>>
 struct LoadedWaveform {
     WaveformSpec spec;
     ImportedAudio audio;
-    std::uint32_t link_id{};
+    std::uint32_t reference_value{};
 };
 
 Result<std::vector<std::byte>> directory_payload(std::uint32_t id, std::uint32_t parent,
@@ -228,13 +228,13 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             if (!imported)
                 return std::unexpected{imported.error()};
             const auto id = next++;
-            const auto link_id = 0x016b1dbcU + static_cast<std::uint32_t>(waveform_index) * 0x100U;
-            auto payload = detail::prepare_smpl_payload(spec, *imported, link_id);
+            const auto reference_value = 0x016b1dbcU + static_cast<std::uint32_t>(waveform_index) * 0x100U;
+            auto payload = detail::prepare_smpl_payload(spec, *imported, reference_value);
             if (!payload)
                 return std::unexpected{payload.error()};
             smpl_entries.emplace_back(spec.name, id, 16U);
             objects.push_back({id, std::move(*payload), RecordKind::object});
-            loaded.emplace(spec.id, LoadedWaveform{spec, std::move(*imported), link_id});
+            loaded.emplace(spec.id, LoadedWaveform{spec, std::move(*imported), reference_value});
         }
         std::map<std::string, std::pair<std::string, std::string>> generated_members;
         std::set<std::string> banked_samples;
@@ -278,15 +278,15 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             const auto add_member = [&](std::string key, std::string name, std::size_t channel) -> Result<void> {
                 WaveformSpec spec{key, std::move(name), *sample.interleaved_audio_path, sample.root_key,
                                   sample.target_sample_rate};
-                const auto link_id = 0x016b1dbcU + static_cast<std::uint32_t>(loaded.size()) * 0x100U;
+                const auto reference_value = 0x016b1dbcU + static_cast<std::uint32_t>(loaded.size()) * 0x100U;
                 auto audio = make_channel(channel);
-                auto payload = detail::prepare_smpl_payload(spec, audio, link_id);
+                auto payload = detail::prepare_smpl_payload(spec, audio, reference_value);
                 if (!payload)
                     return std::unexpected{payload.error()};
                 const auto id = next++;
                 smpl_entries.emplace_back(spec.name, id, 16U);
                 objects.push_back({id, std::move(*payload), RecordKind::object});
-                loaded.emplace(key, LoadedWaveform{std::move(spec), std::move(audio), link_id});
+                loaded.emplace(key, LoadedWaveform{std::move(spec), std::move(audio), reference_value});
                 return {};
             };
             if (auto added = add_member(left_key, left_name, 0); !added)
@@ -317,12 +317,12 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                                                   "stereo SBNK members require matching rate and frame "
                                                   "count")};
             const detail::PreparedWaveformMember left_member{
-                left->second.spec.name, left->second.link_id, left->second.audio.output_sample_rate,
+                left->second.spec.name, left->second.reference_value, left->second.audio.output_sample_rate,
                 static_cast<std::uint32_t>(left->second.audio.output_frames)};
             std::optional<detail::PreparedWaveformMember> right_member;
             if (right != loaded.end()) {
                 right_member.emplace(detail::PreparedWaveformMember{
-                    right->second.spec.name, right->second.link_id, right->second.audio.output_sample_rate,
+                    right->second.spec.name, right->second.reference_value, right->second.audio.output_sample_rate,
                     static_cast<std::uint32_t>(right->second.audio.output_frames)});
             }
             auto payload = detail::prepare_sbnk_payload(

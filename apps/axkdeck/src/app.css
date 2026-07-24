@@ -1642,6 +1642,11 @@ input:focus-visible {
   justify-self: center;
 }
 
+.contained-playback:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
 .contained-list strong,
 .contained-list small {
   display: block;

@@ -51,16 +51,11 @@ struct ValidationSource {
 
 struct DirectoryCleanup {
     std::filesystem::path path;
-    bool active{true};
 
     ~DirectoryCleanup() {
-        if (!active)
-            return;
         std::error_code error;
         std::filesystem::remove_all(path, error);
     }
-
-    void release() noexcept { active = false; }
 };
 
 axk::app::Error operation_error(std::string code, std::string message,
@@ -632,13 +627,10 @@ std::pair<std::string, std::string> ambiguous_relationship_message(const axk::Re
     if (row.type == "SBAC_SLOT_TO_SBNK")
         return {"Sample Bank (SBAC) slot has multiple possible Sample (SBNK) targets.",
                 "Inspect duplicate same-name Sample candidates before using this slot as authoritative."};
-    if (row.basis == "sbnk-member-link-id-only-iso-cross-folder-name-mismatch")
-        return {"Sample (SBNK) link ID points to one Wave Data (SMPL) object in another ISO object folder, but the "
-                "Sample name does not confirm it.",
-                "Inspect the Wave Data candidate before treating this link as exact."};
-    if (row.basis == "sbnk-member-link-id-only-name-mismatch")
-        return {"Sample (SBNK) link ID points to one Wave Data (SMPL) object, but the Sample name does not confirm it.",
-                "Inspect the Wave Data candidate before treating this link as exact."};
+    if (row.basis == "sbnk-member-cache-only-name-mismatch")
+        return {"Sample (SBNK) cached reference metadata matches Wave Data (SMPL), but the authoritative "
+                "member name does not.",
+                "Treat the cached value as diagnostic only; resolve or repair the member by its local name."};
     if (row.type.starts_with("SBNK_") && row.type.ends_with("_TO_SMPL"))
         return {"Sample (SBNK) link has multiple possible Wave Data (SMPL) targets.",
                 "Inspect candidate Wave Data objects before treating this Sample link as exact."};
@@ -668,8 +660,8 @@ std::string tentative_relationship_code(const axk::Relationship &row) {
         return "REL_VISIBLE_OFF_ASSIGNMENT_DIAGNOSTIC";
     if (row.basis.starts_with("sbnk-program-link-bitmap-"))
         return "REL_PROGRAM_LINK_BITMAP_DIAGNOSTIC";
-    if (row.basis.starts_with("sbnk-member-link-id-only"))
-        return "REL_SBNK_MEMBER_LINK_DIAGNOSTIC";
+    if (row.basis == "sbnk-member-cache-only-name-mismatch")
+        return "REL_SBNK_MEMBER_CACHE_DIAGNOSTIC";
     return "REL_AMBIGUOUS_TARGET";
 }
 
@@ -1404,7 +1396,6 @@ axk::app::Result<Json> execute_validation(const axk::app::Sandbox &sandbox, cons
     }
     if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
         return std::unexpected(published.error());
-    cleanup.release();
     return Json{{"operationId", "report.validate"}, {"sourceCount", request->sources.size()},
                 {"issueCount", issues.size()},      {"failed", failed},
                 {"policy", request->policy},        {"artifacts", std::move(artifacts)}};

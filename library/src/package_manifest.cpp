@@ -92,9 +92,9 @@ void package_internal::bind_manifest_relocations(PortablePackage &package) {
         for (auto &relocation : node.relocations) {
             for (const auto &edge : package.relationships) {
                 const bool binds =
-                    (relocation.role == "SBNK_LEFT_MEMBER_LINK" && edge.source_node_id == node.node_id &&
+                    (relocation.role == "SBNK_LEFT_MEMBER_CACHED_REFERENCE" && edge.source_node_id == node.node_id &&
                      edge.role == "SBNK_LEFT_MEMBER_TO_SMPL") ||
-                    (relocation.role == "SBNK_RIGHT_MEMBER_LINK" && edge.source_node_id == node.node_id &&
+                    (relocation.role == "SBNK_RIGHT_MEMBER_CACHED_REFERENCE" && edge.source_node_id == node.node_id &&
                      edge.role == "SBNK_RIGHT_MEMBER_TO_SMPL") ||
                     (relocation.role == "SBNK_GROUP_MEMBERSHIP" && edge.target_node_id == node.node_id &&
                      edge.role == "SBAC_SLOT_TO_SBNK") ||

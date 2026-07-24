@@ -574,7 +574,7 @@ WaveformOrphanReport analyze_waveform_orphans(const Container &container, const 
         row.waveform_name = item.object.header.name;
         row.object_key = item.key;
         row.sfs_id = item.sfs_id;
-        row.smpl_link_id = wave_data->link_id.value;
+        row.wave_data_reference_value = wave_data->wave_data_reference_value.value;
         if (item.placement) {
             row.partition_name = item.placement->partition_name;
             row.volume_name = item.placement->volume_name;
@@ -597,8 +597,7 @@ WaveformOrphanReport analyze_waveform_orphans(const Container &container, const 
             row.referencing_samples.erase(std::unique(row.referencing_samples.begin(), row.referencing_samples.end()),
                                           row.referencing_samples.end());
             row.status = WaveformStatus::referenced;
-            row.basis = "unique current SBNK member match by waveform name and "
-                        "SMPL link ID";
+            row.basis = "unique authoritative SBNK member-name match";
             ++result.referenced_count;
         } else {
             std::vector<std::string> blockers;

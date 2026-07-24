@@ -18,9 +18,9 @@ struct RelocationProfile {
 
 struct PackageNodeRelocationContext {
     std::string destination_name;
-    std::optional<std::uint32_t> smpl_link_id;
+    std::optional<std::uint32_t> wave_data_reference_value;
     std::map<std::string, std::string, std::less<>> edge_target_names;
-    std::map<std::string, std::uint32_t, std::less<>> edge_target_link_ids;
+    std::map<std::string, std::uint32_t, std::less<>> edge_target_reference_values;
     std::vector<std::uint8_t> linked_program_numbers;
     bool sample_bank_member{};
 };

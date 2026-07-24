@@ -390,18 +390,17 @@ Public behavior:
 The raw selector bytes in Program rows are diagnostic fields. They are not used
 as public target IDs.
 
-Sample (`SBNK`) member names and Wave Data (`SMPL`) link IDs can repeat across
-different raw `Fnnn` volumes. When both fields match and exact placement leaves
-one matching Wave Data object in the Sample's own raw volume, that local
-relationship is `Known`; matching objects in other raw volumes remain recorded
-as candidates. A local name-only match remains `Likely`, and multiple matching
-objects inside one raw volume remain `Tentative`.
+Sample (`SBNK`) member names can repeat across different raw `Fnnn` volumes.
+The sampler resolves members by name, so exact placement that leaves one
+matching Wave Data object in the Sample's own raw volume produces a `Known`
+relationship. Matching objects in other raw volumes remain recorded as
+candidates. Multiple matching objects inside one raw volume remain
+`Tentative`.
 
 CD-ROM visible/off rows with missing local SBAC targets stay relationship
-diagnostics, not Program children. A CD-ROM SBNK member link that selects one
-Wave Data object in another ISO object folder but whose Sample name does not
-confirm the target stays `Tentative` and is reported as an `sbnk-member-link`
-diagnostic.
+diagnostics, not Program children. The cached SBNK member reference can be
+stale; when it matches Wave Data that the member name does not select, axklib
+keeps it as a `sbnk-member-cache` diagnostic and does not create a relationship.
 
 ## Paired Sample-Member Stereo
 

@@ -279,12 +279,9 @@ class DirectoryCleanup {
   public:
     explicit DirectoryCleanup(std::filesystem::path path) : path_(std::move(path)) {}
     ~DirectoryCleanup() {
-        if (!path_.empty()) {
-            std::error_code error;
-            std::filesystem::remove_all(path_, error);
-        }
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
     }
-    void release() { path_.clear(); }
 
   private:
     std::filesystem::path path_;
@@ -607,7 +604,6 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
         return std::unexpected(core_error(checked.error()));
     if (auto published = sandbox.publish_directory(request->destination, request->overwrite, staging); !published)
         return std::unexpected(published.error());
-    cleanup.release();
     const auto waveform_count =
         std::accumulate(combined.volumes.begin(), combined.volumes.end(), std::size_t{},
                         [](std::size_t count, const auto &volume) { return count + volume.waveforms.size(); });

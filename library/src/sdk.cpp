@@ -332,7 +332,7 @@ package_action_info public_package_action(const PlannedPackageObject &object) {
         result_value.actions.emplace_back(package_import_action_name(action));
     result_value.canonical_action_id = object.canonical_action_id;
     result_value.target_sfs_id = object.target_sfs_id;
-    result_value.target_link_id = object.target_link_id;
+    result_value.target_wave_data_reference_value = object.target_wave_data_reference_value;
     return result_value;
 }
 

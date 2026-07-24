@@ -3883,14 +3883,14 @@
           "sourceName": {
             "type": "string"
           },
-          "targetLinkId": {
+          "targetSfsId": {
             "minimum": 0,
             "type": [
               "integer",
               "null"
             ]
           },
-          "targetSfsId": {
+          "targetWaveDataReferenceValue": {
             "minimum": 0,
             "type": [
               "integer",
@@ -3918,7 +3918,7 @@
           "actions",
           "canonicalActionId",
           "targetSfsId",
-          "targetLinkId"
+          "targetWaveDataReferenceValue"
         ],
         "type": "object"
       },

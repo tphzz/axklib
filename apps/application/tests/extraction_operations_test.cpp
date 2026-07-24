@@ -6,6 +6,12 @@
 #include <set>
 #include <string>
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
@@ -48,6 +54,30 @@ bool has_publication_temporary(const std::filesystem::path &root) {
     });
 }
 
+int current_process_id() noexcept {
+#if defined(_WIN32)
+    return _getpid();
+#else
+    return getpid();
+#endif
+}
+
+std::set<std::filesystem::path> extraction_staging_directories() {
+    std::set<std::filesystem::path> result;
+    std::error_code error;
+    const auto temporary_root = std::filesystem::temp_directory_path(error);
+    if (error)
+        return result;
+    const auto expected_prefix = "axklib-extraction.axklib-publication.p" + std::to_string(current_process_id()) + ".";
+    for (std::filesystem::directory_iterator iterator{temporary_root, error}, end; iterator != end && !error;
+         iterator.increment(error)) {
+        const auto name = iterator->path().filename().string();
+        if (name.starts_with(expected_prefix))
+            result.insert(iterator->path());
+    }
+    return result;
+}
+
 void write_program_iso(const std::filesystem::path &root) {
     axk::Waveform waveform;
     waveform.format = {1, 2, 44100};
@@ -81,7 +111,8 @@ void write_program_iso(const std::filesystem::path &root) {
 class ExtractionOperationsTest : public testing::Test {
   protected:
     void SetUp() override {
-        root_ = std::filesystem::temp_directory_path() / "axklib-extraction-operations-test";
+        root_ = std::filesystem::temp_directory_path() /
+                ("axklib-extraction-operations-test-" + std::to_string(current_process_id()));
         std::error_code error;
         std::filesystem::remove_all(root_, error);
         std::filesystem::create_directories(root_);
@@ -166,6 +197,7 @@ TEST(VolumeGraph, SerializesUnresolvedPlacementCandidatesAndResolutionQuality) {
 }
 
 TEST_F(ExtractionOperationsTest, SfzPublishesPersistentCollectionAndContentAddressedResult) {
+    const auto staging_before = extraction_staging_directories();
     const auto extracted = registry_.invoke("extract.sfz",
                                             {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
                                              {"destination", {{"rootId", "workspace"}, {"relativePath", "export"}}},
@@ -204,6 +236,7 @@ TEST_F(ExtractionOperationsTest, SfzPublishesPersistentCollectionAndContentAddre
         ASSERT_TRUE(std::filesystem::is_regular_file(path)) << path;
         EXPECT_EQ(std::filesystem::file_size(path), artifact.at("sizeBytes"));
     }
+    EXPECT_EQ(extraction_staging_directories(), staging_before);
 
     const auto refused = registry_.invoke("extract.wav",
                                           {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},

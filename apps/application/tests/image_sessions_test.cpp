@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,31 @@ namespace {
 std::filesystem::path fixture_path() {
     return std::filesystem::path{AXK_SOURCE_ROOT} / "tests" / "fixtures" / "images" / "sampler-authored" /
            "HD00_512_single_sbnk_authored.hds";
+}
+
+void patch_sample_cached_reference(const std::filesystem::path &path, std::uint32_t value) {
+    const auto media = axk::open_media(path);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto &partition = sfs->partitions().front();
+    const auto sample =
+        std::ranges::find_if(partition.records, [](const auto &record) { return record.object_type == "SBNK"; });
+    ASSERT_NE(sample, partition.records.end());
+    ASSERT_EQ(sample->extents.size(), 1U);
+    const auto absolute =
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(sample->extents.front().cluster_offset) * partition.sectors_per_cluster) *
+            512U +
+        0xa0U;
+    const std::array bytes{static_cast<char>(value >> 24U), static_cast<char>(value >> 16U),
+                           static_cast<char>(value >> 8U), static_cast<char>(value)};
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    image.seekp(static_cast<std::streamoff>(absolute));
+    image.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    ASSERT_TRUE(image);
 }
 
 class ImageSessionTest : public testing::Test {
@@ -382,6 +408,21 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     const auto header = sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U);
     ASSERT_TRUE(header) << header.error().message;
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
+}
+
+TEST_F(ImageSessionTest, PreparesSampleAuditionWhenTheNamedWaveDataHasAStaleCachedReference) {
+    patch_sample_cached_reference(root_ / "fixture.hds", 0xdeadbeefU);
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(objects);
+    ASSERT_FALSE(objects->items.empty());
+
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    ASSERT_TRUE(audition) << audition.error().message;
+    EXPECT_EQ(audition->channels, 1U);
+    EXPECT_GT(audition->frame_count, 0U);
 }
 
 TEST_F(ImageSessionTest, ActiveAuditionRangesKeepTheOwningImageSessionAlive) {

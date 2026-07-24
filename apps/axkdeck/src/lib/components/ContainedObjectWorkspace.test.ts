@@ -60,6 +60,11 @@ const callbacks = {
     onwavedataselect: vi.fn(),
 };
 
+const noAuditionableSamples = {
+    auditionableSampleIds: new Set<string>(),
+    auditionableSampleBankIds: new Set<string>(),
+};
+
 describe('ContainedObjectWorkspace', () => {
     it('renders the SBAC hierarchy as three simultaneous list lanes', async () => {
         const bank = structure('SBAC', 'Strings');
@@ -71,6 +76,7 @@ describe('ContainedObjectWorkspace', () => {
         render(ContainedObjectWorkspace, {
             props: {
                 ...callbacks,
+                ...noAuditionableSamples,
                 view: 'sample-banks',
                 sampleBanks: [bank],
                 samples: [sample],
@@ -105,6 +111,7 @@ describe('ContainedObjectWorkspace', () => {
         render(ContainedObjectWorkspace, {
             props: {
                 ...callbacks,
+                ...noAuditionableSamples,
                 view: 'samples',
                 sampleBanks: [],
                 samples: [piano, brass],
@@ -155,6 +162,8 @@ describe('ContainedObjectWorkspace', () => {
                 onstop,
                 playingSampleBankId: bank.objectId,
                 playingObjectId: sample.objectId,
+                auditionableSampleIds: new Set([sample.objectId]),
+                auditionableSampleBankIds: new Set([bank.objectId]),
             },
         });
 
@@ -187,6 +196,8 @@ describe('ContainedObjectWorkspace', () => {
                 onplaysample,
                 onstop,
                 preparingObjectId: sample.objectId,
+                auditionableSampleIds: new Set([sample.objectId]),
+                auditionableSampleBankIds: new Set<string>(),
             },
         });
 
@@ -196,5 +207,43 @@ describe('ContainedObjectWorkspace', () => {
 
         expect(onstop).toHaveBeenCalledOnce();
         expect(onplaysample).not.toHaveBeenCalled();
+    });
+
+    it('disables Sample and Sample Bank audition without confirmed Wave Data while retaining direct playback', async () => {
+        const bank = structure('SBAC', 'Broken Bank');
+        const sample = structure('SBNK', 'Broken Sample');
+        const candidate = waveform('Candidate Wave Data');
+        const onplaysamplebank = vi.fn();
+        const onplaysample = vi.fn();
+        const onplaywavedata = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'sample-banks',
+                sampleBanks: [bank],
+                samples: [sample],
+                waveData: [candidate],
+                activeSampleBankId: bank.objectId,
+                activeSampleId: sample.objectId,
+                activeWaveDataId: '',
+                queries: { primary: '', secondary: '', tertiary: '' },
+                onplaysamplebank,
+                onplaysample,
+                onplaywavedata,
+            },
+        });
+
+        const bankPlayback = screen.getByRole('button', { name: 'Broken Bank cannot be auditioned' });
+        const samplePlayback = screen.getByRole('button', { name: 'Broken Sample cannot be auditioned' });
+        expect(bankPlayback.hasAttribute('disabled')).toBe(true);
+        expect(samplePlayback.hasAttribute('disabled')).toBe(true);
+        await fireEvent.click(bankPlayback);
+        await fireEvent.click(samplePlayback);
+        await fireEvent.click(screen.getByRole('button', { name: 'Play Candidate Wave Data' }));
+
+        expect(onplaysamplebank).not.toHaveBeenCalled();
+        expect(onplaysample).not.toHaveBeenCalled();
+        expect(onplaywavedata).toHaveBeenCalledWith(candidate);
     });
 });

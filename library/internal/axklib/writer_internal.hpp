@@ -34,7 +34,7 @@ struct PreparedRecord {
 
 struct PreparedWaveformMember {
     std::string name;
-    std::uint32_t link_id{};
+    std::uint32_t reference_value{};
     std::uint32_t sample_rate{};
     std::uint32_t frame_count{};
 };
@@ -67,7 +67,7 @@ struct PreparedMediaImage {
 };
 
 Result<std::vector<std::byte>> prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
-                                                    std::uint32_t link_id);
+                                                    std::uint32_t reference_value);
 Result<std::vector<std::byte>> prepare_sbnk_payload(const SampleSpec &spec, const PreparedWaveformMember &left,
                                                     const std::optional<PreparedWaveformMember> &right = {},
                                                     bool sample_bank_member = false,

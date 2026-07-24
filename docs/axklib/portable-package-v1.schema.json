@@ -182,9 +182,9 @@
         "role": {
           "enum": [
             "SMPL_GROUP_ID",
-            "SMPL_LINK_ID",
-            "SBNK_LEFT_MEMBER_LINK",
-            "SBNK_RIGHT_MEMBER_LINK",
+            "SMPL_REFERENCE_VALUE",
+            "SBNK_LEFT_MEMBER_CACHED_REFERENCE",
+            "SBNK_RIGHT_MEMBER_CACHED_REFERENCE",
             "SBNK_GROUP_MEMBERSHIP",
             "SBNK_PROGRAM_BITMAP",
             "SBAC_SLOT_HANDLE",

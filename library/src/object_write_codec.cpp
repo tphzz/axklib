@@ -65,7 +65,7 @@ std::uint16_t pitch_word(std::uint8_t root_key, std::uint32_t sample_rate) {
 }
 
 Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const ImportedAudio &audio,
-                                              std::uint32_t link_id) {
+                                              std::uint32_t reference_value) {
     const auto pcm_bytes = audio.pcm_channels.size() == 1U ? audio.pcm_channels[0].size() : 0U;
     if (audio.output_frames > maximum_wave_data_frames_per_channel ||
         pcm_bytes > maximum_wave_data_pcm16_bytes_per_channel) {
@@ -79,9 +79,9 @@ Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const Im
         return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
                                           "SMPL writer requires bounded mono 16-bit PCM")};
     }
-    if (link_id < 0xbaU) {
+    if (reference_value < 0xbaU) {
         return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
-                                          "SMPL link ID is below the encoded relocation base")};
+                                          "SMPL reference value is below the encoded relocation base")};
     }
     std::vector<std::byte> stored;
     stored.reserve(audio.pcm_channels[0].size() + 8U);
@@ -114,9 +114,9 @@ Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const Im
                                                 std::byte{0x87}, std::byte{0x7c}, std::byte{0x01}, std::byte{0x54}};
     std::ranges::copy(identity, result.begin() + 0x42);
     writer.be32(0x68, 0x01443840);
-    writer.be32(0x6c, link_id - 0xbaU);
+    writer.be32(0x6c, reference_value - 0xbaU);
     writer.be32(0x74, 0x01443840);
-    writer.be32(0x78, link_id);
+    writer.be32(0x78, reference_value);
     writer.be16(0x7c, static_cast<std::uint16_t>(audio.output_sample_rate));
     result[0x7e] = static_cast<std::byte>(spec.root_key);
     writer.be16(0x80, pitch_word(spec.root_key, audio.output_sample_rate));
@@ -133,7 +133,7 @@ Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const Im
 struct LoadedWaveform {
     WaveformSpec spec;
     ImportedAudio audio;
-    std::uint32_t link_id{};
+    std::uint32_t reference_value{};
 };
 
 Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const LoadedWaveform &left,
@@ -186,8 +186,8 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
             return std::unexpected{written.error()};
         }
     }
-    writer.be32(0xa0, left.link_id);
-    writer.be32(0xa4, right == nullptr ? 0U : right->link_id);
+    writer.be32(0xa0, left.reference_value);
+    writer.be32(0xa4, right == nullptr ? 0U : right->reference_value);
     constexpr std::array<std::byte, 16> member_defaults{
         std::byte{0x4a}, std::byte{0x04}, std::byte{0x01}, std::byte{0x20}, std::byte{0x47}, std::byte{0x05},
         std::byte{0x01}, std::byte{0x20}, std::byte{0x49}, std::byte{0x0b}, std::byte{0x01}, std::byte{0xe0},
@@ -376,8 +376,8 @@ Result<std::vector<std::byte>> serialize_prog(const ProgramSpec &program) {
 } // namespace
 
 Result<std::vector<std::byte>> detail::prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
-                                                            std::uint32_t link_id) {
-    return serialize_smpl(spec, audio, link_id);
+                                                            std::uint32_t reference_value) {
+    return serialize_smpl(spec, audio, reference_value);
 }
 
 Result<std::vector<std::byte>> detail::prepare_sbnk_payload(const SampleSpec &spec, const PreparedWaveformMember &left,
@@ -389,7 +389,7 @@ Result<std::vector<std::byte>> detail::prepare_sbnk_payload(const SampleSpec &sp
     left_audio.output_frames = left.frame_count;
     WaveformSpec left_spec;
     left_spec.name = left.name;
-    LoadedWaveform left_loaded{std::move(left_spec), std::move(left_audio), left.link_id};
+    LoadedWaveform left_loaded{std::move(left_spec), std::move(left_audio), left.reference_value};
     std::optional<LoadedWaveform> right_loaded;
     if (right) {
         ImportedAudio right_audio;
@@ -397,7 +397,7 @@ Result<std::vector<std::byte>> detail::prepare_sbnk_payload(const SampleSpec &sp
         right_audio.output_frames = right->frame_count;
         WaveformSpec right_spec;
         right_spec.name = right->name;
-        right_loaded.emplace(LoadedWaveform{std::move(right_spec), std::move(right_audio), right->link_id});
+        right_loaded.emplace(LoadedWaveform{std::move(right_spec), std::move(right_audio), right->reference_value});
     }
     return serialize_sbnk(spec, left_loaded, right_loaded ? &*right_loaded : nullptr, sample_bank_member,
                           linked_programs);

@@ -20,7 +20,7 @@ std::string hex(std::span<const std::byte> bytes) {
 
 OrderedJson member_json(const CurrentSbnkMember &member) {
     return {{"wave_data_name", member.wave_data_name},
-            {"smpl_link_id", member.smpl_link_id},
+            {"cached_wave_data_reference_value", member.cached_wave_data_reference_value},
             {"root_key", member.root_key},
             {"sample_rate", member.sample_rate},
             {"fine_tune_cents", member.fine_tune_cents},
@@ -37,7 +37,7 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"stored_sample_width_bytes", wave_data->stored_sample_width_bytes.value},
                 {"source_wave_name", wave_data->source_wave_name.value},
                 {"group_id", wave_data->group_id.value},
-                {"link_id", wave_data->link_id.value},
+                {"wave_data_reference_value", wave_data->wave_data_reference_value.value},
                 {"duplicate_sample_rate", wave_data->duplicate_sample_rate.value},
                 {"root_key", wave_data->root_key.value},
                 {"fine_tune_cents", wave_data->fine_tune_cents.value},

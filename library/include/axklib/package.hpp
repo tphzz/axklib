@@ -192,7 +192,7 @@ struct PlannedPackageObject {
     std::optional<std::string> canonical_action_id;
     std::optional<std::string> existing_object_key;
     std::optional<std::uint32_t> target_sfs_id;
-    std::optional<std::uint32_t> target_link_id;
+    std::optional<std::uint32_t> target_wave_data_reference_value;
     std::vector<std::uint8_t> target_program_numbers;
     bool target_sample_bank_member{};
     std::uint64_t payload_clusters{};

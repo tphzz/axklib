@@ -107,7 +107,7 @@ Result<package_internal::PackageNodeRelocationContext>
 relocation_context(const PortablePackage &package, const PackageImportPlan &plan, const PlannedPackageObject &owner) {
     package_internal::PackageNodeRelocationContext context;
     context.destination_name = owner.destination_name;
-    context.smpl_link_id = owner.target_link_id;
+    context.wave_data_reference_value = owner.target_wave_data_reference_value;
     context.linked_program_numbers = owner.target_program_numbers;
     context.sample_bank_member = owner.target_sample_bank_member;
     for (const auto &edge : package.relationships) {
@@ -119,8 +119,8 @@ relocation_context(const PortablePackage &package, const PackageImportPlan &plan
                                                  "planned destination")};
         }
         context.edge_target_names.emplace(edge.edge_id, target->destination_name);
-        if (target->target_link_id)
-            context.edge_target_link_ids.emplace(edge.edge_id, *target->target_link_id);
+        if (target->target_wave_data_reference_value)
+            context.edge_target_reference_values.emplace(edge.edge_id, *target->target_wave_data_reference_value);
     }
     return context;
 }
@@ -197,7 +197,7 @@ std::map<DestinationKey, SfsVolume> sfs_volumes(const Container &container) {
 struct ExistingObject {
     const ObjectSnapshot *snapshot{};
     std::optional<std::string> normalized_sha256;
-    std::optional<std::uint32_t> link_id;
+    std::optional<std::uint32_t> wave_data_reference_value;
 };
 
 std::vector<ExistingObject> existing_objects(const ObjectCatalog &catalog) {
@@ -211,8 +211,8 @@ std::vector<ExistingObject> existing_objects(const ObjectCatalog &catalog) {
                 package_internal::hex_digest(package_internal::sha256(profile->normalized_payload));
         }
         if (const auto *wave_data = std::get_if<CurrentSmpl>(&object.object.payload);
-            wave_data != nullptr && wave_data->link_id.value != 0U) {
-            item.link_id = wave_data->link_id.value;
+            wave_data != nullptr && wave_data->wave_data_reference_value.value != 0U) {
+            item.wave_data_reference_value = wave_data->wave_data_reference_value.value;
         }
         result.push_back(std::move(item));
     }
@@ -279,9 +279,9 @@ struct PartitionCapacity {
     const Partition *partition{};
     std::vector<std::uint32_t> free_ids;
     std::set<std::uint32_t> used_clusters;
-    std::set<std::uint32_t> used_link_ids;
+    std::set<std::uint32_t> used_wave_data_reference_values;
     std::size_t next_id{};
-    std::uint32_t next_link_id{0x016b1dbcU};
+    std::uint32_t next_wave_data_reference_value{0x016b1dbcU};
 };
 
 PartitionCapacity partition_capacity(const Partition &partition, const ObjectCatalog &catalog) {
@@ -309,8 +309,8 @@ PartitionCapacity partition_capacity(const Partition &partition, const ObjectCat
         if (object.partition != partition.index)
             continue;
         if (const auto *wave_data = std::get_if<CurrentSmpl>(&object.object.payload);
-            wave_data != nullptr && wave_data->link_id.value != 0U) {
-            result.used_link_ids.insert(wave_data->link_id.value);
+            wave_data != nullptr && wave_data->wave_data_reference_value.value != 0U) {
+            result.used_wave_data_reference_values.insert(wave_data->wave_data_reference_value.value);
         }
     }
     return result;
@@ -527,12 +527,12 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
     });
 
     const auto existing = existing_objects(*catalog);
-    std::set<std::uint32_t> used_link_ids;
+    std::set<std::uint32_t> used_wave_data_reference_values;
     for (const auto &item : existing) {
-        if (item.link_id)
-            used_link_ids.insert(*item.link_id);
+        if (item.wave_data_reference_value)
+            used_wave_data_reference_values.insert(*item.wave_data_reference_value);
     }
-    std::uint32_t next_link_id = 0x016b1dbcU;
+    std::uint32_t next_wave_data_reference_value = 0x016b1dbcU;
     std::map<std::pair<std::string, std::string>, std::size_t> planned_names;
     for (const auto &candidate : candidates) {
         PlannedPackageObject object;
@@ -567,7 +567,7 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
             if (matches.front()->normalized_sha256 == object.normalized_sha256) {
                 object.actions.push_back(PackageImportObjectAction::reuse);
                 object.existing_object_key = matches.front()->snapshot->key;
-                object.target_link_id = matches.front()->link_id;
+                object.target_wave_data_reference_value = matches.front()->wave_data_reference_value;
             } else {
                 mark_conflict(object);
                 add_conflict(plan, "FAT12_NAME_CONFLICT",
@@ -583,7 +583,7 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
                     !std::ranges::contains(canonical.actions, PackageImportObjectAction::conflict)) {
                     object.actions.push_back(PackageImportObjectAction::reuse);
                     object.canonical_action_id = canonical.action_id;
-                    object.target_link_id = canonical.target_link_id;
+                    object.target_wave_data_reference_value = canonical.target_wave_data_reference_value;
                 } else {
                     mark_conflict(object);
                     mark_conflict(plan.objects[found->second]);
@@ -597,11 +597,11 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
                     object.actions.push_back(PackageImportObjectAction::relocate);
                 object.actions.push_back(PackageImportObjectAction::insert);
                 if (object.object_type == "SMPL") {
-                    while (used_link_ids.contains(next_link_id))
-                        next_link_id += 0x100U;
-                    object.target_link_id = next_link_id;
-                    used_link_ids.insert(next_link_id);
-                    next_link_id += 0x100U;
+                    while (used_wave_data_reference_values.contains(next_wave_data_reference_value))
+                        next_wave_data_reference_value += 0x100U;
+                    object.target_wave_data_reference_value = next_wave_data_reference_value;
+                    used_wave_data_reference_values.insert(next_wave_data_reference_value);
+                    next_wave_data_reference_value += 0x100U;
                 }
                 planned_names.emplace(name_key, plan.objects.size());
             }
@@ -622,7 +622,7 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
                          "reused incoming object has no canonical planned allocation");
             continue;
         }
-        object.target_link_id = canonical->second->target_link_id;
+        object.target_wave_data_reference_value = canonical->second->target_wave_data_reference_value;
         if (std::ranges::contains(canonical->second->actions, PackageImportObjectAction::conflict))
             mark_conflict(object);
     }
@@ -692,7 +692,8 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
             const auto *node = node_by_id(packages[object.package_index], object.node_id);
             if (node == nullptr)
                 return std::unexpected{planner_error("planned FAT12 package node is missing")};
-            if (object.object_type == "SMPL" && object.existing_object_key && !object.target_link_id) {
+            if (object.object_type == "SMPL" && object.existing_object_key &&
+                !object.target_wave_data_reference_value) {
                 continue;
             }
             auto context = relocation_context(packages[object.package_index], plan, object);
@@ -1087,16 +1088,16 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
     for (const auto &issue : catalog->issues)
         add_conflict(plan, issue.code, issue.message);
     const auto existing = existing_objects(*catalog);
-    std::map<IsoScopeKey, std::set<std::uint32_t>> used_link_ids;
+    std::map<IsoScopeKey, std::set<std::uint32_t>> used_wave_data_reference_values;
     for (const auto &item : existing) {
         const auto scope = iso_raw_scope(*item.snapshot);
-        if (scope && item.link_id)
-            used_link_ids[*scope].insert(*item.link_id);
+        if (scope && item.wave_data_reference_value)
+            used_wave_data_reference_values[*scope].insert(*item.wave_data_reference_value);
     }
-    std::map<IsoScopeKey, std::uint32_t> next_link_ids;
+    std::map<IsoScopeKey, std::uint32_t> next_wave_data_reference_values;
     for (const auto &[scope, ignored] : planned_scopes) {
         (void)ignored;
-        next_link_ids.emplace(scope, 0x016b1dbcU);
+        next_wave_data_reference_values.emplace(scope, 0x016b1dbcU);
     }
     std::map<std::tuple<std::string, std::string, std::string, std::string>, std::size_t> planned_names;
     std::map<std::tuple<std::string, std::string, std::string>, std::set<IsoScopeKey>> planned_equal_scopes;
@@ -1141,7 +1142,7 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
             if (matches.front()->normalized_sha256 == object.normalized_sha256) {
                 object.actions.push_back(PackageImportObjectAction::reuse);
                 object.existing_object_key = matches.front()->snapshot->key;
-                object.target_link_id = matches.front()->link_id;
+                object.target_wave_data_reference_value = matches.front()->wave_data_reference_value;
             } else {
                 mark_conflict(object);
                 add_conflict(plan, "ISO9660_NAME_CONFLICT",
@@ -1158,7 +1159,7 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
                     !std::ranges::contains(canonical.actions, PackageImportObjectAction::conflict)) {
                     object.actions.push_back(PackageImportObjectAction::reuse);
                     object.canonical_action_id = canonical.action_id;
-                    object.target_link_id = canonical.target_link_id;
+                    object.target_wave_data_reference_value = canonical.target_wave_data_reference_value;
                 } else {
                     mark_conflict(object);
                     mark_conflict(plan.objects[found->second]);
@@ -1173,11 +1174,11 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
                 object.actions.push_back(PackageImportObjectAction::insert);
                 if (object.object_type == "SMPL") {
                     const IsoScopeKey scope{object.raw_group, object.raw_volume};
-                    auto &next = next_link_ids.at(scope);
-                    while (used_link_ids[scope].contains(next))
+                    auto &next = next_wave_data_reference_values.at(scope);
+                    while (used_wave_data_reference_values[scope].contains(next))
                         next += 0x100U;
-                    object.target_link_id = next;
-                    used_link_ids[scope].insert(next);
+                    object.target_wave_data_reference_value = next;
+                    used_wave_data_reference_values[scope].insert(next);
                     next += 0x100U;
                 }
                 planned_names.emplace(name_key, plan.objects.size());
@@ -1216,7 +1217,7 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
                          "reused incoming object has no canonical planned allocation");
             continue;
         }
-        object.target_link_id = canonical->second->target_link_id;
+        object.target_wave_data_reference_value = canonical->second->target_wave_data_reference_value;
         if (std::ranges::contains(canonical->second->actions, PackageImportObjectAction::conflict))
             mark_conflict(object);
     }
@@ -1286,7 +1287,8 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
             const auto *node = node_by_id(packages[object.package_index], object.node_id);
             if (node == nullptr)
                 return std::unexpected{planner_error("planned ISO9660 package node is missing")};
-            if (object.object_type == "SMPL" && object.existing_object_key && !object.target_link_id) {
+            if (object.object_type == "SMPL" && object.existing_object_key &&
+                !object.target_wave_data_reference_value) {
                 continue;
             }
             auto context = relocation_context(packages[object.package_index], plan, object);
@@ -1779,7 +1781,7 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
                 object.actions.push_back(PackageImportObjectAction::reuse);
                 object.existing_object_key = matches.front()->snapshot->key;
                 object.target_sfs_id = matches.front()->snapshot->sfs_id.value;
-                object.target_link_id = matches.front()->link_id;
+                object.target_wave_data_reference_value = matches.front()->wave_data_reference_value;
             } else {
                 mark_conflict(object);
                 add_conflict(plan, "SFS_NAME_CONFLICT",
@@ -1797,7 +1799,7 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
                     object.actions.push_back(PackageImportObjectAction::reuse);
                     object.canonical_action_id = canonical.action_id;
                     object.target_sfs_id = canonical.target_sfs_id;
-                    object.target_link_id = canonical.target_link_id;
+                    object.target_wave_data_reference_value = canonical.target_wave_data_reference_value;
                 } else {
                     mark_conflict(object);
                     add_conflict(plan, "SFS_NAME_CONFLICT",
@@ -1852,11 +1854,11 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
         }
         object.target_sfs_id = capacity.free_ids[capacity.next_id++];
         if (object.object_type == "SMPL") {
-            while (capacity.used_link_ids.contains(capacity.next_link_id))
-                capacity.next_link_id += 0x100U;
-            object.target_link_id = capacity.next_link_id;
-            capacity.used_link_ids.insert(capacity.next_link_id);
-            capacity.next_link_id += 0x100U;
+            while (capacity.used_wave_data_reference_values.contains(capacity.next_wave_data_reference_value))
+                capacity.next_wave_data_reference_value += 0x100U;
+            object.target_wave_data_reference_value = capacity.next_wave_data_reference_value;
+            capacity.used_wave_data_reference_values.insert(capacity.next_wave_data_reference_value);
+            capacity.next_wave_data_reference_value += 0x100U;
         }
         const auto *package_node = node_by_id(packages[object.package_index], object.node_id);
         const auto clusters =
@@ -1943,7 +1945,7 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
             continue;
         }
         object.target_sfs_id = canonical->second->target_sfs_id;
-        object.target_link_id = canonical->second->target_link_id;
+        object.target_wave_data_reference_value = canonical->second->target_wave_data_reference_value;
         if (std::ranges::contains(canonical->second->actions, PackageImportObjectAction::conflict))
             mark_conflict(object);
     }

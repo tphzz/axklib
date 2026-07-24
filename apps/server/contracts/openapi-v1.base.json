@@ -1632,7 +1632,7 @@
       "PackageImportAction": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["actionId", "packageIndex", "rootIndex", "packageId", "nodeId", "objectType", "sourceName", "destinationName", "partitionIndex", "groupName", "volumeName", "rawGroup", "rawVolume", "actions", "canonicalActionId", "targetSfsId", "targetLinkId"],
+        "required": ["actionId", "packageIndex", "rootIndex", "packageId", "nodeId", "objectType", "sourceName", "destinationName", "partitionIndex", "groupName", "volumeName", "rawGroup", "rawVolume", "actions", "canonicalActionId", "targetSfsId", "targetWaveDataReferenceValue"],
         "properties": {
           "actionId": {"type": "string", "minLength": 1},
           "packageIndex": {"type": "integer", "minimum": 0},
@@ -1657,7 +1657,7 @@
           },
           "canonicalActionId": {"type": ["string", "null"]},
           "targetSfsId": {"type": ["integer", "null"], "minimum": 0},
-          "targetLinkId": {"type": ["integer", "null"], "minimum": 0}
+          "targetWaveDataReferenceValue": {"type": ["integer", "null"], "minimum": 0}
         }
       },
       "PackageAllocationEstimate": {

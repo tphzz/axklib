@@ -392,8 +392,9 @@ The first writer scope is intentionally narrow:
   import; sources are converted to signed 16-bit PCM and unsupported rates are
   resampled with the soxr VHQ profile;
 - generated sampler objects are current `FSFSDEV3SPLX` `SMPL` and `SBNK` records;
-- generated `SBNK` objects link either one waveform member or a confirmed
-  left/right pair by name and link ID;
+- generated `SBNK` objects link either one Wave Data member or a confirmed
+  left/right pair by authoritative member name and write matching cached
+  reference values;
 - generated disk headers include the bounded superblock compatibility block,
   initialized sector-2 disk metadata, full primary and duplicate partition-header
   sectors for the supported hard-disk metadata profile, and the early

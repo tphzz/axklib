@@ -115,7 +115,7 @@ Current compact metadata fields:
 | `0x30` | variable | bytes | compact record, reported as `current_smpl_compact_record_hex` |
 | `0x54` | 16 | ASCII | source_wave_name_guess |
 | `0x6c` | 4 | u32be | smpl_group_id_0x06c |
-| `0x78` | 4 | u32be | smpl_link_id_0x078 |
+| `0x78` | 4 | u32be | wave_data_reference_value |
 | `0x7c` | 2 | u16be | sample_rate_duplicate_0x07c |
 | `0x7e` | 1 | u8 | root_key_midi_note_guess |
 | `0x7f` | 1 | s8 | fine_tune_cents_guess |
@@ -171,23 +171,42 @@ write-support format.
 `SBNK` objects are sampler-visible Samples. They link to Wave Data storage and
 carry most Sample parameters.
 
-### Member Link Fields
+### Member Resolution Fields
 
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
-| `0x078` | 16 | ASCII | left member sample name |
-| `0x088` | 16 | ASCII | right member sample name |
-| `0x0a0` | 4 | u32be | left SMPL link ID |
-| `0x0a4` | 4 | u32be | right SMPL link ID |
+| `0x078` | 16 | ASCII | left member Wave Data name |
+| `0x088` | 16 | ASCII | right member Wave Data name |
+| `0x098` | 4 | u32be | left runtime handle slot |
+| `0x09c` | 4 | u32be | right runtime handle slot |
+| `0x0a0` | 4 | u32be | left cached Wave Data reference value |
+| `0x0a4` | 4 | u32be | right cached Wave Data reference value |
 | `0x0c0` | 4 | u32be | linked Programs 001-032 bitmap |
 | `0x0c4` | 4 | u32be | linked Programs 033-064 bitmap |
 | `0x0c8` | 4 | u32be | linked Programs 065-096 bitmap |
 | `0x0cc` | 4 | u32be | linked Programs 097-128 bitmap |
 
-The ordinary stereo layout uses the left and right member link fields on one
+The A4000 resolves each active member by its 16-byte Wave Data name.
+After lookup it writes a runtime handle to `+0x098/+0x09c` and copies the
+resolved object's `SMPL+0x078` value into `+0x0a0/+0x0a4`. The latter fields
+are therefore cached metadata, not authoritative object identifiers. Real
+source media contains stale cached values that disagree with the local named
+target and still loads on hardware.
+
+axklib treats a unique local member-name match as `Known`, whether or not its
+cache agrees. Duplicate local names remain `Tentative`; a cached-value-only
+match is diagnostic and never creates a resolved relationship. Mutation and
+package relocation refresh the cache from the selected named Wave Data object.
+For a placed Sample, a unique same-scope name whose Wave Data placement is
+unresolved remains `Tentative`: exact recovery metadata may retain that
+candidate, but it does not project the Sample or Wave Data into a logical
+volume. Standalone objects without a placement hierarchy can still resolve by
+one unique same-scope name.
+
+The ordinary stereo layout uses the left and right member fields on one
 `SBNK`. Some source media instead stores stereo as two sibling `SBNK` objects
 under the same `SBAC` Sample Bank, with sampler-facing names ending in `-L` and `-R`.
-In that layout each sibling still uses its own left-member `SMPL` link. axklib
+In that layout each sibling still uses its own left-member Wave Data name. axklib
 keeps both `SBNK` objects and both physical `SMPL` exports, then writes an
 additive rendered stereo WAV when the sibling names and links are known and
 compatible.
@@ -536,7 +555,7 @@ ambiguous rows remain diagnostic-only.
 Relationship target matching is reported separately from active/off state. Rows
 that are useful for diagnostics but should not become normal Program children use
 `diagnostic_category` values such as `visible-off-assignment`,
-`program-link-bitmap`, `sbnk-member-link`, or
+`program-link-bitmap`, `sbnk-member-cache`, or
 `active-assignment-missing-target`.
 
 ## SEQU And PRF3

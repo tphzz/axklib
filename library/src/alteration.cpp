@@ -1064,10 +1064,10 @@ Result<detail::PreparedWaveformMember> waveform_member(TransactionState &state, 
     if (!decoded)
         return std::unexpected{decoded.error()};
     const auto *wave_data = std::get_if<CurrentSmpl>(&decoded->payload);
-    if (wave_data == nullptr || wave_data->link_id.value == 0U) {
-        return std::unexpected{transaction_error("waveform has no usable current SMPL link ID")};
+    if (wave_data == nullptr || wave_data->wave_data_reference_value.value == 0U) {
+        return std::unexpected{transaction_error("waveform has no usable current SMPL reference value")};
     }
-    return detail::PreparedWaveformMember{std::string{waveform_name}, wave_data->link_id.value,
+    return detail::PreparedWaveformMember{std::string{waveform_name}, wave_data->wave_data_reference_value.value,
                                           wave_data->duplicate_sample_rate.value, wave_data->wave_length_frames.value};
 }
 
@@ -1185,10 +1185,10 @@ Result<OperationReport> insert_waveform(TransactionState &state, OperationContex
         if (!decoded)
             return std::unexpected{decoded.error()};
         const auto *wave_data = std::get_if<CurrentSmpl>(&decoded->payload);
-        if (wave_data == nullptr || wave_data->link_id.value == 0U) {
-            return std::unexpected{transaction_error("existing waveform has no current SMPL link ID")};
+        if (wave_data == nullptr || wave_data->wave_data_reference_value.value == 0U) {
+            return std::unexpected{transaction_error("existing waveform has no current SMPL reference value")};
         }
-        link_ids.insert(wave_data->link_id.value);
+        link_ids.insert(wave_data->wave_data_reference_value.value);
     }
 
     AudioImportOptions options;
@@ -1283,7 +1283,7 @@ Result<OperationReport> delete_waveform(TransactionState &state, OperationContex
     if (!waveform_object)
         return std::unexpected{waveform_object.error()};
     const auto *wave_data = std::get_if<CurrentSmpl>(&waveform_object->payload);
-    if (wave_data == nullptr || wave_data->link_id.value == 0U) {
+    if (wave_data == nullptr || wave_data->wave_data_reference_value.value == 0U) {
         return std::unexpected{transaction_error("waveform cannot be classified as known_unreferenced")};
     }
 
@@ -1313,7 +1313,7 @@ Result<OperationReport> delete_waveform(TransactionState &state, OperationContex
                                                      "SBNK entry is unresolved")};
         }
         const auto references = [&](const CurrentSbnkMember &member) {
-            return member.smpl_link_id == wave_data->link_id.value || member.wave_data_name == operation.waveform_name;
+            return member.wave_data_name == operation.waveform_name;
         };
         if (references(sample->left) || (sample->right && references(*sample->right))) {
             return std::unexpected{transaction_error("waveform is referenced, not known_unreferenced")};
@@ -1699,17 +1699,16 @@ Result<OperationReport> rename_waveform(TransactionState &state, OperationContex
     if (!waveform_object)
         return std::unexpected{waveform_object.error()};
     const auto *wave_data = std::get_if<CurrentSmpl>(&waveform_object->payload);
-    if (wave_data == nullptr || wave_data->link_id.value == 0U)
-        return std::unexpected{transaction_error("waveform has no current link identity")};
+    if (wave_data == nullptr || wave_data->wave_data_reference_value.value == 0U)
+        return std::unexpected{transaction_error("waveform has no current reference value")};
     auto waveforms = category_objects(state, partition, operation.volume_name, "SMPL", ObjectType::smpl, cancellation);
     if (!waveforms)
         return std::unexpected{waveforms.error()};
     for (const auto &other : *waveforms) {
         if (other.id == located->second)
             continue;
-        const auto *other_wave_data = std::get_if<CurrentSmpl>(&other.decoded.payload);
-        if (other.name == operation.new_waveform_name || other_wave_data->link_id.value == wave_data->link_id.value) {
-            return std::unexpected{transaction_error("waveform rename identity is not unique")};
+        if (other.name == operation.new_waveform_name) {
+            return std::unexpected{transaction_error("waveform rename target name is not unique")};
         }
     }
     auto samples = category_objects(state, partition, operation.volume_name, "SBNK", ObjectType::sbnk, cancellation);
@@ -1718,26 +1717,24 @@ Result<OperationReport> rename_waveform(TransactionState &state, OperationContex
     std::set<SfsId> updated_samples;
     for (const auto &sample_row : *samples) {
         const auto *sample = std::get_if<CurrentSbnk>(&sample_row.decoded.payload);
-        std::vector<std::size_t> offsets;
-        const auto inspect = [&](const CurrentSbnkMember &member, std::size_t offset) -> Result<void> {
-            const auto name_matches = member.wave_data_name == operation.waveform_name;
-            const auto link_matches = member.smpl_link_id == wave_data->link_id.value;
-            if (name_matches != link_matches)
-                return std::unexpected{transaction_error("SBNK waveform name and link identity disagree")};
-            if (name_matches)
-                offsets.push_back(offset);
-            return {};
+        std::vector<std::pair<std::size_t, std::size_t>> offsets;
+        const auto inspect = [&](const CurrentSbnkMember &member, std::size_t name_offset, std::size_t cache_offset) {
+            if (member.wave_data_name == operation.waveform_name)
+                offsets.emplace_back(name_offset, cache_offset);
         };
-        if (auto checked = inspect(sample->left, 0x78U); !checked)
-            return std::unexpected{checked.error()};
-        if (sample->right) {
-            if (auto checked = inspect(*sample->right, 0x88U); !checked)
-                return std::unexpected{checked.error()};
-        }
+        inspect(sample->left, 0x78U, 0xa0U);
+        if (sample->right)
+            inspect(*sample->right, 0x88U, 0xa4U);
         if (!offsets.empty()) {
             auto payload = sample_row.payload;
-            for (const auto offset : offsets)
-                put_padded_name(payload, offset, operation.new_waveform_name);
+            ByteWriter writer{payload};
+            for (const auto &[name_offset, cache_offset] : offsets) {
+                put_padded_name(payload, name_offset, operation.new_waveform_name);
+                if (auto written = writer.write_be32(cache_offset, wave_data->wave_data_reference_value.value);
+                    !written) {
+                    return std::unexpected{written.error()};
+                }
+            }
             if (auto replaced =
                     replace_fixed_object_payload(state, partition, sample_row.id, std::move(payload), cancellation);
                 !replaced)
@@ -2519,7 +2516,7 @@ Result<package_internal::PackageNodeRelocationContext>
 relocation_context(const PortablePackage &package, const PackageImportPlan &plan, const PlannedPackageObject &owner) {
     package_internal::PackageNodeRelocationContext context;
     context.destination_name = owner.destination_name;
-    context.smpl_link_id = owner.target_link_id;
+    context.wave_data_reference_value = owner.target_wave_data_reference_value;
     context.linked_program_numbers = owner.target_program_numbers;
     context.sample_bank_member = owner.target_sample_bank_member;
     for (const auto &edge : package.relationships) {
@@ -2530,8 +2527,8 @@ relocation_context(const PortablePackage &package, const PackageImportPlan &plan
             return std::unexpected{transaction_error("package import plan omits a relationship target action")};
         }
         context.edge_target_names.emplace(edge.edge_id, target->destination_name);
-        if (target->target_link_id)
-            context.edge_target_link_ids.emplace(edge.edge_id, *target->target_link_id);
+        if (target->target_wave_data_reference_value)
+            context.edge_target_reference_values.emplace(edge.edge_id, *target->target_wave_data_reference_value);
     }
     return context;
 }
@@ -2589,10 +2586,12 @@ Result<void> validate_flat_package_result(const std::filesystem::path &temporary
             return std::unexpected{normalized.error()};
         if (*normalized != object.normalized_sha256)
             return std::unexpected{transaction_error("post-write package object changed identity")};
-        if (object.target_link_id) {
+        if (object.target_wave_data_reference_value) {
             const auto *wave_data = std::get_if<CurrentSmpl>(&matches.front()->object.payload);
-            if (wave_data == nullptr || wave_data->link_id.value != *object.target_link_id) {
-                return std::unexpected{transaction_error("post-write SMPL link ID differs from the import plan")};
+            if (wave_data == nullptr ||
+                wave_data->wave_data_reference_value.value != *object.target_wave_data_reference_value) {
+                return std::unexpected{
+                    transaction_error("post-write SMPL reference value differs from the import plan")};
             }
         }
         if (object.object_type == "SBNK") {
@@ -2940,10 +2939,12 @@ Result<void> validate_package_result(const std::filesystem::path &temporary, std
         if (*normalized != object.normalized_sha256) {
             return std::unexpected{transaction_error("post-write package object changed normalized identity")};
         }
-        if (object.target_link_id) {
+        if (object.target_wave_data_reference_value) {
             const auto *wave_data = std::get_if<CurrentSmpl>(&matches.front()->object.payload);
-            if (wave_data == nullptr || wave_data->link_id.value != *object.target_link_id) {
-                return std::unexpected{transaction_error("post-write SMPL link ID differs from the import plan")};
+            if (wave_data == nullptr ||
+                wave_data->wave_data_reference_value.value != *object.target_wave_data_reference_value) {
+                return std::unexpected{
+                    transaction_error("post-write SMPL reference value differs from the import plan")};
             }
         }
         if (object.object_type == "SBNK") {

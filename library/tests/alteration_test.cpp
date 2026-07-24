@@ -1013,7 +1013,84 @@ TEST(Alteration, WaveformDeletionRequiresPriorSampleDeletion) {
     std::filesystem::remove_all(root, error);
 }
 
-TEST(Alteration, VolumeDeletionRejectsKnownCrossVolumeWaveformDependency) {
+TEST(Alteration, WaveformRenameUsesMemberNameAndRefreshesStaleCachedReference) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-wave-rename-stale-cache";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(sample_source_manifest(audio), source));
+
+    const auto opened = axk::open_image(source);
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto &partition = opened->partitions().front();
+    const auto sample_record = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.object_type == "SBNK" && record.object_name == "Old Sample";
+    });
+    const auto wave_data_record = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.object_type == "SMPL" && record.object_name == "Wave";
+    });
+    ASSERT_NE(sample_record, partition.records.end());
+    ASSERT_NE(wave_data_record, partition.records.end());
+    const auto catalog = axk::build_object_catalog(*opened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    const auto wave_data = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::smpl && object.object.header.name == "Wave";
+    });
+    ASSERT_NE(wave_data, catalog->objects.end());
+    const auto *decoded_wave_data = std::get_if<axk::CurrentSmpl>(&wave_data->object.payload);
+    ASSERT_NE(decoded_wave_data, nullptr);
+    const auto stale_cache = decoded_wave_data->wave_data_reference_value.value + 0x100U;
+    patch_record_be32(source, partition, *sample_record, 0xa0U, stale_cache);
+
+    const auto stale_opened = axk::open_image(source);
+    ASSERT_TRUE(stale_opened) << stale_opened.error().message;
+    const auto stale_catalog = axk::build_object_catalog(*stale_opened);
+    ASSERT_TRUE(stale_catalog) << stale_catalog.error().message;
+    const auto stale_graph = axk::build_relationship_graph(*stale_catalog);
+    const auto known = std::ranges::find_if(stale_graph.relationships, [](const auto &relationship) {
+        return relationship.type == "SBNK_LEFT_MEMBER_TO_SMPL";
+    });
+    ASSERT_NE(known, stale_graph.relationships.end());
+    ASSERT_TRUE(known->target_key);
+    EXPECT_EQ(known->quality, axk::RelationshipQuality::known);
+    EXPECT_EQ(known->basis, "sbnk-member-name+same-volume");
+
+    const auto manifest = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"rename","type":"rename_waveform","partition_index":0,
+       "volume_name":"Samples","waveform_name":"Wave","new_waveform_name":"Renamed Wave"}
+    ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto renamed = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(renamed) << renamed.error().message;
+
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto renamed_catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(renamed_catalog) << renamed_catalog.error().message;
+    const auto renamed_wave_data = std::ranges::find_if(renamed_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::smpl && object.object.header.name == "Renamed Wave";
+    });
+    const auto renamed_sample = std::ranges::find_if(renamed_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbnk && object.object.header.name == "Old Sample";
+    });
+    ASSERT_NE(renamed_wave_data, renamed_catalog->objects.end());
+    ASSERT_NE(renamed_sample, renamed_catalog->objects.end());
+    const auto *renamed_wave = std::get_if<axk::CurrentSmpl>(&renamed_wave_data->object.payload);
+    const auto *sample = std::get_if<axk::CurrentSbnk>(&renamed_sample->object.payload);
+    ASSERT_NE(renamed_wave, nullptr);
+    ASSERT_NE(sample, nullptr);
+    EXPECT_EQ(sample->left.wave_data_name, "Renamed Wave");
+    EXPECT_EQ(sample->left.cached_wave_data_reference_value, renamed_wave->wave_data_reference_value.value);
+    EXPECT_NE(sample->left.cached_wave_data_reference_value, stale_cache);
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, StaleCachedReferenceDoesNotCreateCrossVolumeWaveDataDependency) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-cross-volume-waveform";
     const auto audio = root / "tone.wav";
     const auto source = root / "source.hds";
@@ -1072,11 +1149,11 @@ TEST(Alteration, VolumeDeletionRejectsKnownCrossVolumeWaveformDependency) {
         std::ranges::find(partition.records, wave_data_b->sfs_id, &axk::IndexRecord::sfs_id);
     ASSERT_NE(record_b, partition.records.end());
     ASSERT_NE(wave_data_record_b, partition.records.end());
-    const auto disposable_link = decoded_wave_data->link_id.value + 1U;
+    const auto disposable_link = decoded_wave_data->wave_data_reference_value.value + 1U;
     patch_record_be32(source, partition, *wave_data_record_b, 0x6cU, disposable_link - 0xbaU);
     patch_record_be32(source, partition, *wave_data_record_b, 0x78U, disposable_link);
     patch_record_name(source, partition, *record_b, 0x78U, "Shared Wave");
-    patch_record_be32(source, partition, *record_b, 0xa0U, decoded_wave_data->link_id.value);
+    patch_record_be32(source, partition, *record_b, 0xa0U, decoded_wave_data->wave_data_reference_value.value);
 
     const auto remove_duplicate = axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
@@ -1098,19 +1175,18 @@ TEST(Alteration, VolumeDeletionRejectsKnownCrossVolumeWaveformDependency) {
                                     }),
               1);
     const auto graph = axk::build_relationship_graph(*shared_catalog);
-    const auto cross_volume = std::ranges::find_if(graph.relationships, [&](const auto &relation) {
-        if (relation.type != "SBNK_LEFT_MEMBER_TO_SMPL" || relation.quality != axk::RelationshipQuality::known ||
-            !relation.target_key)
+    const auto stale_cache = std::ranges::find_if(graph.relationships, [&](const auto &relation) {
+        if (relation.type != "SBNK_LEFT_MEMBER_TO_SMPL")
             return false;
         const auto source_object =
             std::ranges::find(shared_catalog->objects, relation.source_key, &axk::ObjectSnapshot::key);
-        const auto target_object =
-            std::ranges::find(shared_catalog->objects, *relation.target_key, &axk::ObjectSnapshot::key);
         return source_object != shared_catalog->objects.end() && source_object->placement &&
-               source_object->placement->volume_name == "Volume B" && target_object != shared_catalog->objects.end() &&
-               target_object->placement && target_object->placement->volume_name == "Volume A";
+               source_object->placement->volume_name == "Volume B";
     });
-    ASSERT_NE(cross_volume, graph.relationships.end());
+    ASSERT_NE(stale_cache, graph.relationships.end());
+    EXPECT_FALSE(stale_cache->target_key);
+    EXPECT_EQ(stale_cache->quality, axk::RelationshipQuality::tentative);
+    EXPECT_EQ(stale_cache->basis, "sbnk-member-name-nonlocal-or-ambiguous");
 
     const auto delete_owner = axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
@@ -1118,9 +1194,8 @@ TEST(Alteration, VolumeDeletionRejectsKnownCrossVolumeWaveformDependency) {
        "volume_name":"Volume A"}
     ]})");
     ASSERT_TRUE(delete_owner);
-    const auto rejected = axk::inspect_hds_alteration(shared, *delete_owner);
-    ASSERT_FALSE(rejected);
-    EXPECT_EQ(rejected.error().message, "a known object relationship crosses the volume closure");
+    const auto inspected = axk::inspect_hds_alteration(shared, *delete_owner);
+    ASSERT_TRUE(inspected) << inspected.error().message;
     std::filesystem::remove_all(root, error);
 }
 

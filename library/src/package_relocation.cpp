@@ -83,11 +83,12 @@ Result<std::string_view> target_name(const PackageNode &node, const PackageNodeR
     return found->second;
 }
 
-Result<std::uint32_t> target_link_id(const PackageNode &node, const PackageNodeRelocationContext &context,
-                                     const PackageRelationship &edge) {
-    const auto found = context.edge_target_link_ids.find(edge.edge_id);
-    if (found == context.edge_target_link_ids.end()) {
-        return std::unexpected{relocation_error(node, "package relocation is missing an SMPL target link ID")};
+Result<std::uint32_t> target_wave_data_reference_value(const PackageNode &node,
+                                                       const PackageNodeRelocationContext &context,
+                                                       const PackageRelationship &edge) {
+    const auto found = context.edge_target_reference_values.find(edge.edge_id);
+    if (found == context.edge_target_reference_values.end()) {
+        return std::unexpected{relocation_error(node, "package relocation is missing an SMPL target reference value")};
     }
     return found->second;
 }
@@ -175,15 +176,15 @@ Result<RelocationProfile> build_relocation_profile(const DecodedObject &object,
             return std::unexpected{profile_error(object, "current SMPL payload is not decoded")};
         if (auto added = add_range(result, object, 0x6cU, 4U, "SMPL_GROUP_ID"); !added)
             return std::unexpected{added.error()};
-        if (auto added = add_range(result, object, 0x78U, 4U, "SMPL_LINK_ID"); !added)
+        if (auto added = add_range(result, object, 0x78U, 4U, "SMPL_REFERENCE_VALUE"); !added)
             return std::unexpected{added.error()};
         break;
     case ObjectType::sbnk: {
         if (!std::holds_alternative<CurrentSbnk>(object.payload))
             return std::unexpected{profile_error(object, "current SBNK payload is not decoded")};
-        if (auto added = add_range(result, object, 0xa0U, 4U, "SBNK_LEFT_MEMBER_LINK"); !added)
+        if (auto added = add_range(result, object, 0xa0U, 4U, "SBNK_LEFT_MEMBER_CACHED_REFERENCE"); !added)
             return std::unexpected{added.error()};
-        if (auto added = add_range(result, object, 0xa4U, 4U, "SBNK_RIGHT_MEMBER_LINK"); !added)
+        if (auto added = add_range(result, object, 0xa4U, 4U, "SBNK_RIGHT_MEMBER_CACHED_REFERENCE"); !added)
             return std::unexpected{added.error()};
         if (auto added = add_range(result, object, 0xc0U, 16U, "SBNK_PROGRAM_BITMAP"); !added)
             return std::unexpected{added.error()};
@@ -260,12 +261,13 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
         allowed.push_back({relocation.offset, relocation.width});
 
     if (node.object_type == "SMPL") {
-        if (!context.smpl_link_id || *context.smpl_link_id < 0xbaU || result.size() < 0x7cU) {
-            return std::unexpected{relocation_error(node, "SMPL relocation requires a valid destination link ID")};
+        if (!context.wave_data_reference_value || *context.wave_data_reference_value < 0xbaU || result.size() < 0x7cU) {
+            return std::unexpected{
+                relocation_error(node, "SMPL relocation requires a valid destination reference value")};
         }
-        if (auto written = write_be32(0x6cU, *context.smpl_link_id - 0xbaU); !written)
+        if (auto written = write_be32(0x6cU, *context.wave_data_reference_value - 0xbaU); !written)
             return std::unexpected{written.error()};
-        if (auto written = write_be32(0x78U, *context.smpl_link_id); !written)
+        if (auto written = write_be32(0x78U, *context.wave_data_reference_value); !written)
             return std::unexpected{written.error()};
     } else if (node.object_type == "SBNK") {
         if (result.size() < 0xd1U) {
@@ -277,12 +279,12 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
             if (edge.source_node_id != node.node_id)
                 continue;
             if (edge.role == "SBNK_LEFT_MEMBER_TO_SMPL") {
-                auto link = target_link_id(node, context, edge);
+                auto link = target_wave_data_reference_value(node, context, edge);
                 if (!link)
                     return std::unexpected{link.error()};
                 left_link = *link;
             } else if (edge.role == "SBNK_RIGHT_MEMBER_TO_SMPL") {
-                auto link = target_link_id(node, context, edge);
+                auto link = target_wave_data_reference_value(node, context, edge);
                 if (!link)
                     return std::unexpected{link.error()};
                 right_link = *link;
@@ -300,15 +302,16 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
             const auto *source = std::get_if<CurrentSbnk>(&source_decoded->payload);
             if (source == nullptr)
                 return std::unexpected{relocation_error(node, "SBNK source payload is not decoded")};
-            if (source->inactive_right.smpl_link_id == 0U) {
+            if (source->inactive_right.cached_wave_data_reference_value == 0U) {
                 if (auto written = write_be32(0xa4U, 0U); !written)
                     return std::unexpected{written.error()};
-            } else if (source->inactive_right.smpl_link_id == source->left.smpl_link_id) {
+            } else if (source->inactive_right.cached_wave_data_reference_value ==
+                       source->left.cached_wave_data_reference_value) {
                 if (auto written = write_be32(0xa4U, *left_link); !written)
                     return std::unexpected{written.error()};
             } else {
-                return std::unexpected{relocation_error(node, "inactive SBNK right lane has an "
-                                                              "unsupported nonzero link ID")};
+                return std::unexpected{relocation_error(node, "inactive SBNK right lane has an unsupported nonzero "
+                                                              "cached reference value")};
             }
         }
         std::fill(result.begin() + 0xc0, result.begin() + 0xd0, std::byte{});
@@ -366,8 +369,9 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
         return std::unexpected{relocation_error(node, "relocated object header name does not match its destination")};
     }
     if (const auto *wave_data = std::get_if<CurrentSmpl>(&decoded->payload)) {
-        if (!context.smpl_link_id || wave_data->link_id.value != *context.smpl_link_id ||
-            wave_data->group_id.value != *context.smpl_link_id - 0xbaU) {
+        if (!context.wave_data_reference_value ||
+            wave_data->wave_data_reference_value.value != *context.wave_data_reference_value ||
+            wave_data->group_id.value != *context.wave_data_reference_value - 0xbaU) {
             return std::unexpected{relocation_error(node, "relocated SMPL IDs did not decode to the planned values")};
         }
     } else if (const auto *sample = std::get_if<CurrentSbnk>(&decoded->payload)) {
@@ -385,18 +389,19 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
             if (!name)
                 return std::unexpected{name.error()};
             if (edge.role == "SBNK_LEFT_MEMBER_TO_SMPL") {
-                const auto link = target_link_id(node, context, edge);
+                const auto link = target_wave_data_reference_value(node, context, edge);
                 if (!link)
                     return std::unexpected{link.error()};
-                if (sample->left.wave_data_name != *name || sample->left.smpl_link_id != *link) {
+                if (sample->left.wave_data_name != *name || sample->left.cached_wave_data_reference_value != *link) {
                     return std::unexpected{relocation_error(node, "relocated SBNK left member did not decode to "
                                                                   "the planned target")};
                 }
             } else if (edge.role == "SBNK_RIGHT_MEMBER_TO_SMPL") {
-                const auto link = target_link_id(node, context, edge);
+                const auto link = target_wave_data_reference_value(node, context, edge);
                 if (!link)
                     return std::unexpected{link.error()};
-                if (!sample->right || sample->right->wave_data_name != *name || sample->right->smpl_link_id != *link) {
+                if (!sample->right || sample->right->wave_data_name != *name ||
+                    sample->right->cached_wave_data_reference_value != *link) {
                     return std::unexpected{relocation_error(node, "relocated SBNK right member did not decode to "
                                                                   "the planned target")};
                 }

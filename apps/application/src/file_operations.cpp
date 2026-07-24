@@ -70,16 +70,11 @@ struct LoadedSource {
 
 struct DirectoryCleanup {
     std::filesystem::path path;
-    bool active{true};
 
     ~DirectoryCleanup() {
-        if (!active)
-            return;
         std::error_code error;
         std::filesystem::remove_all(path, error);
     }
-
-    void release() noexcept { active = false; }
 };
 
 axk::app::Error operation_error(std::string code, std::string message,
@@ -307,7 +302,7 @@ axk::ReportRow inventory_row(const LoadedSource &source, const axk::ObjectSnapsh
         decoded_fields = "fine_tune;loop_length;loop_mode;loop_start;root_key;sample_rate";
     } else if (item.object.header.type == axk::ObjectType::sbnk) {
         decoded_kind = "DecodedSample";
-        decoded_fields = "sample_topology;left_wave_data_name;left_smpl_link_id";
+        decoded_fields = "sample_topology;left_wave_data_name;left_cached_wave_data_reference_value";
     } else if (item.object.header.type == axk::ObjectType::sbac) {
         decoded_kind = "DecodedSampleBank";
         decoded_fields = "active_slot_count;max_slot_count_from_payload";
@@ -724,7 +719,6 @@ axk::app::Result<Json> execute_objects(const axk::app::Sandbox &sandbox, const J
     }
     if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
         return std::unexpected(published.error());
-    cleanup.release();
     return Json{{"operationId", "report.objects"},
                 {"sourceCount", request->sources.size()},
                 {"loadedCount", request->sources.size() - failed_count},
@@ -888,7 +882,6 @@ axk::app::Result<Json> execute_inventory(const axk::app::Sandbox &sandbox, const
     }
     if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
         return std::unexpected(published.error());
-    cleanup.release();
     return Json{{"operationId", "report.inventory"},
                 {"sourceCount", request->sources.size()},
                 {"loadedCount", request->sources.size() - load_errors.size()},
@@ -930,11 +923,9 @@ axk::ReportRow relationship_report_row(const LoadedSource &source, const axk::Re
         if (const auto *sample = std::get_if<axk::CurrentSbnk>(&source_object->object.payload)) {
             const bool right = row.type == "SBNK_RIGHT_MEMBER_TO_SMPL";
             const auto *member = right && sample->right ? &*sample->right : &sample->left;
-            raw_fields = std::format("SBNK+{} member {}; name={}; link_id=0x{:08x}", right ? "right" : "left",
-                                     right ? "right" : "left", member->wave_data_name, member->smpl_link_id);
-            if (row.basis == "sbnk-member-link+name") {
-                notes = "Current SBNK member name and member link ID match exactly one same-scope SMPL object.";
-            }
+            raw_fields =
+                std::format("SBNK+{} member {}; name={}; cached_reference_value=0x{:08x}", right ? "right" : "left",
+                            right ? "right" : "left", member->wave_data_name, member->cached_wave_data_reference_value);
         }
     } else if (source_object != source.inventory.catalog.objects.end() && row.type == "SBAC_SLOT_TO_SBNK") {
         if (const auto *sample_bank = std::get_if<axk::CurrentSbac>(&source_object->object.payload)) {
@@ -973,7 +964,7 @@ axk::ReportRow relationship_report_row(const LoadedSource &source, const axk::Re
     else if (row.basis.starts_with("sbnk-program-link-bitmap-"))
         diagnostic = "program-link-bitmap";
     else if (row.quality == axk::RelationshipQuality::tentative)
-        diagnostic = row.basis.starts_with("sbnk-member-link-id-only") ? "sbnk-member-link" : "ambiguous-target";
+        diagnostic = row.basis == "sbnk-member-cache-only-name-mismatch" ? "sbnk-member-cache" : "ambiguous-target";
     else if (row.quality == axk::RelationshipQuality::unknown)
         diagnostic = "missing-target";
     return {{"key", std::format("{}|{}|{}|{}", source_key, row.type, target.empty() ? "missing" : target, row.basis)},
@@ -1663,7 +1654,6 @@ axk::app::Result<Json> execute_coverage(const axk::app::Sandbox &sandbox, const 
     }
     if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
         return std::unexpected(published.error());
-    cleanup.release();
     return Json{{"operationId", "report.coverage"}, {"sourceCount", request->sources.size()},
                 {"loadedCount", loaded.size()},     {"failedCount", load_errors.size()},
                 {"rowCount", relationships.size()}, {"artifacts", std::move(artifacts)}};
@@ -1713,7 +1703,7 @@ axk::app::Result<Json> execute_orphans(const axk::app::Sandbox &sandbox, const J
                 {"waveform_name", row.waveform_name},
                 {"object_key", row.object_key},
                 {"sfs_id", static_cast<std::uint64_t>(row.sfs_id.value)},
-                {"smpl_link_id", static_cast<std::uint64_t>(row.smpl_link_id)},
+                {"wave_data_reference_value", static_cast<std::uint64_t>(row.wave_data_reference_value)},
                 {"status", std::string{axk::waveform_status_name(row.status)}},
                 {"referencing_samples", joined_strings(row.referencing_samples)},
                 {"basis", row.basis},
@@ -1761,7 +1751,6 @@ axk::app::Result<Json> execute_orphans(const axk::app::Sandbox &sandbox, const J
     }
     if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
         return std::unexpected(published.error());
-    cleanup.release();
     return Json{{"operationId", "report.orphans"},
                 {"sourceCount", request->sources.size()},
                 {"loadedCount", request->sources.size()},
@@ -1901,7 +1890,6 @@ axk::app::Result<Json> execute_relationships(const axk::app::Sandbox &sandbox, c
     }
     if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
         return std::unexpected(published.error());
-    cleanup.release();
     return Json{{"operationId", "report.relationships"},
                 {"sourceCount", request->sources.size()},
                 {"loadedCount", loaded.size()},
@@ -2102,7 +2090,6 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
     }
     if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
         return std::unexpected(published.error());
-    cleanup.release();
     return Json{{"operationId", "corpus.audit"},         {"sourceCount", request->sources.size()},
                 {"loadedCount", loaded.size()},          {"failedCount", load_error_count},
                 {"objectCount", inventory.size()},       {"validationIssueCount", validation_issues.size()},

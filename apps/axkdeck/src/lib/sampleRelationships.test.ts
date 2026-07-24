@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { SamplerObject, SamplerRelationship } from './transport';
 import type { SampleStructureItem, WaveDataItem } from './types';
-import { distinctWaveDataForSample, linkedWaveDataForSample, orderedSamplesForBank } from './sampleRelationships';
+import {
+    auditionableSampleIds,
+    distinctWaveDataForSample,
+    linkedWaveDataForSample,
+    orderedSamplesForBank,
+} from './sampleRelationships';
 
 function relationship(id: string, type: string, targetObjectId?: string): SamplerRelationship {
     return {
@@ -10,7 +15,7 @@ function relationship(id: string, type: string, targetObjectId?: string): Sample
         targetObjectId,
         candidateObjectIds: [],
         relationshipType: type,
-        quality: 'known',
+        quality: 'Known',
         basis: 'test',
         notes: [],
         assignmentName: '',
@@ -125,6 +130,44 @@ describe('linkedWaveDataForSample', () => {
         );
 
         expect(result).toEqual([shared]);
+    });
+});
+
+describe('auditionableSampleIds', () => {
+    it('requires one or two distinct Known Wave Data targets', () => {
+        const left = waveData('SMPL-L');
+        const right = waveData('SMPL-R');
+        const third = waveData('SMPL-THIRD');
+        const knownMono = relationship('known-mono', 'SBNK_LEFT_MEMBER_TO_SMPL', left.objectKey);
+        const likely = {
+            ...relationship('likely', 'SBNK_LEFT_MEMBER_TO_SMPL', left.objectKey),
+            sourceObjectId: 'SBNK-LIKELY',
+            quality: 'Likely',
+        };
+        const knownStereo = [
+            {
+                ...relationship('known-left', 'SBNK_LEFT_MEMBER_TO_SMPL', left.objectKey),
+                sourceObjectId: 'SBNK-STEREO',
+            },
+            {
+                ...relationship('known-right', 'SBNK_RIGHT_MEMBER_TO_SMPL', right.objectKey),
+                sourceObjectId: 'SBNK-STEREO',
+            },
+        ];
+        const tooMany = [left, right, third].map((item, index) => ({
+            ...relationship(`known-${index}`, 'SBNK_LEFT_MEMBER_TO_SMPL', item.objectKey),
+            sourceObjectId: 'SBNK-TOO-MANY',
+        }));
+
+        expect(auditionableSampleIds([knownMono, likely, ...knownStereo, ...tooMany], [left, right, third])).toEqual(
+            new Set(['SBNK-1', 'SBNK-STEREO']),
+        );
+    });
+
+    it('ignores Known targets that are absent from the loaded Wave Data collection', () => {
+        expect(
+            auditionableSampleIds([relationship('missing', 'SBNK_LEFT_MEMBER_TO_SMPL', 'SMPL-MISSING')], []),
+        ).toEqual(new Set());
     });
 });
 

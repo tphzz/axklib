@@ -51,7 +51,7 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
     const auto sample_width = reader.be16(0x2a);
     const auto source_name = reader.printable_ascii_field(0x54, 16);
     const auto group_id = reader.be32(0x6c);
-    const auto link_id = reader.be32(0x78);
+    const auto reference_value = reader.be32(0x78);
     const auto duplicate_rate = reader.be16(0x7c);
     const auto root_key = reader.u8(0x7e);
     const auto fine_tune = reader.s8(0x7f);
@@ -59,8 +59,8 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
     const auto wave_length = reader.be32(0x92);
     const auto loop_start = reader.be32(0x96);
     const auto loop_length = reader.be32(0x9a);
-    if (!sample_rate || !sample_width || !source_name || !group_id || !link_id || !duplicate_rate || !root_key ||
-        !fine_tune || !loop_mode || !wave_length || !loop_start || !loop_length) {
+    if (!sample_rate || !sample_width || !source_name || !group_id || !reference_value || !duplicate_rate ||
+        !root_key || !fine_tune || !loop_mode || !wave_length || !loop_start || !loop_length) {
         return std::unexpected{
             make_error(ErrorCode::container_truncated, ErrorCategory::object, "current SMPL metadata is truncated")};
     }
@@ -69,7 +69,7 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
         field(*sample_width, 0x2a, 2, Verification::corroborated, "current SMPL header"),
         field(*source_name, 0x54, 16, Verification::corroborated, "compact record text"),
         field(*group_id, 0x6c, 4, Verification::corroborated, "compact record link field"),
-        field(*link_id, 0x78, 4, Verification::corroborated, "compact record link field"),
+        field(*reference_value, 0x78, 4, Verification::corroborated, "compact Wave Data reference value"),
         field(*duplicate_rate, 0x7c, 2, Verification::corroborated, "compact rate copy"),
         field(*root_key, 0x7e, 1, Verification::corroborated, "compact pitch field"),
         field(*fine_tune, 0x7f, 1, Verification::corroborated, "compact pitch field"),
@@ -98,7 +98,7 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
 
 Result<CurrentSbnkMember> decode_sbnk_member(const ByteReader &reader, bool right) {
     const auto name = reader.printable_ascii_field(right ? 0x88U : 0x78U, 16);
-    const auto link = reader.be32(right ? 0xa4U : 0xa0U);
+    const auto cached_reference = reader.be32(right ? 0xa4U : 0xa0U);
     const auto root = reader.u8(right ? 0xd7U : 0xd6U);
     const auto rate = reader.be16(right ? 0xdaU : 0xd8U);
     const auto fine = reader.s8(right ? 0xddU : 0xdcU);
@@ -106,11 +106,11 @@ Result<CurrentSbnkMember> decode_sbnk_member(const ByteReader &reader, bool righ
     const auto length = reader.be32(right ? 0xf4U : 0xf0U);
     const auto loop_start = reader.be32(right ? 0xfcU : 0xf8U);
     const auto loop_length = reader.be32(right ? 0x104U : 0x100U);
-    if (!name || !link || !root || !rate || !fine || !pitch || !length || !loop_start || !loop_length) {
+    if (!name || !cached_reference || !root || !rate || !fine || !pitch || !length || !loop_start || !loop_length) {
         return std::unexpected{
             make_error(ErrorCode::container_truncated, ErrorCategory::object, "current SBNK member lane is truncated")};
     }
-    return CurrentSbnkMember{*name, *link, *root, *rate, *fine, *pitch, *length, *loop_start, *loop_length};
+    return CurrentSbnkMember{*name, *cached_reference, *root, *rate, *fine, *pitch, *length, *loop_start, *loop_length};
 }
 
 Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
@@ -138,10 +138,10 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
     if (result.right_slot_present) {
         result.right = *inactive_right;
         result.right_link_role = "sample-reference";
-    } else if (inactive_right->smpl_link_id == 0) {
+    } else if (inactive_right->cached_wave_data_reference_value == 0) {
         result.right_link_role = "unused-zero";
-    } else if (inactive_right->smpl_link_id == left->smpl_link_id) {
-        result.right_link_role = "unused-mirrors-left-link";
+    } else if (inactive_right->cached_wave_data_reference_value == left->cached_wave_data_reference_value) {
+        result.right_link_role = "unused-mirrors-left-cache";
     } else {
         result.right_link_role = "unused-nonzero";
     }

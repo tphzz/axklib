@@ -372,7 +372,8 @@ Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::
              {"actions", std::move(names)},
              {"canonicalActionId", object.canonical_action_id ? Json(*object.canonical_action_id) : Json{}},
              {"targetSfsId", object.target_sfs_id ? Json(*object.target_sfs_id) : Json{}},
-             {"targetLinkId", object.target_link_id ? Json(*object.target_link_id) : Json{}}});
+             {"targetWaveDataReferenceValue",
+              object.target_wave_data_reference_value ? Json(*object.target_wave_data_reference_value) : Json{}}});
     }
     auto allocation = Json::array();
     for (const auto &item : plan.allocation) {

@@ -100,7 +100,7 @@ TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
     EXPECT_EQ(sample.right_link_role, "unused-zero");
     EXPECT_FALSE(sample.right);
     EXPECT_EQ(sample.left.wave_data_name, "sine wave");
-    EXPECT_EQ(sample.left.smpl_link_id, 23797180U);
+    EXPECT_EQ(sample.left.cached_wave_data_reference_value, 23797180U);
     EXPECT_EQ(sample.left.root_key, 66U);
     EXPECT_EQ(sample.left.sample_rate, 48000U);
     EXPECT_EQ(sample.left.fine_tune_cents, -20);

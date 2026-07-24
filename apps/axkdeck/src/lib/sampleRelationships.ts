@@ -6,6 +6,32 @@ const memberRelationships = [
     { relationshipType: 'SBNK_RIGHT_MEMBER_TO_SMPL', role: 'right' },
 ] as const;
 
+export function auditionableSampleIds(
+    relationships: readonly SamplerRelationship[],
+    waveData: readonly WaveDataItem[],
+): Set<string> {
+    const waveDataIds = new Set(waveData.map((item) => item.objectKey));
+    const confirmedTargets = new Map<string, Set<string>>();
+    for (const relationship of relationships) {
+        if (
+            relationship.quality !== 'Known' ||
+            !relationship.targetObjectId ||
+            !waveDataIds.has(relationship.targetObjectId) ||
+            !memberRelationships.some((member) => member.relationshipType === relationship.relationshipType)
+        ) {
+            continue;
+        }
+        const targets = confirmedTargets.get(relationship.sourceObjectId) ?? new Set<string>();
+        targets.add(relationship.targetObjectId);
+        confirmedTargets.set(relationship.sourceObjectId, targets);
+    }
+    return new Set(
+        [...confirmedTargets]
+            .filter(([, targets]) => targets.size >= 1 && targets.size <= 2)
+            .map(([sampleId]) => sampleId),
+    );
+}
+
 export function linkedWaveDataForSample(
     sampleId: string,
     relationships: readonly SamplerRelationship[],

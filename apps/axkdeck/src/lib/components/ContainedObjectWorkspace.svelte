@@ -34,6 +34,8 @@
         playingSampleBankId?: string;
         playingObjectId?: string | null;
         preparingObjectId?: string | null;
+        auditionableSampleIds: ReadonlySet<string>;
+        auditionableSampleBankIds: ReadonlySet<string>;
     }
 
     let {
@@ -57,6 +59,8 @@
         playingSampleBankId = '',
         playingObjectId = null,
         preparingObjectId = null,
+        auditionableSampleIds,
+        auditionableSampleBankIds,
     }: Props = $props();
 
     const sampleQuery = $derived(view === 'sample-banks' ? queries.secondary : queries.primary);
@@ -82,6 +86,8 @@
             />
             <div class="contained-list">
                 {#each filteredBanks as item (item.id)}
+                    {@const playbackActive = playingSampleBankId === item.objectId}
+                    {@const auditionable = auditionableSampleBankIds.has(item.objectId)}
                     <div class="contained-row" class:active={activeSampleBankId === item.objectId}>
                         <button
                             class="contained-identity"
@@ -97,16 +103,23 @@
                         <button
                             class="contained-playback icon-button"
                             type="button"
-                            aria-label={playingSampleBankId === item.objectId
+                            disabled={!playbackActive && !auditionable}
+                            aria-label={playbackActive
                                 ? `Stop ${item.name}`
-                                : `Play ${item.name}`}
-                            title={playingSampleBankId === item.objectId ? 'Stop' : 'Play'}
+                                : auditionable
+                                  ? `Play ${item.name}`
+                                  : `${item.name} cannot be auditioned`}
+                            title={playbackActive
+                                ? 'Stop'
+                                : auditionable
+                                  ? 'Play'
+                                  : 'No Samples with confirmed Wave Data'}
                             onclick={() => {
-                                if (playingSampleBankId === item.objectId) onstop();
-                                else onplaysamplebank(item);
+                                if (playbackActive) onstop();
+                                else if (auditionable) onplaysamplebank(item);
                             }}
                         >
-                            <Icon name={playingSampleBankId === item.objectId ? 'stop' : 'play'} size={13} />
+                            <Icon name={playbackActive ? 'stop' : 'play'} size={13} />
                         </button>
                     </div>
                 {:else}
@@ -127,6 +140,8 @@
         />
         <div class="contained-list">
             {#each filteredSamples as item (item.id)}
+                {@const playbackActive = playingObjectId === item.objectId || preparingObjectId === item.objectId}
+                {@const auditionable = auditionableSampleIds.has(item.objectId)}
                 <div class="contained-row" class:active={activeSampleId === item.objectId}>
                     <button
                         class="contained-identity"
@@ -141,25 +156,25 @@
                     <button
                         class="contained-playback icon-button"
                         type="button"
-                        aria-label={playingObjectId === item.objectId || preparingObjectId === item.objectId
+                        disabled={!playbackActive && !auditionable}
+                        aria-label={playbackActive
                             ? `Stop ${item.name}`
-                            : `Play ${item.name}`}
+                            : auditionable
+                              ? `Play ${item.name}`
+                              : `${item.name} cannot be auditioned`}
                         title={preparingObjectId === item.objectId
                             ? 'Stop preparing audio'
                             : playingObjectId === item.objectId
                               ? 'Stop'
-                              : 'Play'}
+                              : auditionable
+                                ? 'Play'
+                                : 'No confirmed Wave Data'}
                         onclick={() => {
-                            if (playingObjectId === item.objectId || preparingObjectId === item.objectId) onstop();
-                            else onplaysample(item);
+                            if (playbackActive) onstop();
+                            else if (auditionable) onplaysample(item);
                         }}
                     >
-                        <Icon
-                            name={playingObjectId === item.objectId || preparingObjectId === item.objectId
-                                ? 'stop'
-                                : 'play'}
-                            size={13}
-                        />
+                        <Icon name={playbackActive ? 'stop' : 'play'} size={13} />
                     </button>
                 </div>
             {:else}

@@ -1893,8 +1893,8 @@ export interface components {
             rawVolume: string;
             rootIndex: number;
             sourceName: string;
-            targetLinkId: number | null;
             targetSfsId: number | null;
+            targetWaveDataReferenceValue: number | null;
             volumeName: string;
         };
         PackageImportConflict: {

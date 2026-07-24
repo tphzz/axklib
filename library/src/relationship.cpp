@@ -23,7 +23,7 @@ struct Match {
 struct ScopeIndex {
     std::map<std::pair<ObjectType, std::string>, std::vector<const ObjectSnapshot *>> typed_names;
     std::map<std::string, std::vector<const ObjectSnapshot *>> names;
-    std::unordered_map<std::uint32_t, std::vector<const ObjectSnapshot *>> wave_data_links;
+    std::unordered_map<std::uint32_t, std::vector<const ObjectSnapshot *>> wave_data_reference_values;
     std::unordered_map<std::string, const ObjectSnapshot *> keys;
 };
 
@@ -34,7 +34,7 @@ ScopeIndex index_scope(const std::vector<const ObjectSnapshot *> &scope) {
         index.names[item->object.header.name].push_back(item);
         index.keys.emplace(item->key, item);
         if (const auto *wave_data = std::get_if<CurrentSmpl>(&item->object.payload)) {
-            index.wave_data_links[wave_data->link_id.value].push_back(item);
+            index.wave_data_reference_values[wave_data->wave_data_reference_value.value].push_back(item);
         } else if (item->object.header.type == ObjectType::smpl) {
             const auto *generic = std::get_if<GenericObject>(&item->object.payload);
             if (generic != nullptr && generic->raw_payload.size() >= 0x7cU) {
@@ -43,7 +43,7 @@ ScopeIndex index_scope(const std::vector<const ObjectSnapshot *> &scope) {
                                   static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x79U])) << 16U |
                                   static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x7aU])) << 8U |
                                   static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x7bU]));
-                index.wave_data_links[link].push_back(item);
+                index.wave_data_reference_values[link].push_back(item);
             }
         }
     }
@@ -66,12 +66,6 @@ bool same_volume(const ObjectSnapshot &left, const ObjectSnapshot &right) {
 bool same_container_folder(const ObjectSnapshot &left, const ObjectSnapshot &right) {
     return left.placement && right.placement && !left.placement->container_directory.empty() &&
            left.placement->container_directory == right.placement->container_directory;
-}
-
-bool same_exact_iso_raw_volume(const ObjectSnapshot &left, const ObjectSnapshot &right) {
-    return left.scope_key.starts_with("iso:") && left.scope_key == right.scope_key &&
-           left.placement_resolution == PlacementResolution::exact &&
-           right.placement_resolution == PlacementResolution::exact && same_container_folder(left, right);
 }
 
 std::vector<const ObjectSnapshot *> named(const ScopeIndex &index, ObjectType type, std::string_view name) {
@@ -104,57 +98,53 @@ std::string local_suffix(const ObjectSnapshot &source) {
 }
 
 Match match_member(const ObjectSnapshot &source, const CurrentSbnkMember &member, const ScopeIndex &index) {
-    const auto link_entry = index.wave_data_links.find(member.smpl_link_id);
-    const auto by_link =
-        link_entry == index.wave_data_links.end() ? std::vector<const ObjectSnapshot *>{} : link_entry->second;
-    std::vector<const ObjectSnapshot *> exact;
-    for (const auto *item : by_link) {
-        if (item->object.header.name == member.wave_data_name)
-            exact.push_back(item);
-    }
-    if (exact.size() == 1) {
-        return {exact.front(), exact, RelationshipQuality::known, "sbnk-member-link+name",
-                "member name and link ID match one SMPL object"};
-    }
-    if (exact.size() > 1) {
-        if (const auto *local = unique_local(source, exact); local != nullptr) {
-            const auto exact_raw_volume = same_exact_iso_raw_volume(source, *local);
-            return {local, exact, exact_raw_volume ? RelationshipQuality::known : RelationshipQuality::likely,
-                    std::format("sbnk-member-link+name+{}", local_suffix(source)),
-                    exact_raw_volume
-                        ? "member name and link ID match one object in the source ISO raw volume; identical "
-                          "cross-volume identities remain candidates"
-                        : "duplicate member identities have one local candidate"};
-        }
-        return {nullptr, exact, RelationshipQuality::tentative, "sbnk-member-link+name-ambiguous",
-                "member name and link ID match multiple SMPL objects"};
-    }
+    const auto link_entry = index.wave_data_reference_values.find(member.cached_wave_data_reference_value);
+    const auto by_link = link_entry == index.wave_data_reference_values.end() ? std::vector<const ObjectSnapshot *>{}
+                                                                              : link_entry->second;
     auto by_name = named(index, ObjectType::smpl, member.wave_data_name);
-    if (by_name.size() == 1) {
-        return {by_name.front(), by_name, RelationshipQuality::likely, "sbnk-member-name-only",
-                "member name uniquely matches but link ID does not confirm it"};
-    }
-    if (by_link.size() == 1) {
-        const bool iso_cross_folder = source.scope_key.starts_with("iso:") && source.placement &&
-                                      by_link.front()->placement && !same_container_folder(source, *by_link.front());
-        return {by_link.front(), by_link, RelationshipQuality::tentative,
-                iso_cross_folder ? "sbnk-member-link-id-only-iso-cross-folder-name-mismatch"
-                                 : "sbnk-member-link-id-only-name-mismatch",
-                "member link ID uniquely matches but name does not confirm it"};
-    }
-    if (by_name.size() > 1) {
-        if (const auto *local = unique_local(source, by_name); local != nullptr) {
-            return {local, by_name, RelationshipQuality::likely,
-                    std::format("sbnk-member-name+{}", local_suffix(source)),
-                    "duplicate member names have one local container candidate"};
+    if (!by_name.empty()) {
+        std::vector<const ObjectSnapshot *> local_names;
+        if (source.placement) {
+            std::ranges::copy_if(by_name, std::back_inserter(local_names), [&](const auto *candidate) {
+                return !source.placement->container_directory.empty() ? same_container_folder(source, *candidate)
+                                                                      : same_volume(source, *candidate);
+            });
         }
+
+        if (local_names.size() == 1U) {
+            const auto cache_matches = std::ranges::find(by_link, local_names.front()) != by_link.end();
+            return {local_names.front(), by_name, RelationshipQuality::known,
+                    std::format("sbnk-member-name+{}", local_suffix(source)),
+                    cache_matches ? "authoritative member name resolves one local SMPL object and the cached "
+                                    "reference value agrees"
+                                  : "authoritative member name resolves one local SMPL object; the cached "
+                                    "reference value is stale or alternate"};
+        }
+        if (local_names.size() > 1U) {
+            return {nullptr, local_names, RelationshipQuality::tentative, "sbnk-member-name-ambiguous-local",
+                    "authoritative member name matches multiple local SMPL objects"};
+        }
+        if (!source.placement && by_name.size() == 1U) {
+            const auto cache_matches = std::ranges::find(by_link, by_name.front()) != by_link.end();
+            return {by_name.front(), by_name, RelationshipQuality::known, "sbnk-member-name",
+                    cache_matches ? "authoritative member name uniquely resolves one same-scope SMPL object "
+                                    "and the cached reference value agrees"
+                                  : "authoritative member name uniquely resolves one same-scope SMPL object; "
+                                    "the cached reference value is stale or alternate"};
+        }
+        if (by_name.size() == 1U && !by_name.front()->placement) {
+            return {by_name.front(), by_name, RelationshipQuality::tentative,
+                    "sbnk-member-name-target-placement-unresolved",
+                    "authoritative member name identifies one same-scope SMPL object whose physical "
+                    "placement is unresolved"};
+        }
+        return {nullptr, by_name, RelationshipQuality::tentative, "sbnk-member-name-nonlocal-or-ambiguous",
+                "member name has no unique local SMPL object"};
     }
-    if (!by_name.empty())
-        return {nullptr, by_name, RelationshipQuality::tentative, "sbnk-member-name-ambiguous",
-                "member name matches multiple SMPL objects"};
-    if (!by_link.empty())
-        return {nullptr, by_link, RelationshipQuality::tentative, "sbnk-member-link-ambiguous",
-                "member link ID matches multiple SMPL objects"};
+    if (!by_link.empty()) {
+        return {nullptr, by_link, RelationshipQuality::tentative, "sbnk-member-cache-only-name-mismatch",
+                "cached reference value matches SMPL metadata, but the authoritative member name does not"};
+    }
     return {nullptr, {}, RelationshipQuality::unknown, "sbnk-member-unmatched", "member does not match a SMPL object"};
 }
 

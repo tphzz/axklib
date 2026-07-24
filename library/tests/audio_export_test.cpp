@@ -112,7 +112,7 @@ TEST(AudioExport, WritesMissingAndAmbiguousWaveDataIntoExplicitUnresolvedScope) 
     std::filesystem::remove_all(output, error);
 }
 
-TEST(AudioExport, ProjectsLogicalSamplesToTheirKnownWaveDataVolume) {
+TEST(AudioExport, DoesNotProjectLogicalSamplesAcrossVolumesWithoutALocalNameTarget) {
     const auto container = axk::open_image(fixture());
     ASSERT_TRUE(container);
     auto catalog = axk::build_object_catalog(*container);
@@ -133,10 +133,10 @@ TEST(AudioExport, ProjectsLogicalSamplesToTheirKnownWaveDataVolume) {
         std::ranges::find(plan->volumes, "Storage-only volume", &axk::VolumeExport::volume_name);
     ASSERT_NE(waveform_volume, plan->volumes.end());
     ASSERT_NE(storage_volume, plan->volumes.end());
-    EXPECT_EQ(waveform_volume->samples.size(), 8U);
-    EXPECT_EQ(waveform_volume->sample_banks.size(), 1U);
-    EXPECT_TRUE(storage_volume->samples.empty());
-    EXPECT_TRUE(storage_volume->sample_banks.empty());
+    EXPECT_TRUE(waveform_volume->samples.empty());
+    EXPECT_TRUE(waveform_volume->sample_banks.empty());
+    EXPECT_EQ(storage_volume->samples.size(), 8U);
+    EXPECT_EQ(storage_volume->sample_banks.size(), 1U);
 }
 
 TEST(AudioExport, RetainsLikelyMembersAsGraphMetadataWithoutWritingSfzRegions) {

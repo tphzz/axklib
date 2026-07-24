@@ -57,7 +57,7 @@ struct CurrentSmpl {
     FieldValue<std::uint16_t> stored_sample_width_bytes;
     FieldValue<std::string> source_wave_name;
     FieldValue<std::uint32_t> group_id;
-    FieldValue<std::uint32_t> link_id;
+    FieldValue<std::uint32_t> wave_data_reference_value;
     FieldValue<std::uint16_t> duplicate_sample_rate;
     FieldValue<std::uint8_t> root_key;
     FieldValue<std::int8_t> fine_tune_cents;
@@ -79,7 +79,7 @@ struct GenericObject {
 
 struct CurrentSbnkMember {
     std::string wave_data_name;
-    std::uint32_t smpl_link_id{};
+    std::uint32_t cached_wave_data_reference_value{};
     std::uint8_t root_key{};
     std::uint16_t sample_rate{};
     std::int8_t fine_tune_cents{};

@@ -20,6 +20,7 @@
     import { createTransport } from './lib/createTransport';
     import { objectPresentationName } from './lib/objectPresentation';
     import {
+        auditionableSampleIds,
         distinctWaveDataForSample,
         linkedWaveDataForSample,
         orderedSamplesForBank,
@@ -360,6 +361,19 @@
     const selectedProgram = $derived(programs.find((item) => item.objectId === selectedProgramId));
     const selectedBank = $derived(sampleBanks.find((item) => item.objectId === selectedBankId));
     const selectedSample = $derived(samples.find((item) => item.objectId === selectedSampleId));
+    const auditionableSampleObjectIds = $derived(auditionableSampleIds(relationships, waveData));
+    const auditionableObjectIds = $derived(
+        new Set([...auditionableSampleObjectIds, ...waveData.map((item) => item.objectKey)]),
+    );
+    const auditionableSampleBankObjectIds = $derived(
+        new Set(
+            sampleBanks
+                .filter((bank) =>
+                    membersForBank(bank.objectId).some((member) => auditionableSampleObjectIds.has(member.objectId)),
+                )
+                .map((bank) => bank.objectId),
+        ),
+    );
     const bankMembers = $derived(selectedBank ? membersForBank(selectedBank.objectId) : []);
     const bankMemberWaveData = $derived(selectedBankMemberId ? waveDataForSample(selectedBankMemberId) : []);
     const sampleWaveData = $derived(selectedSample ? waveDataForSample(selectedSample.objectId) : []);
@@ -443,7 +457,9 @@
                   : inspectorSelection?.kind === 'wave-data'
                     ? inspectorSelection.waveData.objectKey
                     : null;
-        if (sessionId !== null && objectId) void auditionController.prefetch(sessionId, objectId);
+        if (sessionId !== null && objectId && auditionableObjectIds.has(objectId)) {
+            void auditionController.prefetch(sessionId, objectId);
+        }
     });
 
     function noteName(key: number): string {
@@ -790,7 +806,12 @@
         selectedBankWaveDataId = '';
         setEditorObject(item.objectId);
         await inspectObject(item.objectId);
-        if (playAfterSelection && workspaceView === 'sample-banks' && selectedBankId === item.objectId) {
+        if (
+            playAfterSelection &&
+            workspaceView === 'sample-banks' &&
+            selectedBankId === item.objectId &&
+            auditionableSampleBankObjectIds.has(item.objectId)
+        ) {
             playSampleBank(item);
         }
     }
@@ -800,7 +821,12 @@
         selectedSampleWaveDataId = '';
         setEditorObject(item.objectId);
         await inspectObject(item.objectId);
-        if (playAfterSelection && workspaceView === 'samples' && selectedSampleId === item.objectId) {
+        if (
+            playAfterSelection &&
+            workspaceView === 'samples' &&
+            selectedSampleId === item.objectId &&
+            auditionableSampleObjectIds.has(item.objectId)
+        ) {
             playObject(item.objectId);
         }
     }
@@ -810,7 +836,12 @@
         selectedBankWaveDataId = '';
         setEditorObject(item.objectId);
         await inspectObject(item.objectId);
-        if (playAfterSelection && workspaceView === 'sample-banks' && selectedBankMemberId === item.objectId) {
+        if (
+            playAfterSelection &&
+            workspaceView === 'sample-banks' &&
+            selectedBankMemberId === item.objectId &&
+            auditionableSampleObjectIds.has(item.objectId)
+        ) {
             playObject(item.objectId);
         }
     }
@@ -909,6 +940,10 @@
     }
 
     async function playSample(item: SampleStructureItem): Promise<void> {
+        if (!auditionableSampleObjectIds.has(item.objectId)) {
+            sourceStatus = 'This Sample has no confirmed Wave Data to audition';
+            return;
+        }
         await (workspaceView === 'sample-banks' ? selectBankMember(item, false) : selectSample(item, false));
         playObject(item.objectId);
     }
@@ -917,7 +952,9 @@
         if (openSessionId === null) return;
         if (selectedBankId !== item.objectId) await selectBank(item, false);
         if (openSessionId === null) return;
-        const memberIds = membersForBank(item.objectId).map((member) => member.objectId);
+        const memberIds = membersForBank(item.objectId)
+            .filter((member) => auditionableSampleObjectIds.has(member.objectId))
+            .map((member) => member.objectId);
         if (memberIds.length === 0) {
             sampleBankPreviewMemberId = '';
             sourceStatus = 'This Sample Bank has no playable Samples';
@@ -1002,12 +1039,18 @@
 
     function playObject(objectId: string): void {
         if (openSessionId === null) return;
+        if (!auditionableObjectIds.has(objectId)) {
+            sourceStatus = 'This Sample has no confirmed Wave Data to audition';
+            return;
+        }
         cancelSampleBankPlayback();
         void auditionController.play(openSessionId, objectId);
     }
 
     function prefetchObject(objectId: string): void {
-        if (openSessionId !== null) void auditionController.prefetch(openSessionId, objectId);
+        if (openSessionId !== null && auditionableObjectIds.has(objectId)) {
+            void auditionController.prefetch(openSessionId, objectId);
+        }
     }
 
     function seekWaveData(item: WaveDataItem, ratio: number): void {
@@ -1317,6 +1360,8 @@
                 {playingSampleBankId}
                 playingObjectId={auditionState.status === 'playing' ? auditionState.objectId : null}
                 preparingObjectId={auditionState.status === 'preparing' ? auditionState.objectId : null}
+                auditionableSampleIds={auditionableSampleObjectIds}
+                auditionableSampleBankIds={auditionableSampleBankObjectIds}
             />
         {:else}
             <ObjectWorkspace
