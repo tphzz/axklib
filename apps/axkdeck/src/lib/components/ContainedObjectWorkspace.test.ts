@@ -1,9 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { SamplerObject } from '../transport';
 import type { PackageExportSelectionState } from '../objectSelection';
 import type { PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
 import ContainedObjectWorkspace from './ContainedObjectWorkspace.svelte';
+
+const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
 function object(objectType: string, name: string): SamplerObject {
     return {
@@ -67,6 +72,13 @@ const noAuditionableSamples = {
 };
 
 describe('ContainedObjectWorkspace', () => {
+    it('keeps playback controls clear of expanding overlay scrollbars in every lane', () => {
+        const listRule = appStyles.match(/\.contained-list\s*\{[^}]+\}/)?.[0];
+
+        expect(listRule).toContain('padding-right: calc(6px + var(--overlay-scrollbar-clearance))');
+        expect(listRule).toContain('scrollbar-gutter: stable');
+    });
+
     it('naturally orders every displayed object lane before filtering', () => {
         const bank2 = structure('SBAC', 'Bank 2');
         const bank10 = structure('SBAC', 'Bank 10');

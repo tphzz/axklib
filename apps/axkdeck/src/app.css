@@ -962,6 +962,7 @@ input:focus-visible {
 }
 
 .storage-picker-backdrop .storage-picker {
+  height: min(720px, calc(100dvh - var(--storage-picker-top) - 16px));
   max-height: calc(100dvh - var(--storage-picker-top) - 16px);
 }
 
@@ -1692,6 +1693,17 @@ input:focus-visible {
   gap: 8px;
 }
 
+.storage-picker-location .icon-button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.storage-picker-location .icon-button:disabled:hover {
+  color: var(--color-text-muted);
+  border-color: transparent;
+  background: transparent;
+}
+
 .storage-picker-parent-icon {
   transform: rotate(180deg);
 }
@@ -1710,8 +1722,7 @@ input:focus-visible {
 
 .storage-picker-list {
   min-height: 0;
-  max-height: 222px;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   padding: 4px 14px 4px 6px;
   overflow: auto;
   scrollbar-gutter: stable;
@@ -2195,6 +2206,7 @@ input:focus-visible {
   min-height: 0;
   height: calc(100% - var(--density-section-toolbar));
   padding: 2px 6px 5px;
+  padding-right: calc(6px + var(--overlay-scrollbar-clearance));
   overflow: auto;
   scrollbar-gutter: stable;
 }

@@ -209,7 +209,7 @@
             return;
         }
         if (event.key === 'ArrowLeft') {
-            if (!activeRoot) return;
+            if (!activeRoot || !directory?.relativePath) return;
             event.preventDefault();
             void goUp();
             return;
@@ -239,11 +239,7 @@
     }
 
     async function goUp(): Promise<void> {
-        if (!activeRoot || !directory || loading) return;
-        if (!directory.relativePath) {
-            goHome();
-            return;
-        }
+        if (!activeRoot || !directory?.relativePath || loading) return;
         const parts = directory.relativePath.split('/');
         parts.pop();
         await openDirectory({ rootId: directory.rootId, relativePath: parts.join('/') }, activeRoot);
@@ -341,7 +337,7 @@
                 class="icon-button"
                 type="button"
                 aria-label="Parent directory"
-                disabled={!activeRoot || !directory || loading}
+                disabled={!activeRoot || !directory?.relativePath || loading}
                 onclick={() => void goUp()}
             >
                 <Icon name="chevron" size={14} class="storage-picker-parent-icon" />

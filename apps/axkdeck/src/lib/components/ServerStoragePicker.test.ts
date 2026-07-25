@@ -167,7 +167,10 @@ describe('ServerStoragePicker', () => {
         await fireEvent.click(await screen.findByText('Yamaha images'));
 
         const path = within(location).getByText('Yamaha images');
+        const parent = within(location).getByRole('button', { name: 'Parent directory' });
         const home = within(location).getByRole('button', { name: 'Go to all workspaces' });
+        expect(parent.hasAttribute('disabled')).toBe(true);
+        expect(home.hasAttribute('disabled')).toBe(false);
         expect(path.compareDocumentPosition(home) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(location.lastElementChild?.contains(home)).toBe(true);
     });
@@ -218,7 +221,13 @@ describe('ServerStoragePicker', () => {
         );
         expect(activeOption(list).textContent).toContain('images');
 
+        const callsAtWorkspaceRoot = vi.mocked(imageTransport.sandboxDirectory).mock.calls.length;
         await fireEvent.keyDown(list, { key: 'ArrowLeft' });
+        expect(vi.mocked(imageTransport.sandboxDirectory).mock.calls).toHaveLength(callsAtWorkspaceRoot);
+        expect(screen.getByTitle('Yamaha images')).toBeTruthy();
+        expect(screen.queryByText('Archive')).toBeNull();
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Go to all workspaces' }));
         expect(await screen.findByText('Archive')).toBeTruthy();
         expect(within(list).getAllByRole('option')).toHaveLength(2);
     });
@@ -337,10 +346,19 @@ describe('ServerStoragePicker', () => {
     it('anchors storage pickers at a stable responsive top edge', () => {
         const backdropRule = appStyles.match(/\.storage-picker-backdrop\s*\{[^}]+\}/)?.[0];
         const pickerRule = appStyles.match(/\.storage-picker-backdrop \.storage-picker\s*\{[^}]+\}/)?.[0];
+        const listRule = appStyles.match(/\.storage-picker-list\s*\{[^}]+\}/)?.[0];
+        const disabledNavigationRule = appStyles.match(
+            /\.storage-picker-location \.icon-button:disabled\s*\{[^}]+\}/,
+        )?.[0];
 
         expect(backdropRule).toContain('place-items: start center');
         expect(backdropRule).toContain('clamp(16px, 6vh, 48px)');
+        expect(pickerRule).toContain('height: min(720px,');
         expect(pickerRule).toContain('max-height:');
+        expect(listRule).toContain('flex: 1 1 auto');
+        expect(listRule).not.toContain('max-height: 222px');
+        expect(disabledNavigationRule).toContain('cursor: default');
+        expect(disabledNavigationRule).toContain('opacity: 0.35');
     });
 
     it('returns an exact file reference and filters unrelated files', async () => {
