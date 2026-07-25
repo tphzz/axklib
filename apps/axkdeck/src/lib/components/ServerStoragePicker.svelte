@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import type { ImageTransport } from '../transport';
     import { userFacingMessage } from '../userFacingMessage';
     import { modal } from '../modal';
@@ -53,33 +53,27 @@
     let entryActionName = $state('');
     let entryActionBusy = $state(false);
     let entryActionError = $state('');
+    let listElement = $state<HTMLDivElement | null>(null);
+    let activeOptionIndex = $state(-1);
 
     const normalizedExtensions = $derived(extensions.map((extension) => extension.toLocaleLowerCase()));
-    const visibleEntries = $derived(
-        entries.filter((entry) => {
-            if (entry.kind === 'DIRECTORY') return true;
-            if (mode !== 'file') return false;
-            if (normalizedExtensions.length === 0) return true;
-            const extension = entry.name.split('.').pop()?.toLocaleLowerCase() ?? '';
-            return normalizedExtensions.includes(extension);
-        }),
+    const visibleEntries = $derived(entries.filter(entryIsVisible));
+    const activeOptionId = $derived(
+        activeOptionIndex >= 0
+            ? `storage-picker-option-${activeRoot ? 'entry' : 'root'}-${activeOptionIndex}`
+            : undefined,
     );
 
     onMount(async () => {
+        queueMicrotask(() => listElement?.focus());
         outputName = suggestedName;
         try {
             roots = await transport.sandboxRoots();
+            selectFirstOption();
             if (initialDirectory) {
                 const root = roots.find((candidate) => candidate.id === initialDirectory.rootId);
                 if (root) {
-                    activeRoot = root;
-                    if (!(await openDirectory(initialDirectory))) {
-                        activeRoot = null;
-                        directory = null;
-                        entries = [];
-                        nextCursor = null;
-                        ondirectorychange?.(null);
-                    }
+                    if (!(await openDirectory(initialDirectory, root))) ondirectorychange?.(null);
                 } else {
                     ondirectorychange?.(null);
                 }
@@ -91,20 +85,66 @@
         }
     });
 
-    async function openRoot(root: SandboxRoot): Promise<void> {
-        activeRoot = root;
-        await openDirectory({ rootId: root.id, relativePath: '' });
+    function entryIsVisible(entry: SandboxEntry): boolean {
+        if (entry.kind === 'DIRECTORY') return true;
+        if (mode !== 'file') return false;
+        if (normalizedExtensions.length === 0) return true;
+        const extension = entry.name.split('.').pop()?.toLocaleLowerCase() ?? '';
+        return normalizedExtensions.includes(extension);
     }
 
-    async function openDirectory(reference: DirectoryRef): Promise<boolean> {
+    function rootIsDisabled(root: SandboxRoot): boolean {
+        return (mode === 'directory' || mode === 'save-file') && !root.writable;
+    }
+
+    function enabledOptionIndices(): number[] {
+        if (activeRoot) return visibleEntries.map((_, index) => index);
+        return roots.flatMap((root, index) => (rootIsDisabled(root) ? [] : [index]));
+    }
+
+    function selectFirstOption(): void {
+        activeOptionIndex = enabledOptionIndices()[0] ?? -1;
+    }
+
+    async function revealActiveOption(): Promise<void> {
+        await tick();
+        const option = listElement?.querySelector<HTMLElement>(`[data-picker-index="${activeOptionIndex}"]`);
+        option?.scrollIntoView?.({ block: 'nearest' });
+    }
+
+    function setActiveOption(index: number): void {
+        if (!enabledOptionIndices().includes(index)) return;
+        activeOptionIndex = index;
+        void revealActiveOption();
+    }
+
+    function moveActiveOption(direction: -1 | 1): void {
+        const enabled = enabledOptionIndices();
+        if (enabled.length === 0) return;
+        const position = enabled.indexOf(activeOptionIndex);
+        const current = position >= 0 ? position : 0;
+        const next = Math.max(0, Math.min(enabled.length - 1, current + direction));
+        setActiveOption(enabled[next]!);
+    }
+
+    async function openRoot(root: SandboxRoot): Promise<void> {
+        if (loading || rootIsDisabled(root)) return;
+        await openDirectory({ rootId: root.id, relativePath: '' }, root);
+    }
+
+    async function openDirectory(reference: DirectoryRef, root = activeRoot): Promise<boolean> {
+        if (!root) return false;
         loading = true;
         error = '';
         try {
             const listing = await transport.sandboxDirectory(reference);
+            activeRoot = root;
             directory = listing.directory;
             entries = listing.entries;
             nextCursor = listing.nextCursor;
+            activeOptionIndex = listing.entries.some(entryIsVisible) ? 0 : -1;
             ondirectorychange?.(listing.directory);
+            void revealActiveOption();
             return true;
         } catch (reason) {
             error = userFacingMessage(reason);
@@ -119,8 +159,13 @@
         loading = true;
         try {
             const listing = await transport.sandboxDirectory(directory, nextCursor);
-            entries = [...entries, ...listing.entries];
+            const combinedEntries = [...entries, ...listing.entries];
+            entries = combinedEntries;
             nextCursor = listing.nextCursor;
+            if (activeOptionIndex < 0 && combinedEntries.some(entryIsVisible)) {
+                activeOptionIndex = 0;
+                void revealActiveOption();
+            }
         } catch (reason) {
             error = userFacingMessage(reason);
         } finally {
@@ -129,28 +174,79 @@
     }
 
     function activate(entry: SandboxEntry): void {
-        if (!activeRoot) return;
+        if (!activeRoot || loading) return;
         const reference = { rootId: activeRoot.id, relativePath: entry.relativePath };
         if (entry.kind === 'DIRECTORY') {
-            void openDirectory(reference);
+            void openDirectory(reference, activeRoot);
             return;
         }
         onselect(serverFileLocation(reference, `${activeRoot.displayName}/${entry.relativePath}`));
     }
 
-    function goUp(): void {
-        if (!directory) return;
+    function activateOption(index: number): void {
+        if (loading) return;
+        if (!activeRoot) {
+            const root = roots[index];
+            if (root && !rootIsDisabled(root)) void openRoot(root);
+            return;
+        }
+        const entry = visibleEntries[index];
+        if (entry) activate(entry);
+    }
+
+    function handleListKeydown(event: KeyboardEvent): void {
+        if (loading || event.altKey || event.ctrlKey || event.metaKey) return;
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            event.preventDefault();
+            moveActiveOption(event.key === 'ArrowUp' ? -1 : 1);
+            return;
+        }
+        if (event.key === 'Home' || event.key === 'End') {
+            event.preventDefault();
+            const enabled = enabledOptionIndices();
+            const index = event.key === 'Home' ? enabled[0] : enabled.at(-1);
+            if (index !== undefined) setActiveOption(index);
+            return;
+        }
+        if (event.key === 'ArrowLeft') {
+            if (!activeRoot) return;
+            event.preventDefault();
+            void goUp();
+            return;
+        }
+        if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            if (!activeRoot || visibleEntries[activeOptionIndex]?.kind === 'DIRECTORY') {
+                activateOption(activeOptionIndex);
+            }
+            return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            activateOption(activeOptionIndex);
+        }
+    }
+
+    function goHome(): void {
+        activeRoot = null;
+        directory = null;
+        entries = [];
+        nextCursor = null;
+        error = '';
+        selectFirstOption();
+        ondirectorychange?.(null);
+        void revealActiveOption();
+    }
+
+    async function goUp(): Promise<void> {
+        if (!activeRoot || !directory || loading) return;
         if (!directory.relativePath) {
-            activeRoot = null;
-            directory = null;
-            entries = [];
-            nextCursor = null;
-            ondirectorychange?.(null);
+            goHome();
             return;
         }
         const parts = directory.relativePath.split('/');
         parts.pop();
-        void openDirectory({ rootId: directory.rootId, relativePath: parts.join('/') });
+        await openDirectory({ rootId: directory.rootId, relativePath: parts.join('/') }, activeRoot);
     }
 
     function selectCurrentDirectory(): void {
@@ -222,7 +318,7 @@
 </script>
 
 <div
-    class="dialog-backdrop"
+    class="dialog-backdrop storage-picker-backdrop"
     role="presentation"
     onclick={(event) => {
         if (event.target === event.currentTarget) oncancel();
@@ -240,33 +336,78 @@
             <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}>×</button>
         </header>
 
-        {#if activeRoot && directory}
-            <div class="storage-picker-location">
-                <button class="icon-button" type="button" aria-label="Parent directory" onclick={goUp}>←</button>
-                <span class="storage-picker-path"
-                    >{activeRoot.displayName}{directory.relativePath ? `/${directory.relativePath}` : ''}</span
-                >
-                {#if activeRoot.writable && mode !== 'file'}
+        <nav class="storage-picker-location" aria-label="Storage location">
+            <button
+                class="icon-button"
+                type="button"
+                aria-label="Parent directory"
+                disabled={!activeRoot || !directory || loading}
+                onclick={() => void goUp()}
+            >
+                <Icon name="chevron" size={14} class="storage-picker-parent-icon" />
+            </button>
+            <span
+                class="storage-picker-path"
+                title={activeRoot && directory
+                    ? `${activeRoot.displayName}${directory.relativePath ? `/${directory.relativePath}` : ''}`
+                    : 'Workspaces'}
+            >
+                {activeRoot && directory
+                    ? `${activeRoot.displayName}${directory.relativePath ? `/${directory.relativePath}` : ''}`
+                    : 'Workspaces'}
+            </span>
+            <div class="storage-picker-location-actions">
+                {#if activeRoot?.writable && directory && mode !== 'file'}
                     <button
                         class="secondary-button storage-picker-directory-action"
                         type="button"
+                        disabled={loading}
                         onclick={beginCreateDirectory}
                     >
                         <Icon name="folder-plus" size={14} />
                         New folder
                     </button>
                 {/if}
+                <button
+                    class="icon-button"
+                    type="button"
+                    aria-label="Go to all workspaces"
+                    title="All workspaces"
+                    disabled={!activeRoot || loading}
+                    onclick={goHome}
+                >
+                    <Icon name="home" size={15} />
+                </button>
             </div>
-        {/if}
+        </nav>
 
-        <div class="storage-picker-list" aria-busy={loading}>
+        <div
+            bind:this={listElement}
+            class="storage-picker-list"
+            role="listbox"
+            aria-label="Storage entries"
+            aria-activedescendant={activeOptionId}
+            aria-busy={loading}
+            tabindex="0"
+            onkeydown={handleListKeydown}
+        >
             {#if !activeRoot}
-                {#each roots as root (root.id)}
+                {#each roots as root, index (root.id)}
                     <button
+                        id={`storage-picker-option-root-${index}`}
+                        class:storage-picker-row-active={activeOptionIndex === index}
                         class="storage-picker-row"
                         type="button"
-                        disabled={(mode === 'directory' || mode === 'save-file') && !root.writable}
-                        onclick={() => void openRoot(root)}
+                        role="option"
+                        aria-selected={activeOptionIndex === index}
+                        aria-disabled={loading || rootIsDisabled(root)}
+                        data-picker-index={index}
+                        tabindex="-1"
+                        disabled={loading || rootIsDisabled(root)}
+                        onclick={() => {
+                            setActiveOption(index);
+                            void openRoot(root);
+                        }}
                     >
                         <Icon name="folder" size={16} />
                         <span
@@ -287,12 +428,23 @@
                     </div>
                 {/each}
             {:else}
-                {#each visibleEntries as entry (`${entry.kind}:${entry.relativePath}`)}
+                {#each visibleEntries as entry, index (`${entry.kind}:${entry.relativePath}`)}
                     <button
+                        id={`storage-picker-option-entry-${index}`}
                         class:storage-picker-file-row={entry.kind === 'FILE'}
+                        class:storage-picker-row-active={activeOptionIndex === index}
                         class="storage-picker-row"
                         type="button"
-                        onclick={() => activate(entry)}
+                        role="option"
+                        aria-selected={activeOptionIndex === index}
+                        aria-disabled={loading}
+                        data-picker-index={index}
+                        tabindex="-1"
+                        disabled={loading}
+                        onclick={() => {
+                            setActiveOption(index);
+                            activate(entry);
+                        }}
                     >
                         {#if entry.kind === 'DIRECTORY'}<Icon name="folder" size={16} />{/if}
                         <span

@@ -214,7 +214,7 @@ input:focus-visible {
   height: 2px;
   border-radius: 2px 2px 0 0;
   background: var(--color-brand);
-  content: '';
+  content: "";
   opacity: 0;
   transform: scaleX(0.45);
   transition: 140ms ease;
@@ -953,6 +953,18 @@ input:focus-visible {
   z-index: 80;
 }
 
+.storage-picker-backdrop {
+  --storage-picker-top: clamp(16px, 6vh, 48px);
+
+  place-items: start center;
+  padding: var(--storage-picker-top) 20px 16px;
+  overflow-y: auto;
+}
+
+.storage-picker-backdrop .storage-picker {
+  max-height: calc(100dvh - var(--storage-picker-top) - 16px);
+}
+
 .dialog-shell {
   width: min(520px, calc(100vw - 40px));
   max-height: calc(100vh - 40px);
@@ -1673,6 +1685,17 @@ input:focus-visible {
   white-space: nowrap;
 }
 
+.storage-picker-location-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.storage-picker-parent-icon {
+  transform: rotate(180deg);
+}
+
 .storage-picker-directory-action {
   display: inline-flex;
   width: 148px;
@@ -1692,6 +1715,11 @@ input:focus-visible {
   padding: 4px 14px 4px 6px;
   overflow: auto;
   scrollbar-gutter: stable;
+}
+
+.storage-picker-list:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
 }
 
 .storage-picker-row {
@@ -1717,6 +1745,15 @@ input:focus-visible {
 .storage-picker-row:hover {
   border-color: var(--color-border);
   background: var(--color-panel-raised);
+}
+
+.storage-picker-row-active {
+  border-color: var(--color-border);
+  background: var(--color-panel-raised);
+}
+
+.storage-picker-list:focus-visible .storage-picker-row-active {
+  border-color: var(--color-accent);
 }
 
 .storage-picker-row:disabled {
@@ -1960,7 +1997,7 @@ input:focus-visible {
   height: 6px;
   background: currentcolor;
   clip-path: polygon(14% 44%, 0 59%, 40% 100%, 100% 16%, 84% 0, 38% 62%);
-  content: "";
+  content: '';
   transform: scale(0);
 }
 

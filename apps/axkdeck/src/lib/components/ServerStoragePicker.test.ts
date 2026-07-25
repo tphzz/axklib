@@ -38,6 +38,14 @@ function transport(withRoots = true): ImageTransport {
     } as unknown as ImageTransport;
 }
 
+function activeOption(list: HTMLElement): HTMLElement {
+    const activeId = list.getAttribute('aria-activedescendant');
+    expect(activeId).toBeTruthy();
+    const option = activeId ? document.getElementById(activeId) : null;
+    expect(option).toBeTruthy();
+    return option!;
+}
+
 describe('ServerStoragePicker', () => {
     it('uses the task title without exposing server-filesystem terminology', async () => {
         render(ServerStoragePicker, {
@@ -80,6 +88,259 @@ describe('ServerStoragePicker', () => {
             rootId: 'workspace',
             relativePath: 'images',
         });
+    });
+
+    it('returns directly from a remembered directory to the workspace list', async () => {
+        const ondirectorychange = vi.fn();
+        render(ServerStoragePicker, {
+            props: {
+                transport: transport(),
+                mode: 'file',
+                title: 'Open image',
+                initialDirectory: { rootId: 'workspace', relativePath: 'images' },
+                ondirectorychange,
+                onselect: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(await screen.findByText('nested.hds')).toBeTruthy();
+        await fireEvent.click(screen.getByRole('button', { name: 'Go to all workspaces' }));
+
+        expect(await screen.findByText('Yamaha images')).toBeTruthy();
+        expect(screen.getByText('Archive')).toBeTruthy();
+        expect(screen.queryByText('nested.hds')).toBeNull();
+        expect(screen.getByRole('button', { name: 'Go to all workspaces' }).hasAttribute('disabled')).toBe(true);
+        expect(ondirectorychange).toHaveBeenLastCalledWith(null);
+    });
+
+    it('keeps parent navigation distinct from workspace home', async () => {
+        const imageTransport = transport();
+        const ondirectorychange = vi.fn();
+        render(ServerStoragePicker, {
+            props: {
+                transport: imageTransport,
+                mode: 'file',
+                title: 'Open image',
+                initialDirectory: { rootId: 'workspace', relativePath: 'images/nested' },
+                ondirectorychange,
+                onselect: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(await screen.findByText('Yamaha images/images/nested')).toBeTruthy();
+        await fireEvent.click(screen.getByRole('button', { name: 'Parent directory' }));
+
+        await waitFor(() =>
+            expect(imageTransport.sandboxDirectory).toHaveBeenLastCalledWith({
+                rootId: 'workspace',
+                relativePath: 'images',
+            }),
+        );
+        expect(screen.getByText('Yamaha images/images')).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Go to all workspaces' })).toBeTruthy();
+        expect(ondirectorychange).toHaveBeenLastCalledWith({
+            rootId: 'workspace',
+            relativePath: 'images',
+        });
+    });
+
+    it('keeps a persistent location bar with the path before the right-aligned home action', async () => {
+        render(ServerStoragePicker, {
+            props: {
+                transport: transport(),
+                mode: 'file',
+                title: 'Open image',
+                onselect: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        const location = screen.getByRole('navigation', { name: 'Storage location' });
+        expect(within(location).getByText('Workspaces')).toBeTruthy();
+        expect(within(location).getByRole('button', { name: 'Parent directory' }).hasAttribute('disabled')).toBe(true);
+        expect(within(location).getByRole('button', { name: 'Go to all workspaces' }).hasAttribute('disabled')).toBe(
+            true,
+        );
+
+        await fireEvent.click(await screen.findByText('Yamaha images'));
+
+        const path = within(location).getByText('Yamaha images');
+        const home = within(location).getByRole('button', { name: 'Go to all workspaces' });
+        expect(path.compareDocumentPosition(home) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(location.lastElementChild?.contains(home)).toBe(true);
+    });
+
+    it('navigates roots, directories, and files with one keyboard selection cursor', async () => {
+        const onselect = vi.fn();
+        const imageTransport = transport();
+        render(ServerStoragePicker, {
+            props: {
+                transport: imageTransport,
+                mode: 'file',
+                title: 'Open image',
+                extensions: ['hds'],
+                onselect,
+                oncancel: vi.fn(),
+            },
+        });
+
+        await screen.findByText('Yamaha images');
+        const list = screen.getByRole('listbox', { name: 'Storage entries' });
+        await waitFor(() => expect(document.activeElement).toBe(list));
+        expect(activeOption(list).textContent).toContain('Yamaha images');
+
+        await fireEvent.keyDown(list, { key: 'ArrowRight' });
+        await screen.findByText('disk.hds');
+        expect(activeOption(list).textContent).toContain('images');
+
+        await fireEvent.keyDown(list, { key: 'ArrowDown' });
+        expect(activeOption(list).textContent).toContain('disk.hds');
+        await fireEvent.keyDown(list, { key: 'Enter' });
+        expect(onselect).toHaveBeenCalledWith({
+            kind: 'server-file',
+            reference: { rootId: 'workspace', relativePath: 'disk.hds' },
+            displayName: 'Yamaha images/disk.hds',
+        });
+
+        await fireEvent.keyDown(list, { key: 'ArrowUp' });
+        await fireEvent.keyDown(list, { key: 'ArrowRight' });
+        await screen.findByText('nested.hds');
+        expect(activeOption(list).textContent).toContain('nested.hds');
+
+        await fireEvent.keyDown(list, { key: 'ArrowLeft' });
+        await waitFor(() =>
+            expect(imageTransport.sandboxDirectory).toHaveBeenLastCalledWith({
+                rootId: 'workspace',
+                relativePath: '',
+            }),
+        );
+        expect(activeOption(list).textContent).toContain('images');
+
+        await fireEvent.keyDown(list, { key: 'ArrowLeft' });
+        expect(await screen.findByText('Archive')).toBeTruthy();
+        expect(within(list).getAllByRole('option')).toHaveLength(2);
+    });
+
+    it('skips disabled roots and supports first and last keyboard selection', async () => {
+        render(ServerStoragePicker, {
+            props: {
+                transport: transport(),
+                mode: 'directory',
+                title: 'Choose image location',
+                onselect: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        await screen.findByText('Yamaha images');
+        const list = screen.getByRole('listbox', { name: 'Storage entries' });
+        expect(activeOption(list).textContent).toContain('Yamaha images');
+
+        await fireEvent.keyDown(list, { key: 'End' });
+        expect(activeOption(list).textContent).toContain('Yamaha images');
+        await fireEvent.keyDown(list, { key: 'ArrowDown' });
+        expect(activeOption(list).textContent).toContain('Yamaha images');
+    });
+
+    it('retains the current directory and selection when keyboard navigation fails', async () => {
+        const imageTransport = transport();
+        vi.mocked(imageTransport.sandboxDirectory).mockImplementation(async (directory) => {
+            if (directory.relativePath === 'images') throw new Error('Directory became unavailable');
+            return {
+                directory,
+                entries: [
+                    { name: 'images', relativePath: 'images', kind: 'DIRECTORY', size: null },
+                    { name: 'disk.hds', relativePath: 'disk.hds', kind: 'FILE', size: 1024 },
+                ],
+                truncated: false,
+                nextCursor: null,
+            };
+        });
+        render(ServerStoragePicker, {
+            props: {
+                transport: imageTransport,
+                mode: 'file',
+                title: 'Open image',
+                extensions: ['hds'],
+                onselect: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        await fireEvent.click(await screen.findByText('Yamaha images'));
+        const list = screen.getByRole('listbox', { name: 'Storage entries' });
+        expect(activeOption(list).textContent).toContain('images');
+        await fireEvent.keyDown(list, { key: 'ArrowRight' });
+
+        expect((await screen.findByRole('alert')).textContent).toContain('Directory became unavailable');
+        expect(screen.getByTitle('Yamaha images')).toBeTruthy();
+        expect(screen.getByText('disk.hds')).toBeTruthy();
+        expect(activeOption(list).textContent).toContain('images');
+    });
+
+    it('does not treat arrow keys in the save filename as directory navigation', async () => {
+        const imageTransport = transport();
+        render(ServerStoragePicker, {
+            props: {
+                transport: imageTransport,
+                mode: 'save-file',
+                title: 'Select output',
+                extensions: ['hds'],
+                suggestedName: 'output.hds',
+                onselect: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        await fireEvent.click(await screen.findByText('Yamaha images'));
+        const callsBeforeEditing = vi.mocked(imageTransport.sandboxDirectory).mock.calls.length;
+        const filename = screen.getByLabelText('Output filename');
+        await fireEvent.keyDown(filename, { key: 'ArrowLeft' });
+        await fireEvent.keyDown(filename, { key: 'ArrowRight' });
+
+        expect(vi.mocked(imageTransport.sandboxDirectory).mock.calls).toHaveLength(callsBeforeEditing);
+        expect((filename as HTMLInputElement).value).toBe('output.hds');
+    });
+
+    it('selects the first matching entry loaded by a later page', async () => {
+        const imageTransport = transport();
+        vi.mocked(imageTransport.sandboxDirectory).mockImplementation(async (directory, cursor) => ({
+            directory,
+            entries: cursor
+                ? [{ name: 'disk.hds', relativePath: 'disk.hds', kind: 'FILE', size: 1024 }]
+                : [{ name: 'notes.txt', relativePath: 'notes.txt', kind: 'FILE', size: 20 }],
+            truncated: !cursor,
+            nextCursor: cursor ? null : 'next',
+        }));
+        render(ServerStoragePicker, {
+            props: {
+                transport: imageTransport,
+                mode: 'file',
+                title: 'Open image',
+                extensions: ['hds'],
+                onselect: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        await fireEvent.click(await screen.findByText('Yamaha images'));
+        const list = screen.getByRole('listbox', { name: 'Storage entries' });
+        expect(list.hasAttribute('aria-activedescendant')).toBe(false);
+        await fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+
+        expect(await screen.findByText('disk.hds')).toBeTruthy();
+        expect(activeOption(list).textContent).toContain('disk.hds');
+    });
+
+    it('anchors storage pickers at a stable responsive top edge', () => {
+        const backdropRule = appStyles.match(/\.storage-picker-backdrop\s*\{[^}]+\}/)?.[0];
+        const pickerRule = appStyles.match(/\.storage-picker-backdrop \.storage-picker\s*\{[^}]+\}/)?.[0];
+
+        expect(backdropRule).toContain('place-items: start center');
+        expect(backdropRule).toContain('clamp(16px, 6vh, 48px)');
+        expect(pickerRule).toContain('max-height:');
     });
 
     it('returns an exact file reference and filters unrelated files', async () => {
@@ -189,7 +450,7 @@ describe('ServerStoragePicker', () => {
             },
         });
 
-        const readOnlyLocation = await screen.findByRole('button', { name: /Archive/ });
+        const readOnlyLocation = await screen.findByRole('option', { name: /Archive/ });
         expect(readOnlyLocation.hasAttribute('disabled')).toBe(true);
         expect(within(readOnlyLocation).getByText('Read-only location')).toBeTruthy();
     });

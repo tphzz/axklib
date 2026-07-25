@@ -12,6 +12,7 @@
         | 'folder-plus'
         | 'grid'
         | 'hard-drive'
+        | 'home'
         | 'layers'
         | 'list'
         | 'lock'
@@ -74,6 +75,8 @@
         <path d="M6 3h8l4 4v14H6V3Z" /><path d="M14 3v5h5M12 11v6M9 14h6" />
     {:else if name === 'hard-drive'}
         <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 13h18" /><circle cx="17" cy="16" r="1" />
+    {:else if name === 'home'}
+        <path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10M9 20v-6h6v6" />
     {:else if name === 'chevron'}
         <path d="m9 18 6-6-6-6" />
     {:else if name === 'music'}
