@@ -33,6 +33,47 @@ const common = {
 };
 
 describe('ObjectWorkspace', () => {
+    it('naturally orders the standalone Wave Data lane', () => {
+        const wave2 = {
+            ...object('SMPL', 'SMP 2'),
+            sampleRate: 44_100,
+            sampleWidthBytes: 2,
+            frameCount: 1,
+        };
+        const wave10 = {
+            ...object('SMPL', 'SMP 10'),
+            sampleRate: 44_100,
+            sampleWidthBytes: 2,
+            frameCount: 1,
+        };
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                waveData: [wave10, wave2].map((waveObject) => ({
+                    id: waveObject.key,
+                    objectKey: waveObject.key,
+                    name: waveObject.name,
+                    note: 'C3',
+                    duration: '0.00 s',
+                    sampleRate: '44.1 kHz',
+                    bitDepth: '16-bit',
+                    channels: 'Mono' as const,
+                    storedSizeBytes: 2,
+                    waveform: [],
+                    previewState: 'idle' as const,
+                    object: waveObject,
+                })),
+                view: 'wave-data',
+            },
+        });
+
+        const rows = [...document.querySelectorAll('.wave-data-row')];
+        expect(rows.map((row) => row.textContent)).toEqual([
+            expect.stringContaining('SMP 2'),
+            expect.stringContaining('SMP 10'),
+        ]);
+    });
+
     it.each([
         ['programs', 'No matching Programs'],
         ['wave-data', 'No matching Wave Data'],

@@ -7,6 +7,7 @@
         updatePackageExportSelection,
         type PackageExportSelectionState,
     } from '../objectSelection';
+    import { compareNamedItems } from '../naturalSort';
     import type { SamplerObject } from '../transport';
     import type { PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
@@ -127,7 +128,7 @@
     function domainObjects(): PackageExportObject[] {
         return view === 'programs'
             ? programs.map((item) => exportObject(item.object, item.name))
-            : waveData.map((item) => exportObject(item.object, item.name));
+            : orderedWaveData.map((item) => exportObject(item.object, item.name));
     }
 
     function visibleObjects(): PackageExportObject[] {
@@ -217,8 +218,11 @@
             ? programs.filter((item) => `${item.slot} ${item.name}`.toLocaleLowerCase().includes(normalizedQuery))
             : programs,
     );
+    const orderedWaveData = $derived(waveData.toSorted(compareNamedItems));
     const filteredWaveData = $derived(
-        normalizedQuery ? waveData.filter((item) => item.name.toLocaleLowerCase().includes(normalizedQuery)) : waveData,
+        normalizedQuery
+            ? orderedWaveData.filter((item) => item.name.toLocaleLowerCase().includes(normalizedQuery))
+            : orderedWaveData,
     );
     const emptyCollection = $derived(
         view === 'programs' ? filteredPrograms.length === 0 : filteredWaveData.length === 0,

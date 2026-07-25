@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     contentChildren: vi.fn(),
     objectPage: vi.fn(),
     relationshipPage: vi.fn(),
+    preview: vi.fn(),
     inspectPackage: vi.fn(),
     planImagePackageImport: vi.fn(),
     releaseImagePackageImportPlan: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock('./lib/createTransport', () => ({
         contentChildren: mocks.contentChildren,
         objectPage: mocks.objectPage,
         relationshipPage: mocks.relationshipPage,
+        preview: mocks.preview,
         inspectPackage: mocks.inspectPackage,
         planImagePackageImport: mocks.planImagePackageImport,
         releaseImagePackageImportPlan: mocks.releaseImagePackageImportPlan,
@@ -51,6 +53,7 @@ vi.mock('./lib/nativeAudioDrop', () => ({
 }));
 
 import App from './App.svelte';
+import { AuditionController } from './lib/audio/auditionController';
 
 async function chooseNestedImage(buttonName: 'Open image' | 'Open another image' = 'Open image'): Promise<void> {
     await fireEvent.click(screen.getByRole('button', { name: buttonName }));
@@ -106,6 +109,7 @@ describe('App panel layout', () => {
         mocks.contentChildren.mockReset().mockResolvedValue({ items: [], totalCount: 0 });
         mocks.objectPage.mockReset().mockResolvedValue({ objects: [], totalCount: 0 });
         mocks.relationshipPage.mockReset().mockResolvedValue({ relationships: [], totalCount: 0 });
+        mocks.preview.mockReset().mockResolvedValue({ frameCount: 1, lanes: [] });
         mocks.inspectPackage.mockReset();
         mocks.planImagePackageImport.mockReset();
         mocks.releaseImagePackageImportPlan.mockReset().mockResolvedValue(undefined);
@@ -185,6 +189,110 @@ describe('App panel layout', () => {
         expect(screen.getByRole('region', { name: 'Sample hierarchy' })).toBeTruthy();
         expect(document.querySelectorAll('.contained-lane')).toHaveLength(2);
         expect(container.querySelector('.object-editor')?.textContent).toContain('No object selected');
+    });
+
+    it('schedules gapless Sample Bank playback in the natural order displayed in the Samples lane', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'Slices',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const samplerObject = (key: string, objectType: string, name: string) => ({
+            key,
+            objectType,
+            name,
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: volume.name,
+            categoryName: objectType,
+            sfsId: 1,
+            storedSizeBytes: 2,
+            sampleRate: objectType === 'SMPL' ? 44_100 : 0,
+            rootKey: 60,
+            frameCount: objectType === 'SMPL' ? 1 : 0,
+            sampleWidthBytes: objectType === 'SMPL' ? 2 : 0,
+        });
+        const bank = samplerObject('SBAC-1', 'SBAC', 'Slice Bank');
+        const sample00 = samplerObject('SBNK-00', 'SBNK', 'LoopDiv00');
+        const sample02 = samplerObject('SBNK-02', 'SBNK', 'LoopDiv02');
+        const sample10 = samplerObject('SBNK-10', 'SBNK', 'LoopDiv10');
+        const wave00 = samplerObject('SMPL-00', 'SMPL', 'Wave 00');
+        const wave02 = samplerObject('SMPL-02', 'SMPL', 'Wave 02');
+        const wave10 = samplerObject('SMPL-10', 'SMPL', 'Wave 10');
+        const relationship = (
+            id: string,
+            sourceObjectId: string,
+            targetObjectId: string,
+            relationshipType: string,
+            assignmentIndex?: number,
+        ) => ({
+            id,
+            sourceObjectId,
+            targetObjectId,
+            candidateObjectIds: [],
+            relationshipType,
+            quality: 'Known',
+            basis: 'test',
+            notes: [],
+            assignmentIndex,
+            assignmentName: '',
+            assignmentState: '',
+            receiveChannelDisplay: '',
+        });
+        const relationships = [
+            relationship('bank-10', bank.key, sample10.key, 'SBAC_SLOT_TO_SBNK', 1),
+            relationship('bank-02', bank.key, sample02.key, 'SBAC_SLOT_TO_SBNK', 2),
+            relationship('bank-00', bank.key, sample00.key, 'SBAC_SLOT_TO_SBNK', 3),
+            relationship('wave-10', sample10.key, wave10.key, 'SBNK_LEFT_MEMBER_TO_SMPL'),
+            relationship('wave-02', sample02.key, wave02.key, 'SBNK_LEFT_MEMBER_TO_SMPL'),
+            relationship('wave-00', sample00.key, wave00.key, 'SBNK_LEFT_MEMBER_TO_SMPL'),
+        ];
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 7,
+                relationshipCount: relationships.length,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectDeletionAvailable: true,
+        });
+        mocks.objectPage.mockResolvedValue({
+            objects: [bank, sample10, sample02, sample00, wave10, wave02, wave00],
+            totalCount: 7,
+        });
+        mocks.relationshipPage.mockResolvedValue({ relationships, totalCount: relationships.length });
+        const playSequence = vi.spyOn(AuditionController.prototype, 'playSequence').mockImplementation(() => undefined);
+
+        try {
+            render(App);
+            await chooseNestedImage();
+            await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
+            await fireEvent.click(await screen.findByRole('button', { name: 'Play Slice Bank' }));
+
+            expect(
+                screen
+                    .getAllByRole('button', { name: /^Inspect LoopDiv/ })
+                    .map((button) => button.getAttribute('aria-label')),
+            ).toEqual(['Inspect LoopDiv00', 'Inspect LoopDiv02', 'Inspect LoopDiv10']);
+            expect(playSequence).toHaveBeenCalledWith(
+                17,
+                [sample00.key, sample02.key, sample10.key],
+                expect.any(Function),
+            );
+        } finally {
+            playSequence.mockRestore();
+        }
     });
 
     it('defaults the object browser to two-thirds of the middle workspace', () => {

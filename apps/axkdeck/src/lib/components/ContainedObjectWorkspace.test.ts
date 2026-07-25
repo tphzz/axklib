@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { SamplerObject } from '../transport';
+import type { PackageExportSelectionState } from '../objectSelection';
 import type { PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
 import ContainedObjectWorkspace from './ContainedObjectWorkspace.svelte';
 
@@ -66,6 +67,71 @@ const noAuditionableSamples = {
 };
 
 describe('ContainedObjectWorkspace', () => {
+    it('naturally orders every displayed object lane before filtering', () => {
+        const bank2 = structure('SBAC', 'Bank 2');
+        const bank10 = structure('SBAC', 'Bank 10');
+        const sample2 = structure('SBNK', 'LoopDiv2');
+        const sample10 = structure('SBNK', 'LoopDiv10');
+        const wave2 = waveform('Slice 2');
+        const wave10 = waveform('Slice 10');
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'sample-banks',
+                sampleBanks: [bank10, bank2],
+                samples: [sample10, sample2],
+                waveData: [wave10, wave2],
+                activeSampleBankId: '',
+                activeSampleId: '',
+                activeWaveDataId: '',
+                queries: { primary: 'bank', secondary: 'loop', tertiary: 'slice' },
+            },
+        });
+
+        const lanes = [...document.querySelectorAll('.contained-lane')];
+        expect(lanes).toHaveLength(3);
+        expect(lanes[0]?.textContent?.indexOf('Bank 2')).toBeLessThan(lanes[0]?.textContent?.indexOf('Bank 10') ?? -1);
+        expect(lanes[1]?.textContent?.indexOf('LoopDiv2')).toBeLessThan(
+            lanes[1]?.textContent?.indexOf('LoopDiv10') ?? -1,
+        );
+        expect(lanes[2]?.textContent?.indexOf('Slice 2')).toBeLessThan(
+            lanes[2]?.textContent?.indexOf('Slice 10') ?? -1,
+        );
+    });
+
+    it('uses displayed natural order for range selection', async () => {
+        const sample2 = structure('SBNK', 'LoopDiv2');
+        const sample3 = structure('SBNK', 'LoopDiv3');
+        const sample10 = structure('SBNK', 'LoopDiv10');
+        const onselectionchange = vi.fn();
+        const props = {
+            ...callbacks,
+            ...noAuditionableSamples,
+            view: 'samples' as const,
+            sampleBanks: [],
+            samples: [sample10, sample2, sample3],
+            waveData: [],
+            activeSampleBankId: '',
+            activeSampleId: '',
+            activeWaveDataId: '',
+            queries: { primary: '', secondary: '', tertiary: '' },
+            packageExportAvailable: true,
+            onselectionchange,
+        };
+        const rendered = render(ContainedObjectWorkspace, { props });
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Inspect LoopDiv2' }));
+        const anchoredSelection = onselectionchange.mock.calls[0]![0];
+        await rendered.rerender({ ...props, selection: anchoredSelection });
+        await fireEvent.click(screen.getByRole('button', { name: 'Inspect LoopDiv10' }), { shiftKey: true });
+
+        const rangeSelection = onselectionchange.mock.calls[1]![0] as PackageExportSelectionState;
+        expect(new Set(rangeSelection.items.map((item) => item.objectId))).toEqual(
+            new Set([sample2.objectId, sample3.objectId, sample10.objectId]),
+        );
+    });
+
     it('renders the SBAC hierarchy as three simultaneous list lanes', async () => {
         const bank = structure('SBAC', 'Strings');
         const sample = structure('SBNK', 'Violin C3');

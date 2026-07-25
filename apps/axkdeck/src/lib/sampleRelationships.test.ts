@@ -172,28 +172,50 @@ describe('auditionableSampleIds', () => {
 });
 
 describe('orderedSamplesForBank', () => {
-    it('uses assignment order, preserves unindexed response order, and removes duplicate members', () => {
+    it('uses natural Sample names for slice playback and removes duplicate members', () => {
         const makeMember = (id: string, targetObjectId: string, assignmentIndex?: number): SamplerRelationship => ({
             ...relationship(id, 'SBAC_SLOT_TO_SBNK', targetObjectId),
             sourceObjectId: 'SBAC-1',
             assignmentIndex,
         });
-        const first = sample('SBNK-1');
-        const second = sample('SBNK-2');
-        const unindexed = sample('SBNK-3');
+        const slice00 = { ...sample('SBNK-00'), name: 'LoopDiv00' };
+        const slice01 = { ...sample('SBNK-01'), name: 'LoopDiv01' };
+        const slice02 = { ...sample('SBNK-02'), name: 'LoopDiv02' };
+        const slice10 = { ...sample('SBNK-10'), name: 'LoopDiv10' };
+        const slice13 = { ...sample('SBNK-13'), name: 'LoopDiv13' };
 
         expect(
             orderedSamplesForBank(
                 'SBAC-1',
                 [
-                    makeMember('unindexed', unindexed.objectId),
-                    makeMember('second', second.objectId, 2),
-                    makeMember('first', first.objectId, 1),
-                    makeMember('duplicate', first.objectId, 3),
+                    makeMember('slice-13', slice13.objectId, 1),
+                    makeMember('slice-02', slice02.objectId, 2),
+                    makeMember('slice-10', slice10.objectId, 3),
+                    makeMember('slice-00', slice00.objectId, 4),
+                    makeMember('slice-01', slice01.objectId),
+                    makeMember('duplicate', slice00.objectId, 5),
                     makeMember('missing', 'SBNK-MISSING', 4),
                 ],
-                [first, second, unindexed],
+                [slice13, slice02, slice10, slice00, slice01],
             ),
-        ).toEqual([first, second, unindexed]);
+        ).toEqual([slice00, slice01, slice02, slice10, slice13]);
+    });
+
+    it('retains assignment order when distinct Samples have the same visible name', () => {
+        const first = { ...sample('SBNK-1'), name: 'Same Name' };
+        const second = { ...sample('SBNK-2'), name: 'Same Name' };
+        const makeMember = (id: string, targetObjectId: string, assignmentIndex: number): SamplerRelationship => ({
+            ...relationship(id, 'SBAC_SLOT_TO_SBNK', targetObjectId),
+            sourceObjectId: 'SBAC-1',
+            assignmentIndex,
+        });
+
+        expect(
+            orderedSamplesForBank(
+                'SBAC-1',
+                [makeMember('second', second.objectId, 2), makeMember('first', first.objectId, 1)],
+                [second, first],
+            ),
+        ).toEqual([first, second]);
     });
 });

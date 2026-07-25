@@ -1,5 +1,6 @@
 import type { SamplerRelationship } from './transport';
 import type { LinkedWaveDataItem, SampleStructureItem, WaveDataItem } from './types';
+import { compareNaturalNames } from './naturalSort';
 
 const memberRelationships = [
     { relationshipType: 'SBNK_LEFT_MEMBER_TO_SMPL', role: 'left' },
@@ -102,6 +103,15 @@ export function orderedSamplesForBank(
             seen.add(objectId);
             return true;
         })
-        .map((objectId) => samplesById.get(objectId))
-        .filter((item) => item !== undefined);
+        .map((objectId, relationshipOrder) => ({ item: samplesById.get(objectId), relationshipOrder }))
+        .filter(
+            (member): member is { item: SampleStructureItem; relationshipOrder: number } => member.item !== undefined,
+        )
+        .toSorted(
+            (left, right) =>
+                compareNaturalNames(left.item.name, right.item.name) ||
+                left.relationshipOrder - right.relationshipOrder ||
+                (left.item.objectId < right.item.objectId ? -1 : left.item.objectId > right.item.objectId ? 1 : 0),
+        )
+        .map((member) => member.item);
 }

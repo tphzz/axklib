@@ -6,6 +6,7 @@
         updatePackageExportSelection,
         type PackageExportSelectionState,
     } from '../objectSelection';
+    import { compareNamedItems } from '../naturalSort';
     import type { SamplerObject } from '../transport';
     import type { PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
@@ -95,9 +96,12 @@
 
     const sampleQuery = $derived(view === 'sample-banks' ? queries.secondary : queries.primary);
     const waveDataQuery = $derived(view === 'sample-banks' ? queries.tertiary : queries.secondary);
-    const filteredBanks = $derived(sampleBanks.filter((item) => matchesSearch(item.name, queries.primary)));
-    const filteredSamples = $derived(samples.filter((item) => matchesSearch(item.name, sampleQuery)));
-    const filteredWaveData = $derived(waveData.filter((item) => matchesSearch(item.name, waveDataQuery)));
+    const orderedBanks = $derived(sampleBanks.toSorted(compareNamedItems));
+    const orderedSamples = $derived(samples.toSorted(compareNamedItems));
+    const orderedWaveData = $derived(waveData.toSorted(compareNamedItems));
+    const filteredBanks = $derived(orderedBanks.filter((item) => matchesSearch(item.name, queries.primary)));
+    const filteredSamples = $derived(orderedSamples.filter((item) => matchesSearch(item.name, sampleQuery)));
+    const filteredWaveData = $derived(orderedWaveData.filter((item) => matchesSearch(item.name, waveDataQuery)));
 
     function objectId(item: SelectableItem): string {
         return 'objectId' in item ? item.objectId : item.objectKey;
@@ -253,12 +257,12 @@
                             aria-label={`Inspect ${item.name}`}
                             aria-pressed={activeSampleBankId === item.objectId}
                             onclick={(event) => {
-                                updateSelection(event, 'sample-banks', sampleBanks, filteredBanks, item);
+                                updateSelection(event, 'sample-banks', orderedBanks, filteredBanks, item);
                                 onsamplebankselect(item);
                             }}
-                            oncontextmenu={(event) => openObjectMenu(event, 'sample-banks', sampleBanks, item)}
+                            oncontextmenu={(event) => openObjectMenu(event, 'sample-banks', orderedBanks, item)}
                             onkeydown={(event) =>
-                                openObjectMenuFromKeyboard(event, 'sample-banks', sampleBanks, filteredBanks, item)}
+                                openObjectMenuFromKeyboard(event, 'sample-banks', orderedBanks, filteredBanks, item)}
                         >
                             <strong>{item.name}</strong>
                             <small>{item.memberCount ?? 0} {(item.memberCount ?? 0) === 1 ? 'Sample' : 'Samples'}</small
@@ -317,12 +321,12 @@
                         aria-label={`Inspect ${item.name}`}
                         aria-pressed={activeSampleId === item.objectId}
                         onclick={(event) => {
-                            updateSelection(event, 'samples', samples, filteredSamples, item);
+                            updateSelection(event, 'samples', orderedSamples, filteredSamples, item);
                             onsampleselect(item);
                         }}
-                        oncontextmenu={(event) => openObjectMenu(event, 'samples', samples, item)}
+                        oncontextmenu={(event) => openObjectMenu(event, 'samples', orderedSamples, item)}
                         onkeydown={(event) =>
-                            openObjectMenuFromKeyboard(event, 'samples', samples, filteredSamples, item)}
+                            openObjectMenuFromKeyboard(event, 'samples', orderedSamples, filteredSamples, item)}
                     >
                         <strong>{item.name}</strong>
                         {#if view === 'samples'}<small>{item.membershipLabel ?? 'Standalone'}</small>{/if}
@@ -381,12 +385,12 @@
                         aria-label={`Inspect ${item.name}`}
                         aria-pressed={activeWaveDataId === item.objectKey}
                         onclick={(event) => {
-                            updateSelection(event, 'wave-data', waveData, filteredWaveData, item);
+                            updateSelection(event, 'wave-data', orderedWaveData, filteredWaveData, item);
                             onwavedataselect(item);
                         }}
-                        oncontextmenu={(event) => openObjectMenu(event, 'wave-data', waveData, item)}
+                        oncontextmenu={(event) => openObjectMenu(event, 'wave-data', orderedWaveData, item)}
                         onkeydown={(event) =>
-                            openObjectMenuFromKeyboard(event, 'wave-data', waveData, filteredWaveData, item)}
+                            openObjectMenuFromKeyboard(event, 'wave-data', orderedWaveData, filteredWaveData, item)}
                     >
                         <strong>{item.name}</strong><small>{item.note} · {item.duration}</small>
                     </button>
