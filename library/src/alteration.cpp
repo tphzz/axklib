@@ -2526,10 +2526,12 @@ Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAcce
     for (const auto &relationship : state.graph.relationships) {
         if (relationship.quality != RelationshipQuality::known || !relationship.target_key)
             continue;
-        const auto source = object_ids.find(relationship.source_key);
+        const auto source_object = object_ids.find(relationship.source_key);
         const auto target = object_ids.find(*relationship.target_key);
-        if (source != object_ids.end() && target != object_ids.end() && source->second.first == target->second.first) {
-            state.known_edges.emplace_back(source->second.first, source->second.second, target->second.second);
+        if (source_object != object_ids.end() && target != object_ids.end() &&
+            source_object->second.first == target->second.first) {
+            state.known_edges.emplace_back(source_object->second.first, source_object->second.second,
+                                           target->second.second);
         }
     }
     for (const auto &partition : state.container.partitions()) {

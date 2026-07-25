@@ -377,8 +377,7 @@ struct axk::app::ImageSessionManager::Implementation {
     }
 
     Result<PcmMember> prepare_member(Session &session, std::string object_id, std::string role,
-                                     std::optional<std::uint64_t> first_frame,
-                                     std::optional<std::uint64_t> requested_frame_count,
+                                     const CurrentSbnkMember *sample_member,
                                      const CancellationToken &cancellation) const {
         const auto snapshot = session.snapshots_by_id.find(object_id);
         if (snapshot == session.snapshots_by_id.end())
@@ -394,8 +393,9 @@ struct axk::app::ImageSessionManager::Implementation {
             return std::unexpected(
                 session_error("invalid_audio_range", "Wave Data PCM size is not aligned to its sample width"));
         const auto physical_frame_count = smpl->stored_pcm_bytes / smpl->stored_sample_width_bytes.value;
-        const auto used_first_frame = first_frame.value_or(0U);
-        const auto used_frame_count = requested_frame_count.value_or(physical_frame_count);
+        const auto used_first_frame = sample_member == nullptr ? 0U : sample_member->wave_start_frame;
+        const auto used_frame_count =
+            sample_member == nullptr ? physical_frame_count : sample_member->wave_length_frames;
         if (used_frame_count == 0U)
             return std::unexpected(session_error("audition_unsupported", "Sample playback window is empty"));
         if (used_first_frame > physical_frame_count || used_frame_count > physical_frame_count - used_first_frame)
@@ -481,14 +481,8 @@ struct axk::app::ImageSessionManager::Implementation {
 
         PcmSource source;
         for (auto &pending : pending_members) {
-            const auto first_frame = pending.sample_member
-                                         ? std::optional<std::uint64_t>{pending.sample_member->wave_start_frame}
-                                         : std::nullopt;
-            const auto frame_count = pending.sample_member
-                                         ? std::optional<std::uint64_t>{pending.sample_member->wave_length_frames}
-                                         : std::nullopt;
-            auto member = prepare_member(session, std::move(pending.object_id), std::move(pending.role), first_frame,
-                                         frame_count, cancellation);
+            auto member = prepare_member(session, std::move(pending.object_id), std::move(pending.role),
+                                         pending.sample_member, cancellation);
             if (!member)
                 return std::unexpected(member.error());
             const auto &member_snapshot = session.snapshots_by_id.at(member->object_id);
