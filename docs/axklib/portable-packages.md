@@ -13,16 +13,17 @@ person; it does not select a parser or override the manifest.
 
 | Selected roots | Manifest `package_kind` | Extension | Meaning |
 | --- | --- | --- | --- |
-| One complete volume | `volume` | `.axkvol` | Every admitted object placed in the volume and its complete known closure |
-| One Program | `program` | `.axkprg` | The Program, assigned Sample Banks or Samples, and required Wave Data |
-| One Sample Bank | `sbac` | `.axksbac` | One sampler-visible `B <name>` Sample Bank, its Samples, and required Wave Data |
-| One Sample | `sbnk` | `.axksbnk` | One Sample (`SBNK`) and its Wave Data dependencies |
-| One Wave Data object | `smpl` | `.axksmpl` | One Wave Data (`SMPL`) storage object |
-| One admitted sequence | `sequence` | `.axkseq` | Reserved for a future admitted SEQU dependency profile |
-| Two or more roots | `bundle` | `.axkpkg` | A same-type or mixed-type collection of explicitly selected roots |
+| One or more complete volumes | `volume` | `.axkvol` | Every admitted object placed in each volume and its complete known closure |
+| One or more Programs | `program` | `.axkprg` | The Programs, assigned Sample Banks or Samples, and required Wave Data |
+| One or more Sample Banks | `sbac` | `.axksbac` | Sampler-visible `B <name>` Sample Banks, their Samples, and required Wave Data |
+| One or more Samples | `sbnk` | `.axksbnk` | Samples (`SBNK`) and their Wave Data dependencies |
+| One or more Wave Data objects | `smpl` | `.axksmpl` | Wave Data (`SMPL`) storage objects |
+| One or more admitted sequences | `sequence` | `.axkseq` | Reserved for a future admitted SEQU dependency profile |
+| Different root kinds | `bundle` | `.axkpkg` | A mixed-type collection of explicitly selected roots |
 
 Dependencies never change the extension. A Program containing SBAC, SBNK, and
-SMPL nodes remains `.axkprg`; two selected Programs form `.axkpkg`. Version 1
+SMPL nodes remains `.axkprg`, as do two selected Programs. A Program and a
+Sample selected together form `.axkpkg`. Version 1
 currently admits current-format `PROG`, `SBAC`, `SBNK`, and `SMPL` objects.
 `SEQU`, `PRF3`, unknown types, and non-current object profiles are rejected
 because their portable dependency and relocation contracts are not admitted.
@@ -57,7 +58,8 @@ The raw object selectors `sbac`, `sbnk`, and `smpl` remain supported. `prog` is
 an alias for `program`. `sample-bank` always selects an `SBAC` Sample Bank; use
 `sample` or `sbnk` for an `SBNK` Sample. Obsolete pre-release selector names are
 rejected. `--partition`, `--group`, and `--volume` constrain all roots in one
-export command. Repeat `--root` to create a multi-root `.axkpkg`.
+export command. Repeat `--root` to create a multi-root package. Homogeneous
+roots keep their typed extension; mixed root kinds use `.axkpkg`.
 A selector must resolve exactly once and every required active relationship
 must be known and unambiguous; otherwise no archive is published. Ambiguous
 inactive Program diagnostic rows are not package content.
@@ -131,9 +133,10 @@ it is not the CLI's separate-output publication model.
 
 `images.package_export` exports one to 1,024 exact roots from any readable
 image session. A root is either a selected volume or an opaque session object
-ID with kind `PROGRAM`, `SBAC`, `SBNK`, or `SMPL`. One root uses its specific
-package extension; multiple roots use `.axkpkg`, with shared dependencies
-included once. A workspace destination publishes through the sandbox. A
+ID with kind `PROGRAM`, `SBAC`, `SBNK`, or `SMPL`. Homogeneous roots use their
+specific package extension regardless of count; mixed root kinds use `.axkpkg`.
+Shared dependencies are included once. A workspace destination publishes
+through the sandbox. A
 download destination creates a short-lived, owner-scoped retained file for a
 native client to stream and explicitly delete. The package contents and
 identity are identical in both cases.

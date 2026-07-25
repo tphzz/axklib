@@ -36,7 +36,7 @@ bool valid_digest(const std::optional<std::string> &digest) {
 bool admitted_extension(axk::app::UploadKind kind, const std::filesystem::path &path) {
     const auto extension = lowercase(axk::text::path_to_utf8(path.extension()));
     constexpr std::array audio_extensions{".wav", ".wave", ".flac", ".aif", ".aiff"};
-    constexpr std::array package_extensions{".axkpkg", ".axkvol", ".axkprg", ".axksbac", ".axksbnk"};
+    constexpr std::array package_extensions{".axkpkg", ".axkvol", ".axkprg", ".axksbac", ".axksbnk", ".axksmpl"};
     switch (kind) {
     case axk::app::UploadKind::audio:
         return std::ranges::find(audio_extensions, extension) != audio_extensions.end();

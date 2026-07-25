@@ -3206,6 +3206,7 @@
             "type": "string"
           },
           "packageKind": {
+            "description": "Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.",
             "enum": [
               "VOLUME",
               "PROGRAM",
@@ -4743,6 +4744,7 @@
             "type": "string"
           },
           "packageKind": {
+            "description": "Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.",
             "enum": [
               "VOLUME",
               "PROGRAM",
@@ -5189,6 +5191,7 @@
             "type": "string"
           },
           "packageKind": {
+            "description": "Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.",
             "enum": [
               "VOLUME",
               "PROGRAM",

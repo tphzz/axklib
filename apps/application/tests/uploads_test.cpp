@@ -107,6 +107,13 @@ TEST_F(UploadStoreTest, RejectsDiskImagesWrongOwnersOffsetsAndOversizedChunks) {
                                        .declared_size = 5U,
                                        .sha256 = std::nullopt});
     ASSERT_TRUE(created) << created.error().message;
+    const auto wave_data = value.create({.owner_id = "owner",
+                                         .filename = "wave-data.axksmpl",
+                                         .kind = axk::app::UploadKind::package,
+                                         .media_type = "application/vnd.axklib.package",
+                                         .declared_size = 1U,
+                                         .sha256 = std::nullopt});
+    ASSERT_TRUE(wave_data) << wave_data.error().message;
     EXPECT_FALSE(value.inspect(created->reference, "other"));
     EXPECT_FALSE(value.append(created->reference, "owner", 1U, bytes("a")));
     EXPECT_FALSE(value.append(created->reference, "owner", 0U, bytes("abcde")));

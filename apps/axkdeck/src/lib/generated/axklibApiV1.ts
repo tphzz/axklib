@@ -1854,7 +1854,10 @@ export interface components {
             objects: components['schemas']['PackageObject'][];
             output: components['schemas']['FileRef'] | null;
             packageId: string;
-            /** @enum {unknown} */
+            /**
+             * @description Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.
+             * @enum {unknown}
+             */
             packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'BUNDLE';
             payloadsVerified: boolean;
             relationshipCount: number;
@@ -2184,7 +2187,10 @@ export interface components {
             objects: components['schemas']['PackageObject'][];
             output: components['schemas']['FileRef'];
             packageId: string;
-            /** @enum {unknown} */
+            /**
+             * @description Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.
+             * @enum {unknown}
+             */
             packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'BUNDLE';
             payloadsVerified: boolean;
             relationshipCount: number;
@@ -2269,7 +2275,10 @@ export interface components {
             issues: components['schemas']['Issue'][];
             objects: components['schemas']['PackageObject'][];
             packageId: string;
-            /** @enum {unknown} */
+            /**
+             * @description Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.
+             * @enum {unknown}
+             */
             packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'BUNDLE';
             payloadsVerified: boolean;
             relationshipCount: number;

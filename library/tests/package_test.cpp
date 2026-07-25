@@ -546,21 +546,23 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
     axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     auto authored_volume = graph_volume(audio_path);
+    authored_volume.waveforms.push_back({"wave2", "Graph Wave 2", audio_path, 60U, {}});
     axk::SampleSpec banked_two;
     banked_two.name = "Grouped Sample 2";
-    banked_two.waveform_id = "wave";
+    banked_two.waveform_id = "wave2";
     banked_two.root_key = 60U;
     banked_two.key_high = 127U;
     authored_volume.samples.push_back(std::move(banked_two));
     axk::SampleSpec direct_two;
     direct_two.name = "Direct Sample 2";
-    direct_two.waveform_id = "wave";
+    direct_two.waveform_id = "wave2";
     direct_two.root_key = 60U;
     direct_two.key_high = 127U;
     authored_volume.samples.push_back(std::move(direct_two));
     authored_volume.sample_banks.push_back({"Graph Bank 2", {"Grouped Sample 2"}});
     authored_volume.programs.push_back({2U, {{"SBAC", "Graph Bank 2", 1U}, {"SBNK", "Direct Sample 2", 2U}}});
-    manifest.partitions.push_back({"P1", {std::move(authored_volume)}});
+    auto second_volume = single_sample_volume(audio_path, "Graph Volume 2", "Graph Wave 3", "Grouped Sample 3");
+    manifest.partitions.push_back({"P1", {std::move(authored_volume), std::move(second_volume)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
     auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
@@ -621,17 +623,73 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     ASSERT_TRUE(verified_bundle) << verified_bundle.error().message;
     EXPECT_TRUE(axk::verify_portable_package(*verified_bundle));
 
-    const std::vector same_type_bundle_roots{
+    const std::vector homogeneous_program_roots{
         root(axk::PackageRootKind::prog, "Graph Volume", "001"),
         root(axk::PackageRootKind::prog, "Graph Volume", "002"),
     };
-    const auto same_type_bundle = axk::build_portable_package(*source, same_type_bundle_roots);
-    ASSERT_TRUE(same_type_bundle) << same_type_bundle.error().message;
-    EXPECT_EQ(same_type_bundle->package.kind, axk::PackageKind::bundle);
-    EXPECT_EQ(same_type_bundle->required_extension, ".axkpkg");
-    EXPECT_EQ(same_type_bundle->package.roots.size(), 2U);
-    EXPECT_EQ(std::ranges::count(same_type_bundle->package.nodes, std::string{"SMPL"}, &axk::PackageNode::object_type),
-              1);
+    const auto homogeneous_program_package = axk::build_portable_package(*source, homogeneous_program_roots);
+    ASSERT_TRUE(homogeneous_program_package) << homogeneous_program_package.error().message;
+    EXPECT_EQ(homogeneous_program_package->package.kind, axk::PackageKind::program);
+    EXPECT_EQ(homogeneous_program_package->required_extension, ".axkprg");
+    EXPECT_EQ(homogeneous_program_package->package.roots.size(), 2U);
+    EXPECT_EQ(std::ranges::count(homogeneous_program_package->package.nodes, std::string{"SMPL"},
+                                 &axk::PackageNode::object_type),
+              2);
+
+    const std::vector homogeneous_sample_bank_roots{
+        root(axk::PackageRootKind::sbac, "Graph Volume", "Graph Bank"),
+        root(axk::PackageRootKind::sbac, "Graph Volume", "Graph Bank 2"),
+    };
+    const auto homogeneous_sample_bank_package = axk::build_portable_package(*source, homogeneous_sample_bank_roots);
+    ASSERT_TRUE(homogeneous_sample_bank_package) << homogeneous_sample_bank_package.error().message;
+    EXPECT_EQ(homogeneous_sample_bank_package->package.kind, axk::PackageKind::sbac);
+    EXPECT_EQ(homogeneous_sample_bank_package->required_extension, ".axksbac");
+    EXPECT_EQ(homogeneous_sample_bank_package->package.roots.size(), 2U);
+    const auto published_sample_banks =
+        axk::publish_portable_package(*homogeneous_sample_bank_package, output_root / "sample-banks.axksbac");
+    ASSERT_TRUE(published_sample_banks) << published_sample_banks.error().message;
+    const auto reopened_sample_banks = axk::open_portable_package(published_sample_banks->output_path);
+    ASSERT_TRUE(reopened_sample_banks) << reopened_sample_banks.error().message;
+    EXPECT_EQ(reopened_sample_banks->kind, axk::PackageKind::sbac);
+    EXPECT_EQ(reopened_sample_banks->roots.size(), 2U);
+
+    const std::vector homogeneous_sample_roots{
+        root(axk::PackageRootKind::sbnk, "Graph Volume", "Grouped Sample"),
+        root(axk::PackageRootKind::sbnk, "Graph Volume", "Grouped Sample 2"),
+    };
+    const auto homogeneous_sample_package = axk::build_portable_package(*source, homogeneous_sample_roots);
+    ASSERT_TRUE(homogeneous_sample_package) << homogeneous_sample_package.error().message;
+    EXPECT_EQ(homogeneous_sample_package->package.kind, axk::PackageKind::sbnk);
+    EXPECT_EQ(homogeneous_sample_package->required_extension, ".axksbnk");
+
+    const std::vector homogeneous_wave_data_roots{
+        root(axk::PackageRootKind::smpl, "Graph Volume", "Graph Wave"),
+        root(axk::PackageRootKind::smpl, "Graph Volume", "Graph Wave 2"),
+    };
+    const auto homogeneous_wave_data_package = axk::build_portable_package(*source, homogeneous_wave_data_roots);
+    ASSERT_TRUE(homogeneous_wave_data_package) << homogeneous_wave_data_package.error().message;
+    EXPECT_EQ(homogeneous_wave_data_package->package.kind, axk::PackageKind::smpl);
+    EXPECT_EQ(homogeneous_wave_data_package->required_extension, ".axksmpl");
+
+    const std::vector homogeneous_volume_roots{
+        root(axk::PackageRootKind::volume, "Graph Volume"),
+        root(axk::PackageRootKind::volume, "Graph Volume 2"),
+    };
+    const auto homogeneous_volume_package = axk::build_portable_package(*source, homogeneous_volume_roots);
+    ASSERT_TRUE(homogeneous_volume_package) << homogeneous_volume_package.error().message;
+    EXPECT_EQ(homogeneous_volume_package->package.kind, axk::PackageKind::volume);
+    EXPECT_EQ(homogeneous_volume_package->required_extension, ".axkvol");
+
+    const auto obsolete_homogeneous_bundle =
+        mutate_manifest(homogeneous_sample_bank_package->archive,
+                        [](nlohmann::json &manifest_json) { manifest_json["package_kind"] = "bundle"; });
+    ASSERT_FALSE(obsolete_homogeneous_bundle.empty());
+    EXPECT_FALSE(axk::open_portable_package(obsolete_homogeneous_bundle, "sample-banks.axkpkg"));
+
+    const auto incorrectly_typed_mixed_bundle =
+        mutate_manifest(bundle->archive, [](nlohmann::json &manifest_json) { manifest_json["package_kind"] = "sbac"; });
+    ASSERT_FALSE(incorrectly_typed_mixed_bundle.empty());
+    EXPECT_FALSE(axk::open_portable_package(incorrectly_typed_mixed_bundle, "mixed.axksbac"));
 
     const auto copied_source_path = output_root / "copied-source.hds";
     ASSERT_TRUE(std::filesystem::copy_file(source_path, copied_source_path));

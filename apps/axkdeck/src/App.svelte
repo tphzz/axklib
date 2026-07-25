@@ -48,6 +48,7 @@
         maximumPackageExportRoots,
         type PackageExportSelectionState,
     } from './lib/objectSelection';
+    import { packageExportFilename } from './lib/packageExport';
     import {
         type ClientUploadLocation,
         type DirectoryLocation,
@@ -1101,29 +1102,6 @@
         sourceStatus = `Package export supports at most ${maximumPackageExportRoots.toLocaleString()} selected objects`;
     }
 
-    function packageFilename(items: PackageExportSelection[]): string {
-        const first = items[0];
-        const sourceName = items.length === 1 ? (first?.name ?? 'package') : `${first?.name ?? 'selection'} and others`;
-        const stem =
-            sourceName
-                .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
-                .replace(/[ .]+$/g, '')
-                .trim() || 'volume';
-        const extension =
-            items.length !== 1
-                ? 'axkpkg'
-                : first?.kind === 'VOLUME'
-                  ? 'axkvol'
-                  : first?.kind === 'PROGRAM'
-                    ? 'axkprg'
-                    : first?.kind === 'SBAC'
-                      ? 'axksbac'
-                      : first?.kind === 'SBNK'
-                        ? 'axksbnk'
-                        : 'axksmpl';
-        return `${stem}.${extension}`;
-    }
-
     function packageExportRoots(items: PackageExportSelection[]): ImageSessionPackageExportRoot[] {
         return items.map((item) =>
             item.kind === 'VOLUME'
@@ -1186,7 +1164,7 @@
         const request = packageExportRequest;
         if (!request || request.busy) return;
         const generation = packageOperationGeneration;
-        const filename = packageFilename(request.items);
+        const filename = packageExportFilename(request.items);
         const selection = await chooseServerLocation(
             'save-file',
             'Export axklib package',
@@ -1208,7 +1186,7 @@
         if (!request || request.busy || !isDesktop) return;
         const generation = packageOperationGeneration;
         try {
-            const destination = await selectLocalPackageDestination(packageFilename(request.items));
+            const destination = await selectLocalPackageDestination(packageExportFilename(request.items));
             if (!destination || generation !== packageOperationGeneration || !packageExportRequest) return;
             await runPackageExport(
                 { kind: 'DOWNLOAD', filename: destination.filename },

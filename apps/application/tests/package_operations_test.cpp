@@ -66,9 +66,15 @@ void write_mixed_root_source(const std::filesystem::path &path) {
     sample.key_high = 127U;
     volume.samples.push_back(sample);
     sample.name = "Direct";
+    volume.samples.push_back(sample);
+    sample.name = "Sample 2";
+    volume.samples.push_back(sample);
+    sample.name = "Direct 2";
     volume.samples.push_back(std::move(sample));
     volume.sample_banks.push_back({"Bank", {"Sample"}});
+    volume.sample_banks.push_back({"Bank 2", {"Sample 2"}});
     volume.programs.push_back({1U, {{"SBAC", "Bank", 1U}, {"SBNK", "Direct", 2U}}});
+    volume.programs.push_back({2U, {{"SBAC", "Bank 2", 1U}, {"SBNK", "Direct 2", 2U}}});
 
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
     const auto written = axk::write_hds_image(manifest, path);
@@ -370,6 +376,35 @@ TEST_F(PackageOperationsTest, SessionExportCombinesEveryPortableObjectRootKindWi
     ASSERT_TRUE(opened) << opened.error().message;
     const auto objects = images_->objects(opened->image_id, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
+
+    std::vector<std::string> sample_bank_ids;
+    for (const auto &object : objects->items) {
+        if (object.type == "SBAC")
+            sample_bank_ids.push_back(object.id);
+    }
+    ASSERT_EQ(sample_bank_ids.size(), 2U);
+    const nlohmann::json homogeneous_roots{
+        {{"kind", "SBAC"}, {"objectId", sample_bank_ids[0]}},
+        {{"kind", "SBAC"}, {"objectId", sample_bank_ids[1]}},
+    };
+    const auto homogeneous =
+        registry_.invoke("images.package_export",
+                         {{"imageId", opened->image_id},
+                          {"expectedRevision", opened->revision},
+                          {"roots", homogeneous_roots},
+                          {"destination",
+                           {{"kind", "WORKSPACE"},
+                            {"output", {{"rootId", "workspace"}, {"relativePath", "sample-banks"}}},
+                            {"overwrite", false}}}},
+                         context());
+    ASSERT_TRUE(homogeneous) << homogeneous.error().message;
+    EXPECT_EQ(homogeneous->at("packageKind"), "sbac");
+    EXPECT_EQ(homogeneous->at("requiredExtension"), ".axksbac");
+    EXPECT_EQ(homogeneous->at("output").at("relativePath"), "sample-banks.axksbac");
+    const auto sample_banks = axk::open_portable_package(root_ / "sample-banks.axksbac");
+    ASSERT_TRUE(sample_banks) << sample_banks.error().message;
+    EXPECT_EQ(sample_banks->kind, axk::PackageKind::sbac);
+    EXPECT_EQ(sample_banks->roots.size(), 2U);
 
     const auto object_id = [&](std::string_view type) {
         const auto found = std::ranges::find(objects->items, type, &axk::app::ImageObjectItem::type);

@@ -280,7 +280,8 @@ in the focused list. The header shows the total and exports or clears the
 basket. Right-clicking a selected object exports the complete basket;
 right-clicking an unselected object starts a new one-object selection. Up to
 1,024 roots can be selected atomically, and shared dependencies are included
-once in a `.axkpkg` bundle. An export can publish directly to a configured
+once. Homogeneous selections keep their typed package extension; only mixed
+root kinds use `.axkpkg`. An export can publish directly to a configured
 writable storage location. The desktop application can instead choose a local
 destination; the server then retains an owner-scoped package briefly while the
 native shell streams it to the selected file and deletes the retained resource

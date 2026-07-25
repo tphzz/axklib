@@ -199,8 +199,9 @@ Session package export is a read job. Its `roots` array accepts one to 1,024
 exact volume, Program, Sample Bank, Sample, or Wave Data roots. Object roots
 use the opaque IDs returned by the retained image session; the server resolves
 them under the same revision-bound read lease. A single root receives its
-specific package extension and multiple roots produce `.axkpkg`. A
-`WORKSPACE` destination publishes through the normal sandbox. A `DOWNLOAD`
+specific package extension. Multiple roots of the same kind keep that typed
+extension; only mixed root kinds produce `.axkpkg`. A `WORKSPACE` destination
+publishes through the normal sandbox. A `DOWNLOAD`
 destination retains the package in private owner-scoped storage and returns an
 authenticated content path with a short expiry. The client streams that
 content and deletes the retained resource when the save completes; expiry is

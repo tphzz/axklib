@@ -20,6 +20,7 @@
       "const": "1.0"
     },
     "package_kind": {
+      "description": "Derived from the selected root kind when every root is homogeneous; bundle is required only when root kinds differ.",
       "enum": [
         "volume",
         "program",

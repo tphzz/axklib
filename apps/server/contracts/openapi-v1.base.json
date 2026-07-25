@@ -1561,6 +1561,7 @@
           "schemaVersion": {"const": "1.0"},
           "packageId": {"type": "string", "minLength": 1},
           "packageKind": {
+            "description": "Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.",
             "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "BUNDLE"],
             "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "BUNDLE": "bundle"}
           },
@@ -1588,6 +1589,7 @@
           "schemaVersion": {"const": "1.0"},
           "packageId": {"type": "string", "minLength": 1},
           "packageKind": {
+            "description": "Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.",
             "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "BUNDLE"],
             "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "BUNDLE": "bundle"}
           },
@@ -1921,6 +1923,7 @@
           "schemaVersion": {"const": "1.0"},
           "packageId": {"type": "string", "minLength": 1},
           "packageKind": {
+            "description": "Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.",
             "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "BUNDLE"],
             "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "BUNDLE": "bundle"}
           },

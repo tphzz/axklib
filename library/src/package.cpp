@@ -178,10 +178,8 @@ std::optional<PackageKind> parse_package_kind(std::string_view value) {
     return std::nullopt;
 }
 
-PackageKind derive_kind(std::span<const PackageRoot> roots) {
-    if (roots.size() != 1U)
-        return PackageKind::bundle;
-    switch (roots.front().kind) {
+PackageKind package_kind_for_root(PackageRootKind kind) {
+    switch (kind) {
     case PackageRootKind::volume:
         return PackageKind::volume;
     case PackageRootKind::prog:
@@ -196,6 +194,16 @@ PackageKind derive_kind(std::span<const PackageRoot> roots) {
         return PackageKind::sequence;
     }
     return PackageKind::bundle;
+}
+
+template <std::ranges::input_range Roots> PackageKind derive_kind(const Roots &roots) {
+    const auto first = std::ranges::begin(roots);
+    if (first == std::ranges::end(roots))
+        return PackageKind::bundle;
+    const auto root_kind = first->kind;
+    if (!std::ranges::all_of(roots, [root_kind](const auto &root) { return root.kind == root_kind; }))
+        return PackageKind::bundle;
+    return package_kind_for_root(root_kind);
 }
 
 ObjectType root_object_type(PackageRootKind kind) {
@@ -915,26 +923,6 @@ std::string lower_extension(std::string_view filename) {
 bool recognized_extension(std::string_view extension) {
     constexpr std::array extensions{".axkvol", ".axkprg", ".axksbac", ".axksbnk", ".axksmpl", ".axkseq", ".axkpkg"};
     return std::ranges::find(extensions, extension) != extensions.end();
-}
-
-PackageKind derive_kind(std::span<const PackageRootSelector> roots) {
-    if (roots.size() != 1U)
-        return PackageKind::bundle;
-    switch (roots.front().kind) {
-    case PackageRootKind::volume:
-        return PackageKind::volume;
-    case PackageRootKind::prog:
-        return PackageKind::program;
-    case PackageRootKind::sbac:
-        return PackageKind::sbac;
-    case PackageRootKind::sbnk:
-        return PackageKind::sbnk;
-    case PackageRootKind::smpl:
-        return PackageKind::smpl;
-    case PackageRootKind::sequ:
-        return PackageKind::sequence;
-    }
-    return PackageKind::bundle;
 }
 
 Result<std::filesystem::path> resolve_output_path(const std::filesystem::path &requested, PackageKind kind) {
