@@ -181,6 +181,7 @@
               "RENAME_SBAC",
               "DELETE_PROGRAM",
               "INSERT_PROGRAM",
+              "RENAME_PROGRAM",
               "RENAME_VOLUME",
               "RENAME_PARTITION"
             ],
@@ -196,6 +197,7 @@
               "INSERT_VOLUME": "insert_volume",
               "INSERT_WAVEFORM": "insert_waveform",
               "RENAME_PARTITION": "rename_partition",
+              "RENAME_PROGRAM": "rename_program",
               "RENAME_SBAC": "rename_sbac",
               "RENAME_SBNK": "rename_sbnk",
               "RENAME_VOLUME": "rename_volume",

@@ -216,6 +216,35 @@ describe('ContainedObjectWorkspace', () => {
         expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();
     });
 
+    it('offers type-safe rename targets for contained objects', async () => {
+        const bank = structure('SBAC', 'Strings');
+        const onrenameobject = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'sample-banks',
+                sampleBanks: [bank],
+                samples: [],
+                waveData: [],
+                activeSampleBankId: '',
+                activeSampleId: '',
+                activeWaveDataId: '',
+                queries: { primary: '', secondary: '', tertiary: '' },
+                objectRenameAvailable: true,
+                onrenameobject,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect Strings' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+        expect(onrenameobject).toHaveBeenCalledWith({
+            kind: 'sample-bank',
+            object: bank.object,
+            name: 'Strings',
+        });
+    });
+
     it('adds a Sample Bank to an externally controlled mixed selection', async () => {
         const strings = structure('SBAC', 'Strings');
         const program: PackageExportObject = {

@@ -567,7 +567,11 @@ describe('HttpImageTransport', () => {
                         rootCount: 0,
                         objectCount: 0,
                         relationshipCount: 0,
-                        availableOperations: ['images.alter.volumes', 'images.alter.partitions'],
+                        availableOperations: [
+                            'images.alter.volumes',
+                            'images.alter.partitions',
+                            'images.alter.objects',
+                        ],
                         validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
                     });
                 }
@@ -580,7 +584,11 @@ describe('HttpImageTransport', () => {
                         rootCount: 0,
                         objectCount: 0,
                         relationshipCount: 0,
-                        availableOperations: ['images.alter.volumes', 'images.alter.partitions'],
+                        availableOperations: [
+                            'images.alter.volumes',
+                            'images.alter.partitions',
+                            'images.alter.objects',
+                        ],
                         validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
                     });
                 }
@@ -635,6 +643,34 @@ describe('HttpImageTransport', () => {
             partitionIndex: 2,
             partitionName: 'PARTITION 3',
             newPartitionName: 'Samples',
+        });
+        await transport.startObjectRename(opened.sessionId, {
+            kind: 'program',
+            partitionIndex: 2,
+            volumeName: 'Volume',
+            programNumber: 1,
+            newProgramName: 'Piano',
+        });
+        await transport.startObjectRename(opened.sessionId, {
+            kind: 'sample-bank',
+            partitionIndex: 2,
+            volumeName: 'Volume',
+            sampleBankName: 'Old Bank',
+            newSampleBankName: 'New Bank',
+        });
+        await transport.startObjectRename(opened.sessionId, {
+            kind: 'sample',
+            partitionIndex: 2,
+            volumeName: 'Volume',
+            sampleName: 'Old Sample',
+            newSampleName: 'New Sample',
+        });
+        await transport.startObjectRename(opened.sessionId, {
+            kind: 'wave-data',
+            partitionIndex: 2,
+            volumeName: 'Volume',
+            waveformName: 'Old Wave',
+            newWaveformName: 'New Wave',
         });
 
         expect(alterationBodies).toEqual([
@@ -706,6 +742,86 @@ describe('HttpImageTransport', () => {
                                 partition_index: 2,
                                 partition_name: 'PARTITION 3',
                                 new_partition_name: 'Samples',
+                            },
+                        ],
+                    },
+                },
+                inputBindings: [],
+            },
+            {
+                imageId: 'image-retained',
+                expectedRevision: 2,
+                manifest: {
+                    inline: {
+                        schema_version: '1.0',
+                        operations: [
+                            {
+                                id: 'rename-program',
+                                type: 'rename_program',
+                                partition_index: 2,
+                                volume_name: 'Volume',
+                                program_number: 1,
+                                new_program_name: 'Piano',
+                            },
+                        ],
+                    },
+                },
+                inputBindings: [],
+            },
+            {
+                imageId: 'image-retained',
+                expectedRevision: 2,
+                manifest: {
+                    inline: {
+                        schema_version: '1.0',
+                        operations: [
+                            {
+                                id: 'rename-sample-bank',
+                                type: 'rename_sbac',
+                                partition_index: 2,
+                                volume_name: 'Volume',
+                                sample_bank_name: 'Old Bank',
+                                new_sample_bank_name: 'New Bank',
+                            },
+                        ],
+                    },
+                },
+                inputBindings: [],
+            },
+            {
+                imageId: 'image-retained',
+                expectedRevision: 2,
+                manifest: {
+                    inline: {
+                        schema_version: '1.0',
+                        operations: [
+                            {
+                                id: 'rename-sample',
+                                type: 'rename_sbnk',
+                                partition_index: 2,
+                                volume_name: 'Volume',
+                                sample_name: 'Old Sample',
+                                new_sample_name: 'New Sample',
+                            },
+                        ],
+                    },
+                },
+                inputBindings: [],
+            },
+            {
+                imageId: 'image-retained',
+                expectedRevision: 2,
+                manifest: {
+                    inline: {
+                        schema_version: '1.0',
+                        operations: [
+                            {
+                                id: 'rename-wave-data',
+                                type: 'rename_waveform',
+                                partition_index: 2,
+                                volume_name: 'Volume',
+                                waveform_name: 'Old Wave',
+                                new_waveform_name: 'New Wave',
                             },
                         ],
                     },

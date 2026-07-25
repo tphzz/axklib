@@ -114,6 +114,37 @@ describe('ObjectWorkspace', () => {
         expect(screen.getByRole('searchbox', { name: 'Search Programs' })).toBeTruthy();
     });
 
+    it('offers Program rename by display name while retaining its numeric slot target', async () => {
+        const programObject = object('PROG', '001');
+        const onrenameobject = vi.fn();
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                programs: [
+                    {
+                        id: 'program-1',
+                        objectId: programObject.key,
+                        slot: '001',
+                        name: 'Grand',
+                        object: programObject,
+                    },
+                ],
+                view: 'programs',
+                objectRenameAvailable: true,
+                onrenameobject,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: /Grand/ }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+        expect(onrenameobject).toHaveBeenCalledWith({
+            kind: 'program',
+            object: programObject,
+            name: 'Grand',
+            programNumber: 1,
+        });
+    });
+
     it('adds Programs to an externally controlled mixed selection and exports the complete basket', async () => {
         const firstObject = object('PROG', '001');
         const bank: PackageExportObject = {

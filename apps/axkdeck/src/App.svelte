@@ -8,6 +8,7 @@
     import ObjectInspector from './lib/components/ObjectInspector.svelte';
     import ObjectEditor from './lib/components/ObjectEditor.svelte';
     import ObjectDeletionDialog from './lib/components/ObjectDeletionDialog.svelte';
+    import ObjectRenameDialog from './lib/components/ObjectRenameDialog.svelte';
     import PackageExportDialog from './lib/components/PackageExportDialog.svelte';
     import PackageImportDialog from './lib/components/PackageImportDialog.svelte';
     import PackageSelectionControls from './lib/components/PackageSelectionControls.svelte';
@@ -64,6 +65,7 @@
         ImageSessionPackageExportRoot,
         ImageSessionPackageImportPlan,
         PackageInspection,
+        ObjectRenameMutation,
         SamplerObject,
         SamplerRelationship,
         PartitionMutation,
@@ -74,6 +76,7 @@
     import type {
         DiskTreeItem,
         InspectorSelection,
+        ObjectRenameTarget,
         PackageExportObject,
         PackageExportSelection,
         Program,
@@ -172,12 +175,18 @@
     let workspaceManagerOpen = $state(false);
     let volumeMutationsAvailable = $state(false);
     let partitionMutationsAvailable = $state(false);
+    let objectRenameAvailable = $state(false);
     let objectDeletionAvailable = $state(false);
     let packageImportAvailable = $state(false);
     let packageExportAvailable = $state(false);
     let volumeAction = $state<{ item: DiskTreeItem; action: ImageTreeAction } | null>(null);
     let volumeActionBusy = $state(false);
     let volumeActionError = $state('');
+    let objectRenameRequest = $state<{
+        target: ObjectRenameTarget;
+        busy: boolean;
+        error: string;
+    } | null>(null);
     let objectDeletionRequest = $state<{
         target: SamplerObject;
         includedDependentObjectIds: string[];
@@ -1497,6 +1506,139 @@
         }
     }
 
+    interface ObjectSelectionSnapshot {
+        view: WorkspaceView;
+        programId: string;
+        bankId: string;
+        bankMemberId: string;
+        sampleId: string;
+        bankWaveDataId: string;
+        sampleWaveDataId: string;
+        waveDataId: string;
+        inspectorId: string;
+        editorIds: Record<WorkspaceView, string>;
+    }
+
+    function captureObjectSelection(): ObjectSelectionSnapshot {
+        return {
+            view: workspaceView,
+            programId: selectedProgramId,
+            bankId: selectedBankId,
+            bankMemberId: selectedBankMemberId,
+            sampleId: selectedSampleId,
+            bankWaveDataId: selectedBankWaveDataId,
+            sampleWaveDataId: selectedSampleWaveDataId,
+            waveDataId: selectedWaveDataId,
+            inspectorId: inspectorObjectId,
+            editorIds: { ...editorObjectIds },
+        };
+    }
+
+    function restoreObjectSelection(snapshot: ObjectSelectionSnapshot, renamedObjectId: string): void {
+        const exists = (objectId: string): boolean => Boolean(objectId && objectsById.has(objectId));
+        workspaceView = snapshot.view;
+        selectedProgramId = exists(snapshot.programId) ? snapshot.programId : '';
+        selectedBankId = exists(snapshot.bankId) ? snapshot.bankId : '';
+        selectedBankMemberId = exists(snapshot.bankMemberId) ? snapshot.bankMemberId : '';
+        selectedSampleId = exists(snapshot.sampleId) ? snapshot.sampleId : '';
+        selectedBankWaveDataId = exists(snapshot.bankWaveDataId) ? snapshot.bankWaveDataId : '';
+        selectedSampleWaveDataId = exists(snapshot.sampleWaveDataId) ? snapshot.sampleWaveDataId : '';
+        selectedWaveDataId = exists(snapshot.waveDataId) ? snapshot.waveDataId : '';
+        inspectorObjectId = exists(renamedObjectId)
+            ? renamedObjectId
+            : exists(snapshot.inspectorId)
+              ? snapshot.inspectorId
+              : '';
+        editorObjectIds = {
+            programs: exists(snapshot.editorIds.programs) ? snapshot.editorIds.programs : '',
+            'sample-banks': exists(snapshot.editorIds['sample-banks']) ? snapshot.editorIds['sample-banks'] : '',
+            samples: exists(snapshot.editorIds.samples) ? snapshot.editorIds.samples : '',
+            'wave-data': exists(snapshot.editorIds['wave-data']) ? snapshot.editorIds['wave-data'] : '',
+        };
+    }
+
+    function requestObjectRename(target: ObjectRenameTarget): void {
+        if (!objectRenameAvailable || openSessionId === null) return;
+        objectRenameRequest = { target, busy: false, error: '' };
+    }
+
+    function objectRenameMutation(target: ObjectRenameTarget, name: string): ObjectRenameMutation {
+        const common = {
+            partitionIndex: target.object.partitionIndex,
+            volumeName: target.object.volumeName,
+        };
+        if (target.kind === 'program') {
+            return {
+                ...common,
+                kind: 'program',
+                programNumber: target.programNumber,
+                newProgramName: name,
+            };
+        }
+        if (target.kind === 'sample-bank') {
+            return {
+                ...common,
+                kind: 'sample-bank',
+                sampleBankName: target.name,
+                newSampleBankName: name,
+            };
+        }
+        if (target.kind === 'sample') {
+            return {
+                ...common,
+                kind: 'sample',
+                sampleName: target.name,
+                newSampleName: name,
+            };
+        }
+        return {
+            ...common,
+            kind: 'wave-data',
+            waveformName: target.name,
+            newWaveformName: name,
+        };
+    }
+
+    async function submitObjectRename(name: string): Promise<void> {
+        const request = objectRenameRequest;
+        const sessionId = openSessionId;
+        if (!request || request.busy || sessionId === null) return;
+        const target = request.target;
+        const selection = captureObjectSelection();
+        const preferred = {
+            partitionIndex: target.object.partitionIndex,
+            volumeName: target.object.volumeName,
+        };
+        const started = performance.now();
+        objectRenameRequest = { ...request, busy: true, error: '' };
+        sourceStatus = `Renaming ${target.name}`;
+        try {
+            await auditionController.invalidateSession(sessionId);
+            const job = await transport.startObjectRename(sessionId, objectRenameMutation(target, name));
+            const completed = await transport.waitForJob(job.jobId, (update) => {
+                if (update.progress?.label) sourceStatus = update.progress.label;
+            });
+            if (completed.status !== 'completed') {
+                throw new Error(completed.error ?? 'Object rename did not complete');
+            }
+            await refreshOpenImageSession(preferred);
+            restoreObjectSelection(selection, target.object.key);
+            objectRenameRequest = null;
+            sourceStatus = `Renamed ${target.name} to ${name}`;
+            reportMutationTiming('rename-object', started, 1);
+        } catch (error) {
+            const message = userFacingMessage(error);
+            if (openSessionId === sessionId) {
+                await refreshOpenImageSession(preferred).catch(() => undefined);
+                restoreObjectSelection(selection, target.object.key);
+            }
+            if (objectRenameRequest?.target.object.key === target.object.key) {
+                objectRenameRequest = { ...objectRenameRequest, busy: false, error: message };
+            }
+            sourceStatus = message;
+        }
+    }
+
     function selectProgram(program: Program): void {
         selectedProgramId = program.objectId;
         setEditorObject(program.objectId);
@@ -1879,6 +2021,7 @@
             clearPackageExportSelection();
             volumeMutationsAvailable = opened.volumeMutationsAvailable;
             partitionMutationsAvailable = opened.partitionMutationsAvailable;
+            objectRenameAvailable = opened.objectRenameAvailable;
             objectDeletionAvailable = opened.objectDeletionAvailable;
             packageImportAvailable = opened.packageImportAvailable;
             packageExportAvailable = opened.packageExportAvailable;
@@ -1913,6 +2056,7 @@
         clearPackageExportSelection();
         volumeMutationsAvailable = opened.volumeMutationsAvailable;
         partitionMutationsAvailable = opened.partitionMutationsAvailable;
+        objectRenameAvailable = opened.objectRenameAvailable;
         objectDeletionAvailable = opened.objectDeletionAvailable;
         packageImportAvailable = opened.packageImportAvailable;
         packageExportAvailable = opened.packageExportAvailable;
@@ -1952,7 +2096,9 @@
         openSessionId = null;
         volumeMutationsAvailable = false;
         partitionMutationsAvailable = false;
+        objectRenameAvailable = false;
         objectDeletionAvailable = false;
+        objectRenameRequest = null;
         packageImportAvailable = false;
         packageExportAvailable = false;
         ++objectDeletionGeneration;
@@ -2175,6 +2321,8 @@
                 preparingObjectId={auditionState.status === 'preparing' ? auditionState.objectId : null}
                 auditionableSampleIds={auditionableSampleObjectIds}
                 auditionableSampleBankIds={auditionableSampleBankObjectIds}
+                {objectRenameAvailable}
+                onrenameobject={requestObjectRename}
                 {objectDeletionAvailable}
                 ondeleteobject={requestObjectDeletion}
                 {packageExportAvailable}
@@ -2201,6 +2349,8 @@
                 playingObjectId={auditionState.status === 'playing' ? auditionState.objectId : null}
                 preparingObjectId={auditionState.status === 'preparing' ? auditionState.objectId : null}
                 playheadFrame={auditionState.playheadFrame}
+                {objectRenameAvailable}
+                onrenameobject={requestObjectRename}
                 {objectDeletionAvailable}
                 ondeleteobject={requestObjectDeletion}
                 {packageExportAvailable}
@@ -2302,6 +2452,17 @@
             error={volumeActionError}
             oncancel={() => !volumeActionBusy && (volumeAction = null)}
             onsubmit={(name) => void submitVolumeAction(name)}
+        />
+    {/key}
+{/if}
+{#if objectRenameRequest}
+    {#key objectRenameRequest.target.object.key}
+        <ObjectRenameDialog
+            target={objectRenameRequest.target}
+            busy={objectRenameRequest.busy}
+            error={objectRenameRequest.error}
+            oncancel={() => !objectRenameRequest?.busy && (objectRenameRequest = null)}
+            onsubmit={(name) => void submitObjectRename(name)}
         />
     {/key}
 {/if}

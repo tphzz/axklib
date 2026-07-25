@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
     releaseClientUpload: vi.fn(),
     inspectObjectDeletion: vi.fn(),
     startObjectDeletion: vi.fn(),
+    startObjectRename: vi.fn(),
     waitForJob: vi.fn(),
     deleteSandboxEntry: vi.fn(),
     hardDiskCreationProfiles: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock('./lib/createTransport', () => ({
         releaseClientUpload: mocks.releaseClientUpload,
         inspectObjectDeletion: mocks.inspectObjectDeletion,
         startObjectDeletion: mocks.startObjectDeletion,
+        startObjectRename: mocks.startObjectRename,
         waitForJob: mocks.waitForJob,
         deleteSandboxEntry: mocks.deleteSandboxEntry,
         hardDiskCreationProfiles: mocks.hardDiskCreationProfiles,
@@ -102,6 +104,7 @@ describe('App panel layout', () => {
             initialVolume: null,
             volumeMutationsAvailable: true,
             partitionMutationsAvailable: true,
+            objectRenameAvailable: true,
             objectDeletionAvailable: true,
         });
         mocks.refreshImage.mockReset();
@@ -116,6 +119,7 @@ describe('App panel layout', () => {
         mocks.releaseClientUpload.mockReset().mockResolvedValue(undefined);
         mocks.inspectObjectDeletion.mockReset();
         mocks.startObjectDeletion.mockReset();
+        mocks.startObjectRename.mockReset();
         mocks.waitForJob.mockReset();
         mocks.deleteSandboxEntry.mockReset().mockResolvedValue(undefined);
         mocks.listenForNativeAudioDrops.mockReset().mockResolvedValue(() => undefined);
@@ -508,6 +512,94 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete Sample' })).toBeNull());
         expect(screen.queryByText('Piano C3')).toBeNull();
         expect(screen.queryByRole('button', { name: 'Export 1 selected object' })).toBeNull();
+    });
+
+    it('renames an object, refreshes the image, and retains the selected object', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'Piano',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const waveData = {
+            key: 'wave-1',
+            objectType: 'SMPL',
+            name: 'Old Wave',
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: volume.name,
+            categoryName: 'SMPL',
+            sfsId: 9,
+            storedSizeBytes: 4096,
+            sampleRate: 44_100,
+            rootKey: 60,
+            frameCount: 44_100,
+            sampleWidthBytes: 2,
+        };
+        const opened = {
+            sessionId: 17,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk' as const, childCount: 1, children: [volume] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 1,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectRenameAvailable: true,
+            objectDeletionAvailable: true,
+        };
+        mocks.openImage.mockResolvedValueOnce(opened);
+        mocks.refreshImage.mockResolvedValue(opened);
+        mocks.objectPage
+            .mockResolvedValueOnce({ objects: [waveData], totalCount: 1 })
+            .mockResolvedValue({ objects: [{ ...waveData, name: 'New Wave' }], totalCount: 1 });
+        mocks.startObjectRename.mockResolvedValue({ jobId: 56, kind: 'images.alter', status: 'queued' });
+        mocks.waitForJob.mockResolvedValue({
+            jobId: 56,
+            kind: 'images.alter',
+            status: 'completed',
+            result: {},
+        });
+        render(App);
+
+        await chooseNestedImage();
+        await fireEvent.click(screen.getByRole('button', { name: 'Wave Data' }));
+        const row = await screen.findByRole('button', { name: 'Inspect Old Wave' });
+        await fireEvent.click(row);
+        await fireEvent.contextMenu(row);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+        const dialog = await screen.findByRole('dialog', { name: 'Rename Wave Data' });
+        await fireEvent.input(within(dialog).getByLabelText('Wave Data name'), {
+            target: { value: 'New Wave' },
+        });
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }));
+
+        await vi.waitFor(() =>
+            expect(mocks.startObjectRename).toHaveBeenCalledWith(17, {
+                kind: 'wave-data',
+                partitionIndex: 0,
+                volumeName: 'Piano',
+                waveformName: 'Old Wave',
+                newWaveformName: 'New Wave',
+            }),
+        );
+        await vi.waitFor(() => expect(mocks.refreshImage).toHaveBeenCalledWith(17));
+        await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename Wave Data' })).toBeNull());
+        expect(
+            screen
+                .getByRole('button', { name: 'Inspect New Wave' })
+                .closest('.wave-data-row')
+                ?.classList.contains('active'),
+        ).toBe(true);
+        expect(screen.getByRole('complementary', { name: 'Object inspector' }).textContent).toContain('New Wave');
     });
 
     it('closes an image session that finishes opening after the application is unmounted', async () => {

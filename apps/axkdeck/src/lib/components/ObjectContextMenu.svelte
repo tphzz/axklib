@@ -4,12 +4,13 @@
         selectionCount?: number;
         left: number;
         top: number;
+        onrename?: () => void;
         onexport?: () => void;
         ondelete?: () => void;
         onclose: () => void;
     }
 
-    let { objectName, selectionCount = 1, left, top, onexport, ondelete, onclose }: Props = $props();
+    let { objectName, selectionCount = 1, left, top, onrename, onexport, ondelete, onclose }: Props = $props();
     let menu: HTMLDivElement;
 
     $effect(() => {
@@ -29,6 +30,16 @@
     onclick={(event) => event.stopPropagation()}
     onkeydown={(event) => event.stopPropagation()}
 >
+    {#if onrename}
+        <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+                onrename?.();
+                onclose();
+            }}>Rename</button
+        >
+    {/if}
     {#if onexport}
         <button
             type="button"
@@ -39,7 +50,7 @@
             }}>Export {selectionCount === 1 ? 'package' : `${selectionCount} objects`}</button
         >
     {/if}
-    {#if onexport && ondelete}<div class="context-menu-separator" role="separator"></div>{/if}
+    {#if (onrename || onexport) && ondelete}<div class="context-menu-separator" role="separator"></div>{/if}
     {#if ondelete}
         <button
             class="danger-menu-item"

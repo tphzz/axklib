@@ -31,6 +31,7 @@ export interface OpenedImage {
     initialVolume: DiskTreeItem | null;
     volumeMutationsAvailable: boolean;
     partitionMutationsAvailable: boolean;
+    objectRenameAvailable: boolean;
     objectDeletionAvailable: boolean;
     packageImportAvailable: boolean;
     packageExportAvailable: boolean;
@@ -47,6 +48,36 @@ export interface PartitionMutation {
     partitionName: string;
     newPartitionName: string;
 }
+
+export type ObjectRenameMutation =
+    | {
+          kind: 'program';
+          partitionIndex: number;
+          volumeName: string;
+          programNumber: number;
+          newProgramName: string;
+      }
+    | {
+          kind: 'sample-bank';
+          partitionIndex: number;
+          volumeName: string;
+          sampleBankName: string;
+          newSampleBankName: string;
+      }
+    | {
+          kind: 'sample';
+          partitionIndex: number;
+          volumeName: string;
+          sampleName: string;
+          newSampleName: string;
+      }
+    | {
+          kind: 'wave-data';
+          partitionIndex: number;
+          volumeName: string;
+          waveformName: string;
+          newWaveformName: string;
+      };
 
 export interface ObjectDeletionNotice {
     code: string;
@@ -302,6 +333,7 @@ export interface ImageTransport {
     closeImage(sessionId: number): Promise<void>;
     startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState>;
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState>;
+    startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState>;
     inspectObjectDeletion(
         sessionId: number,
         targetObjectId: string,

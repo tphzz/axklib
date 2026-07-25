@@ -18,6 +18,7 @@ import type {
     ObjectPage,
     ObjectPageFilter,
     ObjectDeletionInspection,
+    ObjectRenameMutation,
     OpenedImage,
     PackageImportDestination,
     PackageImportPlan,
@@ -51,12 +52,14 @@ export interface InMemoryImageTransportOptions {
         | 'sessionId'
         | 'volumeMutationsAvailable'
         | 'partitionMutationsAvailable'
+        | 'objectRenameAvailable'
         | 'objectDeletionAvailable'
         | 'packageImportAvailable'
         | 'packageExportAvailable'
     > & {
         volumeMutationsAvailable?: boolean;
         partitionMutationsAvailable?: boolean;
+        objectRenameAvailable?: boolean;
         objectDeletionAvailable?: boolean;
         packageImportAvailable?: boolean;
         packageExportAvailable?: boolean;
@@ -106,6 +109,7 @@ export class InMemoryImageTransport implements ImageTransport {
             sessionId: this.nextSessionId++,
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
+            objectRenameAvailable: this.options.opened.objectRenameAvailable ?? false,
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
@@ -121,6 +125,7 @@ export class InMemoryImageTransport implements ImageTransport {
             sessionId,
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
+            objectRenameAvailable: this.options.opened.objectRenameAvailable ?? false,
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
@@ -157,6 +162,10 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState> {
         return this.invoke('startPartitionMutation', [sessionId, mutation]);
+    }
+
+    startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState> {
+        return this.invoke('startObjectRename', [sessionId, mutation]);
     }
 
     inspectObjectDeletion(

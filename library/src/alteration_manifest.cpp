@@ -41,6 +41,18 @@ Result<void> require_partition_name(std::string_view value, std::string_view fie
     return {};
 }
 
+Result<void> require_program_name(std::string_view value, std::string_view field) {
+    if (auto valid = require_text(value, field); !valid)
+        return valid;
+    const auto printable =
+        std::ranges::all_of(value, [](unsigned char character) { return character >= 0x20U && character <= 0x7eU; });
+    if (value.size() > 8U || !printable || value.front() == ' ' || value.back() == ' ') {
+        return std::unexpected{
+            manifest_error(std::string{field} + " must be 1..8 printable ASCII characters without outer spaces")};
+    }
+    return {};
+}
+
 Result<void> validate_sample_parameters(const SampleSpec &sample) {
     if (auto valid = require_object_name(sample.name, "sample.name"); !valid)
         return valid;
@@ -281,6 +293,10 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     if (operation.program_number == 0U || operation.program_number > 128U)
                         return std::unexpected{manifest_error("program_number must be between 1 and 128")};
                     return {};
+                } else if constexpr (std::same_as<T, RenameProgramOperation>) {
+                    if (operation.program_number == 0U || operation.program_number > 128U)
+                        return std::unexpected{manifest_error("program_number must be between 1 and 128")};
+                    return require_program_name(operation.new_program_name, "new_program_name");
                 } else {
                     return validate_program(operation.program);
                 }

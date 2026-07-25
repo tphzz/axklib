@@ -204,6 +204,12 @@ nlohmann::json all_action_alteration_manifest() {
                 {"assignments",
                  {{{"sample_bank", "Insert Bank"}, {"receive_channel", 1U}},
                   {{"sample", "Delete Direct"}, {"receive_channel", 2U}}}}}}},
+             {{"id", "rename-program"},
+              {"type", "rename_program"},
+              {"partition_index", 0U},
+              {"volume_name", "Volume"},
+              {"program_number", 127U},
+              {"new_program_name", "Renamed"}},
          })},
     };
 }
@@ -887,8 +893,8 @@ TEST_F(WriteOperationsTest, AlterationInspectsAndAppliesEveryMaintainedAction) {
     };
     const auto inspected = registry_.invoke("alter.inspect", inspection_request, context());
     ASSERT_TRUE(inspected) << inspected.error().message;
-    ASSERT_EQ(inspected->at("operations").size(), 13U);
-    EXPECT_EQ(inspected->at("summary").at("operationCount"), 13U);
+    ASSERT_EQ(inspected->at("operations").size(), 14U);
+    EXPECT_EQ(inspected->at("summary").at("operationCount"), 14U);
     EXPECT_EQ(inspected->at("operations")[4].at("audioImport").at("sourcePath"), "insert.wav");
 
     auto alteration_request = inspection_request;
@@ -920,6 +926,13 @@ TEST_F(WriteOperationsTest, AlterationInspectsAndAppliesEveryMaintainedAction) {
     EXPECT_TRUE(has_object(axk::ObjectType::sbac, "New Bank"));
     EXPECT_FALSE(has_object(axk::ObjectType::sbac, "Delete Bank"));
     EXPECT_TRUE(has_object(axk::ObjectType::prog, "128"));
+    const auto renamed_program = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::prog && object.object.header.name == "127";
+    });
+    ASSERT_NE(renamed_program, catalog->objects.end());
+    const auto *program = std::get_if<axk::CurrentProg>(&renamed_program->object.payload);
+    ASSERT_NE(program, nullptr);
+    EXPECT_EQ(program->program_name, "Renamed");
     const auto inserted = std::ranges::find_if(catalog->objects, [](const auto &object) {
         return object.object.header.type == axk::ObjectType::smpl && object.object.header.name == "Insert Wave";
     });

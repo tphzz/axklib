@@ -357,11 +357,12 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
     const auto parsed = axk::load_alteration_manifest(path);
     ASSERT_TRUE(parsed) << parsed.error().message;
     constexpr std::array expected{
-        std::string_view{"delete_volume"},   std::string_view{"insert_volume"},   std::string_view{"delete_sbnk"},
-        std::string_view{"insert_sbnk"},     std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
-        std::string_view{"rename_waveform"}, std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
-        std::string_view{"insert_sbac"},     std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
-        std::string_view{"insert_program"},  std::string_view{"rename_volume"},   std::string_view{"rename_partition"},
+        std::string_view{"delete_volume"},    std::string_view{"insert_volume"},   std::string_view{"delete_sbnk"},
+        std::string_view{"insert_sbnk"},      std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
+        std::string_view{"rename_waveform"},  std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
+        std::string_view{"insert_sbac"},      std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
+        std::string_view{"insert_program"},   std::string_view{"rename_program"},  std::string_view{"rename_volume"},
+        std::string_view{"rename_partition"},
     };
     ASSERT_EQ(parsed->operations.size(), expected.size());
     for (std::size_t index = 0; index < expected.size(); ++index) {
@@ -371,6 +372,27 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
     const auto *deleted = std::get_if<axk::DeleteProgramOperation>(&parsed->operations[11].data);
     ASSERT_NE(deleted, nullptr);
     EXPECT_EQ(deleted->program_number, 128U);
+}
+
+TEST(AlterationManifest, ParsesStrictProgramRename) {
+    const auto parsed = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_program","partition_index":0,
+         "volume_name":"Programs","program_number":128,"new_program_name":"New Name"}
+      ]})");
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto *rename = std::get_if<axk::RenameProgramOperation>(&parsed->operations.front().data);
+    ASSERT_NE(rename, nullptr);
+    EXPECT_EQ(rename->program_number, 128U);
+    EXPECT_EQ(rename->new_program_name, "New Name");
+
+    for (const auto *name : {"", "123456789", " Leading", "Trailing "}) {
+        const auto rejected = axk::parse_alteration_manifest(std::format(
+            R"({{"schema_version":"1.0","operations":[{{"id":"rename","type":"rename_program",)"
+            R"("partition_index":0,"volume_name":"Programs","program_number":1,"new_program_name":"{}"}}]}})",
+            name));
+        EXPECT_FALSE(rejected) << name;
+    }
 }
 
 TEST(AlterationManifest, ParsesStrictVolumeRename) {
@@ -600,6 +622,70 @@ TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
          "volume_name":"Chain","new_volume_name":"This name is too long"}
       ]})");
     EXPECT_FALSE(too_long);
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, RenameProgramChangesOnlyTheSamplerVisibleDisplayName) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-rename-program";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(chain_source_manifest(audio), source));
+
+    const auto before = axk::open_image(source);
+    ASSERT_TRUE(before) << before.error().message;
+    const auto before_catalog = axk::build_object_catalog(*before);
+    ASSERT_TRUE(before_catalog) << before_catalog.error().message;
+    const auto before_program = std::ranges::find_if(before_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::prog && object.object.header.name == "033";
+    });
+    ASSERT_NE(before_program, before_catalog->objects.end());
+    ASSERT_GE(before_program->raw_payload.size(), 0x80U);
+    const auto before_payload = before_program->raw_payload;
+
+    const auto manifest = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_program","partition_index":0,
+         "volume_name":"Chain","program_number":33,"new_program_name":"Renamed"}
+      ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto inspected = axk::inspect_hds_alteration(source, *manifest);
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    const auto applied = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_EQ(applied->operations.front().allocated_clusters, 0U);
+    EXPECT_EQ(applied->operations.front().freed_clusters, 0U);
+
+    const auto after = axk::open_image(output);
+    ASSERT_TRUE(after) << after.error().message;
+    const auto after_catalog = axk::build_object_catalog(*after);
+    ASSERT_TRUE(after_catalog) << after_catalog.error().message;
+    const auto after_program = std::ranges::find_if(after_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::prog && object.object.header.name == "033";
+    });
+    ASSERT_NE(after_program, after_catalog->objects.end());
+    const auto *decoded = std::get_if<axk::CurrentProg>(&after_program->object.payload);
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(decoded->program_name, "Renamed");
+    ASSERT_EQ(after_program->raw_payload.size(), before_payload.size());
+    for (std::size_t offset = 0U; offset < before_payload.size(); ++offset) {
+        if (offset < 0x78U || offset >= 0x80U) {
+            EXPECT_EQ(after_program->raw_payload[offset], before_payload[offset])
+                << "unexpected Program payload change at offset " << offset;
+        }
+    }
+
+    const auto unchanged = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_program","partition_index":0,
+         "volume_name":"Chain","program_number":33,"new_program_name":"Pgm 033"}
+      ]})");
+    ASSERT_TRUE(unchanged);
+    EXPECT_FALSE(axk::inspect_hds_alteration(source, *unchanged));
     std::filesystem::remove_all(root, error);
 }
 

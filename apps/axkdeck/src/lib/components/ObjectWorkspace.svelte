@@ -9,7 +9,7 @@
     } from '../objectSelection';
     import { compareNamedItems } from '../naturalSort';
     import type { SamplerObject } from '../transport';
-    import type { PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
+    import type { ObjectRenameTarget, PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
@@ -32,6 +32,8 @@
         playingObjectId?: string | null;
         preparingObjectId?: string | null;
         playheadFrame?: number;
+        objectRenameAvailable?: boolean;
+        onrenameobject?: (target: ObjectRenameTarget) => void;
         objectDeletionAvailable?: boolean;
         ondeleteobject?: (object: SamplerObject) => void;
         packageExportAvailable?: boolean;
@@ -58,6 +60,8 @@
         playingObjectId = null,
         preparingObjectId = null,
         playheadFrame = 0,
+        objectRenameAvailable = false,
+        onrenameobject = () => undefined,
         objectDeletionAvailable = false,
         ondeleteobject = () => undefined,
         packageExportAvailable = false,
@@ -69,6 +73,7 @@
     let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
     let objectMenu = $state<{
         target: SamplerObject;
+        renameTarget: ObjectRenameTarget | null;
         objects: PackageExportObject[];
         left: number;
         top: number;
@@ -171,8 +176,8 @@
         return true;
     }
 
-    function openObjectMenu(event: MouseEvent, object: SamplerObject): void {
-        if (!objectDeletionAvailable && !packageExportAvailable) return;
+    function openObjectMenu(event: MouseEvent, object: SamplerObject, renameTarget: ObjectRenameTarget | null): void {
+        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable) return;
         event.preventDefault();
         let menuSelection = selection;
         if (!packageExportAvailable || !selection.items.some((item) => item.objectId === object.key)) {
@@ -189,16 +194,21 @@
         }
         objectMenu = {
             target: object,
+            renameTarget,
             objects: menuSelection.items,
             left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
             top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
         };
     }
 
-    function openObjectMenuFromKeyboard(event: KeyboardEvent, object: SamplerObject): void {
+    function openObjectMenuFromKeyboard(
+        event: KeyboardEvent,
+        object: SamplerObject,
+        renameTarget: ObjectRenameTarget | null,
+    ): void {
         if (selectAll(event, object.key)) return;
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
-        if (!objectDeletionAvailable && !packageExportAvailable) return;
+        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable) return;
         event.preventDefault();
         const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
         openObjectMenu(
@@ -207,7 +217,15 @@
                 clientY: bounds.top + Math.min(24, bounds.height / 2),
             }),
             object,
+            renameTarget,
         );
+    }
+
+    function programRenameTarget(program: Program): ObjectRenameTarget | null {
+        if (!/^\d{3}$/.test(program.slot)) return null;
+        const programNumber = Number(program.slot);
+        if (!Number.isInteger(programNumber) || programNumber < 1 || programNumber > 128) return null;
+        return { kind: 'program', object: program.object, name: program.name, programNumber };
     }
 
     const title = $derived(view === 'programs' ? 'Programs' : 'Wave Data');
@@ -249,8 +267,9 @@
                         updateSelection(event, program.objectId);
                         onprogramselect(program);
                     }}
-                    oncontextmenu={(event) => openObjectMenu(event, program.object)}
-                    onkeydown={(event) => openObjectMenuFromKeyboard(event, program.object)}
+                    oncontextmenu={(event) => openObjectMenu(event, program.object, programRenameTarget(program))}
+                    onkeydown={(event) =>
+                        openObjectMenuFromKeyboard(event, program.object, programRenameTarget(program))}
                 >
                     <span class="object-slot">{program.slot}</span>
                     <strong>{program.name}</strong>
@@ -274,8 +293,18 @@
                             updateSelection(event, item.objectKey);
                             onwavedataselect(item);
                         }}
-                        oncontextmenu={(event) => openObjectMenu(event, item.object)}
-                        onkeydown={(event) => openObjectMenuFromKeyboard(event, item.object)}
+                        oncontextmenu={(event) =>
+                            openObjectMenu(event, item.object, {
+                                kind: 'wave-data',
+                                object: item.object,
+                                name: item.name,
+                            })}
+                        onkeydown={(event) =>
+                            openObjectMenuFromKeyboard(event, item.object, {
+                                kind: 'wave-data',
+                                object: item.object,
+                                name: item.name,
+                            })}
                     ></button>
                     <strong class="wave-data-identity">{item.name}</strong>
                     <span class="wave-data-meta">{item.note} · {item.duration}</span>
@@ -344,8 +373,11 @@
         left={objectMenu.left}
         top={objectMenu.top}
         onclose={() => (objectMenu = null)}
+        onrename={objectRenameAvailable && objectMenu.objects.length === 1 && objectMenu.renameTarget
+            ? () => onrenameobject(objectMenu!.renameTarget!)
+            : undefined}
         onexport={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
-        ondelete={objectDeletionAvailable && objectMenu.objects.length === 1
+        ondelete={objectDeletionAvailable && objectMenu.target.objectType === 'SMPL' && objectMenu.objects.length === 1
             ? () => ondeleteobject(objectMenu!.target)
             : undefined}
     />

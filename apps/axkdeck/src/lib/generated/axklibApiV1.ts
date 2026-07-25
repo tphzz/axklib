@@ -1186,6 +1186,7 @@ export interface components {
                 | 'RENAME_SBAC'
                 | 'DELETE_PROGRAM'
                 | 'INSERT_PROGRAM'
+                | 'RENAME_PROGRAM'
                 | 'RENAME_VOLUME'
                 | 'RENAME_PARTITION';
             volumeName: string;

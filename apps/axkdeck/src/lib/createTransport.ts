@@ -124,6 +124,9 @@ class UnavailableTransport implements ImageTransport {
     startPartitionMutation(): Promise<JobState> {
         return this.unavailable();
     }
+    startObjectRename(): Promise<JobState> {
+        return this.unavailable();
+    }
     inspectObjectDeletion(): Promise<ObjectDeletionInspection> {
         return this.unavailable();
     }

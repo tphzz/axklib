@@ -47,6 +47,10 @@ export interface Program {
     object: SamplerObject;
 }
 
+export type ObjectRenameTarget =
+    | { kind: 'program'; object: SamplerObject; name: string; programNumber: number }
+    | { kind: 'sample-bank' | 'sample' | 'wave-data'; object: SamplerObject; name: string };
+
 export interface SampleStructureItem {
     id: string;
     objectId: string;

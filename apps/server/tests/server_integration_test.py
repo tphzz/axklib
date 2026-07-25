@@ -719,6 +719,14 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                     ],
                 },
             },
+            {
+                "id": "rename-program",
+                "type": "rename_program",
+                "partition_index": 0,
+                "volume_name": "Volume",
+                "program_number": 127,
+                "new_program_name": "Renamed",
+            },
         ],
     }
     (root / "all-actions-source.json").write_text(
@@ -2486,7 +2494,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 cli_dry_run.stderr,
             )
             cli_dry = json.loads(cli_dry_run.stdout)
-            assert cli_dry["applied"] is False and len(cli_dry["operations"]) == 13
+            assert cli_dry["applied"] is False and len(cli_dry["operations"]) == 14
 
             cli_apply = subprocess.run(
                 [
@@ -2535,7 +2543,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             alteration_inspection = response["data"]
             assert alteration_inspection["valid"] is True
             assert alteration_inspection["kind"] == "ALTERATION"
-            assert alteration_inspection["summary"]["operationCount"] == 13
+            assert alteration_inspection["summary"]["operationCount"] == 14
             assert alteration_inspection.get("warnings") == [], alteration_inspection
             assert alteration_inspection["validation"]["valid"] is True
             assert str(root_path) not in json.dumps(alteration_inspection)
@@ -2553,6 +2561,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "rename_sbac",
                 "delete_program",
                 "insert_program",
+                "rename_program",
             }
             assert {
                 str(operation["type"]).lower()

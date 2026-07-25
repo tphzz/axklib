@@ -2184,7 +2184,7 @@
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "type": {
-            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_VOLUME", "RENAME_PARTITION"],
+            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "RENAME_VOLUME", "RENAME_PARTITION"],
             "x-axklib-application-enum": {
               "DELETE_VOLUME": "delete_volume",
               "INSERT_VOLUME": "insert_volume",
@@ -2199,6 +2199,7 @@
               "RENAME_SBAC": "rename_sbac",
               "DELETE_PROGRAM": "delete_program",
               "INSERT_PROGRAM": "insert_program",
+              "RENAME_PROGRAM": "rename_program",
               "RENAME_VOLUME": "rename_volume",
               "RENAME_PARTITION": "rename_partition"
             }

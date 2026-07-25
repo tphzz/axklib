@@ -8,7 +8,7 @@
     } from '../objectSelection';
     import { compareNamedItems } from '../naturalSort';
     import type { SamplerObject } from '../transport';
-    import type { PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
+    import type { ObjectRenameTarget, PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
@@ -45,6 +45,8 @@
         preparingObjectId?: string | null;
         auditionableSampleIds: ReadonlySet<string>;
         auditionableSampleBankIds: ReadonlySet<string>;
+        objectRenameAvailable?: boolean;
+        onrenameobject?: (target: ObjectRenameTarget) => void;
         objectDeletionAvailable?: boolean;
         ondeleteobject?: (object: SamplerObject) => void;
         packageExportAvailable?: boolean;
@@ -77,6 +79,8 @@
         preparingObjectId = null,
         auditionableSampleIds,
         auditionableSampleBankIds,
+        objectRenameAvailable = false,
+        onrenameobject = () => undefined,
         objectDeletionAvailable = false,
         ondeleteobject = () => undefined,
         packageExportAvailable = false,
@@ -89,6 +93,7 @@
     type SelectableItem = SampleStructureItem | WaveDataItem;
     let objectMenu = $state<{
         target: SamplerObject;
+        renameTarget: ObjectRenameTarget;
         objects: PackageExportObject[];
         left: number;
         top: number;
@@ -119,6 +124,16 @@
             partitionName: item.object.partitionName,
             volumeName: item.object.volumeName,
         };
+    }
+
+    function renameTarget(item: SelectableItem): ObjectRenameTarget {
+        if (item.object.objectType === 'SBAC') {
+            return { kind: 'sample-bank', object: item.object, name: item.name };
+        }
+        if (item.object.objectType === 'SBNK') {
+            return { kind: 'sample', object: item.object, name: item.name };
+        }
+        return { kind: 'wave-data', object: item.object, name: item.name };
     }
 
     function selectionKey(scope: SelectionScope, domain: SelectableItem[]): string {
@@ -180,7 +195,7 @@
         domain: SelectableItem[],
         target: SelectableItem,
     ): void {
-        if (!objectDeletionAvailable && !packageExportAvailable) return;
+        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable) return;
         event.preventDefault();
         const targetId = objectId(target);
         let menuSelection = selection;
@@ -198,6 +213,7 @@
         }
         objectMenu = {
             target: target.object,
+            renameTarget: renameTarget(target),
             objects: menuSelection.items,
             left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
             top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
@@ -213,7 +229,7 @@
     ): void {
         if (selectAll(event, scope, domain, visible, target)) return;
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
-        if (!objectDeletionAvailable && !packageExportAvailable) return;
+        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable) return;
         event.preventDefault();
         const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
         openObjectMenu(
@@ -436,6 +452,9 @@
         left={objectMenu.left}
         top={objectMenu.top}
         onclose={() => (objectMenu = null)}
+        onrename={objectRenameAvailable && objectMenu.objects.length === 1
+            ? () => onrenameobject(objectMenu!.renameTarget)
+            : undefined}
         onexport={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
         ondelete={objectDeletionAvailable && objectMenu.objects.length === 1
             ? () => ondeleteobject(objectMenu!.target)

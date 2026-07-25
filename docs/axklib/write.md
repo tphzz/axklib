@@ -570,6 +570,7 @@ Supported operation types:
 | `rename_sbac` | `volume_name`, `sample_bank_name`, `new_sample_bank_name` |
 | `delete_program` | `volume_name`, `program_number` |
 | `insert_program` | `volume_name`, `program` |
+| `rename_program` | `volume_name`, `program_number`, `new_program_name` |
 
 An `insert_waveform` audio object contains `path`, one or two distinct
 `waveform_names`, and `root_key`; `target_sample_rate` is optional. Relative
@@ -585,6 +586,9 @@ one to three distinct existing Sample names. An `insert_program` object
 contains a Program `number` and exactly two assignments: a
 `sample_bank` on receive channel 1 followed by a direct `sample` on
 receive channel 2. These limits match the currently supported authored profile.
+`rename_program` changes the sampler-visible Program name while retaining its
+numeric slot; `new_program_name` is `1..8` printable ASCII characters without
+leading or trailing spaces.
 
 Plan without writing an image:
 

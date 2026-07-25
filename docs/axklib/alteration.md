@@ -12,7 +12,7 @@ Supported operations are:
 - insert, delete, and rename waveform;
 - insert, delete, and rename Sample (`SBNK`);
 - insert, delete, and rename Sample Bank (`SBAC`);
-- insert and delete Program.
+- insert, delete, and rename Program.
 
 Wave Data insertion uses the same WAV, FLAC, and AIFF conversion pipeline as fresh
 image creation. A subsequent Sample insertion in the same transaction can

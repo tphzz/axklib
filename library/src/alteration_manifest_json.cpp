@@ -102,15 +102,29 @@ Result<std::string> partition_name(const Json &row, std::string_view field, std:
     return result;
 }
 
+Result<std::string> program_name(const Json &row, std::string_view field, std::string_view context) {
+    auto result = required_text(row, field, context);
+    if (!result)
+        return std::unexpected{result.error()};
+    const auto printable =
+        std::ranges::all_of(*result, [](unsigned char value) { return value >= 0x20U && value <= 0x7eU; });
+    if (result->size() > 8U || !printable || result->front() == ' ' || result->back() == ' ') {
+        return std::unexpected{transaction_error(std::string{context} + "." + std::string{field} +
+                                                 " must be 1..8 printable ASCII characters without outer spaces")};
+    }
+    return result;
+}
+
 } // namespace
 
 std::string_view operation_type_name(const AlterationOperationData &operation) noexcept {
     constexpr std::array names{
-        std::string_view{"delete_volume"},   std::string_view{"insert_volume"},   std::string_view{"delete_sbnk"},
-        std::string_view{"insert_sbnk"},     std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
-        std::string_view{"rename_waveform"}, std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
-        std::string_view{"insert_sbac"},     std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
-        std::string_view{"insert_program"},  std::string_view{"rename_volume"},   std::string_view{"rename_partition"},
+        std::string_view{"delete_volume"},    std::string_view{"insert_volume"},   std::string_view{"delete_sbnk"},
+        std::string_view{"insert_sbnk"},      std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
+        std::string_view{"rename_waveform"},  std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
+        std::string_view{"insert_sbac"},      std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
+        std::string_view{"insert_program"},   std::string_view{"rename_program"},  std::string_view{"rename_volume"},
+        std::string_view{"rename_partition"},
     };
     return names[operation.index()];
 }
@@ -200,7 +214,8 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 *type != "insert_sbnk" && *type != "insert_waveform" && *type != "delete_waveform" &&
                 *type != "delete_program" && *type != "insert_program" && *type != "delete_sbac" &&
                 *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
-                *type != "rename_sbac" && *type != "rename_volume" && *type != "rename_partition") {
+                *type != "rename_sbac" && *type != "rename_program" && *type != "rename_volume" &&
+                *type != "rename_partition") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
             }
@@ -498,6 +513,23 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                         {assignment_index == 0U ? "SBAC" : "SBNK", std::move(*target), *channel});
                 }
                 data = InsertProgramOperation{std::move(selector), std::move(*volume), std::move(spec)};
+            } else if (*type == "rename_program") {
+                if (auto valid = exact_fields(
+                        row, {"id", "type", "partition_index", "volume_name", "program_number", "new_program_name"},
+                        context);
+                    !valid) {
+                    return std::unexpected{valid.error()};
+                }
+                auto volume = required_text(row, "volume_name", context);
+                auto number = program_value(row, "program_number", context);
+                auto name = program_name(row, "new_program_name", context);
+                if (!volume)
+                    return std::unexpected{volume.error()};
+                if (!number)
+                    return std::unexpected{number.error()};
+                if (!name)
+                    return std::unexpected{name.error()};
+                data = RenameProgramOperation{std::move(selector), std::move(*volume), *number, std::move(*name)};
             } else if (*type == "delete_waveform") {
                 if (auto valid =
                         exact_fields(row, {"id", "type", "partition_index", "volume_name", "waveform_name"}, context);

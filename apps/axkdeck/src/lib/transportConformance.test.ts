@@ -26,6 +26,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
     initialVolume: null,
     volumeMutationsAvailable: false,
     partitionMutationsAvailable: false,
+    objectRenameAvailable: false,
     objectDeletionAvailable: false,
     packageImportAvailable: false,
     packageExportAvailable: false,

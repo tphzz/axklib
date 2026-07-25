@@ -27,6 +27,7 @@ import type {
     ObjectPage,
     ObjectPageFilter,
     ObjectDeletionInspection,
+    ObjectRenameMutation,
     OpenedImage,
     PackageImportDestination,
     PackageImportPlan,
@@ -511,6 +512,7 @@ export class HttpImageTransport implements ImageTransport {
             initialVolume,
             volumeMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.volumes'),
             partitionMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.partitions'),
+            objectRenameAvailable: (summary.availableOperations ?? []).includes('images.alter.objects'),
             objectDeletionAvailable: (summary.availableOperations ?? []).includes('images.alter.objects'),
             packageImportAvailable: (summary.availableOperations ?? []).includes('images.package.import'),
             packageExportAvailable: (summary.availableOperations ?? []).includes('images.package.export'),
@@ -647,6 +649,10 @@ export class HttpImageTransport implements ImageTransport {
             partition_name: mutation.partitionName,
             new_partition_name: mutation.newPartitionName,
         });
+    }
+
+    async startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState> {
+        return this.startImageMutation(sessionId, this.objectRenameOperation(mutation));
     }
 
     async inspectObjectDeletion(
@@ -1196,6 +1202,44 @@ export class HttpImageTransport implements ImageTransport {
             ...common,
             type: 'delete_volume',
             volume_name: mutation.volumeName,
+        };
+    }
+
+    private objectRenameOperation(mutation: ObjectRenameMutation): Record<string, unknown> {
+        const common = {
+            id: `rename-${mutation.kind}`,
+            partition_index: mutation.partitionIndex,
+            volume_name: mutation.volumeName,
+        };
+        if (mutation.kind === 'program') {
+            return {
+                ...common,
+                type: 'rename_program',
+                program_number: mutation.programNumber,
+                new_program_name: mutation.newProgramName,
+            };
+        }
+        if (mutation.kind === 'sample-bank') {
+            return {
+                ...common,
+                type: 'rename_sbac',
+                sample_bank_name: mutation.sampleBankName,
+                new_sample_bank_name: mutation.newSampleBankName,
+            };
+        }
+        if (mutation.kind === 'sample') {
+            return {
+                ...common,
+                type: 'rename_sbnk',
+                sample_name: mutation.sampleName,
+                new_sample_name: mutation.newSampleName,
+            };
+        }
+        return {
+            ...common,
+            type: 'rename_waveform',
+            waveform_name: mutation.waveformName,
+            new_waveform_name: mutation.newWaveformName,
         };
     }
 }
