@@ -169,10 +169,33 @@ describe('ServerStoragePicker', () => {
         const path = within(location).getByText('Yamaha images');
         const parent = within(location).getByRole('button', { name: 'Parent directory' });
         const home = within(location).getByRole('button', { name: 'Go to all workspaces' });
-        expect(parent.hasAttribute('disabled')).toBe(true);
+        expect(parent.hasAttribute('disabled')).toBe(false);
         expect(home.hasAttribute('disabled')).toBe(false);
         expect(path.compareDocumentPosition(home) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(location.lastElementChild?.contains(home)).toBe(true);
+    });
+
+    it('uses parent navigation to return from a workspace root to the workspace list', async () => {
+        const ondirectorychange = vi.fn();
+        render(ServerStoragePicker, {
+            props: {
+                transport: transport(),
+                mode: 'file',
+                title: 'Open image',
+                ondirectorychange,
+                onselect: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        await fireEvent.click(await screen.findByText('Yamaha images'));
+        expect(await screen.findByText('disk.hds')).toBeTruthy();
+        await fireEvent.click(screen.getByRole('button', { name: 'Parent directory' }));
+
+        expect(await screen.findByText('Archive')).toBeTruthy();
+        expect(screen.queryByText('disk.hds')).toBeNull();
+        expect(screen.getByRole('button', { name: 'Parent directory' }).hasAttribute('disabled')).toBe(true);
+        expect(ondirectorychange).toHaveBeenLastCalledWith(null);
     });
 
     it('navigates roots, directories, and files with one keyboard selection cursor', async () => {
@@ -224,12 +247,9 @@ describe('ServerStoragePicker', () => {
         const callsAtWorkspaceRoot = vi.mocked(imageTransport.sandboxDirectory).mock.calls.length;
         await fireEvent.keyDown(list, { key: 'ArrowLeft' });
         expect(vi.mocked(imageTransport.sandboxDirectory).mock.calls).toHaveLength(callsAtWorkspaceRoot);
-        expect(screen.getByTitle('Yamaha images')).toBeTruthy();
-        expect(screen.queryByText('Archive')).toBeNull();
-
-        await fireEvent.click(screen.getByRole('button', { name: 'Go to all workspaces' }));
         expect(await screen.findByText('Archive')).toBeTruthy();
         expect(within(list).getAllByRole('option')).toHaveLength(2);
+        expect(screen.getByRole('button', { name: 'Parent directory' }).hasAttribute('disabled')).toBe(true);
     });
 
     it('skips disabled roots and supports first and last keyboard selection', async () => {

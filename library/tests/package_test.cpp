@@ -1249,6 +1249,55 @@ TEST(PortablePackage, NormalizationIgnoresOnlyDeclaredRelocationBytes) {
     EXPECT_NE(unknown_profile->normalized_payload, original->normalized_payload);
 }
 
+TEST(PortablePackage, RelocationClearsUnrelatedInactiveRightSampleCache) {
+    auto media = axk::open_media(fixture("HD00_512_single_sbnk_authored.hds"));
+    ASSERT_TRUE(media) << media.error().message;
+    const std::vector roots{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
+    auto built = axk::build_portable_package(*media, roots);
+    ASSERT_TRUE(built) << built.error().message;
+    auto sample = std::ranges::find(built->package.nodes, "SBNK", &axk::PackageNode::object_type);
+    ASSERT_NE(sample, built->package.nodes.end());
+    ASSERT_GT(sample->raw_payload.size(), 0xa7U);
+    EXPECT_FALSE(std::ranges::any_of(built->package.relationships, [&](const auto &relationship) {
+        return relationship.source_node_id == sample->node_id && relationship.role == "SBNK_RIGHT_MEMBER_TO_SMPL";
+    }));
+
+    constexpr std::uint32_t stale_right_reference = 0x09139878U;
+    sample->raw_payload[0xa4U] = static_cast<std::byte>((stale_right_reference >> 24U) & 0xffU);
+    sample->raw_payload[0xa5U] = static_cast<std::byte>((stale_right_reference >> 16U) & 0xffU);
+    sample->raw_payload[0xa6U] = static_cast<std::byte>((stale_right_reference >> 8U) & 0xffU);
+    sample->raw_payload[0xa7U] = static_cast<std::byte>(stale_right_reference & 0xffU);
+    auto right_relocation =
+        std::ranges::find(sample->relocations, "SBNK_RIGHT_MEMBER_CACHED_REFERENCE", &axk::PackageRelocation::role);
+    ASSERT_NE(right_relocation, sample->relocations.end());
+    right_relocation->expected_hex = "09139878";
+
+    axk::package_internal::PackageNodeRelocationContext context;
+    context.destination_name = sample->name;
+    for (const auto &relationship : built->package.relationships) {
+        if (relationship.source_node_id != sample->node_id)
+            continue;
+        const auto target =
+            std::ranges::find(built->package.nodes, relationship.target_node_id, &axk::PackageNode::node_id);
+        ASSERT_NE(target, built->package.nodes.end());
+        context.edge_target_names.emplace(relationship.edge_id, target->name);
+        if (relationship.role == "SBNK_LEFT_MEMBER_TO_SMPL")
+            context.edge_target_reference_values.emplace(relationship.edge_id, 0x234U);
+    }
+
+    const auto relocated = axk::package_internal::relocate_package_node(built->package, *sample, context);
+    ASSERT_TRUE(relocated) << relocated.error().message;
+    const auto decoded = axk::decode_object(*relocated);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto *relocated_sample = std::get_if<axk::CurrentSbnk>(&decoded->payload);
+    ASSERT_NE(relocated_sample, nullptr);
+    EXPECT_FALSE(relocated_sample->right_slot_present);
+    EXPECT_FALSE(relocated_sample->right);
+    EXPECT_EQ(relocated_sample->right_link_role, "unused-zero");
+    EXPECT_EQ(relocated_sample->inactive_right.cached_wave_data_reference_value, 0U);
+    EXPECT_EQ(relocated_sample->left.cached_wave_data_reference_value, 0x234U);
+}
+
 TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredBytes) {
     const auto output_root = publication_root("axklib-package-relocation-profiles");
     const auto audio = output_root / "tone.wav";

@@ -299,20 +299,8 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
             if (auto written = write_be32(0xa4U, *right_link); !written)
                 return std::unexpected{written.error()};
         } else {
-            const auto *source = std::get_if<CurrentSbnk>(&source_decoded->payload);
-            if (source == nullptr)
-                return std::unexpected{relocation_error(node, "SBNK source payload is not decoded")};
-            if (source->inactive_right.cached_wave_data_reference_value == 0U) {
-                if (auto written = write_be32(0xa4U, 0U); !written)
-                    return std::unexpected{written.error()};
-            } else if (source->inactive_right.cached_wave_data_reference_value ==
-                       source->left.cached_wave_data_reference_value) {
-                if (auto written = write_be32(0xa4U, *left_link); !written)
-                    return std::unexpected{written.error()};
-            } else {
-                return std::unexpected{relocation_error(node, "inactive SBNK right lane has an unsupported nonzero "
-                                                              "cached reference value")};
-            }
+            if (auto written = write_be32(0xa4U, 0U); !written)
+                return std::unexpected{written.error()};
         }
         std::fill(result.begin() + 0xc0, result.begin() + 0xd0, std::byte{});
         std::set<std::uint8_t> unique_programs;
