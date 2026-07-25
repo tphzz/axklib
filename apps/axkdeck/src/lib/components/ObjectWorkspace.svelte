@@ -1,7 +1,12 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
     import { formatStoredSize } from '../formatBytes';
-    import { selectionMode, updateObjectSelection } from '../objectSelection';
+    import {
+        emptyPackageExportSelection,
+        selectionMode,
+        updatePackageExportSelection,
+        type PackageExportSelectionState,
+    } from '../objectSelection';
     import type { SamplerObject } from '../transport';
     import type { PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
@@ -30,7 +35,9 @@
         ondeleteobject?: (object: SamplerObject) => void;
         packageExportAvailable?: boolean;
         onexportobjects?: (objects: PackageExportObject[]) => void;
-        selectionEpoch?: number;
+        selection?: PackageExportSelectionState;
+        onselectionchange?: (selection: PackageExportSelectionState) => void;
+        onselectionlimit?: () => void;
     }
 
     let {
@@ -54,12 +61,11 @@
         ondeleteobject = () => undefined,
         packageExportAvailable = false,
         onexportobjects = () => undefined,
-        selectionEpoch = 0,
+        selection = emptyPackageExportSelection(),
+        onselectionchange = () => undefined,
+        onselectionlimit = () => undefined,
     }: Props = $props();
     let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
-    let selectedObjectIds = $state<string[]>([]);
-    let selectionAnchorId = $state('');
-    let selectionResetKey = '';
     let objectMenu = $state<{
         target: SamplerObject;
         objects: PackageExportObject[];
@@ -107,7 +113,15 @@
         const kind = object.objectType === 'PROG' ? 'PROGRAM' : (object.objectType as PackageExportObject['kind']);
         const typeLabel =
             kind === 'PROGRAM' ? 'Program' : kind === 'SMPL' ? 'Wave Data' : kind === 'SBAC' ? 'Sample Bank' : 'Sample';
-        return { kind, objectId: object.key, name, typeLabel };
+        return {
+            kind,
+            objectId: object.key,
+            name,
+            typeLabel,
+            partitionIndex: object.partitionIndex,
+            partitionName: object.partitionName,
+            volumeName: object.volumeName,
+        };
     }
 
     function domainObjects(): PackageExportObject[] {
@@ -116,52 +130,65 @@
             : waveData.map((item) => exportObject(item.object, item.name));
     }
 
-    function visibleObjectIds(): string[] {
+    function visibleObjects(): PackageExportObject[] {
         return view === 'programs'
-            ? filteredPrograms.map((item) => item.objectId)
-            : filteredWaveData.map((item) => item.objectKey);
+            ? filteredPrograms.map((item) => exportObject(item.object, item.name))
+            : filteredWaveData.map((item) => exportObject(item.object, item.name));
+    }
+
+    function domainKey(): string {
+        const first = domainObjects()[0];
+        return `${view}\u0000${first?.partitionIndex ?? ''}\u0000${first?.volumeName ?? ''}`;
     }
 
     function updateSelection(event: MouseEvent, objectId: string): void {
-        const result = updateObjectSelection(
-            selectedObjectIds,
-            selectionAnchorId,
-            domainObjects().map((item) => item.objectId),
-            visibleObjectIds(),
+        const result = updatePackageExportSelection(
+            selection,
+            domainKey(),
+            domainObjects(),
+            visibleObjects(),
             objectId,
             selectionMode(event),
         );
-        selectedObjectIds = result.objectIds;
-        selectionAnchorId = result.anchorId;
+        if (result.limitExceeded) onselectionlimit();
+        else onselectionchange(result.selection);
     }
 
     function selectAll(event: KeyboardEvent, objectId: string): boolean {
         if (!(event.ctrlKey || event.metaKey) || event.key.toLocaleLowerCase() !== 'a') return false;
         event.preventDefault();
-        const result = updateObjectSelection(
-            selectedObjectIds,
-            selectionAnchorId,
-            domainObjects().map((item) => item.objectId),
-            visibleObjectIds(),
+        const result = updatePackageExportSelection(
+            selection,
+            domainKey(),
+            domainObjects(),
+            visibleObjects(),
             objectId,
             'all',
         );
-        selectedObjectIds = result.objectIds;
-        selectionAnchorId = result.anchorId;
+        if (result.limitExceeded) onselectionlimit();
+        else onselectionchange(result.selection);
         return true;
     }
 
     function openObjectMenu(event: MouseEvent, object: SamplerObject): void {
         if (!objectDeletionAvailable && !packageExportAvailable) return;
         event.preventDefault();
-        if (!packageExportAvailable || !selectedObjectIds.includes(object.key)) {
-            selectedObjectIds = [object.key];
-            selectionAnchorId = object.key;
+        let menuSelection = selection;
+        if (!packageExportAvailable || !selection.items.some((item) => item.objectId === object.key)) {
+            const result = updatePackageExportSelection(
+                selection,
+                domainKey(),
+                domainObjects(),
+                visibleObjects(),
+                object.key,
+                'replace',
+            );
+            menuSelection = result.selection;
+            if (packageExportAvailable) onselectionchange(menuSelection);
         }
-        const selected = new Set(selectedObjectIds);
         objectMenu = {
             target: object,
-            objects: domainObjects().filter((item) => selected.has(item.objectId)),
+            objects: menuSelection.items,
             left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
             top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
         };
@@ -196,18 +223,6 @@
     const emptyCollection = $derived(
         view === 'programs' ? filteredPrograms.length === 0 : filteredWaveData.length === 0,
     );
-
-    $effect(() => {
-        const nextKey = `${selectionEpoch}\u0000${view}\u0000${query}\u0000${domainObjects()
-            .map((item) => item.objectId)
-            .join('\u0000')}`;
-        if (selectionResetKey && selectionResetKey !== nextKey) {
-            selectedObjectIds = [];
-            selectionAnchorId = '';
-            objectMenu = null;
-        }
-        selectionResetKey = nextKey;
-    });
 </script>
 
 <section class="collection-panel" aria-label={title}>
@@ -223,7 +238,7 @@
                 <button
                     type="button"
                     class:active={activeObjectId === program.objectId}
-                    class:selected={selectedObjectIds.includes(program.objectId)}
+                    class:selected={selection.items.some((item) => item.objectId === program.objectId)}
                     class="program-row"
                     aria-pressed={activeObjectId === program.objectId}
                     onclick={(event) => {
@@ -244,7 +259,7 @@
                 <div
                     use:observePreview={item}
                     class:active={activeObjectId === item.objectKey}
-                    class:selected={selectedObjectIds.includes(item.objectKey)}
+                    class:selected={selection.items.some((selected) => selected.objectId === item.objectKey)}
                     class="wave-data-row"
                 >
                     <button

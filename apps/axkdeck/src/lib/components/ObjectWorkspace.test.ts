@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { SamplerObject } from '../transport';
+import type { PackageExportObject } from '../types';
 import ObjectWorkspace from './ObjectWorkspace.svelte';
 
 function object(objectType: string, name: string): SamplerObject {
@@ -72,33 +73,61 @@ describe('ObjectWorkspace', () => {
         expect(screen.getByRole('searchbox', { name: 'Search Programs' })).toBeTruthy();
     });
 
-    it('exports a deterministic multi-selection from the Programs context menu', async () => {
+    it('adds Programs to an externally controlled mixed selection and exports the complete basket', async () => {
         const firstObject = object('PROG', '001');
-        const secondObject = object('PROG', '002');
+        const bank: PackageExportObject = {
+            kind: 'SBAC',
+            objectId: 'bank',
+            name: 'Strings',
+            typeLabel: 'Sample Bank',
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: 'Volume',
+        };
         const onexportobjects = vi.fn();
-        render(ObjectWorkspace, {
+        const onselectionchange = vi.fn();
+        const rendered = render(ObjectWorkspace, {
             props: {
                 ...common,
                 programs: [
                     { id: 'program-1', objectId: firstObject.key, slot: '001', name: 'Piano', object: firstObject },
-                    { id: 'program-2', objectId: secondObject.key, slot: '002', name: 'Strings', object: secondObject },
                 ],
                 view: 'programs',
                 packageExportAvailable: true,
                 onexportobjects,
+                selection: { items: [bank], anchors: {} },
+                onselectionchange,
             },
         });
 
         const piano = screen.getByRole('button', { name: /Piano/ });
-        const strings = screen.getByRole('button', { name: /Strings/ });
-        await fireEvent.click(piano);
-        await fireEvent.click(strings, { ctrlKey: true });
-        await fireEvent.contextMenu(strings);
+        await fireEvent.click(piano, { ctrlKey: true });
+        const selection = onselectionchange.mock.calls[0]![0];
+        expect(selection.items.map((item: PackageExportObject) => item.objectId)).toEqual([firstObject.key, 'bank']);
+
+        await rendered.rerender({
+            ...common,
+            programs: [{ id: 'program-1', objectId: firstObject.key, slot: '001', name: 'Piano', object: firstObject }],
+            view: 'programs',
+            packageExportAvailable: true,
+            onexportobjects,
+            selection,
+            onselectionchange,
+        });
+        await fireEvent.contextMenu(screen.getByRole('button', { name: /Piano/ }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export 2 objects' }));
 
         expect(onexportobjects).toHaveBeenCalledWith([
-            { kind: 'PROGRAM', objectId: firstObject.key, name: 'Piano', typeLabel: 'Program' },
-            { kind: 'PROGRAM', objectId: secondObject.key, name: 'Strings', typeLabel: 'Program' },
+            {
+                kind: 'PROGRAM',
+                objectId: firstObject.key,
+                name: 'Piano',
+                typeLabel: 'Program',
+                partitionIndex: 0,
+                partitionName: 'Partition 0',
+                volumeName: 'Volume',
+            },
+            bank,
         ]);
     });
 

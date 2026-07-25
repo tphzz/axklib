@@ -10,6 +10,7 @@
     import ObjectDeletionDialog from './lib/components/ObjectDeletionDialog.svelte';
     import PackageExportDialog from './lib/components/PackageExportDialog.svelte';
     import PackageImportDialog from './lib/components/PackageImportDialog.svelte';
+    import PackageSelectionControls from './lib/components/PackageSelectionControls.svelte';
     import ObjectWorkspace from './lib/components/ObjectWorkspace.svelte';
     import ServerConnectionSettings from './lib/components/ServerConnectionSettings.svelte';
     import CreateHardDiskImageDialog from './lib/components/CreateHardDiskImageDialog.svelte';
@@ -42,6 +43,11 @@
     import { nativeFileSource } from './lib/nativeFileSource';
     import { saveRetainedPackage, selectLocalPackage, selectLocalPackageDestination } from './lib/nativePackages';
     import { collectPages } from './lib/pagination';
+    import {
+        emptyPackageExportSelection,
+        maximumPackageExportRoots,
+        type PackageExportSelectionState,
+    } from './lib/objectSelection';
     import {
         type ClientUploadLocation,
         type DirectoryLocation,
@@ -206,7 +212,7 @@
     let audioDragTarget = $state<AudioImportTarget | null>(null);
     let activeVolumeId = $state('');
     let volumeLoadGeneration = 0;
-    let objectSelectionEpoch = $state(0);
+    let packageExportSelection = $state<PackageExportSelectionState>(emptyPackageExportSelection());
     let auditionState = $state<AuditionState>({ objectId: null, status: 'idle', playheadFrame: 0 });
     let autoplay = $state(false);
     let playingSampleBankId = $state('');
@@ -653,7 +659,6 @@
 
     async function loadVolume(volumeId: string): Promise<void> {
         if (openSessionId === null) return;
-        objectSelectionEpoch += 1;
         void stopPlaybackNow();
         resetPreviewQueue();
         activeVolumeId = volumeId;
@@ -742,7 +747,6 @@
     }
 
     function clearVolume(): void {
-        objectSelectionEpoch += 1;
         void stopPlaybackNow();
         resetPreviewQueue();
         ++volumeLoadGeneration;
@@ -1084,9 +1088,17 @@
     }
 
     function requestObjectPackageExport(items: PackageExportObject[]): void {
-        if (!packageExportAvailable || items.length === 0 || items.length > 1024) return;
+        if (!packageExportAvailable || items.length === 0 || items.length > maximumPackageExportRoots) return;
         ++packageOperationGeneration;
         packageExportRequest = { items: [...items], busy: false, progressLabel: '', error: '' };
+    }
+
+    function clearPackageExportSelection(): void {
+        packageExportSelection = emptyPackageExportSelection();
+    }
+
+    function reportPackageExportSelectionLimit(): void {
+        sourceStatus = `Package export supports at most ${maximumPackageExportRoots.toLocaleString()} selected objects`;
     }
 
     function packageFilename(items: PackageExportSelection[]): string {
@@ -1875,6 +1887,7 @@
             imageLocation = location;
             openSessionId = opened.sessionId;
             candidateSessionId = null;
+            clearPackageExportSelection();
             volumeMutationsAvailable = opened.volumeMutationsAvailable;
             partitionMutationsAvailable = opened.partitionMutationsAvailable;
             objectDeletionAvailable = opened.objectDeletionAvailable;
@@ -1908,6 +1921,7 @@
         const sessionId = openSessionId;
         const opened = await transport.refreshImage(sessionId);
         if (openSessionId !== sessionId) return;
+        clearPackageExportSelection();
         volumeMutationsAvailable = opened.volumeMutationsAvailable;
         partitionMutationsAvailable = opened.partitionMutationsAvailable;
         objectDeletionAvailable = opened.objectDeletionAvailable;
@@ -1945,6 +1959,7 @@
         if (packageRequest) await releasePackageImportResources(packageRequest);
         await auditionController.invalidateSession(sessionId);
         await transport.closeImage(sessionId);
+        clearPackageExportSelection();
         openSessionId = null;
         volumeMutationsAvailable = false;
         partitionMutationsAvailable = false;
@@ -2084,6 +2099,13 @@
                 </button>
             {/each}
         </nav>
+        {#if packageExportAvailable && packageExportSelection.items.length > 0}
+            <PackageSelectionControls
+                count={packageExportSelection.items.length}
+                onexport={() => requestObjectPackageExport(packageExportSelection.items)}
+                onclear={clearPackageExportSelection}
+            />
+        {/if}
         <div class="global-controls">
             {#if isDesktop}
                 <button
@@ -2168,7 +2190,9 @@
                 ondeleteobject={requestObjectDeletion}
                 {packageExportAvailable}
                 onexportobjects={requestObjectPackageExport}
-                selectionEpoch={objectSelectionEpoch}
+                selection={packageExportSelection}
+                onselectionchange={(selection) => (packageExportSelection = selection)}
+                onselectionlimit={reportPackageExportSelectionLimit}
             />
         {:else}
             <ObjectWorkspace
@@ -2192,7 +2216,9 @@
                 ondeleteobject={requestObjectDeletion}
                 {packageExportAvailable}
                 onexportobjects={requestObjectPackageExport}
-                selectionEpoch={objectSelectionEpoch}
+                selection={packageExportSelection}
+                onselectionchange={(selection) => (packageExportSelection = selection)}
+                onselectionlimit={reportPackageExportSelectionLimit}
             />
         {/if}
         <AuditionBar

@@ -43,6 +43,9 @@ describe('PackageExportDialog', () => {
                         objectId: 'object-piano',
                         name: 'PIANOS',
                         typeLabel: 'Sample',
+                        partitionIndex: 0,
+                        partitionName: 'Partition 0',
+                        volumeName: 'Volume',
                     },
                 ],
                 desktop: false,
@@ -65,8 +68,24 @@ describe('PackageExportDialog', () => {
         render(PackageExportDialog, {
             props: {
                 items: [
-                    { kind: 'SBAC', objectId: 'bank', name: 'Drums', typeLabel: 'Sample Bank' },
-                    { kind: 'SBNK', objectId: 'sample', name: 'Kick', typeLabel: 'Sample' },
+                    {
+                        kind: 'SBAC',
+                        objectId: 'bank',
+                        name: 'Drums',
+                        typeLabel: 'Sample Bank',
+                        partitionIndex: 0,
+                        partitionName: 'Partition 0',
+                        volumeName: 'DRUMS',
+                    },
+                    {
+                        kind: 'SBNK',
+                        objectId: 'sample',
+                        name: 'Kick',
+                        typeLabel: 'Sample',
+                        partitionIndex: 1,
+                        partitionName: 'Partition 1',
+                        volumeName: 'KITS',
+                    },
                 ],
                 desktop: false,
                 busy: false,
@@ -81,5 +100,45 @@ describe('PackageExportDialog', () => {
         expect(screen.getByText('Export 2 objects')).toBeTruthy();
         expect(screen.getByLabelText('Selected objects').textContent).toContain('Drums');
         expect(screen.getByLabelText('Selected objects').textContent).toContain('Kick');
+        expect(screen.getByText('Partition 0 · DRUMS')).toBeTruthy();
+        expect(screen.getByText('Partition 1 · KITS')).toBeTruthy();
+        expect(screen.getByText('1 Sample Bank · 1 Sample')).toBeTruthy();
+    });
+
+    it('distinguishes same-named partition and volume groups by partition index', () => {
+        render(PackageExportDialog, {
+            props: {
+                items: [
+                    {
+                        kind: 'SBNK',
+                        objectId: 'sample-a',
+                        name: 'Kick',
+                        typeLabel: 'Sample',
+                        partitionIndex: 0,
+                        partitionName: 'Shared',
+                        volumeName: 'DRUMS',
+                    },
+                    {
+                        kind: 'SBNK',
+                        objectId: 'sample-b',
+                        name: 'Snare',
+                        typeLabel: 'Sample',
+                        partitionIndex: 1,
+                        partitionName: 'Shared',
+                        volumeName: 'DRUMS',
+                    },
+                ],
+                desktop: false,
+                busy: false,
+                progressLabel: '',
+                error: '',
+                onworkspace: vi.fn(),
+                onlocal: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByText('Shared [Partition 0] · DRUMS')).toBeTruthy();
+        expect(screen.getByText('Shared [Partition 1] · DRUMS')).toBeTruthy();
     });
 });

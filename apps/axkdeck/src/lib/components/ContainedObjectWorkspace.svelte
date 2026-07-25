@@ -1,6 +1,11 @@
 <script lang="ts">
     import { matchesSearch } from '../auditionVisibility';
-    import { selectionMode, updateObjectSelection } from '../objectSelection';
+    import {
+        emptyPackageExportSelection,
+        selectionMode,
+        updatePackageExportSelection,
+        type PackageExportSelectionState,
+    } from '../objectSelection';
     import type { SamplerObject } from '../transport';
     import type { PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
@@ -43,7 +48,9 @@
         ondeleteobject?: (object: SamplerObject) => void;
         packageExportAvailable?: boolean;
         onexportobjects?: (objects: PackageExportObject[]) => void;
-        selectionEpoch?: number;
+        selection?: PackageExportSelectionState;
+        onselectionchange?: (selection: PackageExportSelectionState) => void;
+        onselectionlimit?: () => void;
     }
 
     let {
@@ -73,14 +80,12 @@
         ondeleteobject = () => undefined,
         packageExportAvailable = false,
         onexportobjects = () => undefined,
-        selectionEpoch = 0,
+        selection = emptyPackageExportSelection(),
+        onselectionchange = () => undefined,
+        onselectionlimit = () => undefined,
     }: Props = $props();
     type SelectionScope = 'sample-banks' | 'samples' | 'wave-data';
     type SelectableItem = SampleStructureItem | WaveDataItem;
-    let selectionScope = $state<SelectionScope | null>(null);
-    let selectedObjectIds = $state<string[]>([]);
-    let selectionAnchorId = $state('');
-    let selectionResetKey = '';
     let objectMenu = $state<{
         target: SamplerObject;
         objects: PackageExportObject[];
@@ -101,17 +106,26 @@
     function exportObject(item: SelectableItem): PackageExportObject {
         const kind = item.object.objectType as PackageExportObject['kind'];
         const typeLabel = kind === 'SMPL' ? 'Wave Data' : kind === 'SBAC' ? 'Sample Bank' : 'Sample';
-        return { kind, objectId: objectId(item), name: item.name, typeLabel };
+        return {
+            kind,
+            objectId: objectId(item),
+            name: item.name,
+            typeLabel,
+            partitionIndex: item.object.partitionIndex,
+            partitionName: item.object.partitionName,
+            volumeName: item.object.volumeName,
+        };
     }
 
-    function selectionKey(scope: SelectionScope): string {
-        const [items, query] =
-            scope === 'sample-banks'
-                ? [sampleBanks, queries.primary]
-                : scope === 'samples'
-                  ? [samples, sampleQuery]
-                  : [waveData, waveDataQuery];
-        return `${selectionEpoch}\u0000${view}\u0000${scope}\u0000${query}\u0000${items.map(objectId).join('\u0000')}`;
+    function selectionKey(scope: SelectionScope, domain: SelectableItem[]): string {
+        const first = domain[0]?.object;
+        const owner =
+            scope === 'samples' && view === 'sample-banks'
+                ? activeSampleBankId
+                : scope === 'wave-data'
+                  ? activeSampleId
+                  : '';
+        return `${view}\u0000${scope}\u0000${first?.partitionIndex ?? ''}\u0000${first?.volumeName ?? ''}\u0000${owner}`;
     }
 
     function updateSelection(
@@ -122,18 +136,16 @@
         target: SelectableItem,
     ): void {
         const targetId = objectId(target);
-        const result = updateObjectSelection(
-            selectionScope === scope ? selectedObjectIds : [],
-            selectionScope === scope ? selectionAnchorId : '',
-            domain.map(objectId),
-            visible.map(objectId),
+        const result = updatePackageExportSelection(
+            selection,
+            selectionKey(scope, domain),
+            domain.map(exportObject),
+            visible.map(exportObject),
             targetId,
             selectionMode(event),
         );
-        selectionScope = scope;
-        selectedObjectIds = result.objectIds;
-        selectionAnchorId = result.anchorId;
-        selectionResetKey = selectionKey(scope);
+        if (result.limitExceeded) onselectionlimit();
+        else onselectionchange(result.selection);
     }
 
     function selectAll(
@@ -145,27 +157,17 @@
     ): boolean {
         if (!(event.ctrlKey || event.metaKey) || event.key.toLocaleLowerCase() !== 'a') return false;
         event.preventDefault();
-        const result = updateObjectSelection(
-            selectionScope === scope ? selectedObjectIds : [],
-            selectionScope === scope ? selectionAnchorId : '',
-            domain.map(objectId),
-            visible.map(objectId),
+        const result = updatePackageExportSelection(
+            selection,
+            selectionKey(scope, domain),
+            domain.map(exportObject),
+            visible.map(exportObject),
             objectId(target),
             'all',
         );
-        selectionScope = scope;
-        selectedObjectIds = result.objectIds;
-        selectionAnchorId = result.anchorId;
-        selectionResetKey = selectionKey(scope);
+        if (result.limitExceeded) onselectionlimit();
+        else onselectionchange(result.selection);
         return true;
-    }
-
-    function clearSelection(): void {
-        selectionScope = null;
-        selectedObjectIds = [];
-        selectionAnchorId = '';
-        selectionResetKey = '';
-        objectMenu = null;
     }
 
     function openObjectMenu(
@@ -177,16 +179,22 @@
         if (!objectDeletionAvailable && !packageExportAvailable) return;
         event.preventDefault();
         const targetId = objectId(target);
-        if (!packageExportAvailable || selectionScope !== scope || !selectedObjectIds.includes(targetId)) {
-            selectionScope = scope;
-            selectedObjectIds = [targetId];
-            selectionAnchorId = targetId;
-            selectionResetKey = selectionKey(scope);
+        let menuSelection = selection;
+        if (!packageExportAvailable || !selection.items.some((item) => item.objectId === targetId)) {
+            const result = updatePackageExportSelection(
+                selection,
+                selectionKey(scope, domain),
+                domain.map(exportObject),
+                domain.map(exportObject),
+                targetId,
+                'replace',
+            );
+            menuSelection = result.selection;
+            if (packageExportAvailable) onselectionchange(menuSelection);
         }
-        const selected = new Set(selectedObjectIds);
         objectMenu = {
             target: target.object,
-            objects: domain.filter((item) => selected.has(objectId(item))).map(exportObject),
+            objects: menuSelection.items,
             left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
             top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
         };
@@ -214,12 +222,6 @@
             target,
         );
     }
-
-    $effect(() => {
-        if (!selectionScope) return;
-        const nextKey = selectionKey(selectionScope);
-        if (selectionResetKey && nextKey !== selectionResetKey) clearSelection();
-    });
 </script>
 
 <section
@@ -234,10 +236,7 @@
                 title="Sample Banks"
                 count={sampleBanks.length}
                 query={queries.primary}
-                onquerychange={(value) => {
-                    clearSelection();
-                    onquerychange('primary', value);
-                }}
+                onquerychange={(value) => onquerychange('primary', value)}
             />
             <div class="contained-list">
                 {#each filteredBanks as item (item.id)}
@@ -246,7 +245,7 @@
                     <div
                         class="contained-row"
                         class:active={activeSampleBankId === item.objectId}
-                        class:selected={selectionScope === 'sample-banks' && selectedObjectIds.includes(item.objectId)}
+                        class:selected={selection.items.some((selected) => selected.objectId === item.objectId)}
                     >
                         <button
                             class="contained-identity"
@@ -299,10 +298,7 @@
             title="Samples"
             count={samples.length}
             query={sampleQuery}
-            onquerychange={(value) => {
-                clearSelection();
-                onquerychange(view === 'sample-banks' ? 'secondary' : 'primary', value);
-            }}
+            onquerychange={(value) => onquerychange(view === 'sample-banks' ? 'secondary' : 'primary', value)}
             actionLabel={view === 'samples' ? 'Import audio' : undefined}
             onaction={onimportaudio}
         />
@@ -313,7 +309,7 @@
                 <div
                     class="contained-row"
                     class:active={activeSampleId === item.objectId}
-                    class:selected={selectionScope === 'samples' && selectedObjectIds.includes(item.objectId)}
+                    class:selected={selection.items.some((selected) => selected.objectId === item.objectId)}
                 >
                     <button
                         class="contained-identity"
@@ -370,17 +366,14 @@
             title="Wave Data"
             count={waveData.length}
             query={waveDataQuery}
-            onquerychange={(value) => {
-                clearSelection();
-                onquerychange(view === 'sample-banks' ? 'tertiary' : 'secondary', value);
-            }}
+            onquerychange={(value) => onquerychange(view === 'sample-banks' ? 'tertiary' : 'secondary', value)}
         />
         <div class="contained-list">
             {#each filteredWaveData as item (item.id)}
                 <div
                     class="contained-row"
                     class:active={activeWaveDataId === item.objectKey}
-                    class:selected={selectionScope === 'wave-data' && selectedObjectIds.includes(item.objectKey)}
+                    class:selected={selection.items.some((selected) => selected.objectId === item.objectKey)}
                 >
                     <button
                         class="contained-identity"

@@ -8,6 +8,9 @@ export interface PackageExportObject {
     objectId: string;
     name: string;
     typeLabel: 'Program' | 'Sample Bank' | 'Sample' | 'Wave Data';
+    partitionIndex: number;
+    partitionName: string;
+    volumeName: string;
 }
 
 export interface PackageExportVolume {

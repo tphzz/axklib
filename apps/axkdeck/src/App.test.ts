@@ -302,6 +302,7 @@ describe('App panel layout', () => {
             volumeMutationsAvailable: true,
             partitionMutationsAvailable: true,
             objectDeletionAvailable: true,
+            packageExportAvailable: true,
         };
         const inspection = {
             valid: true,
@@ -381,6 +382,7 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(screen.getByText('Piano C3')).toBeTruthy());
         const row = screen.getByRole('button', { name: 'Inspect Piano C3' });
         await fireEvent.contextMenu(row);
+        expect(screen.getByRole('button', { name: 'Export 1 selected object' })).toBeTruthy();
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
         await vi.waitFor(() => expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy());
         await fireEvent.click(screen.getByRole('checkbox', { name: 'Also delete all (1)' }));
@@ -397,6 +399,7 @@ describe('App panel layout', () => {
         finishRefresh?.({ ...opened, validation: { ...opened.validation, objectCount: 0 } });
         await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete Sample' })).toBeNull());
         expect(screen.queryByText('Piano C3')).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Export 1 selected object' })).toBeNull();
     });
 
     it('closes an image session that finishes opening after the application is unmounted', async () => {
@@ -540,6 +543,94 @@ describe('App panel layout', () => {
         );
         expect(await screen.findByText('Ready to import')).toBeTruthy();
         expect(screen.queryByText(/Uploading package/)).toBeNull();
+    });
+
+    it('keeps one mixed package export selection across tabs and volumes', async () => {
+        const pianoVolume = {
+            id: 'volume-piano',
+            name: 'Piano',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const drumsVolume = {
+            id: 'volume-drums',
+            name: 'Drums',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 1,
+        };
+        const program = {
+            key: 'program-piano',
+            objectType: 'PROG',
+            name: '001: Concert Grand',
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: 'Piano',
+            categoryName: 'PROG',
+            sfsId: 1,
+            storedSizeBytes: 512,
+        };
+        const bank = {
+            key: 'bank-drums',
+            objectType: 'SBAC',
+            name: 'Studio Kit',
+            partitionIndex: 1,
+            partitionName: 'Partition 1',
+            volumeName: 'Drums',
+            categoryName: 'SBAC',
+            sfsId: 2,
+            storedSizeBytes: 512,
+        };
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            tree: [
+                {
+                    id: 'disk-17',
+                    name: 'nested.hds',
+                    kind: 'disk',
+                    childCount: 2,
+                    children: [pianoVolume, drumsVolume],
+                },
+            ],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 2,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: pianoVolume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectDeletionAvailable: true,
+            packageImportAvailable: true,
+            packageExportAvailable: true,
+        });
+        mocks.objectPage.mockImplementation(async (_sessionId, _offset, _limit, filter) => ({
+            objects: filter?.scopeId === pianoVolume.id ? [program] : filter?.scopeId === drumsVolume.id ? [bank] : [],
+            totalCount: 1,
+        }));
+        render(App);
+
+        await chooseNestedImage();
+        await fireEvent.click(await screen.findByText('Concert Grand'));
+        expect(screen.getByRole('status').textContent).toContain('1 selected');
+
+        await fireEvent.click(screen.getByRole('button', { name: /Drums/ }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
+        await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Studio Kit' }), { ctrlKey: true });
+
+        expect(screen.getByRole('status').textContent).toContain('2 selected');
+        await fireEvent.click(screen.getByRole('button', { name: 'Export 2 selected objects' }));
+
+        const dialog = screen.getByRole('dialog', { name: 'Export axklib package' });
+        expect(within(dialog).getByText('Partition 0 · Piano')).toBeTruthy();
+        expect(within(dialog).getByText('Partition 1 · Drums')).toBeTruthy();
+        expect(within(dialog).getByText('1 Program · 1 Sample Bank')).toBeTruthy();
     });
 
     it('suppresses context menus only in the desktop runtime', async () => {

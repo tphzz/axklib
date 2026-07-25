@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { SamplerObject } from '../transport';
-import type { SampleStructureItem, WaveDataItem } from '../types';
+import type { PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
 import ContainedObjectWorkspace from './ContainedObjectWorkspace.svelte';
 
 function object(objectType: string, name: string): SamplerObject {
@@ -133,16 +133,25 @@ describe('ContainedObjectWorkspace', () => {
         expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();
     });
 
-    it('exports only the selected objects from one hierarchy lane', async () => {
+    it('adds a Sample Bank to an externally controlled mixed selection', async () => {
         const strings = structure('SBAC', 'Strings');
-        const brass = structure('SBAC', 'Brass');
+        const program: PackageExportObject = {
+            kind: 'PROGRAM',
+            objectId: 'program',
+            name: 'Program',
+            typeLabel: 'Program',
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: 'Volume',
+        };
         const onexportobjects = vi.fn();
-        render(ContainedObjectWorkspace, {
+        const onselectionchange = vi.fn();
+        const rendered = render(ContainedObjectWorkspace, {
             props: {
                 ...callbacks,
                 ...noAuditionableSamples,
                 view: 'sample-banks',
-                sampleBanks: [strings, brass],
+                sampleBanks: [strings],
                 samples: [],
                 waveData: [],
                 activeSampleBankId: '',
@@ -151,19 +160,49 @@ describe('ContainedObjectWorkspace', () => {
                 queries: { primary: '', secondary: '', tertiary: '' },
                 packageExportAvailable: true,
                 onexportobjects,
+                selection: { items: [program], anchors: {} },
+                onselectionchange,
             },
         });
 
         const stringsRow = screen.getByRole('button', { name: 'Inspect Strings' });
-        const brassRow = screen.getByRole('button', { name: 'Inspect Brass' });
-        await fireEvent.click(stringsRow);
-        await fireEvent.click(brassRow, { metaKey: true });
-        await fireEvent.contextMenu(stringsRow);
+        await fireEvent.click(stringsRow, { metaKey: true });
+        const selection = onselectionchange.mock.calls[0]![0];
+        expect(selection.items.map((item: PackageExportObject) => item.objectId)).toEqual([
+            'program',
+            strings.objectId,
+        ]);
+
+        await rendered.rerender({
+            ...callbacks,
+            ...noAuditionableSamples,
+            view: 'sample-banks',
+            sampleBanks: [strings],
+            samples: [],
+            waveData: [],
+            activeSampleBankId: '',
+            activeSampleId: '',
+            activeWaveDataId: '',
+            queries: { primary: '', secondary: '', tertiary: '' },
+            packageExportAvailable: true,
+            onexportobjects,
+            selection,
+            onselectionchange,
+        });
+        await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect Strings' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export 2 objects' }));
 
         expect(onexportobjects).toHaveBeenCalledWith([
-            { kind: 'SBAC', objectId: strings.objectId, name: 'Strings', typeLabel: 'Sample Bank' },
-            { kind: 'SBAC', objectId: brass.objectId, name: 'Brass', typeLabel: 'Sample Bank' },
+            program,
+            {
+                kind: 'SBAC',
+                objectId: strings.objectId,
+                name: 'Strings',
+                typeLabel: 'Sample Bank',
+                partitionIndex: 0,
+                partitionName: 'Partition 0',
+                volumeName: 'Volume',
+            },
         ]);
     });
 

@@ -272,14 +272,20 @@ axkdeck refreshes the same image session and restores the destination volume.
 
 Volume export creates one `.axkvol` containing the complete admitted object
 dependency graph. Programs, Sample Banks, Samples, and Wave Data can also be
-exported from their list context menus. Use Ctrl/Cmd-click, Shift-click, or
-Ctrl/Cmd+A within one list to export several roots; shared dependencies are
-included once in a `.axkpkg` bundle. An export can publish directly to a
-configured writable storage location. The desktop application can instead
-choose a local destination; the server then retains an owner-scoped package
-briefly while the native shell streams it to the selected file and deletes the
-retained resource afterward. Remote browser clients use configured server
-storage because they cannot write an arbitrary client filesystem path.
+selected into one image-wide export basket. The selection remains available
+while changing tabs, filters, or volumes. Plain click starts a new selection;
+Ctrl/Cmd-click toggles one object, Shift-click replaces the current list's
+range, Ctrl/Cmd+Shift-click adds a range, and Ctrl/Cmd+A adds every visible row
+in the focused list. The header shows the total and exports or clears the
+basket. Right-clicking a selected object exports the complete basket;
+right-clicking an unselected object starts a new one-object selection. Up to
+1,024 roots can be selected atomically, and shared dependencies are included
+once in a `.axkpkg` bundle. An export can publish directly to a configured
+writable storage location. The desktop application can instead choose a local
+destination; the server then retains an owner-scoped package briefly while the
+native shell streams it to the selected file and deletes the retained resource
+afterward. Remote browser clients use configured server storage because they
+cannot write an arbitrary client filesystem path.
 
 ### Diagnostics
 

@@ -5,7 +5,11 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <ranges>
 #include <span>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -15,6 +19,7 @@
 #include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/package_operations.hpp"
+#include "axklib/audio.hpp"
 #include "axklib/package.hpp"
 #include "axklib/writer.hpp"
 
@@ -41,6 +46,35 @@ void write_empty_target(const std::filesystem::path &path, std::string_view part
     ASSERT_TRUE(written) << written.error().message;
 }
 
+void write_mixed_root_source(const std::filesystem::path &path) {
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 4U;
+    waveform.pcm = {std::byte{0},    std::byte{0},    std::byte{0xe8}, std::byte{3},
+                    std::byte{0x18}, std::byte{0xfc}, std::byte{0},    std::byte{0}};
+    const auto audio_path = path.parent_path() / "mixed-root.wav";
+    const auto written_audio = axk::write_wav_atomic(audio_path, waveform);
+    ASSERT_TRUE(written_audio) << written_audio.error().message;
+
+    axk::VolumeSpec volume;
+    volume.name = "Mixed";
+    volume.waveforms.push_back({"wave", "Wave", audio_path, 60U, {}});
+    axk::SampleSpec sample;
+    sample.name = "Sample";
+    sample.waveform_id = "wave";
+    sample.root_key = 60U;
+    sample.key_high = 127U;
+    volume.samples.push_back(sample);
+    sample.name = "Direct";
+    volume.samples.push_back(std::move(sample));
+    volume.sample_banks.push_back({"Bank", {"Sample"}});
+    volume.programs.push_back({1U, {{"SBAC", "Bank", 1U}, {"SBNK", "Direct", 2U}}});
+
+    const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
+    const auto written = axk::write_hds_image(manifest, path);
+    ASSERT_TRUE(written) << written.error().message;
+}
+
 class PackageOperationsTest : public testing::Test {
   protected:
     void SetUp() override {
@@ -50,6 +84,7 @@ class PackageOperationsTest : public testing::Test {
         std::filesystem::create_directories(root_);
         std::filesystem::copy_file(fixture_path(), root_ / "fixture.hds");
         write_empty_target(root_ / "target.hds");
+        write_mixed_root_source(root_ / "mixed-roots.hds");
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root_, true}});
         ASSERT_TRUE(sandbox);
         sandbox_ = std::make_unique<axk::app::Sandbox>(std::move(*sandbox));
@@ -328,6 +363,46 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
         context());
     ASSERT_FALSE(duplicate);
     EXPECT_EQ(duplicate.error().code, "invalid_request");
+}
+
+TEST_F(PackageOperationsTest, SessionExportCombinesEveryPortableObjectRootKindWithoutDuplicatingTheGraph) {
+    const auto opened = images_->open({"workspace", "mixed-roots.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(objects) << objects.error().message;
+
+    const auto object_id = [&](std::string_view type) {
+        const auto found = std::ranges::find(objects->items, type, &axk::app::ImageObjectItem::type);
+        EXPECT_NE(found, objects->items.end());
+        return found == objects->items.end() ? std::string{} : found->id;
+    };
+    const nlohmann::json roots{
+        {{"kind", "SMPL"}, {"objectId", object_id("SMPL")}},
+        {{"kind", "PROGRAM"}, {"objectId", object_id("PROG")}},
+        {{"kind", "SBNK"}, {"objectId", object_id("SBNK")}},
+        {{"kind", "SBAC"}, {"objectId", object_id("SBAC")}},
+    };
+    const auto exported = registry_.invoke("images.package_export",
+                                           {{"imageId", opened->image_id},
+                                            {"expectedRevision", opened->revision},
+                                            {"roots", roots},
+                                            {"destination",
+                                             {{"kind", "WORKSPACE"},
+                                              {"output", {{"rootId", "workspace"}, {"relativePath", "mixed-roots"}}},
+                                              {"overwrite", false}}}},
+                                           context());
+    ASSERT_TRUE(exported) << exported.error().message;
+    EXPECT_EQ(exported->at("packageKind"), "bundle");
+    EXPECT_EQ(exported->at("output").at("relativePath"), "mixed-roots.axkpkg");
+
+    const auto package = axk::open_portable_package(root_ / "mixed-roots.axkpkg");
+    ASSERT_TRUE(package) << package.error().message;
+    EXPECT_EQ(package->roots.size(), 4U);
+    EXPECT_EQ(package->nodes.size(), 5U);
+    EXPECT_EQ(std::ranges::count(package->nodes, std::string{"PROG"}, &axk::PackageNode::object_type), 1);
+    EXPECT_EQ(std::ranges::count(package->nodes, std::string{"SBAC"}, &axk::PackageNode::object_type), 1);
+    EXPECT_EQ(std::ranges::count(package->nodes, std::string{"SBNK"}, &axk::PackageNode::object_type), 2);
+    EXPECT_EQ(std::ranges::count(package->nodes, std::string{"SMPL"}, &axk::PackageNode::object_type), 1);
 }
 
 TEST_F(PackageOperationsTest, RejectsSequenceRootsAndUploadOwnershipMismatch) {

@@ -16,6 +16,33 @@
 
     let { items, desktop, busy, progressLabel, error, onworkspace, onlocal, oncancel }: Props = $props();
     const singleItem = $derived(items.length === 1 ? items[0] : undefined);
+    const typeSummary = $derived.by(() => {
+        const labels = ['Program', 'Sample Bank', 'Sample', 'Wave Data'] as const;
+        return labels
+            .map((label) => {
+                const count = items.filter((item) => item.typeLabel === label).length;
+                if (count === 0) return '';
+                const plural = label === 'Wave Data' ? label : count === 1 ? label : `${label}s`;
+                return `${count} ${plural}`;
+            })
+            .filter(Boolean)
+            .join(' · ');
+    });
+    const locationGroups = $derived.by(() => {
+        const groups = new Map<string, { key: string; label: string; items: PackageExportSelection[] }>();
+        for (const item of items) {
+            const partitionName =
+                'partitionName' in item && item.partitionName ? item.partitionName : `Partition ${item.partitionIndex}`;
+            const numericPartitionName = `Partition ${item.partitionIndex}`;
+            const partitionLabel =
+                partitionName === numericPartitionName ? partitionName : `${partitionName} [${numericPartitionName}]`;
+            const key = `${item.partitionIndex}\u0000${item.volumeName}`;
+            const group = groups.get(key) ?? { key, label: `${partitionLabel} · ${item.volumeName}`, items: [] };
+            group.items.push(item);
+            groups.set(key, group);
+        }
+        return [...groups.values()];
+    });
 </script>
 
 <div class="dialog-backdrop" role="presentation">
@@ -44,9 +71,15 @@
                         : 'The selected objects and their combined dependency graph will be saved as one axklib package.'}
                 </p>
                 {#if items.length > 1}
+                    <p class="package-export-type-summary">{typeSummary}</p>
                     <div class="package-export-items" aria-label="Selected objects">
-                        {#each items as item (`${item.kind}:${'objectId' in item ? item.objectId : `${item.partitionIndex}:${item.volumeName}`}`)}
-                            <div><strong>{item.name}</strong><span>{item.typeLabel}</span></div>
+                        {#each locationGroups as group (group.key)}
+                            <section class="package-export-group">
+                                <h4>{group.label}</h4>
+                                {#each group.items as item (`${item.kind}:${'objectId' in item ? item.objectId : `${item.partitionIndex}:${item.volumeName}`}`)}
+                                    <div><strong>{item.name}</strong><span>{item.typeLabel}</span></div>
+                                {/each}
+                            </section>
                         {/each}
                     </div>
                 {/if}

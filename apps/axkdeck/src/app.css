@@ -154,6 +154,43 @@ input:focus-visible {
   gap: 4px;
 }
 
+.package-selection-controls {
+  display: flex;
+  flex: none;
+  min-width: 0;
+  height: 28px;
+  align-items: center;
+  gap: 3px;
+  padding-left: 7px;
+  border-left: 1px solid var(--color-border);
+}
+
+.package-selection-controls [role='status'] {
+  padding: 0 4px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.package-selection-export {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  color: var(--color-text);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.package-selection-export:hover {
+  color: var(--color-text-strong);
+  background: rgb(255 255 255 / 6%);
+}
+
 .workspace-tabs button {
   position: relative;
   display: flex;
@@ -1004,20 +1041,36 @@ input:focus-visible {
 
 .package-export-items {
   display: grid;
+  gap: 8px;
   max-height: 150px;
-  padding: 3px 8px;
+  padding: 8px;
   overflow-y: auto;
   border: 1px solid var(--color-border);
   border-radius: 5px;
   background: rgb(0 0 0 / 10%);
 }
 
-.package-export-items > div {
+.package-export-group {
+  display: grid;
+  gap: 2px;
+}
+
+.package-export-group h4 {
+  margin: 0 0 2px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.package-export-group > div {
   display: flex;
   min-height: 28px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 2%);
 }
 
 .package-export-items strong {
