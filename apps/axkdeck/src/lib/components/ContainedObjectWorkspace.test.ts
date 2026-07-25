@@ -72,11 +72,16 @@ const noAuditionableSamples = {
 };
 
 describe('ContainedObjectWorkspace', () => {
-    it('keeps playback controls clear of expanding overlay scrollbars in every lane', () => {
+    it('extends row borders past playback controls while keeping them clear of overlay scrollbars', () => {
         const listRule = appStyles.match(/\.contained-list\s*\{[^}]+\}/)?.[0];
+        const rowRule = appStyles.match(/\.contained-row\s*\{[^}]+\}/)?.[0];
 
-        expect(listRule).toContain('padding-right: calc(6px + var(--overlay-scrollbar-clearance))');
+        expect(listRule).toContain('padding: 2px 6px 5px');
+        expect(listRule).not.toContain('padding-right: calc(6px + var(--overlay-scrollbar-clearance))');
         expect(listRule).toContain('scrollbar-gutter: stable');
+        expect(appStyles).toContain('--contained-playback-clearance: 10px');
+        expect(rowRule).toContain('grid-template-columns: minmax(0, 1fr) 26px var(--contained-playback-clearance)');
+        expect(rowRule).toContain('border-bottom-color: rgb(61 68 72 / 72%)');
     });
 
     it('naturally orders every displayed object lane before filtering', () => {

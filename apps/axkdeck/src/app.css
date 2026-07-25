@@ -30,6 +30,7 @@
   --density-metadata-row: 22px;
   --density-gap: 4px;
   --overlay-scrollbar-clearance: 16px;
+  --contained-playback-clearance: 10px;
   font-family: var(--font-sans);
   color: var(--color-text);
   background: var(--color-bg);
@@ -2206,7 +2207,6 @@ input:focus-visible {
   min-height: 0;
   height: calc(100% - var(--density-section-toolbar));
   padding: 2px 6px 5px;
-  padding-right: calc(6px + var(--overlay-scrollbar-clearance));
   overflow: auto;
   scrollbar-gutter: stable;
 }
@@ -2215,7 +2215,7 @@ input:focus-visible {
   display: grid;
   width: 100%;
   min-height: var(--density-row);
-  grid-template-columns: minmax(0, 1fr) 26px;
+  grid-template-columns: minmax(0, 1fr) 26px var(--contained-playback-clearance);
   align-items: center;
   border: 1px solid transparent;
   border-bottom-color: rgb(61 68 72 / 72%);
