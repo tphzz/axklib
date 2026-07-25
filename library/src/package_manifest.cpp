@@ -62,8 +62,7 @@ Json package_internal::manifest_json(const PortablePackage &package, bool includ
     }
     std::map<std::string, std::pair<std::string, std::uint64_t>, std::less<>> payload_map;
     for (const auto &node : package.nodes)
-        payload_map.emplace(node.payload_path,
-                            std::pair{node.payload_sha256, static_cast<std::uint64_t>(node.raw_payload.size())});
+        payload_map.emplace(node.payload_path, std::pair{node.payload_sha256, node.payload_size_bytes});
     Json payloads = Json::array();
     for (const auto &[path, digest_and_size] : payload_map) {
         payloads.push_back({{"media_type", "application/vnd.axklib.yamaha-object"},

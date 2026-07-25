@@ -96,6 +96,7 @@ struct MutablePartition {
         std::vector<Extent> extents;
         std::vector<std::uint32_t> continuation_clusters;
         PayloadKind payload_kind{PayloadKind::unknown};
+        bool capacity_expanded{};
     };
     std::map<SfsId, InsertedRecord> inserted;
     std::map<SfsId, InsertedRecord> changed;
@@ -304,6 +305,23 @@ Result<void> replace_record_payload(TransactionState &state, MutablePartition &p
     }
     if (payload.size() > capacity) {
         return std::unexpected{transaction_error("record payload growth exceeds its current extent capacity")};
+    }
+    if (target->capacity_expanded) {
+        const ByteReader current_index{target->raw_index};
+        const auto tail = current_index.be16(0x46U);
+        if (!tail)
+            return std::unexpected{tail.error()};
+        detail::PreparedRecord prepared;
+        prepared.kind =
+            target->payload_kind == PayloadKind::directory ? detail::RecordKind::directory : detail::RecordKind::object;
+        prepared.tail = *tail;
+        auto encoded = detail::encode_sfs_index_record(
+            prepared, target->extents, static_cast<std::uint32_t>(payload.size()), target->continuation_clusters);
+        if (!encoded)
+            return std::unexpected{encoded.error()};
+        target->raw_index = std::move(*encoded);
+        target->payload = std::move(payload);
+        return {};
     }
     ByteWriter writer{target->raw_index};
     if (auto written = writer.write_be32(6U, static_cast<std::uint32_t>(payload.size())); !written)
@@ -675,6 +693,96 @@ Result<std::vector<std::uint32_t>> allocate_list_clusters(MutablePartition &part
     for (const auto cluster : result)
         set_bitmap(partition.bitmap, cluster, true);
     return result;
+}
+
+std::vector<Extent> merge_extents(std::span<const Extent> existing, std::span<const Extent> added) {
+    std::vector<Extent> all;
+    all.reserve(existing.size() + added.size());
+    all.insert(all.end(), existing.begin(), existing.end());
+    all.insert(all.end(), added.begin(), added.end());
+    std::ranges::sort(all, {}, &Extent::cluster_offset);
+    std::vector<Extent> result;
+    for (const auto &extent : all) {
+        if (!result.empty() && result.back().cluster_offset + result.back().cluster_count == extent.cluster_offset) {
+            result.back().cluster_count += extent.cluster_count;
+            result.back().byte_count += extent.byte_count;
+        } else {
+            result.push_back(extent);
+        }
+    }
+    return result;
+}
+
+Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(TransactionState &state,
+                                                                        MutablePartition &partition, SfsId id,
+                                                                        std::uint64_t required_size,
+                                                                        const CancellationToken &cancellation) {
+    if (current_payload_kind(partition, id) != PayloadKind::directory)
+        return std::unexpected{transaction_error("only SFS directory records may grow")};
+    MutablePartition::InsertedRecord *target{};
+    if (const auto found = partition.inserted.find(id); found != partition.inserted.end()) {
+        target = &found->second;
+    } else if (const auto changed = partition.changed.find(id); changed != partition.changed.end()) {
+        target = &changed->second;
+    } else {
+        const auto *source = record(*partition.source, id);
+        if (source == nullptr)
+            return std::unexpected{transaction_error("cannot grow a missing SFS directory")};
+        auto raw = read_raw(*state.source, source->record_offset.value, 72U);
+        if (!raw)
+            return std::unexpected{raw.error()};
+        auto payload = current_payload(state, partition, id, cancellation);
+        if (!payload)
+            return std::unexpected{payload.error()};
+        auto [inserted, unused] = partition.changed.emplace(
+            id, MutablePartition::InsertedRecord{id, std::move(*raw), std::move(*payload), source->extents,
+                                                 source->continuation_clusters, source->payload_kind});
+        static_cast<void>(unused);
+        target = &inserted->second;
+    }
+    std::uint64_t capacity{};
+    for (const auto &extent : target->extents)
+        capacity += static_cast<std::uint64_t>(extent.cluster_count) * 1024U;
+    if (required_size <= capacity)
+        return std::pair<std::uint64_t, std::uint64_t>{};
+    const auto required_clusters = (required_size + 1023U) / 1024U;
+    const auto current_clusters = capacity / 1024U;
+    if (required_clusters > std::numeric_limits<std::uint32_t>::max() ||
+        required_clusters - current_clusters > std::numeric_limits<std::uint32_t>::max()) {
+        return std::unexpected{transaction_error("SFS directory growth exceeds the supported cluster count")};
+    }
+    const auto additional_clusters = static_cast<std::uint32_t>(required_clusters - current_clusters);
+    auto added = allocate_extents(partition, additional_clusters);
+    if (!added)
+        return std::unexpected{added.error()};
+    auto extents = merge_extents(target->extents, *added);
+    constexpr std::size_t extents_per_list_cluster = (1024U - 12U) / 12U;
+    const auto required_lists =
+        extents.size() <= 4U ? 0U : (extents.size() + extents_per_list_cluster - 1U) / extents_per_list_cluster;
+    if (required_lists < target->continuation_clusters.size())
+        return std::unexpected{transaction_error("SFS directory growth cannot discard continuation lists")};
+    const auto additional_lists = required_lists - target->continuation_clusters.size();
+    if (additional_lists != 0U) {
+        auto lists = allocate_list_clusters(partition, additional_lists);
+        if (!lists)
+            return std::unexpected{lists.error()};
+        target->continuation_clusters.insert(target->continuation_clusters.end(), lists->begin(), lists->end());
+    }
+    const ByteReader current_index{target->raw_index};
+    const auto tail = current_index.be16(0x46U);
+    if (!tail)
+        return std::unexpected{tail.error()};
+    detail::PreparedRecord prepared;
+    prepared.kind = detail::RecordKind::directory;
+    prepared.tail = *tail;
+    auto encoded = detail::encode_sfs_index_record(
+        prepared, extents, static_cast<std::uint32_t>(target->payload.size()), target->continuation_clusters);
+    if (!encoded)
+        return std::unexpected{encoded.error()};
+    target->raw_index = std::move(*encoded);
+    target->extents = std::move(extents);
+    target->capacity_expanded = true;
+    return std::pair{static_cast<std::uint64_t>(additional_clusters), static_cast<std::uint64_t>(additional_lists)};
 }
 
 Result<std::pair<SfsId, std::uint64_t>> allocate_record(MutablePartition &partition, std::vector<std::byte> payload,
@@ -3075,9 +3183,248 @@ apply_iso9660_package_import(const std::filesystem::path &target_path, std::span
         true,        plan.objects, plan.allocation};
 }
 
-Result<void> validate_package_result(const std::filesystem::path &temporary, std::span<const PortablePackage> packages,
-                                     const PackageImportPlan &plan, const CancellationToken &cancellation) {
-    auto media = open_media(temporary, cancellation);
+Result<void> grow_package_category_directories(TransactionState &state, const PackageImportPlan &plan,
+                                               const CancellationToken &cancellation) {
+    using CategoryKey = std::tuple<std::uint8_t, std::string, std::string>;
+    using DestinationKey = std::pair<std::uint8_t, std::string>;
+    std::map<CategoryKey, std::size_t> insertions;
+    for (const auto &object : plan.objects) {
+        if (has_action(object, PackageImportObjectAction::insert) &&
+            !has_action(object, PackageImportObjectAction::conflict)) {
+            ++insertions[{object.partition_index, object.volume_name, object.object_type}];
+        }
+    }
+    std::map<DestinationKey, std::pair<std::uint64_t, std::uint64_t>> actual;
+    for (const auto &[key, count] : insertions) {
+        const auto &[partition_index, volume_name, category_name] = key;
+        const auto partition = state.partitions.find(partition_index);
+        if (partition == state.partitions.end())
+            return std::unexpected{transaction_error("package directory growth partition is unavailable")};
+        auto directory = volume_category(state, partition->second, volume_name, category_name, cancellation);
+        if (!directory)
+            return std::unexpected{directory.error()};
+        auto payload = current_payload(state, partition->second, *directory, cancellation);
+        if (!payload)
+            return std::unexpected{payload.error()};
+        const auto required_size = static_cast<std::uint64_t>(payload->size()) + count * 32U;
+        auto growth = grow_directory_capacity(state, partition->second, *directory, required_size, cancellation);
+        if (!growth)
+            return std::unexpected{growth.error()};
+        auto &totals = actual[{partition_index, volume_name}];
+        totals.first += growth->first;
+        totals.second += growth->second;
+    }
+    for (const auto &allocation : plan.allocation) {
+        const auto found = actual.find({allocation.partition_index, allocation.volume_name});
+        const auto payload_clusters = found == actual.end() ? 0U : found->second.first;
+        const auto continuation_clusters = found == actual.end() ? 0U : found->second.second;
+        if (payload_clusters != allocation.directory_growth_clusters ||
+            continuation_clusters != allocation.directory_continuation_clusters) {
+            return std::unexpected{transaction_error("actual package directory growth differs from the import plan")};
+        }
+    }
+    return {};
+}
+
+Result<TransactionState> prepare_sfs_package_import_state(std::shared_ptr<const RandomAccessReader> source,
+                                                          const std::filesystem::path &source_path,
+                                                          std::span<const PortablePackage> packages,
+                                                          const PackageImportPlan &plan,
+                                                          const CancellationToken &cancellation,
+                                                          ProgressSink *progress) {
+    auto digest = package_internal::sha256_reader(*source, cancellation);
+    if (!digest)
+        return std::unexpected{digest.error()};
+    if (package_internal::hex_digest(*digest) != plan.target_snapshot_id)
+        return std::unexpected{stale_transaction_error("package import plan is stale for this target")};
+    auto opened = open_transaction_state(std::move(source), source_path, cancellation, progress, true);
+    if (!opened)
+        return std::unexpected{opened.error()};
+    auto state = std::move(*opened);
+    std::size_t completed{};
+    for (const auto &destination : plan.destinations) {
+        if (!destination.create)
+            continue;
+        if (const auto checked = cancellation.check(); !checked)
+            return std::unexpected{checked.error()};
+        const auto operation_id =
+            std::format("package-destination-{}-{}", destination.partition_index, destination.volume_name);
+        const InsertVolumeOperation operation{PartitionIndex{destination.partition_index},
+                                              VolumeSpec{destination.volume_name, {}, {}, {}, {}}};
+        auto inserted = insert_volume(state, {operation_id, "insert_volume"}, operation, cancellation);
+        if (!inserted)
+            return std::unexpected{inserted.error()};
+        std::vector<std::uint32_t> actual_ids;
+        for (const auto id : inserted->inserted_sfs_ids)
+            actual_ids.push_back(id.value);
+        if (actual_ids != destination.infrastructure_sfs_ids ||
+            inserted->allocated_clusters != destination.infrastructure_clusters) {
+            return std::unexpected{
+                transaction_error("actual destination volume allocation differs from the import plan")};
+        }
+        state.reports.push_back(std::move(*inserted));
+        if (progress) {
+            progress->report({ProgressPhase::writing, completed, plan.objects.size(),
+                              "creating package destination volume", text::path_to_utf8(source_path)});
+        }
+    }
+    if (auto grown = grow_package_category_directories(state, plan, cancellation); !grown)
+        return std::unexpected{grown.error()};
+    std::set<std::pair<std::uint8_t, std::uint32_t>> updated_reused_objects;
+    for (const auto &object : plan.objects) {
+        if (const auto checked = cancellation.check(); !checked)
+            return std::unexpected{checked.error()};
+        if (!has_action(object, PackageImportObjectAction::insert)) {
+            if (has_action(object, PackageImportObjectAction::reuse) &&
+                has_action(object, PackageImportObjectAction::relocate)) {
+                if (!object.target_sfs_id || object.object_type != "SBNK") {
+                    return std::unexpected{transaction_error("planned reused relocation is not a fixed SBNK object")};
+                }
+                const auto physical_key = std::pair{object.partition_index, *object.target_sfs_id};
+                if (updated_reused_objects.emplace(physical_key).second) {
+                    const auto &package = packages[object.package_index];
+                    const auto *node = package_node(package, object.node_id);
+                    if (node == nullptr)
+                        return std::unexpected{transaction_error("package import action node is missing")};
+                    auto context = relocation_context(package, plan, object);
+                    if (!context)
+                        return std::unexpected{context.error()};
+                    auto payload = package_internal::relocate_package_node(package, *node, *context);
+                    if (!payload)
+                        return std::unexpected{payload.error()};
+                    auto normalized = normalized_payload_digest(*payload);
+                    if (!normalized)
+                        return std::unexpected{normalized.error()};
+                    if (*normalized != object.normalized_sha256) {
+                        return std::unexpected{
+                            transaction_error("relocated reused node differs from its planned identity")};
+                    }
+                    const auto partition = state.partitions.find(object.partition_index);
+                    if (partition == state.partitions.end())
+                        return std::unexpected{transaction_error("package import partition is invalid")};
+                    if (auto replaced = replace_fixed_object_payload(
+                            state, partition->second, SfsId{*object.target_sfs_id}, std::move(*payload), cancellation);
+                        !replaced) {
+                        return std::unexpected{replaced.error()};
+                    }
+                }
+            }
+            ++completed;
+            if (progress) {
+                progress->report({ProgressPhase::writing, completed, plan.objects.size(),
+                                  "reusing portable package object", text::path_to_utf8(source_path)});
+            }
+            continue;
+        }
+        const auto &package = packages[object.package_index];
+        const auto *node = package_node(package, object.node_id);
+        if (node == nullptr)
+            return std::unexpected{transaction_error("package import action node is missing")};
+        auto context = relocation_context(package, plan, object);
+        if (!context)
+            return std::unexpected{context.error()};
+        auto payload = package_internal::relocate_package_node(package, *node, *context);
+        if (!payload)
+            return std::unexpected{payload.error()};
+        auto normalized = normalized_payload_digest(*payload);
+        if (!normalized)
+            return std::unexpected{normalized.error()};
+        if (*normalized != object.normalized_sha256)
+            return std::unexpected{transaction_error("relocated package node differs from its planned identity")};
+        const auto partition = state.partitions.find(object.partition_index);
+        if (partition == state.partitions.end() || !object.target_sfs_id)
+            return std::unexpected{transaction_error("package import partition or SFS ID is invalid")};
+        auto &mutable_partition = partition->second;
+        auto allocated =
+            allocate_record(mutable_partition, std::move(*payload), PayloadKind::object, SfsId{*object.target_sfs_id});
+        if (!allocated)
+            return std::unexpected{allocated.error()};
+        const auto inserted = mutable_partition.inserted.find(SfsId{*object.target_sfs_id});
+        if (inserted == mutable_partition.inserted.end())
+            return std::unexpected{transaction_error("package insertion did not reserve its record")};
+        std::uint64_t payload_clusters{};
+        for (const auto &extent : inserted->second.extents)
+            payload_clusters += extent.cluster_count;
+        if (payload_clusters != object.payload_clusters ||
+            inserted->second.continuation_clusters.size() != object.continuation_clusters ||
+            allocated->second != object.payload_clusters + object.continuation_clusters) {
+            return std::unexpected{transaction_error("actual package allocation differs from the import plan")};
+        }
+        auto directory =
+            volume_category(state, mutable_partition, object.volume_name, object.object_type, cancellation);
+        if (!directory)
+            return std::unexpected{directory.error()};
+        if (auto appended = append_directory_entry(state, mutable_partition, *directory, SfsId{*object.target_sfs_id},
+                                                   object.destination_name, cancellation);
+            !appended) {
+            return std::unexpected{appended.error()};
+        }
+        ++completed;
+        if (progress) {
+            progress->report({ProgressPhase::writing, completed, plan.objects.size(),
+                              "importing portable package object", text::path_to_utf8(source_path)});
+        }
+    }
+
+    std::set<std::tuple<std::uint8_t, SfsId, SfsId>> added_edges;
+    for (const auto &owner : plan.objects) {
+        const auto &package = packages[owner.package_index];
+        for (const auto &edge : package.relationships) {
+            if (edge.source_node_id != owner.node_id)
+                continue;
+            const auto *target = planned_node(plan, owner, edge.target_node_id);
+            if (target == nullptr || !owner.target_sfs_id || !target->target_sfs_id)
+                return std::unexpected{transaction_error("package relationship lacks a planned SFS endpoint")};
+            const auto tuple =
+                std::tuple{owner.partition_index, SfsId{*owner.target_sfs_id}, SfsId{*target->target_sfs_id}};
+            if (added_edges.emplace(tuple).second &&
+                !std::ranges::contains(state.known_edges,
+                                       std::tuple{PartitionIndex{owner.partition_index}, SfsId{*owner.target_sfs_id},
+                                                  SfsId{*target->target_sfs_id}})) {
+                state.known_edges.emplace_back(PartitionIndex{owner.partition_index}, SfsId{*owner.target_sfs_id},
+                                               SfsId{*target->target_sfs_id});
+            }
+        }
+    }
+    return state;
+}
+
+class PatchedReader final : public RandomAccessReader {
+  public:
+    PatchedReader(std::shared_ptr<const RandomAccessReader> source, std::span<const detail::AlterationPatch> patches)
+        : source_{std::move(source)}, patches_{patches} {}
+
+    [[nodiscard]] std::uint64_t size() const noexcept override { return source_->size(); }
+
+    [[nodiscard]] Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> destination) const override {
+        if (auto read = source_->read_exact_at(offset, destination); !read)
+            return read;
+        const auto end = offset + destination.size();
+        for (const auto &patch : patches_) {
+            const auto patch_end = patch.offset + patch.replacement.size();
+            const auto overlap_begin = std::max(offset, patch.offset);
+            const auto overlap_end = std::min(end, patch_end);
+            if (overlap_begin >= overlap_end)
+                continue;
+            const auto source_offset = static_cast<std::size_t>(overlap_begin - patch.offset);
+            const auto destination_offset = static_cast<std::size_t>(overlap_begin - offset);
+            const auto count = static_cast<std::size_t>(overlap_end - overlap_begin);
+            std::ranges::copy(std::span{patch.replacement}.subspan(source_offset, count),
+                              destination.begin() + static_cast<std::ptrdiff_t>(destination_offset));
+        }
+        return {};
+    }
+
+  private:
+    std::shared_ptr<const RandomAccessReader> source_;
+    std::span<const detail::AlterationPatch> patches_;
+};
+
+Result<void> validate_package_result(std::shared_ptr<const RandomAccessReader> reader,
+                                     const std::filesystem::path &source_path,
+                                     std::span<const PortablePackage> packages, const PackageImportPlan &plan,
+                                     const CancellationToken &cancellation) {
+    auto media = open_media(std::move(reader), source_path, cancellation);
     if (!media)
         return std::unexpected{media.error()};
     if (media->kind() != MediaKind::sfs)
@@ -3154,6 +3501,14 @@ Result<void> validate_package_result(const std::filesystem::path &temporary, std
         }
     }
     return {};
+}
+
+Result<void> validate_package_result(const std::filesystem::path &temporary, std::span<const PortablePackage> packages,
+                                     const PackageImportPlan &plan, const CancellationToken &cancellation) {
+    auto reader = FileReader::open(temporary);
+    if (!reader)
+        return std::unexpected{reader.error()};
+    return validate_package_result(std::move(*reader), temporary, packages, plan, cancellation);
 }
 
 Result<std::string> file_snapshot_id(const std::filesystem::path &path, const CancellationToken &cancellation) {
@@ -3259,6 +3614,43 @@ Result<detail::PreparedAlteration> detail::prepare_hds_alteration(std::shared_pt
         return std::unexpected{patches.error()};
     return PreparedAlteration{std::move(source_path), prepared->container.image_size_bytes(),
                               std::move(prepared->reports), std::move(*patches)};
+}
+
+Result<detail::PreparedPackageImport>
+detail::prepare_sfs_package_import(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
+                                   std::span<const PortablePackage> packages, const PackageImportPlan &plan,
+                                   const CancellationToken &cancellation, ProgressSink *progress) {
+    if (!source)
+        return std::unexpected{transaction_error("package import source reader is required")};
+    if (const auto verified = verify_package_import_plan(plan); !verified)
+        return std::unexpected{verified.error()};
+    if (!plan.valid())
+        return std::unexpected{transaction_error("a conflicting package import plan cannot apply")};
+    if (plan.target_kind != MediaKind::sfs)
+        return std::unexpected{transaction_error("journaled package import requires an SFS target")};
+    if (packages.size() != plan.package_ids.size())
+        return std::unexpected{transaction_error("package import inputs do not match the planned package count")};
+    for (std::size_t index = 0; index < packages.size(); ++index) {
+        if (const auto verified = verify_portable_package(packages[index]); !verified)
+            return std::unexpected{verified.error()};
+        if (packages[index].package_id != plan.package_ids[index])
+            return std::unexpected{transaction_error("package import input identity differs from the plan")};
+    }
+    auto prepared = prepare_sfs_package_import_state(source, source_path, packages, plan, cancellation, progress);
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    const auto image_size_bytes = prepared->container.image_size_bytes();
+    auto patches = collect_patches(*prepared, cancellation);
+    if (!patches)
+        return std::unexpected{patches.error()};
+    auto overlay = std::make_shared<PatchedReader>(source, std::span<const detail::AlterationPatch>{*patches});
+    if (auto validated = validate_package_result(std::move(overlay), source_path, packages, plan, cancellation);
+        !validated) {
+        return std::unexpected{validated.error()};
+    }
+    return detail::PreparedPackageImport{std::move(source_path),  image_size_bytes, plan.plan_id,
+                                         plan.target_snapshot_id, plan.objects,     plan.allocation,
+                                         std::move(*patches)};
 }
 
 Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, const AlterationManifest &manifest,
@@ -3370,6 +3762,8 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
                                   "creating package destination volume", output_path.string()});
             }
         }
+        if (auto grown = grow_package_category_directories(state, plan, cancellation); !grown)
+            return std::unexpected{grown.error()};
         std::set<std::pair<std::uint8_t, std::uint32_t>> updated_reused_objects;
         for (const auto &object : plan.objects) {
             if (const auto checked = cancellation.check(); !checked)

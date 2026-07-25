@@ -1,6 +1,24 @@
 import type { PreviewEnvelope, SamplerObject, SamplerRelationship } from './transport';
 
 export type WorkspaceView = 'programs' | 'sample-banks' | 'samples' | 'wave-data';
+export type PackageExportObjectKind = 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL';
+
+export interface PackageExportObject {
+    kind: PackageExportObjectKind;
+    objectId: string;
+    name: string;
+    typeLabel: 'Program' | 'Sample Bank' | 'Sample' | 'Wave Data';
+}
+
+export interface PackageExportVolume {
+    kind: 'VOLUME';
+    partitionIndex: number;
+    volumeName: string;
+    name: string;
+    typeLabel: 'Volume';
+}
+
+export type PackageExportSelection = PackageExportObject | PackageExportVolume;
 
 export interface DiskTreeItem {
     id: string;
@@ -15,7 +33,8 @@ export interface DiskTreeItem {
     partitionIndex?: number;
 }
 
-export type ImageTreeAction = 'add-volume' | 'rename-volume' | 'delete-volume' | 'rename-partition';
+export type ImageTreeAction =
+    'add-volume' | 'rename-volume' | 'delete-volume' | 'rename-partition' | 'import-package' | 'export-package';
 
 export interface Program {
     id: string;

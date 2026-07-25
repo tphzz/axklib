@@ -1,8 +1,9 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
     import { formatStoredSize } from '../formatBytes';
+    import { selectionMode, updateObjectSelection } from '../objectSelection';
     import type { SamplerObject } from '../transport';
-    import type { Program, WaveDataItem, WorkspaceView } from '../types';
+    import type { PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
@@ -27,6 +28,9 @@
         playheadFrame?: number;
         objectDeletionAvailable?: boolean;
         ondeleteobject?: (object: SamplerObject) => void;
+        packageExportAvailable?: boolean;
+        onexportobjects?: (objects: PackageExportObject[]) => void;
+        selectionEpoch?: number;
     }
 
     let {
@@ -48,9 +52,20 @@
         playheadFrame = 0,
         objectDeletionAvailable = false,
         ondeleteobject = () => undefined,
+        packageExportAvailable = false,
+        onexportobjects = () => undefined,
+        selectionEpoch = 0,
     }: Props = $props();
     let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
-    let objectMenu = $state<{ object: SamplerObject; left: number; top: number } | null>(null);
+    let selectedObjectIds = $state<string[]>([]);
+    let selectionAnchorId = $state('');
+    let selectionResetKey = '';
+    let objectMenu = $state<{
+        target: SamplerObject;
+        objects: PackageExportObject[];
+        left: number;
+        top: number;
+    } | null>(null);
 
     onDestroy(() => clearPrefetch());
 
@@ -88,19 +103,74 @@
         onseek(item, Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)));
     }
 
-    function openObjectMenu(event: MouseEvent, object: SamplerObject): void {
-        if (!objectDeletionAvailable) return;
+    function exportObject(object: SamplerObject, name = object.name): PackageExportObject {
+        const kind = object.objectType === 'PROG' ? 'PROGRAM' : (object.objectType as PackageExportObject['kind']);
+        const typeLabel =
+            kind === 'PROGRAM' ? 'Program' : kind === 'SMPL' ? 'Wave Data' : kind === 'SBAC' ? 'Sample Bank' : 'Sample';
+        return { kind, objectId: object.key, name, typeLabel };
+    }
+
+    function domainObjects(): PackageExportObject[] {
+        return view === 'programs'
+            ? programs.map((item) => exportObject(item.object, item.name))
+            : waveData.map((item) => exportObject(item.object, item.name));
+    }
+
+    function visibleObjectIds(): string[] {
+        return view === 'programs'
+            ? filteredPrograms.map((item) => item.objectId)
+            : filteredWaveData.map((item) => item.objectKey);
+    }
+
+    function updateSelection(event: MouseEvent, objectId: string): void {
+        const result = updateObjectSelection(
+            selectedObjectIds,
+            selectionAnchorId,
+            domainObjects().map((item) => item.objectId),
+            visibleObjectIds(),
+            objectId,
+            selectionMode(event),
+        );
+        selectedObjectIds = result.objectIds;
+        selectionAnchorId = result.anchorId;
+    }
+
+    function selectAll(event: KeyboardEvent, objectId: string): boolean {
+        if (!(event.ctrlKey || event.metaKey) || event.key.toLocaleLowerCase() !== 'a') return false;
         event.preventDefault();
+        const result = updateObjectSelection(
+            selectedObjectIds,
+            selectionAnchorId,
+            domainObjects().map((item) => item.objectId),
+            visibleObjectIds(),
+            objectId,
+            'all',
+        );
+        selectedObjectIds = result.objectIds;
+        selectionAnchorId = result.anchorId;
+        return true;
+    }
+
+    function openObjectMenu(event: MouseEvent, object: SamplerObject): void {
+        if (!objectDeletionAvailable && !packageExportAvailable) return;
+        event.preventDefault();
+        if (!packageExportAvailable || !selectedObjectIds.includes(object.key)) {
+            selectedObjectIds = [object.key];
+            selectionAnchorId = object.key;
+        }
+        const selected = new Set(selectedObjectIds);
         objectMenu = {
-            object,
+            target: object,
+            objects: domainObjects().filter((item) => selected.has(item.objectId)),
             left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
             top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
         };
     }
 
     function openObjectMenuFromKeyboard(event: KeyboardEvent, object: SamplerObject): void {
+        if (selectAll(event, object.key)) return;
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
-        if (!objectDeletionAvailable) return;
+        if (!objectDeletionAvailable && !packageExportAvailable) return;
         event.preventDefault();
         const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
         openObjectMenu(
@@ -126,6 +196,18 @@
     const emptyCollection = $derived(
         view === 'programs' ? filteredPrograms.length === 0 : filteredWaveData.length === 0,
     );
+
+    $effect(() => {
+        const nextKey = `${selectionEpoch}\u0000${view}\u0000${query}\u0000${domainObjects()
+            .map((item) => item.objectId)
+            .join('\u0000')}`;
+        if (selectionResetKey && selectionResetKey !== nextKey) {
+            selectedObjectIds = [];
+            selectionAnchorId = '';
+            objectMenu = null;
+        }
+        selectionResetKey = nextKey;
+    });
 </script>
 
 <section class="collection-panel" aria-label={title}>
@@ -141,9 +223,15 @@
                 <button
                     type="button"
                     class:active={activeObjectId === program.objectId}
+                    class:selected={selectedObjectIds.includes(program.objectId)}
                     class="program-row"
                     aria-pressed={activeObjectId === program.objectId}
-                    onclick={() => onprogramselect(program)}
+                    onclick={(event) => {
+                        updateSelection(event, program.objectId);
+                        onprogramselect(program);
+                    }}
+                    oncontextmenu={(event) => openObjectMenu(event, program.object)}
+                    onkeydown={(event) => openObjectMenuFromKeyboard(event, program.object)}
                 >
                     <span class="object-slot">{program.slot}</span>
                     <strong>{program.name}</strong>
@@ -153,12 +241,20 @@
             {/each}
         {:else}
             {#each filteredWaveData as item (item.id)}
-                <div use:observePreview={item} class:active={activeObjectId === item.objectKey} class="wave-data-row">
+                <div
+                    use:observePreview={item}
+                    class:active={activeObjectId === item.objectKey}
+                    class:selected={selectedObjectIds.includes(item.objectKey)}
+                    class="wave-data-row"
+                >
                     <button
                         class="wave-data-selection"
                         type="button"
                         aria-label={`Inspect ${item.name}`}
-                        onclick={() => onwavedataselect(item)}
+                        onclick={(event) => {
+                            updateSelection(event, item.objectKey);
+                            onwavedataselect(item);
+                        }}
                         oncontextmenu={(event) => openObjectMenu(event, item.object)}
                         onkeydown={(event) => openObjectMenuFromKeyboard(event, item.object)}
                     ></button>
@@ -222,10 +318,16 @@
 
 {#if objectMenu}
     <ObjectContextMenu
-        objectName={objectMenu.object.name}
+        objectName={objectMenu.objects.length === 1
+            ? objectMenu.objects[0]!.name
+            : `${objectMenu.objects.length} objects`}
+        selectionCount={objectMenu.objects.length}
         left={objectMenu.left}
         top={objectMenu.top}
         onclose={() => (objectMenu = null)}
-        ondelete={() => ondeleteobject(objectMenu!.object)}
+        onexport={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
+        ondelete={objectDeletionAvailable && objectMenu.objects.length === 1
+            ? () => ondeleteobject(objectMenu!.target)
+            : undefined}
     />
 {/if}

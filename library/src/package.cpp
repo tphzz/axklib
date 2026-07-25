@@ -217,8 +217,10 @@ ObjectType root_object_type(PackageRootKind kind) {
 }
 
 bool matches_scope(const ObjectSnapshot &object, const PackageRootSelector &selector) {
-    if (!object.placement)
-        return false;
+    if (!object.placement) {
+        return selector.kind != PackageRootKind::volume && !selector.partition_index && selector.group_name.empty() &&
+               selector.volume_name.empty();
+    }
     if (selector.partition_index && object.placement->partition.value != *selector.partition_index)
         return false;
     if (!selector.group_name.empty() && object.placement->partition_name != selector.group_name)
@@ -256,7 +258,8 @@ Result<std::vector<SelectedRoot>> select_roots(const ObjectCatalog &catalog,
         } else {
             const auto expected = root_object_type(selector.kind);
             for (const auto &object : catalog.objects) {
-                if (object.object.header.type != expected || object.object.header.name != selector.object_name ||
+                if (object.object.header.type != expected ||
+                    (!selector.object_name.empty() && object.object.header.name != selector.object_name) ||
                     !matches_scope(object, selector) || (selector.object_key && object.key != *selector.object_key)) {
                     continue;
                 }
@@ -807,6 +810,7 @@ Result<PortablePackage> parse_manifest(const Json &manifest,
             (node.audio_sha256 && !lowercase_sha256(*node.audio_sha256))) {
             return std::unexpected{package_error("package object identity or payload reference is invalid")};
         }
+        node.payload_size_bytes = found->second.size;
         if (verify_payloads) {
             if (found->second.bytes == nullptr)
                 return std::unexpected{package_error("package payload bytes are unavailable")};
@@ -1162,16 +1166,19 @@ Result<void> verify_portable_package(const PortablePackage &package) {
         if (digest_text(package_internal::canonical_json(identity_manifest)) != package.package_id)
             return std::unexpected{package_error("package identity does not match its manifest")};
 
-        std::map<std::string, std::vector<std::byte>, std::less<>> entry_bytes;
-        entry_bytes.emplace("manifest.json", string_bytes(package_internal::canonical_json(manifest)));
+        const auto manifest_bytes = string_bytes(package_internal::canonical_json(manifest));
         for (const auto &node : package.nodes) {
-            const auto [found, inserted] = entry_bytes.emplace(node.payload_path, node.raw_payload);
-            if (!inserted && found->second != node.raw_payload)
-                return std::unexpected{package_error("package payload path has conflicting bytes")};
+            if (node.raw_payload.size() != node.payload_size_bytes)
+                return std::unexpected{package_error("package payload size differs from its declaration")};
         }
         std::map<std::string, ManifestArchiveEntry, std::less<>> entries;
-        for (const auto &[path, bytes] : entry_bytes)
-            entries.emplace(path, ManifestArchiveEntry{bytes.size(), &bytes});
+        entries.emplace("manifest.json", ManifestArchiveEntry{manifest_bytes.size(), &manifest_bytes});
+        for (const auto &node : package.nodes) {
+            const auto [found, inserted] =
+                entries.emplace(node.payload_path, ManifestArchiveEntry{node.raw_payload.size(), &node.raw_payload});
+            if (!inserted && *found->second.bytes != node.raw_payload)
+                return std::unexpected{package_error("package payload path has conflicting bytes")};
+        }
         auto reparsed = parse_manifest(manifest, entries, true);
         if (!reparsed)
             return std::unexpected{reparsed.error()};
@@ -1287,6 +1294,7 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
         packaged.audio_sha256 = node.audio_digest;
         packaged.placement_hint = placement_hint(*node.snapshot);
         packaged.relocations = node.profile.relocations;
+        packaged.payload_size_bytes = node.snapshot->raw_payload.size();
         packaged.raw_payload = node.snapshot->raw_payload;
         package.nodes.push_back(std::move(packaged));
     }

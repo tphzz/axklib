@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "axklib/application/contracts.hpp"
@@ -15,6 +16,7 @@
 #include "axklib/deletion.hpp"
 #include "axklib/export.hpp"
 #include "axklib/io.hpp"
+#include "axklib/media.hpp"
 
 namespace axk::app {
 
@@ -43,6 +45,16 @@ struct ImageSessionMutation {
     std::uint64_t revision{};
     FileRef source;
     std::shared_ptr<SandboxMutation> target;
+};
+
+struct ImageSessionRead {
+    std::string image_id;
+    std::uint64_t revision{};
+    FileRef source;
+    std::shared_ptr<const RandomAccessReader> reader;
+    const MediaContainer *media{};
+    std::unordered_map<std::string, std::string> object_keys_by_id;
+    std::shared_ptr<void> lease;
 };
 
 struct ImageContentItem {
@@ -236,6 +248,8 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageObjectDeletionPlan>
     plan_deletion(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
                   std::string_view target_object_id, const std::vector<std::string> &included_dependent_object_ids);
+    [[nodiscard]] Result<ImageSessionRead> begin_read(std::string_view image_id, std::string_view owner_id,
+                                                      std::uint64_t expected_revision);
     [[nodiscard]] Result<ImageSessionMutation> begin_mutation(std::string_view image_id, std::string_view owner_id,
                                                               std::uint64_t expected_revision);
     [[nodiscard]] Result<ImageSessionSummary> commit_mutation(std::string_view image_id, std::string_view owner_id,

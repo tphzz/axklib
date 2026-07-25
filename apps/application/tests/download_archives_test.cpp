@@ -74,6 +74,27 @@ TEST_F(DownloadArchiveStoreTest, CreatesOwnerBoundDeterministicTarAndRemovesItEx
     EXPECT_FALSE(store.inspect(created->reference, "owner-a"));
 }
 
+TEST_F(DownloadArchiveStoreTest, RetainsOwnerBoundNonArchiveDownloads) {
+    axk::app::DownloadArchiveStore store{root_ / "retained", 1024U, 1024U, 4U, std::chrono::seconds{30}};
+    const std::array payload{std::byte{0x41}, std::byte{0x58}, std::byte{0x4b}};
+    const auto created = store.retain("owner-a", "Volume.axkvol", "application/octet-stream", payload);
+    ASSERT_TRUE(created) << created.error().message;
+    EXPECT_EQ(created->filename, "Volume.axkvol");
+    EXPECT_EQ(created->media_type, "application/octet-stream");
+    EXPECT_EQ(created->size_bytes, payload.size());
+    EXPECT_EQ(created->entry_count, 0U);
+
+    const auto denied = store.open(created->reference, "owner-b");
+    ASSERT_FALSE(denied);
+    EXPECT_EQ(denied.error().code, "download_archive_not_found");
+    const auto content = store.open(created->reference, "owner-a");
+    ASSERT_TRUE(content) << content.error().message;
+    std::array<std::byte, 3U> read{};
+    ASSERT_TRUE(content->reader->read_exact_at(0U, read));
+    EXPECT_EQ(read, payload);
+    EXPECT_EQ(content->path.extension(), ".download");
+}
+
 TEST_F(DownloadArchiveStoreTest, EnforcesEntryByteAndRetentionLimitsWithoutLeavingStagingFiles) {
     auto now = std::chrono::steady_clock::now();
     axk::app::DownloadArchiveStore limited{root_ / "limited",  2048U, 2048U, 1U, std::chrono::seconds{5},

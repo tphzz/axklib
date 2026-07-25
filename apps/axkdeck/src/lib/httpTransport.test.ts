@@ -1270,6 +1270,189 @@ describe('HttpImageTransport', () => {
         });
     });
 
+    it('plans, releases, imports, and exports packages against an open image revision', async () => {
+        const requests: Array<{ path: string; body: unknown }> = [];
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+                requests.push({ path: `${init?.method ?? 'GET'} ${url.pathname}`, body });
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return json({
+                        apiVersion: 'v1',
+                        limits: {},
+                        operations: [
+                            {
+                                id: 'images.package_import.plan',
+                                method: 'POST',
+                                route: '/api/v1/image-session-package-import-plans',
+                                mode: 'REQUEST',
+                                operationClass: 'READ',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageSessionPackageImportPlanRequest',
+                                resultSchema: 'ImageSessionPackageImportPlan',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.package_import.release',
+                                method: 'POST',
+                                route: '/api/v1/image-session-package-import-plan-releases',
+                                mode: 'REQUEST',
+                                operationClass: 'WRITE',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'PlanTokenRequest',
+                                resultSchema: 'PlanReleaseResult',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.package_import',
+                                method: 'POST',
+                                route: '/api/v1/image-session-package-imports',
+                                mode: 'JOB',
+                                operationClass: 'WRITE',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'PackageImportRequest',
+                                resultSchema: 'ImageSessionPackageImportResult',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.package_export',
+                                method: 'POST',
+                                route: '/api/v1/image-session-package-exports',
+                                mode: 'JOB',
+                                operationClass: 'READ',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'ImageSessionPackageExportRequest',
+                                resultSchema: 'ImageSessionPackageExportResult',
+                                implemented: true,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return json(
+                        {
+                            imageId: 'image-package',
+                            revision: 7,
+                            source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                            format: 'sfs',
+                            rootCount: 1,
+                            objectCount: 2,
+                            relationshipCount: 1,
+                            availableOperations: ['images.package.import', 'images.package.export'],
+                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        },
+                        201,
+                    );
+                }
+                if (url.pathname.endsWith('/images/image-package/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                if (url.pathname.endsWith('/image-session-package-import-plans')) {
+                    return json({
+                        schemaVersion: '1.0',
+                        imageId: 'image-package',
+                        revision: 7,
+                        planToken: 'session-plan',
+                        expiresInSeconds: 600,
+                        planId: 'plan-id',
+                        targetKind: 'SFS',
+                        targetSnapshotId: 'snapshot',
+                        valid: true,
+                        warnings: [],
+                        conflicts: [],
+                        actions: [],
+                        allocation: [],
+                    });
+                }
+                if (url.pathname.endsWith('/image-session-package-import-plan-releases')) {
+                    return json({ released: true });
+                }
+                if (
+                    url.pathname.endsWith('/image-session-package-imports') ||
+                    url.pathname.endsWith('/image-session-package-exports')
+                ) {
+                    return json(
+                        {
+                            jobId: url.pathname.endsWith('exports') ? 'export-job' : 'import-job',
+                            operationId: url.pathname.endsWith('exports')
+                                ? 'images.package_export'
+                                : 'images.package_import',
+                            state: 'QUEUED',
+                            latestSequence: 1,
+                            progress: null,
+                            result: null,
+                            error: null,
+                        },
+                        202,
+                    );
+                }
+                if (url.pathname.endsWith('/download-archives/archive-package/content')) {
+                    return new Response(null, { status: 204 });
+                }
+                throw new Error(`unexpected request ${init?.method} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const opened = await transport.openImage(serverFile('images/base.hds'));
+        expect(opened).toMatchObject({ packageImportAvailable: true, packageExportAvailable: true });
+        const source = serverFile('packages/drums.axkvol');
+        const plan = await transport.planImagePackageImport(opened.sessionId, source, 0, 'DRUMS', [
+            { nodeId: 'node-1', destinationName: 'DRUM KIT' },
+        ]);
+        await transport.releaseImagePackageImportPlan(plan.planToken);
+        await expect(transport.startImagePackageImport(plan.planToken)).resolves.toMatchObject({
+            kind: 'images.package_import',
+            status: 'queued',
+        });
+        await expect(
+            transport.startImagePackageExport(
+                opened.sessionId,
+                [
+                    { kind: 'SBNK', objectId: 'object-sample' },
+                    { kind: 'SMPL', objectId: 'object-wave-data' },
+                ],
+                {
+                    kind: 'DOWNLOAD',
+                    filename: 'DRUMS.axkpkg',
+                },
+            ),
+        ).resolves.toMatchObject({ kind: 'images.package_export', status: 'queued' });
+        const retained = {
+            archiveId: 'archive-package',
+            filename: 'DRUMS.axkvol',
+            sizeBytes: 13,
+            expiresInSeconds: 60,
+            contentPath: '/api/v1/download-archives/archive-package/content',
+        };
+        await transport.deleteRetainedPackage(retained);
+
+        expect(requests.find((request) => request.path.endsWith('image-session-package-import-plans'))?.body).toEqual({
+            imageId: 'image-package',
+            expectedRevision: 7,
+            package: { fileRef: { rootId: 'workspace', relativePath: 'packages/drums.axkvol' } },
+            partitionIndex: 0,
+            volumeName: 'DRUMS',
+            renames: [{ nodeId: 'node-1', destinationName: 'DRUM KIT' }],
+        });
+        expect(requests.find((request) => request.path.endsWith('image-session-package-exports'))?.body).toEqual({
+            imageId: 'image-package',
+            expectedRevision: 7,
+            roots: [
+                { kind: 'SBNK', objectId: 'object-sample' },
+                { kind: 'SMPL', objectId: 'object-wave-data' },
+            ],
+            destination: { kind: 'DOWNLOAD', filename: 'DRUMS.axkpkg' },
+        });
+        expect(requests.at(-1)?.path).toBe('DELETE /api/v1/download-archives/archive-package/content');
+    });
+
     it('runs remote alteration and extraction jobs without deleting persistent outputs', async () => {
         const requests: string[] = [];
         vi.stubGlobal(

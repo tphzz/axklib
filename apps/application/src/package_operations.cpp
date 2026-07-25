@@ -11,6 +11,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -21,9 +22,14 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/alteration_transaction.hpp"
+#include "axklib/application/alteration_journal.hpp"
+#include "axklib/application/download_archives.hpp"
+#include "axklib/application/image_sessions.hpp"
 #include "axklib/application/secure_random.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package.hpp"
+#include "axklib/package_import_planning.hpp"
 #include "axklib/utf8.hpp"
 
 namespace {
@@ -64,6 +70,26 @@ struct PackageOperationState {
     std::size_t maximum_plans{128U};
 };
 
+struct SessionPackagePlanRecord {
+    std::string token;
+    std::string owner_id;
+    Clock::time_point expires_at;
+    std::string image_id;
+    std::uint64_t expected_revision{};
+    PackageInput input;
+    ResolvedPackage resolved;
+    std::string package_id;
+    axk::PackageImportPlan plan;
+    bool claimed{};
+};
+
+struct SessionPackageOperationState {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::shared_ptr<SessionPackagePlanRecord>> plans;
+    std::chrono::minutes retention{15};
+    std::size_t maximum_plans{128U};
+};
+
 class TemporaryDirectoryCleanup {
   public:
     explicit TemporaryDirectoryCleanup(std::filesystem::path path) : path_{std::move(path)} {}
@@ -83,10 +109,10 @@ std::string normalized_path(const std::filesystem::path &path) {
 }
 
 axk::app::Error operation_error(std::string code, std::string message,
-                                std::optional<std::string> relative_path = std::nullopt) {
+                                std::optional<std::string> relative_path = std::nullopt, bool retryable = false) {
     axk::app::ErrorContext context;
     context.relative_path = std::move(relative_path);
-    return {std::move(code), std::move(message), std::move(context)};
+    return {std::move(code), std::move(message), std::move(context), retryable};
 }
 
 axk::app::Error core_error(const axk::Error &error, std::optional<std::string> relative_path = std::nullopt) {
@@ -189,11 +215,6 @@ axk::app::Result<axk::PortablePackage> read_package(const ResolvedPackage &resol
                           : axk::inspect_portable_package(*resolved.reader, resolved.filename, context.cancellation);
     if (!package)
         return std::unexpected(core_error(package.error()));
-    if (verify) {
-        auto checked = axk::verify_portable_package(*package);
-        if (!checked)
-            return std::unexpected(core_error(checked.error()));
-    }
     return std::move(*package);
 }
 
@@ -205,14 +226,25 @@ Json package_json(const axk::PortablePackage &package) {
                          {"nodeIds", root.node_ids}});
     }
     auto objects = Json::array();
+    std::uint64_t total_payload_bytes{};
     for (const auto &node : package.nodes) {
+        total_payload_bytes += node.payload_size_bytes;
         objects.push_back({{"nodeId", node.node_id},
                            {"objectType", node.object_type},
                            {"name", node.name},
+                           {"payloadSizeBytes", node.payload_size_bytes},
                            {"payloadSha256", node.payload_sha256},
                            {"normalizedSha256", node.normalized_sha256},
                            {"semanticSha256", node.semantic_sha256 ? Json(*node.semantic_sha256) : Json{}},
                            {"audioSha256", node.audio_sha256 ? Json(*node.audio_sha256) : Json{}}});
+    }
+    auto relationships = Json::array();
+    for (const auto &relationship : package.relationships) {
+        relationships.push_back({{"edgeId", relationship.edge_id},
+                                 {"sourceNodeId", relationship.source_node_id},
+                                 {"targetNodeId", relationship.target_node_id},
+                                 {"role", relationship.role},
+                                 {"ordinal", relationship.ordinal}});
     }
     auto issues = Json::array();
     for (const auto &issue : package.issues)
@@ -224,8 +256,10 @@ Json package_json(const axk::PortablePackage &package) {
             {"sourceMediaKind", package.source_media_kind},
             {"valid", std::ranges::none_of(package.issues, &axk::PackageIssue::fatal)},
             {"payloadsVerified", package.payloads_verified},
+            {"totalPayloadBytes", total_payload_bytes},
             {"roots", std::move(roots)},
             {"objects", std::move(objects)},
+            {"relationships", std::move(relationships)},
             {"relationshipCount", package.relationships.size()},
             {"issues", std::move(issues)}};
 }
@@ -273,6 +307,63 @@ axk::app::Result<std::vector<axk::PackageRootSelector>> parse_roots(const Json &
             if (root.kind != axk::PackageRootKind::volume && root.object_name.empty()) {
                 return std::unexpected(operation_error("invalid_request", "object package roots require objectName"));
             }
+            result.push_back(std::move(root));
+        }
+        return result;
+    } catch (const Json::exception &) {
+        return std::unexpected(operation_error("invalid_request", "package root selectors are malformed"));
+    }
+}
+
+axk::app::Result<std::vector<axk::PackageRootSelector>>
+parse_session_export_roots(const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id) {
+    try {
+        const auto &values = input.at("roots");
+        if (!values.is_array() || values.empty() || values.size() > 1024U)
+            return std::unexpected(operation_error("invalid_request", "roots must contain 1 to 1024 selectors"));
+        std::vector<axk::PackageRootSelector> result;
+        result.reserve(values.size());
+        std::set<std::string, std::less<>> identities;
+        for (const auto &value : values) {
+            const auto kind = value.at("kind").get<std::string>();
+            axk::PackageRootSelector root;
+            std::string identity;
+            if (kind == "VOLUME") {
+                const auto partition = value.at("partitionIndex").get<std::uint32_t>();
+                if (partition > std::numeric_limits<std::uint8_t>::max())
+                    return std::unexpected(operation_error("invalid_request", "partitionIndex is out of range"));
+                root.kind = axk::PackageRootKind::volume;
+                root.partition_index = static_cast<std::uint8_t>(partition);
+                root.volume_name = value.at("volumeName").get<std::string>();
+                if (root.volume_name.empty() || value.size() != 3U) {
+                    return std::unexpected(
+                        operation_error("invalid_request", "volume roots require partitionIndex and volumeName"));
+                }
+                identity = std::format("VOLUME\\0{}\\0{}", partition, root.volume_name);
+            } else {
+                if (kind == "PROGRAM")
+                    root.kind = axk::PackageRootKind::prog;
+                else if (kind == "SBAC")
+                    root.kind = axk::PackageRootKind::sbac;
+                else if (kind == "SBNK")
+                    root.kind = axk::PackageRootKind::sbnk;
+                else if (kind == "SMPL")
+                    root.kind = axk::PackageRootKind::smpl;
+                else
+                    return std::unexpected(operation_error("invalid_request", "package root kind is unsupported"));
+                const auto object_id = value.at("objectId").get<std::string>();
+                if (object_id.empty() || value.size() != 2U) {
+                    return std::unexpected(
+                        operation_error("invalid_request", "object roots require exactly kind and objectId"));
+                }
+                const auto object_key = object_keys_by_id.find(object_id);
+                if (object_key == object_keys_by_id.end())
+                    return std::unexpected(operation_error("object_not_found", "package root object does not exist"));
+                identity = "OBJECT\\0" + object_id;
+                root.object_key = object_key->second;
+            }
+            if (!identities.emplace(std::move(identity)).second)
+                return std::unexpected(operation_error("invalid_request", "package roots must be unique"));
             result.push_back(std::move(root));
         }
         return result;
@@ -384,10 +475,15 @@ Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::
                               {"rawVolume", item.raw_volume},
                               {"insertedObjectCount", item.inserted_object_count},
                               {"reusedObjectCount", item.reused_object_count},
+                              {"blockedObjectCount", item.blocked_object_count},
                               {"payloadClusters", item.payload_clusters},
                               {"payloadSectors", item.payload_sectors},
                               {"continuationClusters", item.continuation_clusters},
                               {"directoryGrowthBytes", item.directory_growth_bytes},
+                              {"directoryGrowthClusters", item.directory_growth_clusters},
+                              {"directoryContinuationClusters", item.directory_continuation_clusters},
+                              {"infrastructureClusters", item.infrastructure_clusters},
+                              {"additionalAllocatedBytes", item.additional_allocated_bytes},
                               {"remainingObjectIds", item.remaining_object_ids},
                               {"remainingClusters", item.remaining_clusters},
                               {"projectedImageSectors", item.projected_image_sectors},
@@ -475,6 +571,133 @@ axk::app::Result<PackagePlanClaim> claim_plan(const std::shared_ptr<PackageOpera
         return std::unexpected(operation_error("package_plan_in_use", "package import plan is already being applied"));
     found->second->claimed = true;
     return PackagePlanClaim{state, found->second};
+}
+
+void cleanup_session_plans(SessionPackageOperationState &state, Clock::time_point now) {
+    for (auto current = state.plans.begin(); current != state.plans.end();) {
+        if (!current->second->claimed && current->second->expires_at <= now)
+            current = state.plans.erase(current);
+        else
+            ++current;
+    }
+}
+
+class SessionPackagePlanClaim {
+  public:
+    SessionPackagePlanClaim(std::shared_ptr<SessionPackageOperationState> state,
+                            std::shared_ptr<SessionPackagePlanRecord> record)
+        : state_(std::move(state)), record_(std::move(record)) {}
+    ~SessionPackagePlanClaim() { release(); }
+    SessionPackagePlanClaim(const SessionPackagePlanClaim &) = delete;
+    SessionPackagePlanClaim &operator=(const SessionPackagePlanClaim &) = delete;
+    SessionPackagePlanClaim(SessionPackagePlanClaim &&other) noexcept
+        : state_(std::move(other.state_)), record_(std::move(other.record_)),
+          active_(std::exchange(other.active_, false)) {}
+    SessionPackagePlanClaim &operator=(SessionPackagePlanClaim &&) = delete;
+
+    [[nodiscard]] const std::shared_ptr<SessionPackagePlanRecord> &record() const noexcept { return record_; }
+
+    void consume() {
+        if (!active_)
+            return;
+        std::lock_guard lock{state_->mutex};
+        state_->plans.erase(record_->token);
+        active_ = false;
+    }
+
+  private:
+    void release() {
+        if (!active_)
+            return;
+        std::lock_guard lock{state_->mutex};
+        if (const auto found = state_->plans.find(record_->token); found != state_->plans.end())
+            found->second->claimed = false;
+        active_ = false;
+    }
+
+    std::shared_ptr<SessionPackageOperationState> state_;
+    std::shared_ptr<SessionPackagePlanRecord> record_;
+    bool active_{true};
+};
+
+axk::app::Result<SessionPackagePlanClaim> claim_session_plan(const std::shared_ptr<SessionPackageOperationState> &state,
+                                                             std::string_view token, std::string_view owner_id) {
+    std::lock_guard lock{state->mutex};
+    cleanup_session_plans(*state, Clock::now());
+    const auto found = state->plans.find(std::string{token});
+    if (found == state->plans.end() || found->second->owner_id != owner_id) {
+        return std::unexpected(operation_error("package_plan_not_found", "package import plan is absent or expired"));
+    }
+    if (found->second->claimed)
+        return std::unexpected(operation_error("package_plan_in_use", "package import plan is already being applied"));
+    found->second->claimed = true;
+    return SessionPackagePlanClaim{state, found->second};
+}
+
+class SessionMutationGuard {
+  public:
+    SessionMutationGuard(axk::app::ImageSessionManager &images, std::string_view image_id, std::string_view owner_id,
+                         std::uint64_t revision)
+        : images_(images), image_id_(image_id), owner_id_(owner_id), revision_(revision) {}
+    ~SessionMutationGuard() {
+        if (active_)
+            images_.abort_mutation(image_id_, owner_id_, revision_);
+    }
+    void finish() noexcept { active_ = false; }
+
+  private:
+    axk::app::ImageSessionManager &images_;
+    std::string image_id_;
+    std::string owner_id_;
+    std::uint64_t revision_{};
+    bool active_{true};
+};
+
+axk::app::Result<std::pair<std::string, std::uint64_t>> parse_session_identity(const Json &input) {
+    try {
+        return std::pair{input.at("imageId").get<std::string>(), input.at("expectedRevision").get<std::uint64_t>()};
+    } catch (const Json::exception &) {
+        return std::unexpected(operation_error("invalid_request", "imageId and expectedRevision are required"));
+    }
+}
+
+axk::app::Result<axk::PackageImportRequest> parse_session_import_request(const Json &input,
+                                                                         const axk::PortablePackage &package) {
+    axk::PackageImportRequest request;
+    try {
+        const auto partition = input.at("partitionIndex").get<std::uint32_t>();
+        const auto volume = input.at("volumeName").get<std::string>();
+        if (partition > std::numeric_limits<std::uint8_t>::max() || volume.empty())
+            return std::unexpected(operation_error("invalid_request", "package destination is invalid"));
+        for (std::size_t root_index = 0U; root_index < package.roots.size(); ++root_index) {
+            request.root_destinations.push_back(
+                {0U, root_index, static_cast<std::uint8_t>(partition), {}, volume, {}, {}, false});
+        }
+        if (input.contains("renames")) {
+            for (const auto &rename : input.at("renames")) {
+                request.policy.renames.push_back(
+                    {0U, rename.at("nodeId").get<std::string>(), rename.at("destinationName").get<std::string>()});
+            }
+        }
+    } catch (const Json::exception &) {
+        return std::unexpected(operation_error("invalid_request", "package destination or renames are malformed"));
+    }
+    return request;
+}
+
+Json session_import_result(const SessionPackagePlanRecord &record, const axk::app::ImageSessionSummary &summary,
+                           bool applied) {
+    auto result = plan_json(record.plan, record.token, 0U);
+    result.erase("planToken");
+    result.erase("expiresInSeconds");
+    result.erase("valid");
+    result.erase("warnings");
+    result.erase("conflicts");
+    result["imageId"] = record.image_id;
+    result["revision"] = summary.revision;
+    result["objectCount"] = summary.object_count;
+    result["applied"] = applied;
+    return result;
 }
 
 axk::app::Result<Json> read_operation(const Json &input, const axk::app::OperationContext &context,
@@ -649,8 +872,8 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
                     std::lock_guard lock{state->mutex};
                     cleanup_plans(*state, now);
                     if (state->plans.size() >= state->maximum_plans) {
-                        return Result<Json>{std::unexpected(
-                            operation_error("package_plan_capacity", "too many package import plans are active"))};
+                        return Result<Json>{std::unexpected(operation_error(
+                            "package_plan_capacity", "too many package import plans are active", std::nullopt, true))};
                     }
                     const auto reservation = normalized_path(*output_path);
                     if (state->destination_reservations.contains(reservation)) {
@@ -774,5 +997,254 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
         });
     if (!accesses_bound)
         return accesses_bound;
+    return {};
+}
+
+axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegistry &registry, const Sandbox &sandbox,
+                                                                 UploadStore &uploads, ImageSessionManager &images,
+                                                                 AlterationJournalStore &journals,
+                                                                 DownloadArchiveStore &downloads) {
+    auto state = std::make_shared<SessionPackageOperationState>();
+
+    if (!registry.is_implemented("images.package_import.plan")) {
+        auto bound = registry.bind(
+            "images.package_import.plan",
+            [state, &sandbox, &uploads, &images](const Json &input, const OperationContext &context) -> Result<Json> {
+                const auto identity = parse_session_identity(input);
+                if (!identity)
+                    return std::unexpected(identity.error());
+                auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+                if (!session)
+                    return std::unexpected(session.error());
+
+                PackageInput source;
+                try {
+                    auto parsed = parse_package_input(input.at("package"));
+                    if (!parsed)
+                        return std::unexpected(parsed.error());
+                    source = std::move(*parsed);
+                } catch (const Json::exception &) {
+                    return std::unexpected(operation_error("invalid_request", "package is required"));
+                }
+                auto resolved = resolve_package(source, context.owner_id, sandbox, uploads);
+                if (!resolved)
+                    return std::unexpected(resolved.error());
+                auto package = read_package(*resolved, true, context);
+                if (!package)
+                    return std::unexpected(package.error());
+                auto request = parse_session_import_request(input, *package);
+                if (!request)
+                    return std::unexpected(request.error());
+
+                const std::array packages{*package};
+                auto plan = axk::package_import_internal::plan_package_import_retained(
+                    session->reader, std::filesystem::path{session->source.relative_path}, *session->media, packages,
+                    *request, context.cancellation);
+                if (!plan)
+                    return std::unexpected(core_error(plan.error(), session->source.relative_path));
+
+                const auto now = Clock::now();
+                auto token = secure_random_hex(24U);
+                if (!token)
+                    return std::unexpected(token.error());
+                auto record = std::make_shared<SessionPackagePlanRecord>(SessionPackagePlanRecord{
+                    *token, context.owner_id, now + state->retention, identity->first, identity->second,
+                    std::move(source), std::move(*resolved), package->package_id, std::move(*plan), false});
+                {
+                    std::lock_guard lock{state->mutex};
+                    cleanup_session_plans(*state, now);
+                    if (state->plans.size() >= state->maximum_plans)
+                        return std::unexpected(operation_error(
+                            "package_plan_capacity", "too many package import plans are active", std::nullopt, true));
+                    if (state->plans.contains(*token))
+                        return std::unexpected(operation_error("secure_random_failed", "package plan token collision"));
+                    state->plans.emplace(*token, record);
+                }
+                auto result =
+                    plan_json(record->plan, record->token, static_cast<std::uint64_t>(state->retention.count() * 60));
+                result["imageId"] = record->image_id;
+                result["revision"] = record->expected_revision;
+                return result;
+            });
+        if (!bound)
+            return bound;
+    }
+
+    if (!registry.is_implemented("images.package_import.release")) {
+        auto bound =
+            registry.bind("images.package_import.release",
+                          [state](const Json &input, const OperationContext &context) -> Result<Json> {
+                              std::string token;
+                              try {
+                                  token = input.at("planToken").get<std::string>();
+                              } catch (const Json::exception &) {
+                                  return std::unexpected(operation_error("invalid_request", "planToken is required"));
+                              }
+                              std::lock_guard lock{state->mutex};
+                              cleanup_session_plans(*state, Clock::now());
+                              const auto found = state->plans.find(token);
+                              if (found == state->plans.end() || found->second->owner_id != context.owner_id)
+                                  return std::unexpected(operation_error("package_plan_not_found",
+                                                                         "package import plan is absent or expired"));
+                              if (found->second->claimed)
+                                  return std::unexpected(operation_error(
+                                      "package_plan_in_use", "package import plan is already being applied"));
+                              state->plans.erase(found);
+                              return Json{{"released", true}};
+                          });
+        if (!bound)
+            return bound;
+    }
+
+    if (!registry.is_implemented("images.package_import")) {
+        auto bound = registry.bind(
+            "images.package_import",
+            [state, &sandbox, &uploads, &images, &journals](const Json &input,
+                                                            const OperationContext &context) -> Result<Json> {
+                std::string token;
+                try {
+                    token = input.at("planToken").get<std::string>();
+                } catch (const Json::exception &) {
+                    return std::unexpected(operation_error("invalid_request", "planToken is required"));
+                }
+                auto claim = claim_session_plan(state, token, context.owner_id);
+                if (!claim)
+                    return std::unexpected(claim.error());
+                const auto record = claim->record();
+                if (!record->plan.valid()) {
+                    claim->consume();
+                    return std::unexpected(
+                        operation_error("package_plan_conflicts", "package import plan contains unresolved conflicts"));
+                }
+
+                auto mutation = images.begin_mutation(record->image_id, context.owner_id, record->expected_revision);
+                if (!mutation)
+                    return std::unexpected(mutation.error());
+                SessionMutationGuard mutation_guard{images, record->image_id, context.owner_id,
+                                                    record->expected_revision};
+
+                auto resolved = resolve_package(record->input, context.owner_id, sandbox, uploads);
+                if (!resolved)
+                    return std::unexpected(resolved.error());
+                auto package = read_package(*resolved, true, context);
+                if (!package)
+                    return std::unexpected(package.error());
+                if (package->package_id != record->package_id) {
+                    claim->consume();
+                    return std::unexpected(
+                        operation_error("package_plan_stale", "package changed after import planning"));
+                }
+                const std::array packages{*package};
+                auto prepared = axk::detail::prepare_sfs_package_import(
+                    mutation->target, std::filesystem::path{mutation->source.relative_path}, packages, record->plan,
+                    context.cancellation, context.progress);
+                if (!prepared)
+                    return std::unexpected(core_error(prepared.error(), mutation->source.relative_path));
+
+                std::vector<AlterationJournalPatch> patches;
+                patches.reserve(prepared->patches.size());
+                for (auto &patch : prepared->patches)
+                    patches.push_back({patch.offset, std::move(patch.original), std::move(patch.replacement)});
+                if (auto applied =
+                        journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation);
+                    !applied) {
+                    return std::unexpected(applied.error());
+                }
+                mutation->target.reset();
+                auto summary = images.commit_mutation(record->image_id, context.owner_id, record->expected_revision,
+                                                      CancellationToken{});
+                if (!summary)
+                    return std::unexpected(summary.error());
+                mutation_guard.finish();
+                auto result = session_import_result(*record, *summary, !patches.empty());
+                claim->consume();
+                return result;
+            });
+        if (!bound)
+            return bound;
+    }
+
+    if (!registry.is_implemented("images.package_export")) {
+        auto bound = registry.bind(
+            "images.package_export",
+            [&sandbox, &images, &downloads](const Json &input, const OperationContext &context) -> Result<Json> {
+                const auto identity = parse_session_identity(input);
+                if (!identity)
+                    return std::unexpected(identity.error());
+                auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+                if (!session)
+                    return std::unexpected(session.error());
+
+                auto roots = parse_session_export_roots(input, session->object_keys_by_id);
+                if (!roots)
+                    return std::unexpected(roots.error());
+                auto built = axk::build_portable_package(*session->media, *roots, context.cancellation);
+                if (!built)
+                    return std::unexpected(core_error(built.error(), session->source.relative_path));
+                auto build = std::move(*built);
+                session->lease.reset();
+
+                Json destination;
+                try {
+                    destination = input.at("destination");
+                } catch (const Json::exception &) {
+                    return std::unexpected(operation_error("invalid_request", "destination is required"));
+                }
+                auto result = package_json(build.package);
+                result["imageId"] = identity->first;
+                result["revision"] = identity->second;
+                result["sizeBytes"] = build.archive.size();
+                const auto kind = destination.value("kind", std::string{});
+                if (kind == "WORKSPACE") {
+                    auto output = parse_file_ref(destination, "output");
+                    if (!output)
+                        return std::unexpected(output.error());
+                    const auto required = std::string{build.required_extension};
+                    if (!output->relative_path.ends_with(required)) {
+                        if (!std::filesystem::path{output->relative_path}.extension().empty()) {
+                            return std::unexpected(operation_error("package_extension_mismatch",
+                                                                   std::format("package output must use {}", required),
+                                                                   output->relative_path));
+                        }
+                        output->relative_path += required;
+                    }
+                    const axk::MemoryReader archive{build.archive};
+                    if (auto published = sandbox.publish_file(*output, destination.value("overwrite", false), archive);
+                        !published) {
+                        return std::unexpected(published.error());
+                    }
+                    result["destination"] = "WORKSPACE";
+                    result["output"] = file_ref_json(*output);
+                    result["download"] = nullptr;
+                } else if (kind == "DOWNLOAD") {
+                    auto filename = destination.value("filename", build.package.roots.front().display_name +
+                                                                      std::string{build.required_extension});
+                    if (filename.empty() || filename == "." || filename == ".." ||
+                        filename.find_first_of("/\\") != std::string::npos) {
+                        return std::unexpected(operation_error("invalid_request", "download filename is invalid"));
+                    }
+                    if (!filename.ends_with(build.required_extension))
+                        filename += build.required_extension;
+                    auto retained =
+                        downloads.retain(context.owner_id, filename, "application/octet-stream", build.archive);
+                    if (!retained)
+                        return std::unexpected(retained.error());
+                    result["destination"] = "DOWNLOAD";
+                    result["output"] = nullptr;
+                    result["download"] = {
+                        {"archiveId", retained->reference.archive_id},
+                        {"filename", retained->filename},
+                        {"sizeBytes", retained->size_bytes},
+                        {"expiresInSeconds", retained->expires_in_seconds},
+                        {"contentPath", "/api/v1/download-archives/" + retained->reference.archive_id + "/content"}};
+                } else {
+                    return std::unexpected(
+                        operation_error("invalid_request", "destination kind must be WORKSPACE or DOWNLOAD"));
+                }
+                return result;
+            });
+        if (!bound)
+            return bound;
+    }
     return {};
 }

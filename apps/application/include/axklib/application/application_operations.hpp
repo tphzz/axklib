@@ -8,6 +8,7 @@
 namespace axk::app {
 
 class AlterationJournalStore;
+class DownloadArchiveStore;
 class ImageSessionManager;
 
 // Composes every stateful domain-operation family. Transport adapters should
@@ -21,6 +22,7 @@ make_application_registry(const Sandbox &sandbox, UploadStore &uploads,
                           const axk::MediaBuildLimits &media_limits = {});
 [[nodiscard]] Result<void> bind_session_application_operations(OperationRegistry &registry, const Sandbox &sandbox,
                                                                UploadStore &uploads, ImageSessionManager &images,
-                                                               AlterationJournalStore &journals);
+                                                               AlterationJournalStore &journals,
+                                                               DownloadArchiveStore &downloads);
 
 } // namespace axk::app

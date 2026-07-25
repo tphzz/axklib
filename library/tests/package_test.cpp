@@ -14,11 +14,14 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "axklib/alteration_transaction.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/bytes.hpp"
+#include "axklib/io.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package.hpp"
 #include "axklib/package_archive.hpp"
+#include "axklib/package_import_planning.hpp"
 #include "axklib/package_relocation.hpp"
 #include "axklib/writer.hpp"
 
@@ -1385,7 +1388,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
 }
 
 TEST(PackageImportPlanner, ReusesAnExactExistingSfsClosureWithoutAllocation) {
-    auto source = axk::open_media(fixture("HD00_512_single_sbnk_authored.hds"));
+    const auto target_path = fixture("HD00_512_single_sbnk_authored.hds");
+    auto source = axk::open_media(target_path);
     ASSERT_TRUE(source) << source.error().message;
     const std::vector sample_root{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
     const auto built = axk::build_portable_package(*source, sample_root);
@@ -1394,7 +1398,7 @@ TEST(PackageImportPlanner, ReusesAnExactExistingSfsClosureWithoutAllocation) {
     axk::PackageImportRequest request;
     request.root_destinations.push_back(destination(0U, "New Volume"));
     const std::vector packages{built->package};
-    const auto plan = axk::plan_package_import(fixture("HD00_512_single_sbnk_authored.hds"), packages, request);
+    const auto plan = axk::plan_package_import(target_path, packages, request);
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_TRUE(plan->valid()) << conflict_summary(*plan);
     ASSERT_EQ(plan->objects.size(), 2U);
@@ -1411,6 +1415,25 @@ TEST(PackageImportPlanner, ReusesAnExactExistingSfsClosureWithoutAllocation) {
     EXPECT_EQ(plan->target_snapshot_id.size(), 64U);
     EXPECT_EQ(plan->policy_digest.size(), 64U);
     EXPECT_EQ(plan->plan_id.size(), 64U);
+
+    auto target_reader = axk::FileReader::open(target_path);
+    ASSERT_TRUE(target_reader) << target_reader.error().message;
+    const auto reader_plan = axk::plan_package_import(*target_reader, "retained-session-reader.hds", packages, request);
+    ASSERT_TRUE(reader_plan) << reader_plan.error().message;
+    EXPECT_EQ(reader_plan->target_snapshot_id, plan->target_snapshot_id);
+    EXPECT_EQ(reader_plan->policy_digest, plan->policy_digest);
+    EXPECT_EQ(reader_plan->plan_id, plan->plan_id);
+    EXPECT_EQ(reader_plan->objects.size(), plan->objects.size());
+    EXPECT_EQ(reader_plan->allocation.size(), plan->allocation.size());
+
+    const auto retained_plan = axk::package_import_internal::plan_package_import_retained(
+        *target_reader, "retained-session-reader.hds", *source, packages, request);
+    ASSERT_TRUE(retained_plan) << retained_plan.error().message;
+    EXPECT_EQ(retained_plan->target_snapshot_id, plan->target_snapshot_id);
+    EXPECT_EQ(retained_plan->policy_digest, plan->policy_digest);
+    EXPECT_EQ(retained_plan->plan_id, plan->plan_id);
+    EXPECT_EQ(retained_plan->objects.size(), plan->objects.size());
+    EXPECT_EQ(retained_plan->allocation.size(), plan->allocation.size());
 }
 
 TEST(PackageImportPlanner, ReservesOneSfsObjectForSharedIncomingRoots) {
@@ -1677,7 +1700,7 @@ TEST(PackageImportPlanner, RejectsFat12RootExhaustionAndInvalidExistingChains) {
     std::filesystem::remove_all(output_root, error);
 }
 
-TEST(PackageImportPlanner, ReportsSfsObjectAndDirectoryCapacityBeforeApply) {
+TEST(PackageImportPlanner, ReportsSfsObjectAndClusterCapacityBeforeApply) {
     const auto built = fat_smpl_package();
     ASSERT_TRUE(built) << built.error().message;
     constexpr std::size_t package_count = 8192U;
@@ -1697,7 +1720,7 @@ TEST(PackageImportPlanner, ReportsSfsObjectAndDirectoryCapacityBeforeApply) {
     EXPECT_FALSE(plan->valid());
     EXPECT_TRUE(std::ranges::any_of(plan->conflicts,
                                     [](const auto &conflict) { return conflict.code == "SFS_OBJECT_ID_EXHAUSTED"; }));
-    EXPECT_TRUE(std::ranges::any_of(
+    EXPECT_FALSE(std::ranges::any_of(
         plan->conflicts, [](const auto &conflict) { return conflict.code == "SFS_DIRECTORY_CAPACITY_EXHAUSTED"; }));
     EXPECT_EQ(read_file(target), before);
 }
@@ -1811,6 +1834,21 @@ TEST(PackageImportApply, AtomicallyInsertsAndThenReusesAnExactSmpl) {
     EXPECT_EQ(applied->output_snapshot_id.size(), 64U);
     EXPECT_EQ(read_file(source_path), source_before);
 
+    const auto source_reader = axk::FileReader::open(source_path);
+    ASSERT_TRUE(source_reader) << source_reader.error().message;
+    const auto prepared = axk::detail::prepare_sfs_package_import(*source_reader, source_path, packages, *plan);
+    ASSERT_TRUE(prepared) << prepared.error().message;
+    EXPECT_EQ(prepared->plan_id, plan->plan_id);
+    EXPECT_EQ(prepared->source_snapshot_id, plan->target_snapshot_id);
+    EXPECT_FALSE(prepared->patches.empty());
+    auto patched = source_before;
+    for (const auto &patch : prepared->patches) {
+        ASSERT_LE(patch.offset, patched.size());
+        ASSERT_LE(patch.replacement.size(), patched.size() - patch.offset);
+        std::ranges::copy(patch.replacement, patched.begin() + static_cast<std::ptrdiff_t>(patch.offset));
+    }
+    EXPECT_EQ(patched, read_file(first_output));
+
     auto reopened = axk::open_media(first_output);
     ASSERT_TRUE(reopened) << reopened.error().message;
     auto catalog = axk::build_object_catalog(*reopened);
@@ -1840,6 +1878,60 @@ TEST(PackageImportApply, AtomicallyInsertsAndThenReusesAnExactSmpl) {
     const auto repeated = axk::apply_package_import(first_output, packages, *repeat_plan, second_output, false);
     ASSERT_TRUE(repeated) << repeated.error().message;
     EXPECT_EQ(read_file(second_output), read_file(first_output));
+    std::filesystem::remove_all(output_root, error);
+}
+
+TEST(PackageImportApply, GrowsAnExistingCategoryDirectoryBeforeInsertingObjects) {
+    const auto output_root = publication_root("axklib-package-import-directory-growth");
+    const auto output_path = output_root / "imported.hds";
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+
+    const auto built = fat_smpl_package();
+    ASSERT_TRUE(built) << built.error().message;
+    constexpr std::size_t package_count = 64U;
+    const std::vector packages(package_count, built->package);
+    axk::PackageImportRequest request;
+    request.root_destinations.reserve(package_count);
+    request.policy.renames.reserve(package_count);
+    for (std::size_t index = 0U; index < package_count; ++index) {
+        request.root_destinations.push_back(destination(index, "New Volume"));
+        request.policy.renames.push_back(
+            {index, built->package.nodes.front().node_id, std::format("IMPORTED {:02}", index)});
+    }
+
+    const auto target_path = fixture("HD00_512_single_sbnk_authored.hds");
+    const auto plan = axk::plan_package_import(target_path, packages, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_TRUE(plan->valid()) << conflict_summary(*plan);
+    ASSERT_EQ(plan->allocation.size(), 1U);
+    EXPECT_EQ(plan->allocation.front().inserted_object_count, package_count);
+    EXPECT_EQ(plan->allocation.front().directory_growth_bytes, package_count * 32U);
+    EXPECT_GT(plan->allocation.front().directory_growth_clusters, 0U);
+    EXPECT_EQ(plan->allocation.front().blocked_object_count, 0U);
+    EXPECT_EQ(plan->allocation.front().additional_allocated_bytes,
+              (plan->allocation.front().payload_clusters + plan->allocation.front().continuation_clusters +
+               plan->allocation.front().directory_growth_clusters +
+               plan->allocation.front().directory_continuation_clusters) *
+                  1024U);
+
+    const auto applied = axk::apply_package_import(target_path, packages, *plan, output_path, false);
+    ASSERT_TRUE(applied) << applied.error().message;
+    const auto reopened = axk::open_media(output_path);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    for (std::size_t index = 0U; index < package_count; ++index) {
+        const auto name = std::format("IMPORTED {:02}", index);
+        EXPECT_EQ(std::ranges::count_if(catalog->objects,
+                                        [&](const auto &object) {
+                                            return object.placement && object.placement->volume_name == "New Volume" &&
+                                                   object.object.header.raw_type == "SMPL" &&
+                                                   object.object.header.name == name;
+                                        }),
+                  1U);
+    }
     std::filesystem::remove_all(output_root, error);
 }
 

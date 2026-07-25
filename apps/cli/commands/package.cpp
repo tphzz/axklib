@@ -158,7 +158,8 @@ Result<std::vector<PackageNodeRename>> load_renames(const std::filesystem::path 
 void print_package_summary(const schema::package_v1::PackageOutput &output, bool verify_only) {
     std::cout << output.path_utf8 << '\t' << (output.valid ? "valid" : "invalid") << "\tkind=" << output.package_kind
               << "\tpackage_id=" << output.package_id << "\troots=" << output.roots.size()
-              << "\tobjects=" << output.objects.size() << "\trelationships=" << output.relationship_count;
+              << "\tobjects=" << output.objects.size() << "\tpayload_bytes=" << output.total_payload_bytes
+              << "\trelationships=" << output.relationship_count;
     std::cout << "\tverification=" << (output.payloads_verified ? "full" : "manifest");
     if (!verify_only)
         std::cout << "\textension=" << output.required_extension;
@@ -171,6 +172,12 @@ void print_plan_summary(const schema::package_v1::PlanOutput &output) {
     std::cout << output.target_path_utf8 << '\t' << (output.valid ? "valid" : "conflicts")
               << "\ttarget=" << output.target_kind << "\tplan_id=" << output.plan_id
               << "\tobjects=" << output.objects.size() << "\tconflicts=" << output.conflicts.size() << '\n';
+    for (const auto &allocation : output.allocation) {
+        std::cout << "allocation\tpartition=" << allocation.partition_index << "\tvolume=" << allocation.volume_name
+                  << "\tinsert=" << allocation.inserted_object_count << "\treuse=" << allocation.reused_object_count
+                  << "\tblocked=" << allocation.blocked_object_count
+                  << "\tadditional_bytes=" << allocation.additional_allocated_bytes << '\n';
+    }
     for (const auto &warning : output.warnings)
         std::cout << "warning\t" << warning.code << '\t' << warning.message << '\n';
     for (const auto &conflict : output.conflicts)

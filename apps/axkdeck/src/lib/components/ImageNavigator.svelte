@@ -22,6 +22,8 @@
         ) => Promise<{ items: DiskTreeItem[]; totalCount: number }>;
         volumeActionsEnabled: boolean;
         partitionActionsEnabled: boolean;
+        packageImportEnabled?: boolean;
+        packageExportEnabled?: boolean;
         onimageaction: (item: DiskTreeItem, action: ImageTreeAction) => void;
     }
 
@@ -39,6 +41,8 @@
         onloadchildren,
         volumeActionsEnabled,
         partitionActionsEnabled,
+        packageImportEnabled = false,
+        packageExportEnabled = false,
         onimageaction,
     }: Props = $props();
     let filter = $state('');
@@ -243,6 +247,8 @@
                         {onloadchildren}
                         {volumeActionsEnabled}
                         {partitionActionsEnabled}
+                        {packageImportEnabled}
+                        {packageExportEnabled}
                         onrequestmenu={requestTreeMenu}
                     />
                 {:else}
@@ -294,15 +300,30 @@
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('add-volume')}>Add volume</button>
             {/if}
         {:else}
-            <button type="button" role="menuitem" onclick={() => chooseTreeAction('rename-volume')}
-                >Rename volume</button
-            >
-            <button
-                class="danger-menu-item"
-                type="button"
-                role="menuitem"
-                onclick={() => chooseTreeAction('delete-volume')}>Delete volume</button
-            >
+            {#if packageImportEnabled}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('import-package')}
+                    >Import package…</button
+                >
+            {/if}
+            {#if packageExportEnabled}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-package')}
+                    >Export package…</button
+                >
+            {/if}
+            {#if volumeActionsEnabled}
+                {#if packageImportEnabled || packageExportEnabled}
+                    <div class="context-menu-separator" role="separator"></div>
+                {/if}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('rename-volume')}
+                    >Rename volume</button
+                >
+                <button
+                    class="danger-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onclick={() => chooseTreeAction('delete-volume')}>Delete volume</button
+                >
+            {/if}
         {/if}
     </div>
 {/if}

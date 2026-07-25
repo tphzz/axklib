@@ -179,9 +179,11 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
         .source_media_kind = "sfs",
         .valid = true,
         .payloads_verified = false,
+        .total_payload_bytes = std::numeric_limits<std::uint64_t>::max() - 1U,
         .relationship_count = std::numeric_limits<std::uint64_t>::max(),
         .roots = {{"sbnk", "Sample", {"node"}}},
-        .objects = {{"node", "SBNK", "Sample", "payload", "normalized", std::nullopt, std::nullopt}},
+        .objects = {{"node", "SBNK", "Sample", std::numeric_limits<std::uint64_t>::max() - 1U, "payload", "normalized",
+                     std::nullopt, std::nullopt}},
         .issues = {},
     };
     const auto serialized_package = package_schema::serialize(package, false);
@@ -190,6 +192,8 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
     EXPECT_EQ(package_json["package_kind"], "sbnk");
     EXPECT_EQ(package_json["required_extension"], ".axksbnk");
     EXPECT_FALSE(package_json["payloads_verified"]);
+    EXPECT_EQ(package_json["total_payload_bytes"], std::numeric_limits<std::uint64_t>::max() - 1U);
+    EXPECT_EQ(package_json["objects"][0]["payload_size_bytes"], std::numeric_limits<std::uint64_t>::max() - 1U);
     EXPECT_TRUE(package_json["objects"][0]["semantic_sha256"].is_null());
     EXPECT_TRUE(package_json["objects"][0]["audio_sha256"].is_null());
     EXPECT_EQ(package_json["relationship_count"], std::numeric_limits<std::uint64_t>::max());
@@ -221,7 +225,8 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
                      std::nullopt,
                      std::nullopt,
                      std::nullopt}},
-        .allocation = {},
+        .allocation = {{0U, "Group", "Volume", "Raw Group", "Raw Volume", 1U,  2U,  3U,  4U,  5U,
+                        6U, 7U,      8U,       9U,          10U,          11U, 12U, 13U, 14U, 15U}},
         .result = std::nullopt,
     };
     const auto serialized_plan = package_schema::serialize(plan, false);
@@ -231,5 +236,10 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
     EXPECT_TRUE(plan_json["conflicts"][0]["partition_index"].is_null());
     EXPECT_TRUE(plan_json["objects"][0]["canonical_action_id"].is_null());
     EXPECT_TRUE(plan_json["objects"][0]["target_sfs_id"].is_null());
+    EXPECT_EQ(plan_json["allocation"][0]["blocked_object_count"], 3U);
+    EXPECT_EQ(plan_json["allocation"][0]["directory_growth_clusters"], 8U);
+    EXPECT_EQ(plan_json["allocation"][0]["directory_continuation_clusters"], 9U);
+    EXPECT_EQ(plan_json["allocation"][0]["infrastructure_clusters"], 10U);
+    EXPECT_EQ(plan_json["allocation"][0]["additional_allocated_bytes"], 11U);
     EXPECT_TRUE(plan_json["result"].is_null());
 }

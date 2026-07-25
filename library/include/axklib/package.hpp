@@ -59,6 +59,7 @@ struct PackageNode {
     std::optional<std::string> audio_sha256;
     PackagePlacementHint placement_hint;
     std::vector<PackageRelocation> relocations;
+    std::uint64_t payload_size_bytes{};
     std::vector<std::byte> raw_payload;
 
     friend bool operator==(const PackageNode &, const PackageNode &) = default;
@@ -210,10 +211,15 @@ struct PackageAllocationDelta {
     std::string raw_volume;
     std::uint64_t inserted_object_count{};
     std::uint64_t reused_object_count{};
+    std::uint64_t blocked_object_count{};
     std::uint64_t payload_clusters{};
     std::uint64_t payload_sectors{};
     std::uint64_t continuation_clusters{};
     std::uint64_t directory_growth_bytes{};
+    std::uint64_t directory_growth_clusters{};
+    std::uint64_t directory_continuation_clusters{};
+    std::uint64_t infrastructure_clusters{};
+    std::uint64_t additional_allocated_bytes{};
     std::uint64_t remaining_object_ids{};
     std::uint64_t remaining_clusters{};
     std::uint64_t projected_image_sectors{};
@@ -308,6 +314,11 @@ AXK_API Result<PortablePackage> inspect_portable_package(const RandomAccessReade
                                                          const CancellationToken &cancellation = {});
 
 AXK_API Result<PackageImportPlan> plan_package_import(const std::filesystem::path &target_path,
+                                                      std::span<const PortablePackage> packages,
+                                                      const PackageImportRequest &request,
+                                                      const CancellationToken &cancellation = {});
+AXK_API Result<PackageImportPlan> plan_package_import(std::shared_ptr<const RandomAccessReader> target_reader,
+                                                      std::filesystem::path target_path,
                                                       std::span<const PortablePackage> packages,
                                                       const PackageImportRequest &request,
                                                       const CancellationToken &cancellation = {});

@@ -165,6 +165,7 @@ struct axk::app::ImageSessionManager::Implementation {
         std::unordered_map<std::string, std::vector<std::size_t>> object_indices_by_content_scope;
         std::vector<ImageRelationshipItem> relationships;
         std::vector<ImageValidationItem> validation;
+        std::shared_ptr<const RandomAccessReader> source_reader;
         std::optional<MediaContainer> media;
         std::unordered_map<std::string, MediaObjectDescriptor> descriptors_by_id;
         std::unordered_map<std::string, ObjectSnapshot> snapshots_by_id;
@@ -695,6 +696,7 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
     auto session = std::make_shared<Implementation::Session>();
     session->owner_id = std::move(owner_id);
     session->source = source;
+    session->source_reader = file->reader;
     session->format = media_kind_name(media->kind());
     session->root_count = tree.roots.size();
     session->last_access = implementation_->clock();
@@ -906,13 +908,15 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
             ++validation.info_count;
     }
     std::vector<std::string> available_operations{"images.content",           "images.objects", "images.relationships",
-                                                  "images.validation.issues", "images.preview", "auditions.prepare"};
+                                                  "images.validation.issues", "images.preview", "auditions.prepare",
+                                                  "images.package.export"};
     const auto source_metadata =
         implementation_->sandbox.metadata((*session)->source.root_id, (*session)->source.relative_path);
     if ((*session)->format == "sfs" && source_metadata && source_metadata->writable) {
         available_operations.emplace_back("images.alter.volumes");
         available_operations.emplace_back("images.alter.partitions");
         available_operations.emplace_back("images.alter.objects");
+        available_operations.emplace_back("images.package.import");
     }
     return ImageSessionSummary{.image_id = (*session)->image_id,
                                .revision = (*session)->revision,
@@ -1051,6 +1055,29 @@ axk::app::ImageSessionManager::plan_deletion(std::string_view image_id, std::str
     append_notices(inspected->blockers, result.blockers);
     append_notices(inspected->warnings, result.warnings);
     return ImageObjectDeletionPlan{std::move(result), std::move(inspected->manifest)};
+}
+
+axk::app::Result<axk::app::ImageSessionRead>
+axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string_view owner_id,
+                                          std::uint64_t expected_revision) {
+    const auto session = implementation_->owned(image_id, owner_id);
+    if (!session)
+        return std::unexpected(session.error());
+    auto access = std::unique_lock{(*session)->access_mutex};
+    if ((*session)->revision != expected_revision)
+        return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
+    if ((*session)->mutating)
+        return std::unexpected(session_error("entry_in_use", "image session mutation is already active", true));
+    if (!(*session)->media)
+        return std::unexpected(session_error("image_media_unavailable", "image session media is unavailable", true));
+    auto lease = std::make_shared<std::unique_lock<std::mutex>>(std::move(access));
+    std::unordered_map<std::string, std::string> object_keys_by_id;
+    object_keys_by_id.reserve((*session)->snapshots_by_id.size());
+    for (const auto &[id, snapshot] : (*session)->snapshots_by_id)
+        object_keys_by_id.emplace(id, snapshot.key);
+    return ImageSessionRead{(*session)->image_id,      (*session)->revision, (*session)->source,
+                            (*session)->source_reader, &*(*session)->media,  std::move(object_keys_by_id),
+                            std::move(lease)};
 }
 
 axk::app::Result<axk::app::ImageSessionMutation>

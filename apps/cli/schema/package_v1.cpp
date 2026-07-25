@@ -51,8 +51,10 @@ PackageOutput project_package(const std::filesystem::path &path, const PortableP
     }
     result.objects.reserve(package.nodes.size());
     for (const auto &node : package.nodes) {
-        result.objects.push_back({node.node_id, node.object_type, node.name, node.payload_sha256,
-                                  node.normalized_sha256, node.semantic_sha256, node.audio_sha256});
+        result.total_payload_bytes += node.payload_size_bytes;
+        result.objects.push_back({node.node_id, node.object_type, node.name, node.payload_size_bytes,
+                                  node.payload_sha256, node.normalized_sha256, node.semantic_sha256,
+                                  node.audio_sha256});
     }
     result.issues.reserve(package.issues.size());
     std::ranges::transform(package.issues, std::back_inserter(result.issues), [](const PackageIssue &issue) {
@@ -71,6 +73,7 @@ Result<PackageOutput> project_package(const std::filesystem::path &path, const n
         result.source_media_kind = service_result.at("sourceMediaKind").get<std::string>();
         result.valid = service_result.at("valid").get<bool>();
         result.payloads_verified = service_result.at("payloadsVerified").get<bool>();
+        result.total_payload_bytes = service_result.at("totalPayloadBytes").get<std::uint64_t>();
         result.relationship_count = service_result.at("relationshipCount").get<std::uint64_t>();
         for (const auto &root : service_result.at("roots")) {
             result.roots.push_back({root.at("kind").get<std::string>(), root.at("displayName").get<std::string>(),
@@ -79,8 +82,8 @@ Result<PackageOutput> project_package(const std::filesystem::path &path, const n
         for (const auto &node : service_result.at("objects")) {
             result.objects.push_back(
                 {node.at("nodeId").get<std::string>(), node.at("objectType").get<std::string>(),
-                 node.at("name").get<std::string>(), node.at("payloadSha256").get<std::string>(),
-                 node.at("normalizedSha256").get<std::string>(),
+                 node.at("name").get<std::string>(), node.at("payloadSizeBytes").get<std::uint64_t>(),
+                 node.at("payloadSha256").get<std::string>(), node.at("normalizedSha256").get<std::string>(),
                  node.at("semanticSha256").is_null() ? std::nullopt
                                                      : std::optional{node.at("semanticSha256").get<std::string>()},
                  node.at("audioSha256").is_null() ? std::nullopt
@@ -165,10 +168,15 @@ PlanOutput project_plan(const std::filesystem::path &target, const std::vector<s
             allocation.raw_volume,
             allocation.inserted_object_count,
             allocation.reused_object_count,
+            allocation.blocked_object_count,
             allocation.payload_clusters,
             allocation.payload_sectors,
             allocation.continuation_clusters,
             allocation.directory_growth_bytes,
+            allocation.directory_growth_clusters,
+            allocation.directory_continuation_clusters,
+            allocation.infrastructure_clusters,
+            allocation.additional_allocated_bytes,
             allocation.remaining_object_ids,
             allocation.remaining_clusters,
             allocation.projected_image_sectors,
@@ -250,10 +258,15 @@ Result<PlanOutput> project_plan(const std::filesystem::path &target,
                 allocation.at("rawVolume").get<std::string>(),
                 allocation.at("insertedObjectCount").get<std::uint64_t>(),
                 allocation.at("reusedObjectCount").get<std::uint64_t>(),
+                allocation.at("blockedObjectCount").get<std::uint64_t>(),
                 allocation.at("payloadClusters").get<std::uint64_t>(),
                 allocation.at("payloadSectors").get<std::uint64_t>(),
                 allocation.at("continuationClusters").get<std::uint64_t>(),
                 allocation.at("directoryGrowthBytes").get<std::uint64_t>(),
+                allocation.at("directoryGrowthClusters").get<std::uint64_t>(),
+                allocation.at("directoryContinuationClusters").get<std::uint64_t>(),
+                allocation.at("infrastructureClusters").get<std::uint64_t>(),
+                allocation.at("additionalAllocatedBytes").get<std::uint64_t>(),
                 allocation.at("remainingObjectIds").get<std::uint64_t>(),
                 allocation.at("remainingClusters").get<std::uint64_t>(),
                 allocation.at("projectedImageSectors").get<std::uint64_t>(),
@@ -285,6 +298,7 @@ Result<std::string> serialize(const PackageOutput &output, bool pretty) {
                 {"node_id", object.node_id},
                 {"object_type", object.object_type},
                 {"name", object.name},
+                {"payload_size_bytes", object.payload_size_bytes},
                 {"payload_sha256", object.payload_sha256},
                 {"normalized_sha256", object.normalized_sha256},
                 {"semantic_sha256", optional_string(object.semantic_sha256)},
@@ -303,6 +317,7 @@ Result<std::string> serialize(const PackageOutput &output, bool pretty) {
             {"source_media_kind", output.source_media_kind},
             {"valid", output.valid},
             {"payloads_verified", output.payloads_verified},
+            {"total_payload_bytes", output.total_payload_bytes},
             {"roots", std::move(roots)},
             {"objects", std::move(objects)},
             {"relationship_count", output.relationship_count},
@@ -367,10 +382,15 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
                 {"raw_volume", item.raw_volume},
                 {"inserted_object_count", item.inserted_object_count},
                 {"reused_object_count", item.reused_object_count},
+                {"blocked_object_count", item.blocked_object_count},
                 {"payload_clusters", item.payload_clusters},
                 {"payload_sectors", item.payload_sectors},
                 {"continuation_clusters", item.continuation_clusters},
                 {"directory_growth_bytes", item.directory_growth_bytes},
+                {"directory_growth_clusters", item.directory_growth_clusters},
+                {"directory_continuation_clusters", item.directory_continuation_clusters},
+                {"infrastructure_clusters", item.infrastructure_clusters},
+                {"additional_allocated_bytes", item.additional_allocated_bytes},
                 {"remaining_object_ids", item.remaining_object_ids},
                 {"remaining_clusters", item.remaining_clusters},
                 {"projected_image_sectors", item.projected_image_sectors},

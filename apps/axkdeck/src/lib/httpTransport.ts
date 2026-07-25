@@ -18,6 +18,10 @@ import type {
     HardDiskCreationProfile,
     HardDiskCreationProfileId,
     ImageTransport,
+    ImageSessionPackageExportDestination,
+    ImageSessionPackageExportRoot,
+    ImageSessionPackageImportPlan,
+    ImageSessionPackageRename,
     InputBinding,
     JobState,
     ObjectPage,
@@ -390,6 +394,65 @@ export class HttpImageTransport implements ImageTransport {
         return this.mapJob(job);
     }
 
+    async planImagePackageImport(
+        sessionId: number,
+        source: InputFileLocation,
+        partitionIndex: number,
+        volumeName: string,
+        renames: ImageSessionPackageRename[] = [],
+    ): Promise<ImageSessionPackageImportPlan> {
+        const session = this.session(sessionId);
+        const result = await this.client.invoke<ImageSessionPackageImportPlan>('images.package_import.plan', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            package: this.serverInput(source),
+            partitionIndex,
+            volumeName,
+            renames,
+        });
+        if (this.isJob(result)) throw new Error('image package import planning unexpectedly returned a job');
+        return result;
+    }
+
+    async releaseImagePackageImportPlan(planToken: string): Promise<void> {
+        const result = await this.client.invoke<{ released: true }>('images.package_import.release', { planToken });
+        if (this.isJob(result)) throw new Error('image package plan release unexpectedly returned a job');
+    }
+
+    async startImagePackageImport(planToken: string): Promise<JobState> {
+        const job = await this.client.invoke<never>(
+            'images.package_import',
+            { planToken },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.isJob(job)) throw new Error('images.package_import did not return a job');
+        return this.mapJob(job);
+    }
+
+    async startImagePackageExport(
+        sessionId: number,
+        roots: ImageSessionPackageExportRoot[],
+        destination: ImageSessionPackageExportDestination,
+    ): Promise<JobState> {
+        const session = this.session(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.package_export',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                roots,
+                destination,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.isJob(job)) throw new Error('images.package_export did not return a job');
+        return this.mapJob(job);
+    }
+
+    deleteRetainedPackage(download: components['schemas']['RetainedDownload']): Promise<void> {
+        return this.client.deleteRetainedDownload(download.contentPath);
+    }
+
     async openImage(location: FileLocation): Promise<OpenedImage> {
         const source = this.serverFile(location);
         const summary = await this.client.request<ApiImageSummary>('POST', '/images', {
@@ -447,6 +510,8 @@ export class HttpImageTransport implements ImageTransport {
             volumeMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.volumes'),
             partitionMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.partitions'),
             objectDeletionAvailable: (summary.availableOperations ?? []).includes('images.alter.objects'),
+            packageImportAvailable: (summary.availableOperations ?? []).includes('images.package.import'),
+            packageExportAvailable: (summary.availableOperations ?? []).includes('images.package.export'),
             tree: [disk],
         };
     }

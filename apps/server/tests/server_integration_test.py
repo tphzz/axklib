@@ -1396,9 +1396,11 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.validation.issues",
                 "images.preview",
                 "auditions.prepare",
+                "images.package.export",
                 "images.alter.volumes",
                 "images.alter.partitions",
                 "images.alter.objects",
+                "images.package.import",
             ]
             assert opened["data"]["objectCount"] > 0
             status, objects = http_request(

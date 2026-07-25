@@ -444,6 +444,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/image-session-package-exports': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.package_export'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/image-session-package-import-plan-releases': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.package_import.release'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/image-session-package-import-plans': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.package_import.plan'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/image-session-package-imports': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.package_import'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/images': {
         parameters: {
             query?: never;
@@ -1762,6 +1826,105 @@ export interface components {
             validation: components['schemas']['ImageBuildResult']['validation'];
             warnings: components['schemas']['Issue'][];
         };
+        ImageSessionPackageExportDestination:
+            | {
+                  /** @constant */
+                  kind: 'WORKSPACE';
+                  output: components['schemas']['FileRef'];
+                  /** @default false */
+                  overwrite: boolean;
+              }
+            | {
+                  filename: string;
+                  /** @constant */
+                  kind: 'DOWNLOAD';
+              };
+        ImageSessionPackageExportRequest: {
+            destination: components['schemas']['ImageSessionPackageExportDestination'];
+            expectedRevision: number;
+            imageId: string;
+            roots: components['schemas']['ImageSessionPackageExportRoot'][];
+        };
+        ImageSessionPackageExportResult: {
+            /** @enum {unknown} */
+            destination: 'WORKSPACE' | 'DOWNLOAD';
+            download: components['schemas']['RetainedDownload'] | null;
+            imageId: string;
+            issues: components['schemas']['Issue'][];
+            objects: components['schemas']['PackageObject'][];
+            output: components['schemas']['FileRef'] | null;
+            packageId: string;
+            /** @enum {unknown} */
+            packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'BUNDLE';
+            payloadsVerified: boolean;
+            relationshipCount: number;
+            relationships: components['schemas']['PackageRelationship'][];
+            requiredExtension: string;
+            revision: number;
+            roots: components['schemas']['PackageRoot'][];
+            /** @constant */
+            schemaVersion: '1.0';
+            sizeBytes: number;
+            /** @enum {unknown} */
+            sourceMediaKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'UNKNOWN';
+            totalPayloadBytes: number;
+            valid: boolean;
+        };
+        ImageSessionPackageExportRoot:
+            | {
+                  /** @constant */
+                  kind: 'VOLUME';
+                  partitionIndex: number;
+                  volumeName: string;
+              }
+            | {
+                  /** @enum {unknown} */
+                  kind: 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL';
+                  objectId: string;
+              };
+        ImageSessionPackageImportPlan: {
+            actions: components['schemas']['PackageImportAction'][];
+            allocation: components['schemas']['PackageAllocationEstimate'][];
+            conflicts: components['schemas']['PackageImportConflict'][];
+            expiresInSeconds: number;
+            imageId: string;
+            planId: string;
+            planToken: string;
+            revision: number;
+            /** @constant */
+            schemaVersion: '1.0';
+            /** @enum {unknown} */
+            targetKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660';
+            targetSnapshotId: string;
+            valid: boolean;
+            warnings: components['schemas']['Issue'][];
+        };
+        ImageSessionPackageImportPlanRequest: {
+            expectedRevision: number;
+            imageId: string;
+            package: components['schemas']['InputRef'];
+            partitionIndex: number;
+            renames?: components['schemas']['ImageSessionPackageRename'][];
+            volumeName: string;
+        };
+        ImageSessionPackageImportResult: {
+            actions: components['schemas']['PackageImportAction'][];
+            allocation: components['schemas']['PackageAllocationEstimate'][];
+            applied: boolean;
+            imageId: string;
+            objectCount: number;
+            planId: string;
+            revision: number;
+            /** @constant */
+            schemaVersion: '1.0';
+            /** @enum {unknown} */
+            targetKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660';
+            targetSnapshotId: string;
+        };
+        ImageSessionPackageRename: {
+            destinationName: string;
+            nodeId: string;
+        };
         ImageSessionResponse: {
             data: components['schemas']['ImageSession'];
             meta: components['schemas']['ResponseMeta'];
@@ -1978,9 +2141,14 @@ export interface components {
             summaries: Record<string, never>[];
         };
         PackageAllocationEstimate: {
+            additionalAllocatedBytes: number;
+            blockedObjectCount: number;
             continuationClusters: number;
+            directoryContinuationClusters: number;
             directoryGrowthBytes: number;
+            directoryGrowthClusters: number;
             groupName: string;
+            infrastructureClusters: number;
             insertedObjectCount: number;
             partitionIndex: number;
             payloadClusters: number;
@@ -2020,6 +2188,7 @@ export interface components {
             packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'BUNDLE';
             payloadsVerified: boolean;
             relationshipCount: number;
+            relationships: components['schemas']['PackageRelationship'][];
             requiredExtension: string;
             roots: components['schemas']['PackageRoot'][];
             /** @constant */
@@ -2027,6 +2196,7 @@ export interface components {
             sizeBytes: number;
             /** @enum {unknown} */
             sourceMediaKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'UNKNOWN';
+            totalPayloadBytes: number;
             valid: boolean;
         };
         PackageImportAction: {
@@ -2103,12 +2273,14 @@ export interface components {
             packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'BUNDLE';
             payloadsVerified: boolean;
             relationshipCount: number;
+            relationships: components['schemas']['PackageRelationship'][];
             requiredExtension: string;
             roots: components['schemas']['PackageRoot'][];
             /** @constant */
             schemaVersion: '1.0';
             /** @enum {unknown} */
             sourceMediaKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'UNKNOWN';
+            totalPayloadBytes: number;
             valid: boolean;
         };
         PackageObject: {
@@ -2118,10 +2290,18 @@ export interface components {
             normalizedSha256: string;
             objectType: string;
             payloadSha256: string;
+            payloadSizeBytes: number;
             semanticSha256: string | null;
         };
         PackageReadRequest: {
             package: components['schemas']['InputRef'];
+        };
+        PackageRelationship: {
+            edgeId: string;
+            ordinal: number;
+            role: string;
+            sourceNodeId: string;
+            targetNodeId: string;
         };
         PackageRename: {
             destinationName: string;
@@ -2143,6 +2323,10 @@ export interface components {
             volumeName?: string;
         };
         PackageVerification: components['schemas']['PackageInspection'];
+        PlanReleaseResult: {
+            /** @constant */
+            released: true;
+        };
         PlanTokenRequest: {
             planToken: string;
         };
@@ -2203,6 +2387,13 @@ export interface components {
         ResponseMeta: {
             requestId: string;
             warnings?: components['schemas']['Warning'][];
+        };
+        RetainedDownload: {
+            archiveId: string;
+            contentPath: string;
+            expiresInSeconds: number;
+            filename: string;
+            sizeBytes: number;
         };
         RevisionRequest: {
             revision: number;
@@ -4544,6 +4735,472 @@ export interface operations {
         requestBody: {
             content: {
                 'application/json': components['schemas']['ImageSessionAlterationRequest'];
+            };
+        };
+        responses: {
+            /** @description Job accepted */
+            202: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.package_export': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImageSessionPackageExportRequest'];
+            };
+        };
+        responses: {
+            /** @description Job accepted */
+            202: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.package_import.release': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['PlanTokenRequest'];
+            };
+        };
+        responses: {
+            /** @description Operation completed */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': {
+                        data: components['schemas']['PlanReleaseResult'];
+                        meta: components['schemas']['ResponseMeta'];
+                    };
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.package_import.plan': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImageSessionPackageImportPlanRequest'];
+            };
+        };
+        responses: {
+            /** @description Operation completed */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': {
+                        data: components['schemas']['ImageSessionPackageImportPlan'];
+                        meta: components['schemas']['ResponseMeta'];
+                    };
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.package_import': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['PackageImportRequest'];
             };
         };
         responses: {

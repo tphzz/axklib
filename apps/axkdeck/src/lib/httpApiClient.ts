@@ -467,6 +467,11 @@ export class AxklibHttpApiClient {
         if (!response.ok) await this.throwResponseError(response);
     }
 
+    async deleteRetainedDownload(contentPath: string): Promise<void> {
+        const response = await this.fetchResponse('DELETE', this.operationPath(contentPath));
+        if (!response.ok) await this.throwResponseError(response);
+    }
+
     replayJobEvents(jobId: string, afterSequence: number): Promise<{ events: ApiJobEvent[] }> {
         const query = new URLSearchParams({ afterSequence: String(afterSequence) });
         return this.request('GET', `/jobs/${encodeURIComponent(jobId)}/events?${query}`);

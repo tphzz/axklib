@@ -188,6 +188,24 @@ and the underlying alteration revalidates the image under the mutation lease,
 so an outdated revision or changed relationship graph fails without publishing
 a partial result.
 
+Writable SFS sessions also advertise `images.package.import`; every readable
+media session advertises `images.package.export`. Import is a three-step
+operation: inspect the package, request an owner-bound revision-specific plan,
+then submit its token as a write job. Release an abandoned token explicitly.
+The apply path uses the same journaled in-place mutation boundary as other
+session alterations and refreshes the retained session only after validation.
+
+Session package export is a read job. Its `roots` array accepts one to 1,024
+exact volume, Program, Sample Bank, Sample, or Wave Data roots. Object roots
+use the opaque IDs returned by the retained image session; the server resolves
+them under the same revision-bound read lease. A single root receives its
+specific package extension and multiple roots produce `.axkpkg`. A
+`WORKSPACE` destination publishes through the normal sandbox. A `DOWNLOAD`
+destination retains the package in private owner-scoped storage and returns an
+authenticated content path with a short expiry. The client streams that
+content and deletes the retained resource when the save completes; expiry is
+only a fallback.
+
 Each WebSocket connection has bounded lifetime delivery budgets for both event
 count and serialized bytes. The defaults are 1,024 events and 4 MiB. When
 either budget is exhausted, the server closes the connection with status 1013;

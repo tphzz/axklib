@@ -1,13 +1,15 @@
 <script lang="ts">
     interface Props {
         objectName: string;
+        selectionCount?: number;
         left: number;
         top: number;
-        ondelete: () => void;
+        onexport?: () => void;
+        ondelete?: () => void;
         onclose: () => void;
     }
 
-    let { objectName, left, top, ondelete, onclose }: Props = $props();
+    let { objectName, selectionCount = 1, left, top, onexport, ondelete, onclose }: Props = $props();
     let menu: HTMLDivElement;
 
     $effect(() => {
@@ -27,13 +29,26 @@
     onclick={(event) => event.stopPropagation()}
     onkeydown={(event) => event.stopPropagation()}
 >
-    <button
-        class="danger-menu-item"
-        type="button"
-        role="menuitem"
-        onclick={() => {
-            ondelete();
-            onclose();
-        }}>Delete</button
-    >
+    {#if onexport}
+        <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+                onexport?.();
+                onclose();
+            }}>Export {selectionCount === 1 ? 'package' : `${selectionCount} objects`}</button
+        >
+    {/if}
+    {#if onexport && ondelete}<div class="context-menu-separator" role="separator"></div>{/if}
+    {#if ondelete}
+        <button
+            class="danger-menu-item"
+            type="button"
+            role="menuitem"
+            onclick={() => {
+                ondelete?.();
+                onclose();
+            }}>Delete</button
+        >
+    {/if}
 </div>

@@ -11,6 +11,7 @@ import type {
     UploadKind,
 } from './storageLocations';
 import type { ClientUploadSource } from './clientUploadSource';
+import type { components } from './generated/axklibApiV1';
 
 export interface ValidationSummary {
     valid: boolean;
@@ -31,6 +32,8 @@ export interface OpenedImage {
     volumeMutationsAvailable: boolean;
     partitionMutationsAvailable: boolean;
     objectDeletionAvailable: boolean;
+    packageImportAvailable: boolean;
+    packageExportAvailable: boolean;
 }
 
 export type VolumeMutation =
@@ -219,44 +222,16 @@ export interface ClientDownload {
     blob: Blob;
 }
 
-export interface PackageInspection {
-    schemaVersion: '1.0';
-    packageId: string;
-    packageKind: string;
-    requiredExtension: string;
-    sourceMediaKind: string;
-    valid: boolean;
-    payloadsVerified: boolean;
-    roots: { kind: string; displayName: string; nodeIds: string[] }[];
-    objects: unknown[];
-    relationshipCount: number;
-    issues: unknown[];
-}
-
-export interface PackageImportDestination {
-    packageIndex: number;
-    rootIndex: number;
-    partitionIndex?: number;
-    groupName?: string;
-    volumeName?: string;
-    rawGroup?: string;
-    rawVolume?: string;
-    create?: boolean;
-}
-
-export interface PackageImportPlan {
-    schemaVersion: '1.0';
-    planToken: string;
-    expiresInSeconds: number;
-    planId: string;
-    targetKind: 'sfs' | 'fat12-floppy' | 'iso9660';
-    targetSnapshotId: string;
-    valid: boolean;
-    warnings: unknown[];
-    conflicts: unknown[];
-    actions: unknown[];
-    allocation: unknown[];
-}
+export type PackageInspection = components['schemas']['PackageInspection'];
+export type PackageImportDestination = components['schemas']['PackageDestination'];
+export type PackageImportPlan = components['schemas']['PackageImportPlan'];
+export type ImageSessionPackageRename = components['schemas']['ImageSessionPackageRename'];
+export type ImageSessionPackageImportPlan = components['schemas']['ImageSessionPackageImportPlan'];
+export type ImageSessionPackageImportResult = components['schemas']['ImageSessionPackageImportResult'];
+export type ImageSessionPackageExportDestination = components['schemas']['ImageSessionPackageExportDestination'];
+export type ImageSessionPackageExportRoot = components['schemas']['ImageSessionPackageExportRoot'];
+export type ImageSessionPackageExportResult = components['schemas']['ImageSessionPackageExportResult'];
+export type RetainedDownload = components['schemas']['RetainedDownload'];
 
 export interface InputBinding {
     logicalPath: string;
@@ -362,6 +337,21 @@ export interface ImageTransport {
         overwrite: boolean,
     ): Promise<PackageImportPlan>;
     startPackageImport(planToken: string): Promise<JobState>;
+    planImagePackageImport(
+        sessionId: number,
+        source: InputFileLocation,
+        partitionIndex: number,
+        volumeName: string,
+        renames?: ImageSessionPackageRename[],
+    ): Promise<ImageSessionPackageImportPlan>;
+    releaseImagePackageImportPlan(planToken: string): Promise<void>;
+    startImagePackageImport(planToken: string): Promise<JobState>;
+    startImagePackageExport(
+        sessionId: number,
+        roots: ImageSessionPackageExportRoot[],
+        destination: ImageSessionPackageExportDestination,
+    ): Promise<JobState>;
+    deleteRetainedPackage(download: RetainedDownload): Promise<void>;
     hardDiskCreationProfiles(): Promise<HardDiskCreationProfile[]>;
     planHardDiskCreation(
         profileId: HardDiskCreationProfileId,

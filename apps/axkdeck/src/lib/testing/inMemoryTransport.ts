@@ -9,6 +9,10 @@ import type {
     HardDiskCreationProfile,
     HardDiskCreationProfileId,
     ImageTransport,
+    ImageSessionPackageExportDestination,
+    ImageSessionPackageExportRoot,
+    ImageSessionPackageImportPlan,
+    ImageSessionPackageRename,
     InputBinding,
     JobState,
     ObjectPage,
@@ -18,6 +22,7 @@ import type {
     PackageImportDestination,
     PackageImportPlan,
     PackageInspection,
+    RetainedDownload,
     PartitionMutation,
     PlanSummary,
     PreviewEnvelope,
@@ -43,11 +48,18 @@ export interface InMemoryImageTransportOptions {
     supportsClientUploads?: boolean;
     opened: Omit<
         OpenedImage,
-        'sessionId' | 'volumeMutationsAvailable' | 'partitionMutationsAvailable' | 'objectDeletionAvailable'
+        | 'sessionId'
+        | 'volumeMutationsAvailable'
+        | 'partitionMutationsAvailable'
+        | 'objectDeletionAvailable'
+        | 'packageImportAvailable'
+        | 'packageExportAvailable'
     > & {
         volumeMutationsAvailable?: boolean;
         partitionMutationsAvailable?: boolean;
         objectDeletionAvailable?: boolean;
+        packageImportAvailable?: boolean;
+        packageExportAvailable?: boolean;
     };
     preview?: PreviewEnvelope;
     onClose?: (sessionId: number) => void;
@@ -95,6 +107,8 @@ export class InMemoryImageTransport implements ImageTransport {
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
+            packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
+            packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
         };
     }
 
@@ -108,6 +122,8 @@ export class InMemoryImageTransport implements ImageTransport {
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
+            packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
+            packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
         };
     }
 
@@ -228,6 +244,36 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startPackageImport(planToken: string): Promise<JobState> {
         return this.invoke('startPackageImport', [planToken]);
+    }
+
+    planImagePackageImport(
+        sessionId: number,
+        source: InputFileLocation,
+        partitionIndex: number,
+        volumeName: string,
+        renames?: ImageSessionPackageRename[],
+    ): Promise<ImageSessionPackageImportPlan> {
+        return this.invoke('planImagePackageImport', [sessionId, source, partitionIndex, volumeName, renames]);
+    }
+
+    releaseImagePackageImportPlan(planToken: string): Promise<void> {
+        return this.invoke('releaseImagePackageImportPlan', [planToken]);
+    }
+
+    startImagePackageImport(planToken: string): Promise<JobState> {
+        return this.invoke('startImagePackageImport', [planToken]);
+    }
+
+    startImagePackageExport(
+        sessionId: number,
+        roots: ImageSessionPackageExportRoot[],
+        destination: ImageSessionPackageExportDestination,
+    ): Promise<JobState> {
+        return this.invoke('startImagePackageExport', [sessionId, roots, destination]);
+    }
+
+    deleteRetainedPackage(download: RetainedDownload): Promise<void> {
+        return this.invoke('deleteRetainedPackage', [download]);
     }
 
     hardDiskCreationProfiles(): Promise<HardDiskCreationProfile[]> {

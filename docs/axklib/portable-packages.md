@@ -80,6 +80,10 @@ axklib package verify "Stage Piano.axkprg" --format json
 
 Successful full verification reports `"payloads_verified":true`. Import always
 performs full verification even when the caller previously inspected a file.
+Inspection reports the exact uncompressed object total as
+`total_payload_bytes` in CLI JSON and `totalPayloadBytes` through the server
+contract. This is package content size, not the amount a target image will
+allocate.
 
 Plan before applying:
 
@@ -89,6 +93,13 @@ axklib package plan-import target.hds "Stage Piano.axkprg" \
   --format json
 ```
 
+Each plan allocation reports `additional_allocated_bytes` in CLI JSON and
+`additionalAllocatedBytes` through the server contract. That value includes
+payload rounding, continuation metadata, category-directory growth, and other
+target-format infrastructure. It is the authoritative space estimate shown by
+axkdeck. Category directories grow during a valid SFS import; physical cluster
+or object-ID exhaustion remains a blocking conflict.
+
 Apply the exact plan through the same request:
 
 ```bash
@@ -97,10 +108,28 @@ axklib package import target.hds "Stage Piano.axkprg" \
   -o imported.hds --format json
 ```
 
-Import never edits the source image. It builds and validates a complete
-temporary image, then publishes atomically. Existing output paths are refused
-unless `--overwrite` is explicit. A plan with conflicts is reported with exit
-code 3 and is not applied.
+The CLI import shown above never edits the source image. It builds and validates
+a complete temporary image, then publishes atomically. Existing output paths
+are refused unless `--overwrite` is explicit. A plan with conflicts is reported
+with exit code 3 and is not applied.
+
+An authenticated writable SFS image session has a separate in-place workflow
+for axkdeck. `images.package_import.plan` fully verifies one package and returns
+an owner-bound, expiring plan tied to the current image revision and retained
+image identity. `images.package_import` applies that exact plan through the
+alteration journal, validates the resulting image, and refreshes the retained
+session. `images.package_import.release` explicitly discards an unused plan.
+This session workflow preserves crash recovery and atomic rollback guarantees;
+it is not the CLI's separate-output publication model.
+
+`images.package_export` exports one to 1,024 exact roots from any readable
+image session. A root is either a selected volume or an opaque session object
+ID with kind `PROGRAM`, `SBAC`, `SBNK`, or `SMPL`. One root uses its specific
+package extension; multiple roots use `.axkpkg`, with shared dependencies
+included once. A workspace destination publishes through the sandbox. A
+download destination creates a short-lived, owner-scoped retained file for a
+native client to stream and explicitly delete. The package contents and
+identity are identical in both cases.
 
 ### Destination Objects
 

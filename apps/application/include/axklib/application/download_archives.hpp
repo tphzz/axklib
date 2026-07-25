@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -20,6 +21,7 @@ struct DownloadArchiveRef {
 struct DownloadArchiveSnapshot {
     DownloadArchiveRef reference;
     std::string filename;
+    std::string media_type;
     std::uint64_t size_bytes{};
     std::size_t entry_count{};
     std::uint64_t expires_in_seconds{};
@@ -57,6 +59,8 @@ class DownloadArchiveStore {
 
     [[nodiscard]] Result<DownloadArchiveSnapshot> create(std::string owner_id, const Sandbox &sandbox,
                                                          const DirectoryRef &source);
+    [[nodiscard]] Result<DownloadArchiveSnapshot> retain(std::string owner_id, std::string filename,
+                                                         std::string media_type, std::span<const std::byte> content);
     [[nodiscard]] Result<DownloadArchiveSnapshot> inspect(const DownloadArchiveRef &reference,
                                                           std::string_view owner_id);
     [[nodiscard]] Result<DownloadArchiveContent> open(const DownloadArchiveRef &reference, std::string_view owner_id);

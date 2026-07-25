@@ -133,6 +133,40 @@ describe('ContainedObjectWorkspace', () => {
         expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();
     });
 
+    it('exports only the selected objects from one hierarchy lane', async () => {
+        const strings = structure('SBAC', 'Strings');
+        const brass = structure('SBAC', 'Brass');
+        const onexportobjects = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'sample-banks',
+                sampleBanks: [strings, brass],
+                samples: [],
+                waveData: [],
+                activeSampleBankId: '',
+                activeSampleId: '',
+                activeWaveDataId: '',
+                queries: { primary: '', secondary: '', tertiary: '' },
+                packageExportAvailable: true,
+                onexportobjects,
+            },
+        });
+
+        const stringsRow = screen.getByRole('button', { name: 'Inspect Strings' });
+        const brassRow = screen.getByRole('button', { name: 'Inspect Brass' });
+        await fireEvent.click(stringsRow);
+        await fireEvent.click(brassRow, { metaKey: true });
+        await fireEvent.contextMenu(stringsRow);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export 2 objects' }));
+
+        expect(onexportobjects).toHaveBeenCalledWith([
+            { kind: 'SBAC', objectId: strings.objectId, name: 'Strings', typeLabel: 'Sample Bank' },
+            { kind: 'SBAC', objectId: brass.objectId, name: 'Brass', typeLabel: 'Sample Bank' },
+        ]);
+    });
+
     it('renders the SBNK hierarchy as two lanes and filters each lane independently', async () => {
         const piano = structure('SBNK', 'Piano C3');
         const brass = structure('SBNK', 'Brass C3');

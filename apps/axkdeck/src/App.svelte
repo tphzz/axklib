@@ -8,6 +8,8 @@
     import ObjectInspector from './lib/components/ObjectInspector.svelte';
     import ObjectEditor from './lib/components/ObjectEditor.svelte';
     import ObjectDeletionDialog from './lib/components/ObjectDeletionDialog.svelte';
+    import PackageExportDialog from './lib/components/PackageExportDialog.svelte';
+    import PackageImportDialog from './lib/components/PackageImportDialog.svelte';
     import ObjectWorkspace from './lib/components/ObjectWorkspace.svelte';
     import ServerConnectionSettings from './lib/components/ServerConnectionSettings.svelte';
     import CreateHardDiskImageDialog from './lib/components/CreateHardDiskImageDialog.svelte';
@@ -37,12 +39,24 @@
     import { browserUploadSource, type ClientUploadSource } from './lib/clientUploadSource';
     import { diagnosticsEnabled, reportDiagnostic, reportError } from './lib/diagnostics';
     import { listenForNativeAudioDrops, type NativeDropPosition } from './lib/nativeAudioDrop';
+    import { nativeFileSource } from './lib/nativeFileSource';
+    import { saveRetainedPackage, selectLocalPackage, selectLocalPackageDestination } from './lib/nativePackages';
     import { collectPages } from './lib/pagination';
-    import { type DirectoryLocation, type DirectoryRef, type FileLocation } from './lib/storageLocations';
+    import {
+        type ClientUploadLocation,
+        type DirectoryLocation,
+        type DirectoryRef,
+        type FileLocation,
+        type InputFileLocation,
+    } from './lib/storageLocations';
     import type {
         AudioImportItem,
         AudioImportTarget,
         ObjectDeletionInspection,
+        ImageSessionPackageExportResult,
+        ImageSessionPackageExportRoot,
+        ImageSessionPackageImportPlan,
+        PackageInspection,
         SamplerObject,
         SamplerRelationship,
         PartitionMutation,
@@ -53,6 +67,8 @@
     import type {
         DiskTreeItem,
         InspectorSelection,
+        PackageExportObject,
+        PackageExportSelection,
         Program,
         ProgramAssignmentRow,
         SampleStructureItem,
@@ -78,6 +94,8 @@
         { id: 'samples', label: 'Samples', icon: 'archive' },
         { id: 'wave-data', label: 'Wave Data', icon: 'waveform' },
     ];
+    const packageExtensions = ['axkvol', 'axkprg', 'axksbac', 'axksbnk', 'axksmpl', 'axkpkg'];
+    const packageExtensionSet = new Set(packageExtensions);
 
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
@@ -104,6 +122,7 @@
     let pickerRequest = $state<PickerRequest | null>(null);
     let hardDiskCreationDirectory = $state<DirectoryLocation | null>(null);
     let lastImageDirectory = $state<DirectoryRef | null>(null);
+    let lastPackageDirectory = $state<DirectoryRef | null>(null);
     let openSessionId = $state<number | null>(null);
     let imageOpening = $state(false);
     let imageOpenGeneration = 0;
@@ -147,6 +166,8 @@
     let volumeMutationsAvailable = $state(false);
     let partitionMutationsAvailable = $state(false);
     let objectDeletionAvailable = $state(false);
+    let packageImportAvailable = $state(false);
+    let packageExportAvailable = $state(false);
     let volumeAction = $state<{ item: DiskTreeItem; action: ImageTreeAction } | null>(null);
     let volumeActionBusy = $state(false);
     let volumeActionError = $state('');
@@ -159,12 +180,33 @@
         error: string;
     } | null>(null);
     let objectDeletionGeneration = 0;
+    let packageOperationGeneration = 0;
+    let packageImportAbortController: AbortController | null = null;
+    let packageImportRequest = $state<{
+        item: DiskTreeItem;
+        source: InputFileLocation | null;
+        upload: ClientUploadLocation | null;
+        sourceName: string;
+        inspection: PackageInspection | null;
+        plan: ImageSessionPackageImportPlan | null;
+        renames: Record<string, string>;
+        status: 'choosing' | 'loading' | 'planning' | 'ready' | 'applying';
+        progress: number;
+        error: string;
+    } | null>(null);
+    let packageExportRequest = $state<{
+        items: PackageExportSelection[];
+        busy: boolean;
+        progressLabel: string;
+        error: string;
+    } | null>(null);
     let audioFileInput: HTMLInputElement;
     let audioImportRequest = $state<{ files: ClientUploadSource[]; target: AudioImportTarget } | null>(null);
     let audioDragActive = $state(false);
     let audioDragTarget = $state<AudioImportTarget | null>(null);
     let activeVolumeId = $state('');
     let volumeLoadGeneration = 0;
+    let objectSelectionEpoch = $state(0);
     let auditionState = $state<AuditionState>({ objectId: null, status: 'idle', playheadFrame: 0 });
     let autoplay = $state(false);
     let playingSampleBankId = $state('');
@@ -196,6 +238,12 @@
         stopInterfaceScaleSubscription?.();
         void interfaceScaling?.dispose();
         ++imageOpenGeneration;
+        ++packageOperationGeneration;
+        packageImportAbortController?.abort();
+        packageImportAbortController = null;
+        const packageRequest = packageImportRequest;
+        packageImportRequest = null;
+        if (packageRequest) void releasePackageImportResources(packageRequest);
         const sessionId = openSessionId;
         openSessionId = null;
         void auditionController.dispose().catch(() => undefined);
@@ -605,6 +653,7 @@
 
     async function loadVolume(volumeId: string): Promise<void> {
         if (openSessionId === null) return;
+        objectSelectionEpoch += 1;
         void stopPlaybackNow();
         resetPreviewQueue();
         activeVolumeId = volumeId;
@@ -693,6 +742,7 @@
     }
 
     function clearVolume(): void {
+        objectSelectionEpoch += 1;
         void stopPlaybackNow();
         resetPreviewQueue();
         ++volumeLoadGeneration;
@@ -743,6 +793,46 @@
 
     function requestImageAction(item: DiskTreeItem, action: ImageTreeAction): void {
         if (item.partitionIndex === undefined) return;
+        if (action === 'import-package') {
+            if (!packageImportAvailable || item.kind !== 'volume') return;
+            ++packageOperationGeneration;
+            packageImportAbortController?.abort();
+            packageImportAbortController = null;
+            selectedSource = item;
+            packageImportRequest = {
+                item,
+                source: null,
+                upload: null,
+                sourceName: '',
+                inspection: null,
+                plan: null,
+                renames: {},
+                status: 'choosing',
+                progress: 0,
+                error: '',
+            };
+            return;
+        }
+        if (action === 'export-package') {
+            if (!packageExportAvailable || item.kind !== 'volume') return;
+            ++packageOperationGeneration;
+            selectedSource = item;
+            packageExportRequest = {
+                items: [
+                    {
+                        kind: 'VOLUME',
+                        partitionIndex: item.partitionIndex!,
+                        volumeName: item.name,
+                        name: item.name,
+                        typeLabel: 'Volume',
+                    },
+                ],
+                busy: false,
+                progressLabel: '',
+                error: '',
+            };
+            return;
+        }
         const partitionAction = action === 'rename-partition';
         if (partitionAction && (!partitionMutationsAvailable || item.kind !== 'partition')) return;
         if (!partitionAction && !volumeMutationsAvailable) return;
@@ -751,6 +841,374 @@
         selectedSource = item;
         volumeActionError = '';
         volumeAction = { item, action };
+    }
+
+    async function releasePackageImportResources(request: NonNullable<typeof packageImportRequest>): Promise<void> {
+        if (request.plan) {
+            await transport.releaseImagePackageImportPlan(request.plan.planToken).catch(() => undefined);
+        }
+        if (request.upload) {
+            await transport.releaseClientUpload(request.upload).catch(() => undefined);
+        }
+    }
+
+    async function closePackageImport(): Promise<void> {
+        if (!packageImportRequest || packageImportRequest.status === 'applying') return;
+        const request = packageImportRequest;
+        packageImportRequest = null;
+        ++packageOperationGeneration;
+        packageImportAbortController?.abort();
+        packageImportAbortController = null;
+        await releasePackageImportResources(request);
+    }
+
+    async function resetPackageImportSource(): Promise<void> {
+        if (!packageImportRequest || packageImportRequest.status === 'applying') return;
+        const request = packageImportRequest;
+        ++packageOperationGeneration;
+        packageImportAbortController?.abort();
+        packageImportAbortController = null;
+        await releasePackageImportResources(request);
+        packageImportRequest = {
+            ...request,
+            source: null,
+            upload: null,
+            sourceName: '',
+            inspection: null,
+            plan: null,
+            renames: {},
+            status: 'choosing',
+            progress: 0,
+            error: '',
+        };
+    }
+
+    async function planSelectedPackage(generation: number): Promise<void> {
+        const request = packageImportRequest;
+        if (
+            !request?.source ||
+            openSessionId === null ||
+            request.item.partitionIndex === undefined ||
+            generation !== packageOperationGeneration
+        ) {
+            return;
+        }
+        packageImportRequest = { ...request, status: 'planning', plan: null, error: '' };
+        const renames = Object.entries(request.renames)
+            .map(([nodeId, destinationName]) => ({ nodeId, destinationName: destinationName.trim() }))
+            .filter((rename) => rename.destinationName.length > 0);
+        const plan = await transport.planImagePackageImport(
+            openSessionId,
+            request.source,
+            request.item.partitionIndex,
+            request.item.name,
+            renames,
+        );
+        if (generation !== packageOperationGeneration || !packageImportRequest) {
+            await transport.releaseImagePackageImportPlan(plan.planToken).catch(() => undefined);
+            return;
+        }
+        const nextRenames = { ...request.renames };
+        for (const action of plan.actions) {
+            if (plan.conflicts.some((conflict) => conflict.nodeId === action.nodeId) && !nextRenames[action.nodeId]) {
+                nextRenames[action.nodeId] = action.destinationName;
+            }
+        }
+        packageImportRequest = {
+            ...packageImportRequest,
+            plan,
+            renames: nextRenames,
+            status: 'ready',
+            error: '',
+        };
+    }
+
+    async function inspectSelectedPackage(
+        source: InputFileLocation,
+        sourceName: string,
+        upload: ClientUploadLocation | null = null,
+    ): Promise<void> {
+        if (!packageImportRequest) return;
+        const generation = ++packageOperationGeneration;
+        packageImportRequest = {
+            ...packageImportRequest,
+            source,
+            upload,
+            sourceName,
+            inspection: null,
+            plan: null,
+            renames: {},
+            status: 'loading',
+            progress: 0,
+            error: '',
+        };
+        try {
+            const inspection = await transport.inspectPackage(source, false);
+            if (generation !== packageOperationGeneration || !packageImportRequest) {
+                if (upload) await transport.releaseClientUpload(upload).catch(() => undefined);
+                return;
+            }
+            packageImportRequest = { ...packageImportRequest, inspection, status: 'planning' };
+            await planSelectedPackage(generation);
+        } catch (error) {
+            if (generation !== packageOperationGeneration || !packageImportRequest) {
+                if (upload) await transport.releaseClientUpload(upload).catch(() => undefined);
+                return;
+            }
+            packageImportRequest = {
+                ...packageImportRequest,
+                status: 'choosing',
+                error: userFacingMessage(error),
+            };
+        }
+    }
+
+    async function chooseWorkspacePackage(): Promise<void> {
+        if (!packageImportRequest) return;
+        const selection = await chooseServerLocation('file', 'Choose axklib package', packageExtensions, '', {
+            initialDirectory: lastPackageDirectory,
+            ondirectorychange: (directory) => (lastPackageDirectory = directory),
+        });
+        if (selection?.kind !== 'server-file' || !packageImportRequest) return;
+        await inspectSelectedPackage(selection, selection.displayName);
+    }
+
+    async function chooseLocalPackage(): Promise<void> {
+        if (!packageImportRequest || !isDesktop) return;
+        let controller: AbortController | null = null;
+        let generation = -1;
+        try {
+            const path = await selectLocalPackage();
+            if (!path || !packageImportRequest) return;
+            const file = await nativeFileSource(path, packageExtensionSet, 'application/octet-stream');
+            controller = new AbortController();
+            packageImportAbortController?.abort();
+            packageImportAbortController = controller;
+            generation = ++packageOperationGeneration;
+            packageImportRequest = {
+                ...packageImportRequest,
+                sourceName: file.name,
+                source: null,
+                upload: null,
+                inspection: null,
+                plan: null,
+                renames: {},
+                status: 'loading',
+                progress: 0,
+                error: '',
+            };
+            const upload = await transport.uploadClientFile(
+                file,
+                'PACKAGE',
+                (sent, total) => {
+                    if (generation === packageOperationGeneration && packageImportRequest) {
+                        packageImportRequest = {
+                            ...packageImportRequest,
+                            progress: total === 0 ? 0 : sent / total,
+                        };
+                    }
+                },
+                controller.signal,
+            );
+            if (packageImportAbortController === controller) packageImportAbortController = null;
+            if (generation !== packageOperationGeneration || !packageImportRequest) {
+                await transport.releaseClientUpload(upload).catch(() => undefined);
+                return;
+            }
+            await inspectSelectedPackage(upload, file.name, upload);
+        } catch (error) {
+            if (packageImportAbortController === controller) packageImportAbortController = null;
+            if (generation >= 0 && (generation !== packageOperationGeneration || !packageImportRequest)) return;
+            reportError('Import local package failed', error);
+            if (packageImportRequest) {
+                packageImportRequest = {
+                    ...packageImportRequest,
+                    status: 'choosing',
+                    error: userFacingMessage(error),
+                };
+            }
+        }
+    }
+
+    async function replanPackageImport(): Promise<void> {
+        if (!packageImportRequest?.source || packageImportRequest.status === 'applying') return;
+        const previousPlan = packageImportRequest.plan;
+        packageImportRequest = { ...packageImportRequest, plan: null, status: 'planning', error: '' };
+        if (previousPlan) {
+            await transport.releaseImagePackageImportPlan(previousPlan.planToken).catch(() => undefined);
+        }
+        const generation = ++packageOperationGeneration;
+        try {
+            await planSelectedPackage(generation);
+        } catch (error) {
+            if (generation === packageOperationGeneration && packageImportRequest) {
+                packageImportRequest = {
+                    ...packageImportRequest,
+                    status: 'ready',
+                    error: userFacingMessage(error),
+                };
+            }
+        }
+    }
+
+    async function applyPackageImport(): Promise<void> {
+        const request = packageImportRequest;
+        if (!request?.plan?.valid || openSessionId === null || request.item.partitionIndex === undefined) return;
+        const sessionId = openSessionId;
+        const generation = ++packageOperationGeneration;
+        packageImportRequest = { ...request, status: 'applying', error: '' };
+        sourceStatus = `Importing package into ${request.item.name}`;
+        try {
+            await auditionController.invalidateSession(sessionId);
+            const job = await transport.startImagePackageImport(request.plan.planToken);
+            const completed = await transport.waitForJob(job.jobId, (update) => {
+                if (update.progress?.label) sourceStatus = update.progress.label;
+            });
+            if (completed.status !== 'completed') {
+                throw new Error(completed.error ?? 'Package import did not complete');
+            }
+            if (request.upload) await transport.releaseClientUpload(request.upload).catch(() => undefined);
+            packageImportRequest = null;
+            await refreshOpenImageSession({
+                partitionIndex: request.item.partitionIndex,
+                volumeName: request.item.name,
+            });
+            sourceStatus = `Imported package into ${request.item.name}`;
+        } catch (error) {
+            const message = userFacingMessage(error);
+            sourceStatus = message;
+            if (generation === packageOperationGeneration && packageImportRequest) {
+                packageImportRequest = { ...packageImportRequest, status: 'ready', error: message };
+            }
+        }
+    }
+
+    function requestObjectPackageExport(items: PackageExportObject[]): void {
+        if (!packageExportAvailable || items.length === 0 || items.length > 1024) return;
+        ++packageOperationGeneration;
+        packageExportRequest = { items: [...items], busy: false, progressLabel: '', error: '' };
+    }
+
+    function packageFilename(items: PackageExportSelection[]): string {
+        const first = items[0];
+        const sourceName = items.length === 1 ? (first?.name ?? 'package') : `${first?.name ?? 'selection'} and others`;
+        const stem =
+            sourceName
+                .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+                .replace(/[ .]+$/g, '')
+                .trim() || 'volume';
+        const extension =
+            items.length !== 1
+                ? 'axkpkg'
+                : first?.kind === 'VOLUME'
+                  ? 'axkvol'
+                  : first?.kind === 'PROGRAM'
+                    ? 'axkprg'
+                    : first?.kind === 'SBAC'
+                      ? 'axksbac'
+                      : first?.kind === 'SBNK'
+                        ? 'axksbnk'
+                        : 'axksmpl';
+        return `${stem}.${extension}`;
+    }
+
+    function packageExportRoots(items: PackageExportSelection[]): ImageSessionPackageExportRoot[] {
+        return items.map((item) =>
+            item.kind === 'VOLUME'
+                ? {
+                      kind: 'VOLUME',
+                      partitionIndex: item.partitionIndex,
+                      volumeName: item.volumeName,
+                  }
+                : { kind: item.kind, objectId: item.objectId },
+        );
+    }
+
+    async function runPackageExport(
+        destination:
+            | { kind: 'WORKSPACE'; output: { rootId: string; relativePath: string }; overwrite: boolean }
+            | { kind: 'DOWNLOAD'; filename: string },
+        localDestination?: { candidateId: string },
+    ): Promise<void> {
+        const request = packageExportRequest;
+        if (!request || openSessionId === null) return;
+        const sessionId = openSessionId;
+        const exportLabel = request.items.length === 1 ? request.items[0]!.name : `${request.items.length} objects`;
+        packageExportRequest = { ...request, busy: true, progressLabel: 'Building package', error: '' };
+        sourceStatus = `Exporting ${exportLabel}`;
+        let retained: ImageSessionPackageExportResult['download'] = null;
+        try {
+            const job = await transport.startImagePackageExport(
+                sessionId,
+                packageExportRoots(request.items),
+                destination,
+            );
+            const completed = await transport.waitForJob(job.jobId, (update) => {
+                if (packageExportRequest && update.progress?.label) {
+                    packageExportRequest = { ...packageExportRequest, progressLabel: update.progress.label };
+                }
+            });
+            if (completed.status !== 'completed') {
+                throw new Error(completed.error ?? 'Package export did not complete');
+            }
+            const result = completed.result as ImageSessionPackageExportResult;
+            retained = result.download;
+            if (localDestination) {
+                if (!retained) throw new Error('Package export did not provide a retained download');
+                await saveRetainedPackage(localDestination.candidateId, retained.contentPath, retained.sizeBytes);
+            }
+            packageExportRequest = null;
+            sourceStatus = `Exported ${exportLabel}`;
+        } catch (error) {
+            const message = userFacingMessage(error);
+            sourceStatus = message;
+            if (packageExportRequest) {
+                packageExportRequest = { ...packageExportRequest, busy: false, progressLabel: '', error: message };
+            }
+        } finally {
+            if (retained) await transport.deleteRetainedPackage(retained).catch(() => undefined);
+        }
+    }
+
+    async function exportPackageToWorkspace(): Promise<void> {
+        const request = packageExportRequest;
+        if (!request || request.busy) return;
+        const generation = packageOperationGeneration;
+        const filename = packageFilename(request.items);
+        const selection = await chooseServerLocation(
+            'save-file',
+            'Export axklib package',
+            [filename.slice(filename.lastIndexOf('.') + 1)],
+            filename,
+            {
+                initialDirectory: lastPackageDirectory,
+                ondirectorychange: (directory) => (lastPackageDirectory = directory),
+            },
+        );
+        if (selection?.kind !== 'server-file' || generation !== packageOperationGeneration || !packageExportRequest) {
+            return;
+        }
+        await runPackageExport({ kind: 'WORKSPACE', output: selection.reference, overwrite: false });
+    }
+
+    async function exportPackageToComputer(): Promise<void> {
+        const request = packageExportRequest;
+        if (!request || request.busy || !isDesktop) return;
+        const generation = packageOperationGeneration;
+        try {
+            const destination = await selectLocalPackageDestination(packageFilename(request.items));
+            if (!destination || generation !== packageOperationGeneration || !packageExportRequest) return;
+            await runPackageExport(
+                { kind: 'DOWNLOAD', filename: destination.filename },
+                { candidateId: destination.candidateId },
+            );
+        } catch (error) {
+            if (packageExportRequest) {
+                const message = userFacingMessage(error);
+                packageExportRequest = { ...packageExportRequest, error: message };
+                sourceStatus = message;
+            }
+        }
     }
 
     function cancelObjectDeletion(): void {
@@ -1420,6 +1878,8 @@
             volumeMutationsAvailable = opened.volumeMutationsAvailable;
             partitionMutationsAvailable = opened.partitionMutationsAvailable;
             objectDeletionAvailable = opened.objectDeletionAvailable;
+            packageImportAvailable = opened.packageImportAvailable;
+            packageExportAvailable = opened.packageExportAvailable;
             sourceItems = opened.tree;
             const preferredItem = preferred
                 ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -1451,6 +1911,8 @@
         volumeMutationsAvailable = opened.volumeMutationsAvailable;
         partitionMutationsAvailable = opened.partitionMutationsAvailable;
         objectDeletionAvailable = opened.objectDeletionAvailable;
+        packageImportAvailable = opened.packageImportAvailable;
+        packageExportAvailable = opened.packageExportAvailable;
         sourceItems = opened.tree;
         const preferredItem = preferred
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -1474,12 +1936,21 @@
     async function closeOpenImageSession(): Promise<void> {
         if (openSessionId === null) return;
         const sessionId = openSessionId;
+        const packageRequest = packageImportRequest;
+        ++packageOperationGeneration;
+        packageImportAbortController?.abort();
+        packageImportAbortController = null;
+        packageImportRequest = null;
+        packageExportRequest = null;
+        if (packageRequest) await releasePackageImportResources(packageRequest);
         await auditionController.invalidateSession(sessionId);
         await transport.closeImage(sessionId);
         openSessionId = null;
         volumeMutationsAvailable = false;
         partitionMutationsAvailable = false;
         objectDeletionAvailable = false;
+        packageImportAvailable = false;
+        packageExportAvailable = false;
         ++objectDeletionGeneration;
         objectDeletionRequest = null;
     }
@@ -1651,6 +2122,8 @@
             onselect={selectSource}
             volumeActionsEnabled={volumeMutationsAvailable}
             partitionActionsEnabled={partitionMutationsAvailable}
+            packageImportEnabled={packageImportAvailable}
+            packageExportEnabled={packageExportAvailable}
             onimageaction={requestImageAction}
             onloadchildren={(parentId, offset, limit) =>
                 openSessionId === null
@@ -1693,6 +2166,9 @@
                 auditionableSampleBankIds={auditionableSampleBankObjectIds}
                 {objectDeletionAvailable}
                 ondeleteobject={requestObjectDeletion}
+                {packageExportAvailable}
+                onexportobjects={requestObjectPackageExport}
+                selectionEpoch={objectSelectionEpoch}
             />
         {:else}
             <ObjectWorkspace
@@ -1714,6 +2190,9 @@
                 playheadFrame={auditionState.playheadFrame}
                 {objectDeletionAvailable}
                 ondeleteobject={requestObjectDeletion}
+                {packageExportAvailable}
+                onexportobjects={requestObjectPackageExport}
+                selectionEpoch={objectSelectionEpoch}
             />
         {/if}
         <AuditionBar
@@ -1810,6 +2289,50 @@
             onsubmit={(name) => void submitVolumeAction(name)}
         />
     {/key}
+{/if}
+{#if packageImportRequest}
+    <PackageImportDialog
+        targetName={packageImportRequest.item.name}
+        desktop={isDesktop}
+        sourceName={packageImportRequest.sourceName}
+        inspection={packageImportRequest.inspection}
+        plan={packageImportRequest.plan}
+        renames={packageImportRequest.renames}
+        status={packageImportRequest.status}
+        progress={packageImportRequest.progress}
+        error={packageImportRequest.error}
+        onchooseworkspace={() => void chooseWorkspacePackage()}
+        onchooselocal={() => void chooseLocalPackage()}
+        onchange={() => void resetPackageImportSource()}
+        onrename={(nodeId, name) => {
+            if (packageImportRequest) {
+                packageImportRequest = {
+                    ...packageImportRequest,
+                    renames: { ...packageImportRequest.renames, [nodeId]: name },
+                };
+            }
+        }}
+        onreplan={() => void replanPackageImport()}
+        oncancel={() => void closePackageImport()}
+        onconfirm={() => void applyPackageImport()}
+    />
+{/if}
+{#if packageExportRequest}
+    <PackageExportDialog
+        items={packageExportRequest.items}
+        desktop={isDesktop}
+        busy={packageExportRequest.busy}
+        progressLabel={packageExportRequest.progressLabel}
+        error={packageExportRequest.error}
+        onworkspace={() => void exportPackageToWorkspace()}
+        onlocal={() => void exportPackageToComputer()}
+        oncancel={() => {
+            if (!packageExportRequest?.busy) {
+                ++packageOperationGeneration;
+                packageExportRequest = null;
+            }
+        }}
+    />
 {/if}
 {#if objectDeletionRequest}
     <ObjectDeletionDialog

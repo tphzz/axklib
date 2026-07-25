@@ -93,10 +93,15 @@ std::string plan_identity(const PackageImportPlan &plan) {
         append_field(source, delta.raw_volume);
         append_integer(source, delta.inserted_object_count);
         append_integer(source, delta.reused_object_count);
+        append_integer(source, delta.blocked_object_count);
         append_integer(source, delta.payload_clusters);
         append_integer(source, delta.payload_sectors);
         append_integer(source, delta.continuation_clusters);
         append_integer(source, delta.directory_growth_bytes);
+        append_integer(source, delta.directory_growth_clusters);
+        append_integer(source, delta.directory_continuation_clusters);
+        append_integer(source, delta.infrastructure_clusters);
+        append_integer(source, delta.additional_allocated_bytes);
         append_integer(source, delta.remaining_object_ids);
         append_integer(source, delta.remaining_clusters);
         append_integer(source, delta.projected_image_sectors);
@@ -221,7 +226,8 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
     for (const auto &allocation : plan.allocation) {
         const auto iso = plan.target_kind == MediaKind::iso9660;
         if ((iso && (allocation.payload_clusters != 0U || allocation.continuation_clusters != 0U ||
-                     allocation.projected_image_sectors == 0U ||
+                     allocation.directory_growth_clusters != 0U || allocation.directory_continuation_clusters != 0U ||
+                     allocation.infrastructure_clusters != 0U || allocation.projected_image_sectors == 0U ||
                      allocation.projected_image_size_bytes != allocation.projected_image_sectors * 2048U)) ||
             (!iso && (allocation.payload_sectors != 0U || allocation.projected_image_sectors != 0U ||
                       allocation.projected_image_size_bytes != 0U))) {

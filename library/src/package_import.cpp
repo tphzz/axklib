@@ -5,6 +5,7 @@
 #include <format>
 #include <limits>
 #include <map>
+#include <optional>
 #include <queue>
 #include <ranges>
 #include <set>
@@ -12,6 +13,7 @@
 
 #include "axklib/catalog.hpp"
 #include "axklib/package_archive.hpp"
+#include "axklib/package_import_planning.hpp"
 #include "axklib/package_relocation.hpp"
 
 #include "package_import_internal.hpp"
@@ -316,8 +318,44 @@ PartitionCapacity partition_capacity(const Partition &partition, const ObjectCat
     return result;
 }
 
-std::optional<std::pair<std::uint64_t, std::uint64_t>> reserve_clusters(PartitionCapacity &capacity,
-                                                                        std::uint32_t payload_cluster_count) {
+struct ClusterReservation {
+    std::uint64_t payload_clusters{};
+    std::uint64_t continuation_clusters{};
+    std::vector<Extent> extents;
+};
+
+std::vector<Extent> cluster_extents(std::span<const std::uint32_t> clusters) {
+    std::vector<Extent> result;
+    for (const auto cluster : clusters) {
+        if (!result.empty() && result.back().cluster_offset + result.back().cluster_count == cluster) {
+            ++result.back().cluster_count;
+            result.back().byte_count += 1024U;
+        } else {
+            result.push_back({cluster, 1U, 1024U});
+        }
+    }
+    return result;
+}
+
+std::vector<Extent> merged_extents(std::span<const Extent> existing, std::span<const Extent> added) {
+    std::vector<Extent> result;
+    result.reserve(existing.size() + added.size());
+    result.insert(result.end(), existing.begin(), existing.end());
+    result.insert(result.end(), added.begin(), added.end());
+    std::ranges::sort(result, {}, &Extent::cluster_offset);
+    std::vector<Extent> merged;
+    for (const auto &extent : result) {
+        if (!merged.empty() && merged.back().cluster_offset + merged.back().cluster_count == extent.cluster_offset) {
+            merged.back().cluster_count += extent.cluster_count;
+            merged.back().byte_count += extent.byte_count;
+        } else {
+            merged.push_back(extent);
+        }
+    }
+    return merged;
+}
+
+std::optional<ClusterReservation> reserve_clusters(PartitionCapacity &capacity, std::uint32_t payload_cluster_count) {
     std::vector<std::uint32_t> selected;
     const auto first = capacity.partition->directory_index_cluster + capacity.partition->directory_index_span_clusters;
     for (std::uint32_t cluster = first;
@@ -327,17 +365,11 @@ std::optional<std::pair<std::uint64_t, std::uint64_t>> reserve_clusters(Partitio
     }
     if (selected.size() != payload_cluster_count)
         return std::nullopt;
-    std::size_t extent_count{};
-    std::optional<std::uint32_t> previous;
-    for (const auto cluster : selected) {
-        if (!previous || *previous + 1U != cluster)
-            ++extent_count;
-        previous = cluster;
-    }
+    const auto extents = cluster_extents(selected);
     const std::set selected_set(selected.begin(), selected.end());
     constexpr std::size_t extents_per_list_cluster = (1024U - 12U) / 12U;
     const auto list_count =
-        extent_count <= 4U ? 0U : (extent_count + extents_per_list_cluster - 1U) / extents_per_list_cluster;
+        extents.size() <= 4U ? 0U : (extents.size() + extents_per_list_cluster - 1U) / extents_per_list_cluster;
     std::vector<std::uint32_t> selected_lists;
     for (std::uint32_t cluster = first;
          cluster < capacity.partition->cluster_count && selected_lists.size() < list_count; ++cluster) {
@@ -348,7 +380,44 @@ std::optional<std::pair<std::uint64_t, std::uint64_t>> reserve_clusters(Partitio
         return std::nullopt;
     capacity.used_clusters.insert(selected.begin(), selected.end());
     capacity.used_clusters.insert(selected_lists.begin(), selected_lists.end());
-    return std::pair{payload_cluster_count, static_cast<std::uint64_t>(list_count)};
+    return ClusterReservation{payload_cluster_count, static_cast<std::uint64_t>(list_count), extents};
+}
+
+std::optional<ClusterReservation> reserve_directory_growth(PartitionCapacity &capacity,
+                                                           std::span<const Extent> existing_extents,
+                                                           std::size_t existing_continuation_clusters,
+                                                           std::uint32_t additional_payload_clusters) {
+    if (additional_payload_clusters == 0U)
+        return ClusterReservation{};
+    std::vector<std::uint32_t> selected;
+    const auto first = capacity.partition->directory_index_cluster + capacity.partition->directory_index_span_clusters;
+    for (std::uint32_t cluster = first;
+         cluster < capacity.partition->cluster_count && selected.size() < additional_payload_clusters; ++cluster) {
+        if (!capacity.used_clusters.contains(cluster))
+            selected.push_back(cluster);
+    }
+    if (selected.size() != additional_payload_clusters)
+        return std::nullopt;
+    const auto added_extents = cluster_extents(selected);
+    const auto extents = merged_extents(existing_extents, added_extents);
+    constexpr std::size_t extents_per_list_cluster = (1024U - 12U) / 12U;
+    const auto required_lists =
+        extents.size() <= 4U ? 0U : (extents.size() + extents_per_list_cluster - 1U) / extents_per_list_cluster;
+    if (required_lists < existing_continuation_clusters)
+        return std::nullopt;
+    const auto additional_lists = required_lists - existing_continuation_clusters;
+    const std::set selected_set(selected.begin(), selected.end());
+    std::vector<std::uint32_t> selected_lists;
+    for (std::uint32_t cluster = first;
+         cluster < capacity.partition->cluster_count && selected_lists.size() < additional_lists; ++cluster) {
+        if (!capacity.used_clusters.contains(cluster) && !selected_set.contains(cluster))
+            selected_lists.push_back(cluster);
+    }
+    if (selected_lists.size() != additional_lists)
+        return std::nullopt;
+    capacity.used_clusters.insert(selected.begin(), selected.end());
+    capacity.used_clusters.insert(selected_lists.begin(), selected_lists.end());
+    return ClusterReservation{additional_payload_clusters, static_cast<std::uint64_t>(additional_lists), extents};
 }
 
 std::uint64_t remaining_clusters(const PartitionCapacity &capacity) {
@@ -403,11 +472,11 @@ std::optional<std::pair<std::string, std::string>> iso_raw_scope(const ObjectSna
     return std::pair{path.substr(0, separator), path.substr(separator + 1U)};
 }
 
-Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_path,
+Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_reader,
                                             std::span<const PortablePackage> packages,
                                             const PackageImportRequest &request, const MediaContainer &target,
                                             PackageImportPlan plan, const package_internal::Sha256Digest &before,
-                                            const CancellationToken &cancellation) {
+                                            bool revalidate_target, const CancellationToken &cancellation) {
     const auto &fat = std::get<FatImage>(target.storage());
     auto catalog = build_object_catalog(target, 64U * 1024U * 1024U, cancellation);
     if (!catalog)
@@ -747,14 +816,10 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
             ++retained_files;
     }
     std::uint64_t inserted_objects{};
-    std::uint64_t reused_objects{};
     for (const auto &object : plan.objects) {
         if (std::ranges::contains(object.actions, PackageImportObjectAction::insert) &&
             !std::ranges::contains(object.actions, PackageImportObjectAction::conflict)) {
             ++inserted_objects;
-        } else if (std::ranges::contains(object.actions, PackageImportObjectAction::reuse) &&
-                   !std::ranges::contains(object.actions, PackageImportObjectAction::conflict)) {
-            ++reused_objects;
         }
     }
     const auto final_entries = catalog->objects.size() + retained_files + inserted_objects;
@@ -779,25 +844,31 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
 
     PackageAllocationDelta delta;
     delta.volume_name = "FAT root";
-    delta.inserted_object_count = inserted_objects;
-    delta.reused_object_count = reused_objects;
-    for (const auto &object : plan.objects)
+    for (const auto &object : plan.objects) {
+        const auto conflict = std::ranges::contains(object.actions, PackageImportObjectAction::conflict);
+        if (conflict)
+            ++delta.blocked_object_count;
+        if (!conflict && std::ranges::contains(object.actions, PackageImportObjectAction::insert))
+            ++delta.inserted_object_count;
+        if (!conflict && std::ranges::contains(object.actions, PackageImportObjectAction::reuse))
+            ++delta.reused_object_count;
         delta.payload_clusters += object.payload_clusters;
+    }
     delta.directory_growth_bytes = inserted_objects * 32U;
+    delta.additional_allocated_bytes = delta.payload_clusters * cluster_size;
     delta.remaining_object_ids =
         final_entries > fat.geometry().root_entry_count ? 0U : fat.geometry().root_entry_count - final_entries;
     delta.remaining_clusters =
         used_clusters > fat.geometry().data_cluster_count ? 0U : fat.geometry().data_cluster_count - used_clusters;
     plan.allocation.push_back(std::move(delta));
 
-    auto final_reader = FileReader::open(target_path);
-    if (!final_reader)
-        return std::unexpected{final_reader.error()};
-    const auto after = package_internal::sha256_reader(**final_reader, cancellation);
-    if (!after)
-        return std::unexpected{after.error()};
-    if (*after != before)
-        return std::unexpected{stale_plan_error("target image changed while its import plan was built")};
+    if (revalidate_target) {
+        const auto after = package_internal::sha256_reader(target_reader, cancellation);
+        if (!after)
+            return std::unexpected{after.error()};
+        if (*after != before)
+            return std::unexpected{stale_plan_error("target image changed while its import plan was built")};
+    }
     std::ranges::sort(plan.conflicts, [](const auto &left, const auto &right) {
         return std::tie(left.code, left.package_index, left.root_index, left.package_id, left.node_id,
                         left.partition_index, left.group_name, left.volume_name, left.raw_group, left.raw_volume,
@@ -809,11 +880,11 @@ Result<PackageImportPlan> plan_fat12_import(const std::filesystem::path &target_
     return plan;
 }
 
-Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &target_path,
+Result<PackageImportPlan> plan_iso9660_import(const RandomAccessReader &target_reader,
                                               std::span<const PortablePackage> packages,
                                               const PackageImportRequest &request, const MediaContainer &target,
                                               PackageImportPlan plan, const package_internal::Sha256Digest &before,
-                                              const CancellationToken &cancellation) {
+                                              bool revalidate_target, const CancellationToken &cancellation) {
     const auto &iso = std::get<IsoImage>(target.storage());
     for (const auto &issue : iso.validation_issues())
         add_conflict(plan, issue.code, issue.message);
@@ -1356,6 +1427,8 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
                    !std::ranges::contains(object.actions, PackageImportObjectAction::conflict)) {
             ++delta.reused_object_count;
         }
+        if (std::ranges::contains(object.actions, PackageImportObjectAction::conflict))
+            ++delta.blocked_object_count;
     }
     for (const auto &[key, count] : category_counts) {
         if (count > 50U) {
@@ -1456,17 +1529,17 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
         }
         delta.projected_image_sectors = projected_image_sectors;
         delta.projected_image_size_bytes = projected_image_size_bytes;
+        delta.additional_allocated_bytes = delta.payload_sectors * 2048U;
         plan.allocation.push_back(std::move(delta));
     }
 
-    auto final_reader = FileReader::open(target_path);
-    if (!final_reader)
-        return std::unexpected{final_reader.error()};
-    const auto after = package_internal::sha256_reader(**final_reader, cancellation);
-    if (!after)
-        return std::unexpected{after.error()};
-    if (*after != before)
-        return std::unexpected{stale_plan_error("target image changed while its import plan was built")};
+    if (revalidate_target) {
+        const auto after = package_internal::sha256_reader(target_reader, cancellation);
+        if (!after)
+            return std::unexpected{after.error()};
+        if (*after != before)
+            return std::unexpected{stale_plan_error("target image changed while its import plan was built")};
+    }
     std::ranges::sort(plan.conflicts, [](const auto &left, const auto &right) {
         return std::tie(left.code, left.package_index, left.root_index, left.package_id, left.node_id,
                         left.partition_index, left.group_name, left.volume_name, left.raw_group, left.raw_volume,
@@ -1482,24 +1555,31 @@ Result<PackageImportPlan> plan_iso9660_import(const std::filesystem::path &targe
 
 } // namespace
 
-Result<PackageImportPlan> plan_package_import(const std::filesystem::path &target_path,
-                                              std::span<const PortablePackage> packages,
-                                              const PackageImportRequest &request,
-                                              const CancellationToken &cancellation) {
+static Result<PackageImportPlan> plan_package_import_impl(std::shared_ptr<const RandomAccessReader> target_reader,
+                                                          std::filesystem::path target_path,
+                                                          const MediaContainer *retained_target,
+                                                          std::span<const PortablePackage> packages,
+                                                          const PackageImportRequest &request, bool revalidate_target,
+                                                          const CancellationToken &cancellation) {
     if (packages.empty())
         return std::unexpected{planner_error("package import requires at least one package")};
+    if (!target_reader)
+        return std::unexpected{planner_error("package import target reader is required")};
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected{checked.error()};
 
-    auto target_reader = FileReader::open(target_path);
-    if (!target_reader)
-        return std::unexpected{target_reader.error()};
-    const auto before = package_internal::sha256_reader(**target_reader, cancellation);
+    const auto before = package_internal::sha256_reader(*target_reader, cancellation);
     if (!before)
         return std::unexpected{before.error()};
-    auto target = open_media(target_path, cancellation);
-    if (!target)
-        return std::unexpected{target.error()};
+    std::optional<MediaContainer> opened_target;
+    const MediaContainer *target = retained_target;
+    if (target == nullptr) {
+        auto opened = open_media(target_reader, target_path, cancellation);
+        if (!opened)
+            return std::unexpected{opened.error()};
+        opened_target.emplace(std::move(*opened));
+        target = &*opened_target;
+    }
 
     PackageImportPlan plan;
     plan.schema_version = "1.0";
@@ -1518,10 +1598,12 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
     }
 
     if (target->kind() == MediaKind::fat12_floppy) {
-        return plan_fat12_import(target_path, packages, request, *target, std::move(plan), *before, cancellation);
+        return plan_fat12_import(*target_reader, packages, request, *target, std::move(plan), *before,
+                                 revalidate_target, cancellation);
     }
     if (target->kind() == MediaKind::iso9660) {
-        return plan_iso9660_import(target_path, packages, request, *target, std::move(plan), *before, cancellation);
+        return plan_iso9660_import(*target_reader, packages, request, *target, std::move(plan), *before,
+                                   revalidate_target, cancellation);
     }
     if (target->kind() != MediaKind::sfs) {
         add_conflict(plan, "TARGET_ADAPTER_UNSUPPORTED",
@@ -1530,6 +1612,7 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
         plan.plan_id = package_import_internal::plan_identity(plan);
         return plan;
     }
+
     const auto &container = std::get<Container>(target->storage());
     auto catalog = build_object_catalog(container, 64U * 1024U * 1024U, cancellation);
     if (!catalog)
@@ -1663,6 +1746,7 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
         }
     }
 
+    std::map<std::pair<std::uint8_t, std::uint32_t>, ClusterReservation> infrastructure_layouts;
     std::map<std::uint8_t, std::size_t> new_volume_counts;
     for (const auto &[key, create] : destination_creation) {
         PlannedPackageDestination planned;
@@ -1682,13 +1766,15 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
                     planned.infrastructure_sfs_ids.push_back(capacity->second.free_ids[capacity->second.next_id++]);
                 }
                 bool cluster_failure{};
-                for (std::size_t index = 0; index < 6U; ++index) {
+                for (std::size_t index = 0; index < planned.infrastructure_sfs_ids.size(); ++index) {
                     const auto reserved = reserve_clusters(capacity->second, 2U);
                     if (!reserved) {
                         cluster_failure = true;
                         break;
                     }
-                    planned.infrastructure_clusters += reserved->first + reserved->second;
+                    planned.infrastructure_clusters += reserved->payload_clusters + reserved->continuation_clusters;
+                    infrastructure_layouts.emplace(
+                        std::pair{planned.partition_index, planned.infrastructure_sfs_ids[index]}, *reserved);
                 }
                 if (cluster_failure) {
                     add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
@@ -1830,7 +1916,8 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
         plan.objects.push_back(std::move(object));
     }
 
-    std::map<std::tuple<std::uint8_t, std::string, std::string>, std::vector<std::size_t>> category_insertions;
+    using CategoryKey = std::tuple<std::uint8_t, std::string, std::string>;
+    std::map<CategoryKey, std::vector<std::size_t>> category_insertions;
     for (std::size_t index = 0; index < plan.objects.size(); ++index) {
         auto &object = plan.objects[index];
         if (!std::ranges::contains(object.actions, PackageImportObjectAction::insert) ||
@@ -1860,15 +1947,110 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
             capacity.used_wave_data_reference_values.insert(capacity.next_wave_data_reference_value);
             capacity.next_wave_data_reference_value += 0x100U;
         }
+        category_insertions[{object.partition_index, object.volume_name, object.object_type}].push_back(index);
+    }
+
+    std::map<DestinationKey, std::pair<std::uint64_t, std::uint64_t>> directory_allocations;
+    for (const auto &[key, indices] : category_insertions) {
+        const auto &[partition_index, volume_name, category_name] = key;
+        const auto planned_destination = destination_creation.find({partition_index, volume_name});
+        std::span<const Extent> existing_extents;
+        std::size_t existing_continuation_clusters{};
+        std::uint64_t existing_data_size{};
+        std::vector<Extent> new_destination_extents;
+        if (planned_destination != destination_creation.end() && planned_destination->second) {
+            constexpr std::array<std::string_view, 5> category_names{"SMPL", "SBNK", "SBAC", "SEQU", "PROG"};
+            const auto category_index = std::ranges::find(category_names, category_name);
+            const auto destination = std::ranges::find_if(plan.destinations, [&](const auto &candidate) {
+                return candidate.partition_index == partition_index && candidate.volume_name == volume_name;
+            });
+            if (category_index == category_names.end() || destination == plan.destinations.end() ||
+                destination->infrastructure_sfs_ids.size() != 6U) {
+                for (const auto index : indices)
+                    mark_conflict(plan.objects[index]);
+                add_conflict(plan, "SFS_CATEGORY_MISSING",
+                             "new destination volume does not contain the required object category");
+                auto &conflict = plan.conflicts.back();
+                conflict.partition_index = partition_index;
+                conflict.volume_name = volume_name;
+                continue;
+            }
+            const auto category_offset = static_cast<std::size_t>(category_index - category_names.begin()) + 1U;
+            const auto layout =
+                infrastructure_layouts.find({partition_index, destination->infrastructure_sfs_ids[category_offset]});
+            if (layout == infrastructure_layouts.end()) {
+                for (const auto index : indices)
+                    mark_conflict(plan.objects[index]);
+                add_conflict(plan, "SFS_CATEGORY_MISSING", "new destination category allocation is unavailable");
+                auto &conflict = plan.conflicts.back();
+                conflict.partition_index = partition_index;
+                conflict.volume_name = volume_name;
+                continue;
+            }
+            new_destination_extents = layout->second.extents;
+            existing_extents = new_destination_extents;
+            existing_continuation_clusters = static_cast<std::size_t>(layout->second.continuation_clusters);
+            existing_data_size = 64U;
+        } else {
+            const auto volume = volumes.find({partition_index, volume_name});
+            const auto category = volume == volumes.end()
+                                      ? std::map<std::string, const IndexRecord *, std::less<>>::const_iterator{}
+                                      : volume->second.categories.find(category_name);
+            if (volume == volumes.end() || category == volume->second.categories.end()) {
+                for (const auto index : indices)
+                    mark_conflict(plan.objects[index]);
+                add_conflict(plan, "SFS_CATEGORY_MISSING",
+                             "destination volume does not contain the required object category");
+                auto &conflict = plan.conflicts.back();
+                conflict.partition_index = partition_index;
+                conflict.volume_name = volume_name;
+                continue;
+            }
+            existing_extents = category->second->extents;
+            existing_continuation_clusters = category->second->continuation_clusters.size();
+            existing_data_size = category->second->data_size;
+        }
+
+        std::uint64_t capacity_clusters{};
+        for (const auto &extent : existing_extents)
+            capacity_clusters += extent.cluster_count;
+        const auto required_size = existing_data_size + indices.size() * 32U;
+        const auto required_clusters = (required_size + 1023U) / 1024U;
+        if (required_clusters <= capacity_clusters)
+            continue;
+        const auto added_clusters = static_cast<std::uint32_t>(required_clusters - capacity_clusters);
+        auto &capacity = capacities.at(partition_index);
+        const auto reserved =
+            reserve_directory_growth(capacity, existing_extents, existing_continuation_clusters, added_clusters);
+        if (!reserved) {
+            for (const auto index : indices)
+                mark_conflict(plan.objects[index]);
+            add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
+                         "partition has insufficient clusters to grow an object category directory");
+            auto &conflict = plan.conflicts.back();
+            conflict.partition_index = partition_index;
+            conflict.volume_name = volume_name;
+            continue;
+        }
+        auto &allocation = directory_allocations[{partition_index, volume_name}];
+        allocation.first += reserved->payload_clusters;
+        allocation.second += reserved->continuation_clusters;
+    }
+
+    for (auto &object : plan.objects) {
+        if (!std::ranges::contains(object.actions, PackageImportObjectAction::insert) ||
+            std::ranges::contains(object.actions, PackageImportObjectAction::conflict)) {
+            continue;
+        }
         const auto *package_node = node_by_id(packages[object.package_index], object.node_id);
         const auto clusters =
-            std::max<std::uint32_t>(2U, static_cast<std::uint32_t>((package_node->raw_payload.size() + 1023U) / 1024U));
+            std::max<std::uint32_t>(2U, static_cast<std::uint32_t>((package_node->payload_size_bytes + 1023U) / 1024U));
+        auto &capacity = capacities.at(object.partition_index);
         const auto reserved = reserve_clusters(capacity, clusters);
         if (!reserved) {
             mark_conflict(object);
             add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
-                         "partition has insufficient clusters for the planned "
-                         "object payload");
+                         "partition has insufficient clusters for the planned object payload");
             auto &conflict = plan.conflicts.back();
             conflict.package_index = object.package_index;
             conflict.root_index = object.root_index;
@@ -1878,57 +2060,8 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
             conflict.volume_name = object.volume_name;
             continue;
         }
-        object.payload_clusters = reserved->first;
-        object.continuation_clusters = reserved->second;
-        category_insertions[{object.partition_index, object.volume_name, object.object_type}].push_back(index);
-    }
-
-    for (const auto &[key, indices] : category_insertions) {
-        const auto &[partition_index, volume_name, category_name] = key;
-        const auto planned_destination = destination_creation.find({partition_index, volume_name});
-        if (planned_destination != destination_creation.end() && planned_destination->second) {
-            const auto growth = indices.size() * 32U;
-            if (64U + growth > 2048U) {
-                for (const auto index : indices)
-                    mark_conflict(plan.objects[index]);
-                add_conflict(plan, "SFS_DIRECTORY_CAPACITY_EXHAUSTED",
-                             "new object category directory cannot contain all "
-                             "planned objects");
-                auto &conflict = plan.conflicts.back();
-                conflict.partition_index = partition_index;
-                conflict.volume_name = volume_name;
-            }
-            continue;
-        }
-        const auto volume = volumes.find({partition_index, volume_name});
-        const auto category = volume == volumes.end()
-                                  ? std::map<std::string, const IndexRecord *, std::less<>>::const_iterator{}
-                                  : volume->second.categories.find(category_name);
-        if (volume == volumes.end() || category == volume->second.categories.end()) {
-            for (const auto index : indices)
-                mark_conflict(plan.objects[index]);
-            add_conflict(plan, "SFS_CATEGORY_MISSING",
-                         "destination volume does not contain the required "
-                         "object category");
-            auto &conflict = plan.conflicts.back();
-            conflict.partition_index = partition_index;
-            conflict.volume_name = volume_name;
-            continue;
-        }
-        std::uint64_t capacity_bytes{};
-        for (const auto &extent : category->second->extents)
-            capacity_bytes += static_cast<std::uint64_t>(extent.cluster_count) * 1024U;
-        const auto growth = indices.size() * 32U;
-        if (category->second->data_size + growth > capacity_bytes) {
-            for (const auto index : indices)
-                mark_conflict(plan.objects[index]);
-            add_conflict(plan, "SFS_DIRECTORY_CAPACITY_EXHAUSTED",
-                         "object category directory has insufficient retained "
-                         "extent capacity");
-            auto &conflict = plan.conflicts.back();
-            conflict.partition_index = partition_index;
-            conflict.volume_name = volume_name;
-        }
+        object.payload_clusters = reserved->payload_clusters;
+        object.continuation_clusters = reserved->continuation_clusters;
     }
 
     std::map<std::string, const PlannedPackageObject *, std::less<>> actions_by_id;
@@ -2062,6 +2195,14 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
         delta.group_name = destination.group_name;
         delta.volume_name = destination.volume_name;
         delta.directory_growth_bytes += destination.root_directory_growth_bytes;
+        delta.infrastructure_clusters += destination.infrastructure_clusters;
+    }
+    for (const auto &[key, growth] : directory_allocations) {
+        auto &delta = allocation[key];
+        delta.partition_index = key.first;
+        delta.volume_name = key.second;
+        delta.directory_growth_clusters += growth.first;
+        delta.directory_continuation_clusters += growth.second;
     }
     for (const auto &object : plan.objects) {
         auto &delta = allocation[{object.partition_index, object.volume_name}];
@@ -2078,22 +2219,27 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
                    !std::ranges::contains(object.actions, PackageImportObjectAction::conflict)) {
             ++delta.reused_object_count;
         }
+        if (std::ranges::contains(object.actions, PackageImportObjectAction::conflict))
+            ++delta.blocked_object_count;
     }
     for (auto &[key, delta] : allocation) {
         const auto &capacity = capacities.at(key.first);
         delta.remaining_object_ids = capacity.free_ids.size() - capacity.next_id;
         delta.remaining_clusters = remaining_clusters(capacity);
+        delta.additional_allocated_bytes =
+            (delta.payload_clusters + delta.continuation_clusters + delta.directory_growth_clusters +
+             delta.directory_continuation_clusters + delta.infrastructure_clusters) *
+            1024U;
         plan.allocation.push_back(std::move(delta));
     }
 
-    auto final_reader = FileReader::open(target_path);
-    if (!final_reader)
-        return std::unexpected{final_reader.error()};
-    const auto after = package_internal::sha256_reader(**final_reader, cancellation);
-    if (!after)
-        return std::unexpected{after.error()};
-    if (*after != *before)
-        return std::unexpected{stale_plan_error("target image changed while its import plan was built")};
+    if (revalidate_target) {
+        const auto after = package_internal::sha256_reader(*target_reader, cancellation);
+        if (!after)
+            return std::unexpected{after.error()};
+        if (*after != *before)
+            return std::unexpected{stale_plan_error("target image changed while its import plan was built")};
+    }
 
     std::ranges::sort(plan.conflicts, [](const auto &left, const auto &right) {
         return std::tie(left.code, left.package_index, left.root_index, left.package_id, left.node_id,
@@ -2105,6 +2251,33 @@ Result<PackageImportPlan> plan_package_import(const std::filesystem::path &targe
     if (const auto verified = verify_package_import_plan(plan); !verified)
         return std::unexpected{verified.error()};
     return plan;
+}
+
+Result<PackageImportPlan> plan_package_import(std::shared_ptr<const RandomAccessReader> target_reader,
+                                              std::filesystem::path target_path,
+                                              std::span<const PortablePackage> packages,
+                                              const PackageImportRequest &request,
+                                              const CancellationToken &cancellation) {
+    return plan_package_import_impl(std::move(target_reader), std::move(target_path), nullptr, packages, request, true,
+                                    cancellation);
+}
+
+Result<PackageImportPlan> package_import_internal::plan_package_import_retained(
+    std::shared_ptr<const RandomAccessReader> target_reader, std::filesystem::path target_path,
+    const MediaContainer &target, std::span<const PortablePackage> packages, const PackageImportRequest &request,
+    const CancellationToken &cancellation) {
+    return plan_package_import_impl(std::move(target_reader), std::move(target_path), &target, packages, request, false,
+                                    cancellation);
+}
+
+Result<PackageImportPlan> plan_package_import(const std::filesystem::path &target_path,
+                                              std::span<const PortablePackage> packages,
+                                              const PackageImportRequest &request,
+                                              const CancellationToken &cancellation) {
+    auto target_reader = FileReader::open(target_path);
+    if (!target_reader)
+        return std::unexpected{target_reader.error()};
+    return plan_package_import(std::move(*target_reader), target_path, packages, request, cancellation);
 }
 
 } // namespace axk

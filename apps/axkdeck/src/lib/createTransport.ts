@@ -1,6 +1,7 @@
 import { HttpImageTransport } from './httpTransport';
 import type {
     ImageTransport,
+    ImageSessionPackageImportPlan,
     AudioImportCapabilities,
     AuditionDescriptor,
     ClientDownload,
@@ -12,6 +13,7 @@ import type {
     OpenedImage,
     PackageImportPlan,
     PackageInspection,
+    RetainedDownload,
     PlanSummary,
     PreviewEnvelope,
     RelationshipPage,
@@ -72,6 +74,21 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startPackageImport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    planImagePackageImport(): Promise<ImageSessionPackageImportPlan> {
+        return this.unavailable();
+    }
+    releaseImagePackageImportPlan(): Promise<void> {
+        return this.unavailable();
+    }
+    startImagePackageImport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    startImagePackageExport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    deleteRetainedPackage(_download: RetainedDownload): Promise<void> {
         return this.unavailable();
     }
     hardDiskCreationProfiles(): Promise<HardDiskCreationProfile[]> {

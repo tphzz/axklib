@@ -135,7 +135,8 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     EXPECT_EQ(opened->available_operations,
               (std::vector<std::string>{"images.content", "images.objects", "images.relationships",
                                         "images.validation.issues", "images.preview", "auditions.prepare",
-                                        "images.alter.volumes", "images.alter.partitions", "images.alter.objects"}));
+                                        "images.package.export", "images.alter.volumes", "images.alter.partitions",
+                                        "images.alter.objects", "images.package.import"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
@@ -164,6 +165,29 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
             EXPECT_TRUE(item.object_id->starts_with("object-"));
         }
     }
+}
+
+TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation) {
+    auto read_only = axk::app::Sandbox::create({{"library", "Library", root_, false}});
+    ASSERT_TRUE(read_only) << read_only.error().message;
+    axk::app::ImageSessionManager sessions{*read_only};
+    const auto opened = sessions.open({"library", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    EXPECT_NE(std::ranges::find(opened->available_operations, "images.package.export"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
+              opened->available_operations.end());
+
+    {
+        const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+        ASSERT_TRUE(read) << read.error().message;
+        ASSERT_NE(read->reader, nullptr);
+        EXPECT_GT(read->reader->size(), 0U);
+        ASSERT_NE(read->media, nullptr);
+        EXPECT_EQ(read->media->kind(), axk::MediaKind::sfs);
+    }
+    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    ASSERT_FALSE(mutation);
 }
 
 TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {

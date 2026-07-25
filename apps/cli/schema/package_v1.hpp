@@ -24,6 +24,7 @@ struct NodeOutput {
     std::string node_id;
     std::string object_type;
     std::string name;
+    std::uint64_t payload_size_bytes{};
     std::string payload_sha256;
     std::string normalized_sha256;
     std::optional<std::string> semantic_sha256;
@@ -44,6 +45,7 @@ struct PackageOutput {
     std::string source_media_kind;
     bool valid{};
     bool payloads_verified{};
+    std::uint64_t total_payload_bytes{};
     std::uint64_t relationship_count{};
     std::vector<RootOutput> roots;
     std::vector<NodeOutput> objects;
@@ -92,10 +94,15 @@ struct AllocationOutput {
     std::string raw_volume;
     std::uint64_t inserted_object_count{};
     std::uint64_t reused_object_count{};
+    std::uint64_t blocked_object_count{};
     std::uint64_t payload_clusters{};
     std::uint64_t payload_sectors{};
     std::uint64_t continuation_clusters{};
     std::uint64_t directory_growth_bytes{};
+    std::uint64_t directory_growth_clusters{};
+    std::uint64_t directory_continuation_clusters{};
+    std::uint64_t infrastructure_clusters{};
+    std::uint64_t additional_allocated_bytes{};
     std::uint64_t remaining_object_ids{};
     std::uint64_t remaining_clusters{};
     std::uint64_t projected_image_sectors{};

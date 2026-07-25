@@ -581,6 +581,12 @@ input:focus-visible {
   color: #f3a4a4;
 }
 
+.context-menu-separator {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--color-border);
+}
+
 .storage-card {
   margin: 8px 12px 12px;
   padding: 11px;
@@ -640,7 +646,8 @@ input:focus-visible {
   background: #293036;
 }
 
-.program-row.active {
+.program-row.active,
+.program-row.selected {
   border-color: rgb(104 151 187 / 68%);
   border-radius: 5px;
   background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
@@ -964,6 +971,268 @@ input:focus-visible {
   margin: 0;
   color: var(--color-text-strong);
   font-size: 13px;
+}
+
+.package-dialog {
+  width: min(820px, calc(100vw - 40px));
+}
+
+.package-dialog-content {
+  min-height: 0;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.package-source-choice {
+  display: grid;
+  gap: 9px;
+}
+
+.package-source-choice h3,
+.package-tree-section h3,
+.package-plan-section h3 {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: 12px;
+}
+
+.package-source-choice > p {
+  margin: 0 0 4px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.package-export-items {
+  display: grid;
+  max-height: 150px;
+  padding: 3px 8px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: rgb(0 0 0 / 10%);
+}
+
+.package-export-items > div {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.package-export-items strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.package-export-items span {
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.source-choice-button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 52px;
+  padding: 8px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 2%);
+  cursor: pointer;
+  text-align: left;
+}
+
+.source-choice-button:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  background: rgb(255 255 255 / 5%);
+}
+
+.source-choice-button > span {
+  display: grid;
+  gap: 2px;
+}
+
+.source-choice-button strong {
+  color: var(--color-text-strong);
+  font-size: 12px;
+}
+
+.source-choice-button small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.package-source-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.package-source-summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.package-source-summary small {
+  color: var(--color-text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.package-source-summary strong {
+  overflow: hidden;
+  color: var(--color-text-strong);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.package-review-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 0.9fr);
+  min-height: 290px;
+  gap: 14px;
+}
+
+.package-tree-section,
+.package-plan-section {
+  min-width: 0;
+}
+
+.package-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+}
+
+.package-section-heading small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.package-tree {
+  max-height: 340px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-surface);
+}
+
+.package-tree-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 25px;
+  padding: 3px 6px 3px calc(6px + var(--package-depth) * 14px);
+}
+
+.package-tree-row + .package-tree-row {
+  border-top: 1px solid rgb(255 255 255 / 4%);
+}
+
+.package-tree-row strong {
+  overflow: hidden;
+  color: var(--color-text-strong);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.package-tree-row small {
+  color: var(--color-text-muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.package-plan-summary {
+  display: grid;
+  margin: 0;
+}
+
+.package-plan-summary > div {
+  display: flex;
+  justify-content: space-between;
+  min-height: 25px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 7%);
+}
+
+.package-plan-summary dt,
+.package-plan-summary dd {
+  margin: 0;
+  font-size: 10px;
+}
+
+.package-plan-summary dt {
+  color: var(--color-text-muted);
+}
+
+.package-plan-ready {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  color: #85d8ad;
+  font-size: 11px;
+}
+
+.package-conflicts {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #765d2d;
+  border-radius: 5px;
+  background: rgb(150 108 26 / 10%);
+}
+
+.package-conflicts > strong {
+  color: #e4c17c;
+  font-size: 11px;
+}
+
+.package-conflicts label {
+  display: grid;
+  gap: 4px;
+}
+
+.package-conflicts label span {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.package-conflicts input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+  font-size: 11px;
+}
+
+.package-conflicts .secondary-button {
+  justify-self: start;
+}
+
+.package-warning {
+  margin: 9px 0 0;
+  color: #dfbd7b;
+  font-size: 10px;
 }
 
 .volume-action-dialog {
@@ -1852,7 +2121,8 @@ input:focus-visible {
 }
 
 .contained-row:hover,
-.contained-row.active {
+.contained-row.active,
+.contained-row.selected {
   border-color: rgb(104 151 187 / 45%);
   border-radius: 5px;
   background: rgb(104 151 187 / 10%);
@@ -2167,7 +2437,8 @@ input:focus-visible {
   background: #293036;
 }
 
-.wave-data-row.active {
+.wave-data-row.active,
+.wave-data-row.selected {
   border-color: rgb(104 151 187 / 68%);
   background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
 }
@@ -2237,5 +2508,11 @@ input:focus-visible {
 
   .brand {
     width: 206px;
+  }
+}
+
+@media (max-width: 720px) {
+  .package-review-grid {
+    grid-template-columns: 1fr;
   }
 }

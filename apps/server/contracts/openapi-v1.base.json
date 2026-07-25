@@ -1529,21 +1529,34 @@
       "PackageObject": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["nodeId", "objectType", "name", "payloadSha256", "normalizedSha256", "semanticSha256", "audioSha256"],
+        "required": ["nodeId", "objectType", "name", "payloadSizeBytes", "payloadSha256", "normalizedSha256", "semanticSha256", "audioSha256"],
         "properties": {
           "nodeId": {"type": "string"},
           "objectType": {"type": "string"},
           "name": {"type": "string"},
+          "payloadSizeBytes": {"type": "integer", "minimum": 0},
           "payloadSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "normalizedSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "semanticSha256": {"type": ["string", "null"]},
           "audioSha256": {"type": ["string", "null"]}
         }
       },
+      "PackageRelationship": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["edgeId", "sourceNodeId", "targetNodeId", "role", "ordinal"],
+        "properties": {
+          "edgeId": {"type": "string", "minLength": 1},
+          "sourceNodeId": {"type": "string", "minLength": 1},
+          "targetNodeId": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "minLength": 1},
+          "ordinal": {"type": "integer", "minimum": 0}
+        }
+      },
       "PackageInspection": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "packageId", "packageKind", "requiredExtension", "sourceMediaKind", "valid", "payloadsVerified", "roots", "objects", "relationshipCount", "issues"],
+        "required": ["schemaVersion", "packageId", "packageKind", "requiredExtension", "sourceMediaKind", "valid", "payloadsVerified", "totalPayloadBytes", "roots", "objects", "relationships", "relationshipCount", "issues"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "packageId": {"type": "string", "minLength": 1},
@@ -1558,8 +1571,10 @@
           },
           "valid": {"type": "boolean"},
           "payloadsVerified": {"type": "boolean"},
+          "totalPayloadBytes": {"type": "integer", "minimum": 0},
           "roots": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRoot"}},
           "objects": {"type": "array", "items": {"$ref": "#/components/schemas/PackageObject"}},
+          "relationships": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRelationship"}},
           "relationshipCount": {"type": "integer", "minimum": 0},
           "issues": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}}
         }
@@ -1568,7 +1583,7 @@
       "PackageExportResult": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "packageId", "packageKind", "requiredExtension", "sourceMediaKind", "valid", "payloadsVerified", "roots", "objects", "relationshipCount", "issues", "output", "sizeBytes"],
+        "required": ["schemaVersion", "packageId", "packageKind", "requiredExtension", "sourceMediaKind", "valid", "payloadsVerified", "totalPayloadBytes", "roots", "objects", "relationships", "relationshipCount", "issues", "output", "sizeBytes"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "packageId": {"type": "string", "minLength": 1},
@@ -1583,8 +1598,10 @@
           },
           "valid": {"type": "boolean"},
           "payloadsVerified": {"type": "boolean"},
+          "totalPayloadBytes": {"type": "integer", "minimum": 0},
           "roots": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRoot"}},
           "objects": {"type": "array", "items": {"$ref": "#/components/schemas/PackageObject"}},
+          "relationships": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRelationship"}},
           "relationshipCount": {"type": "integer", "minimum": 0},
           "issues": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
           "output": {"$ref": "#/components/schemas/FileRef"},
@@ -1681,7 +1698,7 @@
       "PackageAllocationEstimate": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["partitionIndex", "groupName", "volumeName", "rawGroup", "rawVolume", "insertedObjectCount", "reusedObjectCount", "payloadClusters", "payloadSectors", "continuationClusters", "directoryGrowthBytes", "remainingObjectIds", "remainingClusters", "projectedImageSectors", "projectedImageSizeBytes"],
+        "required": ["partitionIndex", "groupName", "volumeName", "rawGroup", "rawVolume", "insertedObjectCount", "reusedObjectCount", "blockedObjectCount", "payloadClusters", "payloadSectors", "continuationClusters", "directoryGrowthBytes", "directoryGrowthClusters", "directoryContinuationClusters", "infrastructureClusters", "additionalAllocatedBytes", "remainingObjectIds", "remainingClusters", "projectedImageSectors", "projectedImageSizeBytes"],
         "properties": {
           "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
           "groupName": {"type": "string"},
@@ -1690,10 +1707,15 @@
           "rawVolume": {"type": "string"},
           "insertedObjectCount": {"type": "integer", "minimum": 0},
           "reusedObjectCount": {"type": "integer", "minimum": 0},
+          "blockedObjectCount": {"type": "integer", "minimum": 0},
           "payloadClusters": {"type": "integer", "minimum": 0},
           "payloadSectors": {"type": "integer", "minimum": 0},
           "continuationClusters": {"type": "integer", "minimum": 0},
           "directoryGrowthBytes": {"type": "integer", "minimum": 0},
+          "directoryGrowthClusters": {"type": "integer", "minimum": 0},
+          "directoryContinuationClusters": {"type": "integer", "minimum": 0},
+          "infrastructureClusters": {"type": "integer", "minimum": 0},
+          "additionalAllocatedBytes": {"type": "integer", "minimum": 0},
           "remainingObjectIds": {"type": "integer", "minimum": 0},
           "remainingClusters": {"type": "integer", "minimum": 0},
           "projectedImageSectors": {"type": "integer", "minimum": 0},
@@ -1721,11 +1743,66 @@
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}}
         }
       },
+      "ImageSessionPackageRename": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["nodeId", "destinationName"],
+        "properties": {
+          "nodeId": {"type": "string", "minLength": 1},
+          "destinationName": {"type": "string", "minLength": 1, "maxLength": 16}
+        }
+      },
+      "ImageSessionPackageImportPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "package", "partitionIndex", "volumeName"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "package": {"$ref": "#/components/schemas/InputRef"},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "volumeName": {"type": "string", "minLength": 1},
+          "renames": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {"$ref": "#/components/schemas/ImageSessionPackageRename"}
+          }
+        }
+      },
+      "ImageSessionPackageImportPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "allocation", "imageId", "revision"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "planToken": {"type": "string", "minLength": 1},
+          "expiresInSeconds": {"type": "integer", "minimum": 1},
+          "planId": {"type": "string", "minLength": 1},
+          "targetKind": {
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660"}
+          },
+          "targetSnapshotId": {"type": "string", "minLength": 1},
+          "valid": {"type": "boolean"},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "conflicts": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportConflict"}},
+          "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
+          "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}},
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1}
+        }
+      },
       "PlanTokenRequest": {
         "type": "object",
         "additionalProperties": false,
         "required": ["planToken"],
         "properties": {"planToken": {"type": "string", "minLength": 1}}
+      },
+      "PlanReleaseResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["released"],
+        "properties": {"released": {"const": true}}
       },
       "PackageImportRequest": {"$ref": "#/components/schemas/PlanTokenRequest"},
       "PackageImportResult": {
@@ -1739,6 +1816,143 @@
           "sourceSnapshotId": {"type": "string", "minLength": 1},
           "outputSnapshotId": {"type": "string", "minLength": 1},
           "applied": {"type": "boolean"}
+        }
+      },
+      "ImageSessionPackageImportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "planId", "targetKind", "targetSnapshotId", "actions", "allocation", "imageId", "revision", "objectCount", "applied"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "planId": {"type": "string", "minLength": 1},
+          "targetKind": {
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660"}
+          },
+          "targetSnapshotId": {"type": "string", "minLength": 1},
+          "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
+          "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}},
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 2},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "applied": {"type": "boolean"}
+        }
+      },
+      "RetainedDownload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["archiveId", "filename", "sizeBytes", "expiresInSeconds", "contentPath"],
+        "properties": {
+          "archiveId": {"type": "string", "minLength": 1},
+          "filename": {"type": "string", "minLength": 1},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "expiresInSeconds": {"type": "integer", "minimum": 1},
+          "contentPath": {"type": "string", "pattern": "^/api/v1/download-archives/[A-Za-z0-9]+/content$"}
+        }
+      },
+      "ImageSessionPackageExportDestination": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "output"],
+            "properties": {
+              "kind": {"const": "WORKSPACE"},
+              "output": {"$ref": "#/components/schemas/FileRef"},
+              "overwrite": {"type": "boolean", "default": false}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "filename"],
+            "properties": {
+              "kind": {"const": "DOWNLOAD"},
+              "filename": {"type": "string", "minLength": 1}
+            }
+          }
+        ]
+      },
+      "ImageSessionPackageExportRoot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "partitionIndex", "volumeName"],
+            "properties": {
+              "kind": {"const": "VOLUME"},
+              "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+              "volumeName": {"type": "string", "minLength": 1}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "objectId"],
+            "properties": {
+              "kind": {"enum": ["PROGRAM", "SBAC", "SBNK", "SMPL"]},
+              "objectId": {"type": "string", "minLength": 1}
+            }
+          }
+        ]
+      },
+      "ImageSessionPackageExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "roots", "destination"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "roots": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1024,
+            "uniqueItems": true,
+            "items": {"$ref": "#/components/schemas/ImageSessionPackageExportRoot"}
+          },
+          "destination": {"$ref": "#/components/schemas/ImageSessionPackageExportDestination"}
+        }
+      },
+      "ImageSessionPackageExportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "packageId", "packageKind", "requiredExtension", "sourceMediaKind", "valid", "payloadsVerified", "totalPayloadBytes", "roots", "objects", "relationships", "relationshipCount", "issues", "imageId", "revision", "sizeBytes", "destination", "output", "download"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "packageId": {"type": "string", "minLength": 1},
+          "packageKind": {
+            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "BUNDLE"],
+            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "BUNDLE": "bundle"}
+          },
+          "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
+          "sourceMediaKind": {
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "UNKNOWN"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "UNKNOWN": "unknown"}
+          },
+          "valid": {"type": "boolean"},
+          "payloadsVerified": {"type": "boolean"},
+          "totalPayloadBytes": {"type": "integer", "minimum": 0},
+          "roots": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRoot"}},
+          "objects": {"type": "array", "items": {"$ref": "#/components/schemas/PackageObject"}},
+          "relationships": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRelationship"}},
+          "relationshipCount": {"type": "integer", "minimum": 0},
+          "issues": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "destination": {"enum": ["WORKSPACE", "DOWNLOAD"]},
+          "output": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/FileRef"},
+              {"type": "null"}
+            ]
+          },
+          "download": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/RetainedDownload"},
+              {"type": "null"}
+            ]
+          }
         }
       },
       "ManifestTemplateRequest": {

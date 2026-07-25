@@ -136,7 +136,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 31U);
+    EXPECT_EQ(entries.size(), 35U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -377,15 +377,22 @@ TEST(ServerContract, WireEnumsAreUpperSnakeAndTranslateOnlyAtTheApplicationBound
         {"sourceMediaKind", "sfs"},
         {"valid", true},
         {"payloadsVerified", true},
+        {"totalPayloadBytes", 0},
         {"roots", nlohmann::json::array(
                       {{{"kind", "prog"}, {"displayName", "Program 1"}, {"nodeIds", nlohmann::json::array()}}})},
         {"objects", nlohmann::json::array()},
+        {"relationships", nlohmann::json::array({{{"edgeId", "edge-1"},
+                                                  {"sourceNodeId", "node-1"},
+                                                  {"targetNodeId", "node-2"},
+                                                  {"role", "PROG_ASSIGNMENT_TO_SBNK"},
+                                                  {"ordinal", 0}}})},
         {"relationshipCount", 0},
         {"issues", nlohmann::json::array()}};
     const auto wire_result = validator.wire_value("PackageInspection", application_result);
     EXPECT_EQ(wire_result.at("packageKind"), "PROGRAM");
     EXPECT_EQ(wire_result.at("sourceMediaKind"), "SFS");
     EXPECT_EQ(wire_result.at("roots").at(0).at("kind"), "PROGRAM");
+    EXPECT_EQ(wire_result.at("relationships").at(0).at("role"), "PROG_ASSIGNMENT_TO_SBNK");
     EXPECT_TRUE(validator.validate("PackageInspection", wire_result));
     EXPECT_EQ(validator.application_value("PackageInspection", wire_result), application_result);
 }

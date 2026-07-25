@@ -254,6 +254,33 @@ workflows; they are not empty floppy or ISO containers. Direct empty FAT12 and
 ISO9660 creation is intentionally not offered because those media need Yamaha
 catalog and object content to be useful.
 
+### Import and export portable packages
+
+Right-click a volume in the image sidebar to import or export an axklib
+portable package. Import accepts a package from any configured storage
+location. The desktop application can also choose a local package, upload it
+in bounded chunks, and remove that temporary upload when the dialog closes.
+Axkdeck verifies the package, shows its Program, Sample Bank, Sample, and Wave
+Data graph, and presents the exact insertion, reuse, allocation, warning, and
+naming-conflict plan before enabling **Import package**. Conflict renames are
+replanned before application.
+
+Session import is an atomic, journaled change to the currently open writable
+SFS image. The plan is bound to the image revision and retained package
+identity; an outdated plan cannot alter the image. After a successful job,
+axkdeck refreshes the same image session and restores the destination volume.
+
+Volume export creates one `.axkvol` containing the complete admitted object
+dependency graph. Programs, Sample Banks, Samples, and Wave Data can also be
+exported from their list context menus. Use Ctrl/Cmd-click, Shift-click, or
+Ctrl/Cmd+A within one list to export several roots; shared dependencies are
+included once in a `.axkpkg` bundle. An export can publish directly to a
+configured writable storage location. The desktop application can instead
+choose a local destination; the server then retains an owner-scoped package
+briefly while the native shell streams it to the selected file and deletes the
+retained resource afterward. Remote browser clients use configured server
+storage because they cannot write an arbitrary client filesystem path.
+
 ### Diagnostics
 
 Development builds open the web developer tools with `F12`. This shortcut is

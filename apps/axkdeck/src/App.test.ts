@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
     contentChildren: vi.fn(),
     objectPage: vi.fn(),
     relationshipPage: vi.fn(),
+    inspectPackage: vi.fn(),
+    planImagePackageImport: vi.fn(),
+    releaseImagePackageImportPlan: vi.fn(),
+    releaseClientUpload: vi.fn(),
     inspectObjectDeletion: vi.fn(),
     startObjectDeletion: vi.fn(),
     waitForJob: vi.fn(),
@@ -30,6 +34,10 @@ vi.mock('./lib/createTransport', () => ({
         contentChildren: mocks.contentChildren,
         objectPage: mocks.objectPage,
         relationshipPage: mocks.relationshipPage,
+        inspectPackage: mocks.inspectPackage,
+        planImagePackageImport: mocks.planImagePackageImport,
+        releaseImagePackageImportPlan: mocks.releaseImagePackageImportPlan,
+        releaseClientUpload: mocks.releaseClientUpload,
         inspectObjectDeletion: mocks.inspectObjectDeletion,
         startObjectDeletion: mocks.startObjectDeletion,
         waitForJob: mocks.waitForJob,
@@ -98,6 +106,10 @@ describe('App panel layout', () => {
         mocks.contentChildren.mockReset().mockResolvedValue({ items: [], totalCount: 0 });
         mocks.objectPage.mockReset().mockResolvedValue({ objects: [], totalCount: 0 });
         mocks.relationshipPage.mockReset().mockResolvedValue({ relationships: [], totalCount: 0 });
+        mocks.inspectPackage.mockReset();
+        mocks.planImagePackageImport.mockReset();
+        mocks.releaseImagePackageImportPlan.mockReset().mockResolvedValue(undefined);
+        mocks.releaseClientUpload.mockReset().mockResolvedValue(undefined);
         mocks.inspectObjectDeletion.mockReset();
         mocks.startObjectDeletion.mockReset();
         mocks.waitForJob.mockReset();
@@ -431,6 +443,103 @@ describe('App panel layout', () => {
         expect(screen.queryByRole('button', { name: /More actions/ })).toBeNull();
         expect(screen.queryByRole('menuitem', { name: 'Delete' })).toBeNull();
         expect(screen.queryByRole('button', { name: 'New folder' })).toBeNull();
+    });
+
+    it('continues from package verification into import planning without proxy identity checks', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'My Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 0,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectDeletionAvailable: true,
+            packageImportAvailable: true,
+            packageExportAvailable: true,
+        });
+        mocks.inspectPackage.mockResolvedValue({
+            schemaVersion: '1.0',
+            packageId: 'package-1',
+            packageKind: 'VOLUME',
+            requiredExtension: '.axkvol',
+            sourceMediaKind: 'SFS',
+            valid: true,
+            payloadsVerified: true,
+            roots: [{ kind: 'VOLUME', displayName: 'Grand Piano', nodeIds: [] }],
+            objects: [],
+            relationships: [],
+            relationshipCount: 0,
+            issues: [],
+        });
+        mocks.planImagePackageImport.mockResolvedValue({
+            schemaVersion: '1.0',
+            imageId: 'image-1',
+            revision: 1,
+            planToken: 'plan-1',
+            expiresInSeconds: 600,
+            planId: 'plan-id',
+            targetKind: 'SFS',
+            targetSnapshotId: 'snapshot-1',
+            valid: true,
+            warnings: [],
+            conflicts: [],
+            actions: [],
+            allocation: [],
+        });
+        render(App);
+
+        await chooseNestedImage();
+        await vi.waitFor(() => expect(screen.getByRole('button', { name: /My Volume/ })).toBeTruthy());
+        mocks.sandboxDirectory.mockResolvedValue({
+            directory: { rootId: 'workspace', relativePath: '' },
+            entries: [
+                {
+                    name: 'GrPiano Fazioli.axkvol',
+                    relativePath: 'GrPiano Fazioli.axkvol',
+                    kind: 'FILE',
+                    size: 33832158,
+                },
+            ],
+            truncated: false,
+            nextCursor: null,
+        });
+        await fireEvent.contextMenu(screen.getByRole('button', { name: /My Volume/ }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import package…' }));
+        await fireEvent.click(screen.getByRole('button', { name: /Storage location/ }));
+        const picker = await screen.findByRole('dialog', { name: 'Choose axklib package' });
+        await fireEvent.click(await within(picker).findByText('Yamaha'));
+        await fireEvent.click(await within(picker).findByText('GrPiano Fazioli.axkvol'));
+
+        await vi.waitFor(() =>
+            expect(mocks.planImagePackageImport).toHaveBeenCalledWith(
+                17,
+                expect.objectContaining({
+                    kind: 'server-file',
+                    reference: { rootId: 'workspace', relativePath: 'GrPiano Fazioli.axkvol' },
+                }),
+                0,
+                'My Volume',
+                [],
+            ),
+        );
+        expect(await screen.findByText('Ready to import')).toBeTruthy();
+        expect(screen.queryByText(/Uploading package/)).toBeNull();
     });
 
     it('suppresses context menus only in the desktop runtime', async () => {

@@ -15,6 +15,8 @@
         ) => Promise<{ items: DiskTreeItem[]; totalCount: number }>;
         volumeActionsEnabled?: boolean;
         partitionActionsEnabled?: boolean;
+        packageImportEnabled?: boolean;
+        packageExportEnabled?: boolean;
         onrequestmenu?: (item: DiskTreeItem, x: number, y: number) => void;
     }
 
@@ -26,6 +28,8 @@
         onloadchildren,
         volumeActionsEnabled = false,
         partitionActionsEnabled = false,
+        packageImportEnabled = false,
+        packageExportEnabled = false,
         onrequestmenu = () => undefined,
     }: Props = $props();
     let expanded = $state(false);
@@ -87,7 +91,7 @@
         return (
             item.partitionIndex !== undefined &&
             ((item.kind === 'partition' && (volumeActionsEnabled || partitionActionsEnabled)) ||
-                (item.kind === 'volume' && volumeActionsEnabled))
+                (item.kind === 'volume' && (volumeActionsEnabled || packageImportEnabled || packageExportEnabled)))
         );
     }
 
@@ -166,6 +170,8 @@
                     {onloadchildren}
                     {volumeActionsEnabled}
                     {partitionActionsEnabled}
+                    {packageImportEnabled}
+                    {packageExportEnabled}
                     {onrequestmenu}
                 />
             {/each}

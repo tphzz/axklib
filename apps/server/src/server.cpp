@@ -443,6 +443,8 @@ int status_for_error(const axk::app::Error &error, int fallback = 422) {
         return 404;
     if (error.code == "image_not_found" || error.code == "audition_not_found")
         return 404;
+    if (error.code == "package_plan_not_found")
+        return 404;
     if (error.code == "job_event_replay_expired")
         return 409;
     if (error.code == "job_queue_full" || error.code == "event_ticket_capacity_exhausted" ||
@@ -455,6 +457,8 @@ int status_for_error(const axk::app::Error &error, int fallback = 422) {
     if (error.code == "download_archive_quota_exceeded")
         return 429;
     if (error.code == "archive_download_capacity_exhausted")
+        return 429;
+    if (error.code == "package_plan_capacity")
         return 429;
     if (error.code == "download_archive_too_large")
         return 413;
@@ -471,6 +475,9 @@ int status_for_error(const axk::app::Error &error, int fallback = 422) {
     if (error.code == "archive_in_use")
         return 409;
     if (error.code == "idempotency_conflict")
+        return 409;
+    if (error.code == "package_plan_in_use" || error.code == "package_plan_conflicts" ||
+        error.code == "package_plan_stale" || error.code == "image_revision_stale")
         return 409;
     if (error.code == "destination_reserved")
         return 409;
@@ -601,10 +608,10 @@ class ServerApplication {
           images_(sandbox_, config_.maximum_image_sessions, config_.maximum_page_size,
                   std::chrono::seconds{config_.image_idle_seconds}, std::chrono::steady_clock::now,
                   &path_reservations_),
-          registry_(
-              prepare_registry(std::move(registry), sandbox_, uploads_, images_, alteration_journals_,
-                               {config_.maximum_media_build_object_bytes, config_.maximum_media_build_payload_bytes,
-                                config_.maximum_media_build_output_bytes})),
+          registry_(prepare_registry(
+              std::move(registry), sandbox_, uploads_, images_, alteration_journals_, download_archives_,
+              {config_.maximum_media_build_object_bytes, config_.maximum_media_build_payload_bytes,
+               config_.maximum_media_build_output_bytes})),
           openapi_document_(axk::server::build_openapi_document(axk::server::embedded_openapi(), registry_)),
           openapi_validator_(openapi_document_),
           jobs_(
@@ -727,7 +734,8 @@ class ServerApplication {
     static axk::app::OperationRegistry
     prepare_registry(axk::app::OperationRegistry registry, const axk::app::Sandbox &sandbox,
                      axk::app::UploadStore &uploads, axk::app::ImageSessionManager &images,
-                     axk::app::AlterationJournalStore &journals, const axk::MediaBuildLimits &media_limits) {
+                     axk::app::AlterationJournalStore &journals, axk::app::DownloadArchiveStore &downloads,
+                     const axk::MediaBuildLimits &media_limits) {
         auto prepared = axk::app::make_application_registry(sandbox, uploads, std::move(registry), media_limits);
         if (!prepared)
             std::terminate();
@@ -766,7 +774,7 @@ class ServerApplication {
         if (!bound)
             std::terminate();
         if (const auto session_operations =
-                axk::app::bind_session_application_operations(*prepared, sandbox, uploads, images, journals);
+                axk::app::bind_session_application_operations(*prepared, sandbox, uploads, images, journals, downloads);
             !session_operations) {
             std::terminate();
         }
@@ -1848,7 +1856,7 @@ class ServerApplication {
             finish(error_response(status_for_error(content.error()), content.error(), id));
             return;
         }
-        response.set_static_file_info_unsafe(axk::text::path_to_utf8(content->path), "application/x-tar");
+        response.set_static_file_info_unsafe(axk::text::path_to_utf8(content->path), content->snapshot.media_type);
         if (response.code != 200) {
             finish(error_response(500, {"archive_storage_unavailable", "download archive cannot be streamed"}, id));
             return;

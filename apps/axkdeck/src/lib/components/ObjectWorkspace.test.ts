@@ -72,6 +72,36 @@ describe('ObjectWorkspace', () => {
         expect(screen.getByRole('searchbox', { name: 'Search Programs' })).toBeTruthy();
     });
 
+    it('exports a deterministic multi-selection from the Programs context menu', async () => {
+        const firstObject = object('PROG', '001');
+        const secondObject = object('PROG', '002');
+        const onexportobjects = vi.fn();
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                programs: [
+                    { id: 'program-1', objectId: firstObject.key, slot: '001', name: 'Piano', object: firstObject },
+                    { id: 'program-2', objectId: secondObject.key, slot: '002', name: 'Strings', object: secondObject },
+                ],
+                view: 'programs',
+                packageExportAvailable: true,
+                onexportobjects,
+            },
+        });
+
+        const piano = screen.getByRole('button', { name: /Piano/ });
+        const strings = screen.getByRole('button', { name: /Strings/ });
+        await fireEvent.click(piano);
+        await fireEvent.click(strings, { ctrlKey: true });
+        await fireEvent.contextMenu(strings);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export 2 objects' }));
+
+        expect(onexportobjects).toHaveBeenCalledWith([
+            { kind: 'PROGRAM', objectId: firstObject.key, name: 'Piano', typeLabel: 'Program' },
+            { kind: 'PROGRAM', objectId: secondObject.key, name: 'Strings', typeLabel: 'Program' },
+        ]);
+    });
+
     it('renders Wave Data as dense rows with one full-row selection target', async () => {
         const waveObject = {
             ...object('SMPL', 'SMP 001'),

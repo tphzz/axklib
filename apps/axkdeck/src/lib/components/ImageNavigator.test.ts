@@ -144,4 +144,49 @@ describe('ImageNavigator', () => {
         expect(screen.getAllByText('nested.hds')).toHaveLength(1);
         expect(onloadchildren).toHaveBeenCalledWith('disk', 0, 200);
     });
+
+    it('offers package actions for a volume independently from mutation availability', async () => {
+        const onimageaction = vi.fn();
+        render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'nested.hds' }),
+                items: [
+                    {
+                        id: 'disk',
+                        name: 'nested.hds',
+                        kind: 'disk',
+                        childCount: 1,
+                        children: [
+                            {
+                                id: 'volume',
+                                name: 'DRUMS',
+                                kind: 'volume',
+                                childCount: 0,
+                                partitionIndex: 0,
+                            },
+                        ],
+                    },
+                ],
+                packageImportEnabled: true,
+                packageExportEnabled: true,
+                onimageaction,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: /DRUMS/ }), {
+            clientX: 20,
+            clientY: 20,
+        });
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import package…' }));
+        expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'volume' }), 'import-package');
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: /DRUMS/ }), {
+            clientX: 20,
+            clientY: 20,
+        });
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
+        expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'volume' }), 'export-package');
+        expect(screen.queryByRole('menuitem', { name: 'Delete volume' })).toBeNull();
+    });
 });

@@ -205,6 +205,9 @@ axk::app::make_application_registry(const Sandbox &sandbox, UploadStore &uploads
 axk::app::Result<void> axk::app::bind_session_application_operations(OperationRegistry &registry,
                                                                      const Sandbox &sandbox, UploadStore &uploads,
                                                                      ImageSessionManager &images,
-                                                                     AlterationJournalStore &journals) {
-    return bind_session_write_operations(registry, sandbox, uploads, images, journals);
+                                                                     AlterationJournalStore &journals,
+                                                                     DownloadArchiveStore &downloads) {
+    if (auto bound = bind_session_write_operations(registry, sandbox, uploads, images, journals); !bound)
+        return bound;
+    return bind_session_package_operations(registry, sandbox, uploads, images, journals, downloads);
 }
