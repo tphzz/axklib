@@ -138,6 +138,20 @@ axk::VolumeSpec single_sample_volume(const std::filesystem::path &audio_path, st
     return volume;
 }
 
+axk::VolumeSpec single_sample_bank_volume(const std::filesystem::path &audio_path, std::string volume_name,
+                                          std::string waveform_name, std::string sample_name,
+                                          std::string sample_bank_name) {
+    auto volume =
+        single_sample_volume(audio_path, std::move(volume_name), std::move(waveform_name), std::move(sample_name));
+    volume.sample_banks.push_back({std::move(sample_bank_name), {volume.samples.front().name}});
+    auto direct = volume.samples.front();
+    direct.name = "Direct Sample";
+    volume.samples.push_back(std::move(direct));
+    volume.programs.push_back(
+        {1U, {{"SBAC", volume.sample_banks.front().name, 1U}, {"SBNK", volume.samples.back().name, 2U}}});
+    return volume;
+}
+
 axk::Waveform tiny_waveform(std::int16_t peak) {
     axk::Waveform waveform;
     waveform.format = {1U, 2U, 44100U};
@@ -703,6 +717,130 @@ TEST(PortablePackage, SbacRelationshipOrdinalsPreserveSourceSlotOrder) {
     EXPECT_EQ(edges[1].ordinal, 1U);
     EXPECT_EQ(target_name(edges[1]), "A Sample");
     EXPECT_TRUE(axk::verify_portable_package(built->package));
+    std::filesystem::remove_all(output_root, error);
+}
+
+TEST(PortablePackage, ExportsExactIsoSampleBankClosureWithDuplicateNameInAnotherVolume) {
+    const auto output_root = publication_root("axklib-package-iso-sbac-local-duplicate");
+    const auto local_audio = output_root / "local.wav";
+    const auto remote_audio = output_root / "remote.wav";
+    const auto target_path = output_root / "target.iso";
+    const auto remote_source_path = output_root / "remote.hds";
+    const auto combined_path = output_root / "combined.iso";
+    const auto imported_path = output_root / "imported.iso";
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    ASSERT_TRUE(axk::write_wav_atomic(local_audio, tiny_waveform(1000)));
+    ASSERT_TRUE(axk::write_wav_atomic(remote_audio, tiny_waveform(2000)));
+
+    axk::MediaBuildManifest target_manifest;
+    target_manifest.schema_version = "1.0";
+    target_manifest.format = axk::MediaImageFormat::iso9660;
+    target_manifest.iso_volume_id = "LOCAL_DUPLICATE";
+    target_manifest.group_name = "Target Group";
+    target_manifest.raw_group = "GROUP";
+    target_manifest.volume_name = "Local Volume";
+    target_manifest.raw_volume = "F001";
+    target_manifest.authored_volume =
+        single_sample_bank_volume(local_audio, "Local Volume", "Local Wave", "Shared Sample", "Local Bank");
+    const auto target_written = axk::write_media_image(target_manifest, target_path);
+    ASSERT_TRUE(target_written) << target_written.error().message;
+
+    axk::HdsBuildManifest remote_manifest{"1.0", 4U * 1024U * 1024U, {}};
+    remote_manifest.partitions.push_back(
+        {"P1",
+         {single_sample_bank_volume(remote_audio, "Remote Volume", "Remote Wave", "Shared Sample", "Remote Bank")}});
+    const auto remote_written = axk::write_hds_image(remote_manifest, remote_source_path);
+    ASSERT_TRUE(remote_written) << remote_written.error().message;
+    const auto remote_source = axk::open_media(remote_source_path);
+    ASSERT_TRUE(remote_source) << remote_source.error().message;
+    const std::vector remote_roots{root(axk::PackageRootKind::volume, "Remote Volume")};
+    const auto remote_package = axk::build_portable_package(*remote_source, remote_roots);
+    ASSERT_TRUE(remote_package) << remote_package.error().message;
+
+    axk::PackageImportRequest remote_request;
+    auto remote_destination = destination(0U, 0U, "Remote Volume");
+    remote_destination.group_name = "Target Group";
+    remote_destination.raw_group = "GROUP";
+    remote_destination.raw_volume = "F002";
+    remote_destination.create_destination = true;
+    remote_request.root_destinations.push_back(std::move(remote_destination));
+    const std::vector remote_packages{remote_package->package};
+    const auto remote_plan = axk::plan_package_import(target_path, remote_packages, remote_request);
+    ASSERT_TRUE(remote_plan) << remote_plan.error().message;
+    ASSERT_TRUE(remote_plan->valid()) << conflict_summary(*remote_plan);
+    ASSERT_TRUE(axk::apply_package_import(target_path, remote_packages, *remote_plan, combined_path));
+
+    const auto combined = axk::open_media(combined_path);
+    ASSERT_TRUE(combined) << combined.error().message;
+    const auto combined_catalog = axk::build_object_catalog(*combined);
+    ASSERT_TRUE(combined_catalog) << combined_catalog.error().message;
+    EXPECT_EQ(std::ranges::count_if(combined_catalog->objects,
+                                    [](const auto &object) {
+                                        return object.object.header.type == axk::ObjectType::sbnk &&
+                                               object.object.header.name == "Shared Sample";
+                                    }),
+              2);
+    const auto local_bank = std::ranges::find_if(combined_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Local Bank" &&
+               object.placement && object.placement->container_directory == "GROUP/F001";
+    });
+    ASSERT_NE(local_bank, combined_catalog->objects.end());
+
+    auto local_selector = root(axk::PackageRootKind::sbac, "Local Volume", "Local Bank");
+    local_selector.group_name = "Target Group";
+    local_selector.object_key = local_bank->key;
+    const std::vector local_roots{std::move(local_selector)};
+    const auto local_package = axk::build_portable_package(*combined, local_roots);
+    ASSERT_TRUE(local_package) << local_package.error().message;
+    EXPECT_EQ(local_package->package.kind, axk::PackageKind::sbac);
+    EXPECT_EQ(std::ranges::count(local_package->package.nodes, std::string{"SBAC"}, &axk::PackageNode::object_type), 1);
+    EXPECT_EQ(std::ranges::count(local_package->package.nodes, std::string{"SBNK"}, &axk::PackageNode::object_type), 1);
+    EXPECT_EQ(std::ranges::count(local_package->package.nodes, std::string{"SMPL"}, &axk::PackageNode::object_type), 1);
+    EXPECT_TRUE(std::ranges::any_of(local_package->package.nodes, [](const auto &node) {
+        return node.object_type == "SMPL" && node.name == "Local Wave";
+    }));
+    EXPECT_FALSE(std::ranges::any_of(local_package->package.nodes, [](const auto &node) {
+        return node.object_type == "SMPL" && node.name == "Remote Wave";
+    }));
+
+    axk::PackageImportRequest local_request;
+    auto local_destination = destination(0U, 0U, "Imported Local");
+    local_destination.group_name = "Target Group";
+    local_destination.raw_group = "GROUP";
+    local_destination.raw_volume = "F003";
+    local_destination.create_destination = true;
+    local_request.root_destinations.push_back(std::move(local_destination));
+    const std::vector local_packages{local_package->package};
+    const auto local_plan = axk::plan_package_import(combined_path, local_packages, local_request);
+    ASSERT_TRUE(local_plan) << local_plan.error().message;
+    ASSERT_TRUE(local_plan->valid()) << conflict_summary(*local_plan);
+    ASSERT_TRUE(axk::apply_package_import(combined_path, local_packages, *local_plan, imported_path));
+
+    const auto imported = axk::open_media(imported_path);
+    ASSERT_TRUE(imported) << imported.error().message;
+    const auto imported_catalog = axk::build_object_catalog(*imported);
+    ASSERT_TRUE(imported_catalog) << imported_catalog.error().message;
+    const auto imported_bank = std::ranges::find_if(imported_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Local Bank" &&
+               object.placement && object.placement->container_directory == "GROUP/F003";
+    });
+    ASSERT_NE(imported_bank, imported_catalog->objects.end());
+    auto imported_selector = root(axk::PackageRootKind::sbac, "Imported Local", "Local Bank");
+    imported_selector.group_name = "Target Group";
+    imported_selector.object_key = imported_bank->key;
+    const std::vector imported_roots{std::move(imported_selector)};
+    const auto reexported = axk::build_portable_package(*imported, imported_roots);
+    ASSERT_TRUE(reexported) << reexported.error().message;
+    EXPECT_EQ(reexported->package.relationships, local_package->package.relationships);
+    for (const auto &source_node : local_package->package.nodes) {
+        const auto imported_node = std::ranges::find_if(reexported->package.nodes, [&](const auto &candidate) {
+            return candidate.object_type == source_node.object_type && candidate.name == source_node.name;
+        });
+        ASSERT_NE(imported_node, reexported->package.nodes.end());
+        EXPECT_EQ(imported_node->normalized_sha256, source_node.normalized_sha256);
+    }
     std::filesystem::remove_all(output_root, error);
 }
 

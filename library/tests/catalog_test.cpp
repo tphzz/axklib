@@ -547,6 +547,112 @@ TEST(ProgramRelationships, KeepsVisibleOffAmbiguousSampleBanksAsDiagnosticCandid
     EXPECT_EQ(graph.relationships.front().basis, "assignment-visible-off-name-ambiguous-sbac");
 }
 
+TEST(RelationshipGraph, ResolvesExactIsoSampleBankMemberWithinItsRawVolume) {
+    axk::ObjectCatalog catalog;
+    const auto add_sample = [&](std::string key, std::string folder, std::uint32_t id) {
+        axk::DecodedObject sample;
+        sample.header.type = axk::ObjectType::sbnk;
+        sample.header.name = "Duplicate Sample";
+        sample.payload = axk::CurrentSbnk{};
+        const axk::ObjectPlacement placement{axk::PartitionIndex{0}, "GROUP",          axk::SfsId{id}, "Volume", "SBNK",
+                                             "Duplicate Sample",     std::move(folder)};
+        catalog.objects.emplace_back(std::move(key), axk::PartitionIndex{0}, axk::SfsId{id}, "iso:DISC",
+                                     std::move(sample), placement, std::vector<std::byte>{}, std::vector{placement},
+                                     axk::PlacementResolution::exact);
+    };
+    add_sample("local-sample", "GROUP/F001", 1U);
+    add_sample("remote-sample", "GROUP/F008", 2U);
+
+    axk::CurrentSbac current_sample_bank;
+    current_sample_bank.slots.push_back({"Duplicate Sample", 1U, 0x14cU});
+    axk::DecodedObject sample_bank;
+    sample_bank.header.type = axk::ObjectType::sbac;
+    sample_bank.header.name = "Bank";
+    sample_bank.payload = std::move(current_sample_bank);
+    const axk::ObjectPlacement placement{
+        axk::PartitionIndex{0}, "GROUP", axk::SfsId{3}, "Volume", "SBAC", "Bank", "GROUP/F001"};
+    catalog.objects.emplace_back("sample-bank", axk::PartitionIndex{0}, axk::SfsId{3}, "iso:DISC",
+                                 std::move(sample_bank), placement, std::vector<std::byte>{}, std::vector{placement},
+                                 axk::PlacementResolution::exact);
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    ASSERT_TRUE(graph.relationships.front().target_key);
+    EXPECT_EQ(*graph.relationships.front().target_key, "local-sample");
+    EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::known);
+    EXPECT_EQ(graph.relationships.front().basis, "active-sbac-slot-name+same-folder");
+    EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
+}
+
+TEST(RelationshipGraph, KeepsDuplicateExactIsoSampleBankMembersWithinOneRawVolumeTentative) {
+    axk::ObjectCatalog catalog;
+    const auto add_sample = [&](std::string key, std::string folder, std::uint32_t id) {
+        axk::DecodedObject sample;
+        sample.header.type = axk::ObjectType::sbnk;
+        sample.header.name = "Duplicate Sample";
+        sample.payload = axk::CurrentSbnk{};
+        const axk::ObjectPlacement placement{axk::PartitionIndex{0}, "GROUP",          axk::SfsId{id}, "Volume", "SBNK",
+                                             "Duplicate Sample",     std::move(folder)};
+        catalog.objects.emplace_back(std::move(key), axk::PartitionIndex{0}, axk::SfsId{id}, "iso:DISC",
+                                     std::move(sample), placement, std::vector<std::byte>{}, std::vector{placement},
+                                     axk::PlacementResolution::exact);
+    };
+    add_sample("local-sample-a", "GROUP/F001", 1U);
+    add_sample("local-sample-b", "GROUP/F001", 2U);
+    add_sample("remote-sample", "GROUP/F008", 3U);
+
+    axk::CurrentSbac current_sample_bank;
+    current_sample_bank.slots.push_back({"Duplicate Sample", 1U, 0x14cU});
+    axk::DecodedObject sample_bank;
+    sample_bank.header.type = axk::ObjectType::sbac;
+    sample_bank.header.name = "Bank";
+    sample_bank.payload = std::move(current_sample_bank);
+    const axk::ObjectPlacement placement{
+        axk::PartitionIndex{0}, "GROUP", axk::SfsId{4}, "Volume", "SBAC", "Bank", "GROUP/F001"};
+    catalog.objects.emplace_back("sample-bank", axk::PartitionIndex{0}, axk::SfsId{4}, "iso:DISC",
+                                 std::move(sample_bank), placement, std::vector<std::byte>{}, std::vector{placement},
+                                 axk::PlacementResolution::exact);
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    EXPECT_FALSE(graph.relationships.front().target_key);
+    EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::tentative);
+    EXPECT_EQ(graph.relationships.front().basis, "active-sbac-slot-name-ambiguous");
+    EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 3U);
+}
+
+TEST(RelationshipGraph, KeepsNonExactIsoSampleBankPlacementBelowKnownQuality) {
+    axk::ObjectCatalog catalog;
+    const auto add_sample = [&](std::string key, std::string folder, std::uint32_t id) {
+        axk::DecodedObject sample;
+        sample.header.type = axk::ObjectType::sbnk;
+        sample.header.name = "Duplicate Sample";
+        sample.payload = axk::CurrentSbnk{};
+        const axk::ObjectPlacement placement{axk::PartitionIndex{0}, "GROUP",          axk::SfsId{id}, "Volume", "SBNK",
+                                             "Duplicate Sample",     std::move(folder)};
+        catalog.objects.emplace_back(std::move(key), axk::PartitionIndex{0}, axk::SfsId{id}, "iso:DISC",
+                                     std::move(sample), placement);
+    };
+    add_sample("local-sample", "GROUP/F001", 1U);
+    add_sample("remote-sample", "GROUP/F008", 2U);
+
+    axk::CurrentSbac current_sample_bank;
+    current_sample_bank.slots.push_back({"Duplicate Sample", 1U, 0x14cU});
+    axk::DecodedObject sample_bank;
+    sample_bank.header.type = axk::ObjectType::sbac;
+    sample_bank.header.name = "Bank";
+    sample_bank.payload = std::move(current_sample_bank);
+    catalog.objects.emplace_back(
+        "sample-bank", axk::PartitionIndex{0}, axk::SfsId{3}, "iso:DISC", std::move(sample_bank),
+        axk::ObjectPlacement{axk::PartitionIndex{0}, "GROUP", axk::SfsId{3}, "Volume", "SBAC", "Bank", "GROUP/F001"});
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    ASSERT_TRUE(graph.relationships.front().target_key);
+    EXPECT_EQ(*graph.relationships.front().target_key, "local-sample");
+    EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::likely);
+}
+
 TEST(RelationshipGraph, ResolvesActiveSfsSampleBankMemberWithinItsOwningVolume) {
     axk::ObjectCatalog catalog;
     for (const auto &[key, volume] : {std::pair{"sample-a", 1U}, std::pair{"sample-b", 2U}}) {

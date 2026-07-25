@@ -426,7 +426,13 @@ field. It is opaque source-local state rather than a portable object identity.
 Package export declares each active row handle as a relocation, and package
 import writes the hardware-proven zero form while preserving the row order and
 resolved member name. Target matching uses exact name, object type, and local
-placement before it emits a resolved relationship.
+placement before it emits a resolved relationship. For directory-backed ISO
+objects, a counted slot whose Sample name occurs in several source volumes
+resolves to `Known` only when exactly one exact-placement Sample is in the
+Sample Bank's raw ISO volume. Recovered or otherwise non-exact placement stays
+below package-export quality, and multiple matches inside the same raw volume
+remain ambiguous. The package builder does not admit generic `Likely`
+relationships.
 
 ## PROG: Program Object
 

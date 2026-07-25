@@ -141,4 +141,34 @@ describe('PackageExportDialog', () => {
         expect(screen.getByText('Shared [Partition 0] · DRUMS')).toBeTruthy();
         expect(screen.getByText('Shared [Partition 1] · DRUMS')).toBeTruthy();
     });
+
+    it('presents unresolved Sample Bank members without internal resolver labels', () => {
+        const error =
+            'Sample Bank package export cannot unambiguously identify every Sample member in its source volume';
+        render(PackageExportDialog, {
+            props: {
+                items: [
+                    {
+                        kind: 'SBAC',
+                        objectId: 'bank',
+                        name: 'Ambiguous Bank',
+                        typeLabel: 'Sample Bank',
+                        partitionIndex: 0,
+                        partitionName: 'Partition 0',
+                        volumeName: 'SOURCE',
+                    },
+                ],
+                desktop: false,
+                busy: false,
+                progressLabel: '',
+                error,
+                onworkspace: vi.fn(),
+                onlocal: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByRole('alert').textContent).toBe(error);
+        expect(screen.getByRole('alert').textContent).not.toMatch(/\bKnown\b|\bLikely\b|\bTentative\b/);
+    });
 });

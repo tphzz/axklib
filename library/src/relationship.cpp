@@ -68,6 +68,12 @@ bool same_container_folder(const ObjectSnapshot &left, const ObjectSnapshot &rig
            left.placement->container_directory == right.placement->container_directory;
 }
 
+bool exact_iso_colocation(const ObjectSnapshot &source, const ObjectSnapshot &target) {
+    return source.scope_key.starts_with("iso:") && source.scope_key == target.scope_key &&
+           source.placement_resolution == PlacementResolution::exact &&
+           target.placement_resolution == PlacementResolution::exact && same_container_folder(source, target);
+}
+
 std::vector<const ObjectSnapshot *> named(const ScopeIndex &index, ObjectType type, std::string_view name) {
     if (type == ObjectType::unknown) {
         const auto found = index.names.find(std::string{name});
@@ -304,10 +310,15 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                 for (const auto &slot : sample_bank->slots) {
                     if (slot.name.empty())
                         continue;
-                    result.relationships.push_back(
-                        edge(*item, "SBAC_SLOT_TO_SBNK",
-                             match_named_target(*item, slot.name, ObjectType::sbnk, scope_index,
-                                                "active-sbac-slot-name", "active-sbac-slot-name-ambiguous", true)));
+                    auto match = match_named_target(*item, slot.name, ObjectType::sbnk, scope_index,
+                                                    "active-sbac-slot-name", "active-sbac-slot-name-ambiguous", true);
+                    if (match.target != nullptr && match.basis.ends_with("+same-folder") &&
+                        exact_iso_colocation(*item, *match.target)) {
+                        match.quality = RelationshipQuality::known;
+                        match.notes = "counted Sample Bank slot name resolves exactly one directory-backed Sample "
+                                      "in the same ISO volume";
+                    }
+                    result.relationships.push_back(edge(*item, "SBAC_SLOT_TO_SBNK", match));
                 }
             } else if (const auto *program = std::get_if<CurrentProg>(&item->object.payload)) {
                 const auto first_program_edge = result.relationships.size();

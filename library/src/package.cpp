@@ -339,14 +339,14 @@ Result<std::vector<const Relationship *>> required_relationships(const ObjectSna
             std::ranges::count_if(sample_bank->slots, [](const SbacSlot &slot) { return !slot.name.empty(); });
         if (candidates.size() != static_cast<std::size_t>(active_slots)) {
             return std::unexpected{make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
-                                              "package closure does not contain one relationship for every "
-                                              "active SBAC slot")};
+                                              "Sample Bank package export cannot resolve every active "
+                                              "Sample member")};
         }
         for (const auto *row : candidates) {
             if (row->type != "SBAC_SLOT_TO_SBNK" || row->quality != RelationshipQuality::known || !row->target_key) {
                 return std::unexpected{make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
-                                                  "package closure requires known SBAC member "
-                                                  "relationships")};
+                                                  "Sample Bank package export cannot unambiguously identify "
+                                                  "every Sample member in its source volume")};
             }
             result.push_back(row);
         }

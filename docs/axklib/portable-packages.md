@@ -62,6 +62,13 @@ A selector must resolve exactly once and every required active relationship
 must be known and unambiguous; otherwise no archive is published. Ambiguous
 inactive Program diagnostic rows are not package content.
 
+For an ISO Sample Bank, duplicate Sample names in other raw volumes do not make
+the package ambiguous when the selected bank and exactly one matching Sample
+are exact ISO9660 directory entries in the same raw volume. The closure remains
+volume-local. Recovered placement, no local match, or more than one matching
+Sample in the selected raw volume blocks export; package construction never
+widens the closure gate to accept every `Likely` relationship.
+
 Inspection validates the archive profile, canonical manifest, graph, declared
 entry sizes, and package ID while reading only bounded metadata and the
 manifest:
