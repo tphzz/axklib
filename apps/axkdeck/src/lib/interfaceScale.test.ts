@@ -15,16 +15,24 @@ function monitor(width: number, height: number, scaleFactor = 1, name = 'Display
 function adapterFor(initialMonitor: InterfaceScaleMonitor | null = monitor(1920, 1080)): {
     adapter: InterfaceScaleAdapter;
     setMonitor: (value: InterfaceScaleMonitor | null) => void;
+    setMaximized: (value: boolean) => void;
+    setFullscreen: (value: boolean) => void;
     emitMoved: () => void;
+    emitResized: () => void;
     emitScaleChanged: () => void;
 } {
     let current = initialMonitor;
+    let maximized = false;
+    let fullscreen = false;
     let moved: (() => void) | undefined;
+    let resized: (() => void) | undefined;
     let scaleChanged: (() => void) | undefined;
     const adapter: InterfaceScaleAdapter = {
         currentMonitor: vi.fn(async () => current),
         windowScaleFactor: vi.fn(async () => current?.scaleFactor ?? 1),
         innerSize: vi.fn(async () => ({ width: 1440, height: 900 })),
+        isMaximized: vi.fn(async () => maximized),
+        isFullscreen: vi.fn(async () => fullscreen),
         setMinSize: vi.fn(async () => undefined),
         setSize: vi.fn(async () => undefined),
         setZoom: vi.fn(async () => undefined),
@@ -32,6 +40,12 @@ function adapterFor(initialMonitor: InterfaceScaleMonitor | null = monitor(1920,
             moved = handler;
             return () => {
                 moved = undefined;
+            };
+        }),
+        onResized: vi.fn(async (handler) => {
+            resized = handler;
+            return () => {
+                resized = undefined;
             };
         }),
         onScaleChanged: vi.fn(async (handler) => {
@@ -46,7 +60,14 @@ function adapterFor(initialMonitor: InterfaceScaleMonitor | null = monitor(1920,
         setMonitor: (value) => {
             current = value;
         },
+        setMaximized: (value) => {
+            maximized = value;
+        },
+        setFullscreen: (value) => {
+            fullscreen = value;
+        },
         emitMoved: () => moved?.(),
+        emitResized: () => resized?.(),
         emitScaleChanged: () => scaleChanged?.(),
     };
 }
@@ -109,6 +130,17 @@ describe('InterfaceScaleController', () => {
         expect(adapter.setMinSize).toHaveBeenCalledWith(1200, 900);
         expect(adapter.setSize).not.toHaveBeenCalled();
         expect(adapter.setZoom).toHaveBeenCalledWith(1.5);
+        await controller.dispose();
+    });
+
+    it('applies native window constraints on startup at neutral zoom', async () => {
+        const { adapter } = adapterFor(monitor(1920, 1080));
+
+        const controller = await createInterfaceScaleController(adapter, storageWith());
+
+        expect(adapter.setMinSize).toHaveBeenCalledWith(800, 600);
+        expect(adapter.setSize).not.toHaveBeenCalled();
+        expect(adapter.setZoom).not.toHaveBeenCalled();
         await controller.dispose();
     });
 
@@ -184,9 +216,11 @@ describe('InterfaceScaleController', () => {
         await controller.dispose();
     });
 
-    it('debounces monitor movement, reacts immediately to scale changes, and suppresses duplicate zoom calls', async () => {
+    it('debounces window movement, reacts immediately to scale changes, and suppresses duplicate mutations', async () => {
         const { adapter, emitMoved, emitScaleChanged, setMonitor } = adapterFor(monitor(1920, 1080));
         const controller = await createInterfaceScaleController(adapter, storageWith());
+        vi.mocked(adapter.setMinSize).mockClear();
+        vi.mocked(adapter.setSize).mockClear();
         vi.mocked(adapter.setZoom).mockClear();
 
         emitMoved();
@@ -195,6 +229,8 @@ describe('InterfaceScaleController', () => {
         expect(adapter.currentMonitor).toHaveBeenCalledTimes(1);
         await vi.advanceTimersByTimeAsync(1);
         expect(adapter.currentMonitor).toHaveBeenCalledTimes(2);
+        expect(adapter.setMinSize).not.toHaveBeenCalled();
+        expect(adapter.setSize).not.toHaveBeenCalled();
         expect(adapter.setZoom).not.toHaveBeenCalled();
 
         setMonitor(monitor(3840, 2160));
@@ -205,8 +241,69 @@ describe('InterfaceScaleController', () => {
         await controller.dispose();
     });
 
+    it.each<InterfaceScaleMode>(['auto', '1', '1.25', '1.5'])(
+        'does not mutate the native window when maximizing in %s mode',
+        async (mode) => {
+            const { adapter, emitMoved, emitResized, setMaximized } = adapterFor(monitor(1920, 1080));
+            const controller = await createInterfaceScaleController(
+                adapter,
+                storageWith(mode === 'auto' ? undefined : mode),
+            );
+            vi.mocked(adapter.setMinSize).mockClear();
+            vi.mocked(adapter.setSize).mockClear();
+            vi.mocked(adapter.setZoom).mockClear();
+
+            setMaximized(true);
+            emitMoved();
+            emitResized();
+            await vi.advanceTimersByTimeAsync(150);
+
+            expect(adapter.setMinSize).not.toHaveBeenCalled();
+            expect(adapter.setSize).not.toHaveBeenCalled();
+            expect(adapter.setZoom).not.toHaveBeenCalled();
+            await controller.dispose();
+        },
+    );
+
+    it.each(['maximized', 'fullscreen'] as const)(
+        'defers changed native constraints while %s and reconciles them once after restore',
+        async (windowState) => {
+            const { adapter, emitResized, setFullscreen, setMaximized } = adapterFor(monitor(1920, 1080));
+            const controller = await createInterfaceScaleController(adapter, storageWith());
+            vi.mocked(adapter.setMinSize).mockClear();
+            vi.mocked(adapter.setSize).mockClear();
+            vi.mocked(adapter.setZoom).mockClear();
+
+            if (windowState === 'maximized') setMaximized(true);
+            else setFullscreen(true);
+            await controller.setMode('1.5');
+
+            expect(adapter.setZoom).toHaveBeenCalledWith(1.5);
+            expect(adapter.setMinSize).not.toHaveBeenCalled();
+            expect(adapter.setSize).not.toHaveBeenCalled();
+
+            emitResized();
+            await vi.advanceTimersByTimeAsync(150);
+            expect(adapter.setMinSize).not.toHaveBeenCalled();
+
+            setMaximized(false);
+            setFullscreen(false);
+            emitResized();
+            await vi.advanceTimersByTimeAsync(150);
+            expect(adapter.setMinSize).toHaveBeenCalledOnce();
+            expect(adapter.setMinSize).toHaveBeenCalledWith(1200, 900);
+            expect(adapter.setSize).not.toHaveBeenCalled();
+
+            emitResized();
+            await vi.advanceTimersByTimeAsync(150);
+            expect(adapter.setMinSize).toHaveBeenCalledOnce();
+            expect(adapter.setZoom).toHaveBeenCalledOnce();
+            await controller.dispose();
+        },
+    );
+
     it('notifies subscribers, persists valid modes, and removes listeners on disposal', async () => {
-        const { adapter, emitMoved, emitScaleChanged } = adapterFor(monitor(1920, 1080));
+        const { adapter, emitMoved, emitResized, emitScaleChanged } = adapterFor(monitor(1920, 1080));
         const storage = storageWith();
         const controller = await createInterfaceScaleController(adapter, storage);
         const listener = vi.fn();
@@ -219,6 +316,7 @@ describe('InterfaceScaleController', () => {
         unsubscribe();
         await controller.dispose();
         emitMoved();
+        emitResized();
         emitScaleChanged();
         await vi.runAllTimersAsync();
         expect(adapter.currentMonitor).toHaveBeenCalledTimes(2);

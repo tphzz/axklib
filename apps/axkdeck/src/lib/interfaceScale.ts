@@ -28,10 +28,13 @@ export interface InterfaceScaleAdapter {
     currentMonitor(): Promise<InterfaceScaleMonitor | null>;
     windowScaleFactor(): Promise<number>;
     innerSize(): Promise<PhysicalSize>;
+    isMaximized(): Promise<boolean>;
+    isFullscreen(): Promise<boolean>;
     setMinSize(width: number, height: number): Promise<void>;
     setSize(width: number, height: number): Promise<void>;
     setZoom(zoom: number): Promise<void>;
     onMoved(handler: () => void): Promise<Unlisten>;
+    onResized(handler: () => void): Promise<Unlisten>;
     onScaleChanged(handler: () => void): Promise<Unlisten>;
 }
 
@@ -45,7 +48,7 @@ export interface InterfaceScaleController {
 const storageKey = 'axkdeck.interface-scale.v1';
 const minimumWindowWidth = 800;
 const minimumWindowHeight = 600;
-const monitorMoveDebounceMs = 150;
+const windowEventDebounceMs = 150;
 const fixedModes = new Set<InterfaceScaleMode>(['1', '1.25', '1.5']);
 
 function finitePositive(value: number): boolean {
@@ -106,8 +109,9 @@ export async function createInterfaceScaleController(
     const listeners = new Set<(state: InterfaceScaleState) => void>();
     const unlisteners: Unlisten[] = [];
     let disposed = false;
-    let moveTimer: ReturnType<typeof setTimeout> | undefined;
+    let windowEventTimer: ReturnType<typeof setTimeout> | undefined;
     let updateQueue = Promise.resolve();
+    let constrainedZoom: number | null = null;
 
     const notify = (): void => {
         const snapshot = { ...current };
@@ -129,23 +133,39 @@ export async function createInterfaceScaleController(
                 : await adapter.windowScaleFactor();
         const normalizedMonitor = monitor ? { ...monitor, scaleFactor } : null;
         const requestedZoom = fixedZoom(current.mode) ?? automaticInterfaceZoom(normalizedMonitor);
-        const minimumWidth = Math.round(minimumWindowWidth * requestedZoom);
-        const minimumHeight = Math.round(minimumWindowHeight * requestedZoom);
+        const zoomChanged = current.appliedZoom !== requestedZoom;
+        const constraintsChanged = constrainedZoom !== requestedZoom;
+        if (!zoomChanged && !constraintsChanged) return;
 
-        try {
-            await adapter.setMinSize(minimumWidth, minimumHeight);
-            const physicalSize = await adapter.innerSize();
-            const factor = finitePositive(scaleFactor) ? scaleFactor : 1;
-            const logicalWidth = physicalSize.width / factor;
-            const logicalHeight = physicalSize.height / factor;
-            if (logicalWidth < minimumWidth || logicalHeight < minimumHeight) {
-                await adapter.setSize(Math.max(logicalWidth, minimumWidth), Math.max(logicalHeight, minimumHeight));
+        if (constraintsChanged) {
+            try {
+                const [maximized, fullscreen] = await Promise.all([adapter.isMaximized(), adapter.isFullscreen()]);
+                if (!maximized && !fullscreen) {
+                    const minimumWidth = Math.round(minimumWindowWidth * requestedZoom);
+                    const minimumHeight = Math.round(minimumWindowHeight * requestedZoom);
+                    await adapter.setMinSize(minimumWidth, minimumHeight);
+                    const physicalSize = await adapter.innerSize();
+                    const factor = finitePositive(scaleFactor) ? scaleFactor : 1;
+                    const logicalWidth = physicalSize.width / factor;
+                    const logicalHeight = physicalSize.height / factor;
+                    if (logicalWidth < minimumWidth || logicalHeight < minimumHeight) {
+                        await adapter.setSize(
+                            Math.max(logicalWidth, minimumWidth),
+                            Math.max(logicalHeight, minimumHeight),
+                        );
+                    }
+                    constrainedZoom = requestedZoom;
+                }
+            } catch (error) {
+                report(
+                    'interface_scale_window_constraint_failed',
+                    { message: errorMessage(error), requestedZoom },
+                    'warn',
+                );
             }
-        } catch (error) {
-            report('interface_scale_window_constraint_failed', { message: errorMessage(error), requestedZoom }, 'warn');
         }
 
-        if (current.appliedZoom === requestedZoom) return;
+        if (!zoomChanged) return;
         await adapter.setZoom(requestedZoom);
         current = { ...current, appliedZoom: requestedZoom };
         notify();
@@ -178,27 +198,27 @@ export async function createInterfaceScaleController(
         }
     };
 
+    const scheduleApply = (): void => {
+        if (windowEventTimer !== undefined) clearTimeout(windowEventTimer);
+        windowEventTimer = setTimeout(() => {
+            windowEventTimer = undefined;
+            void queueApply();
+        }, windowEventDebounceMs);
+    };
+
     await Promise.all([
         registerListener(
             adapter.onScaleChanged(() => {
-                if (moveTimer !== undefined) {
-                    clearTimeout(moveTimer);
-                    moveTimer = undefined;
+                if (windowEventTimer !== undefined) {
+                    clearTimeout(windowEventTimer);
+                    windowEventTimer = undefined;
                 }
                 void queueApply();
             }),
             'interface_scale_listener_failed',
         ),
-        registerListener(
-            adapter.onMoved(() => {
-                if (moveTimer !== undefined) clearTimeout(moveTimer);
-                moveTimer = setTimeout(() => {
-                    moveTimer = undefined;
-                    void queueApply();
-                }, monitorMoveDebounceMs);
-            }),
-            'interface_scale_listener_failed',
-        ),
+        registerListener(adapter.onMoved(scheduleApply), 'interface_scale_listener_failed'),
+        registerListener(adapter.onResized(scheduleApply), 'interface_scale_listener_failed'),
     ]);
     await queueApply();
 
@@ -223,8 +243,8 @@ export async function createInterfaceScaleController(
         dispose: async () => {
             if (disposed) return;
             disposed = true;
-            if (moveTimer !== undefined) clearTimeout(moveTimer);
-            moveTimer = undefined;
+            if (windowEventTimer !== undefined) clearTimeout(windowEventTimer);
+            windowEventTimer = undefined;
             for (const unlisten of unlisteners.splice(0)) unlisten();
             await updateQueue;
             listeners.clear();

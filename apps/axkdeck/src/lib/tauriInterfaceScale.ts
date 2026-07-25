@@ -24,10 +24,13 @@ export function createTauriInterfaceScaleAdapter(): InterfaceScaleAdapter {
             const size = await window.innerSize();
             return { width: size.width, height: size.height };
         },
+        isMaximized: () => window.isMaximized(),
+        isFullscreen: () => window.isFullscreen(),
         setMinSize: (width, height) => window.setMinSize(new LogicalSize(width, height)),
         setSize: (width, height) => window.setSize(new LogicalSize(width, height)),
         setZoom: (zoom) => webview.setZoom(zoom),
         onMoved: async (handler) => window.onMoved(handler),
+        onResized: async (handler) => window.onResized(handler),
         onScaleChanged: async (handler) => window.onScaleChanged(handler),
     };
 }
