@@ -1162,7 +1162,8 @@ axk::app::Result<void> axk::app::ImageSessionManager::close(std::string_view ima
         return {};
     if (found->second->owner_id != owner_id)
         return std::unexpected(session_error("image_not_found", "image session does not exist"));
-    const std::unique_lock access{found->second->access_mutex, std::try_to_lock};
+    const auto session = found->second;
+    const std::unique_lock access{session->access_mutex, std::try_to_lock};
     if (!access)
         return std::unexpected(session_error("entry_in_use", "image session mutation is active", true));
     implementation_->sessions.erase(found);
