@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <barrier>
 #include <chrono>
