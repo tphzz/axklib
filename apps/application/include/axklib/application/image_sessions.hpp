@@ -53,6 +53,9 @@ struct ImageSessionRead {
     FileRef source;
     std::shared_ptr<const RandomAccessReader> reader;
     const MediaContainer *media{};
+    std::string target_snapshot_id;
+    std::vector<const ObjectSnapshot *> catalog_objects;
+    std::vector<CatalogIssue> catalog_issues;
     std::unordered_map<std::string, std::string> object_keys_by_id;
     std::shared_ptr<void> lease;
 };

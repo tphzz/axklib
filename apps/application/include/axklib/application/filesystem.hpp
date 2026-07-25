@@ -59,6 +59,7 @@ struct SandboxFile {
     std::string filename;
     std::uint64_t size{};
     std::shared_ptr<const axk::RandomAccessReader> reader;
+    std::function<Result<void>()> verify_unchanged;
 };
 
 class SandboxMutation final : public axk::RandomAccessReader {

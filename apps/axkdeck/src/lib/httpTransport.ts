@@ -400,6 +400,7 @@ export class HttpImageTransport implements ImageTransport {
         partitionIndex: number,
         volumeName: string,
         renames: ImageSessionPackageRename[] = [],
+        replacePlanToken?: string,
     ): Promise<ImageSessionPackageImportPlan> {
         const session = this.session(sessionId);
         const result = await this.client.invoke<ImageSessionPackageImportPlan>('images.package_import.plan', {
@@ -409,6 +410,7 @@ export class HttpImageTransport implements ImageTransport {
             partitionIndex,
             volumeName,
             renames,
+            ...(replacePlanToken ? { replacePlanToken } : {}),
         });
         if (this.isJob(result)) throw new Error('image package import planning unexpectedly returned a job');
         return result;

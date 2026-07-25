@@ -26,9 +26,6 @@
 #include <variant>
 #include <vector>
 
-#include <nlohmann/json.hpp>
-#include <openssl/evp.h>
-
 #include "axklib/alteration.hpp"
 #include "axklib/alteration_transaction.hpp"
 #include "axklib/application/alteration_journal.hpp"
@@ -40,11 +37,16 @@
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 #include "axklib/writer.hpp"
+#include <nlohmann/json.hpp>
+
+#include "content_digest.hpp"
 
 namespace {
 
 using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
+using axk::app::detail::file_sha256;
+using axk::app::detail::reader_sha256;
 
 struct ManifestDocument {
     Json json;
@@ -381,9 +383,6 @@ std::optional<axk::app::FileRef> persistent_file_ref(const Json &input) {
     }
 }
 
-axk::app::Result<std::string> file_sha256(const std::filesystem::path &path,
-                                          const axk::CancellationToken &cancellation);
-
 axk::app::Result<ManifestDocument> load_manifest(const Json &input, const axk::app::OperationContext &context,
                                                  const axk::app::Sandbox &sandbox, axk::app::UploadStore &uploads) {
     ManifestDocument result;
@@ -457,48 +456,6 @@ axk::app::Result<ManifestDocument> load_manifest(const Json &input, const axk::a
     } catch (const Json::exception &) {
         return std::unexpected(operation_error("invalid_request", "manifest request is malformed"));
     }
-}
-
-axk::app::Result<std::string> reader_sha256(const axk::RandomAccessReader &reader,
-                                            const axk::CancellationToken &cancellation) {
-    constexpr std::size_t chunk_size = 1024U * 1024U;
-    std::vector<std::byte> buffer(chunk_size);
-    const auto destroy_context = [](EVP_MD_CTX *context) { EVP_MD_CTX_free(context); };
-    std::unique_ptr<EVP_MD_CTX, decltype(destroy_context)> digest{EVP_MD_CTX_new(), destroy_context};
-    if (!digest || EVP_DigestInit_ex(digest.get(), EVP_sha256(), nullptr) != 1) {
-        return std::unexpected(operation_error("hash_failed", "could not initialize SHA-256"));
-    }
-    for (std::uint64_t offset = 0U; offset < reader.size();) {
-        if (const auto checked = cancellation.check(); !checked)
-            return std::unexpected(core_error(checked.error()));
-        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), reader.size() - offset));
-        const auto chunk = std::span<std::byte>{buffer}.first(count);
-        if (const auto read = reader.read_exact_at(offset, chunk); !read)
-            return std::unexpected(core_error(read.error()));
-        if (EVP_DigestUpdate(digest.get(), chunk.data(), chunk.size()) != 1)
-            return std::unexpected(operation_error("hash_failed", "could not update SHA-256"));
-        offset += count;
-    }
-    std::array<unsigned char, EVP_MAX_MD_SIZE> bytes{};
-    unsigned int size{};
-    if (EVP_DigestFinal_ex(digest.get(), bytes.data(), &size) != 1 || size != 32U)
-        return std::unexpected(operation_error("hash_failed", "could not finish SHA-256"));
-    constexpr std::string_view alphabet = "0123456789abcdef";
-    std::string result;
-    result.reserve(static_cast<std::size_t>(size) * 2U);
-    for (std::size_t index = 0; index < size; ++index) {
-        result.push_back(alphabet[bytes[index] >> 4U]);
-        result.push_back(alphabet[bytes[index] & 0x0fU]);
-    }
-    return result;
-}
-
-axk::app::Result<std::string> file_sha256(const std::filesystem::path &path,
-                                          const axk::CancellationToken &cancellation) {
-    auto reader = axk::FileReader::open(path);
-    if (!reader)
-        return std::unexpected(core_error(reader.error()));
-    return reader_sha256(**reader, cancellation);
 }
 
 axk::app::Result<std::pair<std::uintmax_t, std::filesystem::file_time_type>>

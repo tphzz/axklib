@@ -1762,6 +1762,7 @@
           "imageId": {"type": "string", "minLength": 1},
           "expectedRevision": {"type": "integer", "minimum": 1},
           "package": {"$ref": "#/components/schemas/InputRef"},
+          "replacePlanToken": {"type": "string", "minLength": 1},
           "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
           "volumeName": {"type": "string", "minLength": 1},
           "renames": {

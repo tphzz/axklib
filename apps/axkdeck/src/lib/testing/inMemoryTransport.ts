@@ -252,8 +252,16 @@ export class InMemoryImageTransport implements ImageTransport {
         partitionIndex: number,
         volumeName: string,
         renames?: ImageSessionPackageRename[],
+        replacePlanToken?: string,
     ): Promise<ImageSessionPackageImportPlan> {
-        return this.invoke('planImagePackageImport', [sessionId, source, partitionIndex, volumeName, renames]);
+        return this.invoke('planImagePackageImport', [
+            sessionId,
+            source,
+            partitionIndex,
+            volumeName,
+            renames,
+            replacePlanToken,
+        ]);
     }
 
     releaseImagePackageImportPlan(planToken: string): Promise<void> {

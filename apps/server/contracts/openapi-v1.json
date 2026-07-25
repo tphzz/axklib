@@ -3467,6 +3467,10 @@
             "maxItems": 1024,
             "type": "array"
           },
+          "replacePlanToken": {
+            "minLength": 1,
+            "type": "string"
+          },
           "volumeName": {
             "minLength": 1,
             "type": "string"

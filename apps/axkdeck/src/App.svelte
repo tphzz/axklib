@@ -888,7 +888,7 @@
         };
     }
 
-    async function planSelectedPackage(generation: number): Promise<void> {
+    async function planSelectedPackage(generation: number, replacePlanToken?: string): Promise<void> {
         const request = packageImportRequest;
         if (
             !request?.source ||
@@ -898,17 +898,31 @@
         ) {
             return;
         }
-        packageImportRequest = { ...request, status: 'planning', plan: null, error: '' };
+        packageImportRequest = {
+            ...request,
+            status: 'planning',
+            plan: replacePlanToken ? request.plan : null,
+            error: '',
+        };
         const renames = Object.entries(request.renames)
             .map(([nodeId, destinationName]) => ({ nodeId, destinationName: destinationName.trim() }))
             .filter((rename) => rename.destinationName.length > 0);
-        const plan = await transport.planImagePackageImport(
-            openSessionId,
-            request.source,
-            request.item.partitionIndex,
-            request.item.name,
-            renames,
-        );
+        const plan = replacePlanToken
+            ? await transport.planImagePackageImport(
+                  openSessionId,
+                  request.source,
+                  request.item.partitionIndex,
+                  request.item.name,
+                  renames,
+                  replacePlanToken,
+              )
+            : await transport.planImagePackageImport(
+                  openSessionId,
+                  request.source,
+                  request.item.partitionIndex,
+                  request.item.name,
+                  renames,
+              );
         if (generation !== packageOperationGeneration || !packageImportRequest) {
             await transport.releaseImagePackageImportPlan(plan.planToken).catch(() => undefined);
             return;
@@ -1038,13 +1052,10 @@
     async function replanPackageImport(): Promise<void> {
         if (!packageImportRequest?.source || packageImportRequest.status === 'applying') return;
         const previousPlan = packageImportRequest.plan;
-        packageImportRequest = { ...packageImportRequest, plan: null, status: 'planning', error: '' };
-        if (previousPlan) {
-            await transport.releaseImagePackageImportPlan(previousPlan.planToken).catch(() => undefined);
-        }
+        packageImportRequest = { ...packageImportRequest, status: 'planning', error: '' };
         const generation = ++packageOperationGeneration;
         try {
-            await planSelectedPackage(generation);
+            await planSelectedPackage(generation, previousPlan?.planToken);
         } catch (error) {
             if (generation === packageOperationGeneration && packageImportRequest) {
                 packageImportRequest = {

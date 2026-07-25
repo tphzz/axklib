@@ -1622,14 +1622,27 @@ TEST(PackageImportPlanner, ReusesAnExactExistingSfsClosureWithoutAllocation) {
     EXPECT_EQ(reader_plan->objects.size(), plan->objects.size());
     EXPECT_EQ(reader_plan->allocation.size(), plan->allocation.size());
 
-    const auto retained_plan = axk::package_import_internal::plan_package_import_retained(
-        *target_reader, "retained-session-reader.hds", *source, packages, request);
+    auto retained_inventory = axk::build_media_inventory(*source, axk::MediaObjectReadMode::decoded_metadata);
+    ASSERT_TRUE(retained_inventory) << retained_inventory.error().message;
+    std::vector<const axk::ObjectSnapshot *> retained_objects;
+    retained_objects.reserve(retained_inventory->catalog.objects.size());
+    for (const auto &object : retained_inventory->catalog.objects)
+        retained_objects.push_back(&object);
+    axk::package_import_internal::RetainedPackageImportStats retained_stats;
+    const axk::package_import_internal::RetainedPackageImportTarget retained_target{
+        *target_reader,   "retained-session-reader.hds",      &*source,        plan->target_snapshot_id,
+        retained_objects, retained_inventory->catalog.issues, &retained_stats, true};
+    const auto retained_plan =
+        axk::package_import_internal::plan_package_import_retained(retained_target, packages, request);
     ASSERT_TRUE(retained_plan) << retained_plan.error().message;
     EXPECT_EQ(retained_plan->target_snapshot_id, plan->target_snapshot_id);
     EXPECT_EQ(retained_plan->policy_digest, plan->policy_digest);
     EXPECT_EQ(retained_plan->plan_id, plan->plan_id);
     EXPECT_EQ(retained_plan->objects.size(), plan->objects.size());
     EXPECT_EQ(retained_plan->allocation.size(), plan->allocation.size());
+    EXPECT_GT(retained_stats.target_payload_objects_read, 0U);
+    EXPECT_GT(retained_stats.target_payload_bytes_read, 0U);
+    EXPECT_LT(retained_stats.target_payload_bytes_read, (*target_reader)->size());
 }
 
 TEST(PackageImportPlanner, ReservesOneSfsObjectForSharedIncomingRoots) {

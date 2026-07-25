@@ -343,6 +343,7 @@ export interface ImageTransport {
         partitionIndex: number,
         volumeName: string,
         renames?: ImageSessionPackageRename[],
+        replacePlanToken?: string,
     ): Promise<ImageSessionPackageImportPlan>;
     releaseImagePackageImportPlan(planToken: string): Promise<void>;
     startImagePackageImport(planToken: string): Promise<JobState>;

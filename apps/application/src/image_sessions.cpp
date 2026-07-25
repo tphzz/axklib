@@ -19,6 +19,8 @@
 #include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
 
+#include "content_digest.hpp"
+
 namespace {
 
 axk::app::Error session_error(std::string code, std::string message, bool retryable = false) {
@@ -166,6 +168,8 @@ struct axk::app::ImageSessionManager::Implementation {
         std::vector<ImageRelationshipItem> relationships;
         std::vector<ImageValidationItem> validation;
         std::shared_ptr<const RandomAccessReader> source_reader;
+        std::function<Result<void>()> verify_source_unchanged;
+        std::string target_snapshot_id;
         std::optional<MediaContainer> media;
         std::unordered_map<std::string, MediaObjectDescriptor> descriptors_by_id;
         std::unordered_map<std::string, ObjectSnapshot> snapshots_by_id;
@@ -306,6 +310,9 @@ struct axk::app::ImageSessionManager::Implementation {
         current.object_indices_by_content_scope = std::move(fresh.object_indices_by_content_scope);
         current.relationships = std::move(fresh.relationships);
         current.validation = std::move(fresh.validation);
+        current.source_reader = std::move(fresh.source_reader);
+        current.verify_source_unchanged = std::move(fresh.verify_source_unchanged);
+        current.target_snapshot_id = std::move(fresh.target_snapshot_id);
         current.media = std::move(fresh.media);
         current.descriptors_by_id = std::move(fresh.descriptors_by_id);
         current.snapshots_by_id = std::move(fresh.snapshots_by_id);
@@ -671,6 +678,9 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
     const auto file = implementation_->sandbox.open_file(source);
     if (!file)
         return std::unexpected(file.error());
+    auto target_snapshot_id = detail::reader_sha256(*file->reader, cancellation);
+    if (!target_snapshot_id)
+        return std::unexpected(target_snapshot_id.error());
     const auto media = axk::open_media(file->reader, std::filesystem::path{file->filename}, cancellation);
     if (!media)
         return std::unexpected(core_error(media.error(), source));
@@ -691,6 +701,8 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
     session->owner_id = std::move(owner_id);
     session->source = source;
     session->source_reader = file->reader;
+    session->verify_source_unchanged = file->verify_unchanged;
+    session->target_snapshot_id = std::move(*target_snapshot_id);
     session->format = media_kind_name(media->kind());
     session->root_count = tree.roots.size();
     session->last_access = implementation_->clock();
@@ -868,6 +880,10 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
         session->snapshots_by_id.emplace(identifier, std::move(object));
     }
     session->media.emplace(std::move(*media));
+    if (const auto unchanged = session->verify_source_unchanged(); !unchanged) {
+        return std::unexpected(
+            session_error("image_source_changed", "image source changed while the session was opened", true));
+    }
 
     do {
         auto image_id = random_identifier("image-");
@@ -1064,14 +1080,22 @@ axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string
         return std::unexpected(session_error("entry_in_use", "image session mutation is already active", true));
     if (!(*session)->media)
         return std::unexpected(session_error("image_media_unavailable", "image session media is unavailable", true));
+    if (const auto unchanged = (*session)->verify_source_unchanged(); !unchanged)
+        return std::unexpected(session_error("image_source_changed", "image source changed after it was opened", true));
     auto lease = std::make_shared<std::unique_lock<std::mutex>>(std::move(access));
+    std::vector<const ObjectSnapshot *> catalog_objects;
+    catalog_objects.reserve((*session)->snapshots_by_id.size());
     std::unordered_map<std::string, std::string> object_keys_by_id;
     object_keys_by_id.reserve((*session)->snapshots_by_id.size());
-    for (const auto &[id, snapshot] : (*session)->snapshots_by_id)
+    for (const auto &[id, snapshot] : (*session)->snapshots_by_id) {
+        catalog_objects.push_back(&snapshot);
         object_keys_by_id.emplace(id, snapshot.key);
-    return ImageSessionRead{(*session)->image_id,      (*session)->revision, (*session)->source,
-                            (*session)->source_reader, &*(*session)->media,  std::move(object_keys_by_id),
-                            std::move(lease)};
+    }
+    return ImageSessionRead{(*session)->image_id,         (*session)->revision,
+                            (*session)->source,           (*session)->source_reader,
+                            &*(*session)->media,          (*session)->target_snapshot_id,
+                            std::move(catalog_objects),   (*session)->catalog_issues,
+                            std::move(object_keys_by_id), std::move(lease)};
 }
 
 axk::app::Result<axk::app::ImageSessionMutation>

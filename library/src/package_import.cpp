@@ -200,13 +200,14 @@ struct ExistingObject {
     const ObjectSnapshot *snapshot{};
     std::optional<std::string> normalized_sha256;
     std::optional<std::uint32_t> wave_data_reference_value;
+    std::optional<std::vector<std::byte>> loaded_payload;
 };
 
 std::vector<ExistingObject> existing_objects(const ObjectCatalog &catalog) {
     std::vector<ExistingObject> result;
     result.reserve(catalog.objects.size());
     for (const auto &object : catalog.objects) {
-        ExistingObject item{&object, {}, {}};
+        ExistingObject item{&object, {}, {}, {}};
         const auto profile = package_internal::build_relocation_profile(object.object, object.raw_payload);
         if (profile) {
             item.normalized_sha256 =
@@ -219,6 +220,56 @@ std::vector<ExistingObject> existing_objects(const ObjectCatalog &catalog) {
         result.push_back(std::move(item));
     }
     return result;
+}
+
+std::vector<ExistingObject> retained_existing_objects(std::span<const ObjectSnapshot *const> objects) {
+    std::vector<ExistingObject> result;
+    result.reserve(objects.size());
+    for (const auto *object : objects) {
+        if (object == nullptr)
+            continue;
+        ExistingObject item{object, {}, {}, {}};
+        if (const auto *wave_data = std::get_if<CurrentSmpl>(&object->object.payload);
+            wave_data != nullptr && wave_data->wave_data_reference_value.value != 0U) {
+            item.wave_data_reference_value = wave_data->wave_data_reference_value.value;
+        }
+        result.push_back(std::move(item));
+    }
+    return result;
+}
+
+std::span<const std::byte> existing_payload(const ExistingObject &object) {
+    if (object.loaded_payload)
+        return *object.loaded_payload;
+    return object.snapshot->raw_payload;
+}
+
+Result<void> ensure_existing_identity(ExistingObject &object, const Container &container,
+                                      package_import_internal::RetainedPackageImportStats *stats,
+                                      const CancellationToken &cancellation) {
+    if (object.normalized_sha256)
+        return {};
+    if (object.snapshot->raw_payload.empty()) {
+        auto payload = container.read_record_data(object.snapshot->partition, object.snapshot->sfs_id,
+                                                  64U * 1024U * 1024U, cancellation);
+        if (!payload)
+            return std::unexpected{payload.error()};
+        object.loaded_payload.emplace(std::move(*payload));
+        if (stats != nullptr) {
+            if (object.loaded_payload->size() >
+                std::numeric_limits<std::uint64_t>::max() - stats->target_payload_bytes_read) {
+                return std::unexpected{planner_error("target payload diagnostic byte count overflow")};
+            }
+            stats->target_payload_bytes_read += object.loaded_payload->size();
+            ++stats->target_payload_objects_read;
+        }
+    }
+    const auto payload = existing_payload(object);
+    const auto profile = package_internal::build_relocation_profile(object.snapshot->object, payload);
+    if (!profile)
+        return std::unexpected{profile.error()};
+    object.normalized_sha256 = package_internal::hex_digest(package_internal::sha256(profile->normalized_payload));
+    return {};
 }
 
 void add_conflict(PackageImportPlan &plan, std::string code, std::string message,
@@ -311,6 +362,39 @@ PartitionCapacity partition_capacity(const Partition &partition, const ObjectCat
         if (object.partition != partition.index)
             continue;
         if (const auto *wave_data = std::get_if<CurrentSmpl>(&object.object.payload);
+            wave_data != nullptr && wave_data->wave_data_reference_value.value != 0U) {
+            result.used_wave_data_reference_values.insert(wave_data->wave_data_reference_value.value);
+        }
+    }
+    return result;
+}
+
+PartitionCapacity partition_capacity(const Partition &partition,
+                                     std::span<const ObjectSnapshot *const> catalog_objects) {
+    PartitionCapacity result;
+    result.partition = &partition;
+    const auto capacity = (static_cast<std::uint64_t>(partition.directory_index_span_clusters) *
+                           partition.sectors_per_cluster * 512U / 1024U) *
+                          14U;
+    std::set<std::uint32_t> used_ids;
+    for (const auto &record : partition.records) {
+        used_ids.insert(record.sfs_id.value);
+        for (const auto &extent : record.extents) {
+            for (std::uint32_t cluster = extent.cluster_offset; cluster < extent.cluster_offset + extent.cluster_count;
+                 ++cluster) {
+                result.used_clusters.insert(cluster);
+            }
+        }
+        result.used_clusters.insert(record.continuation_clusters.begin(), record.continuation_clusters.end());
+    }
+    for (std::uint32_t id = 3U; id < capacity; ++id) {
+        if (!used_ids.contains(id))
+            result.free_ids.push_back(id);
+    }
+    for (const auto *object : catalog_objects) {
+        if (object == nullptr || object->partition != partition.index)
+            continue;
+        if (const auto *wave_data = std::get_if<CurrentSmpl>(&object->object.payload);
             wave_data != nullptr && wave_data->wave_data_reference_value.value != 0U) {
             result.used_wave_data_reference_values.insert(wave_data->wave_data_reference_value.value);
         }
@@ -1555,12 +1639,12 @@ Result<PackageImportPlan> plan_iso9660_import(const RandomAccessReader &target_r
 
 } // namespace
 
-static Result<PackageImportPlan> plan_package_import_impl(std::shared_ptr<const RandomAccessReader> target_reader,
-                                                          std::filesystem::path target_path,
-                                                          const MediaContainer *retained_target,
-                                                          std::span<const PortablePackage> packages,
-                                                          const PackageImportRequest &request, bool revalidate_target,
-                                                          const CancellationToken &cancellation) {
+static Result<PackageImportPlan>
+plan_package_import_impl(std::shared_ptr<const RandomAccessReader> target_reader, std::filesystem::path target_path,
+                         const MediaContainer *retained_target,
+                         const package_import_internal::RetainedPackageImportTarget *retained_session,
+                         std::span<const PortablePackage> packages, const PackageImportRequest &request,
+                         bool revalidate_target, const CancellationToken &cancellation) {
     if (packages.empty())
         return std::unexpected{planner_error("package import requires at least one package")};
     if (!target_reader)
@@ -1568,9 +1652,6 @@ static Result<PackageImportPlan> plan_package_import_impl(std::shared_ptr<const 
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected{checked.error()};
 
-    const auto before = package_internal::sha256_reader(*target_reader, cancellation);
-    if (!before)
-        return std::unexpected{before.error()};
     std::optional<MediaContainer> opened_target;
     const MediaContainer *target = retained_target;
     if (target == nullptr) {
@@ -1581,15 +1662,27 @@ static Result<PackageImportPlan> plan_package_import_impl(std::shared_ptr<const 
         target = &*opened_target;
     }
 
+    std::optional<package_internal::Sha256Digest> before;
+    if (retained_session == nullptr || target->kind() != MediaKind::sfs) {
+        auto digest = package_internal::sha256_reader(*target_reader, cancellation);
+        if (!digest)
+            return std::unexpected{digest.error()};
+        before.emplace(*digest);
+    } else if (retained_session->snapshot_id.size() != 64U) {
+        return std::unexpected{planner_error("retained target snapshot identity is invalid")};
+    }
+
     PackageImportPlan plan;
     plan.schema_version = "1.0";
     plan.target_kind = target->kind();
-    plan.target_snapshot_id = package_internal::hex_digest(*before);
+    plan.target_snapshot_id = before ? package_internal::hex_digest(*before) : retained_session->snapshot_id;
     plan.policy_digest = policy_digest(request.policy);
     for (std::size_t package_index = 0; package_index < packages.size(); ++package_index) {
         const auto &package = packages[package_index];
-        if (const auto verified = verify_portable_package(package); !verified)
-            return std::unexpected{verified.error()};
+        if ((retained_session == nullptr || !retained_session->packages_verified)) {
+            if (const auto verified = verify_portable_package(package); !verified)
+                return std::unexpected{verified.error()};
+        }
         plan.package_ids.push_back(package.package_id);
         for (const auto &issue : package.issues) {
             if (!issue.fatal)
@@ -1614,10 +1707,25 @@ static Result<PackageImportPlan> plan_package_import_impl(std::shared_ptr<const 
     }
 
     const auto &container = std::get<Container>(target->storage());
-    auto catalog = build_object_catalog(container, 64U * 1024U * 1024U, cancellation);
-    if (!catalog)
-        return std::unexpected{catalog.error()};
-    for (const auto &issue : catalog->issues) {
+    std::optional<ObjectCatalog> opened_catalog;
+    std::vector<const ObjectSnapshot *> opened_catalog_objects;
+    std::span<const ObjectSnapshot *const> catalog_objects;
+    std::span<const CatalogIssue> catalog_issues;
+    if (retained_session != nullptr) {
+        catalog_objects = retained_session->catalog_objects;
+        catalog_issues = retained_session->catalog_issues;
+    } else {
+        auto catalog = build_object_catalog(container, 64U * 1024U * 1024U, cancellation);
+        if (!catalog)
+            return std::unexpected{catalog.error()};
+        opened_catalog.emplace(std::move(*catalog));
+        opened_catalog_objects.reserve(opened_catalog->objects.size());
+        for (const auto &object : opened_catalog->objects)
+            opened_catalog_objects.push_back(&object);
+        catalog_objects = opened_catalog_objects;
+        catalog_issues = opened_catalog->issues;
+    }
+    for (const auto &issue : catalog_issues) {
         add_conflict(plan, issue.code, issue.message);
         auto &conflict = plan.conflicts.back();
         conflict.partition_index = issue.partition.value;
@@ -1633,10 +1741,26 @@ static Result<PackageImportPlan> plan_package_import_impl(std::shared_ptr<const 
     }
 
     const auto volumes = sfs_volumes(container);
-    const auto existing = existing_objects(*catalog);
+    auto existing =
+        retained_session != nullptr ? retained_existing_objects(catalog_objects) : existing_objects(*opened_catalog);
+    using ExistingNameKey = std::tuple<std::uint8_t, std::string, std::string, std::string>;
+    std::map<ExistingNameKey, std::vector<std::size_t>> existing_by_name;
+    std::map<std::string, std::size_t, std::less<>> existing_by_key;
+    for (std::size_t index = 0U; index < existing.size(); ++index) {
+        const auto &item = existing[index];
+        existing_by_key.emplace(item.snapshot->key, index);
+        if (!item.snapshot->placement)
+            continue;
+        existing_by_name[{item.snapshot->partition.value, item.snapshot->placement->volume_name,
+                          item.snapshot->object.header.raw_type, item.snapshot->object.header.name}]
+            .push_back(index);
+    }
     std::map<std::uint8_t, PartitionCapacity> capacities;
-    for (const auto &partition : container.partitions())
-        capacities.emplace(partition.index.value, partition_capacity(partition, *catalog));
+    for (const auto &partition : container.partitions()) {
+        capacities.emplace(partition.index.value, retained_session != nullptr
+                                                      ? partition_capacity(partition, catalog_objects)
+                                                      : partition_capacity(partition, *opened_catalog));
+    }
 
     std::map<std::pair<std::size_t, std::size_t>, const PackageRootDestination *> destinations;
     for (const auto &destination : request.root_destinations) {
@@ -1846,28 +1970,26 @@ static Result<PackageImportPlan> plan_package_import_impl(std::shared_ptr<const 
         if (object.source_name != object.destination_name)
             object.actions.push_back(PackageImportObjectAction::rename);
 
-        std::vector<const ExistingObject *> matches;
-        for (const auto &item : existing) {
-            if (!item.snapshot->placement || item.snapshot->partition.value != object.partition_index ||
-                item.snapshot->placement->volume_name != object.volume_name ||
-                item.snapshot->object.header.raw_type != object.object_type ||
-                item.snapshot->object.header.name != object.destination_name) {
-                continue;
-            }
-            matches.push_back(&item);
-        }
-        if (matches.size() > 1U) {
+        const auto matches = existing_by_name.find(
+            {object.partition_index, object.volume_name, object.object_type, object.destination_name});
+        const auto match_count = matches == existing_by_name.end() ? 0U : matches->second.size();
+        if (match_count > 1U) {
             mark_conflict(object);
             add_conflict(plan, "SFS_TARGET_NAME_AMBIGUOUS",
                          "destination contains multiple objects with the same "
                          "type and name",
                          candidate.destination, candidate.package, candidate.node);
-        } else if (matches.size() == 1U) {
-            if (matches.front()->normalized_sha256 == candidate.projected_normalized_sha256) {
+        } else if (match_count == 1U) {
+            auto &match = existing[matches->second.front()];
+            if (auto loaded = ensure_existing_identity(
+                    match, container, retained_session ? retained_session->stats : nullptr, cancellation);
+                !loaded)
+                return std::unexpected{loaded.error()};
+            if (match.normalized_sha256 == candidate.projected_normalized_sha256) {
                 object.actions.push_back(PackageImportObjectAction::reuse);
-                object.existing_object_key = matches.front()->snapshot->key;
-                object.target_sfs_id = matches.front()->snapshot->sfs_id.value;
-                object.target_wave_data_reference_value = matches.front()->wave_data_reference_value;
+                object.existing_object_key = match.snapshot->key;
+                object.target_sfs_id = match.snapshot->sfs_id.value;
+                object.target_wave_data_reference_value = match.wave_data_reference_value;
             } else {
                 mark_conflict(object);
                 add_conflict(plan, "SFS_NAME_CONFLICT",
@@ -2095,12 +2217,10 @@ static Result<PackageImportPlan> plan_package_import_impl(std::shared_ptr<const 
         auto &metadata = sbnk_metadata[{object.partition_index, *object.target_sfs_id}];
         if (!object.existing_object_key)
             continue;
-        const auto found = std::ranges::find_if(existing, [&](const ExistingObject &candidate) {
-            return candidate.snapshot->key == *object.existing_object_key;
-        });
-        if (found == existing.end())
+        const auto found = existing_by_key.find(*object.existing_object_key);
+        if (found == existing_by_key.end())
             continue;
-        if (const auto *sample = std::get_if<CurrentSbnk>(&found->snapshot->object.payload)) {
+        if (const auto *sample = std::get_if<CurrentSbnk>(&existing[found->second].snapshot->object.payload)) {
             metadata.program_numbers.insert(sample->linked_program_numbers.begin(),
                                             sample->linked_program_numbers.end());
             metadata.sample_bank_member = (sample->sample_flags & 1U) != 0U;
@@ -2172,12 +2292,15 @@ static Result<PackageImportPlan> plan_package_import_impl(std::shared_ptr<const 
             }
             if (!object.existing_object_key)
                 continue;
-            const auto found = std::ranges::find_if(existing, [&](const ExistingObject &candidate) {
-                return candidate.snapshot->key == *object.existing_object_key;
-            });
-            if (found == existing.end())
+            const auto found = existing_by_key.find(*object.existing_object_key);
+            if (found == existing_by_key.end())
                 return std::unexpected{planner_error("planned existing package object is missing")};
-            if (*relocated == found->snapshot->raw_payload)
+            auto &existing_object = existing[found->second];
+            if (auto loaded = ensure_existing_identity(
+                    existing_object, container, retained_session ? retained_session->stats : nullptr, cancellation);
+                !loaded)
+                return std::unexpected{loaded.error()};
+            if (std::ranges::equal(*relocated, existing_payload(existing_object)))
                 continue;
             if (object.object_type != "SBNK") {
                 return std::unexpected{planner_error("existing package object relocation fields "
@@ -2234,6 +2357,8 @@ static Result<PackageImportPlan> plan_package_import_impl(std::shared_ptr<const 
     }
 
     if (revalidate_target) {
+        if (!before)
+            return std::unexpected{planner_error("target snapshot is unavailable for revalidation")};
         const auto after = package_internal::sha256_reader(*target_reader, cancellation);
         if (!after)
             return std::unexpected{after.error()};
@@ -2258,15 +2383,16 @@ Result<PackageImportPlan> plan_package_import(std::shared_ptr<const RandomAccess
                                               std::span<const PortablePackage> packages,
                                               const PackageImportRequest &request,
                                               const CancellationToken &cancellation) {
-    return plan_package_import_impl(std::move(target_reader), std::move(target_path), nullptr, packages, request, true,
-                                    cancellation);
+    return plan_package_import_impl(std::move(target_reader), std::move(target_path), nullptr, nullptr, packages,
+                                    request, true, cancellation);
 }
 
 Result<PackageImportPlan> package_import_internal::plan_package_import_retained(
-    std::shared_ptr<const RandomAccessReader> target_reader, std::filesystem::path target_path,
-    const MediaContainer &target, std::span<const PortablePackage> packages, const PackageImportRequest &request,
-    const CancellationToken &cancellation) {
-    return plan_package_import_impl(std::move(target_reader), std::move(target_path), &target, packages, request, false,
+    const RetainedPackageImportTarget &target, std::span<const PortablePackage> packages,
+    const PackageImportRequest &request, const CancellationToken &cancellation) {
+    if (target.media == nullptr)
+        return std::unexpected{planner_error("retained package import target media is required")};
+    return plan_package_import_impl(target.reader, target.path, target.media, &target, packages, request, false,
                                     cancellation);
 }
 

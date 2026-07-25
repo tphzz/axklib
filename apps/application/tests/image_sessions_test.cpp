@@ -167,6 +167,18 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     }
 }
 
+TEST_F(ImageSessionTest, RejectsReadsAfterTheOpenedImageChangesExternally) {
+    axk::app::ImageSessionManager sessions{*sandbox_};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    patch_sample_cached_reference(root_ / "fixture.hds", 0x12345678U);
+
+    const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+    ASSERT_FALSE(read);
+    EXPECT_EQ(read.error().code, "image_source_changed");
+}
+
 TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation) {
     auto read_only = axk::app::Sandbox::create({{"library", "Library", root_, false}});
     ASSERT_TRUE(read_only) << read_only.error().message;

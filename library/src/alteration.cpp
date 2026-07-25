@@ -3232,12 +3232,19 @@ Result<TransactionState> prepare_sfs_package_import_state(std::shared_ptr<const 
                                                           const std::filesystem::path &source_path,
                                                           std::span<const PortablePackage> packages,
                                                           const PackageImportPlan &plan,
+                                                          std::optional<std::string_view> verified_source_snapshot_id,
                                                           const CancellationToken &cancellation,
                                                           ProgressSink *progress) {
-    auto digest = package_internal::sha256_reader(*source, cancellation);
-    if (!digest)
-        return std::unexpected{digest.error()};
-    if (package_internal::hex_digest(*digest) != plan.target_snapshot_id)
+    std::string source_snapshot_id;
+    if (verified_source_snapshot_id) {
+        source_snapshot_id = *verified_source_snapshot_id;
+    } else {
+        auto digest = package_internal::sha256_reader(*source, cancellation);
+        if (!digest)
+            return std::unexpected{digest.error()};
+        source_snapshot_id = package_internal::hex_digest(*digest);
+    }
+    if (source_snapshot_id != plan.target_snapshot_id)
         return std::unexpected{stale_transaction_error("package import plan is stale for this target")};
     auto opened = open_transaction_state(std::move(source), source_path, cancellation, progress, true);
     if (!opened)
@@ -3618,10 +3625,13 @@ Result<detail::PreparedAlteration> detail::prepare_hds_alteration(std::shared_pt
                               std::move(prepared->reports), std::move(*patches)};
 }
 
+namespace {
+
 Result<detail::PreparedPackageImport>
-detail::prepare_sfs_package_import(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
-                                   std::span<const PortablePackage> packages, const PackageImportPlan &plan,
-                                   const CancellationToken &cancellation, ProgressSink *progress) {
+prepare_sfs_package_import_impl(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
+                                std::span<const PortablePackage> packages, const PackageImportPlan &plan,
+                                std::optional<std::string_view> verified_source_snapshot_id,
+                                const CancellationToken &cancellation, ProgressSink *progress) {
     if (!source)
         return std::unexpected{transaction_error("package import source reader is required")};
     if (const auto verified = verify_package_import_plan(plan); !verified)
@@ -3638,7 +3648,8 @@ detail::prepare_sfs_package_import(std::shared_ptr<const RandomAccessReader> sou
         if (packages[index].package_id != plan.package_ids[index])
             return std::unexpected{transaction_error("package import input identity differs from the plan")};
     }
-    auto prepared = prepare_sfs_package_import_state(source, source_path, packages, plan, cancellation, progress);
+    auto prepared = prepare_sfs_package_import_state(source, source_path, packages, plan, verified_source_snapshot_id,
+                                                     cancellation, progress);
     if (!prepared)
         return std::unexpected{prepared.error()};
     const auto image_size_bytes = prepared->container.image_size_bytes();
@@ -3653,6 +3664,24 @@ detail::prepare_sfs_package_import(std::shared_ptr<const RandomAccessReader> sou
     return detail::PreparedPackageImport{std::move(source_path),  image_size_bytes, plan.plan_id,
                                          plan.target_snapshot_id, plan.objects,     plan.allocation,
                                          std::move(*patches)};
+}
+
+} // namespace
+
+Result<detail::PreparedPackageImport>
+detail::prepare_sfs_package_import(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
+                                   std::span<const PortablePackage> packages, const PackageImportPlan &plan,
+                                   const CancellationToken &cancellation, ProgressSink *progress) {
+    return prepare_sfs_package_import_impl(std::move(source), std::move(source_path), packages, plan, std::nullopt,
+                                           cancellation, progress);
+}
+
+Result<detail::PreparedPackageImport> detail::prepare_sfs_package_import_verified(
+    std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
+    std::span<const PortablePackage> packages, const PackageImportPlan &plan,
+    std::string_view verified_source_snapshot_id, const CancellationToken &cancellation, ProgressSink *progress) {
+    return prepare_sfs_package_import_impl(std::move(source), std::move(source_path), packages, plan,
+                                           verified_source_snapshot_id, cancellation, progress);
 }
 
 Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, const AlterationManifest &manifest,

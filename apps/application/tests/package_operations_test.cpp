@@ -267,14 +267,31 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
     ASSERT_FALSE(released);
     EXPECT_EQ(released.error().code, "package_plan_not_found");
 
-    const auto planned = registry_.invoke("images.package_import.plan", request, context());
+    std::vector<nlohmann::json> diagnostics;
+    auto operation_context = context();
+    operation_context.diagnostic = [&diagnostics](const nlohmann::json &event) { diagnostics.push_back(event); };
+    const auto planned = registry_.invoke("images.package_import.plan", request, operation_context);
     ASSERT_TRUE(planned) << planned.error().message;
     EXPECT_EQ(planned->at("imageId"), opened->image_id);
     EXPECT_EQ(planned->at("revision"), 1U);
     EXPECT_TRUE(planned->at("valid").get<bool>());
     ASSERT_FALSE(planned->at("actions").empty());
+    auto replacement_request = request;
+    replacement_request["replacePlanToken"] = planned->at("planToken");
+    const auto replanned = registry_.invoke("images.package_import.plan", replacement_request, operation_context);
+    ASSERT_TRUE(replanned) << replanned.error().message;
+    EXPECT_NE(replanned->at("planToken"), planned->at("planToken"));
+    const auto superseded = registry_.invoke("images.package_import",
+                                             {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    ASSERT_FALSE(superseded);
+    EXPECT_EQ(superseded.error().code, "package_plan_not_found");
+    ASSERT_TRUE(std::filesystem::remove(root_ / "session-sample.axksbnk"));
+    EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto &event) {
+        return event.value("event", "") == "package_import_plan_phase" && event.value("phase", "") == "package" &&
+               event.value("cacheHit", false);
+    }));
     const auto applied = registry_.invoke("images.package_import",
-                                          {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+                                          {{"planToken", replanned->at("planToken").get<std::string>()}}, context());
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_EQ(applied->at("imageId"), opened->image_id);
     EXPECT_EQ(applied->at("revision"), 2U);

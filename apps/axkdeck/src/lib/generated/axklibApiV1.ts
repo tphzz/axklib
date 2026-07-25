@@ -1908,6 +1908,7 @@ export interface components {
             package: components['schemas']['InputRef'];
             partitionIndex: number;
             renames?: components['schemas']['ImageSessionPackageRename'][];
+            replacePlanToken?: string;
             volumeName: string;
         };
         ImageSessionPackageImportResult: {

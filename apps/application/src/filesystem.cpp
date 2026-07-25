@@ -948,10 +948,7 @@ axk::app::Result<axk::app::SandboxFile> axk::app::Sandbox::open_file(const FileR
                                 FILE_NON_DIRECTORY_FILE, reference.relative_path);
     if (!handle)
         return std::unexpected(handle.error());
-    LARGE_INTEGER file_size{};
-    if (GetFileSizeEx(handle->get(), &file_size) == 0 || file_size.QuadPart < 0)
-        return std::unexpected(reference_error("sandbox file size cannot be inspected", reference.relative_path));
-    const auto size = static_cast<std::uint64_t>(file_size.QuadPart);
+    auto identity = native_identity(handle->get(), reference.relative_path);
 #else
     const auto descriptor =
         ::openat(**parent, relative->filename().c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
@@ -962,15 +959,20 @@ axk::app::Result<axk::app::SandboxFile> axk::app::Sandbox::open_file(const FileR
     if (::fstat(*handle, &status) != 0 || !S_ISREG(status.st_mode) || status.st_size < 0) {
         return std::unexpected(reference_error("file reference does not name a regular file", reference.relative_path));
     }
-    const auto size = static_cast<std::uint64_t>(status.st_size);
+    auto identity = native_identity(*handle, reference.relative_path);
 #endif
+    if (!identity)
+        return std::unexpected(identity.error());
+    const auto size = identity->size;
     const auto filename = text::path_to_utf8(relative->filename());
 #if defined(_WIN32)
     auto reader = std::make_shared<NativeFileReader>(std::move(*handle), size, reference.relative_path);
 #else
     auto reader = std::make_shared<NativeFileReader>(std::move(handle), size, reference.relative_path);
 #endif
-    return SandboxFile{reference, filename, size, std::move(reader)};
+    const auto expected = *identity;
+    return SandboxFile{reference, filename, size, reader,
+                       [reader, expected] { return reader->verify_unchanged(expected); }};
 }
 
 axk::app::Result<std::shared_ptr<axk::app::SandboxMutation>>

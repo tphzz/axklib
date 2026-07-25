@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include "axklib/alteration.hpp"
@@ -44,5 +45,11 @@ struct PreparedPackageImport {
 prepare_sfs_package_import(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
                            std::span<const PortablePackage> packages, const PackageImportPlan &plan,
                            const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr);
+
+[[nodiscard]] Result<PreparedPackageImport>
+prepare_sfs_package_import_verified(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
+                                    std::span<const PortablePackage> packages, const PackageImportPlan &plan,
+                                    std::string_view verified_source_snapshot_id,
+                                    const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr);
 
 } // namespace axk::detail

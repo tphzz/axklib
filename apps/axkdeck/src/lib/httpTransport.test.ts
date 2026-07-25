@@ -1406,6 +1406,14 @@ describe('HttpImageTransport', () => {
         const plan = await transport.planImagePackageImport(opened.sessionId, source, 0, 'DRUMS', [
             { nodeId: 'node-1', destinationName: 'DRUM KIT' },
         ]);
+        await transport.planImagePackageImport(
+            opened.sessionId,
+            source,
+            0,
+            'DRUMS',
+            [{ nodeId: 'node-1', destinationName: 'DRUM KIT 2' }],
+            plan.planToken,
+        );
         await transport.releaseImagePackageImportPlan(plan.planToken);
         await expect(transport.startImagePackageImport(plan.planToken)).resolves.toMatchObject({
             kind: 'images.package_import',
@@ -1433,13 +1441,23 @@ describe('HttpImageTransport', () => {
         };
         await transport.deleteRetainedPackage(retained);
 
-        expect(requests.find((request) => request.path.endsWith('image-session-package-import-plans'))?.body).toEqual({
+        const planRequests = requests.filter((request) => request.path.endsWith('image-session-package-import-plans'));
+        expect(planRequests[0]?.body).toEqual({
             imageId: 'image-package',
             expectedRevision: 7,
             package: { fileRef: { rootId: 'workspace', relativePath: 'packages/drums.axkvol' } },
             partitionIndex: 0,
             volumeName: 'DRUMS',
             renames: [{ nodeId: 'node-1', destinationName: 'DRUM KIT' }],
+        });
+        expect(planRequests[1]?.body).toEqual({
+            imageId: 'image-package',
+            expectedRevision: 7,
+            package: { fileRef: { rootId: 'workspace', relativePath: 'packages/drums.axkvol' } },
+            replacePlanToken: 'session-plan',
+            partitionIndex: 0,
+            volumeName: 'DRUMS',
+            renames: [{ nodeId: 'node-1', destinationName: 'DRUM KIT 2' }],
         });
         expect(requests.find((request) => request.path.endsWith('image-session-package-exports'))?.body).toEqual({
             imageId: 'image-package',
