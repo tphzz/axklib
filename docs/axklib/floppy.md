@@ -34,7 +34,10 @@ provides read-only object inventory, relationships, preview, audition, and
 package export, but it is not a floppy image: FAT geometry, allocation chains,
 directory ordering, labels, support files, and deleted entries cannot be
 reconstructed from the object set. Higher collection directories remain browser
-or CLI navigation scopes.
+or CLI navigation scopes. When an application image session opens one flat disk
+folder, it can also complete split Wave Data from immediate sibling disk folders.
+Companion discovery requires the same object filename and an exact normalized
+Yamaha segment header; it does not merge the siblings' other objects.
 
 ## Compatibility Profile
 

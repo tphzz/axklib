@@ -283,7 +283,7 @@ TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
     EXPECT_EQ(mutation.error().code, "image_mutation_unsupported");
 }
 
-TEST_F(ImageSessionTest, AssemblesNestedMultiDiskWaveDataAndDiagnosesIncompleteLeaf) {
+TEST_F(ImageSessionTest, DiscoversExactSiblingSegmentsAndDiagnosesAnIncompleteLeaf) {
     const auto source = axk::open_media(root_ / "fixture.hds");
     ASSERT_TRUE(source) << source.error().message;
     const auto source_objects = source->objects(axk::MediaObjectReadMode::complete);
@@ -319,7 +319,9 @@ TEST_F(ImageSessionTest, AssemblesNestedMultiDiskWaveDataAndDiagnosesIncompleteL
     write_object_file(first_disk / "SMP_TEST.001", first_segment);
     write_object_file(second_disk / "SMP_TEST.001", second_segment);
 
-    axk::app::ImageSessionManager sessions{*sandbox_, 3U, 64U};
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::ImageSessionManager sessions{
+        *sandbox_, 3U, 64U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
     const auto complete =
         sessions.open({"workspace", "disk-set", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
     ASSERT_TRUE(complete) << complete.error().message;
@@ -329,9 +331,29 @@ TEST_F(ImageSessionTest, AssemblesNestedMultiDiskWaveDataAndDiagnosesIncompleteL
     const auto audition = sessions.prepare_audition(complete->image_id, "owner-a", complete_objects->items.front().id);
     ASSERT_TRUE(audition) << audition.error().message;
     EXPECT_GT(audition->wav_size_bytes, 44U);
+    ASSERT_TRUE(sessions.close(complete->image_id, "owner-a"));
 
-    const auto incomplete =
+    const auto sibling_complete =
         sessions.open({"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+    ASSERT_TRUE(sibling_complete) << sibling_complete.error().message;
+    const auto sibling_objects = sessions.objects(sibling_complete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(sibling_objects) << sibling_objects.error().message;
+    ASSERT_EQ(sibling_objects->items.size(), 1U);
+    const auto sibling_audition =
+        sessions.prepare_audition(sibling_complete->image_id, "owner-a", sibling_objects->items.front().id);
+    ASSERT_TRUE(sibling_audition) << sibling_audition.error().message;
+    EXPECT_GT(sibling_audition->wav_size_bytes, 44U);
+    EXPECT_FALSE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
+    ASSERT_TRUE(sessions.close(sibling_complete->image_id, "owner-a"));
+    EXPECT_TRUE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
+
+    const auto incomplete_leaf = root_ / "incomplete-leaf";
+    std::filesystem::create_directory(incomplete_leaf);
+    write_object_file(incomplete_leaf / "SMP_TEST.001", second_segment);
+    const auto incomplete =
+        sessions.open({"workspace", "incomplete-leaf", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
     ASSERT_TRUE(incomplete) << incomplete.error().message;
     const auto incomplete_objects = sessions.objects(incomplete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(incomplete_objects) << incomplete_objects.error().message;
@@ -340,7 +362,7 @@ TEST_F(ImageSessionTest, AssemblesNestedMultiDiskWaveDataAndDiagnosesIncompleteL
         sessions.prepare_audition(incomplete->image_id, "owner-a", incomplete_objects->items.front().id);
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "audition_unsupported");
-    EXPECT_NE(rejected.error().message.find("open its parent object directory"), std::string::npos);
+    EXPECT_NE(rejected.error().message.find("make all companion disk folders available"), std::string::npos);
 }
 
 TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {

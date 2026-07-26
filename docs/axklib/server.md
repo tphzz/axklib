@@ -187,10 +187,14 @@ truth.
 `{"kind":"AXK_OBJECT_DIRECTORY","directory":...}` for a flat directory of
 Yamaha object files or a parent containing one level of related disk folders.
 The parent form assembles complete contiguous multi-disk Wave Data segments.
+For a flat leaf, the image session also searches immediate sibling folders for
+exact continuation segments with the same object filename and normalized Yamaha
+header; no other sibling objects enter the session.
 Object-directory sessions are bounded and read-only: inventory, relationships,
 preview, audition, and package export are available, while image alteration and
 package import are not. An incomplete leaf can be inventoried, but split Wave
-Data requires opening its common parent for preview or audition.
+Data cannot be previewed or auditioned until every companion folder is available
+under the same configured storage location.
 
 `POST /api/v1/files/list` performs only a bounded directory listing. A media
 picker inspects one selected directory with

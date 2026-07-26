@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <filesystem>
 #include <format>
 #include <iterator>
 #include <limits>
@@ -63,6 +64,128 @@ std::string media_kind_name(axk::MediaKind kind) {
         return "axk-object-directory";
     }
     return "unknown";
+}
+
+std::string fold_ascii(std::string_view value) {
+    std::string folded;
+    folded.reserve(value.size());
+    std::ranges::transform(value, std::back_inserter(folded), [](char character) {
+        return character >= 'a' && character <= 'z' ? static_cast<char>(character - ('a' - 'A')) : character;
+    });
+    return folded;
+}
+
+std::optional<std::string> incomplete_segment_identity(const axk::MediaObject &object) {
+    const auto &header = object.decoded.header;
+    if (header.type != axk::ObjectType::smpl ||
+        (header.payload_offset_0x24 == 0U && header.payload_bytes_0x20 == header.payload_bytes_0x1c) ||
+        header.header_size < 0x28U || header.header_size > object.raw_payload.size()) {
+        return std::nullopt;
+    }
+    std::string identity(header.header_size, '\0');
+    std::ranges::transform(std::span{object.raw_payload}.first(header.header_size), identity.begin(),
+                           [](std::byte value) { return static_cast<char>(std::to_integer<unsigned char>(value)); });
+    std::fill(identity.begin() + 0x20, identity.begin() + 0x28, '\0');
+    return identity;
+}
+
+std::optional<std::string> filename_from_logical_path(std::string_view logical_path) {
+    auto path = axk::text::path_from_utf8(logical_path);
+    if (!path || path->filename().empty())
+        return std::nullopt;
+    return axk::text::path_to_utf8(path->filename());
+}
+
+axk::app::Result<std::vector<axk::app::DirectoryEntry>> list_bounded_directory(const axk::app::Sandbox &sandbox,
+                                                                               const axk::app::DirectoryRef &reference,
+                                                                               std::size_t maximum_entries) {
+    std::vector<axk::app::DirectoryEntry> entries;
+    std::optional<std::string> cursor;
+    do {
+        const auto remaining = maximum_entries + 1U - entries.size();
+        const auto page_size = std::min<std::size_t>(remaining, 1000U);
+        auto page = sandbox.list_directory(reference, page_size, cursor);
+        if (!page)
+            return std::unexpected(page.error());
+        entries.insert(entries.end(), std::make_move_iterator(page->entries.begin()),
+                       std::make_move_iterator(page->entries.end()));
+        if (entries.size() > maximum_entries) {
+            return std::unexpected(
+                session_error("image_open_failed", "AXK object directory companion scan exceeds its entry limit"));
+        }
+        cursor = std::move(page->next_cursor);
+    } while (cursor);
+    return entries;
+}
+
+axk::app::Result<std::vector<axk::app::FileRef>>
+append_exact_sibling_segments(const axk::app::Sandbox &sandbox, const axk::app::ImageSourceRef &source,
+                              const axk::AxkObjectDirectory &primary,
+                              std::vector<axk::AxkObjectDirectoryEntry> &entries,
+                              std::vector<std::function<axk::app::Result<void>()>> &verifiers) {
+    std::unordered_map<std::string, std::vector<std::string>> identities_by_filename;
+    for (const auto &object : primary.stored_objects()) {
+        auto identity = incomplete_segment_identity(object);
+        auto filename = filename_from_logical_path(object.logical_path);
+        if (identity && filename)
+            identities_by_filename[fold_ascii(*filename)].push_back(std::move(*identity));
+    }
+    if (identities_by_filename.empty())
+        return std::vector<axk::app::FileRef>{};
+
+    auto source_path = axk::text::path_from_utf8(source.relative_path);
+    if (!source_path || source_path->filename().empty())
+        return std::vector<axk::app::FileRef>{};
+    const auto parent_path = source_path->parent_path();
+    const auto parent_relative_path = axk::text::path_to_utf8(parent_path);
+    auto siblings = list_bounded_directory(sandbox, {source.root_id, parent_relative_path},
+                                           axk::AxkObjectDirectory::maximum_entries);
+    if (!siblings)
+        return std::unexpected(siblings.error());
+
+    std::vector<axk::app::FileRef> companion_references;
+    std::size_t entries_visited = siblings->size();
+    for (const auto &sibling : *siblings) {
+        if (sibling.kind != axk::app::DirectoryEntryKind::directory || sibling.relative_path == source.relative_path) {
+            continue;
+        }
+        if (entries_visited >= axk::AxkObjectDirectory::maximum_entries)
+            break;
+        const auto remaining = axk::AxkObjectDirectory::maximum_entries - entries_visited;
+        const auto limit = std::min<std::size_t>(remaining, axk::AxkObjectDirectory::maximum_leaf_entries);
+        auto sibling_listing = sandbox.list_directory({source.root_id, sibling.relative_path}, limit);
+        if (!sibling_listing)
+            continue;
+        entries_visited += sibling_listing->entries.size();
+        if (sibling_listing->truncated)
+            continue;
+        for (const auto &candidate : sibling_listing->entries) {
+            if (candidate.kind != axk::app::DirectoryEntryKind::file)
+                continue;
+            const auto expected = identities_by_filename.find(fold_ascii(candidate.name));
+            if (expected == identities_by_filename.end() ||
+                candidate.size.value_or(axk::AxkObjectDirectory::maximum_payload_bytes + 1U) >
+                    axk::AxkObjectDirectory::maximum_payload_bytes) {
+                continue;
+            }
+            const axk::app::FileRef reference{source.root_id, candidate.relative_path};
+            auto opened = sandbox.open_file(reference);
+            if (!opened)
+                return std::unexpected(opened.error());
+            auto decoded =
+                axk::StandaloneObject::open(opened->reader, candidate.relative_path,
+                                            static_cast<std::size_t>(axk::AxkObjectDirectory::maximum_payload_bytes));
+            if (!decoded)
+                continue;
+            auto identity = incomplete_segment_identity(decoded->object());
+            if (!identity || std::ranges::find(expected->second, *identity) == expected->second.end())
+                continue;
+            entries.push_back({std::format("{}/{}", sibling.name, candidate.name), std::move(opened->reader)});
+            verifiers.push_back(std::move(opened->verify_unchanged));
+            companion_references.push_back(reference);
+        }
+    }
+    return companion_references;
 }
 
 std::string object_format_name(axk::ObjectFormat format) {
@@ -205,6 +328,7 @@ struct axk::app::ImageSessionManager::Implementation {
         CursorSet relationship_cursors;
         CursorSet validation_cursors;
         PathReservationCoordinator::Lease path_lease;
+        PathReservationCoordinator::Lease companion_path_lease;
     };
 
     const Sandbox &sandbox;
@@ -424,7 +548,8 @@ struct axk::app::ImageSessionManager::Implementation {
         if (smpl->stored_segment_offset != 0U || smpl->stored_segment_bytes != smpl->stored_pcm_bytes) {
             return std::unexpected(session_error(
                 "audition_unsupported",
-                "Wave Data is split across sampler disks; open its parent object directory to audition it"));
+                "Wave Data is split across sampler disks; make all companion disk folders available beside this "
+                "object directory"));
         }
         if (smpl->sample_rate.value == 0U || smpl->stored_pcm_bytes == 0U)
             return std::unexpected(session_error("audition_unsupported", "Wave Data contains no playable PCM"));
@@ -704,6 +829,7 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
         return std::unexpected(session_error("invalid_owner", "image session owner is required"));
     const FileRef path_reference{source.root_id, source.relative_path};
     PathReservationCoordinator::Lease path_lease;
+    PathReservationCoordinator::Lease companion_path_lease;
     if (implementation_->path_reservations != nullptr) {
         auto acquired = implementation_->path_reservations->try_acquire({path_reference, PathAccessMode::shared});
         if (!acquired)
@@ -739,6 +865,8 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
             return std::unexpected(tree.error());
         std::vector<AxkObjectDirectoryEntry> entries;
         std::vector<std::function<Result<void>()>> verifiers;
+        const auto nested = std::ranges::any_of(
+            tree->entries(), [](const auto &entry) { return entry.kind == SandboxTreeEntryKind::directory; });
         entries.reserve(tree->entries().size());
         verifiers.reserve(tree->entries().size());
         for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
@@ -751,9 +879,31 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
             entries.push_back({entry.relative_path, opened->reader});
             verifiers.push_back(std::move(opened->verify_unchanged));
         }
-        auto directory = AxkObjectDirectory::open(std::move(entries), source.relative_path, cancellation);
+        auto directory = AxkObjectDirectory::open(entries, source.relative_path, cancellation);
         if (!directory)
             return std::unexpected(core_error(directory.error(), source));
+        if (!nested) {
+            auto companion_references =
+                append_exact_sibling_segments(implementation_->sandbox, source, *directory, entries, verifiers);
+            if (!companion_references)
+                return std::unexpected(companion_references.error());
+            if (!companion_references->empty()) {
+                directory = AxkObjectDirectory::open(std::move(entries), source.relative_path, cancellation);
+                if (!directory)
+                    return std::unexpected(core_error(directory.error(), source));
+                if (implementation_->path_reservations != nullptr) {
+                    std::vector<PathAccess> accesses;
+                    accesses.reserve(companion_references->size());
+                    std::ranges::transform(
+                        *companion_references, std::back_inserter(accesses),
+                        [](const FileRef &reference) { return PathAccess{reference, PathAccessMode::shared}; });
+                    auto acquired = implementation_->path_reservations->try_acquire(accesses);
+                    if (!acquired)
+                        return std::unexpected(acquired.error());
+                    companion_path_lease = std::move(*acquired);
+                }
+            }
+        }
         std::vector<std::byte> snapshot;
         for (const auto &object : directory->stored_objects()) {
             const auto append_text = [&](std::string_view value) {
@@ -805,6 +955,7 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
     session->root_count = tree.roots.size();
     session->last_access = implementation_->clock();
     session->path_lease = std::move(path_lease);
+    session->companion_path_lease = std::move(companion_path_lease);
 
     std::unordered_map<std::string, std::string> object_ids;
     object_ids.reserve(inventory->catalog.objects.size());
