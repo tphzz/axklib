@@ -68,7 +68,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    '/auditions/{auditionId}/audio': {
+    '/auditions/{auditionId}/content': {
         parameters: {
             query?: never;
             header?: {
@@ -79,7 +79,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        get: operations['auditions.audio'];
+        get: operations['auditions.content'];
         put?: never;
         post?: never;
         delete?: never;
@@ -1248,6 +1248,7 @@ export interface components {
         };
         ApiLimits: {
             downloadArchiveRetentionSeconds: number;
+            maximumAuditionBundleBytes: number;
             maximumConcurrentArchiveDownloads?: number;
             maximumDownloadArchiveBytes: number;
             maximumDownloadArchiveDepth?: number;
@@ -1307,23 +1308,33 @@ export interface components {
             sourceSubtype: string;
             valid: boolean;
         };
-        Audition: {
+        AuditionBundle: {
             auditionId: string;
-            channels: number;
-            frameCount: number;
-            loopLengthFrames: number;
+            clips: components['schemas']['AuditionClip'][];
+            contentSizeBytes: number;
+        };
+        AuditionClip: {
+            lanes: components['schemas']['AuditionLane'][];
             loopMode: number;
             loopModeLabel: string;
-            loopStartFrame: number;
             objectId: string;
+            warnings: string[];
+        };
+        AuditionLane: {
+            contentOffsetBytes: number;
+            frameCount: number;
+            loopLengthFrames: number;
+            loopStartFrame: number;
+            /** @enum {string} */
+            role: 'MONO' | 'LEFT' | 'RIGHT';
             sampleRate: number;
             sampleWidthBytes: number;
-            warnings: string[];
+            sourceObjectId: string;
             wavSizeBytes: number;
         };
         AuditionPrepareRequest: {
             imageId: string;
-            objectId: string;
+            objectIds: string[];
         };
         Capabilities: {
             /** @constant */
@@ -1450,6 +1461,7 @@ export interface components {
             retryable: boolean;
         };
         ErrorContext: {
+            objectId?: string;
             objectName?: string;
             objectType?: string;
             partitionIndex?: number;
@@ -3059,7 +3071,7 @@ export interface operations {
             };
         };
     };
-    'auditions.audio': {
+    'auditions.content': {
         parameters: {
             query?: never;
             header?: {
@@ -3072,24 +3084,24 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Complete bounded virtual WAV */
+            /** @description Complete bounded concatenated WAV content */
             200: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;
                 };
                 content: {
-                    'audio/wav': string;
+                    'application/octet-stream': string;
                 };
             };
-            /** @description Virtual WAV byte range */
+            /** @description Concatenated WAV content byte range */
             206: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;
                 };
                 content: {
-                    'audio/wav': string;
+                    'application/octet-stream': string;
                 };
             };
             /** @description Invalid, oversized, or missing required range */

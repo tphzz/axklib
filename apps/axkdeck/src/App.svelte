@@ -2193,19 +2193,24 @@
         const generation = ++sampleBankPlaybackGeneration;
         playingSampleBankId = item.objectId;
         sampleBankPreviewMemberId = memberIds[0] ?? '';
-        auditionController.playSequence(openSessionId, memberIds, (result) => {
-            if (generation !== sampleBankPlaybackGeneration) return;
-            playingSampleBankId = '';
-            resetSampleBankPreview(item.objectId);
-            if (result.status === 'failed') {
-                sourceStatus = result.error;
-                if (result.errorCode === 'companion_disks_required') {
-                    requestCompanionDisks({ kind: 'sample-bank', bankId: item.objectId });
+        auditionController.playSequence(
+            openSessionId,
+            memberIds,
+            (result) => {
+                if (generation !== sampleBankPlaybackGeneration) return;
+                playingSampleBankId = '';
+                resetSampleBankPreview(item.objectId);
+                if (result.status === 'failed') {
+                    sourceStatus = result.error;
+                    if (result.errorCode === 'companion_disks_required') {
+                        requestCompanionDisks({ kind: 'sample-bank', bankId: item.objectId });
+                    }
+                } else if (result.status === 'completed' && result.playedCount === 0) {
+                    sourceStatus = 'This Sample Bank has no playable Samples';
                 }
-            } else if (result.status === 'completed' && result.playedCount === 0) {
-                sourceStatus = 'This Sample Bank has no playable Samples';
-            }
-        });
+            },
+            item.objectId,
+        );
     }
 
     function resetSampleBankPreview(bankId = selectedBankId): void {

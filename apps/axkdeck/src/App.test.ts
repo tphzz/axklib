@@ -343,6 +343,7 @@ describe('App panel layout', () => {
                 17,
                 [sample00.key, sample02.key, sample10.key],
                 expect.any(Function),
+                bank.key,
             );
         } finally {
             playSequence.mockRestore();

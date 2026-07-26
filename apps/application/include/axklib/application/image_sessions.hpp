@@ -232,19 +232,30 @@ struct ImageWaveformPreview {
     std::vector<ImageWaveformPreviewLane> lanes;
 };
 
-struct ImageAudition {
-    std::string audition_id;
-    std::string object_id;
+struct ImageAuditionLane {
+    std::string role;
+    std::string source_object_id;
     std::uint32_t sample_rate{};
-    std::uint16_t channels{};
     std::uint16_t sample_width_bytes{};
     std::uint64_t frame_count{};
+    std::uint64_t content_offset_bytes{};
     std::uint64_t wav_size_bytes{};
-    std::uint8_t loop_mode{};
-    std::string loop_mode_label;
     std::uint64_t loop_start_frame{};
     std::uint64_t loop_length_frames{};
+};
+
+struct ImageAuditionClip {
+    std::string object_id;
+    std::uint8_t loop_mode{};
+    std::string loop_mode_label;
     std::vector<std::string> warnings;
+    std::vector<ImageAuditionLane> lanes;
+};
+
+struct ImageAudition {
+    std::string audition_id;
+    std::uint64_t content_size_bytes{};
+    std::vector<ImageAuditionClip> clips;
 };
 
 struct ImageAuditionRange {
@@ -266,7 +277,9 @@ class ImageSessionManager {
                         std::size_t maximum_page_size = 500U,
                         std::chrono::seconds idle_retention = std::chrono::minutes{15},
                         Clock clock = std::chrono::steady_clock::now,
-                        PathReservationCoordinator *path_reservations = nullptr);
+                        PathReservationCoordinator *path_reservations = nullptr,
+                        std::uint64_t maximum_audition_bundle_bytes = 128ULL * 1024ULL * 1024ULL,
+                        std::size_t maximum_audition_clips = 256U);
     ~ImageSessionManager();
     ImageSessionManager(ImageSessionManager &&) noexcept;
     ImageSessionManager &operator=(ImageSessionManager &&) noexcept;
@@ -316,7 +329,7 @@ class ImageSessionManager {
                                                        std::string_view object_id, std::size_t bin_count,
                                                        const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageAudition> prepare_audition(std::string_view image_id, std::string_view owner_id,
-                                                         std::string_view object_id,
+                                                         const std::vector<std::string> &object_ids,
                                                          const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageAuditionRange> audition_range(std::string_view audition_id, std::string_view owner_id,
                                                             std::uint64_t offset, std::size_t size,

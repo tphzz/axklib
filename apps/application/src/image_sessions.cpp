@@ -8,9 +8,11 @@
 #include <iterator>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <ranges>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "axklib/application/secure_random.hpp"
@@ -285,25 +287,23 @@ struct axk::app::ImageSessionManager::Implementation {
         std::string role;
         bool alternating_byte{};
         std::uint16_t output_width{};
+        std::uint32_t sample_rate{};
         std::uint64_t physical_first_frame{};
         std::uint64_t frame_count{};
+        std::uint64_t loop_start{};
+        std::uint64_t loop_length{};
     };
 
     struct PcmSource {
         std::vector<PcmMember> members;
-        std::uint32_t sample_rate{};
-        std::uint16_t sample_width{};
-        std::uint64_t frame_count{};
         std::uint8_t loop_mode{};
         std::string loop_mode_label;
-        std::uint64_t loop_start{};
-        std::uint64_t loop_length{};
         std::vector<std::string> warnings;
     };
 
     struct AuditionEntry {
         ImageAudition descriptor;
-        PcmSource source;
+        std::vector<PcmSource> sources;
         std::chrono::steady_clock::time_point last_access;
     };
 
@@ -346,6 +346,8 @@ struct axk::app::ImageSessionManager::Implementation {
     const Sandbox &sandbox;
     std::size_t maximum_sessions;
     std::size_t maximum_page_size;
+    std::uint64_t maximum_audition_bundle_bytes;
+    std::size_t maximum_audition_clips;
     std::chrono::seconds idle_retention;
     Clock clock;
     PathReservationCoordinator *path_reservations;
@@ -353,10 +355,13 @@ struct axk::app::ImageSessionManager::Implementation {
     std::unordered_map<std::string, std::shared_ptr<Session>> sessions;
 
     Implementation(const Sandbox &sandbox_value, std::size_t session_count, std::size_t page_size,
-                   std::chrono::seconds retention, Clock now, PathReservationCoordinator *reservations)
+                   std::chrono::seconds retention, Clock now, PathReservationCoordinator *reservations,
+                   std::uint64_t audition_bundle_bytes, std::size_t audition_clips)
         : sandbox(sandbox_value), maximum_sessions(std::max<std::size_t>(session_count, 1U)),
-          maximum_page_size(std::max<std::size_t>(page_size, 1U)), idle_retention(retention), clock(std::move(now)),
-          path_reservations(reservations) {}
+          maximum_page_size(std::max<std::size_t>(page_size, 1U)),
+          maximum_audition_bundle_bytes(std::max<std::uint64_t>(audition_bundle_bytes, 45U)),
+          maximum_audition_clips(std::max<std::size_t>(audition_clips, 1U)), idle_retention(retention),
+          clock(std::move(now)), path_reservations(reservations) {}
 
     void cleanup_locked() {
         const auto now = clock();
@@ -609,8 +614,12 @@ struct axk::app::ImageSessionManager::Implementation {
             }
         }
         const auto output_width = static_cast<std::uint16_t>(alternating ? 1U : smpl->stored_sample_width_bytes.value);
-        return PcmMember{std::move(object_id), std::move(role),  alternating,
-                         output_width,         used_first_frame, used_frame_count};
+        return PcmMember{.object_id = std::move(object_id),
+                         .role = std::move(role),
+                         .alternating_byte = alternating,
+                         .output_width = output_width,
+                         .physical_first_frame = used_first_frame,
+                         .frame_count = used_frame_count};
     }
 
     Result<PcmSource> prepare_source(Session &session, std::string_view object_id,
@@ -670,6 +679,10 @@ struct axk::app::ImageSessionManager::Implementation {
         }
 
         PcmSource source;
+        source.loop_mode =
+            sample ? sample->loop_mode : std::get<CurrentSmpl>(snapshot->second.object.payload).loop_mode.value;
+        source.loop_mode_label =
+            sample ? sample->loop_mode_label : std::get<CurrentSmpl>(snapshot->second.object.payload).loop_mode_label;
         for (auto &pending : pending_members) {
             auto member = prepare_member(session, std::move(pending.object_id), std::move(pending.role),
                                          pending.sample_member, cancellation);
@@ -681,55 +694,66 @@ struct axk::app::ImageSessionManager::Implementation {
                 pending.sample_member ? pending.sample_member->sample_rate : smpl.sample_rate.value;
             if (sample_rate == 0U)
                 return std::unexpected(session_error("audition_unsupported", "Sample playback rate is zero"));
-            if (source.members.empty()) {
-                source.sample_rate = sample_rate;
-                source.sample_width = member->output_width;
-                source.loop_mode = sample ? sample->loop_mode : smpl.loop_mode.value;
-                source.loop_mode_label = sample ? sample->loop_mode_label : smpl.loop_mode_label;
-                if (pending.sample_member) {
-                    if (pending.sample_member->loop_start_frame < pending.sample_member->wave_start_frame) {
-                        source.warnings.emplace_back(
-                            "Sample loop starts before its playback window; playback will use one-shot mode");
-                        source.loop_mode = 0U;
-                        source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
-                    } else {
-                        source.loop_start =
-                            pending.sample_member->loop_start_frame - pending.sample_member->wave_start_frame;
-                        source.loop_length = pending.sample_member->loop_length_frames;
-                    }
-                } else {
-                    source.loop_start = smpl.loop_start_frame.value;
-                    source.loop_length = smpl.loop_length_frames.value;
-                }
-            } else if (source.sample_rate != sample_rate || source.sample_width != member->output_width) {
-                return std::unexpected(
-                    session_error("audition_stereo_incompatible",
-                                  "linked Wave Data must have matching sample rates and decoded sample widths"));
-            } else if (pending.sample_member && source.loop_mode != 0U) {
-                const auto loop_start =
-                    pending.sample_member->loop_start_frame >= pending.sample_member->wave_start_frame
-                        ? pending.sample_member->loop_start_frame - pending.sample_member->wave_start_frame
-                        : std::numeric_limits<std::uint64_t>::max();
-                if (loop_start != source.loop_start ||
-                    pending.sample_member->loop_length_frames != source.loop_length) {
-                    source.warnings.emplace_back("Sample member loop windows differ; playback will use one-shot mode");
+            member->sample_rate = sample_rate;
+            if (pending.sample_member) {
+                if (pending.sample_member->loop_start_frame < pending.sample_member->wave_start_frame) {
+                    source.warnings.emplace_back(
+                        "Sample loop starts before its playback window; playback will use one-shot mode");
                     source.loop_mode = 0U;
                     source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
-                    source.loop_start = 0U;
-                    source.loop_length = 0U;
+                } else {
+                    member->loop_start =
+                        pending.sample_member->loop_start_frame - pending.sample_member->wave_start_frame;
+                    member->loop_length = pending.sample_member->loop_length_frames;
                 }
+            } else {
+                member->loop_start = smpl.loop_start_frame.value;
+                member->loop_length = smpl.loop_length_frames.value;
             }
-            source.frame_count = std::max(source.frame_count, member->frame_count);
+            if ((source.loop_mode == 1U || source.loop_mode == 2U) &&
+                (member->loop_length == 0U || member->loop_start >= member->frame_count ||
+                 member->loop_length > member->frame_count - member->loop_start)) {
+                source.warnings.emplace_back("Invalid loop bounds; playback will use one-shot mode");
+                source.loop_mode = 0U;
+                source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
+            }
             source.members.push_back(std::move(*member));
         }
-        if ((source.loop_mode == 1U || source.loop_mode == 2U) &&
-            (source.loop_length == 0U || source.loop_start >= source.frame_count ||
-             source.loop_length > source.frame_count - source.loop_start)) {
-            source.warnings.emplace_back("Invalid loop bounds; playback will use one-shot mode");
-            source.loop_mode = 0U;
-            source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
-            source.loop_start = 0U;
-            source.loop_length = 0U;
+        if (source.members.size() > 1U) {
+            const auto &left = source.members.front();
+            const auto different_format =
+                std::ranges::any_of(source.members | std::views::drop(1U), [&](const auto &member) {
+                    return member.sample_rate != left.sample_rate || member.output_width != left.output_width;
+                });
+            if (different_format) {
+                source.warnings.emplace_back(
+                    "Sample member formats differ; audition will normalize each lane independently");
+            }
+            if (source.loop_mode == 1U || source.loop_mode == 2U) {
+                const auto equal_time = [](std::uint64_t left_frames, std::uint32_t left_rate,
+                                           std::uint64_t right_frames, std::uint32_t right_rate) {
+                    const auto left_divisor = std::gcd(left_frames, static_cast<std::uint64_t>(left_rate));
+                    const auto right_divisor = std::gcd(right_frames, static_cast<std::uint64_t>(right_rate));
+                    return left_frames / left_divisor == right_frames / right_divisor &&
+                           left_rate / left_divisor == right_rate / right_divisor;
+                };
+                const auto incompatible_loop =
+                    std::ranges::any_of(source.members | std::views::drop(1U), [&](const auto &member) {
+                        return !equal_time(left.loop_start, left.sample_rate, member.loop_start, member.sample_rate) ||
+                               !equal_time(left.loop_length, left.sample_rate, member.loop_length, member.sample_rate);
+                    });
+                if (incompatible_loop) {
+                    source.warnings.emplace_back("Sample member loop timings differ; playback will use one-shot mode");
+                    source.loop_mode = 0U;
+                    source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
+                }
+            }
+        }
+        if (source.loop_mode == 0U) {
+            for (auto &member : source.members) {
+                member.loop_start = 0U;
+                member.loop_length = 0U;
+            }
         }
         return source;
     }
@@ -763,32 +787,6 @@ struct axk::app::ImageSessionManager::Implementation {
                 std::swap((*stored)[offset], (*stored)[offset + 1U]);
         }
         return stored;
-    }
-
-    Result<std::vector<std::byte>> read_pcm(Session &session, const PcmSource &source, std::uint64_t first_frame,
-                                            std::size_t frame_count, const CancellationToken &cancellation) const {
-        std::vector<std::vector<std::byte>> members;
-        members.reserve(source.members.size());
-        for (const auto &member : source.members) {
-            auto pcm = read_member_pcm(session, member, first_frame, frame_count, cancellation);
-            if (!pcm)
-                return std::unexpected(pcm.error());
-            members.push_back(std::move(*pcm));
-        }
-        const auto channels = source.members.size();
-        const auto block = channels * source.sample_width;
-        std::vector<std::byte> result(frame_count * block, source.sample_width == 1U ? std::byte{0x80} : std::byte{0});
-        for (std::size_t frame = 0U; frame < frame_count; ++frame) {
-            for (std::size_t channel = 0U; channel < channels; ++channel) {
-                const auto source_offset = frame * source.sample_width;
-                if (source_offset + source.sample_width > members[channel].size())
-                    continue;
-                const auto destination = (frame * channels + channel) * source.sample_width;
-                std::ranges::copy_n(members[channel].begin() + static_cast<std::ptrdiff_t>(source_offset),
-                                    source.sample_width, result.begin() + static_cast<std::ptrdiff_t>(destination));
-            }
-        }
-        return result;
     }
 
     template <typename Item>
@@ -838,9 +836,12 @@ struct axk::app::ImageSessionManager::Implementation {
 
 axk::app::ImageSessionManager::ImageSessionManager(const Sandbox &sandbox, std::size_t maximum_sessions,
                                                    std::size_t maximum_page_size, std::chrono::seconds idle_retention,
-                                                   Clock clock, PathReservationCoordinator *path_reservations)
+                                                   Clock clock, PathReservationCoordinator *path_reservations,
+                                                   std::uint64_t maximum_audition_bundle_bytes,
+                                                   std::size_t maximum_audition_clips)
     : implementation_(std::make_unique<Implementation>(sandbox, maximum_sessions, maximum_page_size, idle_retention,
-                                                       std::move(clock), path_reservations)) {}
+                                                       std::move(clock), path_reservations,
+                                                       maximum_audition_bundle_bytes, maximum_audition_clips)) {}
 
 axk::app::ImageSessionManager::~ImageSessionManager() = default;
 axk::app::ImageSessionManager::ImageSessionManager(ImageSessionManager &&) noexcept = default;
@@ -1791,7 +1792,9 @@ axk::app::ImageSessionManager::preview(std::string_view image_id, std::string_vi
     auto source = implementation_->prepare_source(**session, object_id, cancellation);
     if (!source)
         return std::unexpected(source.error());
-    ImageWaveformPreview result{.object_id = std::string{object_id}, .frame_count = source->frame_count, .lanes = {}};
+    const auto frame_count =
+        std::ranges::max(source->members | std::views::transform(&Implementation::PcmMember::frame_count));
+    ImageWaveformPreview result{.object_id = std::string{object_id}, .frame_count = frame_count, .lanes = {}};
     result.lanes.reserve(source->members.size());
     constexpr std::size_t chunk_frames = 16U * 1024U;
     for (const auto &member : source->members) {
@@ -1829,38 +1832,93 @@ axk::app::ImageSessionManager::preview(std::string_view image_id, std::string_vi
 
 axk::app::Result<axk::app::ImageAudition>
 axk::app::ImageSessionManager::prepare_audition(std::string_view image_id, std::string_view owner_id,
-                                                std::string_view object_id, const CancellationToken &cancellation) {
+                                                const std::vector<std::string> &object_ids,
+                                                const CancellationToken &cancellation) {
+    if (object_ids.empty() || object_ids.size() > implementation_->maximum_audition_clips) {
+        return std::unexpected(
+            session_error("invalid_request", std::format("audition must contain between 1 and {} unique objects",
+                                                         implementation_->maximum_audition_clips)));
+    }
+    std::unordered_set<std::string_view> unique_ids;
+    unique_ids.reserve(object_ids.size());
+    if (!std::ranges::all_of(object_ids, [&](const auto &object_id) {
+            return !object_id.empty() && unique_ids.insert(object_id).second;
+        })) {
+        return std::unexpected(session_error("invalid_request", "audition object IDs must be nonempty and unique"));
+    }
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
-    auto source = implementation_->prepare_source(**session, object_id, cancellation);
-    if (!source)
-        return std::unexpected(source.error());
-    const auto data_size = source->frame_count * source->members.size() * source->sample_width;
-    if (data_size > std::numeric_limits<std::uint32_t>::max() - 36U)
-        return std::unexpected(session_error("audition_unsupported", "audition exceeds the RIFF/WAVE size limit"));
+    ImageAudition descriptor;
+    std::vector<Implementation::PcmSource> sources;
+    descriptor.clips.reserve(object_ids.size());
+    sources.reserve(object_ids.size());
+    for (const auto &object_id : object_ids) {
+        if (cancellation.is_cancelled())
+            return std::unexpected(session_error("operation_cancelled", "operation cancelled"));
+        const auto attach_object_context = [&](Error &error) {
+            error.context.object_id = object_id;
+            if (const auto index = (*session)->object_indices_by_id.find(object_id);
+                index != (*session)->object_indices_by_id.end()) {
+                const auto &object = (*session)->objects[index->second];
+                error.context.object_type = object.type;
+                error.context.object_name = object.name;
+            }
+        };
+        const auto contextual_error = [&](std::string code, std::string message) {
+            auto error = session_error(std::move(code), std::move(message));
+            attach_object_context(error);
+            return error;
+        };
+        auto source = implementation_->prepare_source(**session, object_id, cancellation);
+        if (!source) {
+            auto error = std::move(source.error());
+            attach_object_context(error);
+            return std::unexpected(std::move(error));
+        }
+        ImageAuditionClip clip{.object_id = object_id,
+                               .loop_mode = source->loop_mode,
+                               .loop_mode_label = source->loop_mode_label,
+                               .warnings = source->warnings,
+                               .lanes = {}};
+        clip.lanes.reserve(source->members.size());
+        for (const auto &member : source->members) {
+            constexpr auto maximum_wave_data = std::numeric_limits<std::uint32_t>::max() - 36U;
+            if (member.frame_count > maximum_wave_data / member.output_width) {
+                return std::unexpected(
+                    contextual_error("audition_unsupported", "audition lane exceeds the RIFF/WAVE size limit"));
+            }
+            const auto data_size = member.frame_count * member.output_width;
+            const auto wav_size = 44U + data_size;
+            if (wav_size > implementation_->maximum_audition_bundle_bytes - descriptor.content_size_bytes) {
+                return std::unexpected(
+                    contextual_error("audition_too_large", "audition bundle exceeds the configured byte limit"));
+            }
+            clip.lanes.push_back(ImageAuditionLane{.role = member.role,
+                                                   .source_object_id = member.object_id,
+                                                   .sample_rate = member.sample_rate,
+                                                   .sample_width_bytes = member.output_width,
+                                                   .frame_count = member.frame_count,
+                                                   .content_offset_bytes = descriptor.content_size_bytes,
+                                                   .wav_size_bytes = wav_size,
+                                                   .loop_start_frame = member.loop_start,
+                                                   .loop_length_frames = member.loop_length});
+            descriptor.content_size_bytes += wav_size;
+        }
+        descriptor.clips.push_back(std::move(clip));
+        sources.push_back(std::move(*source));
+    }
     auto audition_id = random_identifier("audition-");
     if (!audition_id)
         return std::unexpected(audition_id.error());
-    ImageAudition descriptor{.audition_id = *audition_id,
-                             .object_id = std::string{object_id},
-                             .sample_rate = source->sample_rate,
-                             .channels = static_cast<std::uint16_t>(source->members.size()),
-                             .sample_width_bytes = source->sample_width,
-                             .frame_count = source->frame_count,
-                             .wav_size_bytes = 44U + data_size,
-                             .loop_mode = source->loop_mode,
-                             .loop_mode_label = source->loop_mode_label,
-                             .loop_start_frame = source->loop_start,
-                             .loop_length_frames = source->loop_length,
-                             .warnings = source->warnings};
+    descriptor.audition_id = *audition_id;
     const std::scoped_lock lock{(*session)->access_mutex};
     const auto now = implementation_->clock();
     std::erase_if((*session)->auditions,
                   [&](const auto &entry) { return entry.second.last_access + std::chrono::minutes{10} <= now; });
     if ((*session)->auditions.size() >= 256U)
         return std::unexpected(session_error("audition_capacity_exhausted", "audition capacity is exhausted", true));
-    (*session)->auditions.emplace(*audition_id, Implementation::AuditionEntry{descriptor, std::move(*source), now});
+    (*session)->auditions.emplace(*audition_id, Implementation::AuditionEntry{descriptor, std::move(sources), now});
     return descriptor;
 }
 
@@ -1893,58 +1951,72 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
     auto &entry = found->second;
     session->last_access = implementation_->clock();
     entry.last_access = session->last_access;
-    const auto total_size = entry.descriptor.wav_size_bytes;
+    const auto total_size = entry.descriptor.content_size_bytes;
     if (offset > total_size || size > total_size - offset)
         return std::unexpected(session_error("invalid_audio_range", "audio byte range exceeds the audition"));
-
-    std::array<std::byte, 44> header{};
-    const auto write_tag = [&](std::size_t at, std::string_view text) {
-        std::ranges::transform(text, header.begin() + static_cast<std::ptrdiff_t>(at),
-                               [](char value) { return static_cast<std::byte>(value); });
-    };
-    const auto le16 = [&](std::size_t at, std::uint16_t value) {
-        header[at] = static_cast<std::byte>(value & 0xffU);
-        header[at + 1U] = static_cast<std::byte>(value >> 8U);
-    };
-    const auto le32 = [&](std::size_t at, std::uint32_t value) {
-        for (std::size_t index = 0U; index < 4U; ++index)
-            header[at + index] = static_cast<std::byte>((value >> (index * 8U)) & 0xffU);
-    };
-    const auto data_size = static_cast<std::uint32_t>(total_size - header.size());
-    const auto block = static_cast<std::uint16_t>(entry.descriptor.channels * entry.descriptor.sample_width_bytes);
-    write_tag(0U, "RIFF");
-    le32(4U, data_size + 36U);
-    write_tag(8U, "WAVEfmt ");
-    le32(16U, 16U);
-    le16(20U, 1U);
-    le16(22U, entry.descriptor.channels);
-    le32(24U, entry.descriptor.sample_rate);
-    le32(28U, entry.descriptor.sample_rate * block);
-    le16(32U, block);
-    le16(34U, static_cast<std::uint16_t>(entry.descriptor.sample_width_bytes * 8U));
-    write_tag(36U, "data");
-    le32(40U, data_size);
-
     ImageAuditionRange result{.total_size = total_size, .bytes = {}};
     result.bytes.reserve(size);
-    const auto header_count =
-        offset < header.size() ? static_cast<std::size_t>(std::min<std::uint64_t>(size, header.size() - offset)) : 0U;
-    if (header_count > 0U) {
-        result.bytes.insert(result.bytes.end(), header.begin() + static_cast<std::ptrdiff_t>(offset),
-                            header.begin() + static_cast<std::ptrdiff_t>(offset + header_count));
+    const auto requested_end = offset + size;
+    for (std::size_t clip_index = 0U; clip_index < entry.descriptor.clips.size(); ++clip_index) {
+        const auto &clip = entry.descriptor.clips[clip_index];
+        const auto &source = entry.sources[clip_index];
+        for (std::size_t lane_index = 0U; lane_index < clip.lanes.size(); ++lane_index) {
+            const auto &lane = clip.lanes[lane_index];
+            const auto lane_end = lane.content_offset_bytes + lane.wav_size_bytes;
+            if (lane_end <= offset || lane.content_offset_bytes >= requested_end)
+                continue;
+            std::array<std::byte, 44> header{};
+            const auto write_tag = [&](std::size_t at, std::string_view text) {
+                std::ranges::transform(text, header.begin() + static_cast<std::ptrdiff_t>(at),
+                                       [](char value) { return static_cast<std::byte>(value); });
+            };
+            const auto le16 = [&](std::size_t at, std::uint16_t value) {
+                header[at] = static_cast<std::byte>(value & 0xffU);
+                header[at + 1U] = static_cast<std::byte>(value >> 8U);
+            };
+            const auto le32 = [&](std::size_t at, std::uint32_t value) {
+                for (std::size_t index = 0U; index < 4U; ++index)
+                    header[at + index] = static_cast<std::byte>((value >> (index * 8U)) & 0xffU);
+            };
+            const auto data_size = static_cast<std::uint32_t>(lane.wav_size_bytes - header.size());
+            write_tag(0U, "RIFF");
+            le32(4U, data_size + 36U);
+            write_tag(8U, "WAVEfmt ");
+            le32(16U, 16U);
+            le16(20U, 1U);
+            le16(22U, 1U);
+            le32(24U, lane.sample_rate);
+            le32(28U, lane.sample_rate * lane.sample_width_bytes);
+            le16(32U, lane.sample_width_bytes);
+            le16(34U, static_cast<std::uint16_t>(lane.sample_width_bytes * 8U));
+            write_tag(36U, "data");
+            le32(40U, data_size);
+
+            const auto local_offset = std::max(offset, lane.content_offset_bytes) - lane.content_offset_bytes;
+            const auto local_end = std::min(requested_end, lane_end) - lane.content_offset_bytes;
+            const auto header_end = std::min<std::uint64_t>(local_end, header.size());
+            if (local_offset < header_end) {
+                result.bytes.insert(result.bytes.end(), header.begin() + static_cast<std::ptrdiff_t>(local_offset),
+                                    header.begin() + static_cast<std::ptrdiff_t>(header_end));
+            }
+            const auto data_begin = std::max<std::uint64_t>(local_offset, header.size());
+            if (data_begin >= local_end)
+                continue;
+            const auto data_offset = data_begin - header.size();
+            const auto data_count = static_cast<std::size_t>(local_end - data_begin);
+            const auto first_frame = data_offset / lane.sample_width_bytes;
+            const auto first_byte = static_cast<std::size_t>(data_offset % lane.sample_width_bytes);
+            const auto frame_count = (first_byte + data_count + lane.sample_width_bytes - 1U) / lane.sample_width_bytes;
+            auto pcm = implementation_->read_member_pcm(*session, source.members[lane_index], first_frame, frame_count,
+                                                        cancellation);
+            if (!pcm)
+                return std::unexpected(pcm.error());
+            result.bytes.insert(result.bytes.end(), pcm->begin() + static_cast<std::ptrdiff_t>(first_byte),
+                                pcm->begin() + static_cast<std::ptrdiff_t>(first_byte + data_count));
+        }
     }
-    if (result.bytes.size() < size) {
-        const auto data_offset = offset + result.bytes.size() - header.size();
-        const auto data_count = size - result.bytes.size();
-        const auto first_frame = data_offset / block;
-        const auto first_byte = static_cast<std::size_t>(data_offset % block);
-        const auto frame_count = (first_byte + data_count + block - 1U) / block;
-        auto pcm = implementation_->read_pcm(*session, entry.source, first_frame, frame_count, cancellation);
-        if (!pcm)
-            return std::unexpected(pcm.error());
-        result.bytes.insert(result.bytes.end(), pcm->begin() + static_cast<std::ptrdiff_t>(first_byte),
-                            pcm->begin() + static_cast<std::ptrdiff_t>(first_byte + data_count));
-    }
+    if (result.bytes.size() != size)
+        return std::unexpected(session_error("invalid_audio_range", "audition bundle range is incomplete"));
     return result;
 }
 

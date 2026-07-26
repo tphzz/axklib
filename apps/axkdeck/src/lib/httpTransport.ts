@@ -14,7 +14,7 @@ import type {
     AudioImportTarget,
     AudioSourceInfo,
     ContentPage,
-    AuditionDescriptor,
+    AuditionBundleDescriptor,
     ClientDownload,
     CompanionDirectorySelection,
     HardDiskCreationProfile,
@@ -769,15 +769,19 @@ export class HttpImageTransport implements ImageTransport {
         return this.client.request('GET', `/images/${encodeURIComponent(session.remoteId)}/preview?${query}`);
     }
 
-    async prepareAudition(sessionId: number, objectKey: string): Promise<AuditionDescriptor> {
+    async prepareAuditionBundle(
+        sessionId: number,
+        objectKeys: readonly string[],
+        signal?: AbortSignal,
+    ): Promise<AuditionBundleDescriptor> {
         const session = this.session(sessionId);
         const submitted = await this.client.invoke<never>('auditions.prepare', {
             imageId: session.remoteId,
-            objectId: objectKey,
+            objectIds: objectKeys,
         });
         if (!this.isJob(submitted)) throw new Error('auditions.prepare did not return a job');
         const localJob = this.mapJob(submitted);
-        const completed = await this.waitForJob(localJob.jobId, () => undefined);
+        const completed = await this.waitForJob(localJob.jobId, () => undefined, signal);
         if (completed.status !== 'completed' || !completed.result) {
             throw new AxklibApiError(
                 completed.errorCode ?? 'audition_prepare_failed',
@@ -787,12 +791,16 @@ export class HttpImageTransport implements ImageTransport {
                 completed.errorContext,
             );
         }
-        return completed.result as AuditionDescriptor;
+        return completed.result as AuditionBundleDescriptor;
     }
 
-    async readAuditionAudio(auditionId: string, wavSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
-        if (!Number.isSafeInteger(wavSizeBytes) || wavSizeBytes <= 0) {
-            throw new Error('Audition WAV size must be a positive safe integer');
+    async readAuditionContent(
+        auditionId: string,
+        contentSizeBytes: number,
+        signal?: AbortSignal,
+    ): Promise<ArrayBuffer> {
+        if (!Number.isSafeInteger(contentSizeBytes) || contentSizeBytes <= 0) {
+            throw new Error('Audition content size must be a positive safe integer');
         }
         const limits = await this.client.serverLimits();
         const rangeLimit = limits.maximumDownloadRangeBytes;
@@ -800,11 +808,11 @@ export class HttpImageTransport implements ImageTransport {
             throw new Error('axklib-server advertised an invalid audition range limit');
         }
 
-        const audio = new Uint8Array(wavSizeBytes);
-        for (let start = 0; start < wavSizeBytes; start += rangeLimit) {
+        const audio = new Uint8Array(contentSizeBytes);
+        for (let start = 0; start < contentSizeBytes; start += rangeLimit) {
             signal?.throwIfAborted();
-            const end = Math.min(wavSizeBytes, start + rangeLimit) - 1;
-            const response = await this.client.openAuditionAudio(auditionId, start, end, signal);
+            const end = Math.min(contentSizeBytes, start + rangeLimit) - 1;
+            const response = await this.client.openAuditionContent(auditionId, start, end, signal);
             const bytes = new Uint8Array(await response.arrayBuffer());
             const expectedBytes = end - start + 1;
             if (bytes.byteLength !== expectedBytes) {
@@ -982,7 +990,7 @@ export class HttpImageTransport implements ImageTransport {
         return this.mapJob(job, jobId);
     }
 
-    waitForJob(jobId: number, onUpdate: (job: JobState) => void): Promise<JobState> {
+    waitForJob(jobId: number, onUpdate: (job: JobState) => void, signal?: AbortSignal): Promise<JobState> {
         const remoteId = this.jobs.get(jobId);
         if (!remoteId) return Promise.reject(new Error('Job is closed or unknown'));
 
@@ -993,6 +1001,13 @@ export class HttpImageTransport implements ImageTransport {
             let stableConnectionTimer: ReturnType<typeof setTimeout> | undefined;
             let settled = false;
             let work = Promise.resolve();
+            const handleAbort = (): void => {
+                if (settled) return;
+                void this.cancelJob(jobId);
+                const error = new Error('The job was cancelled');
+                error.name = 'AbortError';
+                fail(error);
+            };
 
             const clearStableConnectionTimer = (): void => {
                 if (stableConnectionTimer !== undefined) clearTimeout(stableConnectionTimer);
@@ -1008,6 +1023,7 @@ export class HttpImageTransport implements ImageTransport {
                 if (settled) return;
                 settled = true;
                 clearStableConnectionTimer();
+                signal?.removeEventListener('abort', handleAbort);
                 connection?.close();
                 resolve(job);
             };
@@ -1016,6 +1032,7 @@ export class HttpImageTransport implements ImageTransport {
                 if (settled) return;
                 settled = true;
                 clearStableConnectionTimer();
+                signal?.removeEventListener('abort', handleAbort);
                 connection?.close();
                 reject(reason);
             };
@@ -1114,6 +1131,8 @@ export class HttpImageTransport implements ImageTransport {
                 await reconcile();
                 if (!settled) await connect();
             });
+            signal?.addEventListener('abort', handleAbort, { once: true });
+            if (signal?.aborted) handleAbort();
         });
     }
 

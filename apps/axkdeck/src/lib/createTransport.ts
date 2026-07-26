@@ -3,7 +3,7 @@ import type {
     ImageTransport,
     ImageSessionPackageImportPlan,
     AudioImportCapabilities,
-    AuditionDescriptor,
+    AuditionBundleDescriptor,
     ClientDownload,
     CompanionDirectorySelection,
     ContentPage,
@@ -147,10 +147,10 @@ class UnavailableTransport implements ImageTransport {
     preview(): Promise<PreviewEnvelope> {
         return this.unavailable();
     }
-    prepareAudition(): Promise<AuditionDescriptor> {
+    prepareAuditionBundle(): Promise<AuditionBundleDescriptor> {
         return this.unavailable();
     }
-    readAuditionAudio(): Promise<ArrayBuffer> {
+    readAuditionContent(): Promise<ArrayBuffer> {
         return this.unavailable();
     }
     deleteAudition(): Promise<void> {

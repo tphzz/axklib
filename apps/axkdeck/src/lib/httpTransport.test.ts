@@ -376,7 +376,7 @@ describe('HttpImageTransport', () => {
                         limits: { maximumDownloadRangeBytes: 4 },
                     });
                 }
-                if (url.pathname.endsWith('/auditions/audition-1/audio')) {
+                if (url.pathname.endsWith('/auditions/audition-1/content')) {
                     const range = (init?.headers as Record<string, string>).Range;
                     requestedRanges.push(range);
                     const match = /^bytes=(\d+)-(\d+)$/.exec(range);
@@ -400,7 +400,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
         });
 
-        const audio = await transport.readAuditionAudio('audition-1', 10);
+        const audio = await transport.readAuditionContent('audition-1', 10);
 
         expect(Array.from(new Uint8Array(audio))).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
         expect(requestedRanges).toEqual(['bytes=0-3', 'bytes=4-7', 'bytes=8-9']);
@@ -432,7 +432,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
         });
 
-        await expect(transport.readAuditionAudio('audition-1', 4, controller.signal)).rejects.toThrow(
+        await expect(transport.readAuditionContent('audition-1', 4, controller.signal)).rejects.toThrow(
             'returned 3 bytes; expected 4',
         );
     });

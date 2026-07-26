@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AxklibApiError } from '../httpApiClient';
-import type { AuditionDescriptor, ImageTransport } from '../transport';
+import type { AuditionBundleDescriptor, ImageTransport } from '../transport';
 import { AuditionController, type AuditionState } from './auditionController';
 
 class MockAudioBuffer {
@@ -120,6 +120,10 @@ class MockAudioContext {
         return gain as unknown as GainNode;
     }
 
+    createBuffer(numberOfChannels: number, length: number, sampleRate: number): AudioBuffer {
+        return new MockAudioBuffer(length, numberOfChannels, sampleRate) as unknown as AudioBuffer;
+    }
+
     getOutputTimestamp(): AudioTimestamp {
         return { contextTime: this.currentTime, performanceTime: performance.now() };
     }
@@ -142,12 +146,31 @@ class MockOfflineAudioContext {
         MockOfflineAudioContext.instances.push(this);
         events.push('offline-context');
     }
+
+    createBuffer(numberOfChannels: number, length: number, sampleRate: number): AudioBuffer {
+        return new MockAudioBuffer(length, numberOfChannels, sampleRate) as unknown as AudioBuffer;
+    }
 }
 
 const events: string[] = [];
 const animationCallbacks: FrameRequestCallback[] = [];
 
-function descriptor(overrides: Partial<AuditionDescriptor> = {}): AuditionDescriptor {
+interface TestAuditionDescriptor {
+    auditionId: string;
+    objectId: string;
+    sampleRate: number;
+    channels: number;
+    sampleWidthBytes: number;
+    frameCount: number;
+    wavSizeBytes: number;
+    loopMode: number;
+    loopModeLabel: string;
+    loopStartFrame: number;
+    loopLengthFrames: number;
+    warnings: string[];
+}
+
+function descriptor(overrides: Partial<TestAuditionDescriptor> = {}): TestAuditionDescriptor {
     return {
         auditionId: 'audition-1',
         objectId: 'SMPL-1',
@@ -165,15 +188,41 @@ function descriptor(overrides: Partial<AuditionDescriptor> = {}): AuditionDescri
     };
 }
 
-function transportFor(value: AuditionDescriptor): ImageTransport {
+function auditionBundle(value: TestAuditionDescriptor, objectIds: readonly string[]): AuditionBundleDescriptor {
     return {
-        prepareAudition: vi.fn(async () => {
+        auditionId: value.auditionId,
+        contentSizeBytes: value.wavSizeBytes * objectIds.length,
+        clips: objectIds.map((objectId, index) => ({
+            objectId,
+            loopMode: value.loopMode,
+            loopModeLabel: value.loopModeLabel,
+            warnings: value.warnings,
+            lanes: [
+                {
+                    role: 'MONO',
+                    sourceObjectId: `${objectId}-SMPL`,
+                    sampleRate: value.sampleRate,
+                    sampleWidthBytes: value.sampleWidthBytes,
+                    frameCount: value.frameCount,
+                    contentOffsetBytes: value.wavSizeBytes * index,
+                    wavSizeBytes: value.wavSizeBytes,
+                    loopStartFrame: value.loopStartFrame,
+                    loopLengthFrames: value.loopLengthFrames,
+                },
+            ],
+        })),
+    };
+}
+
+function transportFor(value: TestAuditionDescriptor): ImageTransport {
+    return {
+        prepareAuditionBundle: vi.fn(async (_sessionId: number, objectIds: readonly string[]) => {
             events.push('prepare');
-            return value;
+            return auditionBundle(value, objectIds);
         }),
-        readAuditionAudio: vi.fn(async () => {
+        readAuditionContent: vi.fn(async (_auditionId: string, contentSizeBytes: number) => {
             events.push('read');
-            return new ArrayBuffer(value.wavSizeBytes);
+            return new ArrayBuffer(contentSizeBytes);
         }),
         deleteAudition: vi.fn(async () => {
             events.push('delete');
@@ -232,8 +281,8 @@ describe('AuditionController', () => {
         expect(MockAudioContext.instances).toHaveLength(2);
         expect(MockAudioContext.instances[0]?.state).toBe('closed');
         expect(MockAudioContext.instances[1]?.state).toBe('running');
-        expect(transport.prepareAudition).toHaveBeenCalledTimes(1);
-        expect(transport.readAuditionAudio).toHaveBeenCalledTimes(1);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
         expect(MockAudioContext.instances[0]?.decodeAudioData).toHaveBeenCalledTimes(1);
         expect(MockAudioBufferSourceNode.instances).toHaveLength(2);
 
@@ -311,7 +360,7 @@ describe('AuditionController', () => {
     it('closes the output context after playback preparation fails', async () => {
         installAudio();
         const transport = transportFor(descriptor());
-        vi.mocked(transport.prepareAudition).mockRejectedValueOnce(new Error('Preparation failed'));
+        vi.mocked(transport.prepareAuditionBundle).mockRejectedValueOnce(new Error('Preparation failed'));
         const updates: AuditionState[] = [];
         const controller = new AuditionController(transport, (state) => updates.push(state));
 
@@ -325,7 +374,7 @@ describe('AuditionController', () => {
     it('preserves the companion-disk error code for an explicit audition failure', async () => {
         installAudio();
         const transport = transportFor(descriptor());
-        vi.mocked(transport.prepareAudition).mockRejectedValueOnce(
+        vi.mocked(transport.prepareAuditionBundle).mockRejectedValueOnce(
             new AxklibApiError(
                 'companion_disks_required',
                 'Wave Data continues on another sampler disk. Add companion disk folders to audition it.',
@@ -400,9 +449,67 @@ describe('AuditionController', () => {
         await vi.waitFor(() =>
             expect(completed).toHaveBeenCalledWith({ status: 'completed', playedCount: 2, skippedCount: 0 }),
         );
-        expect(transport.prepareAudition).toHaveBeenNthCalledWith(1, 1, 'SBNK-1');
-        expect(transport.prepareAudition).toHaveBeenNthCalledWith(2, 1, 'SBNK-2');
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledWith(1, ['SBNK-1', 'SBNK-2'], expect.any(AbortSignal));
         expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('normalizes mixed-rate and mixed-width stereo lanes inside one bundle', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        vi.mocked(transport.prepareAuditionBundle).mockResolvedValueOnce({
+            auditionId: 'audition-mixed',
+            contentSizeBytes: 488,
+            clips: [
+                {
+                    objectId: 'SBNK-MIXED',
+                    loopMode: 0,
+                    loopModeLabel: 'off',
+                    warnings: ['Sample member formats differ'],
+                    lanes: [
+                        {
+                            role: 'LEFT',
+                            sourceObjectId: 'SMPL-LEFT',
+                            sampleRate: 31_000,
+                            sampleWidthBytes: 2,
+                            frameCount: 100,
+                            contentOffsetBytes: 0,
+                            wavSizeBytes: 244,
+                            loopStartFrame: 0,
+                            loopLengthFrames: 0,
+                        },
+                        {
+                            role: 'RIGHT',
+                            sourceObjectId: 'SMPL-RIGHT',
+                            sampleRate: 32_000,
+                            sampleWidthBytes: 1,
+                            frameCount: 100,
+                            contentOffsetBytes: 244,
+                            wavSizeBytes: 244,
+                            loopStartFrame: 0,
+                            loopLengthFrames: 0,
+                        },
+                    ],
+                },
+            ],
+        });
+        vi.mocked(transport.readAuditionContent).mockResolvedValueOnce(new ArrayBuffer(488));
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(155, 1, 48_000), new MockAudioBuffer(150, 1, 48_000)];
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+
+        controller.playSequence(1, ['SBNK-MIXED']);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
+
+        expect(MockAudioBufferSourceNode.instances[0]?.buffer).toMatchObject({
+            numberOfChannels: 2,
+            length: 155,
+            sampleRate: 48_000,
+        });
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
+        expect(updates.at(-1)).toMatchObject({ objectId: 'SBNK-MIXED', status: 'playing' });
         await controller.dispose();
     });
 
@@ -458,7 +565,7 @@ describe('AuditionController', () => {
     it('aborts the complete Sample Bank sequence when one member cannot be prepared', async () => {
         installAudio();
         const transport = transportFor(descriptor());
-        vi.mocked(transport.prepareAudition).mockRejectedValueOnce(new Error('Unsupported Sample'));
+        vi.mocked(transport.prepareAuditionBundle).mockRejectedValueOnce(new Error('Unsupported Sample'));
         const updates: AuditionState[] = [];
         const completed = vi.fn();
         const controller = new AuditionController(transport, (state) => updates.push(state));
@@ -475,7 +582,7 @@ describe('AuditionController', () => {
             }),
         );
         expect(MockAudioBufferSourceNode.instances).toHaveLength(0);
-        expect(transport.prepareAudition).toHaveBeenCalledTimes(1);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
         expect(updates.at(-1)).toEqual({
             objectId: 'SBNK-BROKEN',
             status: 'failed',
@@ -504,12 +611,12 @@ describe('AuditionController', () => {
                     playedCount: 0,
                     skippedCount: 2,
                     error: 'Sample Bank audio is too large to audition safely',
-                    failedObjectId: 'SBNK-2',
+                    failedObjectId: 'SBNK-1',
                 }),
             ),
         );
         expect(MockAudioBufferSourceNode.instances).toHaveLength(0);
-        expect(transport.readAuditionAudio).toHaveBeenCalledTimes(1);
+        expect(transport.readAuditionContent).not.toHaveBeenCalled();
         expect(MockAudioContext.instances).toHaveLength(1);
         expect(MockAudioContext.instances[0]?.state).toBe('closed');
         await controller.dispose();
@@ -527,7 +634,7 @@ describe('AuditionController', () => {
 
         expect(MockAudioBufferSourceNode.instances[0]?.stop).toHaveBeenCalledWith(1.005);
         expect(MockAudioBufferSourceNode.instances[1]?.stop).toHaveBeenCalledWith(1.005);
-        expect(transport.prepareAudition).toHaveBeenCalledTimes(2);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
         expect(completed).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 2 });
         expect(MockAudioContext.instances[0]?.state).toBe('closed');
         await controller.dispose();
@@ -536,8 +643,8 @@ describe('AuditionController', () => {
     it('cancels Sample Bank preparation and settles without scheduling audio', async () => {
         installAudio();
         const transport = transportFor(descriptor());
-        vi.mocked(transport.readAuditionAudio).mockImplementation(
-            async (_auditionId, _wavSizeBytes, signal): Promise<ArrayBuffer> =>
+        vi.mocked(transport.readAuditionContent).mockImplementation(
+            async (_auditionId, _contentSizeBytes, signal): Promise<ArrayBuffer> =>
                 new Promise<ArrayBuffer>((_resolve, reject) => {
                     signal?.addEventListener(
                         'abort',
@@ -554,7 +661,7 @@ describe('AuditionController', () => {
         const controller = new AuditionController(transport, () => undefined);
 
         controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
-        await vi.waitFor(() => expect(transport.readAuditionAudio).toHaveBeenCalledOnce());
+        await vi.waitFor(() => expect(transport.readAuditionContent).toHaveBeenCalledOnce());
         await controller.stop();
 
         expect(completed).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 2 });
@@ -590,13 +697,13 @@ describe('AuditionController', () => {
         });
 
         await controller.prefetch(1, 'SMPL-1');
-        expect(transport.readAuditionAudio).not.toHaveBeenCalled();
+        expect(transport.readAuditionContent).not.toHaveBeenCalled();
 
         await controller.play(1, 'SMPL-1');
-        expect(transport.readAuditionAudio).toHaveBeenCalledTimes(1);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
         await controller.stop();
         await controller.play(1, 'SMPL-1');
-        expect(transport.readAuditionAudio).toHaveBeenCalledTimes(2);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(2);
         await controller.dispose();
     });
 
@@ -610,7 +717,7 @@ describe('AuditionController', () => {
 
         await controller.play(1, 'SMPL-1');
 
-        expect(transport.readAuditionAudio).not.toHaveBeenCalled();
+        expect(transport.readAuditionContent).not.toHaveBeenCalled();
         expect(states.at(-1)).toMatchObject({
             objectId: 'SMPL-1',
             status: 'failed',
@@ -628,14 +735,14 @@ describe('AuditionController', () => {
         await controller.play(7, 'SMPL-1');
         await controller.stop();
 
-        expect(transport.prepareAudition).toHaveBeenCalledTimes(1);
-        expect(transport.readAuditionAudio).toHaveBeenCalledTimes(1);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
 
         await controller.invalidateSession(7);
         await controller.play(7, 'SMPL-1');
 
-        expect(transport.prepareAudition).toHaveBeenCalledTimes(2);
-        expect(transport.readAuditionAudio).toHaveBeenCalledTimes(2);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(2);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(2);
         expect(MockAudioContext.instances).toHaveLength(2);
         expect(MockAudioContext.instances[0]?.state).toBe('closed');
         expect(MockAudioContext.instances[1]?.state).toBe('running');
@@ -655,8 +762,8 @@ describe('AuditionController', () => {
         await controller.play(7, 'SMPL-1');
 
         expect(MockAudioContext.instances).toHaveLength(1);
-        expect(transport.prepareAudition).toHaveBeenCalledTimes(1);
-        expect(transport.readAuditionAudio).toHaveBeenCalledTimes(1);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
         await controller.dispose();
     });
 });

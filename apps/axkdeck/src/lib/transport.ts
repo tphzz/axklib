@@ -210,19 +210,30 @@ export interface PreviewLane {
     bins: readonly { minimum: number; maximum: number }[];
 }
 
-export interface AuditionDescriptor {
-    auditionId: string;
-    objectId: string;
+export interface AuditionLaneDescriptor {
+    role: 'MONO' | 'LEFT' | 'RIGHT';
+    sourceObjectId: string;
     sampleRate: number;
-    channels: number;
     sampleWidthBytes: number;
     frameCount: number;
     wavSizeBytes: number;
-    loopMode: number;
-    loopModeLabel: string;
+    contentOffsetBytes: number;
     loopStartFrame: number;
     loopLengthFrames: number;
+}
+
+export interface AuditionClipDescriptor {
+    objectId: string;
+    loopMode: number;
+    loopModeLabel: string;
     warnings: string[];
+    lanes: AuditionLaneDescriptor[];
+}
+
+export interface AuditionBundleDescriptor {
+    auditionId: string;
+    contentSizeBytes: number;
+    clips: AuditionClipDescriptor[];
 }
 
 export interface PlanSummary {
@@ -355,8 +366,12 @@ export interface ImageTransport {
     inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection>;
     startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState>;
     preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope>;
-    prepareAudition(sessionId: number, objectKey: string): Promise<AuditionDescriptor>;
-    readAuditionAudio(auditionId: string, wavSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer>;
+    prepareAuditionBundle(
+        sessionId: number,
+        objectKeys: readonly string[],
+        signal?: AbortSignal,
+    ): Promise<AuditionBundleDescriptor>;
+    readAuditionContent(auditionId: string, contentSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer>;
     deleteAudition(auditionId: string): Promise<void>;
     uploadClientFile(
         file: ClientUploadSource,

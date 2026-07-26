@@ -247,7 +247,7 @@ TEST(ServerConfig, ParsesAndBoundsConcurrentArchiveDownloads) {
 
 TEST(ServerConfig, ParsesAndBoundsArchiveTraversalAndMediaBuildLimits) {
     TemporaryConfigFile config{
-        R"({"bearerToken":"0123456789abcdef","maximumDownloadArchiveDepth":12,"maximumDownloadArchivePathBytes":4096,"maximumMediaBuildObjectBytes":1048576,"maximumMediaBuildPayloadBytes":2097152,"maximumMediaBuildOutputBytes":4194304})"};
+        R"({"bearerToken":"0123456789abcdef","maximumAuditionBundleBytes":8388608,"maximumDownloadArchiveDepth":12,"maximumDownloadArchivePathBytes":4096,"maximumMediaBuildObjectBytes":1048576,"maximumMediaBuildPayloadBytes":2097152,"maximumMediaBuildOutputBytes":4194304})"};
     std::array arguments{std::string{"axklib-server"}, std::string{"--config"}, config.path().string()};
     std::array<char *, arguments.size()> pointers{};
     for (std::size_t index = 0; index < arguments.size(); ++index)
@@ -257,8 +257,15 @@ TEST(ServerConfig, ParsesAndBoundsArchiveTraversalAndMediaBuildLimits) {
     EXPECT_EQ(parsed->config.maximum_download_archive_depth, 12U);
     EXPECT_EQ(parsed->config.maximum_download_archive_path_bytes, 4096U);
     EXPECT_EQ(parsed->config.maximum_media_build_object_bytes, 1048576U);
+    EXPECT_EQ(parsed->config.maximum_audition_bundle_bytes, 8388608U);
 
     auto invalid = parsed->config;
+    invalid.maximum_audition_bundle_bytes = 44U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid = parsed->config;
+    invalid.maximum_audition_bundle_bytes = 4ULL * 1024ULL * 1024ULL * 1024ULL + 1U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid = parsed->config;
     invalid.maximum_download_archive_depth = 0U;
     EXPECT_FALSE(axk::server::validate_config(invalid));
     invalid = parsed->config;

@@ -413,6 +413,14 @@ one `LEFT` lane plus an optional `RIGHT` lane. Each lane identifies its source
 Wave Data and its own frame count; the response-level frame count is the
 playback timeline used for audition and playhead positioning.
 
+`auditions.prepare` accepts up to 256 ordered, unique Sample or Wave Data object
+identifiers. It validates the complete selection before retaining one bounded
+audition bundle. Every clip exposes one or two mono-WAV lane ranges in
+`/auditions/{auditionId}/content`; lane sample rates and decoded widths may
+differ and clients normalize them independently. The default aggregate content
+limit is 128 MiB. A failure rejects the complete request and includes the
+responsible object ID when one object caused it.
+
 Until the first supported public release, the checked-in contract is corrected
 in place and every in-repository consumer is updated with it. Compatibility
 baselines and deprecation policy begin only after a contract has shipped.

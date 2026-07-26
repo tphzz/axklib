@@ -3,7 +3,7 @@ import type {
     AudioImportTarget,
     AudioSourceInfo,
     AudioImportCapabilities,
-    AuditionDescriptor,
+    AuditionBundleDescriptor,
     ClientDownload,
     CompanionDirectorySelection,
     ContentPage,
@@ -211,12 +211,16 @@ export class InMemoryImageTransport implements ImageTransport {
         throw this.unsupported('preview');
     }
 
-    prepareAudition(sessionId: number, objectKey: string): Promise<AuditionDescriptor> {
-        return this.invoke('prepareAudition', [sessionId, objectKey]);
+    prepareAuditionBundle(
+        sessionId: number,
+        objectKeys: readonly string[],
+        signal?: AbortSignal,
+    ): Promise<AuditionBundleDescriptor> {
+        return this.invoke('prepareAuditionBundle', [sessionId, objectKeys, signal]);
     }
 
-    readAuditionAudio(auditionId: string, wavSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
-        return this.invoke('readAuditionAudio', [auditionId, wavSizeBytes, signal]);
+    readAuditionContent(auditionId: string, contentSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
+        return this.invoke('readAuditionContent', [auditionId, contentSizeBytes, signal]);
     }
 
     deleteAudition(auditionId: string): Promise<void> {

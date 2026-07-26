@@ -325,6 +325,50 @@ describe('AxklibHttpApiClient', () => {
         );
     });
 
+    it('coalesces concurrent workspace snapshots without retaining stale results', async () => {
+        let resolveFirst!: (response: Response) => void;
+        const firstResponse = new Promise<Response>((resolve) => {
+            resolveFirst = resolve;
+        });
+        const fetchMock = vi
+            .spyOn(globalThis, 'fetch')
+            .mockReturnValueOnce(firstResponse)
+            .mockResolvedValueOnce(
+                jsonResponse({
+                    data: {
+                        state: 'READY',
+                        revision: 2,
+                        workspaces: [],
+                        configurationIssue: null,
+                    },
+                }),
+            );
+        const connection = { baseUrl: 'http://localhost/api/v1', bearerToken: 'coalescing-token' };
+        const firstClient = new AxklibHttpApiClient(connection);
+        const secondClient = new AxklibHttpApiClient(connection);
+
+        const first = firstClient.workspaces();
+        const second = secondClient.workspaces();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        resolveFirst(
+            jsonResponse({
+                data: {
+                    state: 'READY',
+                    revision: 1,
+                    workspaces: [],
+                    configurationIssue: null,
+                },
+            }),
+        );
+
+        await expect(Promise.all([first, second])).resolves.toEqual([
+            expect.objectContaining({ revision: 1 }),
+            expect.objectContaining({ revision: 1 }),
+        ]);
+        await expect(firstClient.workspaces()).resolves.toMatchObject({ revision: 2 });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
     it('uploads admitted client files in bounded chunks and completes the temporary UploadRef', async () => {
         const fetchMock = vi
             .spyOn(globalThis, 'fetch')

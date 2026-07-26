@@ -68,6 +68,7 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         "imageIdleSeconds",
         "jobRetentionSeconds",
         "jobWorkerThreads",
+        "maximumAuditionBundleBytes",
         "maximumDownloadRangeBytes",
         "maximumDownloadArchiveBytes",
         "maximumConcurrentArchiveDownloads",
@@ -143,6 +144,7 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         assign("maximumUploads", config.maximum_uploads);
         assign("maximumUploadChunkBytes", config.maximum_upload_chunk_bytes);
         assign("maximumDownloadRangeBytes", config.maximum_download_range_bytes);
+        assign("maximumAuditionBundleBytes", config.maximum_audition_bundle_bytes);
         assign("maximumDownloadArchiveBytes", config.maximum_download_archive_bytes);
         assign("maximumDownloadArchiveTotalBytes", config.maximum_download_archive_total_bytes);
         assign("maximumDownloadArchiveEntries", config.maximum_download_archive_entries);
@@ -525,6 +527,8 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
     if (config.maximum_upload_bytes == 0U || config.maximum_upload_total_bytes < config.maximum_upload_bytes ||
         config.maximum_uploads == 0U || config.maximum_upload_chunk_bytes == 0U ||
         config.maximum_upload_chunk_bytes > config.maximum_upload_bytes || config.maximum_download_range_bytes == 0U ||
+        config.maximum_audition_bundle_bytes < 45U ||
+        config.maximum_audition_bundle_bytes > 4ULL * 1024ULL * 1024ULL * 1024ULL ||
         config.upload_retention_seconds == 0U || config.upload_retention_seconds > 86400U) {
         return std::unexpected(argument_error("upload and download limits are invalid"));
     }

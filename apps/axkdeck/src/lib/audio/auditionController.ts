@@ -1,6 +1,11 @@
 import { audioDiagnosticsEnabled, reportDiagnostic, type DiagnosticLevel } from '../diagnostics';
 import { AxklibApiError } from '../httpApiClient';
-import type { AuditionDescriptor, ImageTransport } from '../transport';
+import type {
+    AuditionBundleDescriptor,
+    AuditionClipDescriptor,
+    AuditionLaneDescriptor,
+    ImageTransport,
+} from '../transport';
 import { userFacingMessage } from '../userFacingMessage';
 import {
     initialPlaybackFrame,
@@ -55,11 +60,25 @@ interface PlaybackRun {
     oneShot: boolean;
 }
 
+interface PlaybackDescriptor {
+    objectId: string;
+    sampleRate: number;
+    channels: number;
+    sampleWidthBytes: number;
+    frameCount: number;
+    wavSizeBytes: number;
+    loopMode: number;
+    loopModeLabel: string;
+    loopStartFrame: number;
+    loopLengthFrames: number;
+    warnings: string[];
+}
+
 interface CachedAudition {
     key: string;
     sessionId: number;
     objectId: string;
-    descriptor: AuditionDescriptor;
+    descriptor: PlaybackDescriptor;
     buffer: AudioBuffer;
     weightBytes: number;
     transient: boolean;
@@ -77,7 +96,7 @@ interface ActivePlayback {
     gain: GainNode;
     startFrame: number;
     startTime: number;
-    timelineDescriptor: AuditionDescriptor;
+    timelineDescriptor: PlaybackDescriptor;
     animationFrame?: number;
 }
 
@@ -87,7 +106,7 @@ interface ScheduledSequenceSegment {
     startTime: number;
     endTime: number;
     startFrame: number;
-    timelineDescriptor: AuditionDescriptor;
+    timelineDescriptor: PlaybackDescriptor;
 }
 
 interface ActiveSequence {
@@ -114,7 +133,7 @@ type AuditionDiagnosticSink = (event: AuditionDiagnosticEvent) => void;
 
 const defaultCacheBudgetBytes = 128 * 1024 * 1024;
 const defaultMaximumWorkingSetBytes = 128 * 1024 * 1024;
-const defaultMaximumCacheEntries = 8;
+const defaultMaximumCacheEntries = 256;
 const startLeadSeconds = 0.01;
 const fadeSeconds = 0.005;
 const diagnosticSampleBudget = 32_768;
@@ -173,6 +192,7 @@ export class AuditionController {
     private sequence?: ActiveSequence;
     private sequenceCompletion?: SequenceCompletion;
     private activeRequestKey?: string;
+    private activeBundleAbort?: AbortController;
     private cacheBytes = 0;
     private generation = 0;
     private sequenceGeneration = 0;
@@ -218,6 +238,7 @@ export class AuditionController {
         sessionId: number,
         objectIds: readonly string[],
         oncomplete: (result: AuditionSequenceResult) => void = () => undefined,
+        sequenceObjectId?: string,
     ): void {
         const sequenceGeneration = ++this.sequenceGeneration;
         this.cancelSequenceCompletion();
@@ -234,13 +255,14 @@ export class AuditionController {
             this.settleSequence(sequenceGeneration, { status: 'completed', playedCount: 0, skippedCount: 0 });
             return;
         }
-        void this.prepareAndStartSequence(sessionId, objectIds, sequenceGeneration);
+        void this.prepareAndStartSequence(sessionId, objectIds, sequenceGeneration, sequenceObjectId);
     }
 
     private async prepareAndStartSequence(
         sessionId: number,
         objectIds: readonly string[],
         sequenceGeneration: number,
+        sequenceObjectId?: string,
     ): Promise<void> {
         const generation = ++this.generation;
         this.cancelActiveRequest();
@@ -251,7 +273,7 @@ export class AuditionController {
         const firstObjectId = objectIds[0]!;
         const run: PlaybackRun = {
             id: newPlaybackId(),
-            objectId: firstObjectId,
+            objectId: sequenceObjectId ?? firstObjectId,
             startedAt: monotonicNow(),
             diagnosticsEnabled: this.detailedDiagnosticsEnabled(),
             oneShot: true,
@@ -265,28 +287,11 @@ export class AuditionController {
             const context = this.ensureContext();
             const resumed = this.resumeContext(context, run);
             await Promise.all([previousContextClosed, resumed]);
-            const entries: CachedAudition[] = [];
-            let retainedDecodedBytes = 0;
-            for (const objectId of objectIds) {
-                if (generation !== this.generation || sequenceGeneration !== this.sequenceGeneration) return;
-                failedObjectId = objectId;
-                const requestKey = this.cacheKey(sessionId, objectId);
-                this.activeRequestKey = requestKey;
-                const entry = await this.loadAudition(sessionId, objectId, context, false, run, {
-                    retainedDecodedBytes,
-                    maximumBytes: this.maximumSequenceWorkingSetBytes,
-                    overflowMessage: 'Sample Bank audio is too large to audition safely',
-                });
-                if (generation !== this.generation || sequenceGeneration !== this.sequenceGeneration) return;
-                if (!entry) throw new Error('Sample Bank member audio could not be decoded');
-                if (retainedDecodedBytes + entry.weightBytes > this.maximumSequenceWorkingSetBytes) {
-                    throw new Error('Sample Bank audio is too large to audition safely');
-                }
-                retainedDecodedBytes += entry.weightBytes;
-                entries.push(entry);
-            }
+            const entries = await this.loadAuditionSequence(sessionId, objectIds, context, run);
             this.activeRequestKey = undefined;
+            this.activeBundleAbort = undefined;
             if (generation !== this.generation || sequenceGeneration !== this.sequenceGeneration) return;
+            const retainedDecodedBytes = entries.reduce((total, entry) => total + entry.weightBytes, 0);
             this.emit(run, 'sequence_prepared', {
                 memberCount: entries.length,
                 decodedBytes: retainedDecodedBytes,
@@ -302,8 +307,13 @@ export class AuditionController {
                 return;
             }
             this.activeRequestKey = undefined;
+            this.activeBundleAbort = undefined;
             const message = userFacingMessage(error);
             const typed = this.typedError(error);
+            if (typed.errorContext && typeof typed.errorContext === 'object' && 'objectId' in typed.errorContext) {
+                const contextObjectId = (typed.errorContext as { objectId?: unknown }).objectId;
+                if (typeof contextObjectId === 'string') failedObjectId = contextObjectId;
+            }
             this.emit(run, 'sequence_failed', { message, failedObjectId }, 'error');
             this.releaseSequence('failed');
             this.run = undefined;
@@ -471,115 +481,198 @@ export class AuditionController {
             abort: new AbortController(),
             promise: Promise.resolve(null),
         };
-        pending.promise = this.fetchAndDecode(
+        pending.promise = this.fetchAndDecodeBundle(
             sessionId,
-            objectId,
-            key,
+            [objectId],
             context,
-            pending,
+            pending.abort.signal,
+            pending.speculative,
             run,
             workingSetPolicy,
-        ).finally(() => {
-            if (this.pending.get(key) === pending) this.pending.delete(key);
-        });
+        )
+            .then((entries) => entries.get(objectId) ?? null)
+            .finally(() => {
+                if (this.pending.get(key) === pending) this.pending.delete(key);
+            });
         this.pending.set(key, pending);
         if (run) this.emit(run, 'audio_cache_miss');
         return pending.promise;
     }
 
-    private async fetchAndDecode(
+    private async loadAuditionSequence(
         sessionId: number,
-        objectId: string,
-        key: string,
+        objectIds: readonly string[],
+        context: BaseAudioContext,
+        run: PlaybackRun,
+    ): Promise<CachedAudition[]> {
+        const byId = new Map<string, CachedAudition>();
+        const missing: string[] = [];
+        for (const objectId of objectIds) {
+            const key = this.cacheKey(sessionId, objectId);
+            const cached = this.cache.get(key);
+            if (cached) {
+                this.cache.delete(key);
+                this.cache.set(key, cached);
+                byId.set(objectId, cached);
+                continue;
+            }
+            if (!missing.includes(objectId)) missing.push(objectId);
+        }
+        const retainedDecodedBytes = [...byId.values()].reduce((total, entry) => total + entry.weightBytes, 0);
+        if (retainedDecodedBytes > this.maximumSequenceWorkingSetBytes) {
+            throw new Error('Sample Bank audio is too large to audition safely');
+        }
+        if (missing.length > 0) {
+            const abort = new AbortController();
+            this.activeBundleAbort = abort;
+            this.activeRequestKey = `${sessionId}:bundle`;
+            this.emit(run, 'audio_bundle_cache_miss', {
+                requestedCount: objectIds.length,
+                missingCount: missing.length,
+            });
+            const decoded = await this.fetchAndDecodeBundle(sessionId, missing, context, abort.signal, false, run, {
+                retainedDecodedBytes,
+                maximumBytes: this.maximumSequenceWorkingSetBytes,
+                overflowMessage: 'Sample Bank audio is too large to audition safely',
+            });
+            for (const [objectId, entry] of decoded) byId.set(objectId, entry);
+        } else {
+            this.emit(run, 'audio_bundle_cache_hit', { requestedCount: objectIds.length });
+        }
+        return objectIds.map((objectId) => {
+            const entry = byId.get(objectId);
+            if (!entry) throw new Error(`Sample Bank member ${objectId} could not be decoded`);
+            return entry;
+        });
+    }
+
+    private async fetchAndDecodeBundle(
+        sessionId: number,
+        objectIds: readonly string[],
         context: BaseAudioContext | undefined,
-        pending: PendingAudition,
+        signal: AbortSignal,
+        speculative: boolean,
         run?: PlaybackRun,
         workingSetPolicy?: WorkingSetPolicy,
-    ): Promise<CachedAudition | null> {
+    ): Promise<Map<string, CachedAudition>> {
         let auditionId: string | undefined;
         try {
             const prepareStarted = monotonicNow();
-            const descriptor = await this.transport.prepareAudition(sessionId, objectId);
-            auditionId = descriptor.auditionId;
-            if (pending.abort.signal.aborted) throw abortError();
-            this.validateDescriptor(descriptor);
+            const bundle = await this.transport.prepareAuditionBundle(sessionId, objectIds, signal);
+            auditionId = bundle.auditionId;
+            if (signal.aborted) throw abortError();
+            this.validateBundle(bundle, objectIds);
             if (run) {
-                this.emit(run, 'audition_prepared', {
+                this.emit(run, 'audition_bundle_prepared', {
                     preparationDurationMs: Math.round(monotonicNow() - prepareStarted),
-                    auditionId: descriptor.auditionId,
-                    sourceSampleRate: descriptor.sampleRate,
-                    channels: descriptor.channels,
-                    sampleWidthBytes: descriptor.sampleWidthBytes,
-                    frameCount: descriptor.frameCount,
-                    durationSeconds: descriptor.frameCount / descriptor.sampleRate,
-                    loopMode: descriptor.loopMode,
-                    loopStartFrame: descriptor.loopStartFrame,
-                    loopLengthFrames: descriptor.loopLengthFrames,
-                    warningCount: descriptor.warnings.length,
+                    auditionId: bundle.auditionId,
+                    clipCount: bundle.clips.length,
+                    laneCount: bundle.clips.reduce((total, clip) => total + clip.lanes.length, 0),
+                    contentSizeBytes: bundle.contentSizeBytes,
                 });
             }
 
-            const decoder = context ?? new OfflineAudioContext(descriptor.channels, 1, descriptor.sampleRate);
-            const estimatedBytes = this.estimatedDecodedBytes(descriptor, decoder.sampleRate);
+            const maximumSourceRate = Math.max(
+                ...bundle.clips.flatMap((clip) => clip.lanes.map((lane) => lane.sampleRate)),
+            );
+            const maximumChannels = Math.max(...bundle.clips.map((clip) => clip.lanes.length));
+            const decoder = context ?? new OfflineAudioContext(maximumChannels, 1, maximumSourceRate);
+            const estimatedBytes = bundle.clips.reduce(
+                (total, clip) => total + this.estimatedClipBytes(clip, decoder.sampleRate),
+                0,
+            );
             const retainedDecodedBytes = workingSetPolicy?.retainedDecodedBytes ?? 0;
             const maximumBytes = workingSetPolicy?.maximumBytes ?? this.maximumWorkingSetBytes;
-            const workingSetBytes = retainedDecodedBytes + descriptor.wavSizeBytes + estimatedBytes;
+            const workingSetBytes = retainedDecodedBytes + bundle.contentSizeBytes + estimatedBytes;
             if (!Number.isSafeInteger(workingSetBytes) || workingSetBytes > maximumBytes) {
                 throw new Error(workingSetPolicy?.overflowMessage ?? 'Audio is too large to audition safely');
             }
-            if (pending.speculative && estimatedBytes > this.cacheBudgetBytes) {
+            if (speculative && estimatedBytes > this.cacheBudgetBytes) {
                 if (run) this.emit(run, 'audio_prefetch_skipped', { estimatedDecodedBytes: estimatedBytes });
-                return null;
+                return new Map();
             }
 
             const fetchStarted = monotonicNow();
-            const wav = await this.transport.readAuditionAudio(
-                descriptor.auditionId,
-                descriptor.wavSizeBytes,
-                pending.abort.signal,
+            const content = await this.transport.readAuditionContent(
+                bundle.auditionId,
+                bundle.contentSizeBytes,
+                signal,
             );
-            if (pending.abort.signal.aborted) throw abortError();
+            if (signal.aborted) throw abortError();
             if (run) {
-                this.emit(run, 'audio_fetch_completed', {
-                    byteCount: wav.byteLength,
+                this.emit(run, 'audio_bundle_fetch_completed', {
+                    byteCount: content.byteLength,
                     fetchDurationMs: Math.round(monotonicNow() - fetchStarted),
                 });
             }
 
             const decodeStarted = monotonicNow();
-            const buffer = await decoder.decodeAudioData(wav);
-            if (pending.abort.signal.aborted) throw abortError();
-            if (buffer.numberOfChannels !== descriptor.channels) {
-                throw new Error(
-                    `Decoded audio has ${buffer.numberOfChannels} channels; expected ${descriptor.channels}`,
+            const entries = new Map<string, CachedAudition>();
+            for (const clip of bundle.clips) {
+                const laneBuffers = await Promise.all(
+                    clip.lanes.map(async (lane) => {
+                        const start = lane.contentOffsetBytes;
+                        const end = start + lane.wavSizeBytes;
+                        const decoded = await decoder.decodeAudioData(content.slice(start, end));
+                        if (decoded.numberOfChannels !== 1) {
+                            throw new Error(
+                                `Decoded ${lane.role} Wave Data has ${decoded.numberOfChannels} channels; expected 1`,
+                            );
+                        }
+                        return decoded;
+                    }),
                 );
-            }
-            if (isReversePlayback(descriptor)) {
-                for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-                    buffer.getChannelData(channel).reverse();
+                if (signal.aborted) throw abortError();
+                const frameCount = Math.max(...laneBuffers.map((buffer) => buffer.length));
+                const buffer =
+                    laneBuffers.length === 1
+                        ? laneBuffers[0]!
+                        : decoder.createBuffer(laneBuffers.length, frameCount, decoder.sampleRate);
+                if (laneBuffers.length > 1) {
+                    laneBuffers.forEach((laneBuffer, channel) => {
+                        buffer.getChannelData(channel).set(laneBuffer.getChannelData(0));
+                    });
                 }
+                const firstLane = clip.lanes[0]!;
+                const descriptor: PlaybackDescriptor = {
+                    objectId: clip.objectId,
+                    sampleRate: firstLane.sampleRate,
+                    channels: laneBuffers.length,
+                    sampleWidthBytes: Math.max(...clip.lanes.map((lane) => lane.sampleWidthBytes)),
+                    frameCount: Math.round(buffer.duration * firstLane.sampleRate),
+                    wavSizeBytes: clip.lanes.reduce((total, lane) => total + lane.wavSizeBytes, 0),
+                    loopMode: clip.loopMode,
+                    loopModeLabel: clip.loopModeLabel,
+                    loopStartFrame: firstLane.loopStartFrame,
+                    loopLengthFrames: firstLane.loopLengthFrames,
+                    warnings: clip.warnings,
+                };
+                if (isReversePlayback(descriptor)) {
+                    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+                        buffer.getChannelData(channel).reverse();
+                    }
+                }
+                const weightBytes = buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT;
+                const entry: CachedAudition = {
+                    key: this.cacheKey(sessionId, clip.objectId),
+                    sessionId,
+                    objectId: clip.objectId,
+                    descriptor,
+                    buffer,
+                    weightBytes,
+                    transient: weightBytes > this.cacheBudgetBytes || this.maximumCacheEntries === 0,
+                };
+                if (!entry.transient) this.addCacheEntry(entry);
+                entries.set(clip.objectId, entry);
             }
-            const weightBytes = buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT;
-            const entry: CachedAudition = {
-                key,
-                sessionId,
-                objectId,
-                descriptor,
-                buffer,
-                weightBytes,
-                transient: weightBytes > this.cacheBudgetBytes || this.maximumCacheEntries === 0,
-            };
             if (run) {
-                this.emit(run, 'audio_decode_completed', {
+                this.emit(run, 'audio_bundle_decode_completed', {
                     decodeDurationMs: Math.round(monotonicNow() - decodeStarted),
-                    decodedFrames: buffer.length,
-                    decodedChannels: buffer.numberOfChannels,
-                    decodedBytes: weightBytes,
-                    transient: entry.transient,
+                    decodedClips: entries.size,
+                    decodedBytes: [...entries.values()].reduce((total, entry) => total + entry.weightBytes, 0),
                 });
             }
-            if (!entry.transient) this.addCacheEntry(entry);
-            return entry;
+            return entries;
         } finally {
             if (auditionId) await this.transport.deleteAudition(auditionId).catch(() => undefined);
         }
@@ -899,30 +992,63 @@ export class AuditionController {
     }
 
     private cancelActiveRequest(replacementKey?: string): void {
-        if (!this.activeRequestKey) return;
+        if (!this.activeRequestKey) {
+            this.activeBundleAbort?.abort();
+            this.activeBundleAbort = undefined;
+            return;
+        }
         if (this.activeRequestKey === replacementKey) return;
         this.pending.get(this.activeRequestKey)?.abort.abort();
+        this.activeBundleAbort?.abort();
+        this.activeBundleAbort = undefined;
         this.activeRequestKey = undefined;
     }
 
-    private validateDescriptor(descriptor: AuditionDescriptor): void {
-        if (!Number.isFinite(descriptor.sampleRate) || descriptor.sampleRate <= 0) {
-            throw new Error('Audio sample rate is invalid');
+    private validateBundle(bundle: AuditionBundleDescriptor, requestedObjectIds: readonly string[]): void {
+        if (!Number.isSafeInteger(bundle.contentSizeBytes) || bundle.contentSizeBytes <= 0) {
+            throw new Error('Audio bundle size is invalid');
         }
-        if (!Number.isInteger(descriptor.channels) || descriptor.channels <= 0) {
-            throw new Error('Audio channel count is invalid');
+        if (bundle.clips.length !== requestedObjectIds.length) {
+            throw new Error('Audio bundle did not contain every requested Sample');
         }
-        if (!Number.isInteger(descriptor.frameCount) || descriptor.frameCount <= 0) {
-            throw new Error('Audio frame count is invalid');
-        }
-        if (!Number.isInteger(descriptor.wavSizeBytes) || descriptor.wavSizeBytes <= 44) {
-            throw new Error('Audio WAV size is invalid');
+        let expectedOffset = 0;
+        bundle.clips.forEach((clip, clipIndex) => {
+            if (clip.objectId !== requestedObjectIds[clipIndex]) {
+                throw new Error('Audio bundle clip order does not match the requested Samples');
+            }
+            if (clip.lanes.length < 1 || clip.lanes.length > 2) {
+                throw new Error('Audio bundle clip must contain one or two Wave Data lanes');
+            }
+            clip.lanes.forEach((lane) => {
+                this.validateLane(lane, expectedOffset);
+                expectedOffset += lane.wavSizeBytes;
+            });
+        });
+        if (expectedOffset !== bundle.contentSizeBytes) {
+            throw new Error('Audio bundle content layout is inconsistent');
         }
     }
 
-    private estimatedDecodedBytes(descriptor: AuditionDescriptor, outputSampleRate: number): number {
-        const outputFrames = Math.ceil((descriptor.frameCount * outputSampleRate) / descriptor.sampleRate);
-        return outputFrames * descriptor.channels * Float32Array.BYTES_PER_ELEMENT;
+    private validateLane(lane: AuditionLaneDescriptor, expectedOffset: number): void {
+        if (!Number.isFinite(lane.sampleRate) || lane.sampleRate <= 0) {
+            throw new Error('Audio sample rate is invalid');
+        }
+        if (!Number.isInteger(lane.frameCount) || lane.frameCount <= 0) {
+            throw new Error('Audio frame count is invalid');
+        }
+        if (!Number.isSafeInteger(lane.wavSizeBytes) || lane.wavSizeBytes <= 44) {
+            throw new Error('Audio WAV size is invalid');
+        }
+        if (lane.contentOffsetBytes !== expectedOffset) {
+            throw new Error('Audio bundle lane offsets are inconsistent');
+        }
+    }
+
+    private estimatedClipBytes(clip: AuditionClipDescriptor, outputSampleRate: number): number {
+        const outputFrames = Math.max(
+            ...clip.lanes.map((lane) => Math.ceil((lane.frameCount * outputSampleRate) / lane.sampleRate)),
+        );
+        return outputFrames * clip.lanes.length * Float32Array.BYTES_PER_ELEMENT;
     }
 
     private cacheKey(sessionId: number, objectId: string): string {

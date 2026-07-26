@@ -252,6 +252,10 @@
             "minimum": 1,
             "type": "integer"
           },
+          "maximumAuditionBundleBytes": {
+            "minimum": 45,
+            "type": "integer"
+          },
           "maximumConcurrentArchiveDownloads": {
             "maximum": 64,
             "minimum": 1,
@@ -357,6 +361,7 @@
           "maximumUploadTotalBytes",
           "maximumUploadChunkBytes",
           "maximumDownloadRangeBytes",
+          "maximumAuditionBundleBytes",
           "maximumDownloadArchiveBytes",
           "maximumDownloadArchiveTotalBytes",
           "maximumDownloadArchiveEntries",
@@ -541,16 +546,77 @@
         ],
         "type": "object"
       },
-      "Audition": {
+      "AuditionBundle": {
         "additionalProperties": false,
         "properties": {
           "auditionId": {
             "minLength": 1,
             "type": "string"
           },
-          "channels": {
-            "maximum": 2,
-            "minimum": 1,
+          "clips": {
+            "items": {
+              "$ref": "#/components/schemas/AuditionClip"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "type": "array"
+          },
+          "contentSizeBytes": {
+            "minimum": 45,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "auditionId",
+          "contentSizeBytes",
+          "clips"
+        ],
+        "type": "object"
+      },
+      "AuditionClip": {
+        "additionalProperties": false,
+        "properties": {
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/AuditionLane"
+            },
+            "maxItems": 2,
+            "minItems": 1,
+            "type": "array"
+          },
+          "loopMode": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loopModeLabel": {
+            "type": "string"
+          },
+          "objectId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "objectId",
+          "loopMode",
+          "loopModeLabel",
+          "warnings",
+          "lanes"
+        ],
+        "type": "object"
+      },
+      "AuditionLane": {
+        "additionalProperties": false,
+        "properties": {
+          "contentOffsetBytes": {
+            "minimum": 0,
             "type": "integer"
           },
           "frameCount": {
@@ -561,20 +627,16 @@
             "minimum": 0,
             "type": "integer"
           },
-          "loopMode": {
-            "maximum": 255,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "loopModeLabel": {
-            "type": "string"
-          },
           "loopStartFrame": {
             "minimum": 0,
             "type": "integer"
           },
-          "objectId": {
-            "minLength": 1,
+          "role": {
+            "enum": [
+              "MONO",
+              "LEFT",
+              "RIGHT"
+            ],
             "type": "string"
           },
           "sampleRate": {
@@ -586,11 +648,9 @@
             "minimum": 1,
             "type": "integer"
           },
-          "warnings": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+          "sourceObjectId": {
+            "minLength": 1,
+            "type": "string"
           },
           "wavSizeBytes": {
             "minimum": 45,
@@ -598,18 +658,15 @@
           }
         },
         "required": [
-          "auditionId",
-          "objectId",
+          "role",
+          "sourceObjectId",
           "sampleRate",
-          "channels",
           "sampleWidthBytes",
           "frameCount",
+          "contentOffsetBytes",
           "wavSizeBytes",
-          "loopMode",
-          "loopModeLabel",
           "loopStartFrame",
-          "loopLengthFrames",
-          "warnings"
+          "loopLengthFrames"
         ],
         "type": "object"
       },
@@ -620,14 +677,20 @@
             "minLength": 1,
             "type": "string"
           },
-          "objectId": {
-            "minLength": 1,
-            "type": "string"
+          "objectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 256,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
           }
         },
         "required": [
           "imageId",
-          "objectId"
+          "objectIds"
         ],
         "type": "object"
       },
@@ -1154,6 +1217,9 @@
       "ErrorContext": {
         "additionalProperties": false,
         "properties": {
+          "objectId": {
+            "type": "string"
+          },
           "objectName": {
             "type": "string"
           },
@@ -7476,7 +7542,9 @@
                 "default": {
                   "value": {
                     "imageId": "x",
-                    "objectId": "x"
+                    "objectIds": [
+                      "x"
+                    ]
                   }
                 }
               },
@@ -7816,7 +7884,7 @@
             "operationClass": "read",
             "requestSchema": "AuditionPrepareRequest",
             "requiresIdempotency": false,
-            "resultSchema": "Audition",
+            "resultSchema": "AuditionBundle",
             "variant": null
           }
         ],
@@ -7879,20 +7947,20 @@
         }
       ]
     },
-    "/auditions/{auditionId}/audio": {
+    "/auditions/{auditionId}/content": {
       "get": {
-        "operationId": "auditions.audio",
+        "operationId": "auditions.content",
         "responses": {
           "200": {
             "content": {
-              "audio/wav": {
+              "application/octet-stream": {
                 "schema": {
                   "contentEncoding": "binary",
                   "type": "string"
                 }
               }
             },
-            "description": "Complete bounded virtual WAV",
+            "description": "Complete bounded concatenated WAV content",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
@@ -7901,14 +7969,14 @@
           },
           "206": {
             "content": {
-              "audio/wav": {
+              "application/octet-stream": {
                 "schema": {
                   "contentEncoding": "binary",
                   "type": "string"
                 }
               }
             },
-            "description": "Virtual WAV byte range",
+            "description": "Concatenated WAV content byte range",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"

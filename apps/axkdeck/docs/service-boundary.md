@@ -12,12 +12,14 @@ idempotent cancellation. Errors use a stable code/message/context envelope.
 Large audio is represented as a file or ranged resource transfer rather than an
 unbounded JSON payload.
 
-Audition preparation returns a descriptor and a bounded WAV resource. The
-client may assemble that resource with sequential range requests that respect
-the server-advertised maximum range size. It decodes the complete WAV before
-scheduling playback; the audio render path does not request network blocks.
-This is a client playback policy and does not add a streaming transport or a
-second audio API to the service contract.
+Audition preparation accepts an ordered set of Sample or Wave Data identifiers
+and returns one bounded bundle descriptor. Each clip contains one or two
+independent mono-WAV lane ranges with its own source format and loop metadata.
+The client downloads the concatenated content once, using sequential range
+requests that respect the server-advertised maximum range size, then decodes and
+normalizes each lane locally before scheduling playback. Preparation is
+all-or-nothing: one invalid member rejects the bundle and identifies that object
+in the error context.
 
 `AxklibHttpApiClient` discovers the server operation registry and dispatches by
 operation ID. Shared routes add an `operationId` discriminator only when the

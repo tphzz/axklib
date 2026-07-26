@@ -66,7 +66,7 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/validation/issues"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/preview"));
     EXPECT_TRUE(document.at("paths").contains("/auditions/{auditionId}"));
-    EXPECT_TRUE(document.at("paths").contains("/auditions/{auditionId}/audio"));
+    EXPECT_TRUE(document.at("paths").contains("/auditions/{auditionId}/content"));
     EXPECT_TRUE(document.at("paths").contains("/jobs/{jobId}"));
     EXPECT_TRUE(document.at("paths").contains("/jobs/{jobId}/events"));
     EXPECT_TRUE(document.at("paths").contains("/event-tickets"));
@@ -83,7 +83,7 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentPageResponse"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageCompanionDirectoriesRequest"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionPrepareRequest"));
-    EXPECT_TRUE(document.at("components").at("schemas").contains("Audition"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionBundle"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AudioSourceInfo"));
     const auto &headers = document.at("components").at("headers");
     EXPECT_TRUE(headers.contains("XRequestId"));

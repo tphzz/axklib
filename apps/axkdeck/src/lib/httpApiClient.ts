@@ -83,6 +83,8 @@ interface ApiErrorEnvelope {
     };
 }
 
+const pendingWorkspaceSnapshots = new Map<string, Promise<WorkspaceSnapshot>>();
+
 export class AxklibApiError extends Error {
     readonly code: string;
     readonly status: number;
@@ -262,7 +264,16 @@ export class AxklibHttpApiClient {
     }
 
     workspaces(): Promise<WorkspaceSnapshot> {
-        return this.request('GET', '/workspaces');
+        const key = `${this.baseUrl}\0${this.bearerToken}`;
+        const pending = pendingWorkspaceSnapshots.get(key);
+        if (pending) return pending;
+        const request = this.request<WorkspaceSnapshot>('GET', '/workspaces');
+        pendingWorkspaceSnapshots.set(key, request);
+        const clear = (): void => {
+            if (pendingWorkspaceSnapshots.get(key) === request) pendingWorkspaceSnapshots.delete(key);
+        };
+        void request.then(clear, clear);
+        return request;
     }
 
     createWorkspace(input: {
@@ -445,10 +456,10 @@ export class AxklibHttpApiClient {
         return response;
     }
 
-    async openAuditionAudio(auditionId: string, start: number, end: number, signal?: AbortSignal): Promise<Response> {
+    async openAuditionContent(auditionId: string, start: number, end: number, signal?: AbortSignal): Promise<Response> {
         const response = await this.fetchResponse(
             'GET',
-            `/auditions/${encodeURIComponent(auditionId)}/audio`,
+            `/auditions/${encodeURIComponent(auditionId)}/content`,
             undefined,
             { Range: `bytes=${start}-${end}` },
             signal,

@@ -319,7 +319,7 @@ const std::array descriptors{
                         ExecutionMode::job,
                         {},
                         "AuditionPrepareRequest",
-                        "Audition",
+                        "AuditionBundle",
                         OperationClass::read,
                         false,
                         false},

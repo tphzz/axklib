@@ -348,16 +348,16 @@
       ],
       "delete": {"operationId": "auditions.delete", "responses": {"204": {"description": "Audition released"}}}
     },
-    "/auditions/{auditionId}/audio": {
+    "/auditions/{auditionId}/content": {
       "parameters": [
         {"name": "auditionId", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
         {"name": "Range", "in": "header", "schema": {"type": "string"}}
       ],
       "get": {
-        "operationId": "auditions.audio",
+        "operationId": "auditions.content",
         "responses": {
-          "200": {"description": "Complete bounded virtual WAV", "content": {"audio/wav": {"schema": {"type": "string", "contentEncoding": "binary"}}}},
-          "206": {"description": "Virtual WAV byte range", "content": {"audio/wav": {"schema": {"type": "string", "contentEncoding": "binary"}}}},
+          "200": {"description": "Complete bounded concatenated WAV content", "content": {"application/octet-stream": {"schema": {"type": "string", "contentEncoding": "binary"}}}},
+          "206": {"description": "Concatenated WAV content byte range", "content": {"application/octet-stream": {"schema": {"type": "string", "contentEncoding": "binary"}}}},
           "416": {"description": "Invalid, oversized, or missing required range"}
         }
       }
@@ -1134,29 +1134,54 @@
       "AuditionPrepareRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["imageId", "objectId"],
+        "required": ["imageId", "objectIds"],
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
-          "objectId": {"type": "string", "minLength": 1}
+          "objectIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 256,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
         }
       },
-      "Audition": {
+      "AuditionLane": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["auditionId", "objectId", "sampleRate", "channels", "sampleWidthBytes", "frameCount", "wavSizeBytes", "loopMode", "loopModeLabel", "loopStartFrame", "loopLengthFrames", "warnings"],
+        "required": ["role", "sourceObjectId", "sampleRate", "sampleWidthBytes", "frameCount", "contentOffsetBytes", "wavSizeBytes", "loopStartFrame", "loopLengthFrames"],
         "properties": {
-          "auditionId": {"type": "string", "minLength": 1},
-          "objectId": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "enum": ["MONO", "LEFT", "RIGHT"]},
+          "sourceObjectId": {"type": "string", "minLength": 1},
           "sampleRate": {"type": "integer", "minimum": 1},
-          "channels": {"type": "integer", "minimum": 1, "maximum": 2},
           "sampleWidthBytes": {"type": "integer", "minimum": 1, "maximum": 2},
           "frameCount": {"type": "integer", "minimum": 1},
+          "contentOffsetBytes": {"type": "integer", "minimum": 0},
           "wavSizeBytes": {"type": "integer", "minimum": 45},
+          "loopStartFrame": {"type": "integer", "minimum": 0},
+          "loopLengthFrames": {"type": "integer", "minimum": 0}
+        }
+      },
+      "AuditionClip": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["objectId", "loopMode", "loopModeLabel", "warnings", "lanes"],
+        "properties": {
+          "objectId": {"type": "string", "minLength": 1},
           "loopMode": {"type": "integer", "minimum": 0, "maximum": 255},
           "loopModeLabel": {"type": "string"},
-          "loopStartFrame": {"type": "integer", "minimum": 0},
-          "loopLengthFrames": {"type": "integer", "minimum": 0},
-          "warnings": {"type": "array", "items": {"type": "string"}}
+          "warnings": {"type": "array", "items": {"type": "string"}},
+          "lanes": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/AuditionLane"}}
+        }
+      },
+      "AuditionBundle": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["auditionId", "contentSizeBytes", "clips"],
+        "properties": {
+          "auditionId": {"type": "string", "minLength": 1},
+          "contentSizeBytes": {"type": "integer", "minimum": 45},
+          "clips": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/components/schemas/AuditionClip"}}
         }
       },
       "UploadRef": {
@@ -1208,7 +1233,7 @@
       "ApiLimits": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["maximumJsonBytes", "maximumJsonDepth", "maximumJsonNodes", "maximumJsonContainerItems", "maximumJsonStringBytes", "maximumUploadBytes", "maximumUploadTotalBytes", "maximumUploadChunkBytes", "maximumDownloadRangeBytes", "maximumDownloadArchiveBytes", "maximumDownloadArchiveTotalBytes", "maximumDownloadArchiveEntries", "downloadArchiveRetentionSeconds", "maximumWebsocketDeliveryEvents", "maximumWebsocketDeliveryBytes", "maximumQueuedJobs", "maximumImageSessions", "maximumPageSize"],
+        "required": ["maximumJsonBytes", "maximumJsonDepth", "maximumJsonNodes", "maximumJsonContainerItems", "maximumJsonStringBytes", "maximumUploadBytes", "maximumUploadTotalBytes", "maximumUploadChunkBytes", "maximumDownloadRangeBytes", "maximumAuditionBundleBytes", "maximumDownloadArchiveBytes", "maximumDownloadArchiveTotalBytes", "maximumDownloadArchiveEntries", "downloadArchiveRetentionSeconds", "maximumWebsocketDeliveryEvents", "maximumWebsocketDeliveryBytes", "maximumQueuedJobs", "maximumImageSessions", "maximumPageSize"],
         "properties": {
           "maximumJsonBytes": {"type": "integer", "minimum": 1},
           "maximumJsonDepth": {"type": "integer", "minimum": 1},
@@ -1219,6 +1244,7 @@
           "maximumUploadTotalBytes": {"type": "integer", "minimum": 1},
           "maximumUploadChunkBytes": {"type": "integer", "minimum": 1},
           "maximumDownloadRangeBytes": {"type": "integer", "minimum": 1},
+          "maximumAuditionBundleBytes": {"type": "integer", "minimum": 45},
           "maximumDownloadArchiveBytes": {"type": "integer", "minimum": 1},
           "maximumDownloadArchiveTotalBytes": {"type": "integer", "minimum": 1},
           "maximumDownloadArchiveEntries": {"type": "integer", "minimum": 1},
@@ -2598,6 +2624,7 @@
           "volumeName": {"type": "string"},
           "objectType": {"type": "string"},
           "objectName": {"type": "string"},
+          "objectId": {"type": "string"},
           "relativePath": {"type": "string"}
         }
       },

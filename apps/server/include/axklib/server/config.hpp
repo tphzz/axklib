@@ -44,6 +44,7 @@ struct Config {
     std::size_t maximum_uploads{64U};
     std::size_t maximum_upload_chunk_bytes{1024U * 1024U};
     std::size_t maximum_download_range_bytes{8U * 1024U * 1024U};
+    std::uint64_t maximum_audition_bundle_bytes{128ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_download_archive_bytes{4ULL * 1024ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_download_archive_total_bytes{8ULL * 1024ULL * 1024ULL * 1024ULL};
     std::size_t maximum_download_archive_entries{100000U};

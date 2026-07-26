@@ -1187,6 +1187,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "maximumWebsocketDeliveryBytes": 4 * 1024 * 1024,
                 "maximumQueuedJobs": 64,
                 "maximumImageSessions": 32,
+                "maximumAuditionBundleBytes": 128 * 1024 * 1024,
                 "maximumMediaBuildObjectBytes": 64 * 1024 * 1024,
                 "maximumMediaBuildPayloadBytes": 737280000,
                 "maximumMediaBuildOutputBytes": 737280000,
@@ -1566,18 +1567,22 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 port,
                 "POST",
                 "/api/v1/auditions",
-                {"imageId": image_id, "objectId": waveform["id"]},
+                {"imageId": image_id, "objectIds": [waveform["id"]]},
             )
             assert status == 202, submitted
             audition_job = wait_for_job(port, str(submitted["data"]["jobId"]), process)
             assert audition_job["state"] == "COMPLETED", audition_job
             audition = audition_job["result"]
             audition_id = str(audition["auditionId"])
-            assert audition["objectId"] == waveform["id"]
+            assert audition["clips"][0]["objectId"] == waveform["id"]
+            assert audition["clips"][0]["lanes"][0]["contentOffsetBytes"] == 0
+            assert audition["contentSizeBytes"] == audition["clips"][0]["lanes"][0][
+                "wavSizeBytes"
+            ]
             status, wav_header, headers = raw_http_request(
                 port,
                 "GET",
-                f"/api/v1/auditions/{audition_id}/audio",
+                f"/api/v1/auditions/{audition_id}/content",
                 headers={"Range": "bytes=0-43"},
             )
             assert status == 206 and len(wav_header) == 44, (status, headers)
@@ -1591,7 +1596,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, _, _ = raw_http_request(
                 port,
                 "GET",
-                f"/api/v1/auditions/{audition_id}/audio",
+                f"/api/v1/auditions/{audition_id}/content",
                 headers={"Range": "bytes=0-43"},
             )
             assert status == 404

@@ -419,6 +419,8 @@ crow::response error_response(int status, const axk::app::Error &error, std::str
         context["objectType"] = *error.context.object_type;
     if (error.context.object_name)
         context["objectName"] = *error.context.object_name;
+    if (error.context.object_id)
+        context["objectId"] = *error.context.object_id;
     if (error.context.relative_path)
         context["relativePath"] = *error.context.relative_path;
     auto response = json_response(status,
@@ -608,8 +610,8 @@ class ServerApplication {
           archive_download_budget_(config_.maximum_concurrent_archive_downloads),
           alteration_journals_(alteration_journal_directory()),
           images_(sandbox_, config_.maximum_image_sessions, config_.maximum_page_size,
-                  std::chrono::seconds{config_.image_idle_seconds}, std::chrono::steady_clock::now,
-                  &path_reservations_),
+                  std::chrono::seconds{config_.image_idle_seconds}, std::chrono::steady_clock::now, &path_reservations_,
+                  config_.maximum_audition_bundle_bytes),
           registry_(prepare_registry(
               std::move(registry), sandbox_, uploads_, images_, alteration_journals_, download_archives_,
               {config_.maximum_media_build_object_bytes, config_.maximum_media_build_payload_bytes,
@@ -745,33 +747,53 @@ class ServerApplication {
             "auditions.prepare",
             [&images](const Json &request, const axk::app::OperationContext &context) -> axk::app::Result<Json> {
                 const auto image = request.find("imageId");
-                const auto object = request.find("objectId");
-                if (image == request.end() || object == request.end() || !image->is_string() || !object->is_string()) {
-                    return std::unexpected(axk::app::Error{"invalid_request", "imageId and objectId are required"});
+                const auto objects = request.find("objectIds");
+                if (image == request.end() || objects == request.end() || !image->is_string() || !objects->is_array()) {
+                    return std::unexpected(axk::app::Error{"invalid_request", "imageId and objectIds are required"});
+                }
+                std::vector<std::string> object_ids;
+                object_ids.reserve(objects->size());
+                for (const auto &object : *objects) {
+                    if (!object.is_string())
+                        return std::unexpected(
+                            axk::app::Error{"invalid_request", "audition object IDs must be strings"});
+                    object_ids.push_back(object.get<std::string>());
                 }
                 if (context.progress != nullptr) {
-                    context.progress->report(
-                        {axk::ProgressPhase::reading, 0U, 1U, "Preparing bounded audio source", std::nullopt});
+                    context.progress->report({axk::ProgressPhase::reading, 0U, object_ids.size(),
+                                              "Preparing bounded audio sources", std::nullopt});
                 }
                 auto audition = images.prepare_audition(image->get_ref<const std::string &>(), context.owner_id,
-                                                        object->get_ref<const std::string &>(), context.cancellation);
+                                                        object_ids, context.cancellation);
                 if (!audition)
                     return std::unexpected(audition.error());
                 if (context.progress != nullptr) {
-                    context.progress->report({axk::ProgressPhase::reading, 1U, 1U, "Audio source ready", std::nullopt});
+                    context.progress->report({axk::ProgressPhase::reading, object_ids.size(), object_ids.size(),
+                                              "Audio sources ready", std::nullopt});
+                }
+                Json clips = Json::array();
+                for (const auto &clip : audition->clips) {
+                    Json lanes = Json::array();
+                    for (const auto &lane : clip.lanes) {
+                        lanes.push_back({{"role", lane.role},
+                                         {"sourceObjectId", lane.source_object_id},
+                                         {"sampleRate", lane.sample_rate},
+                                         {"sampleWidthBytes", lane.sample_width_bytes},
+                                         {"frameCount", lane.frame_count},
+                                         {"contentOffsetBytes", lane.content_offset_bytes},
+                                         {"wavSizeBytes", lane.wav_size_bytes},
+                                         {"loopStartFrame", lane.loop_start_frame},
+                                         {"loopLengthFrames", lane.loop_length_frames}});
+                    }
+                    clips.push_back({{"objectId", clip.object_id},
+                                     {"loopMode", clip.loop_mode},
+                                     {"loopModeLabel", clip.loop_mode_label},
+                                     {"warnings", clip.warnings},
+                                     {"lanes", std::move(lanes)}});
                 }
                 return Json{{"auditionId", audition->audition_id},
-                            {"objectId", audition->object_id},
-                            {"sampleRate", audition->sample_rate},
-                            {"channels", audition->channels},
-                            {"sampleWidthBytes", audition->sample_width_bytes},
-                            {"frameCount", audition->frame_count},
-                            {"wavSizeBytes", audition->wav_size_bytes},
-                            {"loopMode", audition->loop_mode},
-                            {"loopModeLabel", audition->loop_mode_label},
-                            {"loopStartFrame", audition->loop_start_frame},
-                            {"loopLengthFrames", audition->loop_length_frames},
-                            {"warnings", audition->warnings}};
+                            {"contentSizeBytes", audition->content_size_bytes},
+                            {"clips", std::move(clips)}};
             });
         if (!bound)
             std::terminate();
@@ -889,6 +911,7 @@ class ServerApplication {
                           {"maximumUploadTotalBytes", config_.maximum_upload_total_bytes},
                           {"maximumUploadChunkBytes", config_.maximum_upload_chunk_bytes},
                           {"maximumDownloadRangeBytes", config_.maximum_download_range_bytes},
+                          {"maximumAuditionBundleBytes", config_.maximum_audition_bundle_bytes},
                           {"maximumDownloadArchiveBytes", config_.maximum_download_archive_bytes},
                           {"maximumDownloadArchiveTotalBytes", config_.maximum_download_archive_total_bytes},
                           {"maximumDownloadArchiveEntries", config_.maximum_download_archive_entries},
@@ -1656,7 +1679,7 @@ class ServerApplication {
             id);
     }
 
-    crow::response audition_audio_response(const crow::request &request, const std::string &audition_id) {
+    crow::response audition_content_response(const crow::request &request, const std::string &audition_id) {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
@@ -1670,7 +1693,7 @@ class ServerApplication {
         if (range_header.empty()) {
             if (total > config_.maximum_download_range_bytes) {
                 response = error_response(
-                    416, {"range_required", "large audition audio must be requested with a bounded byte range"}, id);
+                    416, {"range_required", "large audition content must be requested with a bounded byte range"}, id);
                 response.set_header("Content-Range", "bytes */" + std::to_string(total));
                 return response;
             }
@@ -1694,7 +1717,7 @@ class ServerApplication {
                                                      std::to_string(range->offset + range->length - 1U) + "/" +
                                                      std::to_string(total));
         }
-        response.set_header("Content-Type", "audio/wav");
+        response.set_header("Content-Type", "application/octet-stream");
         response.set_header("Accept-Ranges", "bytes");
         response.set_header("Cache-Control", "no-store");
         response.set_header("X-Request-Id", id);
@@ -2315,9 +2338,9 @@ class ServerApplication {
             [this](const crow::request &request, std::string image_id) {
                 return image_preview_response(request, image_id);
             });
-        app_.route_dynamic("/api/v1/auditions/<string>/audio")
+        app_.route_dynamic("/api/v1/auditions/<string>/content")
             .methods(crow::HTTPMethod::Get)([this](const crow::request &request, std::string audition_id) {
-                return audition_audio_response(request, audition_id);
+                return audition_content_response(request, audition_id);
             });
         app_.route_dynamic("/api/v1/auditions/<string>")
             .methods(crow::HTTPMethod::Delete)([this](const crow::request &request, std::string audition_id) {

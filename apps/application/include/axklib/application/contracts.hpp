@@ -50,6 +50,7 @@ struct ErrorContext {
     std::optional<std::string> volume_name;
     std::optional<std::string> object_type;
     std::optional<std::string> object_name;
+    std::optional<std::string> object_id;
     std::optional<std::string> relative_path;
 };
 

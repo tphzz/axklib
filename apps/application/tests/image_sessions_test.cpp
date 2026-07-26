@@ -63,7 +63,8 @@ void patch_sample_cached_reference(const std::filesystem::path &path, std::uint3
 
 void patch_sample_window(const std::filesystem::path &path, std::uint32_t first_frame, std::uint32_t frame_count,
                          std::uint32_t loop_start, std::uint32_t loop_length,
-                         std::optional<std::array<std::uint32_t, 4>> right_window = std::nullopt) {
+                         std::optional<std::array<std::uint32_t, 4>> right_window = std::nullopt,
+                         std::uint16_t right_sample_rate = 48'000U) {
     const auto media = axk::open_media(path);
     ASSERT_TRUE(media) << media.error().message;
     const auto *sfs = std::get_if<axk::Container>(&media->storage());
@@ -111,7 +112,7 @@ void patch_sample_window(const std::filesystem::path &path, std::uint32_t first_
         ASSERT_TRUE(image);
         write_be32(0xa4U, 23'797'180U);
         write_u8(0xd7U, 66U);
-        write_be16(0xdaU, 48'000U);
+        write_be16(0xdaU, right_sample_rate);
         write_u8(0xddU, static_cast<std::uint8_t>(-20));
         write_be16(0xe0U, 5'442U);
         write_be32(0xecU, (*right_window)[0]);
@@ -269,9 +270,9 @@ TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
     const auto wave_data = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(wave_data) << wave_data.error().message;
     ASSERT_FALSE(wave_data->items.empty());
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", wave_data->items.front().id);
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {wave_data->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
-    EXPECT_GT(audition->wav_size_bytes, 44U);
+    EXPECT_GT(audition->content_size_bytes, 44U);
 
     {
         const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
@@ -328,9 +329,10 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     const auto complete_objects = sessions.objects(complete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(complete_objects) << complete_objects.error().message;
     ASSERT_EQ(complete_objects->items.size(), 1U);
-    const auto audition = sessions.prepare_audition(complete->image_id, "owner-a", complete_objects->items.front().id);
+    const auto audition =
+        sessions.prepare_audition(complete->image_id, "owner-a", {complete_objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
-    EXPECT_GT(audition->wav_size_bytes, 44U);
+    EXPECT_GT(audition->content_size_bytes, 44U);
     ASSERT_TRUE(sessions.close(complete->image_id, "owner-a"));
 
     const auto incomplete =
@@ -341,7 +343,7 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     ASSERT_TRUE(sibling_objects) << sibling_objects.error().message;
     ASSERT_EQ(sibling_objects->items.size(), 1U);
     const auto object_id = sibling_objects->items.front().id;
-    const auto rejected = sessions.prepare_audition(incomplete->image_id, "owner-a", object_id);
+    const auto rejected = sessions.prepare_audition(incomplete->image_id, "owner-a", {object_id});
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "companion_disks_required");
     EXPECT_NE(rejected.error().message.find("Add companion disk folders"), std::string::npos);
@@ -369,9 +371,9 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     ASSERT_EQ(refreshed_objects->items.size(), 1U);
     EXPECT_EQ(refreshed_objects->items.front().id, object_id);
     const auto sibling_audition =
-        sessions.prepare_audition(attached->image_id, "owner-a", refreshed_objects->items.front().id);
+        sessions.prepare_audition(attached->image_id, "owner-a", {refreshed_objects->items.front().id});
     ASSERT_TRUE(sibling_audition) << sibling_audition.error().message;
-    EXPECT_GT(sibling_audition->wav_size_bytes, 44U);
+    EXPECT_GT(sibling_audition->content_size_bytes, 44U);
     EXPECT_FALSE(reservations.try_acquire(
         axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
     const auto stale =
@@ -769,16 +771,19 @@ TEST_F(ImageSessionTest, PreparesOwnerBoundRangeReadableWavAndInvalidatesItWithT
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
 
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
-    EXPECT_EQ(audition->channels, 1U);
-    EXPECT_GT(audition->sample_rate, 0U);
-    EXPECT_GT(audition->frame_count, 0U);
-    EXPECT_GT(audition->wav_size_bytes, 44U);
+    ASSERT_EQ(audition->clips.size(), 1U);
+    ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
+    const auto &lane = audition->clips.front().lanes.front();
+    EXPECT_GT(lane.sample_rate, 0U);
+    EXPECT_GT(lane.frame_count, 0U);
+    EXPECT_GT(lane.wav_size_bytes, 44U);
+    EXPECT_EQ(audition->content_size_bytes, lane.wav_size_bytes);
 
     const auto header = sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U);
     ASSERT_TRUE(header) << header.error().message;
-    EXPECT_EQ(header->total_size, audition->wav_size_bytes);
+    EXPECT_EQ(header->total_size, audition->content_size_bytes);
     ASSERT_EQ(header->bytes.size(), 44U);
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data()), 4U), "RIFF");
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
@@ -787,10 +792,39 @@ TEST_F(ImageSessionTest, PreparesOwnerBoundRangeReadableWavAndInvalidatesItWithT
     ASSERT_TRUE(crossing) << crossing.error().message;
     EXPECT_EQ(crossing->bytes.size(), 16U);
     EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner-b", 0U, 1U));
-    EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner-a", audition->wav_size_bytes, 1U));
+    EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner-a", audition->content_size_bytes, 1U));
 
     ASSERT_TRUE(sessions.close(opened->image_id, "owner-a"));
     EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner-a", 0U, 1U));
+}
+
+TEST_F(ImageSessionTest, PreparesOneOrderedBundleAndReadsAcrossLaneBoundaries) {
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto wave_data = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(samples) << samples.error().message;
+    ASSERT_TRUE(wave_data) << wave_data.error().message;
+    ASSERT_FALSE(samples->items.empty());
+    ASSERT_FALSE(wave_data->items.empty());
+
+    const std::vector object_ids{samples->items.front().id, wave_data->items.front().id};
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", object_ids);
+    ASSERT_TRUE(audition) << audition.error().message;
+    ASSERT_EQ(audition->clips.size(), 2U);
+    EXPECT_EQ(audition->clips[0].object_id, object_ids[0]);
+    EXPECT_EQ(audition->clips[1].object_id, object_ids[1]);
+    ASSERT_FALSE(audition->clips[0].lanes.empty());
+    ASSERT_FALSE(audition->clips[1].lanes.empty());
+    const auto boundary = audition->clips[1].lanes.front().content_offset_bytes;
+    ASSERT_GE(boundary, 8U);
+
+    const auto crossing = sessions.audition_range(audition->audition_id, "owner-a", boundary - 8U, 16U);
+    ASSERT_TRUE(crossing) << crossing.error().message;
+    ASSERT_EQ(crossing->bytes.size(), 16U);
+    EXPECT_EQ(std::string(reinterpret_cast<const char *>(crossing->bytes.data() + 8U), 4U), "RIFF");
+    EXPECT_EQ(crossing->total_size, audition->content_size_bytes);
 }
 
 TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
@@ -801,10 +835,11 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
 
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
-    EXPECT_EQ(audition->channels, 1U);
-    EXPECT_GT(audition->frame_count, 0U);
+    ASSERT_EQ(audition->clips.size(), 1U);
+    ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
+    EXPECT_GT(audition->clips.front().lanes.front().frame_count, 0U);
     const auto header = sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U);
     ASSERT_TRUE(header) << header.error().message;
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
@@ -834,22 +869,28 @@ TEST_F(ImageSessionTest, UsesTheSamplePlaybackWindowForPreviewAndAudition) {
     EXPECT_EQ(sample_preview->lanes.front().frame_count, 32U);
     EXPECT_EQ(sample_preview->lanes.front().bins.size(), 32U);
 
-    const auto sample_audition = sessions.prepare_audition(opened->image_id, "owner-a", sample.id);
-    const auto wave_audition = sessions.prepare_audition(opened->image_id, "owner-a", wave->id);
+    const auto sample_audition = sessions.prepare_audition(opened->image_id, "owner-a", {sample.id});
+    const auto wave_audition = sessions.prepare_audition(opened->image_id, "owner-a", {wave->id});
     ASSERT_TRUE(sample_audition) << sample_audition.error().message;
     ASSERT_TRUE(wave_audition) << wave_audition.error().message;
-    EXPECT_EQ(sample_audition->frame_count, 32U);
-    EXPECT_EQ(sample_audition->loop_mode, 1U);
-    EXPECT_EQ(sample_audition->loop_start_frame, 8U);
-    EXPECT_EQ(sample_audition->loop_length_frames, 8U);
-    EXPECT_EQ(wave_audition->frame_count, 132U);
+    ASSERT_EQ(sample_audition->clips.size(), 1U);
+    ASSERT_EQ(sample_audition->clips.front().lanes.size(), 1U);
+    ASSERT_EQ(wave_audition->clips.size(), 1U);
+    ASSERT_EQ(wave_audition->clips.front().lanes.size(), 1U);
+    const auto &sample_clip = sample_audition->clips.front();
+    const auto &sample_lane = sample_clip.lanes.front();
+    const auto &wave_lane = wave_audition->clips.front().lanes.front();
+    EXPECT_EQ(sample_lane.frame_count, 32U);
+    EXPECT_EQ(sample_clip.loop_mode, 1U);
+    EXPECT_EQ(sample_lane.loop_start_frame, 8U);
+    EXPECT_EQ(sample_lane.loop_length_frames, 8U);
+    EXPECT_EQ(wave_lane.frame_count, 132U);
 
-    const auto sample_pcm = sessions.audition_range(sample_audition->audition_id, "owner-a", 44U,
-                                                    32U * sample_audition->sample_width_bytes);
-    const auto wave_pcm =
-        sessions.audition_range(wave_audition->audition_id, "owner-a",
-                                44U + 32U * static_cast<std::uint64_t>(wave_audition->sample_width_bytes),
-                                32U * wave_audition->sample_width_bytes);
+    const auto sample_pcm =
+        sessions.audition_range(sample_audition->audition_id, "owner-a", 44U, 32U * sample_lane.sample_width_bytes);
+    const auto wave_pcm = sessions.audition_range(wave_audition->audition_id, "owner-a",
+                                                  44U + 32U * static_cast<std::uint64_t>(wave_lane.sample_width_bytes),
+                                                  32U * wave_lane.sample_width_bytes);
     ASSERT_TRUE(sample_pcm) << sample_pcm.error().message;
     ASSERT_TRUE(wave_pcm) << wave_pcm.error().message;
     EXPECT_EQ(sample_pcm->bytes, wave_pcm->bytes);
@@ -870,9 +911,10 @@ TEST_F(ImageSessionTest, RejectsSamplePlaybackWindowsOutsideStoredWaveData) {
     const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(objects) << objects.error().message;
     ASSERT_FALSE(objects->items.empty());
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
     ASSERT_FALSE(audition);
     EXPECT_EQ(audition.error().code, "invalid_audio_range");
+    EXPECT_EQ(audition.error().context.object_id, objects->items.front().id);
 }
 
 TEST_F(ImageSessionTest, UsesIndependentStereoMemberWindowsAndPadsTheShorterLane) {
@@ -893,20 +935,44 @@ TEST_F(ImageSessionTest, UsesIndependentStereoMemberWindowsAndPadsTheShorterLane
     EXPECT_EQ(preview->lanes[1].role, "RIGHT");
     EXPECT_EQ(preview->lanes[1].frame_count, 16U);
 
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
-    EXPECT_EQ(audition->channels, 2U);
-    EXPECT_EQ(audition->frame_count, 32U);
-    EXPECT_EQ(audition->loop_start_frame, 8U);
-    EXPECT_EQ(audition->loop_length_frames, 8U);
-    EXPECT_TRUE(audition->warnings.empty());
-    const auto pcm = sessions.audition_range(audition->audition_id, "owner-a", 44U, 32U * 2U * 2U);
-    ASSERT_TRUE(pcm) << pcm.error().message;
-    ASSERT_EQ(pcm->bytes.size(), 128U);
-    for (std::size_t frame = 16U; frame < 32U; ++frame) {
-        EXPECT_EQ(pcm->bytes[frame * 4U + 2U], std::byte{0});
-        EXPECT_EQ(pcm->bytes[frame * 4U + 3U], std::byte{0});
-    }
+    ASSERT_EQ(audition->clips.size(), 1U);
+    const auto &clip = audition->clips.front();
+    ASSERT_EQ(clip.lanes.size(), 2U);
+    EXPECT_EQ(clip.loop_mode, 1U);
+    EXPECT_TRUE(clip.warnings.empty());
+    EXPECT_EQ(clip.lanes[0].frame_count, 32U);
+    EXPECT_EQ(clip.lanes[0].loop_start_frame, 8U);
+    EXPECT_EQ(clip.lanes[0].loop_length_frames, 8U);
+    EXPECT_EQ(clip.lanes[1].frame_count, 16U);
+    EXPECT_EQ(clip.lanes[1].content_offset_bytes, clip.lanes[0].wav_size_bytes);
+    const auto right_header =
+        sessions.audition_range(audition->audition_id, "owner-a", clip.lanes[1].content_offset_bytes, 44U);
+    ASSERT_TRUE(right_header) << right_header.error().message;
+    EXPECT_EQ(std::string(reinterpret_cast<const char *>(right_header->bytes.data()), 4U), "RIFF");
+}
+
+TEST_F(ImageSessionTest, PreservesMixedStereoLaneRatesForIndependentClientNormalization) {
+    patch_sample_window(root_ / "fixture.hds", 32U, 32U, 40U, 8U, std::array{64U, 16U, 72U, 8U}, 32'000U);
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(objects) << objects.error().message;
+    ASSERT_FALSE(objects->items.empty());
+
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
+    ASSERT_TRUE(audition) << audition.error().message;
+    ASSERT_EQ(audition->clips.size(), 1U);
+    const auto &clip = audition->clips.front();
+    ASSERT_EQ(clip.lanes.size(), 2U);
+    EXPECT_EQ(clip.lanes[0].sample_rate, 48'000U);
+    EXPECT_EQ(clip.lanes[1].sample_rate, 32'000U);
+    EXPECT_EQ(clip.loop_mode, 0U);
+    EXPECT_NE(std::ranges::find(clip.warnings,
+                                "Sample member formats differ; audition will normalize each lane independently"),
+              clip.warnings.end());
 }
 
 TEST_F(ImageSessionTest, PreparesSampleAuditionWhenTheNamedWaveDataHasAStaleCachedReference) {
@@ -918,10 +984,11 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionWhenTheNamedWaveDataHasAStaleCach
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
 
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
-    EXPECT_EQ(audition->channels, 1U);
-    EXPECT_GT(audition->frame_count, 0U);
+    ASSERT_EQ(audition->clips.size(), 1U);
+    ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
+    EXPECT_GT(audition->clips.front().lanes.front().frame_count, 0U);
 }
 
 TEST_F(ImageSessionTest, ActiveAuditionRangesKeepTheOwningImageSessionAlive) {
@@ -932,7 +999,7 @@ TEST_F(ImageSessionTest, ActiveAuditionRangesKeepTheOwningImageSessionAlive) {
     const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", objects->items.front().id);
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
 
     now += std::chrono::seconds{4};
