@@ -240,6 +240,13 @@ status instead of silently disappearing. Remote axkdeck connections use a
 directory-only browser for the remote host; after selection, ordinary image
 and output access remains confined to the configured workspaces.
 
+The image browser opens supported image and standalone object files normally.
+For externally extracted Yamaha object sets, navigate to the flat leaf
+directory and choose **Open object directory**. The resulting
+`AXK_OBJECT_DIRECTORY` session is read-only and supports browsing, preview,
+audition, and package export. Parent collection directories remain navigation
+folders and cannot be opened as one combined image.
+
 ### Create an empty hard-disk image
 
 Open the disk-image browser, enter the writable workspace directory that should

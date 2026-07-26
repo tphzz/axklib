@@ -182,6 +182,14 @@ sequence numbers. After a disconnect, replay retained events through REST and
 fetch the job snapshot; WebSocket delivery is an update hint, not the source of
 truth.
 
+`POST /api/v1/images` requires one explicit `ImageSourceRef`. Use
+`{"kind":"FILE","file":...}` for an image or standalone object file and
+`{"kind":"AXK_OBJECT_DIRECTORY","directory":...}` for one flat directory of
+Yamaha object files. Object-directory sessions are bounded and read-only:
+inventory, relationships, preview, audition, and package export are available,
+while image alteration and package import are not. Collection directories must
+be navigated to a recognized leaf before opening a session.
+
 Writable SFS image sessions advertise `images.alter.objects`. Use
 `images.deletion.inspect` with the image ID, expected revision, target object
 IDs, and explicit optional-cleanup object IDs to obtain the complete deletion

@@ -2,6 +2,7 @@
 #include <array>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <optional>
 #include <string_view>
@@ -207,6 +208,56 @@ TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation)
     }
     const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);
+}
+
+TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
+    const auto source = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(source) << source.error().message;
+    const auto source_objects = source->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(source_objects) << source_objects.error().message;
+    ASSERT_FALSE(source_objects->empty());
+
+    const auto object_directory = root_ / "objects";
+    std::filesystem::create_directory(object_directory);
+    for (std::size_t index = 0U; index < source_objects->size(); ++index) {
+        std::ofstream output{object_directory / std::format("object-{:03}.bin", index), std::ios::binary};
+        ASSERT_TRUE(output);
+        const auto &payload = (*source_objects)[index].raw_payload;
+        output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+        ASSERT_TRUE(output);
+    }
+    {
+        std::ofstream support_file{object_directory / "README.TXT"};
+        support_file << "support metadata is not a sampler object\n";
+    }
+
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened =
+        sessions.open({"workspace", "objects", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    EXPECT_EQ(opened->source.kind, axk::app::ImageSourceKind::axk_object_directory);
+    EXPECT_EQ(opened->format, "axk-object-directory");
+    EXPECT_EQ(opened->object_count, source_objects->size());
+    EXPECT_NE(std::ranges::find(opened->available_operations, "images.package.export"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
+              opened->available_operations.end());
+
+    const auto wave_data = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(wave_data) << wave_data.error().message;
+    ASSERT_FALSE(wave_data->items.empty());
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", wave_data->items.front().id);
+    ASSERT_TRUE(audition) << audition.error().message;
+    EXPECT_GT(audition->wav_size_bytes, 44U);
+
+    {
+        const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+        ASSERT_TRUE(read) << read.error().message;
+        EXPECT_EQ(read->media->kind(), axk::MediaKind::axk_object_directory);
+    }
+    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    ASSERT_FALSE(mutation);
+    EXPECT_EQ(mutation.error().code, "image_mutation_unsupported");
 }
 
 TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {

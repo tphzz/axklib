@@ -26,6 +26,7 @@
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/application/write_operations.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/media.hpp"
 #include "axklib/package.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
@@ -115,6 +116,35 @@ TEST(CliPathExpansion, RejectsInputsThatCannotBeInspected) {
     const auto expanded = axk::cli::commands::expand_cli_paths({missing});
     ASSERT_FALSE(expanded);
     EXPECT_EQ(expanded.error().code, axk::ErrorCode::io_read_failed);
+}
+
+TEST(CliPathExpansion, TreatsAxkObjectDirectoriesAsMediaLeaves) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-cli-object-directory";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    ASSERT_TRUE(std::filesystem::create_directories(root / "collection" / "volume"));
+
+    const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "tests" / "fixtures" / "images" / "sampler-authored" /
+                         "HD00_512_single_sbnk_authored.hds";
+    const auto source = axk::open_media(fixture);
+    ASSERT_TRUE(source) << source.error().message;
+    const auto objects = source->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(objects) << objects.error().message;
+    for (std::size_t index = 0U; index < objects->size(); ++index) {
+        std::ofstream output{root / "collection" / "volume" / std::format("object-{:03}.bin", index), std::ios::binary};
+        ASSERT_TRUE(output);
+        const auto &payload = (*objects)[index].raw_payload;
+        output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+        ASSERT_TRUE(output);
+    }
+
+    const auto expanded = axk::cli::commands::expand_cli_paths({root / "collection"}, true);
+    ASSERT_TRUE(expanded) << expanded.error().message;
+    ASSERT_EQ(expanded->size(), 1U);
+    EXPECT_EQ(expanded->front(), root / "collection" / "volume");
+    EXPECT_EQ(run_cli({"axklib", "info", (root / "collection").string(), "--format", "summary"}), 0);
+
+    std::filesystem::remove_all(root, error);
 }
 
 TEST(ContentId, ReusesEqualContentAndRejectsInjectedShortPrefixCollision) {

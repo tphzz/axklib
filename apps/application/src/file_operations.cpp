@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <functional>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -40,7 +42,7 @@ struct ReportRequest {
 };
 
 struct InfoRequest {
-    std::vector<axk::app::FileRef> sources;
+    std::vector<axk::app::ImageSourceRef> sources;
     bool strict{};
     bool include_default_programs{};
 };
@@ -61,7 +63,7 @@ struct InfoLoadFailure {
 };
 
 struct LoadedSource {
-    axk::app::FileRef source;
+    axk::app::ImageSourceRef source;
     axk::MediaContainer media;
     axk::MediaInventory inventory;
     axk::RelationshipGraph graph;
@@ -95,6 +97,10 @@ axk::app::Error core_error(const axk::Error &error, const axk::app::FileRef &sou
             error.message, std::move(context)};
 }
 
+axk::app::Error image_source_error(const axk::Error &error, const axk::app::ImageSourceRef &source) {
+    return core_error(error, axk::app::FileRef{source.root_id, source.relative_path});
+}
+
 axk::app::Result<ReportRequest> parse_request(const Json &input) {
     ReportRequest result;
     try {
@@ -125,11 +131,23 @@ axk::app::Result<InfoRequest> parse_info_request(const Json &input) {
     try {
         if (!input.is_object() || !input.contains("sources") || !input.at("sources").is_array() ||
             input.at("sources").empty() || input.at("sources").size() > 1024U) {
-            return std::unexpected(operation_error("invalid_request", "sources must contain 1 to 1024 FileRef values"));
+            return std::unexpected(
+                operation_error("invalid_request", "sources must contain 1 to 1024 image source values"));
         }
         for (const auto &source : input.at("sources")) {
-            result.sources.push_back(
-                {source.at("rootId").get<std::string>(), source.at("relativePath").get<std::string>()});
+            const auto kind = source.at("kind").get<std::string>();
+            if (kind == "FILE") {
+                const auto &file = source.at("file");
+                result.sources.push_back({file.at("rootId").get<std::string>(),
+                                          file.at("relativePath").get<std::string>(), axk::app::ImageSourceKind::file});
+            } else if (kind == "AXK_OBJECT_DIRECTORY") {
+                const auto &directory = source.at("directory");
+                result.sources.push_back({directory.at("rootId").get<std::string>(),
+                                          directory.at("relativePath").get<std::string>(),
+                                          axk::app::ImageSourceKind::axk_object_directory});
+            } else {
+                return std::unexpected(operation_error("invalid_request", "info source kind is unsupported"));
+            }
         }
         result.strict = input.value("strict", false);
         result.include_default_programs = input.value("includeDefaultPrograms", false);
@@ -179,6 +197,8 @@ std::string info_media_kind_name(axk::MediaKind kind) {
         return "iso";
     case axk::MediaKind::standalone_object:
         return "standalone_object";
+    case axk::MediaKind::axk_object_directory:
+        return "axk_object_directory";
     }
     return "unknown";
 }
@@ -218,6 +238,98 @@ load_source(const axk::app::Sandbox &sandbox, const axk::app::FileRef &source, b
         return std::unexpected(core_error(inventory.error(), source));
     auto graph = axk::build_relationship_graph(inventory->catalog);
     auto tree = axk::build_content_tree(*media, inventory->catalog, graph, include_default_programs);
+    return LoadedSource{{source.root_id, source.relative_path, axk::app::ImageSourceKind::file},
+                        std::move(*media),
+                        std::move(*inventory),
+                        std::move(graph),
+                        std::move(tree)};
+}
+
+std::expected<LoadedSource, InfoLoadFailure> load_info_source(const axk::app::Sandbox &sandbox,
+                                                              const axk::app::ImageSourceRef &source,
+                                                              bool include_default_programs,
+                                                              const axk::app::OperationContext &context) {
+    std::optional<axk::MediaContainer> media;
+    if (source.kind == axk::app::ImageSourceKind::file) {
+        const auto file = sandbox.open_file({source.root_id, source.relative_path});
+        if (!file) {
+            return std::unexpected(
+                InfoLoadFailure{.error = file.error(),
+                                .error_code = static_cast<std::uint64_t>(axk::ErrorCode::io_open_failed),
+                                .original_exception = "axk::Error"});
+        }
+        auto opened = axk::open_media(file->reader, std::filesystem::path{file->filename}, context.cancellation);
+        if (!opened) {
+            return std::unexpected(InfoLoadFailure{.error = image_source_error(opened.error(), source),
+                                                   .error_code = static_cast<std::uint64_t>(opened.error().code),
+                                                   .original_exception = "axk::Error"});
+        }
+        media.emplace(std::move(*opened));
+    } else {
+        auto tree = sandbox.open_tree({source.root_id, source.relative_path},
+                                      {.maximum_entries = axk::AxkObjectDirectory::maximum_entries,
+                                       .maximum_total_file_bytes = axk::AxkObjectDirectory::maximum_payload_bytes,
+                                       .maximum_depth = 1U,
+                                       .maximum_path_bytes = 64U * 1024U});
+        if (!tree) {
+            return std::unexpected(
+                InfoLoadFailure{.error = tree.error(),
+                                .error_code = static_cast<std::uint64_t>(axk::ErrorCode::io_open_failed),
+                                .original_exception = "axk::Error"});
+        }
+        std::vector<axk::AxkObjectDirectoryEntry> entries;
+        std::vector<std::function<axk::app::Result<void>()>> verifiers;
+        for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
+            const auto &entry = tree->entries()[index];
+            if (entry.kind != axk::app::SandboxTreeEntryKind::file) {
+                return std::unexpected(InfoLoadFailure{
+                    .error = operation_error("invalid_image_source",
+                                             "AXK object directories must be flat and contain only files",
+                                             source.relative_path),
+                    .error_code = static_cast<std::uint64_t>(axk::ErrorCode::invalid_argument),
+                    .original_exception = "axk::Error"});
+            }
+            auto file = tree->open_file(index);
+            if (!file) {
+                return std::unexpected(
+                    InfoLoadFailure{.error = file.error(),
+                                    .error_code = static_cast<std::uint64_t>(axk::ErrorCode::io_open_failed),
+                                    .original_exception = "axk::Error"});
+            }
+            const auto path = axk::text::path_from_utf8(entry.relative_path);
+            if (!path) {
+                return std::unexpected(InfoLoadFailure{.error = image_source_error(path.error(), source),
+                                                       .error_code = static_cast<std::uint64_t>(path.error().code),
+                                                       .original_exception = "axk::Error"});
+            }
+            entries.push_back({axk::text::path_to_utf8(path->filename()), file->reader});
+            verifiers.push_back(std::move(file->verify_unchanged));
+        }
+        auto opened = axk::AxkObjectDirectory::open(std::move(entries), source.relative_path, context.cancellation);
+        if (!opened) {
+            return std::unexpected(InfoLoadFailure{.error = image_source_error(opened.error(), source),
+                                                   .error_code = static_cast<std::uint64_t>(opened.error().code),
+                                                   .original_exception = "axk::Error"});
+        }
+        for (const auto &verify : verifiers) {
+            if (const auto unchanged = verify(); !unchanged) {
+                return std::unexpected(
+                    InfoLoadFailure{.error = unchanged.error(),
+                                    .error_code = static_cast<std::uint64_t>(axk::ErrorCode::io_read_failed),
+                                    .original_exception = "axk::Error"});
+            }
+        }
+        media.emplace(std::move(*opened));
+    }
+    auto inventory = axk::build_media_inventory(*media, axk::MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U,
+                                                context.cancellation);
+    if (!inventory) {
+        return std::unexpected(InfoLoadFailure{.error = image_source_error(inventory.error(), source),
+                                               .error_code = static_cast<std::uint64_t>(inventory.error().code),
+                                               .original_exception = "axk::Error"});
+    }
+    auto graph = axk::build_relationship_graph(inventory->catalog);
+    auto tree = axk::build_content_tree(*media, inventory->catalog, graph, include_default_programs);
     return LoadedSource{source, std::move(*media), std::move(*inventory), std::move(graph), std::move(tree)};
 }
 
@@ -225,28 +337,8 @@ std::expected<LoadedSource, InfoLoadFailure> load_info_source(const axk::app::Sa
                                                               const axk::app::FileRef &source,
                                                               bool include_default_programs,
                                                               const axk::app::OperationContext &context) {
-    const auto file = sandbox.open_file(source);
-    if (!file) {
-        return std::unexpected(InfoLoadFailure{.error = file.error(),
-                                               .error_code = static_cast<std::uint64_t>(axk::ErrorCode::io_open_failed),
-                                               .original_exception = "axk::Error"});
-    }
-    auto media = axk::open_media(file->reader, std::filesystem::path{file->filename}, context.cancellation);
-    if (!media) {
-        return std::unexpected(InfoLoadFailure{.error = core_error(media.error(), source),
-                                               .error_code = static_cast<std::uint64_t>(media.error().code),
-                                               .original_exception = "axk::Error"});
-    }
-    auto inventory = axk::build_media_inventory(*media, axk::MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U,
-                                                context.cancellation);
-    if (!inventory) {
-        return std::unexpected(InfoLoadFailure{.error = core_error(inventory.error(), source),
-                                               .error_code = static_cast<std::uint64_t>(inventory.error().code),
-                                               .original_exception = "axk::Error"});
-    }
-    auto graph = axk::build_relationship_graph(inventory->catalog);
-    auto tree = axk::build_content_tree(*media, inventory->catalog, graph, include_default_programs);
-    return LoadedSource{source, std::move(*media), std::move(*inventory), std::move(graph), std::move(tree)};
+    return load_info_source(sandbox, {source.root_id, source.relative_path, axk::app::ImageSourceKind::file},
+                            include_default_programs, context);
 }
 
 std::string source_display_path(const axk::app::FileRef &source, const axk::app::OperationContext &context) {
@@ -256,6 +348,10 @@ std::string source_display_path(const axk::app::FileRef &source, const axk::app:
             return display;
     }
     return source.relative_path;
+}
+
+std::string source_display_path(const axk::app::ImageSourceRef &source, const axk::app::OperationContext &context) {
+    return source_display_path(axk::app::FileRef{source.root_id, source.relative_path}, context);
 }
 
 std::string source_filename(const LoadedSource &source) {
@@ -274,6 +370,8 @@ std::string public_object_key(const LoadedSource &source, std::string_view nativ
         return std::format("{}:{}", filename, object->logical_path);
     if (source.media.kind() == axk::MediaKind::iso9660)
         return std::format("{}:iso9660:{}", filename, object->logical_path);
+    if (source.media.kind() == axk::MediaKind::axk_object_directory)
+        return std::format("{}:axk-object-directory:{}", filename, object->logical_path);
     return std::format("{}:standalone-object", filename);
 }
 
@@ -285,6 +383,8 @@ std::string public_scope_key(const LoadedSource &source, const axk::ObjectSnapsh
         return std::format("{}:fat-root", display_path);
     if (source.media.kind() == axk::MediaKind::standalone_object)
         return std::format("{}:standalone-object", display_path);
+    if (source.media.kind() == axk::MediaKind::axk_object_directory)
+        return std::format("{}:axk-object-directory", display_path);
     const auto object = std::ranges::find(source.inventory.objects, item.key, &axk::MediaObjectDescriptor::key);
     return object == source.inventory.objects.end() ? std::format("{}:iso", display_path)
                                                     : std::format("{}:{}", display_path, object->scope_key);

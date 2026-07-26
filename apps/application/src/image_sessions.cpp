@@ -4,8 +4,10 @@
 #include <array>
 #include <charconv>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <unordered_map>
 #include <utility>
@@ -19,6 +21,7 @@
 #include "axklib/object.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
+#include "axklib/utf8.hpp"
 
 #include "content_digest.hpp"
 
@@ -28,7 +31,7 @@ axk::app::Error session_error(std::string code, std::string message, bool retrya
     return {std::move(code), std::move(message), {}, retryable};
 }
 
-axk::app::Error core_error(const axk::Error &error, const axk::app::FileRef &source) {
+axk::app::Error core_error(const axk::Error &error, const axk::app::ImageSourceRef &source) {
     axk::app::ErrorContext context;
     context.partition_index = error.context.partition_index;
     context.volume_name = error.context.volume_name;
@@ -56,6 +59,8 @@ std::string media_kind_name(axk::MediaKind kind) {
         return "iso9660";
     case axk::MediaKind::standalone_object:
         return "standalone-object";
+    case axk::MediaKind::axk_object_directory:
+        return "axk-object-directory";
     }
     return "unknown";
 }
@@ -171,7 +176,7 @@ struct axk::app::ImageSessionManager::Implementation {
     struct Session {
         std::string image_id;
         std::string owner_id;
-        FileRef source;
+        ImageSourceRef source;
         std::string format;
         std::vector<ImageContentItem> content;
         std::unordered_map<std::string, std::vector<std::size_t>> content_children;
@@ -389,6 +394,16 @@ struct axk::app::ImageSessionManager::Implementation {
             if (!bytes)
                 return std::unexpected(core_error(bytes.error(), session.source));
             return std::move(*bytes);
+        }
+        if (const auto *directory = std::get_if<AxkObjectDirectory>(&session.media->storage())) {
+            const auto object =
+                std::ranges::find(directory->stored_objects(), descriptor->second.key, &MediaObject::key);
+            if (object == directory->stored_objects().end())
+                return std::unexpected(session_error("object_not_found", "AXK object directory entry does not exist"));
+            if (offset > object->raw_payload.size() || size > object->raw_payload.size() - offset)
+                return std::unexpected(session_error("invalid_audio_range", "AXK object directory range is invalid"));
+            return std::vector<std::byte>{object->raw_payload.begin() + static_cast<std::ptrdiff_t>(offset),
+                                          object->raw_payload.begin() + static_cast<std::ptrdiff_t>(offset + size)};
         }
         const auto &payload = snapshot->second.raw_payload;
         if (offset > payload.size() || size > payload.size() - offset)
@@ -678,26 +693,95 @@ axk::app::ImageSessionManager::ImageSessionManager(ImageSessionManager &&) noexc
 axk::app::ImageSessionManager &axk::app::ImageSessionManager::operator=(ImageSessionManager &&) noexcept = default;
 
 axk::app::Result<axk::app::ImageSessionSummary>
-axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
+axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string owner_id,
                                     const CancellationToken &cancellation) {
     if (owner_id.empty())
         return std::unexpected(session_error("invalid_owner", "image session owner is required"));
+    const FileRef path_reference{source.root_id, source.relative_path};
     PathReservationCoordinator::Lease path_lease;
     if (implementation_->path_reservations != nullptr) {
-        auto acquired = implementation_->path_reservations->try_acquire({source, PathAccessMode::shared});
+        auto acquired = implementation_->path_reservations->try_acquire({path_reference, PathAccessMode::shared});
         if (!acquired)
             return std::unexpected(acquired.error());
         path_lease = std::move(*acquired);
     }
-    const auto file = implementation_->sandbox.open_file(source);
-    if (!file)
-        return std::unexpected(file.error());
-    auto target_snapshot_id = detail::reader_sha256(*file->reader, cancellation);
-    if (!target_snapshot_id)
-        return std::unexpected(target_snapshot_id.error());
-    const auto media = axk::open_media(file->reader, std::filesystem::path{file->filename}, cancellation);
-    if (!media)
-        return std::unexpected(core_error(media.error(), source));
+    std::shared_ptr<const RandomAccessReader> source_reader;
+    std::function<Result<void>()> verify_source_unchanged;
+    std::string target_snapshot_id;
+    std::optional<MediaContainer> media;
+    if (source.kind == ImageSourceKind::file) {
+        const auto file = implementation_->sandbox.open_file(path_reference);
+        if (!file)
+            return std::unexpected(file.error());
+        auto digest = detail::reader_sha256(*file->reader, cancellation);
+        if (!digest)
+            return std::unexpected(digest.error());
+        target_snapshot_id = std::move(*digest);
+        auto opened_media = axk::open_media(file->reader, std::filesystem::path{file->filename}, cancellation);
+        if (!opened_media)
+            return std::unexpected(core_error(opened_media.error(), source));
+        media.emplace(std::move(*opened_media));
+        source_reader = file->reader;
+        verify_source_unchanged = file->verify_unchanged;
+    } else {
+        const DirectoryRef directory_reference{source.root_id, source.relative_path};
+        auto tree = implementation_->sandbox.open_tree(
+            directory_reference, {.maximum_entries = AxkObjectDirectory::maximum_entries,
+                                  .maximum_total_file_bytes = AxkObjectDirectory::maximum_payload_bytes,
+                                  .maximum_depth = 1U,
+                                  .maximum_path_bytes = 64U * 1024U});
+        if (!tree)
+            return std::unexpected(tree.error());
+        std::vector<AxkObjectDirectoryEntry> entries;
+        std::vector<std::function<Result<void>()>> verifiers;
+        entries.reserve(tree->entries().size());
+        verifiers.reserve(tree->entries().size());
+        for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
+            const auto &entry = tree->entries()[index];
+            if (entry.kind != SandboxTreeEntryKind::file) {
+                return std::unexpected(session_error("invalid_image_source",
+                                                     "AXK object directories must be flat and contain only files"));
+            }
+            auto opened = tree->open_file(index);
+            if (!opened)
+                return std::unexpected(opened.error());
+            const auto name_path = axk::text::path_from_utf8(entry.relative_path);
+            if (!name_path)
+                return std::unexpected(session_error("invalid_image_source", "object filename is not valid UTF-8"));
+            entries.push_back({axk::text::path_to_utf8(name_path->filename()), opened->reader});
+            verifiers.push_back(std::move(opened->verify_unchanged));
+        }
+        auto directory = AxkObjectDirectory::open(std::move(entries), source.relative_path, cancellation);
+        if (!directory)
+            return std::unexpected(core_error(directory.error(), source));
+        std::vector<std::byte> snapshot;
+        for (const auto &object : directory->stored_objects()) {
+            const auto append_text = [&](std::string_view value) {
+                std::ranges::transform(value, std::back_inserter(snapshot),
+                                       [](char ch) { return static_cast<std::byte>(ch); });
+                snapshot.push_back(std::byte{0});
+            };
+            append_text(object.logical_path);
+            const auto payload_size = static_cast<std::uint64_t>(object.raw_payload.size());
+            for (std::size_t byte = 0U; byte < sizeof(payload_size); ++byte) {
+                snapshot.push_back(static_cast<std::byte>((payload_size >> (byte * 8U)) & 0xffU));
+            }
+            snapshot.insert(snapshot.end(), object.raw_payload.begin(), object.raw_payload.end());
+        }
+        for (const auto &verify : verifiers) {
+            if (const auto unchanged = verify(); !unchanged)
+                return std::unexpected(
+                    session_error("image_source_changed", "object directory changed while it was opened", true));
+        }
+        auto snapshot_reader = std::make_shared<MemoryReader>(std::move(snapshot));
+        auto digest = detail::reader_sha256(*snapshot_reader, cancellation);
+        if (!digest)
+            return std::unexpected(digest.error());
+        target_snapshot_id = std::move(*digest);
+        source_reader = std::move(snapshot_reader);
+        verify_source_unchanged = []() -> Result<void> { return {}; };
+        media.emplace(std::move(*directory));
+    }
     auto inventory = axk::build_media_inventory(*media, axk::MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U,
                                                 cancellation);
     if (!inventory)
@@ -714,9 +798,9 @@ axk::app::ImageSessionManager::open(const FileRef &source, std::string owner_id,
     auto session = std::make_shared<Implementation::Session>();
     session->owner_id = std::move(owner_id);
     session->source = source;
-    session->source_reader = file->reader;
-    session->verify_source_unchanged = file->verify_unchanged;
-    session->target_snapshot_id = std::move(*target_snapshot_id);
+    session->source_reader = std::move(source_reader);
+    session->verify_source_unchanged = std::move(verify_source_unchanged);
+    session->target_snapshot_id = std::move(target_snapshot_id);
     session->format = media_kind_name(media->kind());
     session->root_count = tree.roots.size();
     session->last_access = implementation_->clock();
@@ -1224,14 +1308,15 @@ axk::app::ImageSessionManager::begin_mutation(std::string_view image_id, std::st
         return std::unexpected(session_error("entry_in_use", "image session mutation is already active", true));
     if (auto upgraded = (*session)->path_lease.try_upgrade(); !upgraded)
         return std::unexpected(upgraded.error());
-    auto target = implementation_->sandbox.open_mutation((*session)->source);
+    const FileRef source{(*session)->source.root_id, (*session)->source.relative_path};
+    auto target = implementation_->sandbox.open_mutation(source);
     if (!target) {
         (*session)->path_lease.downgrade();
         return std::unexpected(target.error());
     }
     (*session)->mutating = true;
     (*session)->mutation_guard.emplace(std::move(access));
-    return ImageSessionMutation{(*session)->image_id, (*session)->revision, (*session)->source, std::move(*target)};
+    return ImageSessionMutation{(*session)->image_id, (*session)->revision, std::move(source), std::move(*target)};
 }
 
 axk::app::Result<axk::app::ImageSessionSummary>

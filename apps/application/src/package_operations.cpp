@@ -427,6 +427,8 @@ std::string target_kind_name(axk::MediaKind kind) {
         return "iso9660";
     case axk::MediaKind::standalone_object:
         return "standalone-object";
+    case axk::MediaKind::axk_object_directory:
+        return "axk-object-directory";
     }
     return "unknown";
 }
@@ -1062,6 +1064,10 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 auto session = images.begin_read(identity->first, context.owner_id, identity->second);
                 if (!session)
                     return std::unexpected(session.error());
+                if (session->media->kind() != axk::MediaKind::sfs) {
+                    return std::unexpected(operation_error("image_mutation_unsupported",
+                                                           "package import requires a writable SFS image session"));
+                }
 
                 PackageInput source;
                 std::optional<std::string> replace_plan_token;

@@ -272,6 +272,8 @@ std::string media_kind_name(MediaKind kind) {
         return "iso9660";
     case MediaKind::standalone_object:
         return "standalone-object";
+    case MediaKind::axk_object_directory:
+        return "axk-object-directory";
     }
     return "unknown";
 }

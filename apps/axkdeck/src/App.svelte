@@ -56,6 +56,7 @@
         type DirectoryLocation,
         type DirectoryRef,
         type FileLocation,
+        type ImageLocation,
         type InputFileLocation,
     } from './lib/storageLocations';
     import type {
@@ -111,9 +112,9 @@
 
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
-    type PickerMode = 'file' | 'directory' | 'save-file';
+    type PickerMode = 'file' | 'directory' | 'save-file' | 'media-source';
     type PickerParentDialog = 'audio-import' | 'package-import' | 'package-export';
-    type PickerSelection = FileLocation | DirectoryLocation | FileLocation[];
+    type PickerSelection = ImageLocation | DirectoryLocation | FileLocation[];
     interface PickerRequest {
         mode: PickerMode;
         title: string;
@@ -134,7 +135,7 @@
 
     let sourceItems = $state<DiskTreeItem[]>([]);
     let selectedSource = $state<DiskTreeItem>({ id: 'none', name: 'No image', kind: 'disk', childCount: 0 });
-    let imageLocation = $state<FileLocation | null>(null);
+    let imageLocation = $state<ImageLocation | null>(null);
     let pickerRequest = $state<PickerRequest | null>(null);
     let hardDiskCreationDirectory = $state<DirectoryLocation | null>(null);
     let lastImageDirectory = $state<DirectoryRef | null>(null);
@@ -2272,7 +2273,7 @@
     }
 
     async function openImageLocation(
-        location: FileLocation,
+        location: ImageLocation,
         preferred?: { partitionIndex: number; volumeName?: string },
     ): Promise<void> {
         const generation = ++imageOpenGeneration;
@@ -2418,10 +2419,10 @@
         await openImageLocation(selected);
     }
 
-    async function chooseImageLocation(): Promise<FileLocation | null> {
+    async function chooseImageLocation(): Promise<ImageLocation | null> {
         if (transport.storageMode !== 'server') return null;
         const selection = await chooseServerLocation(
-            'file',
+            'media-source',
             'Open image',
             ['hds', 'hda', 'ima', 'img', 'iso', 'a3k'],
             '',
@@ -2430,7 +2431,7 @@
                 ondirectorychange: (directory) => (lastImageDirectory = directory),
             },
         );
-        return selection?.kind === 'server-file' ? selection : null;
+        return selection?.kind === 'server-file' || selection?.kind === 'axk-object-directory' ? selection : null;
     }
 
     async function chooseHardDiskCreationDirectory(): Promise<void> {
@@ -2452,7 +2453,7 @@
         extensions: string[] = [],
         suggestedName = '',
         navigation?: Pick<PickerRequest, 'parentDialog' | 'initialDirectory' | 'ondirectorychange'>,
-    ): Promise<FileLocation | DirectoryLocation | null> {
+    ): Promise<ImageLocation | DirectoryLocation | null> {
         return new Promise((resolve) => {
             pickerRequest?.resolve(null);
             pickerRequest = {

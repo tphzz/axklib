@@ -281,7 +281,12 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             TOKEN_A,
             "POST",
             "/api/v1/images",
-            {"source": {"rootId": "workspace", "relativePath": "fixture.hds"}},
+            {
+                "source": {
+                    "kind": "FILE",
+                    "file": {"rootId": "workspace", "relativePath": "fixture.hds"},
+                }
+            },
         )
         assert opened.status == 201, opened.content
         image_id = str(opened.json()["data"]["imageId"])
@@ -291,7 +296,12 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             TOKEN_B,
             "POST",
             "/api/v1/images",
-            {"source": {"rootId": "workspace", "relativePath": "fixture.hds"}},
+            {
+                "source": {
+                    "kind": "FILE",
+                    "file": {"rootId": "workspace", "relativePath": "fixture.hds"},
+                }
+            },
         )
         assert full_sessions.status == 429, full_sessions.content
         assert full_sessions.headers["retry-after"] == "1"

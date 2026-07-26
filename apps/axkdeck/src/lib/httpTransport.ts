@@ -54,6 +54,7 @@ import {
     type DirectoryRef,
     type FileLocation,
     type FileRef,
+    type ImageLocation,
     type InputFileLocation,
     type SandboxRoot,
     type ServerDirectoryLocation,
@@ -71,7 +72,7 @@ type WireInputRef = components['schemas']['InputRef'];
 interface ApiImageSummary {
     imageId: string;
     revision: number;
-    source: { rootId: string; relativePath: string };
+    source: components['schemas']['ImageSourceRef'];
     format: string;
     rootCount: number;
     objectCount: number;
@@ -117,7 +118,7 @@ interface ApiAlterationInspection {
 interface SessionState {
     remoteId: string;
     revision: number;
-    source: ServerFileLocation;
+    source: ImageLocation;
     contentCursors: Map<string, Map<number, string | null>>;
     contentItems: Map<string, DiskTreeItem>;
     objectCursors: Map<string, Map<number, string | null>>;
@@ -458,16 +459,22 @@ export class HttpImageTransport implements ImageTransport {
         return this.client.deleteRetainedDownload(download.contentPath);
     }
 
-    async openImage(location: FileLocation): Promise<OpenedImage> {
-        const source = this.serverFile(location);
+    async openImage(location: ImageLocation): Promise<OpenedImage> {
+        if (location.kind !== 'server-file' && location.kind !== 'axk-object-directory') {
+            throw new Error('Opening images requires a server sandbox file selection or AXK object directory');
+        }
+        const wireSource: components['schemas']['ImageSourceRef'] =
+            location.kind === 'server-file'
+                ? { kind: 'FILE', file: location.reference }
+                : { kind: 'AXK_OBJECT_DIRECTORY', directory: location.reference };
         const summary = await this.client.request<ApiImageSummary>('POST', '/images', {
-            source: source.reference,
+            source: wireSource,
         });
         const sessionId = this.nextSessionId++;
         this.sessions.set(sessionId, {
             remoteId: summary.imageId,
             revision: summary.revision,
-            source,
+            source: location,
             contentCursors: new Map(),
             contentItems: new Map(),
             objectCursors: new Map(),

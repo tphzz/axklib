@@ -482,6 +482,28 @@
           "relativePath": {"type": "string"}
         }
       },
+      "ImageSourceRef": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "file"],
+            "properties": {
+              "kind": {"const": "FILE"},
+              "file": {"$ref": "#/components/schemas/FileRef"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "directory"],
+            "properties": {
+              "kind": {"const": "AXK_OBJECT_DIRECTORY"},
+              "directory": {"$ref": "#/components/schemas/DirectoryRef"}
+            }
+          }
+        ]
+      },
       "EntryRef": {
         "type": "object",
         "additionalProperties": false,
@@ -818,8 +840,9 @@
       },
       "ImageOpenRequest": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["source"],
-        "properties": {"source": {"$ref": "#/components/schemas/FileRef"}}
+        "properties": {"source": {"$ref": "#/components/schemas/ImageSourceRef"}}
       },
       "ImageSession": {
         "type": "object",
@@ -828,7 +851,7 @@
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 1},
-          "source": {"$ref": "#/components/schemas/FileRef"},
+          "source": {"$ref": "#/components/schemas/ImageSourceRef"},
           "format": {"type": "string", "minLength": 1},
           "availableOperations": {"type": "array", "items": {"type": "string", "minLength": 1}},
           "rootCount": {"type": "integer", "minimum": 0},
@@ -1240,7 +1263,7 @@
         "additionalProperties": false,
         "required": ["sources"],
         "properties": {
-          "sources": {"type": "array", "minItems": 1, "maxItems": 1024, "items": {"$ref": "#/components/schemas/FileRef"}},
+          "sources": {"type": "array", "minItems": 1, "maxItems": 1024, "items": {"$ref": "#/components/schemas/ImageSourceRef"}},
           "strict": {"type": "boolean", "default": false},
           "includeDefaultPrograms": {"type": "boolean", "default": false}
         }

@@ -1765,7 +1765,7 @@ export interface components {
             meta: components['schemas']['ResponseMeta'];
         };
         ImageOpenRequest: {
-            source: components['schemas']['FileRef'];
+            source: components['schemas']['ImageSourceRef'];
         };
         ImagePreviewBin: {
             maximum: number;
@@ -1817,7 +1817,7 @@ export interface components {
             relationshipCount: number;
             revision: number;
             rootCount: number;
-            source: components['schemas']['FileRef'];
+            source: components['schemas']['ImageSourceRef'];
             validation: {
                 errorCount: number;
                 infoCount: number;
@@ -1952,6 +1952,17 @@ export interface components {
             data: components['schemas']['ImageSession'];
             meta: components['schemas']['ResponseMeta'];
         };
+        ImageSourceRef:
+            | {
+                  file: components['schemas']['FileRef'];
+                  /** @constant */
+                  kind: 'FILE';
+              }
+            | {
+                  directory: components['schemas']['DirectoryRef'];
+                  /** @constant */
+                  kind: 'AXK_OBJECT_DIRECTORY';
+              };
         ImageValidationItem: {
             code: string;
             message: string;
@@ -1994,7 +2005,7 @@ export interface components {
         InfoRequest: {
             /** @default false */
             includeDefaultPrograms: boolean;
-            sources: components['schemas']['FileRef'][];
+            sources: components['schemas']['ImageSourceRef'][];
             /** @default false */
             strict: boolean;
         };

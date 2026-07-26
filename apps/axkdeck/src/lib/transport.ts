@@ -5,6 +5,7 @@ import type {
     DirectoryRef,
     FileRef,
     FileLocation,
+    ImageLocation,
     InputFileLocation,
     SandboxRoot,
     ClientUploadLocation,
@@ -324,7 +325,7 @@ export interface ImageTransport {
     createSandboxDirectory(parent: DirectoryRef, name: string): Promise<void>;
     renameSandboxEntry(entry: FileRef, name: string): Promise<void>;
     deleteSandboxEntry(entry: FileRef): Promise<void>;
-    openImage(source: FileLocation): Promise<OpenedImage>;
+    openImage(source: ImageLocation): Promise<OpenedImage>;
     refreshImage(sessionId: number): Promise<OpenedImage>;
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage>;
     objectPage(sessionId: number, offset: number, limit: number, filter?: ObjectPageFilter): Promise<ObjectPage>;

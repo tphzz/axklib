@@ -1384,8 +1384,11 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "/api/v1/images",
                 {
                     "source": {
-                        "rootId": "workspace",
-                        "relativePath": session_fixture.name,
+                        "kind": "FILE",
+                        "file": {
+                            "rootId": "workspace",
+                            "relativePath": session_fixture.name,
+                        },
                     }
                 },
             )
@@ -1773,7 +1776,15 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 if source["relativePath"] != "malformed.bin"
             ]
             report_requests = (
-                ("report.info", "/api/v1/reports/info", {"sources": sources}),
+                (
+                    "report.info",
+                    "/api/v1/reports/info",
+                    {
+                        "sources": [
+                            {"kind": "FILE", "file": source} for source in sources
+                        ]
+                    },
+                ),
                 (
                     "report.objects",
                     "/api/v1/reports/objects",

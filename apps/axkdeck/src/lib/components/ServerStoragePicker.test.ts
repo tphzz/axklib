@@ -549,6 +549,31 @@ describe('ServerStoragePicker', () => {
         expect(within(readOnlyLocation).getByText('Read-only location')).toBeTruthy();
     });
 
+    it('opens the current folder explicitly as an AXK object directory', async () => {
+        const onselect = vi.fn();
+        render(ServerStoragePicker, {
+            props: {
+                transport: transport(),
+                mode: 'media-source',
+                title: 'Open image',
+                extensions: ['hds'],
+                onselect,
+                oncancel: vi.fn(),
+            },
+        });
+
+        await fireEvent.click(await screen.findByText('Yamaha images'));
+        expect(screen.getByText('disk.hds')).toBeTruthy();
+        expect(screen.queryByText('notes.txt')).toBeNull();
+        await fireEvent.click(screen.getByRole('button', { name: 'Open object directory' }));
+
+        expect(onselect).toHaveBeenCalledWith({
+            kind: 'axk-object-directory',
+            reference: { rootId: 'workspace', relativePath: '' },
+            displayName: 'Yamaha images',
+        });
+    });
+
     it('offers storage-location management when no locations are configured', async () => {
         const onmanagelocations = vi.fn();
         render(ServerStoragePicker, {

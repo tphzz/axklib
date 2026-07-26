@@ -61,6 +61,7 @@ Start with the sampler-facing tree:
 ```bash
 axklib info source.hds
 axklib info source.iso --show-quality --show-unresolved
+axklib info extracted-object-collection
 ```
 
 Use JSON or stable selector paths for automation:
@@ -72,6 +73,11 @@ axklib info source.hds --format paths
 
 `--show-default-programs` includes synthesized empty Program slots. They are
 navigation aids and are not stored objects.
+
+For `info` only, a directory input is searched for bounded flat
+`AXK_OBJECT_DIRECTORY` leaves. Each recognized leaf is reported as one
+read-only media source. Other report, extraction, validation, and authoring
+commands continue to require explicit supported image or object files.
 
 ## Extract WAV And SFZ
 

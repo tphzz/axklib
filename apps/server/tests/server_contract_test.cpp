@@ -319,9 +319,17 @@ TEST(ServerContract, CanonicalReportRequestSchemasMatchApplicationInputs) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
 
-    const auto info = nlohmann::json{
-        {"sources", nlohmann::json::array({file_ref()})}, {"strict", true}, {"includeDefaultPrograms", true}};
+    const auto info = nlohmann::json{{"sources", nlohmann::json::array({{{"kind", "FILE"}, {"file", file_ref()}}})},
+                                     {"strict", true},
+                                     {"includeDefaultPrograms", true}};
     EXPECT_TRUE(axk::server::validate_openapi_value(document, "InfoRequest", info));
+    auto directory_info = info;
+    directory_info["sources"] =
+        nlohmann::json::array({{{"kind", "AXK_OBJECT_DIRECTORY"}, {"directory", directory_ref()}}});
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "InfoRequest", directory_info));
+    auto obsolete_info = info;
+    obsolete_info["sources"] = nlohmann::json::array({file_ref()});
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "InfoRequest", obsolete_info));
     auto invalid_info = info;
     invalid_info["destination"] = directory_ref();
     EXPECT_FALSE(axk::server::validate_openapi_value(document, "InfoRequest", invalid_info));

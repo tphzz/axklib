@@ -1312,9 +1312,16 @@ class ServerApplication {
     }
 
     Json image_summary_json(const axk::app::ImageSessionSummary &summary) const {
+        const auto source =
+            summary.source.kind == axk::app::ImageSourceKind::file
+                ? Json{{"kind", "FILE"},
+                       {"file", {{"rootId", summary.source.root_id}, {"relativePath", summary.source.relative_path}}}}
+                : Json{{"kind", "AXK_OBJECT_DIRECTORY"},
+                       {"directory",
+                        {{"rootId", summary.source.root_id}, {"relativePath", summary.source.relative_path}}}};
         return {{"imageId", summary.image_id},
                 {"revision", summary.revision},
-                {"source", {{"rootId", summary.source.root_id}, {"relativePath", summary.source.relative_path}}},
+                {"source", source},
                 {"format", summary.format},
                 {"availableOperations", summary.available_operations},
                 {"rootCount", summary.root_count},
@@ -1335,13 +1342,26 @@ class ServerApplication {
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         const auto &input = *parsed;
-        axk::app::FileRef source;
+        axk::app::ImageSourceRef source;
         try {
             const auto &reference = input.at("source");
-            source.root_id = reference.at("rootId").get<std::string>();
-            source.relative_path = reference.at("relativePath").get<std::string>();
+            const auto kind = reference.at("kind").get<std::string>();
+            if (kind == "FILE") {
+                const auto &file = reference.at("file");
+                source.root_id = file.at("rootId").get<std::string>();
+                source.relative_path = file.at("relativePath").get<std::string>();
+                source.kind = axk::app::ImageSourceKind::file;
+            } else if (kind == "AXK_OBJECT_DIRECTORY") {
+                const auto &directory = reference.at("directory");
+                source.root_id = directory.at("rootId").get<std::string>();
+                source.relative_path = directory.at("relativePath").get<std::string>();
+                source.kind = axk::app::ImageSourceKind::axk_object_directory;
+            } else {
+                return error_response(400, {"invalid_request", "image source kind is unsupported"}, id);
+            }
         } catch (const Json::exception &) {
-            return error_response(400, {"invalid_request", "source must be one sandbox FileRef"}, id);
+            return error_response(400, {"invalid_request", "source must be one FILE or AXK_OBJECT_DIRECTORY reference"},
+                                  id);
         }
         const auto opened = images_.open(source, request_owner(request));
         if (!opened)

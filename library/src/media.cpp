@@ -100,7 +100,9 @@ MediaKind MediaContainer::kind() const noexcept {
         return MediaKind::fat12_floppy;
     if (std::holds_alternative<IsoImage>(storage_))
         return MediaKind::iso9660;
-    return MediaKind::standalone_object;
+    if (std::holds_alternative<StandaloneObject>(storage_))
+        return MediaKind::standalone_object;
+    return MediaKind::axk_object_directory;
 }
 
 std::filesystem::path MediaContainer::source_path() const {
@@ -110,7 +112,9 @@ std::filesystem::path MediaContainer::source_path() const {
         return fat->source_name();
     if (const auto *iso = std::get_if<IsoImage>(&storage_))
         return iso->source_name();
-    return std::get<StandaloneObject>(storage_).object().logical_path;
+    if (const auto *standalone = std::get_if<StandaloneObject>(&storage_))
+        return standalone->object().logical_path;
+    return std::get<AxkObjectDirectory>(storage_).source_name();
 }
 
 const MediaStorage &MediaContainer::storage() const noexcept { return storage_; }
@@ -134,6 +138,8 @@ Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mod
         return iso->objects(mode, maximum_object_bytes, cancellation);
     if (const auto *standalone = variant_ptr<StandaloneObject>(storage_))
         return std::vector{standalone->object()};
+    if (const auto *directory = variant_ptr<AxkObjectDirectory>(storage_))
+        return directory->objects(mode, cancellation);
     const auto *sfs = variant_ptr<Container>(storage_);
     auto catalog = build_object_catalog(*sfs, maximum_object_bytes, cancellation);
     if (!catalog)
@@ -164,6 +170,14 @@ Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mod
 }
 
 Result<MediaContainer> open_media(const std::filesystem::path &path, const CancellationToken &cancellation) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(path, error);
+    if (!error && std::filesystem::is_directory(status)) {
+        auto directory = AxkObjectDirectory::open(path, cancellation);
+        if (!directory)
+            return std::unexpected{directory.error()};
+        return MediaContainer{std::move(*directory)};
+    }
     auto reader = FileReader::open(path);
     if (!reader)
         return std::unexpected{reader.error()};

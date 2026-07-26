@@ -585,6 +585,146 @@ Result<StandaloneObject> StandaloneObject::open(const std::filesystem::path &pat
 
 const MediaObject &StandaloneObject::object() const noexcept { return object_; }
 
+Result<AxkObjectDirectory> AxkObjectDirectory::open(std::vector<AxkObjectDirectoryEntry> entries,
+                                                    std::string source_name, const CancellationToken &cancellation) {
+    if (entries.size() > maximum_entries) {
+        return std::unexpected{detail::media_error(ErrorCode::io_unsupported_size,
+                                                   "AXK object directory exceeds the entry limit", source_name)};
+    }
+    std::ranges::sort(entries, [](const auto &left, const auto &right) {
+        const auto left_name = detail::upper_ascii(left.name);
+        const auto right_name = detail::upper_ascii(right.name);
+        return left_name == right_name ? left.name < right.name : left_name < right_name;
+    });
+
+    AxkObjectDirectory result;
+    result.source_name_ = std::move(source_name);
+    std::string previous_name;
+    std::uint64_t total_payload_bytes{};
+    for (auto &entry : entries) {
+        if (const auto check = cancellation.check(); !check)
+            return std::unexpected{check.error()};
+        if (detail::unsafe_component(entry.name) || !entry.reader) {
+            return std::unexpected{detail::media_error(ErrorCode::invalid_argument,
+                                                       "AXK object directory entry is invalid", result.source_name_)};
+        }
+        const auto folded_name = detail::upper_ascii(entry.name);
+        if (!previous_name.empty() && folded_name == previous_name) {
+            return std::unexpected{detail::media_error(ErrorCode::invalid_argument,
+                                                       "AXK object directory contains case-insensitive duplicate names",
+                                                       result.source_name_)};
+        }
+        previous_name = folded_name;
+
+        if (entry.reader->size() > maximum_payload_bytes - total_payload_bytes ||
+            entry.reader->size() > std::numeric_limits<std::size_t>::max()) {
+            return std::unexpected{detail::media_error(
+                ErrorCode::io_unsupported_size, "AXK object directory exceeds the payload limit", result.source_name_)};
+        }
+        total_payload_bytes += entry.reader->size();
+        const auto prefix_size =
+            static_cast<std::size_t>(std::min<std::uint64_t>(entry.reader->size(), detail::object_magic.size()));
+        auto prefix = detail::read_bytes(*entry.reader, 0U, prefix_size, cancellation);
+        if (!prefix)
+            return std::unexpected{prefix.error()};
+        if (!detail::object_prefix(*prefix))
+            continue;
+        auto bytes =
+            detail::read_bytes(*entry.reader, 0U, static_cast<std::size_t>(entry.reader->size()), cancellation);
+        if (!bytes)
+            return std::unexpected{bytes.error()};
+        auto decoded = decode_media_object(*bytes, bytes->size());
+        if (!decoded)
+            return std::unexpected{decoded.error()};
+        result.objects_.push_back({std::format("axk-object-directory:{}", entry.name),
+                                   entry.name,
+                                   "axk-object-directory",
+                                   {},
+                                   {},
+                                   {"", LabelStatus::raw_identifier, "AXK object directory has no group label"},
+                                   {"Object directory", LabelStatus::confirmed, "flat AXK object directory"},
+                                   0U,
+                                   bytes->size(),
+                                   std::move(decoded->object),
+                                   std::move(*bytes),
+                                   std::move(decoded->issue)});
+    }
+    if (result.objects_.empty()) {
+        return std::unexpected{detail::media_error(
+            ErrorCode::container_unrecognized, "directory contains no recognized Yamaha objects", result.source_name_)};
+    }
+    return result;
+}
+
+Result<AxkObjectDirectory> AxkObjectDirectory::open(const std::filesystem::path &path,
+                                                    const CancellationToken &cancellation) {
+    std::error_code error;
+    const auto root_status = std::filesystem::symlink_status(path, error);
+    if (error || !std::filesystem::is_directory(root_status) || std::filesystem::is_symlink(root_status)) {
+        return std::unexpected{detail::media_error(
+            ErrorCode::invalid_argument, "AXK object directory path is not a directory", text::path_to_utf8(path))};
+    }
+    std::vector<AxkObjectDirectoryEntry> entries;
+    std::filesystem::directory_iterator iterator{path, std::filesystem::directory_options::none, error};
+    const std::filesystem::directory_iterator end;
+    if (error) {
+        return std::unexpected{detail::media_error(
+            ErrorCode::io_read_failed, "could not enumerate AXK object directory", text::path_to_utf8(path))};
+    }
+    while (iterator != end) {
+        if (entries.size() >= maximum_entries) {
+            return std::unexpected{detail::media_error(ErrorCode::io_unsupported_size,
+                                                       "AXK object directory exceeds the entry limit",
+                                                       text::path_to_utf8(path))};
+        }
+        const auto entry_path = iterator->path();
+        const auto status = iterator->symlink_status(error);
+        if (error) {
+            return std::unexpected{detail::media_error(ErrorCode::io_read_failed,
+                                                       "could not inspect AXK object directory entry",
+                                                       text::path_to_utf8(entry_path))};
+        }
+        if (std::filesystem::is_symlink(status)) {
+            return std::unexpected{detail::media_error(ErrorCode::invalid_argument,
+                                                       "AXK object directories may not contain links",
+                                                       text::path_to_utf8(entry_path))};
+        }
+        if (!std::filesystem::is_regular_file(status)) {
+            return std::unexpected{detail::media_error(ErrorCode::invalid_argument,
+                                                       "AXK object directories must be flat and contain only files",
+                                                       text::path_to_utf8(entry_path))};
+        }
+        auto reader = FileReader::open(entry_path);
+        if (!reader)
+            return std::unexpected{reader.error()};
+        entries.push_back({text::path_to_utf8(entry_path.filename()), std::move(*reader)});
+        iterator.increment(error);
+        if (error) {
+            return std::unexpected{detail::media_error(
+                ErrorCode::io_read_failed, "could not enumerate AXK object directory", text::path_to_utf8(path))};
+        }
+    }
+    return open(std::move(entries), text::path_to_utf8(path), cancellation);
+}
+
+const std::string &AxkObjectDirectory::source_name() const noexcept { return source_name_; }
+
+const std::vector<MediaObject> &AxkObjectDirectory::stored_objects() const noexcept { return objects_; }
+
+Result<std::vector<MediaObject>> AxkObjectDirectory::objects(MediaObjectReadMode mode,
+                                                             const CancellationToken &cancellation) const {
+    if (const auto check = cancellation.check(); !check)
+        return std::unexpected{check.error()};
+    auto result = objects_;
+    if (mode == MediaObjectReadMode::decoded_metadata) {
+        for (auto &object : result) {
+            if (object.decoded.header.type == ObjectType::smpl)
+                object.raw_payload.clear();
+        }
+    }
+    return result;
+}
+
 namespace {
 
 MediaObjectDescriptor describe_media_object(const MediaObject &object) {
@@ -734,6 +874,13 @@ Result<MediaObject> load_media_object(const MediaContainer &container, const Med
             return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
                                               "standalone media object does not match the descriptor")};
         return standalone->object();
+    } else if (const auto *directory = std::get_if<AxkObjectDirectory>(&container.storage())) {
+        const auto found = std::ranges::find(directory->stored_objects(), descriptor.key, &MediaObject::key);
+        if (found == directory->stored_objects().end()) {
+            return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                              "media object is not present in the AXK object directory")};
+        }
+        return *found;
     }
     auto decoded = decode_media_object(bytes, bytes.size());
     if (!decoded)

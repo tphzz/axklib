@@ -4,17 +4,19 @@
     import { userFacingMessage } from '../userFacingMessage';
     import { modal } from '../modal';
     import {
+        axkObjectDirectoryLocation,
         serverDirectoryLocation,
         serverFileLocation,
         type DirectoryRef,
         type FileLocation,
+        type ImageLocation,
         type DirectoryLocation,
         type SandboxEntry,
         type SandboxRoot,
     } from '../storageLocations';
     import Icon from './Icon.svelte';
 
-    type PickerMode = 'file' | 'directory' | 'save-file';
+    type PickerMode = 'file' | 'directory' | 'save-file' | 'media-source';
     interface Props {
         transport: ImageTransport;
         mode: PickerMode;
@@ -25,7 +27,7 @@
         initialDirectory?: DirectoryRef | null;
         ondirectorychange?: (directory: DirectoryRef | null) => void;
         onmanagelocations?: () => void;
-        onselect: (selection: FileLocation | DirectoryLocation) => void;
+        onselect: (selection: ImageLocation | DirectoryLocation) => void;
         onselectmany?: (selections: FileLocation[]) => void;
         oncancel: () => void;
     }
@@ -93,7 +95,7 @@
 
     function entryIsVisible(entry: SandboxEntry): boolean {
         if (entry.kind === 'DIRECTORY') return true;
-        if (mode !== 'file') return false;
+        if (mode !== 'file' && mode !== 'media-source') return false;
         if (normalizedExtensions.length === 0) return true;
         const extension = entry.name.split('.').pop()?.toLocaleLowerCase() ?? '';
         return normalizedExtensions.includes(extension);
@@ -273,6 +275,16 @@
         );
     }
 
+    function selectCurrentObjectDirectory(): void {
+        if (!activeRoot || !directory) return;
+        onselect(
+            axkObjectDirectoryLocation(
+                directory,
+                directory.relativePath ? `${activeRoot.displayName}/${directory.relativePath}` : activeRoot.displayName,
+            ),
+        );
+    }
+
     function selectFiles(): void {
         if (!activeRoot || selectedFilePaths.length === 0 || !onselectmany) return;
         const selected = visibleEntries.flatMap((entry) =>
@@ -386,7 +398,7 @@
                     : 'Workspaces'}
             </span>
             <div class="storage-picker-location-actions">
-                {#if activeRoot?.writable && directory && mode !== 'file'}
+                {#if activeRoot?.writable && directory && (mode === 'directory' || mode === 'save-file')}
                     <button
                         class="secondary-button storage-picker-directory-action"
                         type="button"
@@ -514,6 +526,10 @@
                 <button class="primary-button" type="button" onclick={selectOutput}>Select output</button>
             {:else if mode === 'directory' && directory}
                 <button class="primary-button" type="button" onclick={selectCurrentDirectory}>Select directory</button>
+            {:else if mode === 'media-source' && directory}
+                <button class="primary-button" type="button" onclick={selectCurrentObjectDirectory}
+                    >Open object directory</button
+                >
             {:else if mode === 'file' && multiple && directory}
                 <button
                     class="primary-button"

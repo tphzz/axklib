@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HttpImageTransport } from './httpTransport';
-import { clientUploadLocation, serverDirectoryLocation, serverFileLocation } from './storageLocations';
+import {
+    axkObjectDirectoryLocation,
+    clientUploadLocation,
+    serverDirectoryLocation,
+    serverFileLocation,
+} from './storageLocations';
 import type { FileLocation } from './storageLocations';
 
 const serverFile = (relativePath: string) => serverFileLocation({ rootId: 'workspace', relativePath });
@@ -99,12 +104,18 @@ describe('HttpImageTransport', () => {
                 expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer secret');
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
                     expect(JSON.parse(String(init.body))).toEqual({
-                        source: { rootId: 'workspace', relativePath: 'images/test.hds' },
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/test.hds' },
+                        },
                     });
                     return json(
                         {
                             imageId: 'image-remote',
-                            source: { rootId: 'workspace', relativePath: 'images/test.hds' },
+                            source: {
+                                kind: 'FILE',
+                                file: { rootId: 'workspace', relativePath: 'images/test.hds' },
+                            },
                             format: 'sfs',
                             rootCount: 1,
                             objectCount: 2,
@@ -223,6 +234,54 @@ describe('HttpImageTransport', () => {
         });
         await transport.closeImage(1);
         expect(requests).toHaveLength(6);
+    });
+
+    it('opens an AXK object directory through the explicit directory source contract', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    expect(JSON.parse(String(init.body))).toEqual({
+                        source: {
+                            kind: 'AXK_OBJECT_DIRECTORY',
+                            directory: { rootId: 'workspace', relativePath: 'unpacked/volume' },
+                        },
+                    });
+                    return json(
+                        {
+                            imageId: 'directory-image',
+                            revision: 1,
+                            source: {
+                                kind: 'AXK_OBJECT_DIRECTORY',
+                                directory: { rootId: 'workspace', relativePath: 'unpacked/volume' },
+                            },
+                            format: 'axk-object-directory',
+                            availableOperations: ['images.content', 'images.objects', 'images.package.export'],
+                            rootCount: 0,
+                            objectCount: 0,
+                            relationshipCount: 0,
+                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        },
+                        201,
+                    );
+                }
+                if (url.pathname.endsWith('/images/directory-image/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                throw new Error(`unexpected request ${init?.method} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const opened = await transport.openImage(
+            axkObjectDirectoryLocation({ rootId: 'workspace', relativePath: 'unpacked/volume' }),
+        );
+        expect(opened).toMatchObject({
+            sessionId: 1,
+            packageImportAvailable: false,
+            packageExportAvailable: true,
+        });
     });
 
     it('assembles complete audition audio with the server-advertised range limit', async () => {

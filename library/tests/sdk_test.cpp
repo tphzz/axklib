@@ -137,12 +137,15 @@ TEST(Sdk, OpensInventoriesPreviewsAndExportsEveryDocumentedMediaProfile) {
     const auto fat_path = root / "fixture.ima";
     const auto iso_path = root / "fixture.iso";
     const auto standalone_path = root / "fixture.smpl";
+    const auto object_directory = root / "objects";
+    std::filesystem::create_directory(object_directory);
     write_bytes(fat_path, fat_fixture());
     write_bytes(iso_path, iso_fixture());
     write_bytes(standalone_path, smpl_object());
+    write_bytes(object_directory / "SAMPLE.001", smpl_object());
 
     axk::operation_context context;
-    for (const auto &path : {fixture_path(), fat_path, iso_path, standalone_path}) {
+    for (const auto &path : {fixture_path(), fat_path, iso_path, standalone_path, object_directory}) {
         auto opened = axk::image::open(path.string(), context);
         ASSERT_TRUE(opened) << path << ": " << opened.error().message;
         auto objects = opened->objects(0U, 32U, context);

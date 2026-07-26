@@ -38,6 +38,7 @@ import type {
     DirectoryLocation,
     DirectoryRef,
     FileLocation,
+    ImageLocation,
     FileRef,
     InputFileLocation,
     SandboxRoot,
@@ -103,7 +104,7 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('deleteSandboxEntry', [entry]);
     }
 
-    async openImage(source: FileLocation): Promise<OpenedImage> {
+    async openImage(source: ImageLocation): Promise<OpenedImage> {
         this.calls.push('openImage');
         const configured = this.options.operations?.openImage;
         if (configured) return configured(source);

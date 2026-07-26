@@ -31,7 +31,7 @@ struct ImageValidationSummary {
 struct ImageSessionSummary {
     std::string image_id;
     std::uint64_t revision{};
-    FileRef source;
+    ImageSourceRef source;
     std::string format;
     std::vector<std::string> available_operations;
     std::size_t root_count{};
@@ -50,7 +50,7 @@ struct ImageSessionMutation {
 struct ImageSessionRead {
     std::string image_id;
     std::uint64_t revision{};
-    FileRef source;
+    ImageSourceRef source;
     std::shared_ptr<const RandomAccessReader> reader;
     const MediaContainer *media{};
     std::string target_snapshot_id;
@@ -265,7 +265,7 @@ class ImageSessionManager {
     ImageSessionManager(const ImageSessionManager &) = delete;
     ImageSessionManager &operator=(const ImageSessionManager &) = delete;
 
-    [[nodiscard]] Result<ImageSessionSummary> open(const FileRef &source, std::string owner_id,
+    [[nodiscard]] Result<ImageSessionSummary> open(const ImageSourceRef &source, std::string owner_id,
                                                    const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageSessionSummary> inspect(std::string_view image_id, std::string_view owner_id);
     [[nodiscard]] Result<ImageObjectDeletionPlan> plan_deletion(std::string_view image_id, std::string_view owner_id,

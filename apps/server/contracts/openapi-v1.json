@@ -2727,9 +2727,10 @@
         "type": "object"
       },
       "ImageOpenRequest": {
+        "additionalProperties": false,
         "properties": {
           "source": {
-            "$ref": "#/components/schemas/FileRef"
+            "$ref": "#/components/schemas/ImageSourceRef"
           }
         },
         "required": [
@@ -2979,7 +2980,7 @@
             "type": "integer"
           },
           "source": {
-            "$ref": "#/components/schemas/FileRef"
+            "$ref": "#/components/schemas/ImageSourceRef"
           },
           "validation": {
             "additionalProperties": false,
@@ -3613,6 +3614,42 @@
         ],
         "type": "object"
       },
+      "ImageSourceRef": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "file": {
+                "$ref": "#/components/schemas/FileRef"
+              },
+              "kind": {
+                "const": "FILE"
+              }
+            },
+            "required": [
+              "kind",
+              "file"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "directory": {
+                "$ref": "#/components/schemas/DirectoryRef"
+              },
+              "kind": {
+                "const": "AXK_OBJECT_DIRECTORY"
+              }
+            },
+            "required": [
+              "kind",
+              "directory"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "ImageValidationItem": {
         "additionalProperties": false,
         "properties": {
@@ -3805,7 +3842,7 @@
           },
           "sources": {
             "items": {
-              "$ref": "#/components/schemas/FileRef"
+              "$ref": "#/components/schemas/ImageSourceRef"
             },
             "maxItems": 1024,
             "minItems": 1,
@@ -18470,8 +18507,11 @@
                   "value": {
                     "sources": [
                       {
-                        "relativePath": "x",
-                        "rootId": "x"
+                        "file": {
+                          "relativePath": "x",
+                          "rootId": "x"
+                        },
+                        "kind": "FILE"
                       }
                     ]
                   }

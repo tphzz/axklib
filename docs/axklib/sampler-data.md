@@ -3,7 +3,7 @@
 Yamaha A-series containers store sampler objects as payload files. axklib reads
 the container layer first, then decodes these shared object payloads in the same
 way for SFS hard-disk images, FAT12 floppy images, CD-ROM ISO images, standalone
-object files, and directory scans.
+object files, and explicit flat `AXK_OBJECT_DIRECTORY` sources.
 
 ```mermaid
 flowchart TD

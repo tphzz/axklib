@@ -9,6 +9,7 @@
 
 #include "axklib/application/file_operations.hpp"
 #include "axklib/application/validation_operations.hpp"
+#include "axklib/media.hpp"
 
 namespace {
 
@@ -333,7 +334,8 @@ TEST_F(FileOperationsTest, InfoReturnsCanonicalHierarchyWithoutRequiringAnArtifa
     ASSERT_TRUE(axk::app::bind_file_operations(registry, *sandbox_));
     const auto result = registry.invoke(
         "report.info",
-        {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}}, {"includeDefaultPrograms", false}},
+        {{"sources", {{{"kind", "FILE"}, {"file", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}}}},
+         {"includeDefaultPrograms", false}},
         {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(result->at("operationId"), "report.info");
@@ -353,6 +355,38 @@ TEST_F(FileOperationsTest, InfoReturnsCanonicalHierarchyWithoutRequiringAnArtifa
     ASSERT_FALSE(partition.at("children").empty());
     const auto serialized = result->dump();
     EXPECT_EQ(serialized.find(root_.string()), std::string::npos);
+}
+
+TEST_F(FileOperationsTest, InfoReadsAnExplicitFlatObjectDirectory) {
+    const auto media = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(media) << media.error().message;
+    const auto objects = media->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(objects) << objects.error().message;
+    ASSERT_FALSE(objects->empty());
+    ASSERT_TRUE(std::filesystem::create_directory(root_ / "objects"));
+    for (std::size_t index = 0U; index < objects->size(); ++index) {
+        std::ofstream output{root_ / "objects" / std::format("object-{:03}.bin", index), std::ios::binary};
+        ASSERT_TRUE(output);
+        const auto &payload = (*objects)[index].raw_payload;
+        output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+    }
+    std::ofstream{root_ / "objects" / "README.TXT"} << "support file\n";
+
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_file_operations(registry, *sandbox_));
+    const auto result = registry.invoke(
+        "report.info",
+        {{"sources",
+          {{{"kind", "AXK_OBJECT_DIRECTORY"}, {"directory", {{"rootId", "workspace"}, {"relativePath", "objects"}}}}}}},
+        {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(result->at("loadedCount"), 1U);
+    EXPECT_EQ(result->at("failedCount"), 0U);
+    ASSERT_EQ(result->at("trees").size(), 1U);
+    const auto &tree = result->at("trees").front();
+    EXPECT_EQ(tree.at("sourcePath"), "objects");
+    EXPECT_EQ(tree.at("containerKind"), "axk_object_directory");
+    EXPECT_EQ(tree.at("objectCount"), objects->size());
 }
 
 TEST_F(FileOperationsTest, ObjectsWritesTheCompleteCliArtifactSetWithCanonicalRows) {

@@ -19,7 +19,7 @@
 
 namespace axk {
 
-enum class MediaKind : std::uint8_t { sfs, fat12_floppy, iso9660, standalone_object };
+enum class MediaKind : std::uint8_t { sfs, fat12_floppy, iso9660, standalone_object, axk_object_directory };
 enum class LabelStatus : std::uint8_t { confirmed, navigation_aid, raw_identifier };
 enum class MediaObjectReadMode : std::uint8_t { complete, decoded_metadata };
 
@@ -84,6 +84,11 @@ struct MediaObject {
     DecodedObject decoded;
     std::vector<std::byte> raw_payload;
     std::optional<Error> decode_issue;
+};
+
+struct AxkObjectDirectoryEntry {
+    std::string name;
+    std::shared_ptr<const RandomAccessReader> reader;
 };
 
 struct MediaObjectDescriptor {
@@ -198,7 +203,30 @@ class AXK_API StandaloneObject {
     MediaObject object_;
 };
 
-using MediaStorage = std::variant<Container, FatImage, IsoImage, StandaloneObject>;
+// Read-only snapshot of a flat directory containing standalone Yamaha object
+// files. Filesystem and FAT metadata are intentionally not reconstructed.
+class AXK_API AxkObjectDirectory {
+  public:
+    static constexpr std::size_t maximum_entries = 224U;
+    static constexpr std::uint64_t maximum_payload_bytes = 1'474'560U;
+
+    [[nodiscard]] static Result<AxkObjectDirectory> open(std::vector<AxkObjectDirectoryEntry> entries,
+                                                         std::string source_name = {},
+                                                         const CancellationToken &cancellation = {});
+    [[nodiscard]] static Result<AxkObjectDirectory> open(const std::filesystem::path &path,
+                                                         const CancellationToken &cancellation = {});
+
+    [[nodiscard]] const std::string &source_name() const noexcept;
+    [[nodiscard]] const std::vector<MediaObject> &stored_objects() const noexcept;
+    [[nodiscard]] Result<std::vector<MediaObject>> objects(MediaObjectReadMode mode = MediaObjectReadMode::complete,
+                                                           const CancellationToken &cancellation = {}) const;
+
+  private:
+    std::string source_name_;
+    std::vector<MediaObject> objects_;
+};
+
+using MediaStorage = std::variant<Container, FatImage, IsoImage, StandaloneObject, AxkObjectDirectory>;
 
 class AXK_API MediaContainer {
   public:

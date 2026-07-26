@@ -227,7 +227,7 @@ void render_tree_paths(const axk::cli::schema::info_v1::TreeOutput &tree,
 }
 
 int run_info_request(const axk::cli::InfoRequest &request) {
-    auto expanded = expand_cli_paths(request.paths);
+    auto expanded = expand_cli_paths(request.paths, true);
     if (!expanded)
         return report_failure(expanded.error());
     const auto &paths = *expanded;
@@ -241,10 +241,25 @@ int run_info_request(const axk::cli::InfoRequest &request) {
         return axk::cli::report_application_failure(runtime.error());
     auto sources = nlohmann::json::array();
     for (const auto &path : paths) {
-        auto reference = (*runtime)->file_ref(path);
-        if (!reference)
-            return axk::cli::report_application_failure(reference.error());
-        sources.push_back({{"rootId", reference->root_id}, {"relativePath", reference->relative_path}});
+        std::error_code status_error;
+        const auto directory = std::filesystem::is_directory(path, status_error);
+        if (status_error)
+            return report_failure(
+                make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not inspect info source path"));
+        if (directory) {
+            auto reference = (*runtime)->directory_ref(path);
+            if (!reference)
+                return axk::cli::report_application_failure(reference.error());
+            sources.push_back(
+                {{"kind", "AXK_OBJECT_DIRECTORY"},
+                 {"directory", {{"rootId", reference->root_id}, {"relativePath", reference->relative_path}}}});
+        } else {
+            auto reference = (*runtime)->file_ref(path);
+            if (!reference)
+                return axk::cli::report_application_failure(reference.error());
+            sources.push_back({{"kind", "FILE"},
+                               {"file", {{"rootId", reference->root_id}, {"relativePath", reference->relative_path}}}});
+        }
     }
     auto service_result =
         (*runtime)->invoke("report.info", {{"sources", std::move(sources)},

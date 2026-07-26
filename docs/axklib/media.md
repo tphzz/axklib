@@ -2,7 +2,8 @@
 
 The native library exposes opened container variants through
 `axk::MediaContainer`. `axk::open_media()` detects Yamaha SFS images, FAT12
-floppies, ISO9660 CD-ROM images, and standalone `FSFSDEV3SPLX` object files.
+floppies, ISO9660 CD-ROM images, standalone `FSFSDEV3SPLX` object files, and
+flat AXK object directories.
 The individual `axk::FatImage`, `axk::IsoImage`, and
 `axk::StandaloneObject` types are available when an application already knows
 the container kind.
@@ -37,6 +38,21 @@ but names or metadata supplied only by those extensions are outside the API
 contract. `axklib create iso` separately creates the deterministic one-group,
 one-volume profile documented in [CD-ROM Images](cdrom.md).
 
+## AXK object directory profile
+
+An `AXK_OBJECT_DIRECTORY` is one flat host directory whose immediate regular
+files may contain complete `FSFSDEV3SPLX` Yamaha objects. Object recognition,
+decoding, catalog construction, relationship resolution, preview, audition, and
+package export use the same object layer as image-backed media. Unrecognized
+regular support files are ignored.
+
+The profile is intentionally read-only and bounded to 224 immediate entries and
+1,474,560 aggregate bytes. Links, nested directories, case-insensitive duplicate
+names, and directories without a recognized object are rejected. The directory
+does not recover FAT allocation, DOS directory order, deleted entries, volume
+labels, or any other missing container metadata. Collection directories above
+an object directory are navigation scopes, not media sessions.
+
 ## Format Documentation Map
 
 The public format pages divide the byte contracts by layer:
@@ -64,7 +80,8 @@ graph service.
 
 The installed `axk::image::open()` SDK facade uses the same media dispatcher.
 SDK inventory, validation, preview, PCM, and export operations therefore accept
-SFS, FAT12, ISO9660, and standalone Yamaha object inputs through one session API.
+SFS, FAT12, ISO9660, standalone Yamaha objects, and AXK object directories
+through one session API.
 
 ## CD menu labels
 

@@ -532,7 +532,9 @@ ContentTree build_content_tree(const MediaContainer &container, const ObjectCata
     if (!result.roots.empty())
         return result;
 
-    const auto name = container.kind() == MediaKind::fat12_floppy ? "FAT root" : "Standalone object";
+    const auto name = container.kind() == MediaKind::fat12_floppy           ? "FAT root"
+                      : container.kind() == MediaKind::axk_object_directory ? "Object directory"
+                                                                            : "Standalone object";
     result.roots.push_back({std::format("scope:{}", name), "volume", name});
     return result;
 }

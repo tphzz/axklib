@@ -1,11 +1,11 @@
 <script lang="ts">
-    import type { FileLocation } from '../storageLocations';
+    import type { ImageLocation } from '../storageLocations';
     import type { DiskTreeItem, ImageTreeAction } from '../types';
     import Icon from './Icon.svelte';
     import TreeNode from './TreeNode.svelte';
 
     interface Props {
-        image: FileLocation | null;
+        image: ImageLocation | null;
         items: DiskTreeItem[];
         selectedId: string;
         opening: boolean;

@@ -17,6 +17,12 @@ export interface ServerDirectoryLocation {
     displayName: string;
 }
 
+export interface AxkObjectDirectoryLocation {
+    kind: 'axk-object-directory';
+    reference: DirectoryRef;
+    displayName: string;
+}
+
 export interface UploadRef {
     uploadId: string;
 }
@@ -32,6 +38,7 @@ export interface ClientUploadLocation {
 
 export type FileLocation = ServerFileLocation;
 export type DirectoryLocation = ServerDirectoryLocation;
+export type ImageLocation = FileLocation | AxkObjectDirectoryLocation;
 export type InputFileLocation = FileLocation | ClientUploadLocation;
 
 export interface SandboxRoot {
@@ -70,6 +77,14 @@ export function serverDirectoryLocation(reference: DirectoryRef, displayName?: s
     };
 }
 
+export function axkObjectDirectoryLocation(reference: DirectoryRef, displayName?: string): AxkObjectDirectoryLocation {
+    return {
+        kind: 'axk-object-directory',
+        reference,
+        displayName: displayName ?? (reference.relativePath || reference.rootId),
+    };
+}
+
 export function clientUploadLocation(
     reference: UploadRef,
     uploadKind: UploadKind,
@@ -78,7 +93,7 @@ export function clientUploadLocation(
     return { kind: 'client-upload', reference, uploadKind, displayName };
 }
 
-export function locationKey(location: FileLocation | DirectoryLocation): string {
+export function locationKey(location: FileLocation | DirectoryLocation | AxkObjectDirectoryLocation): string {
     return JSON.stringify([location.reference.rootId, location.reference.relativePath]);
 }
 
