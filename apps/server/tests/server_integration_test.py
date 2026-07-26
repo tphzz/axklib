@@ -844,6 +844,13 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
         (abandoned_publication / "partial.wav").write_bytes(b"partial")
         ordinary_temporary_file = root_path / ".export.tmp"
         ordinary_temporary_file.write_bytes(b"ordinary")
+        media_sources = root_path / "media-sources"
+        object_directory = media_sources / "objects"
+        ordinary_directory = media_sources / "ordinary"
+        object_directory.mkdir(parents=True)
+        ordinary_directory.mkdir()
+        (object_directory / "SMP00001").write_bytes(b"FSFSDEV3SPLX")
+        (ordinary_directory / "readme.txt").write_text("ordinary", encoding="utf-8")
         server_log_path = root_path / "server.log"
         workspace_store = root_path / "workspaces.json"
         write_workspace_store(workspace_store, root_path)
@@ -977,6 +984,43 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 {"rootId": "workspace", "relativePath": "download.bin"},
             )
             assert status == 200 and metadata["data"]["size"] == 6
+            status, ordinary_listing = http_request(
+                port,
+                "POST",
+                "/api/v1/files/list",
+                {
+                    "directory": {
+                        "rootId": "workspace",
+                        "relativePath": "media-sources",
+                    }
+                },
+            )
+            assert status == 200, ordinary_listing
+            assert all(
+                entry["mediaSourceKind"] is None
+                for entry in ordinary_listing["data"]["entries"]
+            )
+            status, classified_listing = http_request(
+                port,
+                "POST",
+                "/api/v1/files/list",
+                {
+                    "directory": {
+                        "rootId": "workspace",
+                        "relativePath": "media-sources",
+                    },
+                    "classifyMediaSources": True,
+                },
+            )
+            assert status == 200, classified_listing
+            classified_entries = {
+                entry["name"]: entry["mediaSourceKind"]
+                for entry in classified_listing["data"]["entries"]
+            }
+            assert classified_entries == {
+                "objects": "AXK_OBJECT_DIRECTORY",
+                "ordinary": None,
+            }
             status, created_directory = http_request(
                 port,
                 "POST",

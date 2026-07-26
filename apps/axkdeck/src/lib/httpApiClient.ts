@@ -300,13 +300,15 @@ export class AxklibHttpApiClient {
 
     listDirectory(
         directory: DirectoryRef,
-        options: { limit?: number; cursor?: string } = {},
+        options: { limit?: number; cursor?: string; classifyMediaSources?: boolean } = {},
     ): Promise<DirectoryListing> {
-        return this.request('POST', '/files/list', {
+        const input: components['schemas']['DirectoryListRequest'] = {
             directory,
             limit: options.limit ?? 200,
             cursor: options.cursor ?? null,
-        });
+            classifyMediaSources: options.classifyMediaSources ?? false,
+        };
+        return this.request('POST', '/files/list', input);
     }
 
     metadata(reference: FileRef): Promise<EntryMetadata> {

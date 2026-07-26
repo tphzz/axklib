@@ -110,6 +110,21 @@ TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
     EXPECT_EQ(content_response, "#/components/schemas/ImageContentPageResponse");
 }
 
+TEST(ServerContract, DirectoryListingsExposeOptInMediaSourceClassification) {
+    const auto document = nlohmann::json::parse(axk::server::embedded_openapi());
+    const auto &schemas = document.at("components").at("schemas");
+    const auto &request = schemas.at("DirectoryListRequest");
+    const auto &classification = request.at("properties").at("classifyMediaSources");
+    EXPECT_EQ(classification.at("type"), "boolean");
+    EXPECT_FALSE(classification.at("default").get<bool>());
+
+    const auto &entry =
+        schemas.at("DirectoryListResponse").at("properties").at("data").at("properties").at("entries").at("items");
+    EXPECT_TRUE(std::ranges::contains(entry.at("required"), "mediaSourceKind"));
+    EXPECT_EQ(entry.at("properties").at("mediaSourceKind").at("enum"),
+              nlohmann::json::array({"AXK_OBJECT_DIRECTORY", nullptr}));
+}
+
 TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelMetadata) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());

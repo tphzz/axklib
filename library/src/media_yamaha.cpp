@@ -585,9 +585,11 @@ Result<StandaloneObject> StandaloneObject::open(const std::filesystem::path &pat
 
 const MediaObject &StandaloneObject::object() const noexcept { return object_; }
 
-Result<AxkObjectDirectory> AxkObjectDirectory::open(std::vector<AxkObjectDirectoryEntry> entries,
-                                                    std::string source_name, const CancellationToken &cancellation) {
-    if (entries.size() > maximum_entries) {
+namespace {
+
+Result<void> prepare_axk_object_directory_entries(std::vector<AxkObjectDirectoryEntry> &entries,
+                                                  std::string_view source_name, const CancellationToken &cancellation) {
+    if (entries.size() > AxkObjectDirectory::maximum_entries) {
         return std::unexpected{detail::media_error(ErrorCode::io_unsupported_size,
                                                    "AXK object directory exceeds the entry limit", source_name)};
     }
@@ -597,31 +599,59 @@ Result<AxkObjectDirectory> AxkObjectDirectory::open(std::vector<AxkObjectDirecto
         return left_name == right_name ? left.name < right.name : left_name < right_name;
     });
 
-    AxkObjectDirectory result;
-    result.source_name_ = std::move(source_name);
     std::string previous_name;
     std::uint64_t total_payload_bytes{};
-    for (auto &entry : entries) {
+    for (const auto &entry : entries) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
         if (detail::unsafe_component(entry.name) || !entry.reader) {
-            return std::unexpected{detail::media_error(ErrorCode::invalid_argument,
-                                                       "AXK object directory entry is invalid", result.source_name_)};
+            return std::unexpected{
+                detail::media_error(ErrorCode::invalid_argument, "AXK object directory entry is invalid", source_name)};
         }
         const auto folded_name = detail::upper_ascii(entry.name);
         if (!previous_name.empty() && folded_name == previous_name) {
             return std::unexpected{detail::media_error(ErrorCode::invalid_argument,
                                                        "AXK object directory contains case-insensitive duplicate names",
-                                                       result.source_name_)};
+                                                       source_name)};
         }
         previous_name = folded_name;
 
-        if (entry.reader->size() > maximum_payload_bytes - total_payload_bytes ||
+        if (entry.reader->size() > AxkObjectDirectory::maximum_payload_bytes - total_payload_bytes ||
             entry.reader->size() > std::numeric_limits<std::size_t>::max()) {
-            return std::unexpected{detail::media_error(
-                ErrorCode::io_unsupported_size, "AXK object directory exceeds the payload limit", result.source_name_)};
+            return std::unexpected{detail::media_error(ErrorCode::io_unsupported_size,
+                                                       "AXK object directory exceeds the payload limit", source_name)};
         }
         total_payload_bytes += entry.reader->size();
+    }
+    return {};
+}
+
+} // namespace
+
+Result<bool> AxkObjectDirectory::recognizes(std::vector<AxkObjectDirectoryEntry> entries, std::string source_name,
+                                            const CancellationToken &cancellation) {
+    if (const auto prepared = prepare_axk_object_directory_entries(entries, source_name, cancellation); !prepared)
+        return std::unexpected{prepared.error()};
+    for (const auto &entry : entries) {
+        const auto prefix_size =
+            static_cast<std::size_t>(std::min<std::uint64_t>(entry.reader->size(), detail::object_magic.size()));
+        auto prefix = detail::read_bytes(*entry.reader, 0U, prefix_size, cancellation);
+        if (!prefix)
+            return std::unexpected{prefix.error()};
+        if (detail::object_prefix(*prefix))
+            return true;
+    }
+    return false;
+}
+
+Result<AxkObjectDirectory> AxkObjectDirectory::open(std::vector<AxkObjectDirectoryEntry> entries,
+                                                    std::string source_name, const CancellationToken &cancellation) {
+    if (const auto prepared = prepare_axk_object_directory_entries(entries, source_name, cancellation); !prepared)
+        return std::unexpected{prepared.error()};
+
+    AxkObjectDirectory result;
+    result.source_name_ = std::move(source_name);
+    for (auto &entry : entries) {
         const auto prefix_size =
             static_cast<std::size_t>(std::min<std::uint64_t>(entry.reader->size(), detail::object_magic.size()));
         auto prefix = detail::read_bytes(*entry.reader, 0U, prefix_size, cancellation);

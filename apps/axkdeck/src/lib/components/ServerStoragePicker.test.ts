@@ -25,11 +25,37 @@ function transport(withRoots = true): ImageTransport {
         sandboxDirectory: vi.fn().mockImplementation(async (directory) => ({
             directory,
             entries: directory.relativePath
-                ? [{ name: 'nested.hds', relativePath: 'images/nested.hds', kind: 'FILE', size: 2048 }]
+                ? [
+                      {
+                          name: 'nested.hds',
+                          relativePath: 'images/nested.hds',
+                          kind: 'FILE',
+                          size: 2048,
+                          mediaSourceKind: null,
+                      },
+                  ]
                 : [
-                      { name: 'images', relativePath: 'images', kind: 'DIRECTORY', size: null },
-                      { name: 'disk.hds', relativePath: 'disk.hds', kind: 'FILE', size: 1024 },
-                      { name: 'notes.txt', relativePath: 'notes.txt', kind: 'FILE', size: 20 },
+                      {
+                          name: 'images',
+                          relativePath: 'images',
+                          kind: 'DIRECTORY',
+                          size: null,
+                          mediaSourceKind: null,
+                      },
+                      {
+                          name: 'disk.hds',
+                          relativePath: 'disk.hds',
+                          kind: 'FILE',
+                          size: 1024,
+                          mediaSourceKind: null,
+                      },
+                      {
+                          name: 'notes.txt',
+                          relativePath: 'notes.txt',
+                          kind: 'FILE',
+                          size: 20,
+                          mediaSourceKind: null,
+                      },
                   ],
             truncated: false,
             nextCursor: null,
@@ -280,8 +306,20 @@ describe('ServerStoragePicker', () => {
             return {
                 directory,
                 entries: [
-                    { name: 'images', relativePath: 'images', kind: 'DIRECTORY', size: null },
-                    { name: 'disk.hds', relativePath: 'disk.hds', kind: 'FILE', size: 1024 },
+                    {
+                        name: 'images',
+                        relativePath: 'images',
+                        kind: 'DIRECTORY',
+                        size: null,
+                        mediaSourceKind: null,
+                    },
+                    {
+                        name: 'disk.hds',
+                        relativePath: 'disk.hds',
+                        kind: 'FILE',
+                        size: 1024,
+                        mediaSourceKind: null,
+                    },
                 ],
                 truncated: false,
                 nextCursor: null,
@@ -338,8 +376,24 @@ describe('ServerStoragePicker', () => {
         vi.mocked(imageTransport.sandboxDirectory).mockImplementation(async (directory, cursor) => ({
             directory,
             entries: cursor
-                ? [{ name: 'disk.hds', relativePath: 'disk.hds', kind: 'FILE', size: 1024 }]
-                : [{ name: 'notes.txt', relativePath: 'notes.txt', kind: 'FILE', size: 20 }],
+                ? [
+                      {
+                          name: 'disk.hds',
+                          relativePath: 'disk.hds',
+                          kind: 'FILE',
+                          size: 1024,
+                          mediaSourceKind: null,
+                      },
+                  ]
+                : [
+                      {
+                          name: 'notes.txt',
+                          relativePath: 'notes.txt',
+                          kind: 'FILE',
+                          size: 20,
+                          mediaSourceKind: null,
+                      },
+                  ],
             truncated: !cursor,
             nextCursor: cursor ? null : 'next',
         }));
@@ -410,10 +464,34 @@ describe('ServerStoragePicker', () => {
         vi.mocked(imageTransport.sandboxDirectory).mockImplementation(async (directory) => ({
             directory,
             entries: [
-                { name: 'nested', relativePath: 'nested', kind: 'DIRECTORY', size: null },
-                { name: 'kick.wav', relativePath: 'kick.wav', kind: 'FILE', size: 1024 },
-                { name: 'snare.FLAC', relativePath: 'snare.FLAC', kind: 'FILE', size: 2048 },
-                { name: 'notes.txt', relativePath: 'notes.txt', kind: 'FILE', size: 20 },
+                {
+                    name: 'nested',
+                    relativePath: 'nested',
+                    kind: 'DIRECTORY',
+                    size: null,
+                    mediaSourceKind: null,
+                },
+                {
+                    name: 'kick.wav',
+                    relativePath: 'kick.wav',
+                    kind: 'FILE',
+                    size: 1024,
+                    mediaSourceKind: null,
+                },
+                {
+                    name: 'snare.FLAC',
+                    relativePath: 'snare.FLAC',
+                    kind: 'FILE',
+                    size: 2048,
+                    mediaSourceKind: null,
+                },
+                {
+                    name: 'notes.txt',
+                    relativePath: 'notes.txt',
+                    kind: 'FILE',
+                    size: 20,
+                    mediaSourceKind: null,
+                },
             ],
             truncated: false,
             nextCursor: null,
@@ -549,11 +627,40 @@ describe('ServerStoragePicker', () => {
         expect(within(readOnlyLocation).getByText('Read-only location')).toBeTruthy();
     });
 
-    it('opens the current folder explicitly as an AXK object directory', async () => {
+    it('opens a recognized sampler object folder directly from its parent', async () => {
         const onselect = vi.fn();
+        const imageTransport = transport();
+        vi.mocked(imageTransport.sandboxDirectory).mockResolvedValue({
+            directory: { rootId: 'workspace', relativePath: '' },
+            entries: [
+                {
+                    name: 'objects',
+                    relativePath: 'objects',
+                    kind: 'DIRECTORY',
+                    size: null,
+                    mediaSourceKind: 'AXK_OBJECT_DIRECTORY',
+                },
+                {
+                    name: 'collection',
+                    relativePath: 'collection',
+                    kind: 'DIRECTORY',
+                    size: null,
+                    mediaSourceKind: null,
+                },
+                {
+                    name: 'disk.hds',
+                    relativePath: 'disk.hds',
+                    kind: 'FILE',
+                    size: 1024,
+                    mediaSourceKind: null,
+                },
+            ],
+            truncated: false,
+            nextCursor: null,
+        });
         render(ServerStoragePicker, {
             props: {
-                transport: transport(),
+                transport: imageTransport,
                 mode: 'media-source',
                 title: 'Open image',
                 extensions: ['hds'],
@@ -564,14 +671,31 @@ describe('ServerStoragePicker', () => {
 
         await fireEvent.click(await screen.findByText('Yamaha images'));
         expect(screen.getByText('disk.hds')).toBeTruthy();
-        expect(screen.queryByText('notes.txt')).toBeNull();
-        await fireEvent.click(screen.getByRole('button', { name: 'Open object directory' }));
+        expect(screen.getByText('Sampler object folder')).toBeTruthy();
+        expect(screen.getByText('Disk image · 1024 bytes')).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Open object directory' })).toBeNull();
+        const objectDirectory = screen.getByRole('option', { name: /objects/ });
+        const collection = screen.getByRole('option', { name: /collection/ });
+        expect(objectDirectory.querySelector('[data-icon="chevron"]')).toBeNull();
+        expect(collection.querySelector('[data-icon="chevron"]')).toBeTruthy();
+        await fireEvent.click(objectDirectory);
 
         expect(onselect).toHaveBeenCalledWith({
             kind: 'axk-object-directory',
-            reference: { rootId: 'workspace', relativePath: '' },
-            displayName: 'Yamaha images',
+            reference: { rootId: 'workspace', relativePath: 'objects' },
+            displayName: 'Yamaha images/objects',
         });
+        await fireEvent.click(screen.getByRole('option', { name: /disk.hds/ }));
+        expect(onselect).toHaveBeenLastCalledWith({
+            kind: 'server-file',
+            reference: { rootId: 'workspace', relativePath: 'disk.hds' },
+            displayName: 'Yamaha images/disk.hds',
+        });
+        expect(imageTransport.sandboxDirectory).toHaveBeenCalledWith(
+            { rootId: 'workspace', relativePath: '' },
+            undefined,
+            true,
+        );
     });
 
     it('offers storage-location management when no locations are configured', async () => {

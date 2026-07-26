@@ -1346,6 +1346,8 @@ export interface components {
             directory: components['schemas']['DirectoryRef'];
         };
         DirectoryListRequest: {
+            /** @default false */
+            classifyMediaSources: boolean;
             cursor?: string | null;
             directory: components['schemas']['DirectoryRef'];
             /** @default 200 */
@@ -1357,6 +1359,8 @@ export interface components {
                 entries: {
                     /** @enum {unknown} */
                     kind: 'FILE' | 'DIRECTORY';
+                    /** @enum {unknown} */
+                    mediaSourceKind: 'AXK_OBJECT_DIRECTORY' | null;
                     name: string;
                     relativePath: string;
                     size: number | null;

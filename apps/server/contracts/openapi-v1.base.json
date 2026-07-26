@@ -712,7 +712,8 @@
         "properties": {
           "directory": {"$ref": "#/components/schemas/DirectoryRef"},
           "limit": {"type": "integer", "minimum": 1, "maximum": 5000, "default": 200},
-          "cursor": {"type": ["string", "null"], "minLength": 1, "maxLength": 512}
+          "cursor": {"type": ["string", "null"], "minLength": 1, "maxLength": 512},
+          "classifyMediaSources": {"type": "boolean", "default": false}
         }
       },
       "DirectoryArchiveRequest": {
@@ -732,7 +733,7 @@
             "required": ["directory", "entries", "truncated", "nextCursor"],
             "properties": {
               "directory": {"$ref": "#/components/schemas/DirectoryRef"},
-              "entries": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "relativePath", "kind", "size"], "properties": {"name": {"type": "string"}, "relativePath": {"type": "string"}, "kind": {"enum": ["FILE", "DIRECTORY"]}, "size": {"type": ["integer", "null"], "minimum": 0}}}},
+              "entries": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "relativePath", "kind", "size", "mediaSourceKind"], "properties": {"name": {"type": "string"}, "relativePath": {"type": "string"}, "kind": {"enum": ["FILE", "DIRECTORY"]}, "size": {"type": ["integer", "null"], "minimum": 0}, "mediaSourceKind": {"enum": ["AXK_OBJECT_DIRECTORY", null]}}}},
               "truncated": {"type": "boolean"},
               "nextCursor": {"type": ["string", "null"]}
             }

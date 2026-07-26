@@ -234,8 +234,12 @@ export class HttpImageTransport implements ImageTransport {
         return this.client.roots();
     }
 
-    sandboxDirectory(directory: DirectoryRef, cursor?: string): Promise<DirectoryListing> {
-        return this.client.listDirectory(directory, { cursor });
+    sandboxDirectory(
+        directory: DirectoryRef,
+        cursor?: string,
+        classifyMediaSources = false,
+    ): Promise<DirectoryListing> {
+        return this.client.listDirectory(directory, { cursor, classifyMediaSources });
     }
 
     async createSandboxDirectory(parent: DirectoryRef, name: string): Promise<void> {

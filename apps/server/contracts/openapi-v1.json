@@ -845,6 +845,10 @@
       "DirectoryListRequest": {
         "additionalProperties": false,
         "properties": {
+          "classifyMediaSources": {
+            "default": false,
+            "type": "boolean"
+          },
           "cursor": {
             "maxLength": 512,
             "minLength": 1,
@@ -887,6 +891,12 @@
                         "DIRECTORY"
                       ]
                     },
+                    "mediaSourceKind": {
+                      "enum": [
+                        "AXK_OBJECT_DIRECTORY",
+                        null
+                      ]
+                    },
                     "name": {
                       "type": "string"
                     },
@@ -905,7 +915,8 @@
                     "name",
                     "relativePath",
                     "kind",
-                    "size"
+                    "size",
+                    "mediaSourceKind"
                   ],
                   "type": "object"
                 },

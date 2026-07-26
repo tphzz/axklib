@@ -1221,10 +1221,14 @@ describe('App panel layout', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
         expect(await screen.findByText('nested.hds')).toBeTruthy();
-        expect(mocks.sandboxDirectory).toHaveBeenLastCalledWith({
-            rootId: 'workspace',
-            relativePath: 'images',
-        });
+        expect(mocks.sandboxDirectory).toHaveBeenLastCalledWith(
+            {
+                rootId: 'workspace',
+                relativePath: 'images',
+            },
+            undefined,
+            true,
+        );
     });
 
     it('starts hard-disk image creation through a dedicated destination picker', async () => {

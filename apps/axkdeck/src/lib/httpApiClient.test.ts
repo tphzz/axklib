@@ -177,7 +177,15 @@ describe('AxklibHttpApiClient', () => {
                 jsonResponse({
                     data: {
                         directory: { rootId: 'workspace', relativePath: '' },
-                        entries: [{ name: 'disks', relativePath: 'disks', kind: 'DIRECTORY', size: null }],
+                        entries: [
+                            {
+                                name: 'disks',
+                                relativePath: 'disks',
+                                kind: 'DIRECTORY',
+                                size: null,
+                                mediaSourceKind: null,
+                            },
+                        ],
                         truncated: false,
                         nextCursor: null,
                     },
@@ -186,8 +194,10 @@ describe('AxklibHttpApiClient', () => {
         const client = new AxklibHttpApiClient({ baseUrl: 'http://localhost/api/v1', bearerToken: 'token' });
 
         await expect(client.roots()).resolves.toEqual([{ id: 'workspace', displayName: 'Workspace', writable: true }]);
-        await expect(client.listDirectory({ rootId: 'workspace', relativePath: '' })).resolves.toMatchObject({
-            entries: [{ relativePath: 'disks', kind: 'DIRECTORY' }],
+        await expect(
+            client.listDirectory({ rootId: 'workspace', relativePath: '' }, { classifyMediaSources: true }),
+        ).resolves.toMatchObject({
+            entries: [{ relativePath: 'disks', kind: 'DIRECTORY', mediaSourceKind: null }],
         });
         expect(fetchMock).toHaveBeenNthCalledWith(
             2,
@@ -197,6 +207,7 @@ describe('AxklibHttpApiClient', () => {
                     directory: { rootId: 'workspace', relativePath: '' },
                     limit: 200,
                     cursor: null,
+                    classifyMediaSources: true,
                 }),
             }),
         );

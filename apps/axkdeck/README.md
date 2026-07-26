@@ -241,11 +241,12 @@ directory-only browser for the remote host; after selection, ordinary image
 and output access remains confined to the configured workspaces.
 
 The image browser opens supported image and standalone object files normally.
-For externally extracted Yamaha object sets, navigate to the flat leaf
-directory and choose **Open object directory**. The resulting
-`AXK_OBJECT_DIRECTORY` session is read-only and supports browsing, preview,
-audition, and package export. Parent collection directories remain navigation
-folders and cannot be opened as one combined image.
+It also recognizes flat leaf directories containing externally extracted
+Yamaha objects and labels them **Sampler object folder**. Select that row to
+open it directly. The resulting `AXK_OBJECT_DIRECTORY` session is read-only and
+supports browsing, preview, audition, and package export. Parent collection
+directories remain navigation folders and cannot be opened as one combined
+image.
 
 ### Create an empty hard-disk image
 

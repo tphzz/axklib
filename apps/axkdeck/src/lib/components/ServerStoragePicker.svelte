@@ -101,6 +101,10 @@
         return normalizedExtensions.includes(extension);
     }
 
+    function isRecognizedMediaDirectory(entry: SandboxEntry): boolean {
+        return mode === 'media-source' && entry.mediaSourceKind === 'AXK_OBJECT_DIRECTORY';
+    }
+
     function rootIsDisabled(root: SandboxRoot): boolean {
         return (mode === 'directory' || mode === 'save-file') && !root.writable;
     }
@@ -145,7 +149,10 @@
         loading = true;
         error = '';
         try {
-            const listing = await transport.sandboxDirectory(reference);
+            const listing =
+                mode === 'media-source'
+                    ? await transport.sandboxDirectory(reference, undefined, true)
+                    : await transport.sandboxDirectory(reference);
             activeRoot = root;
             directory = listing.directory;
             entries = listing.entries;
@@ -167,7 +174,7 @@
         if (!directory || !nextCursor || loading) return;
         loading = true;
         try {
-            const listing = await transport.sandboxDirectory(directory, nextCursor);
+            const listing = await transport.sandboxDirectory(directory, nextCursor, mode === 'media-source');
             const combinedEntries = [...entries, ...listing.entries];
             entries = combinedEntries;
             nextCursor = listing.nextCursor;
@@ -186,6 +193,10 @@
         if (!activeRoot || loading) return;
         const reference = { rootId: activeRoot.id, relativePath: entry.relativePath };
         if (entry.kind === 'DIRECTORY') {
+            if (isRecognizedMediaDirectory(entry)) {
+                onselect(axkObjectDirectoryLocation(reference, `${activeRoot.displayName}/${entry.relativePath}`));
+                return;
+            }
             void openDirectory(reference, activeRoot);
             return;
         }
@@ -269,16 +280,6 @@
         if (!activeRoot || !directory) return;
         onselect(
             serverDirectoryLocation(
-                directory,
-                directory.relativePath ? `${activeRoot.displayName}/${directory.relativePath}` : activeRoot.displayName,
-            ),
-        );
-    }
-
-    function selectCurrentObjectDirectory(): void {
-        if (!activeRoot || !directory) return;
-        onselect(
-            axkObjectDirectoryLocation(
                 directory,
                 directory.relativePath ? `${activeRoot.displayName}/${directory.relativePath}` : activeRoot.displayName,
             ),
@@ -491,7 +492,7 @@
                         }}
                     >
                         {#if entry.kind === 'DIRECTORY'}
-                            <Icon name="folder" size={16} />
+                            <Icon name={isRecognizedMediaDirectory(entry) ? 'folder-open' : 'folder'} size={16} />
                         {:else if multiple}
                             <span
                                 class:storage-picker-selection-checked={selectedFilePathSet.has(entry.relativePath)}
@@ -500,12 +501,23 @@
                                 {#if selectedFilePathSet.has(entry.relativePath)}<Icon name="check" size={12} />{/if}
                             </span>
                         {/if}
-                        <span
-                            ><strong>{entry.name}</strong><small
-                                >{entry.kind === 'DIRECTORY' ? 'Directory' : `${entry.size ?? 0} bytes`}</small
-                            ></span
-                        >
-                        {#if entry.kind === 'DIRECTORY'}<Icon name="chevron" size={14} />{/if}
+                        <span>
+                            <strong>{entry.name}</strong>
+                            <small>
+                                {#if isRecognizedMediaDirectory(entry)}
+                                    Sampler object folder
+                                {:else if entry.kind === 'DIRECTORY'}
+                                    Folder
+                                {:else if mode === 'media-source'}
+                                    Disk image · {entry.size ?? 0} bytes
+                                {:else}
+                                    {entry.size ?? 0} bytes
+                                {/if}
+                            </small>
+                        </span>
+                        {#if entry.kind === 'DIRECTORY' && !isRecognizedMediaDirectory(entry)}
+                            <Icon name="chevron" size={14} />
+                        {/if}
                     </button>
                 {/each}
                 {#if visibleEntries.length === 0 && !loading}<p class="empty-copy">No matching entries</p>{/if}
@@ -526,10 +538,6 @@
                 <button class="primary-button" type="button" onclick={selectOutput}>Select output</button>
             {:else if mode === 'directory' && directory}
                 <button class="primary-button" type="button" onclick={selectCurrentDirectory}>Select directory</button>
-            {:else if mode === 'media-source' && directory}
-                <button class="primary-button" type="button" onclick={selectCurrentObjectDirectory}
-                    >Open object directory</button
-                >
             {:else if mode === 'file' && multiple && directory}
                 <button
                     class="primary-button"

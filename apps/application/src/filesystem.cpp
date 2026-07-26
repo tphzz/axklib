@@ -36,6 +36,7 @@ extern "C" NTSYSAPI NTSTATUS NTAPI NtSetInformationFile(HANDLE file_handle, PIO_
 #include <unistd.h>
 #endif
 
+#include "axklib/media.hpp"
 #include "axklib/utf8.hpp"
 
 namespace {
@@ -1901,9 +1902,10 @@ axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::metadata(std::strin
     return result;
 }
 
-axk::app::Result<axk::app::DirectoryListing>
-axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t limit,
-                                  std::optional<std::string_view> cursor) const {
+axk::app::Result<axk::app::DirectoryListing> axk::app::Sandbox::list_directory(const DirectoryRef &reference,
+                                                                               std::size_t limit,
+                                                                               std::optional<std::string_view> cursor,
+                                                                               bool classify_media_sources) const {
     if (limit == 0U || limit > 1000U)
         return std::unexpected(
             reference_error("directory listing limit must be between 1 and 1000", reference.relative_path));
@@ -1931,8 +1933,11 @@ axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t lim
         const auto status = std::filesystem::status(*resolved, error);
         if (error)
             break;
-        DirectoryEntry entry{
-            .name = name, .relative_path = relative, .kind = DirectoryEntryKind::file, .size = std::nullopt};
+        DirectoryEntry entry{.name = name,
+                             .relative_path = relative,
+                             .kind = DirectoryEntryKind::file,
+                             .size = std::nullopt,
+                             .media_source_kind = std::nullopt};
         if (std::filesystem::is_directory(status)) {
             entry.kind = DirectoryEntryKind::directory;
         } else if (std::filesystem::is_regular_file(status)) {
@@ -1959,6 +1964,40 @@ axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t lim
         result.entries.pop_back();
         result.truncated = true;
         result.next_cursor = encode_cursor(entry_key(result.entries.back()));
+    }
+    if (classify_media_sources) {
+        for (auto &entry : result.entries) {
+            if (entry.kind != DirectoryEntryKind::directory)
+                continue;
+            auto tree = open_tree({reference.root_id, entry.relative_path},
+                                  {.maximum_entries = axk::AxkObjectDirectory::maximum_entries,
+                                   .maximum_total_file_bytes = axk::AxkObjectDirectory::maximum_payload_bytes,
+                                   .maximum_depth = 1U,
+                                   .maximum_path_bytes = 64U * 1024U});
+            if (!tree)
+                continue;
+            std::vector<axk::AxkObjectDirectoryEntry> object_entries;
+            object_entries.reserve(tree->entries().size());
+            bool flat = true;
+            for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
+                const auto &tree_entry = tree->entries()[index];
+                if (tree_entry.kind != SandboxTreeEntryKind::file) {
+                    flat = false;
+                    break;
+                }
+                auto opened = tree->open_file(index);
+                if (!opened) {
+                    flat = false;
+                    break;
+                }
+                object_entries.push_back({tree_entry.relative_path, std::move(opened->reader)});
+            }
+            if (!flat)
+                continue;
+            auto recognized = axk::AxkObjectDirectory::recognizes(std::move(object_entries), entry.relative_path);
+            if (recognized && *recognized)
+                entry.media_source_kind = DirectoryMediaSourceKind::axk_object_directory;
+        }
     }
     return result;
 }
@@ -2181,6 +2220,14 @@ std::string_view axk::app::directory_entry_kind_name(DirectoryEntryKind kind) no
         return "FILE";
     case DirectoryEntryKind::directory:
         return "DIRECTORY";
+    }
+    return "UNKNOWN";
+}
+
+std::string_view axk::app::directory_media_source_kind_name(DirectoryMediaSourceKind kind) noexcept {
+    switch (kind) {
+    case DirectoryMediaSourceKind::axk_object_directory:
+        return "AXK_OBJECT_DIRECTORY";
     }
     return "UNKNOWN";
 }

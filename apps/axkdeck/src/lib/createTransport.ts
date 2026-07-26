@@ -31,7 +31,11 @@ class UnavailableTransport implements ImageTransport {
     sandboxRoots(): Promise<SandboxRoot[]> {
         return this.unavailable();
     }
-    sandboxDirectory(_directory: DirectoryRef, _cursor?: string): Promise<DirectoryListing> {
+    sandboxDirectory(
+        _directory: DirectoryRef,
+        _cursor?: string,
+        _classifyMediaSources?: boolean,
+    ): Promise<DirectoryListing> {
         return this.unavailable();
     }
     createSandboxDirectory(_parent: DirectoryRef, _name: string): Promise<void> {

@@ -1158,6 +1158,7 @@ class ServerApplication {
         axk::app::DirectoryRef directory;
         std::size_t limit = 200U;
         std::optional<std::string> cursor;
+        bool classify_media_sources = false;
         try {
             const auto &reference = input.at("directory");
             directory.root_id = reference.at("rootId").get<std::string>();
@@ -1166,20 +1167,26 @@ class ServerApplication {
                 limit = found->get<std::size_t>();
             if (const auto found = input.find("cursor"); found != input.end() && !found->is_null())
                 cursor = found->get<std::string>();
+            if (const auto found = input.find("classifyMediaSources"); found != input.end())
+                classify_media_sources = found->get<bool>();
         } catch (const Json::exception &) {
-            return error_response(400, {"invalid_request", "directory, limit, and cursor do not match the schema"}, id);
+            return error_response(400, {"invalid_request", "directory listing fields do not match the schema"}, id);
         }
         if (cursor && (cursor->empty() || cursor->size() > maximum_cursor_length))
             return error_response(400, {"invalid_cursor", "cursor length is outside the configured contract"}, id);
-        const auto listing = sandbox_.list_directory(directory, limit, cursor);
+        const auto listing = sandbox_.list_directory(directory, limit, cursor, classify_media_sources);
         if (!listing)
             return error_response(422, listing.error(), id);
         Json entries = Json::array();
         for (const auto &entry : listing->entries) {
-            entries.push_back({{"name", entry.name},
-                               {"relativePath", entry.relative_path},
-                               {"kind", axk::app::directory_entry_kind_name(entry.kind)},
-                               {"size", entry.size ? Json(*entry.size) : Json{}}});
+            entries.push_back(
+                {{"name", entry.name},
+                 {"relativePath", entry.relative_path},
+                 {"kind", axk::app::directory_entry_kind_name(entry.kind)},
+                 {"size", entry.size ? Json(*entry.size) : Json{}},
+                 {"mediaSourceKind", entry.media_source_kind
+                                         ? Json(axk::app::directory_media_source_kind_name(*entry.media_source_kind))
+                                         : Json{}}});
         }
         return json_response(
             200,

@@ -210,6 +210,9 @@ class AXK_API AxkObjectDirectory {
     static constexpr std::size_t maximum_entries = 224U;
     static constexpr std::uint64_t maximum_payload_bytes = 1'474'560U;
 
+    [[nodiscard]] static Result<bool> recognizes(std::vector<AxkObjectDirectoryEntry> entries,
+                                                 std::string source_name = {},
+                                                 const CancellationToken &cancellation = {});
     [[nodiscard]] static Result<AxkObjectDirectory> open(std::vector<AxkObjectDirectoryEntry> entries,
                                                          std::string source_name = {},
                                                          const CancellationToken &cancellation = {});

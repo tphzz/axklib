@@ -190,6 +190,13 @@ inventory, relationships, preview, audition, and package export are available,
 while image alteration and package import are not. Collection directories must
 be navigated to a recognized leaf before opening a session.
 
+`POST /api/v1/files/list` returns `mediaSourceKind: null` by default. Browsers
+that select media sources may send `classifyMediaSources: true`; immediate
+directories whose bounded file-prefix inspection recognizes Yamaha object data then
+return `mediaSourceKind: "AXK_OBJECT_DIRECTORY"`. Classification does not
+decode complete payloads, recurse into collection directories, or change the
+listing semantics for callers that omit the option.
+
 Writable SFS image sessions advertise `images.alter.objects`. Use
 `images.deletion.inspect` with the image ID, expected revision, target object
 IDs, and explicit optional-cleanup object IDs to obtain the complete deletion

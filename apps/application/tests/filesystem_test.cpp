@@ -96,6 +96,34 @@ TEST_F(SandboxTest, DiscoversRootsAndListsBoundedRelativeEntries) {
     EXPECT_EQ(*file, std::filesystem::canonical(root_ / "images" / "disk.hds"));
 }
 
+TEST_F(SandboxTest, ClassifiesAxkObjectDirectoriesOnlyWhenRequested) {
+    ASSERT_TRUE(std::filesystem::create_directories(root_ / "images" / "objects"));
+    ASSERT_TRUE(std::filesystem::create_directories(root_ / "images" / "collection" / "nested"));
+    ASSERT_TRUE(std::filesystem::create_directories(root_ / "images" / "support-only"));
+    std::ofstream(root_ / "images" / "objects" / "SMP_0001.001", std::ios::binary) << "FSFSDEV3SPLX";
+    std::ofstream(root_ / "images" / "objects" / "YAMAHA.SYM", std::ios::binary) << "support";
+    std::ofstream(root_ / "images" / "support-only" / "YAMAHA.SYM", std::ios::binary) << "support";
+
+    const auto value = sandbox();
+    const auto ordinary = value.list_directory({"workspace", "images"}, 20U);
+    ASSERT_TRUE(ordinary) << ordinary.error().message;
+    const auto ordinary_objects = std::ranges::find(ordinary->entries, "objects", &axk::app::DirectoryEntry::name);
+    ASSERT_NE(ordinary_objects, ordinary->entries.end());
+    EXPECT_FALSE(ordinary_objects->media_source_kind);
+
+    const auto classified = value.list_directory({"workspace", "images"}, 20U, std::nullopt, true);
+    ASSERT_TRUE(classified) << classified.error().message;
+    const auto objects = std::ranges::find(classified->entries, "objects", &axk::app::DirectoryEntry::name);
+    const auto collection = std::ranges::find(classified->entries, "collection", &axk::app::DirectoryEntry::name);
+    const auto support_only = std::ranges::find(classified->entries, "support-only", &axk::app::DirectoryEntry::name);
+    ASSERT_NE(objects, classified->entries.end());
+    ASSERT_NE(collection, classified->entries.end());
+    ASSERT_NE(support_only, classified->entries.end());
+    EXPECT_EQ(objects->media_source_kind, axk::app::DirectoryMediaSourceKind::axk_object_directory);
+    EXPECT_FALSE(collection->media_source_kind);
+    EXPECT_FALSE(support_only->media_source_kind);
+}
+
 TEST_F(SandboxTest, SupportsAnEmptyRootSetAndAtomicReplacement) {
     auto value = axk::app::Sandbox::create({});
     ASSERT_TRUE(value) << value.error().message;

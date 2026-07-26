@@ -31,12 +31,14 @@ struct RootInfo {
 };
 
 enum class DirectoryEntryKind : std::uint8_t { file, directory };
+enum class DirectoryMediaSourceKind : std::uint8_t { axk_object_directory };
 
 struct DirectoryEntry {
     std::string name;
     std::string relative_path;
     DirectoryEntryKind kind{DirectoryEntryKind::file};
     std::optional<std::uint64_t> size;
+    std::optional<DirectoryMediaSourceKind> media_source_kind;
 };
 
 struct DirectoryListing {
@@ -145,7 +147,8 @@ class Sandbox {
                                                                          bool overwrite) const;
     [[nodiscard]] Result<EntryMetadata> metadata(std::string_view root_id, std::string_view relative_path) const;
     [[nodiscard]] Result<DirectoryListing> list_directory(const DirectoryRef &reference, std::size_t limit,
-                                                          std::optional<std::string_view> cursor = std::nullopt) const;
+                                                          std::optional<std::string_view> cursor = std::nullopt,
+                                                          bool classify_media_sources = false) const;
     [[nodiscard]] Result<EntryMetadata> create_directory(const DirectoryRef &parent, std::string_view name) const;
     [[nodiscard]] Result<EntryMetadata> rename_entry(const FileRef &reference, std::string_view name) const;
     [[nodiscard]] Result<void> delete_entry(const FileRef &reference) const;
@@ -178,5 +181,6 @@ class Sandbox {
 };
 
 [[nodiscard]] std::string_view directory_entry_kind_name(DirectoryEntryKind kind) noexcept;
+[[nodiscard]] std::string_view directory_media_source_kind_name(DirectoryMediaSourceKind kind) noexcept;
 
 } // namespace axk::app

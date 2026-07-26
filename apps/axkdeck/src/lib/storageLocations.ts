@@ -47,12 +47,7 @@ export interface SandboxRoot {
     writable: boolean;
 }
 
-export interface SandboxEntry {
-    name: string;
-    relativePath: string;
-    kind: 'FILE' | 'DIRECTORY';
-    size: number | null;
-}
+export type SandboxEntry = components['schemas']['DirectoryListResponse']['data']['entries'][number];
 
 export interface DirectoryListing {
     directory: DirectoryRef;
@@ -102,3 +97,4 @@ export function inputLocationKey(location: InputFileLocation): string {
         ? JSON.stringify(['upload', location.reference.uploadId])
         : locationKey(location);
 }
+import type { components } from './generated/axklibApiV1';

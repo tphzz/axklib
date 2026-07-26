@@ -57,6 +57,22 @@ TEST(AxkObjectDirectory, RejectsEmptyAmbiguousAndOversizedObjectSets) {
     EXPECT_EQ(oversized.error().code, axk::ErrorCode::io_unsupported_size);
 }
 
+TEST(AxkObjectDirectory, RecognizesCandidatesFromPrefixesWithoutDecodingPayloads) {
+    auto object_prefix = smpl_object("PREFIX");
+    object_prefix.resize(12U);
+    auto candidate = axk::AxkObjectDirectory::recognizes(
+        {{"SMP_0001.001", std::make_shared<axk::MemoryReader>(std::move(object_prefix))},
+         {"YAMAHA.SYM", std::make_shared<axk::MemoryReader>(std::vector<std::byte>(32U))}},
+        "candidate");
+    ASSERT_TRUE(candidate);
+    EXPECT_TRUE(*candidate);
+
+    auto support_only = axk::AxkObjectDirectory::recognizes(
+        {{"YAMAHA.SYM", std::make_shared<axk::MemoryReader>(std::vector<std::byte>(32U))}}, "support-only");
+    ASSERT_TRUE(support_only);
+    EXPECT_FALSE(*support_only);
+}
+
 TEST(AxkObjectDirectory, OpensAFlatFilesystemDirectoryAsMedia) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-axk-object-directory";
     std::error_code error;

@@ -88,8 +88,12 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('sandboxRoots', []);
     }
 
-    sandboxDirectory(directory: DirectoryRef, cursor?: string): Promise<DirectoryListing> {
-        return this.invoke('sandboxDirectory', [directory, cursor]);
+    sandboxDirectory(
+        directory: DirectoryRef,
+        cursor?: string,
+        classifyMediaSources?: boolean,
+    ): Promise<DirectoryListing> {
+        return this.invoke('sandboxDirectory', [directory, cursor, classifyMediaSources]);
     }
 
     createSandboxDirectory(parent: DirectoryRef, name: string): Promise<void> {
