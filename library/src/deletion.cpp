@@ -161,6 +161,7 @@ struct DeletionIndex {
     std::map<std::string, std::vector<const axk::Relationship *>> outgoing;
     std::set<std::uint8_t> inconsistent_partitions;
     std::map<std::tuple<std::uint8_t, std::string, std::uint8_t>, std::string> programs;
+    std::map<std::string, axk::WaveformStatus> waveform_statuses;
 
     DeletionIndex(const axk::Container &source_container, const axk::ObjectCatalog &source_catalog,
                   const axk::RelationshipGraph &source_graph)
@@ -194,6 +195,9 @@ struct DeletionIndex {
                 inconsistent_partitions.insert(partition.index.value);
             }
         }
+        const auto orphan_report = axk::analyze_waveform_orphans(container, catalog, graph);
+        for (const auto &row : orphan_report.rows)
+            waveform_statuses.emplace(row.object_key, row.status);
     }
 
     [[nodiscard]] const axk::ObjectSnapshot *find(std::string_view key) const {
@@ -350,9 +354,8 @@ std::vector<axk::ObjectDeletionNotice> evaluate_object(const DeletionIndex &inde
         }
     }
     if (object.object.header.type == axk::ObjectType::smpl && !has_wave_reference) {
-        const auto orphan_report = axk::analyze_waveform_orphans(index.container, index.catalog, index.graph);
-        const auto row = std::ranges::find(orphan_report.rows, object.key, &axk::WaveformOrphanRow::object_key);
-        if (row == orphan_report.rows.end() || row->status != axk::WaveformStatus::known_unreferenced) {
+        const auto row = index.waveform_statuses.find(object.key);
+        if (row == index.waveform_statuses.end() || row->second != axk::WaveformStatus::known_unreferenced) {
             add_notice(notices, "WAVE_DATA_NOT_UNREFERENCED",
                        "Wave Data can be deleted only when it is confirmed unreferenced", {object.key});
         }

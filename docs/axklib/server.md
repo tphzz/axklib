@@ -193,6 +193,17 @@ and the underlying alteration revalidates the image under the mutation lease,
 so an outdated revision or changed relationship graph fails without publishing
 a partial result.
 
+Writable SFS sessions also advertise `images.deletion.orphans.inspect`.
+Pass one volume content-scope ID with the image ID and expected revision to
+discover Wave Data that the current relationship graph classifies as confirmed
+unreferenced. The bounded response returns at most 1,024 candidates, their
+locations, stored sizes, and recoverable allocation; `totalCandidateCount`
+indicates whether another cleanup pass may be needed. This operation is
+discovery only. Before deleting a selected subset, submit those opaque object
+IDs to `images.deletion.inspect` and require every target to remain eligible,
+then use the normal `images.delete` job. Re-run both inspections immediately
+before mutation so a stale UI list cannot authorize deletion.
+
 Writable SFS sessions also advertise `images.package.import`; every readable
 media session advertises `images.package.export`. Import is a three-step
 operation: inspect the package, request an owner-bound revision-specific plan,

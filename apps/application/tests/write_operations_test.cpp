@@ -786,6 +786,21 @@ TEST_F(WriteOperationsTest, SessionAlterationCommitsInPlaceAndRefreshesTheExisti
 TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedClosure) {
     const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = images_->content(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    ASSERT_EQ(roots->items.size(), 1U);
+    const auto volumes = images_->content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes) << volumes.error().message;
+    const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(volume, volumes->items.end());
+    const auto orphans = registry_.invoke(
+        "images.deletion.orphans.inspect",
+        {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"contentScopeId", volume->id}},
+        context());
+    ASSERT_TRUE(orphans) << orphans.error().message;
+    EXPECT_EQ(orphans->at("contentScopeId"), volume->id);
+    EXPECT_EQ(orphans->at("totalCandidateCount"), orphans->at("candidates").size());
+
     const auto samples = images_->objects(opened->image_id, "owner", 100U, std::nullopt, "SBNK");
     ASSERT_TRUE(samples) << samples.error().message;
     const auto sample = std::ranges::find(samples->items, "sine wave", &axk::app::ImageObjectItem::name);

@@ -887,6 +887,27 @@ Json deletion_inspection_json(const axk::app::ImageObjectDeletionInspection &ins
             {"estimatedFreedClusters", inspection.estimated_freed_clusters}};
 }
 
+Json wave_data_orphan_inspection_json(const axk::app::ImageWaveDataOrphanInspection &inspection) {
+    Json candidates = Json::array();
+    for (const auto &candidate : inspection.candidates) {
+        candidates.push_back(
+            {{"objectId", candidate.object_id},
+             {"objectType", candidate.object_type},
+             {"objectName", candidate.object_name},
+             {"partitionIndex", candidate.partition_index ? Json(*candidate.partition_index) : Json(nullptr)},
+             {"partitionName", candidate.partition_name},
+             {"volumeName", candidate.volume_name},
+             {"storedSizeBytes", candidate.stored_size_bytes},
+             {"recoverableBytes", candidate.recoverable_bytes},
+             {"recoverableClusters", candidate.recoverable_clusters}});
+    }
+    return {{"imageId", inspection.image_id},
+            {"revision", inspection.revision},
+            {"contentScopeId", inspection.content_scope_id},
+            {"totalCandidateCount", inspection.total_candidate_count},
+            {"candidates", std::move(candidates)}};
+}
+
 Json deletion_manifest_json(const axk::AlterationManifest &manifest) {
     Json operations = Json::array();
     for (const auto &operation : manifest.operations) {
@@ -1732,6 +1753,27 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                         "imageId, expectedRevision, targetObjectIds, and cleanupObjectIds are required"));
                 }
             });
+        if (!bound)
+            return bound;
+    }
+    if (!registry.is_implemented("images.deletion.orphans.inspect")) {
+        auto bound =
+            registry.bind("images.deletion.orphans.inspect",
+                          [&images](const Json &input, const OperationContext &context) -> Result<Json> {
+                              try {
+                                  const auto image_id = input.at("imageId").get<std::string>();
+                                  const auto revision = input.at("expectedRevision").get<std::uint64_t>();
+                                  const auto content_scope_id = input.at("contentScopeId").get<std::string>();
+                                  auto inspection = images.inspect_wave_data_orphans(image_id, context.owner_id,
+                                                                                     revision, content_scope_id);
+                                  if (!inspection)
+                                      return std::unexpected(inspection.error());
+                                  return wave_data_orphan_inspection_json(*inspection);
+                              } catch (const Json::exception &) {
+                                  return std::unexpected(operation_error(
+                                      "invalid_request", "imageId, expectedRevision, and contentScopeId are required"));
+                              }
+                          });
         if (!bound)
             return bound;
     }

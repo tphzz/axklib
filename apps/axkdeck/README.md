@@ -295,6 +295,15 @@ incoming or ambiguous references, and offers newly unreferenced dependencies as
 explicit opt-in cleanup. Blocked objects remain untouched; the eligible subset
 is published atomically after the image revision and impact are rechecked.
 
+The Wave Data view adds a broom action for volume-scoped storage cleanup.
+It lists only Wave Data that the server can confirm is unreferenced, selects
+the candidates by default, and lets the user review or deselect each object.
+The dialog reports recoverable bytes and clusters and uses an explicit
+**Delete N Wave Data objects** confirmation. Axkdeck repeats orphan discovery
+and the normal deletion inspection immediately before starting the job; a
+changed or newly referenced candidate returns to review instead of being
+deleted. Discovery is capped at 1,024 candidates per pass.
+
 ### Diagnostics
 
 Development builds open the web developer tools with `F12`. This shortcut is

@@ -178,6 +178,26 @@ struct ImageObjectDeletionPlan {
     axk::AlterationManifest manifest;
 };
 
+struct ImageWaveDataOrphanCandidate {
+    std::string object_id;
+    std::string object_type;
+    std::string object_name;
+    std::optional<std::uint8_t> partition_index;
+    std::string partition_name;
+    std::string volume_name;
+    std::uint64_t stored_size_bytes{};
+    std::uint64_t recoverable_bytes{};
+    std::uint64_t recoverable_clusters{};
+};
+
+struct ImageWaveDataOrphanInspection {
+    std::string image_id;
+    std::uint64_t revision{};
+    std::string content_scope_id;
+    std::size_t total_candidate_count{};
+    std::vector<ImageWaveDataOrphanCandidate> candidates;
+};
+
 struct ImageValidationItem {
     std::string code;
     std::string severity;
@@ -252,6 +272,9 @@ class ImageSessionManager {
                                                                 std::uint64_t expected_revision,
                                                                 const std::vector<std::string> &target_object_ids,
                                                                 const std::vector<std::string> &cleanup_object_ids);
+    [[nodiscard]] Result<ImageWaveDataOrphanInspection>
+    inspect_wave_data_orphans(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                              std::string_view content_scope_id, std::size_t maximum_candidates = 1024U);
     [[nodiscard]] Result<ImageSessionRead> begin_read(std::string_view image_id, std::string_view owner_id,
                                                       std::uint64_t expected_revision);
     [[nodiscard]] Result<ImageSessionMutation> begin_mutation(std::string_view image_id, std::string_view owner_id,

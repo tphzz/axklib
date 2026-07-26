@@ -12,6 +12,7 @@
 
 #include "axklib/application/secure_random.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/lookups.hpp"
 #include "axklib/media.hpp"
@@ -111,6 +112,19 @@ std::optional<std::uint8_t> partition_index_from_node_id(std::string_view node_i
         return std::nullopt;
     }
     return static_cast<std::uint8_t>(value);
+}
+
+std::uint64_t record_cluster_count(const axk::Container &container, const axk::ObjectSnapshot &object) {
+    const auto partition = std::ranges::find(container.partitions(), object.partition, &axk::Partition::index);
+    if (partition == container.partitions().end())
+        return 0U;
+    const auto record = std::ranges::find(partition->records, object.sfs_id, &axk::IndexRecord::sfs_id);
+    if (record == partition->records.end())
+        return 0U;
+    std::uint64_t result = record->continuation_clusters.size();
+    for (const auto &extent : record->extents)
+        result += extent.cluster_count;
+    return result;
 }
 
 } // namespace
@@ -927,6 +941,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
         available_operations.emplace_back("images.alter.partitions");
         available_operations.emplace_back("images.alter.objects");
         available_operations.emplace_back("images.package.import");
+        available_operations.emplace_back("images.deletion.orphans.inspect");
     }
     return ImageSessionSummary{.image_id = (*session)->image_id,
                                .revision = (*session)->revision,
@@ -1067,6 +1082,100 @@ axk::app::Result<axk::app::ImageObjectDeletionPlan> axk::app::ImageSessionManage
     append_notices(inspected->blockers, result.blockers);
     append_notices(inspected->warnings, result.warnings);
     return ImageObjectDeletionPlan{std::move(result), std::move(inspected->manifest)};
+}
+
+axk::app::Result<axk::app::ImageWaveDataOrphanInspection> axk::app::ImageSessionManager::inspect_wave_data_orphans(
+    std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+    std::string_view content_scope_id, std::size_t maximum_candidates) {
+    const auto session = implementation_->owned(image_id, owner_id);
+    if (!session)
+        return std::unexpected(session.error());
+    const std::scoped_lock access{(*session)->access_mutex};
+    if ((*session)->revision != expected_revision)
+        return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
+    if ((*session)->format != "sfs" || !(*session)->media)
+        return std::unexpected(
+            session_error("image_mutation_unsupported", "Wave Data cleanup requires an SFS image session"));
+    const auto content_item = std::ranges::find((*session)->content, content_scope_id, &axk::app::ImageContentItem::id);
+    if (content_item == (*session)->content.end())
+        return std::unexpected(session_error("content_not_found", "content scope does not exist"));
+    if (content_item->kind != "volume")
+        return std::unexpected(
+            session_error("content_scope_invalid", "Wave Data cleanup requires a volume content scope"));
+    const auto scope = (*session)->object_indices_by_content_scope.find(std::string{content_scope_id});
+    if (scope == (*session)->object_indices_by_content_scope.end())
+        return std::unexpected(session_error("content_not_found", "content scope does not exist"));
+    const auto *container = std::get_if<Container>(&(*session)->media->storage());
+    if (container == nullptr)
+        return std::unexpected(
+            session_error("image_mutation_unsupported", "Wave Data cleanup requires an SFS container"));
+
+    ObjectCatalog catalog;
+    catalog.issues = (*session)->catalog_issues;
+    catalog.objects.reserve((*session)->snapshots_by_id.size());
+    for (const auto &[id, snapshot] : (*session)->snapshots_by_id) {
+        static_cast<void>(id);
+        catalog.objects.push_back(snapshot);
+    }
+    std::ranges::sort(catalog.objects, {}, [](const auto &object) { return object.key; });
+    const auto graph = build_relationship_graph(catalog);
+    const auto orphan_report = analyze_waveform_orphans(*container, catalog, graph);
+    std::unordered_map<std::string, WaveformStatus> status_by_key;
+    status_by_key.reserve(orphan_report.rows.size());
+    for (const auto &row : orphan_report.rows)
+        status_by_key.emplace(row.object_key, row.status);
+
+    ImageWaveDataOrphanInspection result;
+    result.image_id = std::string{image_id};
+    result.revision = expected_revision;
+    result.content_scope_id = std::string{content_scope_id};
+    for (const auto object_index : scope->second) {
+        if (object_index >= (*session)->objects.size())
+            return std::unexpected(
+                session_error("image_session_invalid", "content scope references an invalid object"));
+        const auto &item = (*session)->objects[object_index];
+        if (item.type != "SMPL")
+            continue;
+        const auto snapshot = (*session)->snapshots_by_id.find(item.id);
+        if (snapshot == (*session)->snapshots_by_id.end())
+            return std::unexpected(session_error("image_session_invalid", "Wave Data snapshot is unavailable"));
+        const auto status = status_by_key.find(snapshot->second.key);
+        if (status == status_by_key.end() || status->second != WaveformStatus::known_unreferenced)
+            continue;
+        const auto partition =
+            std::ranges::find(container->partitions(), snapshot->second.partition, &Partition::index);
+        if (partition == container->partitions().end())
+            return std::unexpected(session_error("image_session_invalid", "Wave Data partition is unavailable"));
+        const auto clusters = record_cluster_count(*container, snapshot->second);
+        const auto cluster_bytes =
+            checked_multiply(container->superblock().sector_size_bytes, partition->sectors_per_cluster);
+        if (!cluster_bytes)
+            return std::unexpected(session_error("image_session_invalid", cluster_bytes.error().message));
+        const auto recoverable_bytes = checked_multiply(clusters, *cluster_bytes);
+        if (!recoverable_bytes)
+            return std::unexpected(session_error("image_session_invalid", recoverable_bytes.error().message));
+        result.candidates.push_back({.object_id = item.id,
+                                     .object_type = item.type,
+                                     .object_name = item.name,
+                                     .partition_index = item.partition_index,
+                                     .partition_name = item.partition_name,
+                                     .volume_name = item.volume_name,
+                                     .stored_size_bytes = item.stored_size_bytes,
+                                     .recoverable_bytes = *recoverable_bytes,
+                                     .recoverable_clusters = clusters});
+    }
+    std::ranges::sort(result.candidates, [](const auto &left, const auto &right) {
+        if (left.partition_index != right.partition_index)
+            return left.partition_index < right.partition_index;
+        if (left.volume_name != right.volume_name)
+            return left.volume_name < right.volume_name;
+        if (left.object_name != right.object_name)
+            return left.object_name < right.object_name;
+        return left.object_id < right.object_id;
+    });
+    result.total_candidate_count = result.candidates.size();
+    result.candidates.resize(std::min({result.candidates.size(), maximum_candidates, std::size_t{1024U}}));
+    return result;
 }
 
 axk::app::Result<axk::app::ImageSessionRead>

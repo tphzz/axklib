@@ -27,6 +27,7 @@ import type {
     ObjectPage,
     ObjectPageFilter,
     ObjectDeletionInspection,
+    WaveDataOrphanInspection,
     ObjectRenameMutation,
     OpenedImage,
     PackageImportDestination,
@@ -94,6 +95,7 @@ interface ApiContentItem {
 type ApiObjectItem = components['schemas']['ImageObjectItem'];
 type ApiRelationshipItem = components['schemas']['ImageRelationshipItem'];
 type ApiObjectDeletionInspection = components['schemas']['ImageObjectDeletionInspection'];
+type ApiWaveDataOrphanInspection = components['schemas']['ImageWaveDataOrphanInspection'];
 
 interface ApiPage<Item> {
     items: Item[];
@@ -514,6 +516,7 @@ export class HttpImageTransport implements ImageTransport {
             partitionMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.partitions'),
             objectRenameAvailable: (summary.availableOperations ?? []).includes('images.alter.objects'),
             objectDeletionAvailable: (summary.availableOperations ?? []).includes('images.alter.objects'),
+            waveDataCleanupAvailable: (summary.availableOperations ?? []).includes('images.deletion.orphans.inspect'),
             packageImportAvailable: (summary.availableOperations ?? []).includes('images.package.import'),
             packageExportAvailable: (summary.availableOperations ?? []).includes('images.package.export'),
             tree: [disk],
@@ -668,6 +671,17 @@ export class HttpImageTransport implements ImageTransport {
             cleanupObjectIds,
         });
         if (this.isJob(result)) throw new Error('images.deletion.inspect unexpectedly returned a job');
+        return result;
+    }
+
+    async inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection> {
+        const session = this.session(sessionId);
+        const result = await this.client.invoke<ApiWaveDataOrphanInspection>('images.deletion.orphans.inspect', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            contentScopeId,
+        });
+        if (this.isJob(result)) throw new Error('images.deletion.orphans.inspect unexpectedly returned a job');
         return result;
     }
 

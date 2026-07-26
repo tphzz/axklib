@@ -1409,6 +1409,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.alter.partitions",
                 "images.alter.objects",
                 "images.package.import",
+                "images.deletion.orphans.inspect",
             ]
             assert opened["data"]["objectCount"] > 0
             status, objects = http_request(

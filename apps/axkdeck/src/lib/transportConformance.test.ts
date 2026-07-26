@@ -28,6 +28,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
     partitionMutationsAvailable: false,
     objectRenameAvailable: false,
     objectDeletionAvailable: false,
+    waveDataCleanupAvailable: false,
     packageImportAvailable: false,
     packageExportAvailable: false,
     tree: [

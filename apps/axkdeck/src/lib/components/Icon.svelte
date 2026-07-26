@@ -1,6 +1,7 @@
 <script lang="ts">
     type IconName =
         | 'archive'
+        | 'broom'
         | 'chevron'
         | 'check'
         | 'close'
@@ -47,6 +48,7 @@
 
 <svg
     class={className}
+    data-icon={name}
     width={size}
     height={size}
     viewBox="0 0 24 24"
@@ -87,6 +89,8 @@
         <path d="M4 19h5l10-10-5-5L4 14v5Z" /><path d="m12 6 5 5" />
     {:else if name === 'trash'}
         <path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6" />
+    {:else if name === 'broom'}
+        <path d="m16 3 5 5-9 9H7l-4-4 13-10Z" /><path d="m5 15-2 3 3 3 3-3M8 16l3 3" />
     {:else if name === 'grid'}
         <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect
             x="3"

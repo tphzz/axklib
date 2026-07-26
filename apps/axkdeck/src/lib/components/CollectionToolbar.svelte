@@ -7,10 +7,19 @@
         query: string;
         onquerychange: (value: string) => void;
         actionLabel?: string;
+        actionIcon?: 'upload' | 'broom';
         onaction?: () => void;
     }
 
-    let { title, count, query, onquerychange, actionLabel, onaction = () => undefined }: Props = $props();
+    let {
+        title,
+        count,
+        query,
+        onquerychange,
+        actionLabel,
+        actionIcon = 'upload',
+        onaction = () => undefined,
+    }: Props = $props();
 </script>
 
 <header class="collection-toolbar">
@@ -21,7 +30,7 @@
     <div class="collection-actions">
         {#if actionLabel}
             <button class="icon-button" type="button" aria-label={actionLabel} title={actionLabel} onclick={onaction}>
-                <Icon name="upload" size={14} />
+                <Icon name={actionIcon} size={14} />
             </button>
         {/if}
         <label class="search-field collection-search">

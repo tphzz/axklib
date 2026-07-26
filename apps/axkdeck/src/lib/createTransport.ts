@@ -17,6 +17,7 @@ import type {
     PlanSummary,
     PreviewEnvelope,
     RelationshipPage,
+    WaveDataOrphanInspection,
 } from './transport';
 import type { DirectoryListing, DirectoryRef, FileRef, SandboxRoot } from './storageLocations';
 
@@ -128,6 +129,9 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     inspectObjectDeletion(): Promise<ObjectDeletionInspection> {
+        return this.unavailable();
+    }
+    inspectWaveDataOrphans(): Promise<WaveDataOrphanInspection> {
         return this.unavailable();
     }
     startObjectDeletion(): Promise<JobState> {

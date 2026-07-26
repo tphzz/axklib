@@ -8,6 +8,7 @@
     import ObjectInspector from './lib/components/ObjectInspector.svelte';
     import ObjectEditor from './lib/components/ObjectEditor.svelte';
     import ObjectDeletionDialog from './lib/components/ObjectDeletionDialog.svelte';
+    import WaveDataCleanupDialog from './lib/components/WaveDataCleanupDialog.svelte';
     import ObjectRenameDialog from './lib/components/ObjectRenameDialog.svelte';
     import PackageExportDialog from './lib/components/PackageExportDialog.svelte';
     import PackageImportDialog from './lib/components/PackageImportDialog.svelte';
@@ -61,6 +62,7 @@
         AudioImportItem,
         AudioImportTarget,
         ObjectDeletionInspection,
+        WaveDataOrphanInspection,
         ImageSessionPackageExportResult,
         ImageSessionPackageExportRoot,
         ImageSessionPackageImportPlan,
@@ -177,6 +179,7 @@
     let partitionMutationsAvailable = $state(false);
     let objectRenameAvailable = $state(false);
     let objectDeletionAvailable = $state(false);
+    let waveDataCleanupAvailable = $state(false);
     let packageImportAvailable = $state(false);
     let packageExportAvailable = $state(false);
     let volumeAction = $state<{ item: DiskTreeItem; action: ImageTreeAction } | null>(null);
@@ -196,6 +199,16 @@
         error: string;
     } | null>(null);
     let objectDeletionGeneration = 0;
+    let waveDataCleanupRequest = $state<{
+        volumeId: string;
+        volumeName: string;
+        inspection: WaveDataOrphanInspection | null;
+        selectedObjectIds: string[];
+        loading: boolean;
+        busy: boolean;
+        error: string;
+    } | null>(null);
+    let waveDataCleanupGeneration = 0;
     let packageOperationGeneration = 0;
     let packageImportAbortController: AbortController | null = null;
     let packageImportRequest = $state<{
@@ -669,6 +682,10 @@
 
     async function loadVolume(volumeId: string): Promise<void> {
         if (openSessionId === null) return;
+        if (waveDataCleanupRequest?.volumeId !== volumeId) {
+            ++waveDataCleanupGeneration;
+            waveDataCleanupRequest = null;
+        }
         void stopPlaybackNow();
         resetPreviewQueue();
         activeVolumeId = volumeId;
@@ -757,6 +774,8 @@
     }
 
     function clearVolume(): void {
+        ++waveDataCleanupGeneration;
+        waveDataCleanupRequest = null;
         void stopPlaybackNow();
         resetPreviewQueue();
         ++volumeLoadGeneration;
@@ -1469,6 +1488,191 @@
         }
     }
 
+    function cancelWaveDataCleanup(): void {
+        if (waveDataCleanupRequest?.busy) return;
+        ++waveDataCleanupGeneration;
+        waveDataCleanupRequest = null;
+    }
+
+    function waveDataCleanupFingerprint(inspection: WaveDataOrphanInspection): string {
+        return JSON.stringify(
+            inspection.candidates
+                .map((candidate) => [
+                    candidate.objectId,
+                    candidate.storedSizeBytes,
+                    candidate.recoverableBytes,
+                    candidate.recoverableClusters,
+                ])
+                .toSorted(([left], [right]) => String(left).localeCompare(String(right))),
+        );
+    }
+
+    function requestWaveDataCleanup(): void {
+        if (
+            !waveDataCleanupAvailable ||
+            openSessionId === null ||
+            activeVolumeId === '' ||
+            selectedSource.kind !== 'volume'
+        ) {
+            return;
+        }
+        const generation = ++waveDataCleanupGeneration;
+        waveDataCleanupRequest = {
+            volumeId: activeVolumeId,
+            volumeName: selectedSource.name,
+            inspection: null,
+            selectedObjectIds: [],
+            loading: true,
+            busy: false,
+            error: '',
+        };
+        void stopPlaybackNow();
+        void inspectWaveDataCleanup(generation);
+    }
+
+    async function inspectWaveDataCleanup(generation = waveDataCleanupGeneration): Promise<void> {
+        const request = waveDataCleanupRequest;
+        const sessionId = openSessionId;
+        if (!request || sessionId === null) return;
+        try {
+            const inspection = await transport.inspectWaveDataOrphans(sessionId, request.volumeId);
+            if (
+                generation !== waveDataCleanupGeneration ||
+                openSessionId !== sessionId ||
+                activeVolumeId !== request.volumeId ||
+                waveDataCleanupRequest?.volumeId !== request.volumeId
+            ) {
+                return;
+            }
+            waveDataCleanupRequest = {
+                ...request,
+                inspection,
+                selectedObjectIds: inspection.candidates.map((candidate) => candidate.objectId),
+                loading: false,
+                error: '',
+            };
+        } catch (error) {
+            if (
+                generation !== waveDataCleanupGeneration ||
+                openSessionId !== sessionId ||
+                waveDataCleanupRequest?.volumeId !== request.volumeId
+            ) {
+                return;
+            }
+            waveDataCleanupRequest = {
+                ...request,
+                inspection: null,
+                selectedObjectIds: [],
+                loading: false,
+                error: userFacingMessage(error),
+            };
+        }
+    }
+
+    function updateWaveDataCleanupSelection(objectId: string, selected: boolean): void {
+        const request = waveDataCleanupRequest;
+        if (!request || request.loading || request.busy) return;
+        const selectedIds = new Set(request.selectedObjectIds);
+        if (selected) selectedIds.add(objectId);
+        else selectedIds.delete(objectId);
+        waveDataCleanupRequest = { ...request, selectedObjectIds: [...selectedIds] };
+    }
+
+    function updateAllWaveDataCleanupSelection(selected: boolean): void {
+        const request = waveDataCleanupRequest;
+        if (!request?.inspection || request.loading || request.busy) return;
+        waveDataCleanupRequest = {
+            ...request,
+            selectedObjectIds: selected ? request.inspection.candidates.map((candidate) => candidate.objectId) : [],
+        };
+    }
+
+    async function submitWaveDataCleanup(): Promise<void> {
+        const request = waveDataCleanupRequest;
+        const sessionId = openSessionId;
+        if (
+            !request?.inspection ||
+            request.selectedObjectIds.length === 0 ||
+            request.loading ||
+            request.busy ||
+            sessionId === null
+        ) {
+            return;
+        }
+        const selectedIds = request.selectedObjectIds.toSorted();
+        const preferred =
+            selectedSource.kind === 'volume' && selectedSource.partitionIndex !== undefined
+                ? { partitionIndex: selectedSource.partitionIndex, volumeName: selectedSource.name }
+                : undefined;
+        const started = performance.now();
+        waveDataCleanupRequest = { ...request, busy: true, error: '' };
+        sourceStatus = `Deleting ${selectedIds.length} unreferenced Wave Data ${
+            selectedIds.length === 1 ? 'object' : 'objects'
+        }`;
+        try {
+            await auditionController.invalidateSession(sessionId);
+            const rediscovered = await transport.inspectWaveDataOrphans(sessionId, request.volumeId);
+            if (
+                waveDataCleanupFingerprint(rediscovered) !== waveDataCleanupFingerprint(request.inspection) ||
+                selectedIds.some(
+                    (objectId) => !rediscovered.candidates.some((candidate) => candidate.objectId === objectId),
+                )
+            ) {
+                waveDataCleanupRequest = {
+                    ...request,
+                    inspection: rediscovered,
+                    selectedObjectIds: rediscovered.candidates.map((candidate) => candidate.objectId),
+                    busy: false,
+                    error: 'The cleanup candidates changed. Review the current list before confirming again.',
+                };
+                sourceStatus = 'Cleanup candidates changed; review before confirming again';
+                return;
+            }
+            const deletion = await transport.inspectObjectDeletion(sessionId, selectedIds, []);
+            const targetImpacts = deletion.impacts.filter((impact) => impact.role === 'TARGET');
+            const eligibleIds = deletion.selectedObjectIds.toSorted();
+            if (
+                !deletion.canApply ||
+                targetImpacts.length !== selectedIds.length ||
+                targetImpacts.some((impact) => impact.status !== 'REQUIRED' || !impact.selected) ||
+                eligibleIds.join('\u0000') !== selectedIds.join('\u0000')
+            ) {
+                const current = await transport.inspectWaveDataOrphans(sessionId, request.volumeId);
+                waveDataCleanupRequest = {
+                    ...request,
+                    inspection: current,
+                    selectedObjectIds: current.candidates.map((candidate) => candidate.objectId),
+                    busy: false,
+                    error: 'One or more Wave Data objects are no longer safe to delete. Review the current list.',
+                };
+                sourceStatus = 'Wave Data cleanup requires another review';
+                return;
+            }
+            const job = await transport.startObjectDeletion(sessionId, selectedIds, []);
+            const completed = await transport.waitForJob(job.jobId, (update) => {
+                if (update.progress?.label) sourceStatus = update.progress.label;
+            });
+            if (completed.status !== 'completed')
+                throw new Error(completed.error ?? 'Wave Data cleanup did not complete');
+            await refreshOpenImageSession(preferred);
+            const deletedIds = new Set(selectedIds);
+            packageExportSelection = {
+                ...packageExportSelection,
+                items: packageExportSelection.items.filter((item) => !deletedIds.has(item.objectId)),
+            };
+            ++waveDataCleanupGeneration;
+            waveDataCleanupRequest = null;
+            reportMutationTiming('cleanup-wave-data', started, selectedIds.length);
+        } catch (error) {
+            const message = userFacingMessage(error);
+            sourceStatus = message;
+            ++waveDataCleanupGeneration;
+            waveDataCleanupRequest = null;
+            if (openSessionId === sessionId) await refreshOpenImageSession(preferred).catch(() => undefined);
+            sourceStatus = `${message} The image has been refreshed.`;
+        }
+    }
+
     async function submitVolumeAction(name: string): Promise<void> {
         if (!volumeAction || !imageLocation || volumeAction.item.partitionIndex === undefined) return;
         const requested = volumeAction;
@@ -2060,6 +2264,7 @@
             partitionMutationsAvailable = opened.partitionMutationsAvailable;
             objectRenameAvailable = opened.objectRenameAvailable;
             objectDeletionAvailable = opened.objectDeletionAvailable;
+            waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
             packageImportAvailable = opened.packageImportAvailable;
             packageExportAvailable = opened.packageExportAvailable;
             sourceItems = opened.tree;
@@ -2095,6 +2300,7 @@
         partitionMutationsAvailable = opened.partitionMutationsAvailable;
         objectRenameAvailable = opened.objectRenameAvailable;
         objectDeletionAvailable = opened.objectDeletionAvailable;
+        waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
         packageImportAvailable = opened.packageImportAvailable;
         packageExportAvailable = opened.packageExportAvailable;
         sourceItems = opened.tree;
@@ -2135,11 +2341,14 @@
         partitionMutationsAvailable = false;
         objectRenameAvailable = false;
         objectDeletionAvailable = false;
+        waveDataCleanupAvailable = false;
         objectRenameRequest = null;
         packageImportAvailable = false;
         packageExportAvailable = false;
         ++objectDeletionGeneration;
         objectDeletionRequest = null;
+        ++waveDataCleanupGeneration;
+        waveDataCleanupRequest = null;
     }
 
     async function closeImage(): Promise<void> {
@@ -2395,6 +2604,8 @@
                 onrenameobject={requestObjectRename}
                 {objectDeletionAvailable}
                 ondeleteobjects={requestObjectDeletion}
+                waveDataCleanupAvailable={waveDataCleanupAvailable && activeVolumeId !== ''}
+                oncleanupwavedata={requestWaveDataCleanup}
                 {packageExportAvailable}
                 onexportobjects={requestObjectPackageExport}
                 selection={packageExportSelection}
@@ -2562,6 +2773,20 @@
         onselectall={updateAllObjectDeletionDependencies}
         oncancel={cancelObjectDeletion}
         onconfirm={() => void submitObjectDeletion()}
+    />
+{/if}
+{#if waveDataCleanupRequest}
+    <WaveDataCleanupDialog
+        volumeName={waveDataCleanupRequest.volumeName}
+        inspection={waveDataCleanupRequest.inspection}
+        selectedObjectIds={waveDataCleanupRequest.selectedObjectIds}
+        loading={waveDataCleanupRequest.loading}
+        busy={waveDataCleanupRequest.busy}
+        error={waveDataCleanupRequest.error}
+        onselectionchange={updateWaveDataCleanupSelection}
+        onselectall={updateAllWaveDataCleanupSelection}
+        oncancel={cancelWaveDataCleanup}
+        onconfirm={() => void submitWaveDataCleanup()}
     />
 {/if}
 {#if audioImportRequest}

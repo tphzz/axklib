@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     releaseImagePackageImportPlan: vi.fn(),
     releaseClientUpload: vi.fn(),
     inspectObjectDeletion: vi.fn(),
+    inspectWaveDataOrphans: vi.fn(),
     startObjectDeletion: vi.fn(),
     startObjectRename: vi.fn(),
     waitForJob: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock('./lib/createTransport', () => ({
         releaseImagePackageImportPlan: mocks.releaseImagePackageImportPlan,
         releaseClientUpload: mocks.releaseClientUpload,
         inspectObjectDeletion: mocks.inspectObjectDeletion,
+        inspectWaveDataOrphans: mocks.inspectWaveDataOrphans,
         startObjectDeletion: mocks.startObjectDeletion,
         startObjectRename: mocks.startObjectRename,
         waitForJob: mocks.waitForJob,
@@ -106,6 +108,7 @@ describe('App panel layout', () => {
             partitionMutationsAvailable: true,
             objectRenameAvailable: true,
             objectDeletionAvailable: true,
+            waveDataCleanupAvailable: false,
         });
         mocks.refreshImage.mockReset();
         mocks.closeImage.mockReset().mockResolvedValue(undefined);
@@ -118,6 +121,7 @@ describe('App panel layout', () => {
         mocks.releaseImagePackageImportPlan.mockReset().mockResolvedValue(undefined);
         mocks.releaseClientUpload.mockReset().mockResolvedValue(undefined);
         mocks.inspectObjectDeletion.mockReset();
+        mocks.inspectWaveDataOrphans.mockReset();
         mocks.startObjectDeletion.mockReset();
         mocks.startObjectRename.mockReset();
         mocks.waitForJob.mockReset();
@@ -512,6 +516,130 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete Sample' })).toBeNull());
         expect(screen.queryByText('Piano C3')).toBeNull();
         expect(screen.queryByRole('button', { name: 'Export 1 selected object' })).toBeNull();
+    });
+
+    it('rediscovers and deletes only selected unreferenced Wave Data before refreshing', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'Piano',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const opened = {
+            sessionId: 17,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk' as const, childCount: 1, children: [volume] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 2,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectDeletionAvailable: true,
+            waveDataCleanupAvailable: true,
+        };
+        const candidates = [
+            {
+                objectId: 'wave-unused-a',
+                objectName: 'Unused A',
+                objectType: 'SMPL' as const,
+                partitionIndex: 0,
+                partitionName: 'Partition 0',
+                volumeName: volume.name,
+                storedSizeBytes: 4096,
+                recoverableBytes: 4096,
+                recoverableClusters: 4,
+            },
+            {
+                objectId: 'wave-unused-b',
+                objectName: 'Unused B',
+                objectType: 'SMPL' as const,
+                partitionIndex: 0,
+                partitionName: 'Partition 0',
+                volumeName: volume.name,
+                storedSizeBytes: 2048,
+                recoverableBytes: 2048,
+                recoverableClusters: 2,
+            },
+        ];
+        const orphanInspection = {
+            imageId: 'image-1',
+            revision: 1,
+            contentScopeId: volume.id,
+            candidates,
+            totalCandidateCount: candidates.length,
+        };
+        mocks.openImage.mockResolvedValueOnce(opened);
+        mocks.refreshImage.mockResolvedValue({ ...opened, validation: { ...opened.validation, objectCount: 1 } });
+        mocks.inspectWaveDataOrphans.mockResolvedValue(orphanInspection);
+        mocks.inspectObjectDeletion.mockResolvedValue({
+            canApply: true,
+            imageId: 'image-1',
+            revision: 1,
+            targetObjectIds: ['wave-unused-a'],
+            selectedObjectIds: ['wave-unused-a'],
+            impacts: [
+                {
+                    objectId: 'wave-unused-a',
+                    objectType: 'SMPL',
+                    objectName: 'Unused A',
+                    partitionIndex: 0,
+                    partitionName: 'Partition 0',
+                    volumeName: volume.name,
+                    role: 'TARGET',
+                    status: 'REQUIRED',
+                    selected: true,
+                    storedSizeBytes: 4096,
+                    freedClusters: 4,
+                    prerequisiteObjectIds: [],
+                    reason: 'Requested deletion target',
+                },
+            ],
+            references: [],
+            blockers: [],
+            warnings: [],
+            estimatedFreedBytes: 4096,
+            estimatedFreedClusters: 4,
+        });
+        mocks.startObjectDeletion.mockResolvedValue({ jobId: 56, kind: 'images.delete', status: 'queued' });
+        mocks.waitForJob.mockResolvedValue({
+            jobId: 56,
+            kind: 'images.delete',
+            status: 'completed',
+            result: { deletedObjectIds: ['wave-unused-a'] },
+        });
+        render(App);
+
+        await chooseNestedImage();
+        await fireEvent.click(screen.getByRole('button', { name: 'Wave Data' }));
+        await fireEvent.click(await screen.findByRole('button', { name: 'Clean up unreferenced Wave Data' }));
+        const dialog = await screen.findByRole('dialog', { name: 'Clean up Wave Data' });
+        const unusedA = within(dialog).getByRole('checkbox', {
+            name: 'Delete Wave Data Unused A',
+        }) as HTMLInputElement;
+        const unusedB = within(dialog).getByRole('checkbox', {
+            name: 'Delete Wave Data Unused B',
+        }) as HTMLInputElement;
+        expect(unusedA.checked).toBe(true);
+        expect(unusedB.checked).toBe(true);
+        await fireEvent.click(unusedB);
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete 1 Wave Data object' }));
+
+        await vi.waitFor(() => expect(mocks.inspectWaveDataOrphans).toHaveBeenCalledTimes(2));
+        expect(mocks.inspectWaveDataOrphans).toHaveBeenNthCalledWith(1, 17, volume.id);
+        expect(mocks.inspectWaveDataOrphans).toHaveBeenNthCalledWith(2, 17, volume.id);
+        expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, ['wave-unused-a'], []);
+        await vi.waitFor(() => expect(mocks.startObjectDeletion).toHaveBeenCalledOnce());
+        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, ['wave-unused-a'], []);
+        await vi.waitFor(() => expect(mocks.refreshImage).toHaveBeenCalledWith(17));
+        await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Clean up Wave Data' })).toBeNull());
     });
 
     it('renames an object, refreshes the image, and retains the selected object', async () => {

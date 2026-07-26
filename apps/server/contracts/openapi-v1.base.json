@@ -2431,6 +2431,48 @@
           "operations": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/AlterationOperationReport"}}
         }
       },
+      "ImageWaveDataOrphanInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "contentScopeId"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "contentScopeId": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageWaveDataOrphanCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["objectId", "objectType", "objectName", "partitionIndex", "partitionName", "volumeName", "storedSizeBytes", "recoverableBytes", "recoverableClusters"],
+        "properties": {
+          "objectId": {"type": "string", "minLength": 1},
+          "objectType": {"const": "SMPL"},
+          "objectName": {"type": "string"},
+          "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
+          "partitionName": {"type": "string"},
+          "volumeName": {"type": "string"},
+          "storedSizeBytes": {"type": "integer", "minimum": 0},
+          "recoverableBytes": {"type": "integer", "minimum": 0},
+          "recoverableClusters": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ImageWaveDataOrphanInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "contentScopeId", "totalCandidateCount", "candidates"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "contentScopeId": {"type": "string", "minLength": 1},
+          "totalCandidateCount": {"type": "integer", "minimum": 0},
+          "candidates": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {"$ref": "#/components/schemas/ImageWaveDataOrphanCandidate"}
+          }
+        }
+      },
       "ErrorContext": {
         "type": "object",
         "additionalProperties": false,

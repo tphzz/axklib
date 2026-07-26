@@ -36,6 +36,8 @@
         onrenameobject?: (target: ObjectRenameTarget) => void;
         objectDeletionAvailable?: boolean;
         ondeleteobjects?: (objects: PackageExportObject[]) => void;
+        waveDataCleanupAvailable?: boolean;
+        oncleanupwavedata?: () => void;
         packageExportAvailable?: boolean;
         onexportobjects?: (objects: PackageExportObject[]) => void;
         selection?: PackageExportSelectionState;
@@ -64,6 +66,8 @@
         onrenameobject = () => undefined,
         objectDeletionAvailable = false,
         ondeleteobjects = () => undefined,
+        waveDataCleanupAvailable = false,
+        oncleanupwavedata = () => undefined,
         packageExportAvailable = false,
         onexportobjects = () => undefined,
         selection = emptyPackageExportSelection(),
@@ -248,7 +252,15 @@
 </script>
 
 <section class="collection-panel" aria-label={title}>
-    <CollectionToolbar {title} {count} {query} {onquerychange} />
+    <CollectionToolbar
+        {title}
+        {count}
+        {query}
+        {onquerychange}
+        actionLabel={view === 'wave-data' && waveDataCleanupAvailable ? 'Clean up unreferenced Wave Data' : undefined}
+        actionIcon="broom"
+        onaction={oncleanupwavedata}
+    />
     <div
         class:program-list={view === 'programs'}
         class:wave-data-list={view === 'wave-data'}

@@ -977,6 +977,94 @@ describe('HttpImageTransport', () => {
         expect(bodies.get('delete')).toEqual(expected);
     });
 
+    it('discovers revision-bound unreferenced Wave Data within one volume scope', async () => {
+        let inspectionBody: unknown;
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return json({
+                        apiVersion: 'v1',
+                        limits: {},
+                        operations: [
+                            {
+                                id: 'images.deletion.orphans.inspect',
+                                method: 'POST',
+                                route: '/api/v1/image-wave-data-orphan-inspections',
+                                mode: 'read',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageWaveDataOrphanInspectionRequest',
+                                resultSchema: 'ImageWaveDataOrphanInspection',
+                                implemented: true,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return json({
+                        imageId: 'image-cleanup',
+                        revision: 11,
+                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        format: 'sfs',
+                        rootCount: 0,
+                        objectCount: 1,
+                        relationshipCount: 0,
+                        availableOperations: ['images.deletion.orphans.inspect'],
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                if (url.pathname.endsWith('/image-wave-data-orphan-inspections')) {
+                    inspectionBody = JSON.parse(String(init?.body));
+                    return json({
+                        imageId: 'image-cleanup',
+                        revision: 11,
+                        contentScopeId: 'volume-7',
+                        candidates: [
+                            {
+                                objectId: 'object-wave',
+                                objectName: 'Unused Wave',
+                                objectType: 'SMPL',
+                                partitionIndex: 0,
+                                partitionName: 'Partition 0',
+                                volumeName: 'Volume',
+                                storedSizeBytes: 4096,
+                                recoverableBytes: 4096,
+                                recoverableClusters: 4,
+                            },
+                        ],
+                        totalCandidateCount: 1,
+                    });
+                }
+                throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+        });
+        const opened = await transport.openImage(serverFile('images/base.hds'));
+        expect(opened.waveDataCleanupAvailable).toBe(true);
+
+        const inspection = await transport.inspectWaveDataOrphans(opened.sessionId, 'volume-7');
+        expect(inspection).toMatchObject({
+            contentScopeId: 'volume-7',
+            totalCandidateCount: 1,
+            candidates: [{ objectId: 'object-wave', objectName: 'Unused Wave' }],
+        });
+        expect(inspectionBody).toEqual({
+            imageId: 'image-cleanup',
+            expectedRevision: 11,
+            contentScopeId: 'volume-7',
+        });
+    });
+
     it('imports one audio batch through one atomic alteration job', async () => {
         let alterationBody: unknown;
         vi.stubGlobal(

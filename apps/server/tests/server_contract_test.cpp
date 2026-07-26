@@ -136,7 +136,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 35U);
+    EXPECT_EQ(entries.size(), 36U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -411,6 +411,35 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
                        {"estimatedFreedBytes", 1024U},
                        {"estimatedFreedClusters", 1U}};
     EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageObjectDeletionInspection", inspection));
+}
+
+TEST(ServerContract, WaveDataOrphanInspectionIsVolumeScopedAndResponseBounded) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    const auto request =
+        nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"contentScopeId", "content-volume-1"}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageWaveDataOrphanInspectionRequest", request));
+    auto missing_scope = request;
+    missing_scope.erase("contentScopeId");
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImageWaveDataOrphanInspectionRequest", missing_scope));
+
+    const auto inspection = nlohmann::json{{"imageId", "image-1"},
+                                           {"revision", 4U},
+                                           {"contentScopeId", "content-volume-1"},
+                                           {"totalCandidateCount", 1U},
+                                           {"candidates", nlohmann::json::array({{{"objectId", "object-wave-1"},
+                                                                                  {"objectType", "SMPL"},
+                                                                                  {"objectName", "Unused Wave"},
+                                                                                  {"partitionIndex", 0U},
+                                                                                  {"partitionName", "Partition 0"},
+                                                                                  {"volumeName", "Volume"},
+                                                                                  {"storedSizeBytes", 4096U},
+                                                                                  {"recoverableBytes", 8192U},
+                                                                                  {"recoverableClusters", 2U}}})}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageWaveDataOrphanInspection", inspection));
+    auto wrong_type = inspection;
+    wrong_type["candidates"][0]["objectType"] = "SBNK";
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImageWaveDataOrphanInspection", wrong_type));
 }
 
 TEST(ServerContract, WireEnumsAreUpperSnakeAndTranslateOnlyAtTheApplicationBoundary) {

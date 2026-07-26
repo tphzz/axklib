@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include "axklib/alteration.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/media.hpp"
 
@@ -132,11 +133,12 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     EXPECT_EQ(opened->source.root_id, "workspace");
     EXPECT_EQ(opened->source.relative_path, "fixture.hds");
     EXPECT_EQ(opened->format, "sfs");
-    EXPECT_EQ(opened->available_operations,
-              (std::vector<std::string>{"images.content", "images.objects", "images.relationships",
-                                        "images.validation.issues", "images.preview", "auditions.prepare",
-                                        "images.package.export", "images.alter.volumes", "images.alter.partitions",
-                                        "images.alter.objects", "images.package.import"}));
+    EXPECT_EQ(
+        opened->available_operations,
+        (std::vector<std::string>{"images.content", "images.objects", "images.relationships",
+                                  "images.validation.issues", "images.preview", "auditions.prepare",
+                                  "images.package.export", "images.alter.volumes", "images.alter.partitions",
+                                  "images.alter.objects", "images.package.import", "images.deletion.orphans.inspect"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
@@ -172,7 +174,10 @@ TEST_F(ImageSessionTest, RejectsReadsAfterTheOpenedImageChangesExternally) {
     const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
-    patch_sample_cached_reference(root_ / "fixture.hds", 0x12345678U);
+    const auto fixture = root_ / "fixture.hds";
+    const auto previous_write_time = std::filesystem::last_write_time(fixture);
+    patch_sample_cached_reference(fixture, 0x12345678U);
+    std::filesystem::last_write_time(fixture, previous_write_time + std::chrono::seconds{1});
 
     const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
     ASSERT_FALSE(read);
@@ -188,6 +193,8 @@ TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation)
     EXPECT_NE(std::ranges::find(opened->available_operations, "images.package.export"),
               opened->available_operations.end());
     EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.deletion.orphans.inspect"),
               opened->available_operations.end());
 
     {
@@ -256,6 +263,60 @@ TEST_F(ImageSessionTest, PlansOpaqueIdDeletionWithOptionalWaveDataCleanup) {
     const auto stale = sessions.plan_deletion(opened->image_id, "owner-a", opened->revision + 1U, {sample->id}, {});
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
+}
+
+TEST_F(ImageSessionTest, DiscoversOnlyConfirmedUnreferencedWaveDataWithinTheRequestedVolume) {
+    axk::app::ImageSessionManager source_sessions{*sandbox_, 2U, 64U};
+    const auto source = source_sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(source) << source.error().message;
+    const auto samples = source_sessions.objects(source->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(samples) << samples.error().message;
+    const auto sample = std::ranges::find(samples->items, "sine wave", &axk::app::ImageObjectItem::name);
+    ASSERT_NE(sample, samples->items.end());
+    const auto deletion =
+        source_sessions.plan_deletion(source->image_id, "owner-a", source->revision, {sample->id}, {});
+    ASSERT_TRUE(deletion) << deletion.error().message;
+    ASSERT_TRUE(deletion->inspection.can_apply);
+    ASSERT_TRUE(source_sessions.close(source->image_id, "owner-a"));
+    const auto altered = axk::alter_hds(root_ / "fixture.hds", deletion->manifest, root_ / "orphan.hds");
+    ASSERT_TRUE(altered) << altered.error().message;
+
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "orphan.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    EXPECT_NE(std::ranges::find(opened->available_operations, "images.deletion.orphans.inspect"),
+              opened->available_operations.end());
+    const auto roots = sessions.content(opened->image_id, "owner-a", 64U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    ASSERT_EQ(roots->items.size(), 1U);
+    const auto volumes = sessions.content(opened->image_id, "owner-a", 64U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes) << volumes.error().message;
+    const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(volume, volumes->items.end());
+
+    const auto inspection =
+        sessions.inspect_wave_data_orphans(opened->image_id, "owner-a", opened->revision, volume->id, 1024U);
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    EXPECT_EQ(inspection->image_id, opened->image_id);
+    EXPECT_EQ(inspection->revision, opened->revision);
+    EXPECT_EQ(inspection->content_scope_id, volume->id);
+    EXPECT_EQ(inspection->total_candidate_count, 1U);
+    ASSERT_EQ(inspection->candidates.size(), 1U);
+    EXPECT_EQ(inspection->candidates.front().object_type, "SMPL");
+    EXPECT_EQ(inspection->candidates.front().object_name, "sine wave");
+    EXPECT_TRUE(inspection->candidates.front().object_id.starts_with("object-"));
+    EXPECT_GT(inspection->candidates.front().stored_size_bytes, 0U);
+    EXPECT_GT(inspection->candidates.front().recoverable_bytes, 0U);
+    EXPECT_GT(inspection->candidates.front().recoverable_clusters, 0U);
+
+    const auto stale =
+        sessions.inspect_wave_data_orphans(opened->image_id, "owner-a", opened->revision + 1U, volume->id, 1024U);
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, "image_revision_stale");
+    const auto partition = sessions.inspect_wave_data_orphans(opened->image_id, "owner-a", opened->revision,
+                                                              roots->items.front().id, 1024U);
+    ASSERT_FALSE(partition);
+    EXPECT_EQ(partition.error().code, "content_scope_invalid");
 }
 
 TEST_F(ImageSessionTest, HoldsPathReservationFromBeforeOpenUntilClose) {

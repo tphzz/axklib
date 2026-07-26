@@ -30,6 +30,7 @@ import type {
     RelationshipPage,
     RelationshipPageFilter,
     VolumeMutation,
+    WaveDataOrphanInspection,
 } from '../transport';
 import type {
     ClientUploadLocation,
@@ -54,6 +55,7 @@ export interface InMemoryImageTransportOptions {
         | 'partitionMutationsAvailable'
         | 'objectRenameAvailable'
         | 'objectDeletionAvailable'
+        | 'waveDataCleanupAvailable'
         | 'packageImportAvailable'
         | 'packageExportAvailable'
     > & {
@@ -61,6 +63,7 @@ export interface InMemoryImageTransportOptions {
         partitionMutationsAvailable?: boolean;
         objectRenameAvailable?: boolean;
         objectDeletionAvailable?: boolean;
+        waveDataCleanupAvailable?: boolean;
         packageImportAvailable?: boolean;
         packageExportAvailable?: boolean;
     };
@@ -111,6 +114,7 @@ export class InMemoryImageTransport implements ImageTransport {
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
             objectRenameAvailable: this.options.opened.objectRenameAvailable ?? false,
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
+            waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
         };
@@ -127,6 +131,7 @@ export class InMemoryImageTransport implements ImageTransport {
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
             objectRenameAvailable: this.options.opened.objectRenameAvailable ?? false,
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
+            waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
         };
@@ -174,6 +179,10 @@ export class InMemoryImageTransport implements ImageTransport {
         cleanupObjectIds: string[],
     ): Promise<ObjectDeletionInspection> {
         return this.invoke('inspectObjectDeletion', [sessionId, targetObjectIds, cleanupObjectIds]);
+    }
+
+    inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection> {
+        return this.invoke('inspectWaveDataOrphans', [sessionId, contentScopeId]);
     }
 
     startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState> {

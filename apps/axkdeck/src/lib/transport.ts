@@ -33,6 +33,7 @@ export interface OpenedImage {
     partitionMutationsAvailable: boolean;
     objectRenameAvailable: boolean;
     objectDeletionAvailable: boolean;
+    waveDataCleanupAvailable: boolean;
     packageImportAvailable: boolean;
     packageExportAvailable: boolean;
 }
@@ -126,6 +127,9 @@ export interface ObjectDeletionInspection {
     estimatedFreedBytes: number;
     estimatedFreedClusters: number;
 }
+
+export type WaveDataOrphanCandidate = components['schemas']['ImageWaveDataOrphanCandidate'];
+export type WaveDataOrphanInspection = components['schemas']['ImageWaveDataOrphanInspection'];
 
 export interface ContentPage {
     items: DiskTreeItem[];
@@ -339,6 +343,7 @@ export interface ImageTransport {
         targetObjectIds: string[],
         cleanupObjectIds: string[],
     ): Promise<ObjectDeletionInspection>;
+    inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection>;
     startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState>;
     preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope>;
     prepareAudition(sessionId: number, objectKey: string): Promise<AuditionDescriptor>;

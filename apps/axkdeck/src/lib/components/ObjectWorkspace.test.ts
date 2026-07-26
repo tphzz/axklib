@@ -85,6 +85,30 @@ describe('ObjectWorkspace', () => {
         expect(emptyState.parentElement?.classList.contains('empty-collection')).toBe(true);
     });
 
+    it('offers volume-scoped orphan cleanup only in the Wave Data view when available', async () => {
+        const oncleanupwavedata = vi.fn();
+        const rendered = render(ObjectWorkspace, {
+            props: {
+                ...common,
+                view: 'wave-data',
+                waveDataCleanupAvailable: true,
+                oncleanupwavedata,
+            },
+        });
+
+        const action = screen.getByRole('button', { name: 'Clean up unreferenced Wave Data' });
+        await fireEvent.click(action);
+        expect(oncleanupwavedata).toHaveBeenCalledOnce();
+
+        await rendered.rerender({
+            ...common,
+            view: 'programs',
+            waveDataCleanupAvailable: true,
+            oncleanupwavedata,
+        });
+        expect(screen.queryByRole('button', { name: 'Clean up unreferenced Wave Data' })).toBeNull();
+    });
+
     it('renders Programs as factual list rows without fabricated keyboard metadata', () => {
         const programObject = object('PROG', '001');
         render(ObjectWorkspace, {
