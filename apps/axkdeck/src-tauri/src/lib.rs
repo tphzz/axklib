@@ -1,3 +1,4 @@
+mod desktop_preferences;
 mod remote_settings;
 mod server_sidecar;
 
@@ -13,6 +14,8 @@ use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_fs::FsExt;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
+
+use desktop_preferences::DesktopPreferencesStore;
 
 const LOG_FILE_SIZE: u128 = 5 * 1024 * 1024;
 const RETAINED_LOG_FILES: usize = 3;
@@ -247,6 +250,7 @@ async fn select_local_package_destination(
     window: WebviewWindow,
     suggested_name: String,
     state: State<'_, Mutex<PackageSaveCandidateStore>>,
+    preferences: State<'_, Mutex<DesktopPreferencesStore>>,
 ) -> Result<Option<PackageSaveCandidate>, String> {
     let expected_extension = Path::new(&suggested_name)
         .extension()
@@ -260,14 +264,25 @@ async fn select_local_package_destination(
         .ok_or_else(|| "the suggested package filename has an unsupported extension".to_owned())?
         .to_owned();
     let picker_extension = expected_extension.clone();
+    let starting_directory = match preferences.lock() {
+        Ok(preferences) => preferences.package_export_directory(),
+        Err(_) => {
+            log::warn!("desktop preference state is unavailable; using the platform save location");
+            None
+        }
+    };
     let selected = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
+        let mut dialog = app
+            .dialog()
             .file()
             .set_title("Save axklib package")
             .add_filter("axklib package", &[picker_extension.as_str()])
             .set_file_name(suggested_name)
-            .set_parent(&window)
-            .blocking_save_file()
+            .set_parent(&window);
+        if let Some(directory) = starting_directory {
+            dialog = dialog.set_directory(directory);
+        }
+        dialog.blocking_save_file()
     })
     .await
     .map_err(|error| format!("open package save picker: {error}"))?;
@@ -283,6 +298,20 @@ async fn select_local_package_destination(
         .and_then(|value| value.to_str())
         .ok_or_else(|| "the selected destination has no valid filename".to_owned())?
         .to_owned();
+    if let Some(directory) = path.parent() {
+        match preferences.lock() {
+            Ok(mut preferences) => {
+                if let Err(error) = preferences.remember_package_export_directory(directory) {
+                    log::warn!("could not persist the package export directory: {error}");
+                }
+            }
+            Err(_) => {
+                log::warn!(
+                    "desktop preference state is unavailable; the package export directory was not retained"
+                );
+            }
+        }
+    }
     let candidate_id = candidate_id()?;
     let mut candidates = state
         .lock()
@@ -649,11 +678,17 @@ pub fn run() {
                 .path()
                 .app_log_dir()
                 .map_err(|error| format!("resolve application log directory: {error}"))?;
-            let state_directory = app
+            let application_data_directory = app
                 .path()
                 .app_local_data_dir()
-                .map_err(|error| format!("resolve application state directory: {error}"))?
-                .join("server-state");
+                .map_err(|error| format!("resolve application state directory: {error}"))?;
+            let preferences_path = application_data_directory.join("desktop-preferences.json");
+            let preferences = DesktopPreferencesStore::load(preferences_path.clone()).unwrap_or_else(|error| {
+                log::warn!("desktop preferences are unavailable and will be reset on the next update: {error}");
+                DesktopPreferencesStore::empty(preferences_path)
+            });
+            app.manage(Mutex::new(preferences));
+            let state_directory = application_data_directory.join("server-state");
             let manager = remote_settings::ServerConnectionManager::initialize(
                 log_directory.clone(),
                 state_directory.clone(),
