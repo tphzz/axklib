@@ -180,7 +180,7 @@
         'wave-data': { primary: '', secondary: '', tertiary: '' },
     });
     let sidebarOpen = $state(true);
-    let lowerPanelOpen = $state(true);
+    let lowerPanelOpen = $state(false);
     let inspectorOpen = $state(true);
     let splitRatio = $state(2 / 3);
     let mainStage: HTMLElement;

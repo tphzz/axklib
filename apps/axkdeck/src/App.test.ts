@@ -181,12 +181,15 @@ describe('App panel layout', () => {
 
         expect(shell?.classList.contains('sidebar-closed')).toBe(false);
         expect(shell?.classList.contains('inspector-closed')).toBe(false);
+        expect(screen.queryByRole('region', { name: 'Object editor' })).toBeNull();
+        expect(editor.getAttribute('aria-pressed')).toBe('false');
 
+        await fireEvent.click(editor);
+        expect(screen.getByRole('region', { name: 'Object editor' })).toBeTruthy();
+        expect(editor.getAttribute('aria-pressed')).toBe('true');
         await fireEvent.click(editor);
         expect(screen.queryByRole('region', { name: 'Object editor' })).toBeNull();
         expect(editor.getAttribute('aria-pressed')).toBe('false');
-        await fireEvent.click(editor);
-        expect(screen.getByRole('region', { name: 'Object editor' })).toBeTruthy();
 
         await fireEvent.click(library);
         expect(screen.getByRole('toolbar', { name: 'Panel layout' })).toBe(toolbar);
@@ -229,6 +232,7 @@ describe('App panel layout', () => {
 
     it('uses contained-object lanes above the editor for SBAC and SBNK views', async () => {
         const { container } = render(App);
+        await fireEvent.click(screen.getByRole('button', { name: 'Editor panel' }));
 
         await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
         expect(screen.getByRole('region', { name: 'Sample Bank hierarchy' })).toBeTruthy();

@@ -152,7 +152,8 @@ describe('ServerStoragePicker', () => {
             },
         });
 
-        expect(await screen.findByText('Yamaha images/images/nested')).toBeTruthy();
+        const location = screen.getByRole('navigation', { name: 'Storage location' });
+        expect((await within(location).findByText('nested')).getAttribute('aria-current')).toBe('location');
         await fireEvent.click(screen.getByRole('button', { name: 'Parent directory' }));
 
         await waitFor(() =>
@@ -161,11 +162,55 @@ describe('ServerStoragePicker', () => {
                 relativePath: 'images',
             }),
         );
-        expect(screen.getByText('Yamaha images/images')).toBeTruthy();
+        expect(within(location).getByText('images').getAttribute('aria-current')).toBe('location');
         expect(screen.getByRole('button', { name: 'Go to all workspaces' })).toBeTruthy();
         expect(ondirectorychange).toHaveBeenLastCalledWith({
             rootId: 'workspace',
             relativePath: 'images',
+        });
+    });
+
+    it('navigates directly through accessible cumulative path breadcrumbs', async () => {
+        const imageTransport = transport();
+        const ondirectorychange = vi.fn();
+        render(ServerStoragePicker, {
+            props: {
+                transport: imageTransport,
+                mode: 'file',
+                title: 'Open image',
+                initialDirectory: { rootId: 'workspace', relativePath: 'images/nested' },
+                ondirectorychange,
+                onselect: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        const location = screen.getByRole('navigation', { name: 'Storage location' });
+        expect(await within(location).findByRole('button', { name: 'Yamaha images' })).toBeTruthy();
+        expect(within(location).getByRole('button', { name: 'images' })).toBeTruthy();
+        expect(within(location).getByText('nested').getAttribute('aria-current')).toBe('location');
+        expect(within(location).queryByRole('button', { name: 'nested' })).toBeNull();
+
+        await fireEvent.click(within(location).getByRole('button', { name: 'images' }));
+        await waitFor(() =>
+            expect(imageTransport.sandboxDirectory).toHaveBeenLastCalledWith({
+                rootId: 'workspace',
+                relativePath: 'images',
+            }),
+        );
+        expect(within(location).getByText('images').getAttribute('aria-current')).toBe('location');
+
+        await fireEvent.click(within(location).getByRole('button', { name: 'Yamaha images' }));
+        await waitFor(() =>
+            expect(imageTransport.sandboxDirectory).toHaveBeenLastCalledWith({
+                rootId: 'workspace',
+                relativePath: '',
+            }),
+        );
+        expect(within(location).getByText('Yamaha images').getAttribute('aria-current')).toBe('location');
+        expect(ondirectorychange).toHaveBeenLastCalledWith({
+            rootId: 'workspace',
+            relativePath: '',
         });
     });
 

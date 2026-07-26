@@ -62,6 +62,7 @@
     let entryActionBusy = $state(false);
     let entryActionError = $state('');
     let listElement = $state<HTMLDivElement | null>(null);
+    let breadcrumbElement = $state<HTMLOListElement | null>(null);
     let activeOptionIndex = $state(-1);
     let selectedFilePaths = $state<string[]>([]);
     let openingCurrentFolder = $state(false);
@@ -74,6 +75,27 @@
             ? `storage-picker-option-${activeRoot ? 'entry' : 'root'}-${activeOptionIndex}`
             : undefined,
     );
+    const breadcrumbs = $derived.by(() => {
+        if (!activeRoot || !directory) {
+            return [{ label: 'Workspaces', reference: null }];
+        }
+
+        const currentDirectory = directory;
+        const parts = currentDirectory.relativePath.split('/').filter(Boolean);
+        return [
+            {
+                label: activeRoot.displayName,
+                reference: { rootId: activeRoot.id, relativePath: '' },
+            },
+            ...parts.map((label, index) => ({
+                label,
+                reference: {
+                    rootId: currentDirectory.rootId,
+                    relativePath: parts.slice(0, index + 1).join('/'),
+                },
+            })),
+        ];
+    });
 
     onMount(async () => {
         queueMicrotask(() => listElement?.focus());
@@ -123,6 +145,12 @@
         option?.scrollIntoView?.({ block: 'nearest' });
     }
 
+    async function revealCurrentBreadcrumb(): Promise<void> {
+        await tick();
+        const current = breadcrumbElement?.querySelector<HTMLElement>('[aria-current="location"]');
+        current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }
+
     function setActiveOption(index: number): void {
         if (!enabledOptionIndices().includes(index)) return;
         activeOptionIndex = index;
@@ -157,6 +185,7 @@
             activeOptionIndex = listing.entries.some(entryIsVisible) ? 0 : -1;
             ondirectorychange?.(listing.directory);
             void revealActiveOption();
+            void revealCurrentBreadcrumb();
             return true;
         } catch (reason) {
             error = userFacingMessage(reason);
@@ -255,6 +284,7 @@
         selectFirstOption();
         ondirectorychange?.(null);
         void revealActiveOption();
+        void revealCurrentBreadcrumb();
     }
 
     async function goUp(): Promise<void> {
@@ -266,6 +296,11 @@
         const parts = directory.relativePath.split('/');
         parts.pop();
         await openDirectory({ rootId: directory.rootId, relativePath: parts.join('/') }, activeRoot);
+    }
+
+    async function openBreadcrumb(reference: DirectoryRef | null): Promise<void> {
+        if (!reference || !activeRoot || loading) return;
+        await openDirectory(reference, activeRoot);
     }
 
     function selectCurrentDirectory(): void {
@@ -405,16 +440,34 @@
             >
                 <Icon name="chevron" size={14} class="storage-picker-parent-icon" />
             </button>
-            <span
-                class="storage-picker-path"
-                title={activeRoot && directory
-                    ? `${activeRoot.displayName}${directory.relativePath ? `/${directory.relativePath}` : ''}`
-                    : 'Workspaces'}
-            >
-                {activeRoot && directory
-                    ? `${activeRoot.displayName}${directory.relativePath ? `/${directory.relativePath}` : ''}`
-                    : 'Workspaces'}
-            </span>
+            <ol class="storage-picker-breadcrumbs" bind:this={breadcrumbElement}>
+                {#each breadcrumbs as breadcrumb, index (`${breadcrumb.reference?.rootId ?? 'home'}:${breadcrumb.reference?.relativePath ?? ''}`)}
+                    <li class="storage-picker-breadcrumb-item">
+                        {#if index > 0}
+                            <Icon name="chevron" size={11} class="storage-picker-breadcrumb-separator" />
+                        {/if}
+                        {#if index === breadcrumbs.length - 1}
+                            <span
+                                class="storage-picker-breadcrumb-current"
+                                aria-current="location"
+                                title={breadcrumb.label}
+                            >
+                                {breadcrumb.label}
+                            </span>
+                        {:else}
+                            <button
+                                class="storage-picker-breadcrumb"
+                                type="button"
+                                disabled={loading}
+                                title={breadcrumb.label}
+                                onclick={() => void openBreadcrumb(breadcrumb.reference)}
+                            >
+                                {breadcrumb.label}
+                            </button>
+                        {/if}
+                    </li>
+                {/each}
+            </ol>
             <div class="storage-picker-location-actions">
                 {#if activeRoot?.writable && directory && (mode === 'directory' || mode === 'save-file')}
                     <button

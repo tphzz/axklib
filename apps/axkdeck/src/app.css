@@ -1691,16 +1691,70 @@ input:focus-visible {
   border-bottom: 1px solid var(--color-border);
 }
 
-.storage-picker-path {
+.storage-picker-breadcrumbs {
+  display: flex;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
   font-family: var(--font-mono);
   font-size: 10px;
   line-height: normal;
-  text-overflow: ellipsis;
+  list-style: none;
+  scrollbar-width: none;
   transform: translateY(1px);
   white-space: nowrap;
+}
+
+.storage-picker-breadcrumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.storage-picker-breadcrumb-item {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.storage-picker-breadcrumb,
+.storage-picker-breadcrumb-current {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-picker-breadcrumb {
+  margin: 0;
+  padding: 2px 1px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.storage-picker-breadcrumb:hover,
+.storage-picker-breadcrumb:focus-visible,
+.storage-picker-breadcrumb-current {
+  color: var(--color-text);
+}
+
+.storage-picker-breadcrumb:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.storage-picker-breadcrumb-separator {
+  flex: none;
+  color: var(--color-text-muted);
 }
 
 .storage-picker-location-actions {
