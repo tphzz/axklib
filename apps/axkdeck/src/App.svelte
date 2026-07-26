@@ -112,6 +112,7 @@
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
     type PickerMode = 'file' | 'directory' | 'save-file';
+    type PickerParentDialog = 'audio-import' | 'package-import' | 'package-export';
     type PickerSelection = FileLocation | DirectoryLocation | FileLocation[];
     interface PickerRequest {
         mode: PickerMode;
@@ -119,6 +120,7 @@
         extensions: string[];
         suggestedName: string;
         multiple: boolean;
+        parentDialog?: PickerParentDialog;
         initialDirectory?: DirectoryRef | null;
         ondirectorychange?: (directory: DirectoryRef | null) => void;
         resolve: (selection: PickerSelection | null) => void;
@@ -395,6 +397,7 @@
         const request = audioImportRequest;
         if (!request) return;
         const selections = await chooseServerFiles('Choose audio files', [...audioExtensions], {
+            parentDialog: 'audio-import',
             initialDirectory: lastAudioDirectory,
             ondirectorychange: (directory) => (lastAudioDirectory = directory),
         });
@@ -1051,6 +1054,7 @@
     async function chooseWorkspacePackage(): Promise<void> {
         if (!packageImportRequest) return;
         const selection = await chooseServerLocation('file', 'Choose axklib package', packageExtensions, '', {
+            parentDialog: 'package-import',
             initialDirectory: lastPackageDirectory,
             ondirectorychange: (directory) => (lastPackageDirectory = directory),
         });
@@ -1248,6 +1252,7 @@
             [filename.slice(filename.lastIndexOf('.') + 1)],
             filename,
             {
+                parentDialog: 'package-export',
                 initialDirectory: lastPackageDirectory,
                 ondirectorychange: (directory) => (lastPackageDirectory = directory),
             },
@@ -2446,7 +2451,7 @@
         title: string,
         extensions: string[] = [],
         suggestedName = '',
-        navigation?: Pick<PickerRequest, 'initialDirectory' | 'ondirectorychange'>,
+        navigation?: Pick<PickerRequest, 'parentDialog' | 'initialDirectory' | 'ondirectorychange'>,
     ): Promise<FileLocation | DirectoryLocation | null> {
         return new Promise((resolve) => {
             pickerRequest?.resolve(null);
@@ -2465,7 +2470,7 @@
     function chooseServerFiles(
         title: string,
         extensions: string[],
-        navigation?: Pick<PickerRequest, 'initialDirectory' | 'ondirectorychange'>,
+        navigation?: Pick<PickerRequest, 'parentDialog' | 'initialDirectory' | 'ondirectorychange'>,
     ): Promise<FileLocation[] | null> {
         return new Promise((resolve) => {
             pickerRequest?.resolve(null);
@@ -2786,7 +2791,7 @@
         />
     {/key}
 {/if}
-{#if packageImportRequest}
+{#if packageImportRequest && pickerRequest?.parentDialog !== 'package-import'}
     <PackageImportDialog
         targetName={packageImportRequest.item.name}
         desktop={isDesktop}
@@ -2813,7 +2818,7 @@
         onconfirm={() => void applyPackageImport()}
     />
 {/if}
-{#if packageExportRequest}
+{#if packageExportRequest && pickerRequest?.parentDialog !== 'package-export'}
     <PackageExportDialog
         items={packageExportRequest.items}
         desktop={isDesktop}
@@ -2856,7 +2861,7 @@
         onconfirm={() => void submitWaveDataCleanup()}
     />
 {/if}
-{#if audioImportRequest}
+{#if audioImportRequest && pickerRequest?.parentDialog !== 'audio-import'}
     <AudioImportDialog
         {transport}
         files={audioImportRequest.files}

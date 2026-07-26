@@ -889,6 +889,8 @@ describe('App panel layout', () => {
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import package…' }));
         await fireEvent.click(screen.getByRole('button', { name: /Storage location/ }));
         const picker = await screen.findByRole('dialog', { name: 'Choose axklib package' });
+        expect(screen.queryByRole('dialog', { name: 'Import axklib package' })).toBeNull();
+        expect(screen.getAllByRole('dialog')).toHaveLength(1);
         await fireEvent.click(await within(picker).findByText('Yamaha'));
         await fireEvent.click(await within(picker).findByText('GrPiano Fazioli.axkvol'));
 
@@ -994,6 +996,12 @@ describe('App panel layout', () => {
         expect(within(dialog).getByText('Partition 0 · Piano')).toBeTruthy();
         expect(within(dialog).getByText('Partition 1 · Drums')).toBeTruthy();
         expect(within(dialog).getByText('1 Program · 1 Sample Bank')).toBeTruthy();
+        await fireEvent.click(within(dialog).getByRole('button', { name: /Storage location/ }));
+        const picker = await screen.findByRole('navigation', { name: 'Storage location' });
+        expect(screen.queryByRole('heading', { name: 'Export package' })).toBeNull();
+        expect(screen.getAllByRole('dialog')).toHaveLength(1);
+        await fireEvent.click(within(picker.closest('[role="dialog"]')!).getByRole('button', { name: 'Cancel' }));
+        expect(await screen.findByRole('heading', { name: 'Export package' })).toBeTruthy();
     });
 
     it('suppresses context menus only in the desktop runtime', async () => {
@@ -1091,7 +1099,13 @@ describe('App panel layout', () => {
             truncated: false,
             nextCursor: null,
         });
-        const picker = await screen.findByRole('dialog', { name: 'Choose audio files' });
+        let picker = await screen.findByRole('dialog', { name: 'Choose audio files' });
+        expect(screen.queryByRole('dialog', { name: 'Import audio' })).toBeNull();
+        expect(screen.getAllByRole('dialog')).toHaveLength(1);
+        await fireEvent.click(within(picker).getByRole('button', { name: 'Cancel' }));
+        const restoredSourceDialog = await screen.findByRole('dialog', { name: 'Import audio' });
+        await fireEvent.click(within(restoredSourceDialog).getByRole('button', { name: /Storage location/ }));
+        picker = await screen.findByRole('dialog', { name: 'Choose audio files' });
         await fireEvent.click(await within(picker).findByText('Yamaha'));
         await fireEvent.click(await within(picker).findByText('kick.wav'));
         await fireEvent.click(await within(picker).findByText('snare.FLAC'));
