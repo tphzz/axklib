@@ -69,6 +69,27 @@ axk::HdsBuildManifest chain_source_manifest(const std::filesystem::path &audio_p
     return result;
 }
 
+axk::HdsBuildManifest wide_sample_bank_source_manifest(const std::filesystem::path &audio_path) {
+    auto result = sample_source_manifest(audio_path);
+    auto &volume = result.partitions[0].volumes[0];
+    volume.name = "Wide Bank";
+    volume.samples[0].name = "Member 1";
+    for (std::size_t index = 2U; index <= 5U; ++index) {
+        auto member = volume.samples[0];
+        member.name = std::format("Member {}", index);
+        volume.samples.push_back(std::move(member));
+    }
+    auto direct = volume.samples[0];
+    direct.name = "Direct";
+    volume.samples.push_back(std::move(direct));
+    volume.sample_banks.push_back({"Group", {"Member 1", "Member 2", "Member 3"}});
+    axk::ProgramSpec program;
+    program.number = 33U;
+    program.assignments = {{"SBAC", "Group", 1U}, {"SBNK", "Direct", 2U}};
+    volume.programs.push_back(std::move(program));
+    return result;
+}
+
 axk::Waveform test_waveform() {
     axk::Waveform result;
     result.format = {1U, 2U, 44100U};
@@ -953,7 +974,104 @@ TEST(Alteration, RejectsSourceWithCrossLinkedRecordAllocation) {
     std::filesystem::remove_all(root, error);
 }
 
-TEST(Alteration, RejectsSharedSampleBankMemberAndNonzeroRenameHandle) {
+TEST(Alteration, RenamesHardwareSizedSampleBankAndNormalizesProgramHandle) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-rename-wide-sample-bank";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(wide_sample_bank_source_manifest(audio), source));
+
+    const auto generated = axk::open_image(source);
+    ASSERT_TRUE(generated) << generated.error().message;
+    const auto &partition = generated->partitions().front();
+    const auto group = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.object_type == "SBAC" && record.object_name == "Group";
+    });
+    ASSERT_NE(group, partition.records.end());
+    const auto program = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.object_type == "PROG" && record.object_name == "033";
+    });
+    ASSERT_NE(program, partition.records.end());
+    for (std::size_t index = 0U; index < 5U; ++index) {
+        if (index >= 3U) {
+            patch_record_name(source, partition, *group, 0x14cU + index * 0x14U, std::format("Member {}", index + 1U));
+        }
+        patch_record_be32(source, partition, *group, 0x15cU + index * 0x14U,
+                          0x0144'0000U + static_cast<std::uint32_t>(index));
+    }
+    patch_record_byte(source, partition, *group, 0x144U, std::byte{5});
+    for (std::string_view name : {"Member 4", "Member 5"}) {
+        const auto member = std::ranges::find_if(partition.records, [&](const auto &record) {
+            return record.object_type == "SBNK" && record.object_name == name;
+        });
+        ASSERT_NE(member, partition.records.end());
+        patch_record_byte(source, partition, *member, 0xd0U, std::byte{3});
+    }
+    patch_record_be32(source, partition, *program, 0x130U, 0x0144'1000U);
+
+    const auto before = axk::open_image(source);
+    ASSERT_TRUE(before) << before.error().message;
+    const auto before_catalog = axk::build_object_catalog(*before);
+    ASSERT_TRUE(before_catalog) << before_catalog.error().message;
+    const auto before_group = std::ranges::find_if(before_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Group";
+    });
+    ASSERT_NE(before_group, before_catalog->objects.end());
+    const auto *before_decoded = std::get_if<axk::CurrentSbac>(&before_group->object.payload);
+    ASSERT_NE(before_decoded, nullptr);
+    ASSERT_EQ(before_decoded->slots.size(), 5U);
+
+    const auto manifest = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_sbac","partition_index":0,
+         "volume_name":"Wide Bank","sample_bank_name":"Group","new_sample_bank_name":"Renamed"}
+      ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto inspected = axk::inspect_hds_alteration(source, *manifest);
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    const auto applied = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto after = axk::open_image(output);
+    ASSERT_TRUE(after) << after.error().message;
+    const auto after_catalog = axk::build_object_catalog(*after);
+    ASSERT_TRUE(after_catalog) << after_catalog.error().message;
+    const auto after_group = std::ranges::find_if(after_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Renamed";
+    });
+    ASSERT_NE(after_group, after_catalog->objects.end());
+    const auto *after_decoded = std::get_if<axk::CurrentSbac>(&after_group->object.payload);
+    ASSERT_NE(after_decoded, nullptr);
+    ASSERT_EQ(after_decoded->slots.size(), 5U);
+    for (std::size_t index = 0U; index < after_decoded->slots.size(); ++index) {
+        EXPECT_EQ(after_decoded->slots[index].name, before_decoded->slots[index].name);
+        EXPECT_EQ(after_decoded->slots[index].raw_handle, before_decoded->slots[index].raw_handle);
+        EXPECT_EQ(after_decoded->slots[index].offset, before_decoded->slots[index].offset);
+    }
+    EXPECT_EQ(after_group->raw_payload.size(), before_group->raw_payload.size());
+    for (std::size_t offset = 0U; offset < before_group->raw_payload.size(); ++offset) {
+        if (offset < 0x32U || offset >= 0x42U) {
+            EXPECT_EQ(after_group->raw_payload[offset], before_group->raw_payload[offset])
+                << "unexpected SBAC payload change at offset " << offset;
+        }
+    }
+    const auto after_program = std::ranges::find_if(after_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::prog && object.object.header.name == "033";
+    });
+    ASSERT_NE(after_program, after_catalog->objects.end());
+    const auto *program_decoded = std::get_if<axk::CurrentProg>(&after_program->object.payload);
+    ASSERT_NE(program_decoded, nullptr);
+    ASSERT_FALSE(program_decoded->assignments.empty());
+    EXPECT_EQ(program_decoded->assignments.front().name, "Renamed");
+    EXPECT_EQ(program_decoded->assignments.front().raw_handle, 0U);
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, RejectsSharedSampleBankMember) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-sample-bank-safety";
     const auto audio = root / "tone.wav";
     const auto source = root / "source.hds";
@@ -969,22 +1087,6 @@ TEST(Alteration, RejectsSharedSampleBankMemberAndNonzeroRenameHandle) {
     ]})");
     ASSERT_TRUE(shared);
     EXPECT_FALSE(axk::inspect_hds_alteration(source, *shared));
-
-    const auto opened = axk::open_image(source);
-    ASSERT_TRUE(opened);
-    const auto &partition = opened->partitions()[0];
-    const auto program = std::ranges::find_if(partition.records, [](const auto &record) {
-        return record.object_type == "PROG" && record.object_name == "033";
-    });
-    ASSERT_NE(program, partition.records.end());
-    patch_record_byte(source, partition, *program, 0x133U, std::byte{1});
-    const auto rename = axk::parse_alteration_manifest(R"({
-    "schema_version":"1.0","operations":[
-      {"id":"rename","type":"rename_sbac","partition_index":0,"volume_name":"Chain",
-       "sample_bank_name":"Bank","new_sample_bank_name":"Renamed"}
-    ]})");
-    ASSERT_TRUE(rename);
-    EXPECT_FALSE(axk::inspect_hds_alteration(source, *rename));
     std::filesystem::remove_all(root, error);
 }
 

@@ -1945,13 +1945,12 @@ Result<OperationReport> rename_sbac(TransactionState &state, OperationContext co
     if (!sample_bank_object)
         return std::unexpected{sample_bank_object.error()};
     const auto *sample_bank = std::get_if<CurrentSbac>(&sample_bank_object->payload);
-    if (sample_bank == nullptr || sample_bank->slots.empty() || sample_bank->slots.size() > 3U ||
-        sample_bank->slots.size() != sample_bank->active_slot_count)
-        return std::unexpected{transaction_error("SBAC rename requires 1..3 readable slots")};
+    if (sample_bank == nullptr || sample_bank->slots.empty() ||
+        sample_bank->slots.size() != sample_bank->active_slot_count) {
+        return std::unexpected{transaction_error("SBAC rename requires a nonempty fully readable slot table")};
+    }
     std::set<SfsId> member_ids;
     for (const auto &slot : sample_bank->slots) {
-        if (slot.raw_handle != 0U)
-            return std::unexpected{transaction_error("SBAC member has unsupported nonzero handle")};
         auto member = category_object(state, partition, operation.volume_name, "SBNK", slot.name, "SBNK", cancellation);
         if (!member)
             return std::unexpected{member.error()};
@@ -1990,6 +1989,7 @@ Result<OperationReport> rename_sbac(TransactionState &state, OperationContext co
     for (const auto &program_row : *programs) {
         const auto *program = std::get_if<CurrentProg>(&program_row.decoded.payload);
         auto payload = program_row.payload;
+        ByteWriter writer{payload};
         bool changed{};
         for (std::size_t index = 0; index < program->assignments.size(); ++index) {
             const auto &assignment = program->assignments[index];
@@ -1999,9 +1999,9 @@ Result<OperationReport> rename_sbac(TransactionState &state, OperationContext co
                 return std::unexpected{transaction_error("Program already assigns rename destination")};
             if (assignment.name != operation.sample_bank_name)
                 continue;
-            if (assignment.raw_handle != 0U)
-                return std::unexpected{transaction_error("Program assignment has unsupported nonzero handle")};
             put_padded_name(payload, 0x120U + index * 0x38U, operation.new_sample_bank_name);
+            if (auto written = writer.write_be32(0x130U + index * 0x38U, 0U); !written)
+                return std::unexpected{written.error()};
             changed = true;
         }
         if (changed) {

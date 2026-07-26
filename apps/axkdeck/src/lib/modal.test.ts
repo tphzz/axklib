@@ -1,6 +1,13 @@
+/// <reference types="node" />
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { modal } from './modal';
+
+const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
 describe('modal', () => {
     it('owns focus, traps tab navigation, handles Escape, and restores background state', async () => {
@@ -29,5 +36,10 @@ describe('modal', () => {
         expect(document.activeElement).toBe(background);
         background.remove();
         dialog.remove();
+    });
+
+    it('suppresses native and WebKit overlay scrollbars in inert modal backgrounds', () => {
+        expect(appStyles).toMatch(/:is\(\[inert\], \[inert\] \*\)\s*\{[^}]*scrollbar-width:\s*none;[^}]*\}/);
+        expect(appStyles).toMatch(/:is\(\[inert\], \[inert\] \*\)::-webkit-scrollbar\s*\{[^}]*display:\s*none;[^}]*\}/);
     });
 });
