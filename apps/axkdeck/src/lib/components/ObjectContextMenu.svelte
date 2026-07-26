@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
+
     interface Props {
         objectName: string;
         selectionCount?: number;
@@ -16,9 +18,18 @@
     $effect(() => {
         queueMicrotask(() => menu?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
     });
+
+    onMount(() => {
+        const dismissFromOutsidePointer = (event: PointerEvent): void => {
+            if (!menu || event.composedPath().includes(menu)) return;
+            onclose();
+        };
+        window.addEventListener('pointerdown', dismissFromOutsidePointer, true);
+        return () => window.removeEventListener('pointerdown', dismissFromOutsidePointer, true);
+    });
 </script>
 
-<svelte:window onclick={onclose} onkeydown={(event) => event.key === 'Escape' && onclose()} />
+<svelte:window onkeydown={(event) => event.key === 'Escape' && onclose()} />
 
 <div
     bind:this={menu}

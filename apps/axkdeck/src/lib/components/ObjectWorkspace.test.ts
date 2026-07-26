@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
+import type { PackageExportSelectionState } from '../objectSelection';
 import type { SamplerObject } from '../transport';
 import type { PackageExportObject } from '../types';
 import ObjectWorkspace from './ObjectWorkspace.svelte';
@@ -286,7 +287,7 @@ describe('ObjectWorkspace', () => {
         expect(onwavedataselect).toHaveBeenCalledOnce();
     });
 
-    it('offers Wave Data deletion from the selection target without changing playback behavior', async () => {
+    it('offers Wave Data deletion from the waveform without changing playback behavior', async () => {
         const waveObject = {
             ...object('SMPL', 'SMP 001'),
             sampleRate: 44_100,
@@ -318,7 +319,9 @@ describe('ObjectWorkspace', () => {
             },
         });
 
-        await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect SMP 001' }));
+        const waveform = document.querySelector('.wave-data-row canvas');
+        expect(waveform).toBeTruthy();
+        await fireEvent.contextMenu(waveform!);
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
         expect(ondeleteobject).toHaveBeenCalledWith([
             {
@@ -331,6 +334,182 @@ describe('ObjectWorkspace', () => {
                 volumeName: waveObject.volumeName,
             },
         ]);
+    });
+
+    it('uses the waveform for selection gestures and clears selection from empty list space', async () => {
+        const waveObject = {
+            ...object('SMPL', 'SMP 001'),
+            sampleRate: 44_100,
+            sampleWidthBytes: 2,
+            frameCount: 100,
+        };
+        const waveData = {
+            id: waveObject.key,
+            objectKey: waveObject.key,
+            name: waveObject.name,
+            note: 'C3',
+            duration: '1.00 s',
+            sampleRate: '44.1 kHz',
+            bitDepth: '16-bit',
+            channels: 'Mono' as const,
+            storedSizeBytes: 200,
+            waveform: [{ minimum: -10, maximum: 10 }],
+            previewState: 'ready' as const,
+            object: waveObject,
+        };
+        const secondWaveObject = {
+            ...object('SMPL', 'SMP 002'),
+            sampleRate: 44_100,
+            sampleWidthBytes: 2,
+            frameCount: 100,
+        };
+        const secondWaveData = {
+            ...waveData,
+            id: secondWaveObject.key,
+            objectKey: secondWaveObject.key,
+            name: secondWaveObject.name,
+            object: secondWaveObject,
+        };
+        const selected: PackageExportSelectionState = {
+            items: [
+                {
+                    kind: 'SMPL' as const,
+                    objectId: waveObject.key,
+                    name: waveObject.name,
+                    typeLabel: 'Wave Data',
+                    partitionIndex: waveObject.partitionIndex,
+                    partitionName: waveObject.partitionName,
+                    volumeName: waveObject.volumeName,
+                },
+            ],
+            anchors: { 'wave-data\u00000\u0000Volume': waveObject.key },
+        };
+        const onselectionchange = vi.fn();
+        const onwavedataselect = vi.fn();
+        const onseek = vi.fn();
+        const rendered = render(ObjectWorkspace, {
+            props: {
+                ...common,
+                waveData: [waveData, secondWaveData],
+                view: 'wave-data',
+                activeObjectId: waveObject.key,
+                selection: selected,
+                onselectionchange,
+                onwavedataselect,
+                onseek,
+            },
+        });
+
+        const rows = [...document.querySelectorAll('.wave-data-row')];
+        const row = rows[0]!;
+        const waveform = row.querySelector('canvas')!;
+        const secondWaveform = rows[1]!.querySelector('canvas')!;
+        const selectionTarget = screen.getByRole('button', { name: 'Inspect SMP 001' });
+        expect(row.classList.contains('active')).toBe(true);
+        expect(row.classList.contains('selected')).toBe(true);
+        expect(selectionTarget.getAttribute('aria-pressed')).toBe('true');
+
+        await fireEvent.click(waveform, { ctrlKey: true, clientX: 50 });
+        expect(onselectionchange.mock.calls.at(-1)?.[0].items).toEqual([]);
+        expect(onwavedataselect).not.toHaveBeenCalled();
+        expect(onseek).not.toHaveBeenCalled();
+
+        await rendered.rerender({
+            ...common,
+            waveData: [waveData, secondWaveData],
+            view: 'wave-data',
+            activeObjectId: waveObject.key,
+            selection: onselectionchange.mock.calls.at(-1)?.[0],
+            onselectionchange,
+            onwavedataselect,
+            onseek,
+        });
+        expect(row.classList.contains('active')).toBe(true);
+        expect(row.classList.contains('selected')).toBe(false);
+        expect(selectionTarget.getAttribute('aria-pressed')).toBe('false');
+
+        await fireEvent.click(secondWaveform, { shiftKey: true, clientX: 50 });
+        expect(
+            onselectionchange.mock.calls.at(-1)?.[0].items.map((item: PackageExportObject) => item.objectId),
+        ).toEqual([waveObject.key, secondWaveObject.key]);
+        expect(onwavedataselect).not.toHaveBeenCalled();
+        expect(onseek).not.toHaveBeenCalled();
+
+        await rendered.rerender({
+            ...common,
+            waveData: [waveData, secondWaveData],
+            view: 'wave-data',
+            activeObjectId: waveObject.key,
+            selection: { items: [], anchors: {} },
+            onselectionchange,
+            onwavedataselect,
+            onseek,
+        });
+        vi.spyOn(secondWaveform.closest('button')!, 'getBoundingClientRect').mockReturnValue({
+            left: 0,
+            width: 100,
+        } as DOMRect);
+        await fireEvent.click(secondWaveform, { clientX: 50 });
+        expect(
+            onselectionchange.mock.calls.at(-1)?.[0].items.map((item: PackageExportObject) => item.objectId),
+        ).toEqual([secondWaveObject.key]);
+        expect(onwavedataselect).toHaveBeenCalledWith(secondWaveData);
+        expect(onseek).toHaveBeenCalledWith(secondWaveData, 0.5);
+
+        await rendered.rerender({
+            ...common,
+            waveData: [waveData, secondWaveData],
+            view: 'wave-data',
+            activeObjectId: waveObject.key,
+            selection: selected,
+            onselectionchange,
+            onwavedataselect,
+            onseek,
+        });
+        await fireEvent.click(document.querySelector('.collection-body')!);
+        expect(onselectionchange.mock.calls.at(-1)?.[0]).toEqual({ items: [], anchors: {} });
+    });
+
+    it('dismisses the Wave Data context menu on external pointer interactions that stop bubbling', async () => {
+        const waveObject = {
+            ...object('SMPL', 'SMP 001'),
+            sampleRate: 44_100,
+            sampleWidthBytes: 2,
+            frameCount: 1,
+        };
+        const waveData = {
+            id: waveObject.key,
+            objectKey: waveObject.key,
+            name: waveObject.name,
+            note: 'C3',
+            duration: '0.00 s',
+            sampleRate: '44.1 kHz',
+            bitDepth: '16-bit',
+            channels: 'Mono' as const,
+            storedSizeBytes: 2,
+            waveform: [],
+            previewState: 'idle' as const,
+            object: waveObject,
+        };
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                waveData: [waveData],
+                view: 'wave-data',
+                objectDeletionAvailable: true,
+            },
+        });
+
+        const waveform = document.querySelector('.wave-data-row canvas')!;
+        await fireEvent.contextMenu(waveform);
+        expect(screen.getByRole('menu')).toBeTruthy();
+        await fireEvent.pointerDown(waveform);
+        expect(screen.queryByRole('menu')).toBeNull();
+
+        await fireEvent.contextMenu(waveform);
+        expect(screen.getByRole('menu')).toBeTruthy();
+        await fireEvent.pointerDown(screen.getByRole('button', { name: 'Play SMP 001' }));
+        expect(screen.queryByRole('menu')).toBeNull();
     });
 
     it('delegates play and selection as one coordinated action', async () => {

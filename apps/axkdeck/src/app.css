@@ -2575,7 +2575,14 @@ input:focus-visible {
   background: #293036;
 }
 
-.wave-data-row.active,
+.wave-data-row.active {
+  border-color: rgb(104 151 187 / 68%);
+}
+
+.wave-data-row.active:not(.selected) {
+  background: rgb(104 151 187 / 10%);
+}
+
 .wave-data-row.selected {
   border-color: rgb(104 151 187 / 68%);
   background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));

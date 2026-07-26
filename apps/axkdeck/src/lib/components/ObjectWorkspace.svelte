@@ -4,6 +4,7 @@
     import {
         emptyPackageExportSelection,
         selectionMode,
+        type ObjectSelectionMode,
         updatePackageExportSelection,
         type PackageExportSelectionState,
     } from '../objectSelection';
@@ -114,7 +115,6 @@
     }
 
     function seek(event: MouseEvent, item: WaveDataItem): void {
-        event.stopPropagation();
         const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
         onseek(item, Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)));
     }
@@ -151,17 +151,41 @@
         return `${view}\u0000${first?.partitionIndex ?? ''}\u0000${first?.volumeName ?? ''}`;
     }
 
-    function updateSelection(event: MouseEvent, objectId: string): void {
+    function updateSelection(event: MouseEvent, objectId: string): ObjectSelectionMode {
+        const mode = selectionMode(event);
         const result = updatePackageExportSelection(
             selection,
             domainKey(),
             domainObjects(),
             visibleObjects(),
             objectId,
-            selectionMode(event),
+            mode,
         );
         if (result.limitExceeded) onselectionlimit();
         else onselectionchange(result.selection);
+        return mode;
+    }
+
+    function selectWaveData(event: MouseEvent, item: WaveDataItem, seekAfterSelection = false): void {
+        if (updateSelection(event, item.objectKey) !== 'replace') return;
+        onwavedataselect(item);
+        if (seekAfterSelection) seek(event, item);
+    }
+
+    function clearWaveDataSelection(event: MouseEvent): void {
+        if (
+            view !== 'wave-data' ||
+            event.button !== 0 ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey ||
+            selection.items.length === 0
+        ) {
+            return;
+        }
+        const target = event.target;
+        if (target instanceof Element && target.closest('.wave-data-row')) return;
+        onselectionchange(emptyPackageExportSelection());
     }
 
     function selectAll(event: KeyboardEvent, objectId: string): boolean {
@@ -232,6 +256,10 @@
         return { kind: 'program', object: program.object, name: program.name, programNumber };
     }
 
+    function waveDataRenameTarget(item: WaveDataItem): ObjectRenameTarget {
+        return { kind: 'wave-data', object: item.object, name: item.name };
+    }
+
     const title = $derived(view === 'programs' ? 'Programs' : 'Wave Data');
     const count = $derived(view === 'programs' ? programs.length : waveData.length);
     const normalizedQuery = $derived(query.trim().toLocaleLowerCase());
@@ -261,11 +289,15 @@
         actionIcon="broom"
         onaction={oncleanupwavedata}
     />
+    <!-- Blank-space clearing is a pointer shortcut; the selection toolbar exposes the keyboard-accessible command. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
         class:program-list={view === 'programs'}
         class:wave-data-list={view === 'wave-data'}
         class:empty-collection={emptyCollection}
         class="collection-body"
+        onclick={clearWaveDataSelection}
     >
         {#if view === 'programs'}
             {#each filteredPrograms as program (program.id)}
@@ -291,32 +323,25 @@
             {/each}
         {:else}
             {#each filteredWaveData as item (item.id)}
+                <!-- The composite row owns its pointer context menu; the selection button retains the keyboard path. -->
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <div
                     use:observePreview={item}
                     class:active={activeObjectId === item.objectKey}
                     class:selected={selection.items.some((selected) => selected.objectId === item.objectKey)}
                     class="wave-data-row"
+                    role="group"
+                    aria-label={`${item.name} Wave Data`}
+                    oncontextmenu={(event) => openObjectMenu(event, item.object, waveDataRenameTarget(item))}
                 >
                     <button
                         class="wave-data-selection"
                         type="button"
                         aria-label={`Inspect ${item.name}`}
-                        onclick={(event) => {
-                            updateSelection(event, item.objectKey);
-                            onwavedataselect(item);
-                        }}
-                        oncontextmenu={(event) =>
-                            openObjectMenu(event, item.object, {
-                                kind: 'wave-data',
-                                object: item.object,
-                                name: item.name,
-                            })}
+                        aria-pressed={selection.items.some((selected) => selected.objectId === item.objectKey)}
+                        onclick={(event) => selectWaveData(event, item)}
                         onkeydown={(event) =>
-                            openObjectMenuFromKeyboard(event, item.object, {
-                                kind: 'wave-data',
-                                object: item.object,
-                                name: item.name,
-                            })}
+                            openObjectMenuFromKeyboard(event, item.object, waveDataRenameTarget(item))}
                     ></button>
                     <strong class="wave-data-identity">{item.name}</strong>
                     <span class="wave-data-meta">{item.note} · {item.duration}</span>
@@ -324,10 +349,7 @@
                         class="waveform-seek"
                         type="button"
                         aria-label={`Seek ${item.name}`}
-                        onclick={(event) => {
-                            onwavedataselect(item);
-                            seek(event, item);
-                        }}
+                        onclick={(event) => selectWaveData(event, item, true)}
                     >
                         <Waveform
                             values={item.waveform}
