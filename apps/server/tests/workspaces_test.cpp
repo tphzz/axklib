@@ -1,3 +1,4 @@
+#include <array>
 #include <filesystem>
 #include <fstream>
 
@@ -14,7 +15,7 @@ class WorkspaceStoreTest : public testing::Test {
         base_ = std::filesystem::temp_directory_path() / "axklib-workspace-store-test";
         std::error_code error;
         std::filesystem::remove_all(base_, error);
-        std::filesystem::create_directories(base_ / "one");
+        std::filesystem::create_directories(base_ / "one" / "nested");
         std::filesystem::create_directories(base_ / "two");
         store_path_ = base_ / "config" / "workspaces.json";
     }
@@ -90,6 +91,59 @@ TEST_F(WorkspaceStoreTest, RejectsStaleMutationsAndKeepsInvalidUpdatesVisible) {
     const auto snapshot = store->snapshot();
     EXPECT_EQ(snapshot.state, axk::server::WorkspaceConfigurationState::no_available_workspace);
     EXPECT_EQ(snapshot.revision, 2U);
+}
+
+TEST_F(WorkspaceStoreTest, RejectsOverlappingWorkspaceTreesWithoutChangingTheStore) {
+    auto store = axk::server::WorkspaceStore::open(store_path_);
+    ASSERT_TRUE(store) << store.error().message;
+    auto added = store->add("One", base_ / "one", false, 0U);
+    ASSERT_TRUE(added) << added.error().message;
+
+    for (const auto &overlap : std::array{
+             base_ / "one",
+             base_ / "one" / "nested",
+             base_,
+             base_ / "one" / ".." / "one",
+         }) {
+        auto rejected = store->add("Overlap", overlap, false, 1U);
+        ASSERT_FALSE(rejected);
+        EXPECT_EQ(rejected.error().code, "workspace_path_overlap");
+        EXPECT_EQ(store->snapshot().revision, 1U);
+        EXPECT_EQ(store->snapshot().workspaces.size(), 1U);
+    }
+
+    auto disjoint = store->add("Two", base_ / "two", false, 1U);
+    ASSERT_TRUE(disjoint) << disjoint.error().message;
+    auto rejected_update =
+        store->update(disjoint->definition.id, std::nullopt, base_ / "one" / "nested", std::nullopt, 2U);
+    ASSERT_FALSE(rejected_update);
+    EXPECT_EQ(rejected_update.error().code, "workspace_path_overlap");
+    const auto snapshot = store->snapshot();
+    EXPECT_EQ(snapshot.revision, 2U);
+    ASSERT_EQ(snapshot.workspaces.size(), 2U);
+    EXPECT_EQ(snapshot.workspaces.back().definition.path, std::filesystem::canonical(base_ / "two"));
+}
+
+TEST_F(WorkspaceStoreTest, TreatsPersistedOverlappingWorkspaceTreesAsAConfigurationError) {
+    std::filesystem::create_directories(store_path_.parent_path());
+    std::ofstream(store_path_) << nlohmann::json{
+        {"schemaVersion", 1U},
+        {"revision", 2U},
+        {"workspaces",
+         {{{"id", "one"}, {"displayName", "One"}, {"path", (base_ / "one").string()}, {"writable", false}},
+          {{"id", "nested"},
+           {"displayName", "Nested"},
+           {"path", (base_ / "one" / "nested").string()},
+           {"writable", false}}}},
+    };
+
+    auto store = axk::server::WorkspaceStore::open(store_path_);
+    ASSERT_TRUE(store) << store.error().message;
+    const auto snapshot = store->snapshot();
+    EXPECT_EQ(snapshot.state, axk::server::WorkspaceConfigurationState::configuration_error);
+    ASSERT_TRUE(snapshot.configuration_issue);
+    EXPECT_EQ(*snapshot.configuration_issue, "workspace directories must not overlap");
+    EXPECT_TRUE(store->sandbox().roots().empty());
 }
 
 TEST_F(WorkspaceStoreTest, CorruptStoreRequiresExplicitArchiveAndReset) {

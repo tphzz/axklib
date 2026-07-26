@@ -21805,25 +21805,27 @@
           "409": {
             "content": {
               "application/json": {
-                "examples": {
-                  "default": {
-                    "value": {
-                      "error": {
-                        "code": "invalid_request",
-                        "context": {},
-                        "message": "request could not be processed",
-                        "requestId": "request-1",
-                        "retryable": false
-                      }
-                    }
-                  }
-                },
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Revision conflict",
+            "description": "Workspace configuration revision conflict",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Workspace directory is unavailable or overlaps another workspace",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
@@ -21874,6 +21876,21 @@
               }
             },
             "description": "Existing store archived and empty store created",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A workspace is in use",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
@@ -21933,28 +21950,30 @@
               }
             }
           },
-          "409": {
+          "404": {
             "content": {
               "application/json": {
-                "examples": {
-                  "default": {
-                    "value": {
-                      "error": {
-                        "code": "invalid_request",
-                        "context": {},
-                        "message": "request could not be processed",
-                        "requestId": "request-1",
-                        "retryable": false
-                      }
-                    }
-                  }
-                },
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Revision conflict",
+            "description": "Workspace does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Workspace configuration revision conflict or workspace is in use",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
@@ -22032,25 +22051,27 @@
           "409": {
             "content": {
               "application/json": {
-                "examples": {
-                  "default": {
-                    "value": {
-                      "error": {
-                        "code": "invalid_request",
-                        "context": {},
-                        "message": "request could not be processed",
-                        "requestId": "request-1",
-                        "retryable": false
-                      }
-                    }
-                  }
-                },
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             },
-            "description": "Revision conflict",
+            "description": "Workspace configuration revision conflict or workspace is in use",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Workspace update is invalid or overlaps another workspace",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"

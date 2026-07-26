@@ -44,9 +44,13 @@ overwritten automatically; the recovery endpoint archives it before creating
 an empty replacement.
 
 Workspace mutations use the snapshot `revision` as an optimistic concurrency
-check. Removing or relocating a workspace while an image session or active job
-uses it returns a conflict. Closing the image or waiting for the job to finish
-releases that workspace.
+check. A new, disjoint workspace can be added while image sessions or jobs are
+active. Removing or relocating a workspace while an image session or active job
+uses that specific workspace returns a conflict; unrelated workspaces remain
+configurable. Closing the image or waiting for the job to finish releases that
+workspace. Workspace directories must not be identical, ancestors, or
+descendants of one another, because each root is an independent reservation and
+sandbox boundary.
 
 Temporary uploads are only for browser-selected audio, portable package, and
 JSON manifest files. A client creates an upload, streams bounded chunks, and

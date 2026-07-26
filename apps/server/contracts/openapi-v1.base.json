@@ -75,7 +75,11 @@
       "post": {
         "operationId": "workspaces.create",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceCreateRequest"}}}},
-        "responses": {"201": {"description": "Workspace persisted and activated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceResponse"}}}}, "409": {"description": "Revision conflict"}}
+        "responses": {
+          "201": {"description": "Workspace persisted and activated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceResponse"}}}},
+          "409": {"description": "Workspace configuration revision conflict", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+          "422": {"description": "Workspace directory is unavailable or overlaps another workspace", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+        }
       }
     },
     "/workspaces/{workspaceId}": {
@@ -83,18 +87,29 @@
       "patch": {
         "operationId": "workspaces.update",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceUpdateRequest"}}}},
-        "responses": {"200": {"description": "Workspace updated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceResponse"}}}}, "409": {"description": "Revision conflict"}}
+        "responses": {
+          "200": {"description": "Workspace updated", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceResponse"}}}},
+          "409": {"description": "Workspace configuration revision conflict or workspace is in use", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+          "422": {"description": "Workspace update is invalid or overlaps another workspace", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+        }
       },
       "delete": {
         "operationId": "workspaces.delete",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RevisionRequest"}}}},
-        "responses": {"204": {"description": "Workspace removed"}, "409": {"description": "Revision conflict"}}
+        "responses": {
+          "204": {"description": "Workspace removed"},
+          "404": {"description": "Workspace does not exist", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+          "409": {"description": "Workspace configuration revision conflict or workspace is in use", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+        }
       }
     },
     "/workspaces/recovery/reset": {
       "post": {
         "operationId": "workspaces.recovery.reset",
-        "responses": {"200": {"description": "Existing store archived and empty store created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceResetResponse"}}}}}
+        "responses": {
+          "200": {"description": "Existing store archived and empty store created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceResetResponse"}}}},
+          "409": {"description": "A workspace is in use", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+        }
       }
     },
     "/host-directories/roots": {

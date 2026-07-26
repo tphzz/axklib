@@ -14,10 +14,11 @@
 
     interface Props {
         open: boolean;
+        activeWorkspaceId?: string | null;
         onclose: () => void;
     }
 
-    let { open, onclose }: Props = $props();
+    let { open, activeWorkspaceId = null, onclose }: Props = $props();
     const connection = window.__AXKLIB_SERVER__;
     const client = connection ? new AxklibHttpApiClient(connection) : null;
     const local = connection?.mode === 'local';
@@ -220,23 +221,29 @@
                         aria-busy={loading}
                     >
                         {#each snapshot?.workspaces ?? [] as workspace (workspace.id)}
+                            {@const containsOpenImage = workspace.id === activeWorkspaceId}
                             <div class="workspace-row" role="listitem">
                                 <Icon name="folder" size={17} />
                                 <span>
                                     <strong>{workspace.displayName}</strong>
                                     <small
-                                        >{workspace.status === 'AVAILABLE'
-                                            ? workspace.effectiveWritable
-                                                ? 'Writable'
-                                                : 'Read-only'
-                                            : workspace.issue}</small
+                                        >{containsOpenImage
+                                            ? 'In use by open image'
+                                            : workspace.status === 'AVAILABLE'
+                                              ? workspace.effectiveWritable
+                                                  ? 'Writable'
+                                                  : 'Read-only'
+                                              : workspace.issue}</small
                                     >
                                 </span>
                                 <button
                                     class="icon-button"
                                     type="button"
                                     aria-label={`Remove ${workspace.displayName}`}
-                                    title="Remove storage location"
+                                    title={containsOpenImage
+                                        ? 'Close the open image before removing this storage location'
+                                        : 'Remove storage location'}
+                                    disabled={containsOpenImage}
                                     onclick={() => void removeWorkspace(workspace.id)}>×</button
                                 >
                             </div>

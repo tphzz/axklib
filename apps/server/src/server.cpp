@@ -975,12 +975,6 @@ class ServerApplication {
             auto path = axk::text::path_from_utf8(parsed->at("path").get<std::string>());
             if (!path)
                 return error_response(400, {"invalid_request", "workspace path is not valid UTF-8"}, id);
-            auto reservation = path_reservations_.try_acquire(
-                axk::app::PathAccess{.reference = {}, .mode = axk::app::PathAccessMode::exclusive, .all_roots = true});
-            if (!reservation) {
-                return error_response(
-                    409, {"workspace_in_use", "close images and wait for active jobs before adding a workspace"}, id);
-            }
             auto added = workspaces_.add(parsed->at("displayName").get<std::string>(), std::move(*path),
                                          parsed->value("writable", true), parsed->at("revision").get<std::uint64_t>());
             if (!added)
@@ -1006,7 +1000,9 @@ class ServerApplication {
                 axk::app::PathAccess{{workspace_id, ""}, axk::app::PathAccessMode::exclusive});
             if (!reservation) {
                 return error_response(
-                    409, {"workspace_in_use", "close images and wait for active jobs before changing this workspace"},
+                    409,
+                    {"workspace_in_use",
+                     "close the open image or wait for active jobs using this workspace before changing it"},
                     id);
             }
             if (request.method == crow::HTTPMethod::Delete) {

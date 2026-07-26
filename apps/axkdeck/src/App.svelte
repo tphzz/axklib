@@ -2759,7 +2759,11 @@
         oncancel={() => (hardDiskCreationDirectory = null)}
     />
 {/if}
-<WorkspaceManager open={workspaceManagerOpen} onclose={() => (workspaceManagerOpen = false)} />
+<WorkspaceManager
+    open={workspaceManagerOpen}
+    activeWorkspaceId={imageLocation?.reference.rootId ?? null}
+    onclose={() => (workspaceManagerOpen = false)}
+/>
 {#if connectionSettings}
     <ServerConnectionSettings
         settings={connectionSettings}

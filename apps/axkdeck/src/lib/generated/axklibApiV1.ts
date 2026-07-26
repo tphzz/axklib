@@ -8006,8 +8006,18 @@ export interface operations {
                     'application/json': components['schemas']['WorkspaceResponse'];
                 };
             };
-            /** @description Revision conflict */
+            /** @description Workspace configuration revision conflict */
             409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Workspace directory is unavailable or overlaps another workspace */
+            422: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;
@@ -8051,7 +8061,17 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Revision conflict */
+            /** @description Workspace does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Workspace configuration revision conflict or workspace is in use */
             409: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
@@ -8098,8 +8118,18 @@ export interface operations {
                     'application/json': components['schemas']['WorkspaceResponse'];
                 };
             };
-            /** @description Revision conflict */
+            /** @description Workspace configuration revision conflict or workspace is in use */
             409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Workspace update is invalid or overlaps another workspace */
+            422: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;
@@ -8137,6 +8167,16 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['WorkspaceResetResponse'];
+                };
+            };
+            /** @description A workspace is in use */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
                 };
             };
             /** @description Request could not be completed */

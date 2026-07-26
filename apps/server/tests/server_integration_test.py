@@ -769,8 +769,12 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
     server = server.resolve()
     cli = cli.resolve()
     fixture = fixture.resolve()
-    with tempfile.TemporaryDirectory(prefix="axklib-server-test-") as root:
+    with (
+        tempfile.TemporaryDirectory(prefix="axklib-server-test-") as root,
+        tempfile.TemporaryDirectory(prefix="axklib-server-external-test-") as external,
+    ):
         root_path = Path(root)
+        external_path = Path(external)
         connection_path = root_path / "state" / "connection.json"
         (root_path / "download.bin").write_bytes(b"abcdef")
         (root_path / "archive-source" / "nested").mkdir(parents=True)
@@ -931,7 +935,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert status == 200
             assert host_listing["data"]["path"] == root_path.resolve().as_posix()
-            secondary_workspace = root_path / "secondary-workspace"
+            secondary_workspace = external_path / "secondary-workspace"
             secondary_workspace.mkdir()
             status, added_workspace = http_request(
                 port,
@@ -1387,6 +1391,56 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert status == 201, opened
             image_id = str(opened["data"]["imageId"])
+            status, workspace_snapshot = http_request(
+                port, "GET", "/api/v1/workspaces"
+            )
+            assert status == 200, workspace_snapshot
+            active_workspace_revision = workspace_snapshot["data"]["revision"]
+            active_secondary = external_path / "active-secondary"
+            active_secondary.mkdir()
+            status, active_added = http_request(
+                port,
+                "POST",
+                "/api/v1/workspaces",
+                {
+                    "displayName": "Active secondary",
+                    "path": str(active_secondary),
+                    "writable": True,
+                    "revision": active_workspace_revision,
+                },
+            )
+            assert status == 201, active_added
+            active_secondary_id = active_added["data"]["id"]
+            status, active_removed = http_request(
+                port,
+                "DELETE",
+                f"/api/v1/workspaces/{active_secondary_id}",
+                {"revision": active_workspace_revision + 1},
+            )
+            assert status == 204 and active_removed is None
+            status, active_root_removal = http_request(
+                port,
+                "DELETE",
+                "/api/v1/workspaces/workspace",
+                {"revision": active_workspace_revision + 2},
+            )
+            assert status == 409, active_root_removal
+            assert active_root_removal["error"]["code"] == "workspace_in_use"
+            status, overlapping_workspace = http_request(
+                port,
+                "POST",
+                "/api/v1/workspaces",
+                {
+                    "displayName": "Overlapping",
+                    "path": str(root_path / "archive-source"),
+                    "writable": True,
+                    "revision": active_workspace_revision + 2,
+                },
+            )
+            assert status == 422, overlapping_workspace
+            assert (
+                overlapping_workspace["error"]["code"] == "workspace_path_overlap"
+            )
             fixture_query = urlencode(
                 {"rootId": "workspace", "relativePath": session_fixture.name}
             )

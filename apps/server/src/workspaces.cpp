@@ -1,11 +1,15 @@
 #include "axklib/server/workspaces.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <fstream>
 #include <mutex>
 #include <set>
+#include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -25,6 +29,49 @@ namespace {
 using Json = nlohmann::json;
 
 axk::app::Error workspace_error(std::string code, std::string message) { return {std::move(code), std::move(message)}; }
+
+std::string path_component_key(const std::filesystem::path &component) {
+    auto result = axk::text::path_to_utf8(component);
+#if defined(_WIN32) || defined(__APPLE__)
+    std::ranges::transform(result, result.begin(), [](char value) {
+        return static_cast<char>(std::tolower(static_cast<unsigned char>(value)));
+    });
+#endif
+    return result;
+}
+
+std::vector<std::string> workspace_path_components(const std::filesystem::path &path) {
+    std::error_code error;
+    auto normalized = std::filesystem::weakly_canonical(path, error);
+    if (error)
+        normalized = path.lexically_normal();
+    std::vector<std::string> result;
+    for (const auto &component : normalized)
+        result.push_back(path_component_key(component));
+    return result;
+}
+
+bool workspace_paths_overlap(const std::filesystem::path &left, const std::filesystem::path &right) {
+    const auto left_components = workspace_path_components(left);
+    const auto right_components = workspace_path_components(right);
+    const auto is_prefix = [](const auto &prefix, const auto &value) {
+        return prefix.size() <= value.size() && std::equal(prefix.begin(), prefix.end(), value.begin());
+    };
+    return is_prefix(left_components, right_components) || is_prefix(right_components, left_components);
+}
+
+axk::app::Result<void>
+validate_non_overlapping_workspaces(const std::vector<axk::server::WorkspaceDefinition> &definitions) {
+    for (std::size_t left = 0U; left < definitions.size(); ++left) {
+        for (std::size_t right = left + 1U; right < definitions.size(); ++right) {
+            if (workspace_paths_overlap(definitions[left].path, definitions[right].path)) {
+                return std::unexpected(
+                    workspace_error("workspace_path_overlap", "workspace directories must not overlap"));
+            }
+        }
+    }
+    return {};
+}
 
 bool can_write(const std::filesystem::path &path) {
     auto suffix = axk::app::secure_random_hex(16U);
@@ -237,6 +284,8 @@ axk::app::Result<axk::server::WorkspaceStore> axk::server::WorkspaceStore::open(
             }
             state->definitions.push_back(std::move(definition));
         }
+        if (auto validated = validate_non_overlapping_workspaces(state->definitions); !validated)
+            state->configuration_issue = validated.error().message;
     } catch (const std::exception &) {
         state->configuration_issue = "workspace store is unreadable or has an unsupported schema";
     }
@@ -309,7 +358,9 @@ axk::app::Result<axk::server::WorkspaceInfo> axk::server::WorkspaceStore::add(st
     if (info.status != WorkspaceStatus::available && info.status != WorkspaceStatus::read_only)
         return std::unexpected(workspace_error("invalid_workspace", info.issue.value_or("workspace is unavailable")));
     auto updated = state_->definitions;
-    updated.push_back(definition);
+    updated.push_back(info.definition);
+    if (auto validated = validate_non_overlapping_workspaces(updated); !validated)
+        return std::unexpected(validated.error());
     if (auto written = publish(state_->path, state_->revision + 1U, updated); !written)
         return std::unexpected(written.error());
     state_->definitions = std::move(updated);
@@ -340,6 +391,9 @@ axk::server::WorkspaceStore::update(std::string_view id, std::optional<std::stri
     if (found->display_name.empty() || !found->path.is_absolute())
         return std::unexpected(workspace_error("invalid_workspace", "workspace name and absolute path are required"));
     const auto info = inspect(*found);
+    *found = info.definition;
+    if (auto validated = validate_non_overlapping_workspaces(updated); !validated)
+        return std::unexpected(validated.error());
     if (auto written = publish(state_->path, state_->revision + 1U, updated); !written)
         return std::unexpected(written.error());
     state_->definitions = std::move(updated);

@@ -20,6 +20,39 @@ function workspaceResponse(): Response {
     );
 }
 
+function activeWorkspaceResponse(): Response {
+    return new Response(
+        JSON.stringify({
+            data: {
+                state: 'READY',
+                revision: 2,
+                workspaces: [
+                    {
+                        id: 'workspace-active',
+                        displayName: 'Open image location',
+                        path: '/tmp/open',
+                        writable: true,
+                        effectiveWritable: true,
+                        status: 'AVAILABLE',
+                        issue: null,
+                    },
+                    {
+                        id: 'workspace-other',
+                        displayName: 'Other location',
+                        path: '/tmp/other',
+                        writable: true,
+                        effectiveWritable: true,
+                        status: 'AVAILABLE',
+                        issue: null,
+                    },
+                ],
+                configurationIssue: null,
+            },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+}
+
 describe('WorkspaceManager', () => {
     beforeEach(() => {
         mocks.invoke.mockReset();
@@ -86,5 +119,26 @@ describe('WorkspaceManager', () => {
         await fireEvent.click(await screen.findByRole('button', { name: 'Add storage location' }));
 
         expect((await screen.findByRole('alert')).textContent).toContain('Native dialog unavailable');
+    });
+
+    it('protects only the storage location containing the open image', async () => {
+        vi.mocked(fetch).mockResolvedValue(activeWorkspaceResponse());
+        render(WorkspaceManager, {
+            props: {
+                open: true,
+                activeWorkspaceId: 'workspace-active',
+                onclose: vi.fn(),
+            },
+        });
+
+        const activeRemove = await screen.findByRole('button', { name: 'Remove Open image location' });
+        const otherRemove = screen.getByRole('button', { name: 'Remove Other location' });
+        expect((activeRemove as HTMLButtonElement).disabled).toBe(true);
+        expect(activeRemove.getAttribute('title')).toBe('Close the open image before removing this storage location');
+        expect((otherRemove as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole('button', { name: 'Add storage location' }) as HTMLButtonElement).disabled).toBe(
+            false,
+        );
+        expect(screen.getByText('In use by open image')).toBeTruthy();
     });
 });
