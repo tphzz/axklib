@@ -180,8 +180,13 @@ truth.
 
 Writable SFS image sessions advertise `images.alter.objects`. Use
 `images.deletion.inspect` with the image ID, expected revision, target object
-ID, and explicit dependent object IDs to obtain the complete deletion impact.
-If the inspection is valid, submit the same selection to `images.delete`.
+IDs, and explicit optional-cleanup object IDs to obtain the complete deletion
+impact. Targets may be Programs, Sample Banks, Samples, or Wave Data and may
+span volumes and partitions. The inspection marks each target eligible or
+blocked; `canApply` is true when at least one requested target can be deleted
+safely. Submit the unchanged reviewed selection to `images.delete`. Eligible
+targets are applied atomically while blocked target IDs are returned unchanged
+in `blockedObjectIds`.
 Deletion is a write job: clients must wait for a terminal job snapshot, then
 refresh the retained image session. The delete operation replans at admission
 and the underlying alteration revalidates the image under the mutation lease,

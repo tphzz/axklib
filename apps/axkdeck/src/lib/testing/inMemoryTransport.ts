@@ -170,18 +170,14 @@ export class InMemoryImageTransport implements ImageTransport {
 
     inspectObjectDeletion(
         sessionId: number,
-        targetObjectId: string,
-        includedDependentObjectIds: string[],
+        targetObjectIds: string[],
+        cleanupObjectIds: string[],
     ): Promise<ObjectDeletionInspection> {
-        return this.invoke('inspectObjectDeletion', [sessionId, targetObjectId, includedDependentObjectIds]);
+        return this.invoke('inspectObjectDeletion', [sessionId, targetObjectIds, cleanupObjectIds]);
     }
 
-    startObjectDeletion(
-        sessionId: number,
-        targetObjectId: string,
-        includedDependentObjectIds: string[],
-    ): Promise<JobState> {
-        return this.invoke('startObjectDeletion', [sessionId, targetObjectId, includedDependentObjectIds]);
+    startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState> {
+        return this.invoke('startObjectDeletion', [sessionId, targetObjectIds, cleanupObjectIds]);
     }
 
     async preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {

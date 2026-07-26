@@ -160,10 +160,10 @@ struct ImageObjectDeletionReference {
 };
 
 struct ImageObjectDeletionInspection {
-    bool valid{};
+    bool can_apply{};
     std::string image_id;
     std::uint64_t revision{};
-    std::string target_object_id;
+    std::vector<std::string> target_object_ids;
     std::vector<std::string> selected_object_ids;
     std::vector<ImageObjectDeletionImpact> impacts;
     std::vector<ImageObjectDeletionReference> references;
@@ -248,9 +248,10 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageSessionSummary> open(const FileRef &source, std::string owner_id,
                                                    const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageSessionSummary> inspect(std::string_view image_id, std::string_view owner_id);
-    [[nodiscard]] Result<ImageObjectDeletionPlan>
-    plan_deletion(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
-                  std::string_view target_object_id, const std::vector<std::string> &included_dependent_object_ids);
+    [[nodiscard]] Result<ImageObjectDeletionPlan> plan_deletion(std::string_view image_id, std::string_view owner_id,
+                                                                std::uint64_t expected_revision,
+                                                                const std::vector<std::string> &target_object_ids,
+                                                                const std::vector<std::string> &cleanup_object_ids);
     [[nodiscard]] Result<ImageSessionRead> begin_read(std::string_view image_id, std::string_view owner_id,
                                                       std::uint64_t expected_revision);
     [[nodiscard]] Result<ImageSessionMutation> begin_mutation(std::string_view image_id, std::string_view owner_id,

@@ -59,7 +59,7 @@
             onclick={() => {
                 ondelete?.();
                 onclose();
-            }}>Delete</button
+            }}>Delete {selectionCount === 1 ? '' : `${selectionCount} objects`}</button
         >
     {/if}
 </div>

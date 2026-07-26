@@ -234,11 +234,11 @@ TEST_F(ImageSessionTest, PlansOpaqueIdDeletionWithOptionalWaveDataCleanup) {
     const auto sample = std::ranges::find(samples->items, "sine wave", &axk::app::ImageObjectItem::name);
     ASSERT_NE(sample, samples->items.end());
 
-    const auto inspected = sessions.plan_deletion(opened->image_id, "owner-a", opened->revision, sample->id, {});
+    const auto inspected = sessions.plan_deletion(opened->image_id, "owner-a", opened->revision, {sample->id}, {});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
-    EXPECT_TRUE(inspected->inspection.valid);
-    EXPECT_EQ(inspected->inspection.target_object_id, sample->id);
+    EXPECT_TRUE(inspected->inspection.can_apply);
+    EXPECT_EQ(inspected->inspection.target_object_ids, std::vector<std::string>{sample->id});
     ASSERT_EQ(inspected->manifest.operations.size(), 1U);
     EXPECT_TRUE(std::holds_alternative<axk::DeleteSampleOperation>(inspected->manifest.operations.front().data));
     const auto optional_wave = std::ranges::find(inspected->inspection.impacts, std::string{"SMPL"},
@@ -248,12 +248,12 @@ TEST_F(ImageSessionTest, PlansOpaqueIdDeletionWithOptionalWaveDataCleanup) {
     EXPECT_FALSE(optional_wave->selected);
 
     const auto selected =
-        sessions.plan_deletion(opened->image_id, "owner-a", opened->revision, sample->id, {optional_wave->object_id});
+        sessions.plan_deletion(opened->image_id, "owner-a", opened->revision, {sample->id}, {optional_wave->object_id});
     ASSERT_TRUE(selected) << selected.error().message;
     ASSERT_EQ(selected->manifest.operations.size(), 2U);
     EXPECT_GT(selected->inspection.estimated_freed_bytes, 0U);
 
-    const auto stale = sessions.plan_deletion(opened->image_id, "owner-a", opened->revision + 1U, sample->id, {});
+    const auto stale = sessions.plan_deletion(opened->image_id, "owner-a", opened->revision + 1U, {sample->id}, {});
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
 }

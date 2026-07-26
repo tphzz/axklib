@@ -1654,7 +1654,7 @@ export interface components {
             objectId: string;
             objectName: string;
             /** @enum {unknown} */
-            objectType: 'SBAC' | 'SBNK' | 'SMPL';
+            objectType: 'PROG' | 'SBAC' | 'SBNK' | 'SMPL';
             partitionIndex: number | null;
             partitionName: string;
             prerequisiteObjectIds: string[];
@@ -1669,6 +1669,8 @@ export interface components {
         };
         ImageObjectDeletionInspection: {
             blockers: components['schemas']['ImageObjectDeletionNotice'][];
+            /** @description True when at least one requested object can be deleted safely */
+            canApply: boolean;
             /** @description Allocated storage bytes expected to become free for the selected deletion closure */
             estimatedFreedBytes: number;
             /** @description Allocated storage clusters expected to become free for the selected deletion closure */
@@ -1678,8 +1680,7 @@ export interface components {
             references: components['schemas']['ImageObjectDeletionReference'][];
             revision: number;
             selectedObjectIds: string[];
-            targetObjectId: string;
-            valid: boolean;
+            targetObjectIds: string[];
             warnings: components['schemas']['ImageObjectDeletionNotice'][];
         };
         ImageObjectDeletionNotice: {
@@ -1701,14 +1702,15 @@ export interface components {
             type: string;
         };
         ImageObjectDeletionRequest: {
+            cleanupObjectIds: string[];
             expectedRevision: number;
             imageId: string;
-            includedDependentObjectIds: string[];
-            targetObjectId: string;
+            targetObjectIds: string[];
         };
         ImageObjectDeletionResult: {
             /** @constant */
             applied: true;
+            blockedObjectIds: string[];
             deletedObjectIds: string[];
             freedClusters: number;
             imageId: string;

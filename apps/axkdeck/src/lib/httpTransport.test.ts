@@ -888,10 +888,10 @@ describe('HttpImageTransport', () => {
                 if (url.pathname.endsWith('/image-object-deletion-inspections')) {
                     bodies.set('inspect', JSON.parse(String(init?.body)));
                     return json({
-                        valid: true,
+                        canApply: true,
                         imageId: 'image-delete',
                         revision: 7,
-                        targetObjectId: 'object-sample',
+                        targetObjectIds: ['object-sample'],
                         selectedObjectIds: ['object-sample', 'object-wave'],
                         impacts: [
                             {
@@ -958,20 +958,20 @@ describe('HttpImageTransport', () => {
         const opened = await transport.openImage(serverFile('images/base.hds'));
         expect(opened.objectDeletionAvailable).toBe(true);
 
-        const inspection = await transport.inspectObjectDeletion(opened.sessionId, 'object-sample', ['object-wave']);
+        const inspection = await transport.inspectObjectDeletion(opened.sessionId, ['object-sample'], ['object-wave']);
         expect(inspection).toMatchObject({
-            valid: true,
+            canApply: true,
             selectedObjectIds: ['object-sample', 'object-wave'],
             estimatedFreedClusters: 5,
         });
-        const job = await transport.startObjectDeletion(opened.sessionId, 'object-sample', ['object-wave']);
+        const job = await transport.startObjectDeletion(opened.sessionId, ['object-sample'], ['object-wave']);
         expect(job).toMatchObject({ kind: 'images.delete', status: 'queued' });
 
         const expected = {
             imageId: 'image-delete',
             expectedRevision: 7,
-            targetObjectId: 'object-sample',
-            includedDependentObjectIds: ['object-wave'],
+            targetObjectIds: ['object-sample'],
+            cleanupObjectIds: ['object-wave'],
         };
         expect(bodies.get('inspect')).toEqual(expected);
         expect(bodies.get('delete')).toEqual(expected);

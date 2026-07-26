@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "axklib/alteration.hpp"
@@ -47,13 +48,13 @@ struct ObjectDeletionReference {
 };
 
 struct ObjectDeletionSelection {
-    std::string target_key;
-    std::vector<std::string> included_dependency_keys;
+    std::vector<std::string> target_keys;
+    std::vector<std::string> cleanup_keys;
 };
 
 struct ObjectDeletionInspection {
-    bool valid{};
-    std::string target_key;
+    bool can_apply{};
+    std::vector<std::string> target_keys;
     std::vector<std::string> selected_keys;
     std::vector<ObjectDeletionImpact> impacts;
     std::vector<ObjectDeletionReference> references;

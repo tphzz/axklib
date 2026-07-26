@@ -939,10 +939,9 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
                                .validation = validation};
 }
 
-axk::app::Result<axk::app::ImageObjectDeletionPlan>
-axk::app::ImageSessionManager::plan_deletion(std::string_view image_id, std::string_view owner_id,
-                                             std::uint64_t expected_revision, std::string_view target_object_id,
-                                             const std::vector<std::string> &included_dependent_object_ids) {
+axk::app::Result<axk::app::ImageObjectDeletionPlan> axk::app::ImageSessionManager::plan_deletion(
+    std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+    const std::vector<std::string> &target_object_ids, const std::vector<std::string> &cleanup_object_ids) {
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
@@ -952,18 +951,22 @@ axk::app::ImageSessionManager::plan_deletion(std::string_view image_id, std::str
     if ((*session)->format != "sfs" || !(*session)->media)
         return std::unexpected(
             session_error("image_mutation_unsupported", "only SFS image sessions support object deletion"));
-    const auto target = (*session)->snapshots_by_id.find(std::string{target_object_id});
-    if (target == (*session)->snapshots_by_id.end())
-        return std::unexpected(session_error("object_not_found", "deletion target does not exist"));
-
-    std::vector<std::string> included_keys;
-    included_keys.reserve(included_dependent_object_ids.size());
-    for (const auto &object_id : included_dependent_object_ids) {
+    std::vector<std::string> target_keys;
+    target_keys.reserve(target_object_ids.size());
+    for (const auto &object_id : target_object_ids) {
+        const auto found = (*session)->snapshots_by_id.find(object_id);
+        if (found == (*session)->snapshots_by_id.end())
+            return std::unexpected(session_error("object_not_found", "deletion target does not exist"));
+        target_keys.push_back(found->second.key);
+    }
+    std::vector<std::string> cleanup_keys;
+    cleanup_keys.reserve(cleanup_object_ids.size());
+    for (const auto &object_id : cleanup_object_ids) {
         const auto found = (*session)->snapshots_by_id.find(object_id);
         if (found == (*session)->snapshots_by_id.end()) {
-            return std::unexpected(session_error("object_not_found", "included deletion dependency does not exist"));
+            return std::unexpected(session_error("object_not_found", "deletion cleanup object does not exist"));
         }
-        included_keys.push_back(found->second.key);
+        cleanup_keys.push_back(found->second.key);
     }
     ObjectCatalog catalog;
     catalog.issues = (*session)->catalog_issues;
@@ -979,8 +982,7 @@ axk::app::ImageSessionManager::plan_deletion(std::string_view image_id, std::str
         return std::unexpected(
             session_error("image_mutation_unsupported", "object deletion requires an SFS container"));
     const auto inspected = inspect_object_deletion(
-        *container, catalog, graph,
-        {.target_key = target->second.key, .included_dependency_keys = std::move(included_keys)});
+        *container, catalog, graph, {.target_keys = std::move(target_keys), .cleanup_keys = std::move(cleanup_keys)});
     if (!inspected)
         return std::unexpected(session_error("deletion_invalid", inspected.error().message));
 
@@ -1004,10 +1006,10 @@ axk::app::ImageSessionManager::plan_deletion(std::string_view image_id, std::str
     };
 
     ImageObjectDeletionInspection result;
-    result.valid = inspected->valid;
+    result.can_apply = inspected->can_apply;
     result.image_id = std::string{image_id};
     result.revision = expected_revision;
-    result.target_object_id = std::string{target_object_id};
+    result.target_object_ids = target_object_ids;
     result.selected_object_ids = map_keys(inspected->selected_keys);
     result.estimated_freed_bytes = inspected->estimated_freed_bytes;
     result.estimated_freed_clusters = inspected->estimated_freed_clusters;

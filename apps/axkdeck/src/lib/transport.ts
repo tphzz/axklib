@@ -87,7 +87,7 @@ export interface ObjectDeletionNotice {
 
 export interface ObjectDeletionImpact {
     objectId: string;
-    objectType: 'SBAC' | 'SBNK' | 'SMPL';
+    objectType: 'PROG' | 'SBAC' | 'SBNK' | 'SMPL';
     objectName: string;
     partitionIndex: number | null;
     partitionName: string;
@@ -114,10 +114,10 @@ export interface ObjectDeletionReference {
 }
 
 export interface ObjectDeletionInspection {
-    valid: boolean;
+    canApply: boolean;
     imageId: string;
     revision: number;
-    targetObjectId: string;
+    targetObjectIds: string[];
     selectedObjectIds: string[];
     impacts: ObjectDeletionImpact[];
     references: ObjectDeletionReference[];
@@ -336,14 +336,10 @@ export interface ImageTransport {
     startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState>;
     inspectObjectDeletion(
         sessionId: number,
-        targetObjectId: string,
-        includedDependentObjectIds: string[],
+        targetObjectIds: string[],
+        cleanupObjectIds: string[],
     ): Promise<ObjectDeletionInspection>;
-    startObjectDeletion(
-        sessionId: number,
-        targetObjectId: string,
-        includedDependentObjectIds: string[],
-    ): Promise<JobState>;
+    startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState>;
     preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope>;
     prepareAudition(sessionId: number, objectKey: string): Promise<AuditionDescriptor>;
     readAuditionAudio(auditionId: string, wavSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer>;

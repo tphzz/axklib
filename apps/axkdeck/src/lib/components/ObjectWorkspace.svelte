@@ -35,7 +35,7 @@
         objectRenameAvailable?: boolean;
         onrenameobject?: (target: ObjectRenameTarget) => void;
         objectDeletionAvailable?: boolean;
-        ondeleteobject?: (object: SamplerObject) => void;
+        ondeleteobjects?: (objects: PackageExportObject[]) => void;
         packageExportAvailable?: boolean;
         onexportobjects?: (objects: PackageExportObject[]) => void;
         selection?: PackageExportSelectionState;
@@ -63,7 +63,7 @@
         objectRenameAvailable = false,
         onrenameobject = () => undefined,
         objectDeletionAvailable = false,
-        ondeleteobject = () => undefined,
+        ondeleteobjects = () => undefined,
         packageExportAvailable = false,
         onexportobjects = () => undefined,
         selection = emptyPackageExportSelection(),
@@ -180,7 +180,7 @@
         if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable) return;
         event.preventDefault();
         let menuSelection = selection;
-        if (!packageExportAvailable || !selection.items.some((item) => item.objectId === object.key)) {
+        if (!selection.items.some((item) => item.objectId === object.key)) {
             const result = updatePackageExportSelection(
                 selection,
                 domainKey(),
@@ -190,7 +190,7 @@
                 'replace',
             );
             menuSelection = result.selection;
-            if (packageExportAvailable) onselectionchange(menuSelection);
+            onselectionchange(menuSelection);
         }
         objectMenu = {
             target: object,
@@ -377,8 +377,6 @@
             ? () => onrenameobject(objectMenu!.renameTarget!)
             : undefined}
         onexport={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
-        ondelete={objectDeletionAvailable && objectMenu.target.objectType === 'SMPL' && objectMenu.objects.length === 1
-            ? () => ondeleteobject(objectMenu!.target)
-            : undefined}
+        ondelete={objectDeletionAvailable ? () => ondeleteobjects(objectMenu!.objects) : undefined}
     />
 {/if}

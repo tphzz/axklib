@@ -657,15 +657,15 @@ export class HttpImageTransport implements ImageTransport {
 
     async inspectObjectDeletion(
         sessionId: number,
-        targetObjectId: string,
-        includedDependentObjectIds: string[],
+        targetObjectIds: string[],
+        cleanupObjectIds: string[],
     ): Promise<ObjectDeletionInspection> {
         const session = this.session(sessionId);
         const result = await this.client.invoke<ApiObjectDeletionInspection>('images.deletion.inspect', {
             imageId: session.remoteId,
             expectedRevision: session.revision,
-            targetObjectId,
-            includedDependentObjectIds,
+            targetObjectIds,
+            cleanupObjectIds,
         });
         if (this.isJob(result)) throw new Error('images.deletion.inspect unexpectedly returned a job');
         return result;
@@ -673,8 +673,8 @@ export class HttpImageTransport implements ImageTransport {
 
     async startObjectDeletion(
         sessionId: number,
-        targetObjectId: string,
-        includedDependentObjectIds: string[],
+        targetObjectIds: string[],
+        cleanupObjectIds: string[],
     ): Promise<JobState> {
         const session = this.session(sessionId);
         const result = await this.client.invoke<never>(
@@ -682,8 +682,8 @@ export class HttpImageTransport implements ImageTransport {
             {
                 imageId: session.remoteId,
                 expectedRevision: session.revision,
-                targetObjectId,
-                includedDependentObjectIds,
+                targetObjectIds,
+                cleanupObjectIds,
             },
             { idempotencyKey: randomIdempotencyKey() },
         );

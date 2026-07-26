@@ -2235,6 +2235,7 @@
           },
           "objectType": {
             "enum": [
+              "PROG",
               "SBAC",
               "SBNK",
               "SMPL"
@@ -2313,6 +2314,10 @@
             },
             "type": "array"
           },
+          "canApply": {
+            "description": "True when at least one requested object can be deleted safely",
+            "type": "boolean"
+          },
           "estimatedFreedBytes": {
             "description": "Allocated storage bytes expected to become free for the selected deletion closure",
             "minimum": 0,
@@ -2351,12 +2356,15 @@
             },
             "type": "array"
           },
-          "targetObjectId": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "valid": {
-            "type": "boolean"
+          "targetObjectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
           },
           "warnings": {
             "items": {
@@ -2366,10 +2374,10 @@
           }
         },
         "required": [
-          "valid",
+          "canApply",
           "imageId",
           "revision",
-          "targetObjectId",
+          "targetObjectIds",
           "selectedObjectIds",
           "impacts",
           "references",
@@ -2489,6 +2497,15 @@
       "ImageObjectDeletionRequest": {
         "additionalProperties": false,
         "properties": {
+          "cleanupObjectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "type": "array",
+            "uniqueItems": true
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -2497,25 +2514,22 @@
             "minLength": 1,
             "type": "string"
           },
-          "includedDependentObjectIds": {
+          "targetObjectIds": {
             "items": {
               "minLength": 1,
               "type": "string"
             },
-            "maxItems": 16,
+            "maxItems": 1024,
+            "minItems": 1,
             "type": "array",
             "uniqueItems": true
-          },
-          "targetObjectId": {
-            "minLength": 1,
-            "type": "string"
           }
         },
         "required": [
           "imageId",
           "expectedRevision",
-          "targetObjectId",
-          "includedDependentObjectIds"
+          "targetObjectIds",
+          "cleanupObjectIds"
         ],
         "type": "object"
       },
@@ -2524,6 +2538,14 @@
         "properties": {
           "applied": {
             "const": true
+          },
+          "blockedObjectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
           },
           "deletedObjectIds": {
             "items": {
@@ -2582,6 +2604,7 @@
           "revision",
           "summary",
           "deletedObjectIds",
+          "blockedObjectIds",
           "freedClusters",
           "objectCount",
           "validation",
@@ -11894,10 +11917,12 @@
               "examples": {
                 "default": {
                   "value": {
+                    "cleanupObjectIds": [],
                     "expectedRevision": 1,
                     "imageId": "x",
-                    "includedDependentObjectIds": [],
-                    "targetObjectId": "x"
+                    "targetObjectIds": [
+                      "x"
+                    ]
                   }
                 }
               },
@@ -11917,6 +11942,7 @@
                     "value": {
                       "data": {
                         "blockers": [],
+                        "canApply": false,
                         "estimatedFreedBytes": 0,
                         "estimatedFreedClusters": 0,
                         "imageId": "x",
@@ -11925,7 +11951,7 @@
                             "freedClusters": 0,
                             "objectId": "x",
                             "objectName": "x",
-                            "objectType": "SBAC",
+                            "objectType": "PROG",
                             "partitionIndex": 0,
                             "partitionName": "x",
                             "prerequisiteObjectIds": [],
@@ -11940,8 +11966,9 @@
                         "references": [],
                         "revision": 1,
                         "selectedObjectIds": [],
-                        "targetObjectId": "x",
-                        "valid": false,
+                        "targetObjectIds": [
+                          "x"
+                        ],
                         "warnings": []
                       },
                       "meta": {
@@ -11953,6 +11980,7 @@
                     "value": {
                       "data": {
                         "blockers": [],
+                        "canApply": false,
                         "estimatedFreedBytes": 0,
                         "estimatedFreedClusters": 0,
                         "imageId": "x",
@@ -11961,7 +11989,7 @@
                             "freedClusters": 0,
                             "objectId": "x",
                             "objectName": "x",
-                            "objectType": "SBAC",
+                            "objectType": "PROG",
                             "partitionIndex": 0,
                             "partitionName": "x",
                             "prerequisiteObjectIds": [],
@@ -11976,8 +12004,9 @@
                         "references": [],
                         "revision": 1,
                         "selectedObjectIds": [],
-                        "targetObjectId": "x",
-                        "valid": false,
+                        "targetObjectIds": [
+                          "x"
+                        ],
                         "warnings": []
                       },
                       "meta": {
@@ -12298,10 +12327,12 @@
               "examples": {
                 "default": {
                   "value": {
+                    "cleanupObjectIds": [],
                     "expectedRevision": 1,
                     "imageId": "x",
-                    "includedDependentObjectIds": [],
-                    "targetObjectId": "x"
+                    "targetObjectIds": [
+                      "x"
+                    ]
                   }
                 }
               },

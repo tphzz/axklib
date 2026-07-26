@@ -1621,8 +1621,8 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             deletion_request = {
                 "imageId": image_id,
                 "expectedRevision": 2,
-                "targetObjectId": sample["id"],
-                "includedDependentObjectIds": [],
+                "targetObjectIds": [sample["id"]],
+                "cleanupObjectIds": [],
             }
             status, deletion_inspection = http_request(
                 port,
@@ -1630,7 +1630,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "/api/v1/image-object-deletion-inspections",
                 deletion_request,
             )
-            assert status == 200 and deletion_inspection["data"]["valid"], (
+            assert status == 200 and deletion_inspection["data"]["canApply"], (
                 deletion_inspection
             )
             optional_wave_data = [
@@ -1639,14 +1639,14 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 if impact["objectType"] == "SMPL" and impact["status"] == "OPTIONAL"
             ]
             assert optional_wave_data, deletion_inspection
-            deletion_request["includedDependentObjectIds"] = optional_wave_data
+            deletion_request["cleanupObjectIds"] = optional_wave_data
             status, reviewed_deletion = http_request(
                 port,
                 "POST",
                 "/api/v1/image-object-deletion-inspections",
                 deletion_request,
             )
-            assert status == 200 and reviewed_deletion["data"]["valid"], (
+            assert status == 200 and reviewed_deletion["data"]["canApply"], (
                 reviewed_deletion
             )
             status, submitted_deletion = http_request(

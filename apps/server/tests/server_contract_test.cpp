@@ -354,6 +354,65 @@ TEST(ServerContract, CanonicalReportRequestSchemasMatchApplicationInputs) {
     EXPECT_FALSE(axk::server::validate_openapi_value(document, "ValidationRequest", ambiguous_validation));
 }
 
+TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialApplicability) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    const auto request = nlohmann::json{{"imageId", "image-1"},
+                                        {"expectedRevision", 4U},
+                                        {"targetObjectIds", nlohmann::json::array({"program-1", "sample-1"})},
+                                        {"cleanupObjectIds", nlohmann::json::array({"wave-1"})}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageObjectDeletionRequest", request));
+
+    auto single_target = request;
+    single_target["targetObjectIds"] = "sample-1";
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImageObjectDeletionRequest", single_target));
+
+    auto duplicate_targets = request;
+    duplicate_targets["targetObjectIds"] = nlohmann::json::array({"sample-1", "sample-1"});
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImageObjectDeletionRequest", duplicate_targets));
+
+    const auto inspection =
+        nlohmann::json{{"canApply", true},
+                       {"imageId", "image-1"},
+                       {"revision", 4U},
+                       {"targetObjectIds", nlohmann::json::array({"program-1", "sample-1"})},
+                       {"selectedObjectIds", nlohmann::json::array({"program-1"})},
+                       {"impacts", nlohmann::json::array({{{"objectId", "program-1"},
+                                                           {"objectType", "PROG"},
+                                                           {"objectName", "001: Piano"},
+                                                           {"partitionIndex", 0U},
+                                                           {"partitionName", "Partition 0"},
+                                                           {"volumeName", "Piano"},
+                                                           {"role", "TARGET"},
+                                                           {"status", "REQUIRED"},
+                                                           {"selected", true},
+                                                           {"storedSizeBytes", 512U},
+                                                           {"freedClusters", 1U},
+                                                           {"prerequisiteObjectIds", nlohmann::json::array()},
+                                                           {"reason", "Selected object"}},
+                                                          {{"objectId", "sample-1"},
+                                                           {"objectType", "SBNK"},
+                                                           {"objectName", "Piano C3"},
+                                                           {"partitionIndex", 0U},
+                                                           {"partitionName", "Partition 0"},
+                                                           {"volumeName", "Piano"},
+                                                           {"role", "TARGET"},
+                                                           {"status", "BLOCKED"},
+                                                           {"selected", false},
+                                                           {"storedSizeBytes", 512U},
+                                                           {"freedClusters", 1U},
+                                                           {"prerequisiteObjectIds", nlohmann::json::array()},
+                                                           {"reason", "A Sample Bank still refers to this Sample"}}})},
+                       {"references", nlohmann::json::array()},
+                       {"blockers", nlohmann::json::array({{{"code", "incoming_reference"},
+                                                            {"message", "A Sample Bank still refers to this Sample"},
+                                                            {"objectIds", nlohmann::json::array({"sample-1"})}}})},
+                       {"warnings", nlohmann::json::array()},
+                       {"estimatedFreedBytes", 1024U},
+                       {"estimatedFreedClusters", 1U}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageObjectDeletionInspection", inspection));
+}
+
 TEST(ServerContract, WireEnumsAreUpperSnakeAndTranslateOnlyAtTheApplicationBoundary) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());

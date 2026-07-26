@@ -874,10 +874,10 @@ Json deletion_inspection_json(const axk::app::ImageObjectDeletionInspection &ins
         }
         return result;
     };
-    return {{"valid", inspection.valid},
+    return {{"canApply", inspection.can_apply},
             {"imageId", inspection.image_id},
             {"revision", inspection.revision},
-            {"targetObjectId", inspection.target_object_id},
+            {"targetObjectIds", inspection.target_object_ids},
             {"selectedObjectIds", inspection.selected_object_ids},
             {"impacts", std::move(impacts)},
             {"references", std::move(references)},
@@ -895,7 +895,8 @@ Json deletion_manifest_json(const axk::AlterationManifest &manifest) {
                 using T = std::decay_t<decltype(data)>;
                 if constexpr (std::same_as<T, axk::DeleteSampleBankOperation> ||
                               std::same_as<T, axk::DeleteSampleOperation> ||
-                              std::same_as<T, axk::DeleteWaveformOperation>) {
+                              std::same_as<T, axk::DeleteWaveformOperation> ||
+                              std::same_as<T, axk::DeleteProgramOperation>) {
                     const auto *partition = std::get_if<axk::PartitionIndex>(&data.partition);
                     if (partition == nullptr)
                         return Json::object();
@@ -907,6 +908,8 @@ Json deletion_manifest_json(const axk::AlterationManifest &manifest) {
                         result["sample_bank_name"] = data.sample_bank_name;
                     else if constexpr (std::same_as<T, axk::DeleteSampleOperation>)
                         result["sample_name"] = data.sample_name;
+                    else if constexpr (std::same_as<T, axk::DeleteProgramOperation>)
+                        result["program_number"] = data.program_number;
                     else
                         result["waveform_name"] = data.waveform_name;
                     return result;
@@ -1717,16 +1720,16 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                 try {
                     const auto image_id = input.at("imageId").get<std::string>();
                     const auto revision = input.at("expectedRevision").get<std::uint64_t>();
-                    const auto target = input.at("targetObjectId").get<std::string>();
-                    const auto included = input.at("includedDependentObjectIds").get<std::vector<std::string>>();
-                    auto plan = images.plan_deletion(image_id, context.owner_id, revision, target, included);
+                    const auto targets = input.at("targetObjectIds").get<std::vector<std::string>>();
+                    const auto cleanup = input.at("cleanupObjectIds").get<std::vector<std::string>>();
+                    auto plan = images.plan_deletion(image_id, context.owner_id, revision, targets, cleanup);
                     if (!plan)
                         return std::unexpected(plan.error());
                     return deletion_inspection_json(plan->inspection);
                 } catch (const Json::exception &) {
                     return std::unexpected(operation_error(
                         "invalid_request",
-                        "imageId, expectedRevision, targetObjectId, and includedDependentObjectIds are required"));
+                        "imageId, expectedRevision, targetObjectIds, and cleanupObjectIds are required"));
                 }
             });
         if (!bound)
@@ -1738,22 +1741,22 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
             [&images, alter_session](const Json &input, const OperationContext &context) -> Result<Json> {
                 std::string image_id;
                 std::uint64_t revision{};
-                std::string target;
-                std::vector<std::string> included;
+                std::vector<std::string> targets;
+                std::vector<std::string> cleanup;
                 try {
                     image_id = input.at("imageId").get<std::string>();
                     revision = input.at("expectedRevision").get<std::uint64_t>();
-                    target = input.at("targetObjectId").get<std::string>();
-                    included = input.at("includedDependentObjectIds").get<std::vector<std::string>>();
+                    targets = input.at("targetObjectIds").get<std::vector<std::string>>();
+                    cleanup = input.at("cleanupObjectIds").get<std::vector<std::string>>();
                 } catch (const Json::exception &) {
                     return std::unexpected(operation_error(
                         "invalid_request",
-                        "imageId, expectedRevision, targetObjectId, and includedDependentObjectIds are required"));
+                        "imageId, expectedRevision, targetObjectIds, and cleanupObjectIds are required"));
                 }
-                auto plan = images.plan_deletion(image_id, context.owner_id, revision, target, included);
+                auto plan = images.plan_deletion(image_id, context.owner_id, revision, targets, cleanup);
                 if (!plan)
                     return std::unexpected(plan.error());
-                if (!plan->inspection.valid) {
+                if (!plan->inspection.can_apply) {
                     const auto message = plan->inspection.blockers.empty() ? "object deletion is blocked"
                                                                            : plan->inspection.blockers.front().message;
                     return std::unexpected(operation_error("deletion_blocked", message));
@@ -1767,6 +1770,12 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     return std::unexpected(altered.error());
                 (*altered)["kind"] = "DELETION";
                 (*altered)["deletedObjectIds"] = plan->inspection.selected_object_ids;
+                std::vector<std::string> blocked;
+                for (const auto &impact : plan->inspection.impacts) {
+                    if (impact.status == "BLOCKED")
+                        blocked.push_back(impact.object_id);
+                }
+                (*altered)["blockedObjectIds"] = std::move(blocked);
                 (*altered)["freedClusters"] = plan->inspection.estimated_freed_clusters;
                 return altered;
             });

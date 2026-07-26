@@ -188,8 +188,8 @@
         error: string;
     } | null>(null);
     let objectDeletionRequest = $state<{
-        target: SamplerObject;
-        includedDependentObjectIds: string[];
+        targets: PackageExportObject[];
+        cleanupObjectIds: string[];
         inspection: ObjectDeletionInspection | null;
         loading: boolean;
         busy: boolean;
@@ -1227,18 +1227,29 @@
         objectDeletionRequest = null;
     }
 
-    function requestObjectDeletion(target: SamplerObject): void {
-        if (
-            !objectDeletionAvailable ||
-            openSessionId === null ||
-            !['SBAC', 'SBNK', 'SMPL'].includes(target.objectType)
-        ) {
-            return;
-        }
+    function deletionRequestKey(targets: PackageExportObject[]): string {
+        return targets
+            .map((target) => target.objectId)
+            .toSorted()
+            .join('\u0000');
+    }
+
+    function deletionInspectionFingerprint(inspection: ObjectDeletionInspection): string {
+        return JSON.stringify({
+            selected: inspection.selectedObjectIds.toSorted(),
+            targets: inspection.impacts
+                .filter((impact) => impact.role === 'TARGET')
+                .map((impact) => [impact.objectId, impact.status, impact.reason])
+                .toSorted(([left], [right]) => left.localeCompare(right)),
+        });
+    }
+
+    function requestObjectDeletion(targets: PackageExportObject[]): void {
+        if (!objectDeletionAvailable || openSessionId === null || targets.length === 0) return;
         const generation = ++objectDeletionGeneration;
         objectDeletionRequest = {
-            target,
-            includedDependentObjectIds: [],
+            targets,
+            cleanupObjectIds: [],
             inspection: null,
             loading: true,
             busy: false,
@@ -1255,28 +1266,31 @@
         try {
             const inspection = await transport.inspectObjectDeletion(
                 sessionId,
-                request.target.key,
-                request.includedDependentObjectIds,
+                request.targets.map((target) => target.objectId),
+                request.cleanupObjectIds,
             );
             if (
                 generation !== objectDeletionGeneration ||
-                objectDeletionRequest?.target.key !== request.target.key ||
+                deletionRequestKey(objectDeletionRequest?.targets ?? []) !== deletionRequestKey(request.targets) ||
                 openSessionId !== sessionId
             ) {
                 return;
             }
             objectDeletionRequest = {
-                ...objectDeletionRequest,
+                ...request,
                 inspection,
                 loading: false,
                 error: '',
             };
         } catch (error) {
-            if (generation !== objectDeletionGeneration || objectDeletionRequest?.target.key !== request.target.key) {
+            if (
+                generation !== objectDeletionGeneration ||
+                deletionRequestKey(objectDeletionRequest?.targets ?? []) !== deletionRequestKey(request.targets)
+            ) {
                 return;
             }
             objectDeletionRequest = {
-                ...objectDeletionRequest,
+                ...request,
                 inspection: null,
                 loading: false,
                 error: userFacingMessage(error),
@@ -1289,9 +1303,15 @@
         const inspection = request?.inspection;
         if (!request || !inspection || request.busy) return;
         const included = new Set(
-            inspection.selectedObjectIds.filter((selectedObjectId) => selectedObjectId !== inspection.targetObjectId),
+            inspection.impacts
+                .filter((impact) => impact.role === 'DEPENDENCY' && impact.selected)
+                .map((impact) => impact.objectId),
         );
         if (selected) {
+            if (request.targets.length + included.size >= maximumPackageExportRoots) {
+                sourceStatus = `Deletion is limited to ${maximumPackageExportRoots} targets and cleanup objects`;
+                return;
+            }
             included.add(objectId);
         } else {
             included.delete(objectId);
@@ -1301,8 +1321,13 @@
                 for (const impact of inspection.impacts) {
                     if (
                         included.has(impact.objectId) &&
-                        impact.prerequisiteObjectIds.some(
-                            (prerequisite) => prerequisite !== inspection.targetObjectId && !included.has(prerequisite),
+                        impact.prerequisiteObjectIds.some((prerequisite) =>
+                            inspection.impacts.some(
+                                (candidate) =>
+                                    candidate.objectId === prerequisite &&
+                                    candidate.role === 'DEPENDENCY' &&
+                                    !included.has(prerequisite),
+                            ),
                         )
                     ) {
                         included.delete(impact.objectId);
@@ -1314,7 +1339,7 @@
         const generation = ++objectDeletionGeneration;
         objectDeletionRequest = {
             ...request,
-            includedDependentObjectIds: [...included],
+            cleanupObjectIds: [...included],
             loading: true,
             error: '',
         };
@@ -1325,15 +1350,24 @@
         const request = objectDeletionRequest;
         const inspection = request?.inspection;
         if (!request || !inspection || request.busy) return;
-        const includedDependentObjectIds = selected
+        const cleanupCapacity = Math.max(0, maximumPackageExportRoots - request.targets.length);
+        const cleanupObjectIds = selected
             ? inspection.impacts
                   .filter((impact) => impact.role === 'DEPENDENCY' && impact.status === 'OPTIONAL')
                   .map((impact) => impact.objectId)
+                  .slice(0, cleanupCapacity)
             : [];
+        if (
+            selected &&
+            inspection.impacts.filter((impact) => impact.role === 'DEPENDENCY' && impact.status === 'OPTIONAL').length >
+                cleanupCapacity
+        ) {
+            sourceStatus = `Deletion is limited to ${maximumPackageExportRoots} targets and cleanup objects`;
+        }
         const generation = ++objectDeletionGeneration;
         objectDeletionRequest = {
             ...request,
-            includedDependentObjectIds,
+            cleanupObjectIds,
             loading: true,
             error: '',
         };
@@ -1343,7 +1377,7 @@
     async function submitObjectDeletion(): Promise<void> {
         const request = objectDeletionRequest;
         const sessionId = openSessionId;
-        if (!request || !request.inspection?.valid || request.loading || request.busy || sessionId === null) return;
+        if (!request || !request.inspection?.canApply || request.loading || request.busy || sessionId === null) return;
         const generation = objectDeletionGeneration;
         const preferred =
             selectedSource.kind === 'volume' && selectedSource.partitionIndex !== undefined
@@ -1351,34 +1385,32 @@
                 : undefined;
         const started = performance.now();
         objectDeletionRequest = { ...request, busy: true, error: '' };
-        sourceStatus = `Deleting ${request.target.name}`;
+        sourceStatus = `Deleting ${request.inspection.selectedObjectIds.length} ${
+            request.inspection.selectedObjectIds.length === 1 ? 'object' : 'objects'
+        }`;
         try {
             await auditionController.invalidateSession(sessionId);
             const finalInspection = await transport.inspectObjectDeletion(
                 sessionId,
-                request.target.key,
-                request.includedDependentObjectIds,
+                request.targets.map((target) => target.objectId),
+                request.cleanupObjectIds,
             );
-            if (!finalInspection.valid) {
+            if (!finalInspection.canApply) {
                 objectDeletionRequest = {
-                    ...objectDeletionRequest,
+                    ...request,
                     inspection: finalInspection,
                     busy: false,
                 };
                 sourceStatus = 'Deletion is blocked; review the affected references';
                 return;
             }
-            const expectedSelection = new Set([request.target.key, ...request.includedDependentObjectIds]);
-            if (
-                finalInspection.selectedObjectIds.length !== expectedSelection.size ||
-                finalInspection.selectedObjectIds.some((objectId) => !expectedSelection.has(objectId))
-            ) {
+            if (deletionInspectionFingerprint(finalInspection) !== deletionInspectionFingerprint(request.inspection)) {
                 objectDeletionRequest = {
-                    ...objectDeletionRequest,
+                    ...request,
                     inspection: finalInspection,
-                    includedDependentObjectIds: finalInspection.selectedObjectIds.filter(
-                        (objectId) => objectId !== finalInspection.targetObjectId,
-                    ),
+                    cleanupObjectIds: finalInspection.impacts
+                        .filter((impact) => impact.role === 'DEPENDENCY' && impact.selected)
+                        .map((impact) => impact.objectId),
                     busy: false,
                     error: 'The deletion impact changed. Review the affected objects before confirming again.',
                 };
@@ -1387,8 +1419,8 @@
             }
             const job = await transport.startObjectDeletion(
                 sessionId,
-                request.target.key,
-                request.includedDependentObjectIds,
+                request.targets.map((target) => target.objectId),
+                request.cleanupObjectIds,
             );
             const completed = await transport.waitForJob(job.jobId, (update) => {
                 if (update.progress?.label) sourceStatus = update.progress.label;
@@ -1397,6 +1429,11 @@
                 throw new Error(completed.error ?? 'Object deletion did not complete');
             }
             await refreshOpenImageSession(preferred);
+            const deletedIds = new Set(finalInspection.selectedObjectIds);
+            packageExportSelection = {
+                ...packageExportSelection,
+                items: packageExportSelection.items.filter((item) => !deletedIds.has(item.objectId)),
+            };
             ++objectDeletionGeneration;
             objectDeletionRequest = null;
             reportMutationTiming('delete-object', started, finalInspection.selectedObjectIds.length);
@@ -1408,11 +1445,11 @@
             }
             if (
                 generation === objectDeletionGeneration &&
-                objectDeletionRequest?.target.key === request.target.key &&
+                deletionRequestKey(objectDeletionRequest?.targets ?? []) === deletionRequestKey(request.targets) &&
                 openSessionId === sessionId
             ) {
                 objectDeletionRequest = {
-                    ...objectDeletionRequest,
+                    ...request,
                     busy: false,
                     loading: true,
                     error: `${message} The image has been refreshed; review the deletion again.`,
@@ -1421,10 +1458,10 @@
                 await inspectObjectDeletion(nextGeneration);
                 if (
                     nextGeneration === objectDeletionGeneration &&
-                    objectDeletionRequest?.target.key === request.target.key
+                    deletionRequestKey(objectDeletionRequest?.targets ?? []) === deletionRequestKey(request.targets)
                 ) {
                     objectDeletionRequest = {
-                        ...objectDeletionRequest,
+                        ...request,
                         error: `${message} The image has been refreshed; review the deletion again.`,
                     };
                 }
@@ -2234,10 +2271,15 @@
                 </button>
             {/each}
         </nav>
-        {#if packageExportAvailable && packageExportSelection.items.length > 0}
+        {#if (packageExportAvailable || objectDeletionAvailable) && packageExportSelection.items.length > 0}
             <PackageSelectionControls
                 count={packageExportSelection.items.length}
-                onexport={() => requestObjectPackageExport(packageExportSelection.items)}
+                onexport={packageExportAvailable
+                    ? () => requestObjectPackageExport(packageExportSelection.items)
+                    : undefined}
+                ondelete={objectDeletionAvailable
+                    ? () => requestObjectDeletion(packageExportSelection.items)
+                    : undefined}
                 onclear={clearPackageExportSelection}
             />
         {/if}
@@ -2324,7 +2366,7 @@
                 {objectRenameAvailable}
                 onrenameobject={requestObjectRename}
                 {objectDeletionAvailable}
-                ondeleteobject={requestObjectDeletion}
+                ondeleteobjects={requestObjectDeletion}
                 {packageExportAvailable}
                 onexportobjects={requestObjectPackageExport}
                 selection={packageExportSelection}
@@ -2352,7 +2394,7 @@
                 {objectRenameAvailable}
                 onrenameobject={requestObjectRename}
                 {objectDeletionAvailable}
-                ondeleteobject={requestObjectDeletion}
+                ondeleteobjects={requestObjectDeletion}
                 {packageExportAvailable}
                 onexportobjects={requestObjectPackageExport}
                 selection={packageExportSelection}
@@ -2512,7 +2554,6 @@
 {/if}
 {#if objectDeletionRequest}
     <ObjectDeletionDialog
-        targetName={objectDeletionRequest.target.name}
         inspection={objectDeletionRequest.inspection}
         loading={objectDeletionRequest.loading}
         busy={objectDeletionRequest.busy}

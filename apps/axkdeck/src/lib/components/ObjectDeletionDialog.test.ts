@@ -11,10 +11,10 @@ import ObjectDeletionDialog from './ObjectDeletionDialog.svelte';
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
 const inspection: ObjectDeletionInspection = {
-    valid: true,
+    canApply: true,
     imageId: 'image-1',
     revision: 2,
-    targetObjectId: 'sample-1',
+    targetObjectIds: ['sample-1'],
     selectedObjectIds: ['sample-1'],
     impacts: [
         {
@@ -80,7 +80,6 @@ describe('ObjectDeletionDialog', () => {
         const onconfirm = vi.fn();
         render(ObjectDeletionDialog, {
             props: {
-                targetName: 'Piano C3',
                 inspection,
                 loading: false,
                 busy: false,
@@ -116,10 +115,9 @@ describe('ObjectDeletionDialog', () => {
     it('surfaces blockers and their consequential references without technical labels', () => {
         render(ObjectDeletionDialog, {
             props: {
-                targetName: 'Piano C3',
                 inspection: {
                     ...inspection,
-                    valid: false,
+                    canApply: false,
                     selectedObjectIds: [],
                     impacts: [{ ...inspection.impacts[0]!, status: 'BLOCKED' }],
                     blockers: [
@@ -153,14 +151,58 @@ describe('ObjectDeletionDialog', () => {
             },
         });
 
-        expect(screen.getByRole('region', { name: 'Deletion blockers' })).toBeTruthy();
-        expect(screen.getByRole('heading', { name: 'Requested deletion' })).toBeTruthy();
+        expect(screen.getByRole('region', { name: 'Cannot be deleted' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Cannot be deleted' })).toBeTruthy();
         expect(screen.getByText('Program 001 still refers to this Sample.')).toBeTruthy();
         expect(screen.getByText('Referenced by Program 001: Piano')).toBeTruthy();
         expect(screen.queryByRole('heading', { name: 'References' })).toBeNull();
         expect(screen.queryByText(/Known/)).toBeNull();
         expect(screen.queryByText(/PROG_ASSIGNMENT_TO_SBNK/)).toBeNull();
-        expect(screen.getByRole('button', { name: 'Delete 1 object' }).hasAttribute('disabled')).toBe(true);
+        expect(screen.getByRole('button', { name: 'Delete 0 eligible objects' }).hasAttribute('disabled')).toBe(true);
+    });
+
+    it('allows the eligible subset of a partially blocked batch to proceed', () => {
+        const blockedBank = {
+            ...inspection.impacts[0]!,
+            objectId: 'bank-1',
+            objectType: 'SBAC' as const,
+            objectName: 'Referenced Bank',
+            status: 'BLOCKED' as const,
+            selected: false,
+            reason: 'A Program still refers to this Sample Bank',
+        };
+        render(ObjectDeletionDialog, {
+            props: {
+                inspection: {
+                    ...inspection,
+                    targetObjectIds: ['sample-1', 'bank-1'],
+                    impacts: [inspection.impacts[0]!, blockedBank],
+                    blockers: [
+                        {
+                            code: 'incoming_reference',
+                            message: 'Program 001 still refers to this Sample Bank.',
+                            objectIds: ['program-1', 'bank-1'],
+                        },
+                    ],
+                    estimatedFreedBytes: 512,
+                    estimatedFreedClusters: 1,
+                },
+                loading: false,
+                busy: false,
+                error: '',
+                onselectionchange: vi.fn(),
+                onselectall: vi.fn(),
+                oncancel: vi.fn(),
+                onconfirm: vi.fn(),
+            },
+        });
+
+        expect(screen.getByRole('dialog', { name: 'Delete 2 objects' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Will be deleted' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Cannot be deleted' })).toBeTruthy();
+        expect(screen.getByText('Program 001 still refers to this Sample Bank.')).toBeTruthy();
+        expect(screen.getByText(/1 selected object remains/)).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Delete 1 eligible object' }).hasAttribute('disabled')).toBe(false);
     });
 
     it('nests optional Wave Data and disables it until its prerequisite Sample is selected', () => {
@@ -180,10 +222,9 @@ describe('ObjectDeletionDialog', () => {
         };
         render(ObjectDeletionDialog, {
             props: {
-                targetName: 'Bank',
                 inspection: {
                     ...inspection,
-                    targetObjectId: 'bank-1',
+                    targetObjectIds: ['bank-1'],
                     selectedObjectIds: ['bank-1'],
                     impacts: [
                         { ...inspection.impacts[0]!, objectId: 'bank-1', objectType: 'SBAC' },
@@ -210,10 +251,9 @@ describe('ObjectDeletionDialog', () => {
     it('shows preserved related objects and folds external references into their rows', () => {
         render(ObjectDeletionDialog, {
             props: {
-                targetName: 'Bank',
                 inspection: {
                     ...inspection,
-                    targetObjectId: 'bank-1',
+                    targetObjectIds: ['bank-1'],
                     selectedObjectIds: ['bank-1'],
                     impacts: [
                         { ...inspection.impacts[0]!, objectId: 'bank-1', objectType: 'SBAC', objectName: 'Bank' },
@@ -263,7 +303,6 @@ describe('ObjectDeletionDialog', () => {
     it('reports the selected cleanup count without changing the dialog structure', () => {
         render(ObjectDeletionDialog, {
             props: {
-                targetName: 'Piano C3',
                 inspection: {
                     ...inspection,
                     selectedObjectIds: ['sample-1', 'wave-1'],
@@ -294,7 +333,6 @@ describe('ObjectDeletionDialog', () => {
     it('shows a mixed optional-cleanup selection on the master checkbox', async () => {
         render(ObjectDeletionDialog, {
             props: {
-                targetName: 'Piano C3',
                 inspection: {
                     ...inspection,
                     selectedObjectIds: ['sample-1', 'wave-1'],

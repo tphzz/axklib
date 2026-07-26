@@ -417,10 +417,10 @@ describe('App panel layout', () => {
             packageExportAvailable: true,
         };
         const inspection = {
-            valid: true,
+            canApply: true,
             imageId: 'image-1',
             revision: 1,
-            targetObjectId: sample.key,
+            targetObjectIds: [sample.key],
             selectedObjectIds: [sample.key],
             impacts: [
                 {
@@ -498,12 +498,12 @@ describe('App panel layout', () => {
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
         await vi.waitFor(() => expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy());
         await fireEvent.click(screen.getByRole('checkbox', { name: 'Also delete all (1)' }));
-        await vi.waitFor(() => expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, sample.key, ['wave-1']));
+        await vi.waitFor(() => expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, [sample.key], ['wave-1']));
         await fireEvent.click(screen.getByRole('button', { name: 'Delete 2 objects' }));
 
         await vi.waitFor(() => expect(mocks.startObjectDeletion).toHaveBeenCalledOnce());
         expect(mocks.inspectObjectDeletion).toHaveBeenCalledTimes(3);
-        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, sample.key, ['wave-1']);
+        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, [sample.key], ['wave-1']);
         await vi.waitFor(() => expect(mocks.waitForJob).toHaveBeenCalledWith(55, expect.any(Function)));
         await vi.waitFor(() => expect(mocks.refreshImage).toHaveBeenCalledWith(17));
         expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy();

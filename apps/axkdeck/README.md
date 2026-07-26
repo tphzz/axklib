@@ -288,6 +288,13 @@ native shell streams it to the selected file and deletes the retained resource
 afterward. Remote browser clients use configured server storage because they
 cannot write an arbitrary client filesystem path.
 
+The same image-wide basket supports deletion in writable SFS sessions.
+Right-click **Delete** or use the header action to preview the complete batch.
+The confirmation dialog separates eligible selections from objects blocked by
+incoming or ambiguous references, and offers newly unreferenced dependencies as
+explicit opt-in cleanup. Blocked objects remain untouched; the eligible subset
+is published atomically after the image revision and impact are rechecked.
+
 ### Diagnostics
 
 Development builds open the web developer tools with `F12`. This shortcut is

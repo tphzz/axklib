@@ -48,7 +48,7 @@
         objectRenameAvailable?: boolean;
         onrenameobject?: (target: ObjectRenameTarget) => void;
         objectDeletionAvailable?: boolean;
-        ondeleteobject?: (object: SamplerObject) => void;
+        ondeleteobjects?: (objects: PackageExportObject[]) => void;
         packageExportAvailable?: boolean;
         onexportobjects?: (objects: PackageExportObject[]) => void;
         selection?: PackageExportSelectionState;
@@ -82,7 +82,7 @@
         objectRenameAvailable = false,
         onrenameobject = () => undefined,
         objectDeletionAvailable = false,
-        ondeleteobject = () => undefined,
+        ondeleteobjects = () => undefined,
         packageExportAvailable = false,
         onexportobjects = () => undefined,
         selection = emptyPackageExportSelection(),
@@ -199,7 +199,7 @@
         event.preventDefault();
         const targetId = objectId(target);
         let menuSelection = selection;
-        if (!packageExportAvailable || !selection.items.some((item) => item.objectId === targetId)) {
+        if (!selection.items.some((item) => item.objectId === targetId)) {
             const result = updatePackageExportSelection(
                 selection,
                 selectionKey(scope, domain),
@@ -209,7 +209,7 @@
                 'replace',
             );
             menuSelection = result.selection;
-            if (packageExportAvailable) onselectionchange(menuSelection);
+            onselectionchange(menuSelection);
         }
         objectMenu = {
             target: target.object,
@@ -456,8 +456,6 @@
             ? () => onrenameobject(objectMenu!.renameTarget)
             : undefined}
         onexport={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
-        ondelete={objectDeletionAvailable && objectMenu.objects.length === 1
-            ? () => ondeleteobject(objectMenu!.target)
-            : undefined}
+        ondelete={objectDeletionAvailable ? () => ondeleteobjects(objectMenu!.objects) : undefined}
     />
 {/if}

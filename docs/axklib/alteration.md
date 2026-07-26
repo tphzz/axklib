@@ -28,8 +28,10 @@ bitmaps, and decoded relationships to agree.
 ## Object deletion planning
 
 Interactive clients should use `inspect_object_deletion()` before deleting a
-Sample Bank, Sample, or Wave Data object. The planner accepts one exact catalog
-object and an explicit list of dependent objects to remove. It returns:
+Program, Sample Bank, Sample, or Wave Data object. The planner accepts exact
+catalog targets plus an explicit list of optional dependent objects to remove,
+with a combined limit of 1,024 selected inputs. Targets may span volumes and
+partitions. It returns:
 
 - blockers for incoming Program, Sample Bank, Sample, ambiguous, or
   allocation-inconsistent references;
@@ -37,7 +39,13 @@ object and an explicit list of dependent objects to remove. It returns:
 - dependency prerequisites and relationship effects;
 - estimated reclaimed allocation bytes and clusters (distinct from each
   object's logical stored size); and
-- a typed alteration manifest ordered from Sample Bank to Sample to Wave Data.
+- a typed alteration manifest ordered within each partition and volume from
+  Program to Sample Bank to Sample to Wave Data.
+
+Each target is evaluated against the whole requested batch. A target blocked by
+an unselected reference remains unchanged, while every independently eligible
+target can still be submitted as one atomic alteration. A batch with no
+eligible target cannot be applied.
 
 Dependent cleanup is never implicit. Deleting a Sample Bank leaves its member
 Samples as standalone objects unless the caller explicitly includes them.

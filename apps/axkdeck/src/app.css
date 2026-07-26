@@ -181,7 +181,7 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-.package-selection-export {
+.package-selection-action {
   display: inline-flex;
   height: 24px;
   align-items: center;
@@ -195,9 +195,14 @@ input:focus-visible {
   font-size: 10px;
 }
 
-.package-selection-export:hover {
+.package-selection-action:hover {
   color: var(--color-text-strong);
   background: rgb(255 255 255 / 6%);
+}
+
+.package-selection-delete:hover {
+  color: #ffb0ad;
+  background: rgb(174 47 47 / 18%);
 }
 
 .workspace-tabs button {

@@ -795,11 +795,11 @@ TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedCl
     const auto inspection = registry_.invoke("images.deletion.inspect",
                                              {{"imageId", opened->image_id},
                                               {"expectedRevision", opened->revision},
-                                              {"targetObjectId", sample->id},
-                                              {"includedDependentObjectIds", nlohmann::json::array()}},
+                                              {"targetObjectIds", nlohmann::json::array({sample->id})},
+                                              {"cleanupObjectIds", nlohmann::json::array()}},
                                              context());
     ASSERT_TRUE(inspection) << inspection.error().message;
-    EXPECT_TRUE(inspection->at("valid").get<bool>());
+    EXPECT_TRUE(inspection->at("canApply").get<bool>());
     const auto optional_wave = std::ranges::find(inspection->at("impacts"), "SMPL", [](const auto &impact) {
         return impact.at("objectType").template get<std::string>();
     });
@@ -816,13 +816,14 @@ TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedCl
     const auto deleted = moved_registry.invoke("images.delete",
                                                {{"imageId", opened->image_id},
                                                 {"expectedRevision", opened->revision},
-                                                {"targetObjectId", sample->id},
-                                                {"includedDependentObjectIds", included}},
+                                                {"targetObjectIds", nlohmann::json::array({sample->id})},
+                                                {"cleanupObjectIds", included}},
                                                context());
     ASSERT_TRUE(deleted) << deleted.error().message;
     EXPECT_EQ(deleted->at("kind"), "DELETION");
     EXPECT_EQ(deleted->at("revision"), 2U);
     EXPECT_EQ(deleted->at("deletedObjectIds").size(), 2U);
+    EXPECT_TRUE(deleted->at("blockedObjectIds").empty());
     EXPECT_GT(deleted->at("freedClusters").get<std::uint64_t>(), 0U);
     EXPECT_EQ(deleted->at("objectCount"), object_count - 2U);
 

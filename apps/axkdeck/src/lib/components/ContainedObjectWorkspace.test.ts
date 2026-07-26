@@ -203,14 +203,24 @@ describe('ContainedObjectWorkspace', () => {
                 activeWaveDataId: '',
                 queries: { primary: '', secondary: '', tertiary: '' },
                 objectDeletionAvailable: true,
-                ondeleteobject,
+                ondeleteobjects: ondeleteobject,
             },
         });
 
         const row = screen.getByRole('button', { name: 'Inspect Strings' });
         await fireEvent.contextMenu(row, { clientX: 80, clientY: 120 });
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
-        expect(ondeleteobject).toHaveBeenCalledWith(bank.object);
+        expect(ondeleteobject).toHaveBeenCalledWith([
+            {
+                kind: 'SBAC',
+                objectId: bank.object.key,
+                name: bank.name,
+                typeLabel: 'Sample Bank',
+                partitionIndex: bank.object.partitionIndex,
+                partitionName: bank.object.partitionName,
+                volumeName: bank.object.volumeName,
+            },
+        ]);
 
         await fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
         expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();

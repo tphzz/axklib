@@ -145,7 +145,7 @@ describe('ObjectWorkspace', () => {
         });
     });
 
-    it('adds Programs to an externally controlled mixed selection and exports the complete basket', async () => {
+    it('uses one externally controlled mixed selection for export and deletion', async () => {
         const firstObject = object('PROG', '001');
         const bank: PackageExportObject = {
             kind: 'SBAC',
@@ -157,6 +157,7 @@ describe('ObjectWorkspace', () => {
             volumeName: 'Volume',
         };
         const onexportobjects = vi.fn();
+        const ondeleteobjects = vi.fn();
         const onselectionchange = vi.fn();
         const rendered = render(ObjectWorkspace, {
             props: {
@@ -166,7 +167,9 @@ describe('ObjectWorkspace', () => {
                 ],
                 view: 'programs',
                 packageExportAvailable: true,
+                objectDeletionAvailable: true,
                 onexportobjects,
+                ondeleteobjects,
                 selection: { items: [bank], anchors: {} },
                 onselectionchange,
             },
@@ -182,7 +185,9 @@ describe('ObjectWorkspace', () => {
             programs: [{ id: 'program-1', objectId: firstObject.key, slot: '001', name: 'Piano', object: firstObject }],
             view: 'programs',
             packageExportAvailable: true,
+            objectDeletionAvailable: true,
             onexportobjects,
+            ondeleteobjects,
             selection,
             onselectionchange,
         });
@@ -201,6 +206,10 @@ describe('ObjectWorkspace', () => {
             },
             bank,
         ]);
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: /Piano/ }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete 2 objects' }));
+        expect(ondeleteobjects).toHaveBeenCalledWith(onexportobjects.mock.calls[0]![0]);
     });
 
     it('renders Wave Data as dense rows with one full-row selection target', async () => {
@@ -281,13 +290,23 @@ describe('ObjectWorkspace', () => {
                 waveData: [waveData],
                 view: 'wave-data',
                 objectDeletionAvailable: true,
-                ondeleteobject,
+                ondeleteobjects: ondeleteobject,
             },
         });
 
         await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect SMP 001' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
-        expect(ondeleteobject).toHaveBeenCalledWith(waveObject);
+        expect(ondeleteobject).toHaveBeenCalledWith([
+            {
+                kind: 'SMPL',
+                objectId: waveObject.key,
+                name: waveObject.name,
+                typeLabel: 'Wave Data',
+                partitionIndex: waveObject.partitionIndex,
+                partitionName: waveObject.partitionName,
+                volumeName: waveObject.volumeName,
+            },
+        ]);
     });
 
     it('delegates play and selection as one coordinated action', async () => {
