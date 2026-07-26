@@ -184,18 +184,21 @@ truth.
 
 `POST /api/v1/images` requires one explicit `ImageSourceRef`. Use
 `{"kind":"FILE","file":...}` for an image or standalone object file and
-`{"kind":"AXK_OBJECT_DIRECTORY","directory":...}` for one flat directory of
-Yamaha object files. Object-directory sessions are bounded and read-only:
-inventory, relationships, preview, audition, and package export are available,
-while image alteration and package import are not. Collection directories must
-be navigated to a recognized leaf before opening a session.
+`{"kind":"AXK_OBJECT_DIRECTORY","directory":...}` for a flat directory of
+Yamaha object files or a parent containing one level of related disk folders.
+The parent form assembles complete contiguous multi-disk Wave Data segments.
+Object-directory sessions are bounded and read-only: inventory, relationships,
+preview, audition, and package export are available, while image alteration and
+package import are not. An incomplete leaf can be inventoried, but split Wave
+Data requires opening its common parent for preview or audition.
 
-`POST /api/v1/files/list` returns `mediaSourceKind: null` by default. Browsers
-that select media sources may send `classifyMediaSources: true`; immediate
-directories whose bounded file-prefix inspection recognizes Yamaha object data then
-return `mediaSourceKind: "AXK_OBJECT_DIRECTORY"`. Classification does not
-decode complete payloads, recurse into collection directories, or change the
-listing semantics for callers that omit the option.
+`POST /api/v1/files/list` performs only a bounded directory listing. A media
+picker inspects one selected directory with
+`POST /api/v1/files/media-source/inspect` before navigating into it. The
+response reports `mediaSourceKind: "AXK_OBJECT_DIRECTORY"` when bounded
+file-prefix inspection recognizes Yamaha object data, otherwise `null`.
+Inspection does not decode complete payloads or recurse beyond one related
+disk-folder level.
 
 Writable SFS image sessions advertise `images.alter.objects`. Use
 `images.deletion.inspect` with the image ID, expected revision, target object

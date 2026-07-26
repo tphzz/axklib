@@ -49,6 +49,7 @@ struct ObjectHeader {
     std::uint32_t record_size_or_header_used{};
     std::uint32_t payload_bytes_0x1c{};
     std::uint32_t payload_bytes_0x20{};
+    std::uint32_t payload_offset_0x24{};
     std::array<std::byte, 64> raw_prefix{};
 };
 
@@ -70,6 +71,8 @@ struct CurrentSmpl {
     std::optional<std::uint64_t> loop_end_frame_exclusive;
     std::uint32_t stored_pcm_offset{};
     std::uint32_t stored_pcm_bytes{};
+    std::uint32_t stored_segment_offset{};
+    std::uint32_t stored_segment_bytes{};
     std::array<std::byte, 0x7c> compact_record{};
 };
 

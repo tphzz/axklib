@@ -134,6 +134,13 @@
         "responses": {"200": {"description": "Bounded sandbox directory listing", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DirectoryListResponse"}}}}}
       }
     },
+    "/files/media-source/inspect": {
+      "post": {
+        "operationId": "filesystem.mediaSource.inspect",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MediaSourceInspectRequest"}}}},
+        "responses": {"200": {"description": "Bounded media-source inspection", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MediaSourceInspectResponse"}}}}}
+      }
+    },
     "/files/metadata": {
       "post": {
         "operationId": "filesystem.metadata",
@@ -712,8 +719,27 @@
         "properties": {
           "directory": {"$ref": "#/components/schemas/DirectoryRef"},
           "limit": {"type": "integer", "minimum": 1, "maximum": 5000, "default": 200},
-          "cursor": {"type": ["string", "null"], "minLength": 1, "maxLength": 512},
-          "classifyMediaSources": {"type": "boolean", "default": false}
+          "cursor": {"type": ["string", "null"], "minLength": 1, "maxLength": 512}
+        }
+      },
+      "MediaSourceInspectRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["directory"],
+        "properties": {"directory": {"$ref": "#/components/schemas/DirectoryRef"}}
+      },
+      "MediaSourceInspectResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mediaSourceKind"],
+            "properties": {"mediaSourceKind": {"enum": ["AXK_OBJECT_DIRECTORY", null]}}
+          },
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },
       "DirectoryArchiveRequest": {
@@ -733,7 +759,7 @@
             "required": ["directory", "entries", "truncated", "nextCursor"],
             "properties": {
               "directory": {"$ref": "#/components/schemas/DirectoryRef"},
-              "entries": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "relativePath", "kind", "size", "mediaSourceKind"], "properties": {"name": {"type": "string"}, "relativePath": {"type": "string"}, "kind": {"enum": ["FILE", "DIRECTORY"]}, "size": {"type": ["integer", "null"], "minimum": 0}, "mediaSourceKind": {"enum": ["AXK_OBJECT_DIRECTORY", null]}}}},
+              "entries": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "relativePath", "kind", "size"], "properties": {"name": {"type": "string"}, "relativePath": {"type": "string"}, "kind": {"enum": ["FILE", "DIRECTORY"]}, "size": {"type": ["integer", "null"], "minimum": 0}}}},
               "truncated": {"type": "boolean"},
               "nextCursor": {"type": ["string", "null"]}
             }
@@ -1606,8 +1632,8 @@
           },
           "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
           "sourceMediaKind": {
-            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "UNKNOWN"],
-            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "UNKNOWN": "unknown"}
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "AXK_OBJECT_DIRECTORY", "UNKNOWN"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "AXK_OBJECT_DIRECTORY": "axk-object-directory", "UNKNOWN": "unknown"}
           },
           "valid": {"type": "boolean"},
           "payloadsVerified": {"type": "boolean"},
@@ -1634,8 +1660,8 @@
           },
           "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
           "sourceMediaKind": {
-            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "UNKNOWN"],
-            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "UNKNOWN": "unknown"}
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "AXK_OBJECT_DIRECTORY", "UNKNOWN"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "AXK_OBJECT_DIRECTORY": "axk-object-directory", "UNKNOWN": "unknown"}
           },
           "valid": {"type": "boolean"},
           "payloadsVerified": {"type": "boolean"},
@@ -1969,8 +1995,8 @@
           },
           "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
           "sourceMediaKind": {
-            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "UNKNOWN"],
-            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "UNKNOWN": "unknown"}
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "AXK_OBJECT_DIRECTORY", "UNKNOWN"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "AXK_OBJECT_DIRECTORY": "axk-object-directory", "UNKNOWN": "unknown"}
           },
           "valid": {"type": "boolean"},
           "payloadsVerified": {"type": "boolean"},

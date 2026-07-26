@@ -82,6 +82,8 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
         std::nullopt,
         header.header_size,
         header.payload_bytes_0x1c,
+        header.payload_offset_0x24,
+        header.payload_bytes_0x20,
         {},
     };
     result.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, *loop_mode);
@@ -385,7 +387,9 @@ Result<ObjectHeader> decode_object_header(std::span<const std::byte> payload) {
     const auto record_size = reader.be32(0x18);
     const auto payload_1c = reader.be32(0x1c);
     const auto payload_20 = reader.be32(0x20);
-    if (!raw_type || !name || !header_size || !unknown_14 || !record_size || !payload_1c || !payload_20) {
+    const auto payload_offset = reader.be32(0x24);
+    if (!raw_type || !name || !header_size || !unknown_14 || !record_size || !payload_1c || !payload_20 ||
+        !payload_offset) {
         return std::unexpected{
             make_error(ErrorCode::container_truncated, ErrorCategory::object, "object header fields are truncated")};
     }
@@ -398,6 +402,7 @@ Result<ObjectHeader> decode_object_header(std::span<const std::byte> payload) {
     result.record_size_or_header_used = *record_size;
     result.payload_bytes_0x1c = *payload_1c;
     result.payload_bytes_0x20 = *payload_20;
+    result.payload_offset_0x24 = *payload_offset;
     std::copy_n(payload.begin(), result.raw_prefix.size(), result.raw_prefix.begin());
     return result;
 }

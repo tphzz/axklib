@@ -3,7 +3,7 @@
 The native library exposes opened container variants through
 `axk::MediaContainer`. `axk::open_media()` detects Yamaha SFS images, FAT12
 floppies, ISO9660 CD-ROM images, standalone `FSFSDEV3SPLX` object files, and
-flat AXK object directories.
+AXK object directories.
 The individual `axk::FatImage`, `axk::IsoImage`, and
 `axk::StandaloneObject` types are available when an application already knows
 the container kind.
@@ -40,18 +40,32 @@ one-volume profile documented in [CD-ROM Images](cdrom.md).
 
 ## AXK object directory profile
 
-An `AXK_OBJECT_DIRECTORY` is one flat host directory whose immediate regular
-files may contain complete `FSFSDEV3SPLX` Yamaha objects. Object recognition,
-decoding, catalog construction, relationship resolution, preview, audition, and
-package export use the same object layer as image-backed media. Unrecognized
-regular support files are ignored.
+An `AXK_OBJECT_DIRECTORY` is either one flat host directory whose regular files
+contain `FSFSDEV3SPLX` Yamaha objects, or a bounded parent containing one level
+of such leaf directories. Object recognition, decoding, catalog construction,
+relationship resolution, preview, audition, and package export use the same
+object layer as image-backed media. Unrecognized regular support files are
+ignored.
 
-The profile is intentionally read-only and bounded to 224 immediate entries and
-1,474,560 aggregate bytes. Links, nested directories, case-insensitive duplicate
-names, and directories without a recognized object are rejected. The directory
-does not recover FAT allocation, DOS directory order, deleted entries, volume
-labels, or any other missing container metadata. Collection directories above
-an object directory are navigation scopes, not media sessions.
+The session presents the admitted objects as one synthetic `Object directory`
+volume. That scope can be exported as a `.axkvol` package, but its name and
+partition index are navigation metadata; they do not recover an original
+floppy volume label or partition layout.
+
+The parent form supports Yamaha multi-floppy object sets. A split `SMPL` file
+declares its complete logical Wave Data byte count, its local segment size, and
+its segment offset. Axklib groups matching headers and assembles only complete,
+contiguous, byte-identical segment sets. An incomplete leaf remains readable for
+inventory and diagnostics, but preview and audition report that the parent
+object directory must be opened.
+
+The profile is intentionally read-only and bounded to 224 entries per leaf,
+1,024 total entries, 16 MiB of aggregate file data, and one nested directory
+level. Links, deeper nesting, case-insensitive duplicate paths, unsafe names,
+and directories without a recognized object are rejected. The directory does
+not recover FAT allocation, DOS directory order, deleted entries, volume labels,
+or any other missing container metadata. Higher collection directories remain
+navigation scopes rather than media sessions.
 
 ## Format Documentation Map
 

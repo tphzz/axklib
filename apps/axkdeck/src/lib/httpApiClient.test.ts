@@ -183,7 +183,6 @@ describe('AxklibHttpApiClient', () => {
                                 relativePath: 'disks',
                                 kind: 'DIRECTORY',
                                 size: null,
-                                mediaSourceKind: null,
                             },
                         ],
                         truncated: false,
@@ -194,10 +193,8 @@ describe('AxklibHttpApiClient', () => {
         const client = new AxklibHttpApiClient({ baseUrl: 'http://localhost/api/v1', bearerToken: 'token' });
 
         await expect(client.roots()).resolves.toEqual([{ id: 'workspace', displayName: 'Workspace', writable: true }]);
-        await expect(
-            client.listDirectory({ rootId: 'workspace', relativePath: '' }, { classifyMediaSources: true }),
-        ).resolves.toMatchObject({
-            entries: [{ relativePath: 'disks', kind: 'DIRECTORY', mediaSourceKind: null }],
+        await expect(client.listDirectory({ rootId: 'workspace', relativePath: '' })).resolves.toMatchObject({
+            entries: [{ relativePath: 'disks', kind: 'DIRECTORY' }],
         });
         expect(fetchMock).toHaveBeenNthCalledWith(
             2,
@@ -207,9 +204,22 @@ describe('AxklibHttpApiClient', () => {
                     directory: { rootId: 'workspace', relativePath: '' },
                     limit: 200,
                     cursor: null,
-                    classifyMediaSources: true,
                 }),
             }),
+        );
+    });
+
+    it('inspects one selected directory as a media source', async () => {
+        const fetchMock = vi
+            .spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(jsonResponse({ data: { mediaSourceKind: 'AXK_OBJECT_DIRECTORY' } }));
+        const client = new AxklibHttpApiClient({ baseUrl: 'http://localhost/api/v1', bearerToken: 'token' });
+        const directory = { rootId: 'workspace', relativePath: 'objects' };
+
+        await expect(client.inspectMediaSource(directory)).resolves.toBe('AXK_OBJECT_DIRECTORY');
+        expect(fetchMock).toHaveBeenCalledWith(
+            'http://localhost/api/v1/files/media-source/inspect',
+            expect.objectContaining({ body: JSON.stringify({ directory }) }),
         );
     });
 

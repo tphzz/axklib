@@ -51,6 +51,8 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"loop_end_frame_exclusive", wave_data->loop_end_frame_exclusive},
                 {"stored_pcm_offset", wave_data->stored_pcm_offset},
                 {"stored_pcm_bytes", wave_data->stored_pcm_bytes},
+                {"stored_segment_offset", wave_data->stored_segment_offset},
+                {"stored_segment_bytes", wave_data->stored_segment_bytes},
                 {"compact_record_hex", hex(wave_data->compact_record)}};
     }
     if (const auto *sample = std::get_if<CurrentSbnk>(&object.payload)) {
@@ -130,6 +132,7 @@ OrderedJson header_json(const ObjectHeader &header) {
             {"record_size_or_header_used", header.record_size_or_header_used},
             {"payload_bytes_0x1c", header.payload_bytes_0x1c},
             {"payload_bytes_0x20", header.payload_bytes_0x20},
+            {"payload_offset_0x24", header.payload_offset_0x24},
             {"raw_prefix_hex", hex(header.raw_prefix)}};
 }
 

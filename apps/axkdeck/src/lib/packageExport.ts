@@ -1,3 +1,4 @@
+import type { ImageLocation } from './storageLocations';
 import type { PackageExportSelection } from './types';
 
 const extensions = {
@@ -8,9 +9,28 @@ const extensions = {
     SMPL: 'axksmpl',
 } as const;
 
-export function packageExportFilename(items: PackageExportSelection[]): string {
+function locationBasename(location: ImageLocation): string {
+    const referenceName = location.reference.relativePath.replaceAll('\\', '/').split('/').filter(Boolean).at(-1);
+    if (referenceName) return referenceName;
+    return location.displayName.replaceAll('\\', '/').split('/').filter(Boolean).at(-1) ?? '';
+}
+
+function mediaRootName(items: PackageExportSelection[], location: ImageLocation | null): string | undefined {
+    if (items.length !== 1 || items[0]?.kind !== 'VOLUME' || !location) return undefined;
+
+    const basename = locationBasename(location);
+    if (location.kind === 'axk-object-directory') return basename || undefined;
+
+    const match = /^(.*)\.(?:ima|img)$/i.exec(basename);
+    return match?.[1] || undefined;
+}
+
+export function packageExportFilename(items: PackageExportSelection[], location: ImageLocation | null = null): string {
     const first = items[0];
-    const sourceName = items.length === 1 ? (first?.name ?? 'package') : `${first?.name ?? 'selection'} and others`;
+    const sourceName =
+        items.length === 1
+            ? (mediaRootName(items, location) ?? first?.name ?? 'package')
+            : `${first?.name ?? 'selection'} and others`;
     const stem =
         sourceName
             .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')

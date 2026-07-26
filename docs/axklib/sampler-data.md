@@ -38,8 +38,9 @@ Header fields used by axklib:
 | `0x10` | 4 | u32be | header_size | Object header size. For `SMPL` exact export, this is the stored waveform byte start. |
 | `0x14` | 4 | u32be | unknown_0x14 | Preserved diagnostic value. |
 | `0x18` | 4 | u32be | record_size_or_header_used | Object-specific compact-record or header-size value surfaced as a raw field. |
-| `0x1c` | 4 | u32be | payload_bytes_0x1c | Object payload byte-count field. For `SMPL`, exact export reads this many stored waveform bytes. |
-| `0x20` | 4 | u32be | payload_bytes_0x20 | Second object payload byte-count field surfaced for diagnostics. |
+| `0x1c` | 4 | u32be | payload_bytes_0x1c | Object payload byte-count field. For `SMPL`, this is the complete logical Wave Data byte count. |
+| `0x20` | 4 | u32be | payload_bytes_0x20 | For `SMPL`, the Wave Data bytes physically stored in this file segment. |
+| `0x24` | 4 | u32be | payload_offset_0x24 | For `SMPL`, this file segment's byte offset in the complete logical Wave Data. |
 | `0x28` | 2 | u16be | sample_rate_guess | `SMPL` sample-rate field. Empty for other types. |
 | `0x2a` | 2 | u16be | bytes_per_sample_guess | `SMPL` stored sample width. Empty for other types. |
 | `0x32` | 16 | ASCII | name_guess | Object header name, trimmed of trailing NUL and spaces. |
@@ -151,10 +152,23 @@ PCM export mapping:
 | `1` | 8-bit PCM | Copied directly to WAV frames. |
 | `2` with alternating-byte compatibility pattern | Alternating filler bytes with useful high-byte lane | Useful lane is converted to unsigned 8-bit WAV frames and remains a read/export compatibility case. |
 
-`header_size` is the start offset of stored waveform bytes inside the `SMPL`
-payload. `payload_bytes_0x1c` is the stored byte count read by exact export.
+`header_size` is the start offset of waveform bytes inside a `SMPL` file.
+Complete objects use `payload_offset_0x24 == 0` and
+`payload_bytes_0x20 == payload_bytes_0x1c`. Yamaha multi-floppy saves can split
+one logical Wave Data object across several disk files. Those files repeat the
+same header, set `payload_bytes_0x20` to the local segment size, and set
+`payload_offset_0x24` to the segment's byte offset. Axklib assembles a complete,
+contiguous set when the shared parent object directory is opened. A leaf
+directory with missing sibling segments remains available for inventory but
+cannot be decoded as complete audio.
+
+This segment interpretation is **Strong**: it is repeated across independent
+multi-disk object-directory sets and the segment ranges join exactly to
+`payload_bytes_0x1c`; the corresponding primary implementation path has not yet
+been fully traced.
+
 Generated images may store a short compatibility tail after the logical waveform
-frames. In that case the stored byte count includes the tail, while
+frames. In that case the complete logical byte count includes the tail, while
 `wave_length_frames_0x092` and `loop_length_frames_0x09a` describe the logical
 sample window.
 

@@ -5,13 +5,22 @@
 #include <atomic>
 #include <cctype>
 #include <charconv>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <format>
+#include <functional>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_set>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -212,6 +221,15 @@ axk::app::Result<std::filesystem::path> entry_name_from_utf8(std::string_view va
     return name;
 }
 
+struct NativeDirectoryEntry {
+    std::filesystem::path name;
+    std::string utf8_name;
+    axk::app::DirectoryEntryKind kind{axk::app::DirectoryEntryKind::file};
+    std::optional<std::uint64_t> size;
+};
+
+using DirectoryVisitor = std::function<axk::app::Result<bool>(const NativeDirectoryEntry &)>;
+
 #if defined(_WIN32)
 
 struct NativeHandleCloser {
@@ -251,8 +269,13 @@ axk::app::Result<NativeHandle> open_relative(HANDLE parent, const std::filesyste
 
 axk::app::Result<NativeHandle> open_parent(HANDLE root, const std::filesystem::path &relative,
                                            std::string_view relative_path) {
-    HANDLE current = root;
-    NativeHandle owned;
+    const auto reopened = ReOpenFile(root, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                     FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    if (reopened == INVALID_HANDLE_VALUE)
+        return std::unexpected(reference_error("sandbox root handle could not be reopened", relative_path));
+    NativeHandle owned{reopened};
+    HANDLE current = owned.get();
     for (const auto &component : relative) {
         auto next = open_relative(current, component, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_OPEN,
                                   FILE_DIRECTORY_FILE, relative_path);
@@ -261,14 +284,72 @@ axk::app::Result<NativeHandle> open_parent(HANDLE root, const std::filesystem::p
         owned = std::move(*next);
         current = owned.get();
     }
-    if (!owned) {
-        if (DuplicateHandle(GetCurrentProcess(), root, GetCurrentProcess(), &current, 0U, FALSE,
-                            DUPLICATE_SAME_ACCESS) == 0) {
-            return std::unexpected(reference_error("sandbox root handle could not be duplicated", relative_path));
-        }
-        owned.reset(current);
-    }
     return owned;
+}
+
+axk::app::Result<void> visit_directory(HANDLE directory, std::string_view relative_path,
+                                       const DirectoryVisitor &visitor) {
+    alignas(FILE_ID_BOTH_DIR_INFO) std::array<std::byte, 64U * 1024U> buffer{};
+    for (;;) {
+        if (GetFileInformationByHandleEx(directory, FileIdBothDirectoryInfo, buffer.data(),
+                                         static_cast<DWORD>(buffer.size())) == 0) {
+            if (GetLastError() == ERROR_NO_MORE_FILES)
+                return {};
+            return std::unexpected(reference_error("sandbox directory cannot be enumerated safely", relative_path));
+        }
+        auto *entry = reinterpret_cast<FILE_ID_BOTH_DIR_INFO *>(buffer.data());
+        for (;;) {
+            const std::wstring_view native_name{entry->FileName, entry->FileNameLength / sizeof(wchar_t)};
+            if (native_name != L"." && native_name != L".." &&
+                (entry->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0U) {
+                const std::filesystem::path name{native_name};
+                const auto utf8_name = axk::text::path_to_utf8(name);
+                if (entry_name_from_utf8(utf8_name)) {
+                    NativeDirectoryEntry discovered{.name = name,
+                                                    .utf8_name = utf8_name,
+                                                    .kind = axk::app::DirectoryEntryKind::file,
+                                                    .size = std::nullopt};
+                    bool supported = true;
+                    if ((entry->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U) {
+                        discovered.kind = axk::app::DirectoryEntryKind::directory;
+                    } else if (entry->EndOfFile.QuadPart >= 0) {
+                        discovered.size = static_cast<std::uint64_t>(entry->EndOfFile.QuadPart);
+                    } else {
+                        supported = false;
+                    }
+                    if (supported) {
+                        auto proceed = visitor(discovered);
+                        if (!proceed)
+                            return std::unexpected(proceed.error());
+                        if (!*proceed)
+                            return {};
+                    }
+                }
+            }
+            if (entry->NextEntryOffset == 0U)
+                break;
+            entry = reinterpret_cast<FILE_ID_BOTH_DIR_INFO *>(reinterpret_cast<std::byte *>(entry) +
+                                                              entry->NextEntryOffset);
+        }
+    }
+}
+
+axk::app::Result<std::vector<std::byte>> read_prefix(HANDLE directory, const NativeDirectoryEntry &entry,
+                                                     std::size_t maximum_bytes, std::string_view relative_path) {
+    const auto prefix_size = static_cast<std::size_t>(std::min<std::uint64_t>(entry.size.value_or(0U), maximum_bytes));
+    std::vector<std::byte> prefix(prefix_size);
+    if (prefix.empty())
+        return prefix;
+    auto opened = open_relative(directory, entry.name, FILE_READ_DATA | FILE_READ_ATTRIBUTES, FILE_OPEN,
+                                FILE_NON_DIRECTORY_FILE, relative_path);
+    if (!opened)
+        return std::unexpected(opened.error());
+    DWORD read{};
+    if (ReadFile(opened->get(), prefix.data(), static_cast<DWORD>(prefix.size()), &read, nullptr) == 0 ||
+        read != static_cast<DWORD>(prefix.size())) {
+        return std::unexpected(reference_error("sandbox file prefix cannot be read", relative_path));
+    }
+    return prefix;
 }
 
 #else
@@ -287,9 +368,9 @@ NativeHandle descriptor_handle(int descriptor) { return NativeHandle{new int{des
 
 axk::app::Result<NativeHandle> open_parent(int root, const std::filesystem::path &relative,
                                            std::string_view relative_path) {
-    auto descriptor = ::dup(root);
+    auto descriptor = ::openat(root, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (descriptor < 0)
-        return std::unexpected(reference_error("sandbox root handle could not be duplicated", relative_path));
+        return std::unexpected(reference_error("sandbox root handle could not be reopened", relative_path));
     auto current = descriptor_handle(descriptor);
     for (const auto &component : relative) {
         const auto next = ::openat(*current, component.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
@@ -299,6 +380,84 @@ axk::app::Result<NativeHandle> open_parent(int root, const std::filesystem::path
         current = descriptor_handle(next);
     }
     return current;
+}
+
+axk::app::Result<void> visit_directory(int directory, std::string_view relative_path, const DirectoryVisitor &visitor) {
+    const auto enumeration_descriptor = ::openat(directory, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (enumeration_descriptor < 0)
+        return std::unexpected(reference_error("sandbox directory cannot be reopened", relative_path));
+    auto *stream = ::fdopendir(enumeration_descriptor);
+    if (stream == nullptr) {
+        ::close(enumeration_descriptor);
+        return std::unexpected(reference_error("sandbox directory cannot be enumerated safely", relative_path));
+    }
+    errno = 0;
+    while (const auto *entry = ::readdir(stream)) {
+        const std::string_view native_name{entry->d_name};
+        if (native_name == "." || native_name == "..")
+            continue;
+        auto name = entry_name_from_utf8(native_name);
+        if (!name)
+            continue;
+        struct stat status{};
+        if (::fstatat(directory, name->c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0) {
+            const auto saved_errno = errno;
+            ::closedir(stream);
+            errno = saved_errno;
+            return std::unexpected(reference_error("sandbox directory changed while it was listed", relative_path));
+        }
+        if (S_ISLNK(status.st_mode))
+            continue;
+        NativeDirectoryEntry discovered{.name = *name,
+                                        .utf8_name = std::string{native_name},
+                                        .kind = axk::app::DirectoryEntryKind::file,
+                                        .size = std::nullopt};
+        if (S_ISDIR(status.st_mode)) {
+            discovered.kind = axk::app::DirectoryEntryKind::directory;
+        } else if (S_ISREG(status.st_mode) && status.st_size >= 0) {
+            discovered.size = static_cast<std::uint64_t>(status.st_size);
+        } else {
+            continue;
+        }
+        auto proceed = visitor(discovered);
+        if (!proceed) {
+            ::closedir(stream);
+            return std::unexpected(proceed.error());
+        }
+        if (!*proceed) {
+            ::closedir(stream);
+            return {};
+        }
+        errno = 0;
+    }
+    const auto enumeration_error = errno;
+    ::closedir(stream);
+    if (enumeration_error != 0)
+        return std::unexpected(reference_error("sandbox directory cannot be enumerated safely", relative_path));
+    return {};
+}
+
+axk::app::Result<std::vector<std::byte>> read_prefix(int directory, const NativeDirectoryEntry &entry,
+                                                     std::size_t maximum_bytes, std::string_view relative_path) {
+    const auto prefix_size = static_cast<std::size_t>(std::min<std::uint64_t>(entry.size.value_or(0U), maximum_bytes));
+    std::vector<std::byte> prefix(prefix_size);
+    if (prefix.empty())
+        return prefix;
+    const auto descriptor = ::openat(directory, entry.name.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (descriptor < 0)
+        return std::unexpected(reference_error("sandbox file prefix cannot be opened", relative_path));
+    auto opened = descriptor_handle(descriptor);
+    std::size_t completed{};
+    while (completed < prefix.size()) {
+        const auto count =
+            ::pread(*opened, prefix.data() + completed, prefix.size() - completed, static_cast<off_t>(completed));
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count <= 0)
+            return std::unexpected(reference_error("sandbox file prefix cannot be read", relative_path));
+        completed += static_cast<std::size_t>(count);
+    }
+    return prefix;
 }
 
 int rename_no_replace(int source_parent, const char *source_name, int destination_parent,
@@ -1902,14 +2061,23 @@ axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::metadata(std::strin
     return result;
 }
 
-axk::app::Result<axk::app::DirectoryListing> axk::app::Sandbox::list_directory(const DirectoryRef &reference,
-                                                                               std::size_t limit,
-                                                                               std::optional<std::string_view> cursor,
-                                                                               bool classify_media_sources) const {
+axk::app::Result<axk::app::DirectoryListing>
+axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t limit,
+                                  std::optional<std::string_view> cursor) const {
     if (limit == 0U || limit > 1000U)
         return std::unexpected(
             reference_error("directory listing limit must be between 1 and 1000", reference.relative_path));
-    auto directory = resolve_directory(reference);
+    const auto root = find_root(reference.root_id);
+    if (!root)
+        return std::unexpected(reference_error("sandbox root does not exist", reference.relative_path));
+    auto relative = relative_path_from_utf8(reference.relative_path);
+    if (!relative)
+        return std::unexpected(relative.error());
+#if defined(_WIN32)
+    auto directory = open_parent(root->native->handle, *relative, reference.relative_path);
+#else
+    auto directory = open_parent(root->native->descriptor, *relative, reference.relative_path);
+#endif
     if (!directory)
         return std::unexpected(directory.error());
 
@@ -1922,82 +2090,145 @@ axk::app::Result<axk::app::DirectoryListing> axk::app::Sandbox::list_directory(c
     }
 
     DirectoryListing result{.directory = reference, .entries = {}, .truncated = false, .next_cursor = std::nullopt};
-    std::error_code error;
-    for (std::filesystem::directory_iterator iterator{*directory, error}, end; !error && iterator != end;
-         iterator.increment(error)) {
-        const auto name = text::path_to_utf8(iterator->path().filename());
-        const auto relative = reference.relative_path.empty() ? name : reference.relative_path + '/' + name;
-        const auto resolved = resolve_existing(reference.root_id, relative);
-        if (!resolved)
-            continue;
-        const auto status = std::filesystem::status(*resolved, error);
-        if (error)
-            break;
-        DirectoryEntry entry{.name = name,
-                             .relative_path = relative,
-                             .kind = DirectoryEntryKind::file,
-                             .size = std::nullopt,
-                             .media_source_kind = std::nullopt};
-        if (std::filesystem::is_directory(status)) {
-            entry.kind = DirectoryEntryKind::directory;
-        } else if (std::filesystem::is_regular_file(status)) {
-            entry.kind = DirectoryEntryKind::file;
-            entry.size = std::filesystem::file_size(*resolved, error);
-            if (error)
-                break;
-        } else {
-            continue;
-        }
+    const auto collect = [&](const NativeDirectoryEntry &discovered) -> Result<bool> {
+        const auto entry_relative = reference.relative_path.empty()
+                                        ? discovered.utf8_name
+                                        : reference.relative_path + '/' + discovered.utf8_name;
+        DirectoryEntry entry{.name = discovered.utf8_name,
+                             .relative_path = entry_relative,
+                             .kind = discovered.kind,
+                             .size = discovered.size};
         const auto key = entry_key(entry);
         if (after_key && key <= *after_key)
-            continue;
+            return true;
         const auto position = std::ranges::lower_bound(
             result.entries, entry,
             [](const DirectoryEntry &left, const DirectoryEntry &right) { return entry_key(left) < entry_key(right); });
         result.entries.insert(position, std::move(entry));
         if (result.entries.size() > limit + 1U)
             result.entries.pop_back();
-    }
-    if (error)
-        return std::unexpected(reference_error("directory cannot be listed", reference.relative_path));
+        return true;
+    };
+#if defined(_WIN32)
+    auto visited = visit_directory(directory->get(), reference.relative_path, collect);
+#else
+    auto visited = visit_directory(**directory, reference.relative_path, collect);
+#endif
+    if (!visited)
+        return std::unexpected(visited.error());
     if (result.entries.size() > limit) {
         result.entries.pop_back();
         result.truncated = true;
         result.next_cursor = encode_cursor(entry_key(result.entries.back()));
     }
-    if (classify_media_sources) {
-        for (auto &entry : result.entries) {
-            if (entry.kind != DirectoryEntryKind::directory)
-                continue;
-            auto tree = open_tree({reference.root_id, entry.relative_path},
-                                  {.maximum_entries = axk::AxkObjectDirectory::maximum_entries,
-                                   .maximum_total_file_bytes = axk::AxkObjectDirectory::maximum_payload_bytes,
-                                   .maximum_depth = 1U,
-                                   .maximum_path_bytes = 64U * 1024U});
-            if (!tree)
-                continue;
-            std::vector<axk::AxkObjectDirectoryEntry> object_entries;
-            object_entries.reserve(tree->entries().size());
-            bool flat = true;
-            for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
-                const auto &tree_entry = tree->entries()[index];
-                if (tree_entry.kind != SandboxTreeEntryKind::file) {
-                    flat = false;
-                    break;
-                }
-                auto opened = tree->open_file(index);
-                if (!opened) {
-                    flat = false;
-                    break;
-                }
-                object_entries.push_back({tree_entry.relative_path, std::move(opened->reader)});
-            }
-            if (!flat)
-                continue;
-            auto recognized = axk::AxkObjectDirectory::recognizes(std::move(object_entries), entry.relative_path);
-            if (recognized && *recognized)
-                entry.media_source_kind = DirectoryMediaSourceKind::axk_object_directory;
+    return result;
+}
+
+axk::app::Result<axk::app::MediaSourceInspection>
+axk::app::Sandbox::inspect_media_source(const DirectoryRef &reference) const {
+    const auto root = find_root(reference.root_id);
+    if (!root)
+        return std::unexpected(reference_error("sandbox root does not exist", reference.relative_path));
+    auto relative = relative_path_from_utf8(reference.relative_path);
+    if (!relative)
+        return std::unexpected(relative.error());
+#if defined(_WIN32)
+    auto directory = open_parent(root->native->handle, *relative, reference.relative_path);
+#else
+    auto directory = open_parent(root->native->descriptor, *relative, reference.relative_path);
+#endif
+    if (!directory)
+        return std::unexpected(directory.error());
+
+    MediaSourceInspection result;
+    std::vector<std::filesystem::path> children;
+    bool unsupported{};
+    const auto inspect_entry = [&](const NativeDirectoryEntry &entry, auto directory_handle,
+                                   bool nested) -> Result<bool> {
+        ++result.entries_visited;
+        if (result.entries_visited > axk::AxkObjectDirectory::maximum_entries) {
+            unsupported = true;
+            return false;
         }
+        if (entry.kind == DirectoryEntryKind::directory) {
+            if (nested) {
+                unsupported = true;
+                return false;
+            }
+            children.push_back(entry.name);
+            return true;
+        }
+        constexpr std::size_t object_prefix_size = 12U;
+        constexpr std::size_t segment_prefix_size = 0x28U;
+        auto prefix = read_prefix(directory_handle, entry, nested ? segment_prefix_size : object_prefix_size,
+                                  reference.relative_path);
+        if (!prefix)
+            return std::unexpected(prefix.error());
+        ++result.prefixes_read;
+        if (axk::AxkObjectDirectory::recognizes_entry_prefix(*prefix, nested)) {
+            result.kind = DirectoryMediaSourceKind::axk_object_directory;
+            return false;
+        }
+        return true;
+    };
+
+    std::size_t root_entries{};
+    const auto inspect_root = [&](const NativeDirectoryEntry &entry) -> Result<bool> {
+        if (++root_entries > axk::AxkObjectDirectory::maximum_leaf_entries) {
+            unsupported = true;
+            return false;
+        }
+#if defined(_WIN32)
+        return inspect_entry(entry, directory->get(), false);
+#else
+        return inspect_entry(entry, **directory, false);
+#endif
+    };
+#if defined(_WIN32)
+    auto inspected = visit_directory(directory->get(), reference.relative_path, inspect_root);
+#else
+    auto inspected = visit_directory(**directory, reference.relative_path, inspect_root);
+#endif
+    if (!inspected)
+        return std::unexpected(inspected.error());
+    if (result.kind || unsupported)
+        return result;
+
+    for (const auto &child_name : children) {
+#if defined(_WIN32)
+        auto child = open_relative(directory->get(), child_name, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_OPEN,
+                                   FILE_DIRECTORY_FILE, reference.relative_path);
+#else
+        const auto descriptor =
+            ::openat(**directory, child_name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        auto child =
+            descriptor >= 0
+                ? Result<NativeHandle>{descriptor_handle(descriptor)}
+                : std::unexpected(reference_error("sandbox child directory cannot be opened", reference.relative_path));
+#endif
+        if (!child)
+            return std::unexpected(child.error());
+        std::size_t leaf_entries{};
+        const auto inspect_child = [&](const NativeDirectoryEntry &entry) -> Result<bool> {
+            if (++leaf_entries > axk::AxkObjectDirectory::maximum_leaf_entries) {
+                unsupported = true;
+                return false;
+            }
+#if defined(_WIN32)
+            return inspect_entry(entry, child->get(), true);
+#else
+            return inspect_entry(entry, **child, true);
+#endif
+        };
+#if defined(_WIN32)
+        inspected = visit_directory(child->get(), reference.relative_path, inspect_child);
+#else
+        inspected = visit_directory(**child, reference.relative_path, inspect_child);
+#endif
+        if (!inspected)
+            return std::unexpected(inspected.error());
+        if (result.kind || unsupported)
+            return result;
     }
     return result;
 }

@@ -189,4 +189,46 @@ describe('ImageNavigator', () => {
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'volume' }), 'export-package');
         expect(screen.queryByRole('menuitem', { name: 'Delete volume' })).toBeNull();
     });
+
+    it('offers only volume package export for a read-only AXK object directory', async () => {
+        const onimageaction = vi.fn();
+        render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation(
+                    { rootId: 'workspace', relativePath: 'floppies/FS1R' },
+                    'Yamaha/floppies/FS1R',
+                ),
+                items: [
+                    {
+                        id: 'disk',
+                        name: 'FS1R',
+                        kind: 'disk',
+                        childCount: 1,
+                        children: [
+                            {
+                                id: 'object-directory-volume',
+                                name: 'Object directory',
+                                kind: 'volume',
+                                childCount: 3,
+                                partitionIndex: 0,
+                            },
+                        ],
+                    },
+                ],
+                packageExportEnabled: true,
+                onimageaction,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: /Object directory/ }));
+        expect(screen.queryByRole('menuitem', { name: 'Import package…' })).toBeNull();
+        expect(screen.queryByRole('menuitem', { name: 'Rename volume' })).toBeNull();
+        expect(screen.queryByRole('menuitem', { name: 'Delete volume' })).toBeNull();
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
+        expect(onimageaction).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'object-directory-volume', partitionIndex: 0 }),
+            'export-package',
+        );
+    });
 });

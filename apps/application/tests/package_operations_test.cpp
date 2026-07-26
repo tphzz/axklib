@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <memory>
@@ -81,6 +82,22 @@ void write_mixed_root_source(const std::filesystem::path &path) {
     ASSERT_TRUE(written) << written.error().message;
 }
 
+void write_object_directory(const std::filesystem::path &source, const std::filesystem::path &destination) {
+    const auto media = axk::open_media(source);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto objects = media->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(objects) << objects.error().message;
+    ASSERT_FALSE(objects->empty());
+    std::filesystem::create_directories(destination);
+    for (std::size_t index = 0U; index < objects->size(); ++index) {
+        std::ofstream output{destination / std::format("object-{:03}.bin", index), std::ios::binary};
+        ASSERT_TRUE(output);
+        const auto &payload = (*objects)[index].raw_payload;
+        output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+        ASSERT_TRUE(output);
+    }
+}
+
 class PackageOperationsTest : public testing::Test {
   protected:
     void SetUp() override {
@@ -91,6 +108,7 @@ class PackageOperationsTest : public testing::Test {
         std::filesystem::copy_file(fixture_path(), root_ / "fixture.hds");
         write_empty_target(root_ / "target.hds");
         write_mixed_root_source(root_ / "mixed-roots.hds");
+        write_object_directory(root_ / "fixture.hds", root_ / "objects");
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root_, true}});
         ASSERT_TRUE(sandbox);
         sandbox_ = std::make_unique<axk::app::Sandbox>(std::move(*sandbox));
@@ -386,6 +404,42 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
         context());
     ASSERT_FALSE(duplicate);
     EXPECT_EQ(duplicate.error().code, "invalid_request");
+}
+
+TEST_F(PackageOperationsTest, SessionExportsAnAxkObjectDirectoryAsAVolumePackage) {
+    const auto opened =
+        images_->open({"workspace", "objects", axk::app::ImageSourceKind::axk_object_directory}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto content = images_->content(opened->image_id, "owner", 64U);
+    ASSERT_TRUE(content) << content.error().message;
+    ASSERT_EQ(content->items.size(), 1U);
+    const auto &volume = content->items.front();
+    ASSERT_EQ(volume.kind, "volume");
+    ASSERT_TRUE(volume.partition_index);
+
+    const auto exported = registry_.invoke(
+        "images.package_export",
+        {{"imageId", opened->image_id},
+         {"expectedRevision", opened->revision},
+         {"roots", {{{"kind", "VOLUME"}, {"partitionIndex", *volume.partition_index}, {"volumeName", volume.name}}}},
+         {"destination",
+          {{"kind", "WORKSPACE"},
+           {"output", {{"rootId", "workspace"}, {"relativePath", "object-directory"}}},
+           {"overwrite", false}}}},
+        context());
+    ASSERT_TRUE(exported) << exported.error().message;
+    EXPECT_EQ(exported->at("packageKind"), "volume");
+    EXPECT_EQ(exported->at("requiredExtension"), ".axkvol");
+    EXPECT_EQ(exported->at("sourceMediaKind"), "axk-object-directory");
+    EXPECT_EQ(exported->at("output").at("relativePath"), "object-directory.axkvol");
+    EXPECT_TRUE(exported->at("payloadsVerified").get<bool>());
+
+    const auto package = axk::open_portable_package(root_ / "object-directory.axkvol");
+    ASSERT_TRUE(package) << package.error().message;
+    EXPECT_EQ(package->kind, axk::PackageKind::volume);
+    ASSERT_EQ(package->roots.size(), 1U);
+    EXPECT_EQ(package->roots.front().display_name, "Object directory");
+    EXPECT_EQ(package->nodes.size(), opened->object_count);
 }
 
 TEST_F(PackageOperationsTest, SessionExportCombinesEveryPortableObjectRootKindWithoutDuplicatingTheGraph) {

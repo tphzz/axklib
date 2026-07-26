@@ -3,6 +3,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -96,11 +97,42 @@ TEST_F(SandboxTest, DiscoversRootsAndListsBoundedRelativeEntries) {
     EXPECT_EQ(*file, std::filesystem::canonical(root_ / "images" / "disk.hds"));
 }
 
-TEST_F(SandboxTest, ClassifiesAxkObjectDirectoriesOnlyWhenRequested) {
+TEST_F(SandboxTest, ReenteringAWorkspaceRootRestartsDirectoryEnumeration) {
+    const auto value = sandbox();
+    const auto first_root = value.list_directory({"workspace", ""}, 20U);
+    ASSERT_TRUE(first_root) << first_root.error().message;
+    ASSERT_EQ(first_root->entries.size(), 1U);
+    EXPECT_EQ(first_root->entries.front().name, "images");
+
+    const auto child = value.list_directory({"workspace", "images"}, 20U);
+    ASSERT_TRUE(child) << child.error().message;
+    EXPECT_FALSE(child->entries.empty());
+
+    const auto second_root = value.list_directory({"workspace", ""}, 20U);
+    ASSERT_TRUE(second_root) << second_root.error().message;
+    ASSERT_EQ(second_root->entries.size(), first_root->entries.size());
+    EXPECT_EQ(second_root->entries.front().name, "images");
+}
+
+TEST_F(SandboxTest, InspectsOnlyTheSelectedDirectoryForSamplerObjects) {
     ASSERT_TRUE(std::filesystem::create_directories(root_ / "images" / "objects"));
     ASSERT_TRUE(std::filesystem::create_directories(root_ / "images" / "collection" / "nested"));
+    ASSERT_TRUE(std::filesystem::create_directories(root_ / "images" / "disk-set" / "DISK1"));
+    ASSERT_TRUE(std::filesystem::create_directories(root_ / "images" / "disk-set" / "DISK2"));
     ASSERT_TRUE(std::filesystem::create_directories(root_ / "images" / "support-only"));
     std::ofstream(root_ / "images" / "objects" / "SMP_0001.001", std::ios::binary) << "FSFSDEV3SPLX";
+    std::array<std::byte, 0x28U> segment_header{};
+    std::ranges::copy(std::as_bytes(std::span{"FSFSDEV3SPLX", 12U}), segment_header.begin());
+    std::ranges::copy(std::as_bytes(std::span{"SMPL", 4U}), segment_header.begin() + 0x0cU);
+    segment_header[0x1fU] = std::byte{4U};
+    segment_header[0x23U] = std::byte{2U};
+    {
+        std::ofstream segment_file{root_ / "images" / "disk-set" / "DISK1" / "SMP_0001.001", std::ios::binary};
+        segment_file.write(reinterpret_cast<const char *>(segment_header.data()),
+                           static_cast<std::streamsize>(segment_header.size()));
+        ASSERT_TRUE(segment_file);
+    }
+    std::ofstream(root_ / "images" / "disk-set" / "DISK2" / "YAMAHA.SYM", std::ios::binary) << "support";
     std::ofstream(root_ / "images" / "objects" / "YAMAHA.SYM", std::ios::binary) << "support";
     std::ofstream(root_ / "images" / "support-only" / "YAMAHA.SYM", std::ios::binary) << "support";
 
@@ -109,19 +141,21 @@ TEST_F(SandboxTest, ClassifiesAxkObjectDirectoriesOnlyWhenRequested) {
     ASSERT_TRUE(ordinary) << ordinary.error().message;
     const auto ordinary_objects = std::ranges::find(ordinary->entries, "objects", &axk::app::DirectoryEntry::name);
     ASSERT_NE(ordinary_objects, ordinary->entries.end());
-    EXPECT_FALSE(ordinary_objects->media_source_kind);
 
-    const auto classified = value.list_directory({"workspace", "images"}, 20U, std::nullopt, true);
-    ASSERT_TRUE(classified) << classified.error().message;
-    const auto objects = std::ranges::find(classified->entries, "objects", &axk::app::DirectoryEntry::name);
-    const auto collection = std::ranges::find(classified->entries, "collection", &axk::app::DirectoryEntry::name);
-    const auto support_only = std::ranges::find(classified->entries, "support-only", &axk::app::DirectoryEntry::name);
-    ASSERT_NE(objects, classified->entries.end());
-    ASSERT_NE(collection, classified->entries.end());
-    ASSERT_NE(support_only, classified->entries.end());
-    EXPECT_EQ(objects->media_source_kind, axk::app::DirectoryMediaSourceKind::axk_object_directory);
-    EXPECT_FALSE(collection->media_source_kind);
-    EXPECT_FALSE(support_only->media_source_kind);
+    const auto objects = value.inspect_media_source({"workspace", "images/objects"});
+    const auto collection = value.inspect_media_source({"workspace", "images/collection"});
+    const auto disk_set = value.inspect_media_source({"workspace", "images/disk-set"});
+    const auto support_only = value.inspect_media_source({"workspace", "images/support-only"});
+    ASSERT_TRUE(objects) << objects.error().message;
+    ASSERT_TRUE(collection) << collection.error().message;
+    ASSERT_TRUE(disk_set) << disk_set.error().message;
+    ASSERT_TRUE(support_only) << support_only.error().message;
+    EXPECT_EQ(objects->kind, axk::app::DirectoryMediaSourceKind::axk_object_directory);
+    EXPECT_FALSE(collection->kind);
+    EXPECT_EQ(disk_set->kind, axk::app::DirectoryMediaSourceKind::axk_object_directory);
+    EXPECT_FALSE(support_only->kind);
+    EXPECT_GT(objects->entries_visited, 0U);
+    EXPECT_GT(objects->prefixes_read, 0U);
 }
 
 TEST_F(SandboxTest, SupportsAnEmptyRootSetAndAtomicReplacement) {

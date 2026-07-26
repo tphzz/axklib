@@ -845,10 +845,6 @@
       "DirectoryListRequest": {
         "additionalProperties": false,
         "properties": {
-          "classifyMediaSources": {
-            "default": false,
-            "type": "boolean"
-          },
           "cursor": {
             "maxLength": 512,
             "minLength": 1,
@@ -891,12 +887,6 @@
                         "DIRECTORY"
                       ]
                     },
-                    "mediaSourceKind": {
-                      "enum": [
-                        "AXK_OBJECT_DIRECTORY",
-                        null
-                      ]
-                    },
                     "name": {
                       "type": "string"
                     },
@@ -915,8 +905,7 @@
                     "name",
                     "relativePath",
                     "kind",
-                    "size",
-                    "mediaSourceKind"
+                    "size"
                   ],
                   "type": "object"
                 },
@@ -3301,9 +3290,11 @@
               "FAT12_FLOPPY",
               "ISO9660",
               "STANDALONE_OBJECT",
+              "AXK_OBJECT_DIRECTORY",
               "UNKNOWN"
             ],
             "x-axklib-application-enum": {
+              "AXK_OBJECT_DIRECTORY": "axk-object-directory",
               "FAT12_FLOPPY": "fat12-floppy",
               "ISO9660": "iso9660",
               "SFS": "sfs",
@@ -4420,6 +4411,46 @@
         ],
         "type": "object"
       },
+      "MediaSourceInspectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "directory": {
+            "$ref": "#/components/schemas/DirectoryRef"
+          }
+        },
+        "required": [
+          "directory"
+        ],
+        "type": "object"
+      },
+      "MediaSourceInspectResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "mediaSourceKind": {
+                "enum": [
+                  "AXK_OBJECT_DIRECTORY",
+                  null
+                ]
+              }
+            },
+            "required": [
+              "mediaSourceKind"
+            ],
+            "type": "object"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "type": "object"
+      },
       "MetricsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4987,9 +5018,11 @@
               "FAT12_FLOPPY",
               "ISO9660",
               "STANDALONE_OBJECT",
+              "AXK_OBJECT_DIRECTORY",
               "UNKNOWN"
             ],
             "x-axklib-application-enum": {
+              "AXK_OBJECT_DIRECTORY": "axk-object-directory",
               "FAT12_FLOPPY": "fat12-floppy",
               "ISO9660": "iso9660",
               "SFS": "sfs",
@@ -5430,9 +5463,11 @@
               "FAT12_FLOPPY",
               "ISO9660",
               "STANDALONE_OBJECT",
+              "AXK_OBJECT_DIRECTORY",
               "UNKNOWN"
             ],
             "x-axklib-application-enum": {
+              "AXK_OBJECT_DIRECTORY": "axk-object-directory",
               "FAT12_FLOPPY": "fat12-floppy",
               "ISO9660": "iso9660",
               "SFS": "sfs",
@@ -9350,6 +9385,66 @@
               }
             },
             "description": "Bounded sandbox directory listing",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files/media-source/inspect": {
+      "post": {
+        "operationId": "filesystem.mediaSource.inspect",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaSourceInspectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaSourceInspectResponse"
+                }
+              }
+            },
+            "description": "Bounded media-source inspection",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"

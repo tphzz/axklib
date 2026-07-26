@@ -74,9 +74,11 @@ axklib info source.hds --format paths
 `--show-default-programs` includes synthesized empty Program slots. They are
 navigation aids and are not stored objects.
 
-For `info` only, a directory input is searched for bounded flat
-`AXK_OBJECT_DIRECTORY` leaves. Each recognized leaf is reported as one
-read-only media source. Other report, extraction, validation, and authoring
+For `info` only, a directory input is searched for bounded
+`AXK_OBJECT_DIRECTORY` sources. A source may be a flat object leaf or a parent
+containing one level of related disk folders; the parent form assembles
+contiguous multi-disk Wave Data segments. Each recognized source is reported as
+one read-only medium. Other report, extraction, validation, and authoring
 commands continue to require explicit supported image or object files.
 
 ## Extract WAV And SFZ

@@ -55,6 +55,7 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("paths").contains("/system/shutdown"));
     EXPECT_TRUE(document.at("paths").contains("/roots"));
     EXPECT_TRUE(document.at("paths").contains("/files/list"));
+    EXPECT_TRUE(document.at("paths").contains("/files/media-source/inspect"));
     EXPECT_TRUE(document.at("paths").contains("/filesystem/directories"));
     EXPECT_TRUE(document.at("paths").contains("/filesystem/entries"));
     EXPECT_TRUE(document.at("paths").contains("/images"));
@@ -110,19 +111,15 @@ TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
     EXPECT_EQ(content_response, "#/components/schemas/ImageContentPageResponse");
 }
 
-TEST(ServerContract, DirectoryListingsExposeOptInMediaSourceClassification) {
+TEST(ServerContract, DirectoryListingsSeparateMediaSourceInspection) {
     const auto document = nlohmann::json::parse(axk::server::embedded_openapi());
     const auto &schemas = document.at("components").at("schemas");
-    const auto &request = schemas.at("DirectoryListRequest");
-    const auto &classification = request.at("properties").at("classifyMediaSources");
-    EXPECT_EQ(classification.at("type"), "boolean");
-    EXPECT_FALSE(classification.at("default").get<bool>());
-
     const auto &entry =
         schemas.at("DirectoryListResponse").at("properties").at("data").at("properties").at("entries").at("items");
-    EXPECT_TRUE(std::ranges::contains(entry.at("required"), "mediaSourceKind"));
-    EXPECT_EQ(entry.at("properties").at("mediaSourceKind").at("enum"),
-              nlohmann::json::array({"AXK_OBJECT_DIRECTORY", nullptr}));
+    EXPECT_FALSE(entry.at("properties").contains("mediaSourceKind"));
+    const auto &inspection =
+        schemas.at("MediaSourceInspectResponse").at("properties").at("data").at("properties").at("mediaSourceKind");
+    EXPECT_EQ(inspection.at("enum"), nlohmann::json::array({"AXK_OBJECT_DIRECTORY", nullptr}));
 }
 
 TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelMetadata) {
@@ -223,6 +220,8 @@ TEST(ServerContract, InfrastructureJsonOperationsDeclareConcreteRequestAndRespon
         Expectation{"/host-directories/roots", "get", "", "200", "HostDirectoryRootsResponse"},
         Expectation{"/host-directories/list", "post", "HostDirectoryListRequest", "200", "HostDirectoryListResponse"},
         Expectation{"/files/list", "post", "DirectoryListRequest", "200", "DirectoryListResponse"},
+        Expectation{"/files/media-source/inspect", "post", "MediaSourceInspectRequest", "200",
+                    "MediaSourceInspectResponse"},
         Expectation{"/files/metadata", "post", "EntryRef", "200", "EntryMetadataResponse"},
         Expectation{"/filesystem/directories", "post", "CreateDirectoryRequest", "201", "EntryMetadataResponse"},
         Expectation{"/filesystem/entries", "patch", "RenameEntryRequest", "200", "EntryMetadataResponse"},
@@ -506,6 +505,13 @@ TEST(ServerContract, WireEnumsAreUpperSnakeAndTranslateOnlyAtTheApplicationBound
     EXPECT_EQ(wire_result.at("relationships").at(0).at("role"), "PROG_ASSIGNMENT_TO_SBNK");
     EXPECT_TRUE(validator.validate("PackageInspection", wire_result));
     EXPECT_EQ(validator.application_value("PackageInspection", wire_result), application_result);
+
+    auto object_directory_result = application_result;
+    object_directory_result["sourceMediaKind"] = "axk-object-directory";
+    const auto object_directory_wire_result = validator.wire_value("PackageInspection", object_directory_result);
+    EXPECT_EQ(object_directory_wire_result.at("sourceMediaKind"), "AXK_OBJECT_DIRECTORY");
+    EXPECT_TRUE(validator.validate("PackageInspection", object_directory_wire_result));
+    EXPECT_EQ(validator.application_value("PackageInspection", object_directory_wire_result), object_directory_result);
 }
 
 TEST(ServerContract, SharedRouteSchemaAdmitsOnlyDeclaredOperationDiscriminators) {

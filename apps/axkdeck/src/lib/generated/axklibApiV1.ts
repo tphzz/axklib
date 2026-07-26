@@ -218,6 +218,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/files/media-source/inspect': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['filesystem.mediaSource.inspect'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/files/metadata': {
         parameters: {
             query?: never;
@@ -1346,8 +1362,6 @@ export interface components {
             directory: components['schemas']['DirectoryRef'];
         };
         DirectoryListRequest: {
-            /** @default false */
-            classifyMediaSources: boolean;
             cursor?: string | null;
             directory: components['schemas']['DirectoryRef'];
             /** @default 200 */
@@ -1359,8 +1373,6 @@ export interface components {
                 entries: {
                     /** @enum {unknown} */
                     kind: 'FILE' | 'DIRECTORY';
-                    /** @enum {unknown} */
-                    mediaSourceKind: 'AXK_OBJECT_DIRECTORY' | null;
                     name: string;
                     relativePath: string;
                     size: number | null;
@@ -1892,7 +1904,8 @@ export interface components {
             schemaVersion: '1.0';
             sizeBytes: number;
             /** @enum {unknown} */
-            sourceMediaKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'UNKNOWN';
+            sourceMediaKind:
+                'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'AXK_OBJECT_DIRECTORY' | 'UNKNOWN';
             totalPayloadBytes: number;
             valid: boolean;
         };
@@ -2131,6 +2144,16 @@ export interface components {
             };
             meta: components['schemas']['ResponseMeta'];
         };
+        MediaSourceInspectRequest: {
+            directory: components['schemas']['DirectoryRef'];
+        };
+        MediaSourceInspectResponse: {
+            data: {
+                /** @enum {unknown} */
+                mediaSourceKind: 'AXK_OBJECT_DIRECTORY' | null;
+            };
+            meta: components['schemas']['ResponseMeta'];
+        };
         MetricsResponse: {
             data: {
                 activeRequests: number;
@@ -2260,7 +2283,8 @@ export interface components {
             schemaVersion: '1.0';
             sizeBytes: number;
             /** @enum {unknown} */
-            sourceMediaKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'UNKNOWN';
+            sourceMediaKind:
+                'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'AXK_OBJECT_DIRECTORY' | 'UNKNOWN';
             totalPayloadBytes: number;
             valid: boolean;
         };
@@ -2347,7 +2371,8 @@ export interface components {
             /** @constant */
             schemaVersion: '1.0';
             /** @enum {unknown} */
-            sourceMediaKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'UNKNOWN';
+            sourceMediaKind:
+                'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'AXK_OBJECT_DIRECTORY' | 'UNKNOWN';
             totalPayloadBytes: number;
             valid: boolean;
         };
@@ -3628,6 +3653,41 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['DirectoryListResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'filesystem.mediaSource.inspect': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['MediaSourceInspectRequest'];
+            };
+        };
+        responses: {
+            /** @description Bounded media-source inspection */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['MediaSourceInspectResponse'];
                 };
             };
             /** @description Request could not be completed */

@@ -38,7 +38,6 @@ struct DirectoryEntry {
     std::string relative_path;
     DirectoryEntryKind kind{DirectoryEntryKind::file};
     std::optional<std::uint64_t> size;
-    std::optional<DirectoryMediaSourceKind> media_source_kind;
 };
 
 struct DirectoryListing {
@@ -46,6 +45,12 @@ struct DirectoryListing {
     std::vector<DirectoryEntry> entries;
     bool truncated{};
     std::optional<std::string> next_cursor;
+};
+
+struct MediaSourceInspection {
+    std::optional<DirectoryMediaSourceKind> kind;
+    std::size_t entries_visited{};
+    std::size_t prefixes_read{};
 };
 
 struct EntryMetadata {
@@ -147,8 +152,8 @@ class Sandbox {
                                                                          bool overwrite) const;
     [[nodiscard]] Result<EntryMetadata> metadata(std::string_view root_id, std::string_view relative_path) const;
     [[nodiscard]] Result<DirectoryListing> list_directory(const DirectoryRef &reference, std::size_t limit,
-                                                          std::optional<std::string_view> cursor = std::nullopt,
-                                                          bool classify_media_sources = false) const;
+                                                          std::optional<std::string_view> cursor = std::nullopt) const;
+    [[nodiscard]] Result<MediaSourceInspection> inspect_media_source(const DirectoryRef &reference) const;
     [[nodiscard]] Result<EntryMetadata> create_directory(const DirectoryRef &parent, std::string_view name) const;
     [[nodiscard]] Result<EntryMetadata> rename_entry(const FileRef &reference, std::string_view name) const;
     [[nodiscard]] Result<void> delete_entry(const FileRef &reference) const;

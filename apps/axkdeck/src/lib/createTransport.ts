@@ -31,11 +31,10 @@ class UnavailableTransport implements ImageTransport {
     sandboxRoots(): Promise<SandboxRoot[]> {
         return this.unavailable();
     }
-    sandboxDirectory(
-        _directory: DirectoryRef,
-        _cursor?: string,
-        _classifyMediaSources?: boolean,
-    ): Promise<DirectoryListing> {
+    sandboxDirectory(_directory: DirectoryRef, _cursor?: string): Promise<DirectoryListing> {
+        return this.unavailable();
+    }
+    inspectSandboxMediaSource(_directory: DirectoryRef): Promise<'AXK_OBJECT_DIRECTORY' | null> {
         return this.unavailable();
     }
     createSandboxDirectory(_parent: DirectoryRef, _name: string): Promise<void> {

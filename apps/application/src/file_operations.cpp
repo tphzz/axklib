@@ -269,7 +269,7 @@ std::expected<LoadedSource, InfoLoadFailure> load_info_source(const axk::app::Sa
         auto tree = sandbox.open_tree({source.root_id, source.relative_path},
                                       {.maximum_entries = axk::AxkObjectDirectory::maximum_entries,
                                        .maximum_total_file_bytes = axk::AxkObjectDirectory::maximum_payload_bytes,
-                                       .maximum_depth = 1U,
+                                       .maximum_depth = axk::AxkObjectDirectory::maximum_depth,
                                        .maximum_path_bytes = 64U * 1024U});
         if (!tree) {
             return std::unexpected(
@@ -281,14 +281,8 @@ std::expected<LoadedSource, InfoLoadFailure> load_info_source(const axk::app::Sa
         std::vector<std::function<axk::app::Result<void>()>> verifiers;
         for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
             const auto &entry = tree->entries()[index];
-            if (entry.kind != axk::app::SandboxTreeEntryKind::file) {
-                return std::unexpected(InfoLoadFailure{
-                    .error = operation_error("invalid_image_source",
-                                             "AXK object directories must be flat and contain only files",
-                                             source.relative_path),
-                    .error_code = static_cast<std::uint64_t>(axk::ErrorCode::invalid_argument),
-                    .original_exception = "axk::Error"});
-            }
+            if (entry.kind != axk::app::SandboxTreeEntryKind::file)
+                continue;
             auto file = tree->open_file(index);
             if (!file) {
                 return std::unexpected(
@@ -296,13 +290,7 @@ std::expected<LoadedSource, InfoLoadFailure> load_info_source(const axk::app::Sa
                                     .error_code = static_cast<std::uint64_t>(axk::ErrorCode::io_open_failed),
                                     .original_exception = "axk::Error"});
             }
-            const auto path = axk::text::path_from_utf8(entry.relative_path);
-            if (!path) {
-                return std::unexpected(InfoLoadFailure{.error = image_source_error(path.error(), source),
-                                                       .error_code = static_cast<std::uint64_t>(path.error().code),
-                                                       .original_exception = "axk::Error"});
-            }
-            entries.push_back({axk::text::path_to_utf8(path->filename()), file->reader});
+            entries.push_back({entry.relative_path, file->reader});
             verifiers.push_back(std::move(file->verify_unchanged));
         }
         auto opened = axk::AxkObjectDirectory::open(std::move(entries), source.relative_path, context.cancellation);

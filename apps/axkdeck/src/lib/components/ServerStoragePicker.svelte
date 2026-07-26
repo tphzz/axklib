@@ -62,6 +62,9 @@
     let listElement = $state<HTMLDivElement | null>(null);
     let activeOptionIndex = $state(-1);
     let selectedFilePaths = $state<string[]>([]);
+    let inspectingEntryPath = $state('');
+    let inspectionGeneration = 0;
+    const mediaSourceCache = new Map<string, 'AXK_OBJECT_DIRECTORY' | null>();
 
     const normalizedExtensions = $derived(extensions.map((extension) => extension.toLocaleLowerCase()));
     const visibleEntries = $derived(entries.filter(entryIsVisible));
@@ -101,8 +104,16 @@
         return normalizedExtensions.includes(extension);
     }
 
+    function inspectionKey(reference: DirectoryRef): string {
+        return `${reference.rootId}\0${reference.relativePath}`;
+    }
+
     function isRecognizedMediaDirectory(entry: SandboxEntry): boolean {
-        return mode === 'media-source' && entry.mediaSourceKind === 'AXK_OBJECT_DIRECTORY';
+        if (mode !== 'media-source' || !activeRoot) return false;
+        return (
+            mediaSourceCache.get(inspectionKey({ rootId: activeRoot.id, relativePath: entry.relativePath })) ===
+            'AXK_OBJECT_DIRECTORY'
+        );
     }
 
     function rootIsDisabled(root: SandboxRoot): boolean {
@@ -146,13 +157,12 @@
 
     async function openDirectory(reference: DirectoryRef, root = activeRoot): Promise<boolean> {
         if (!root) return false;
+        ++inspectionGeneration;
+        inspectingEntryPath = '';
         loading = true;
         error = '';
         try {
-            const listing =
-                mode === 'media-source'
-                    ? await transport.sandboxDirectory(reference, undefined, true)
-                    : await transport.sandboxDirectory(reference);
+            const listing = await transport.sandboxDirectory(reference);
             activeRoot = root;
             directory = listing.directory;
             entries = listing.entries;
@@ -174,7 +184,7 @@
         if (!directory || !nextCursor || loading) return;
         loading = true;
         try {
-            const listing = await transport.sandboxDirectory(directory, nextCursor, mode === 'media-source');
+            const listing = await transport.sandboxDirectory(directory, nextCursor);
             const combinedEntries = [...entries, ...listing.entries];
             entries = combinedEntries;
             nextCursor = listing.nextCursor;
@@ -189,15 +199,34 @@
         }
     }
 
-    function activate(entry: SandboxEntry): void {
+    async function activate(entry: SandboxEntry): Promise<void> {
         if (!activeRoot || loading) return;
         const reference = { rootId: activeRoot.id, relativePath: entry.relativePath };
         if (entry.kind === 'DIRECTORY') {
-            if (isRecognizedMediaDirectory(entry)) {
-                onselect(axkObjectDirectoryLocation(reference, `${activeRoot.displayName}/${entry.relativePath}`));
-                return;
+            if (mode === 'media-source') {
+                const key = inspectionKey(reference);
+                let kind = mediaSourceCache.get(key);
+                if (kind === undefined) {
+                    const generation = ++inspectionGeneration;
+                    inspectingEntryPath = entry.relativePath;
+                    error = '';
+                    try {
+                        kind = await transport.inspectSandboxMediaSource(reference);
+                    } catch (reason) {
+                        if (generation === inspectionGeneration) error = userFacingMessage(reason);
+                        return;
+                    } finally {
+                        if (generation === inspectionGeneration) inspectingEntryPath = '';
+                    }
+                    if (generation !== inspectionGeneration) return;
+                    mediaSourceCache.set(key, kind);
+                }
+                if (kind === 'AXK_OBJECT_DIRECTORY') {
+                    onselect(axkObjectDirectoryLocation(reference, `${activeRoot.displayName}/${entry.relativePath}`));
+                    return;
+                }
             }
-            void openDirectory(reference, activeRoot);
+            await openDirectory(reference, activeRoot);
             return;
         }
         if (multiple) {
@@ -217,7 +246,7 @@
             return;
         }
         const entry = visibleEntries[index];
-        if (entry) activate(entry);
+        if (entry) void activate(entry);
     }
 
     function handleListKeydown(event: KeyboardEvent): void {
@@ -255,6 +284,8 @@
 
     function goHome(): void {
         activeRoot = null;
+        ++inspectionGeneration;
+        inspectingEntryPath = '';
         directory = null;
         entries = [];
         nextCursor = null;
@@ -488,7 +519,7 @@
                         disabled={loading}
                         onclick={() => {
                             setActiveOption(index);
-                            activate(entry);
+                            void activate(entry);
                         }}
                     >
                         {#if entry.kind === 'DIRECTORY'}
@@ -506,6 +537,8 @@
                             <small>
                                 {#if isRecognizedMediaDirectory(entry)}
                                     Sampler object folder
+                                {:else if inspectingEntryPath === entry.relativePath}
+                                    Inspecting
                                 {:else if entry.kind === 'DIRECTORY'}
                                     Folder
                                 {:else if mode === 'media-source'}

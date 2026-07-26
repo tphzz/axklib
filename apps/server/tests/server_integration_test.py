@@ -996,31 +996,36 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 },
             )
             assert status == 200, ordinary_listing
-            assert all(
-                entry["mediaSourceKind"] is None
-                for entry in ordinary_listing["data"]["entries"]
-            )
-            status, classified_listing = http_request(
+            assert {entry["name"] for entry in ordinary_listing["data"]["entries"]} == {
+                "objects",
+                "ordinary",
+            }
+            status, object_inspection = http_request(
                 port,
                 "POST",
-                "/api/v1/files/list",
+                "/api/v1/files/media-source/inspect",
                 {
                     "directory": {
                         "rootId": "workspace",
-                        "relativePath": "media-sources",
-                    },
-                    "classifyMediaSources": True,
+                        "relativePath": "media-sources/objects",
+                    }
                 },
             )
-            assert status == 200, classified_listing
-            classified_entries = {
-                entry["name"]: entry["mediaSourceKind"]
-                for entry in classified_listing["data"]["entries"]
-            }
-            assert classified_entries == {
-                "objects": "AXK_OBJECT_DIRECTORY",
-                "ordinary": None,
-            }
+            assert status == 200, object_inspection
+            assert object_inspection["data"]["mediaSourceKind"] == "AXK_OBJECT_DIRECTORY"
+            status, ordinary_inspection = http_request(
+                port,
+                "POST",
+                "/api/v1/files/media-source/inspect",
+                {
+                    "directory": {
+                        "rootId": "workspace",
+                        "relativePath": "media-sources/ordinary",
+                    }
+                },
+            )
+            assert status == 200, ordinary_inspection
+            assert ordinary_inspection["data"]["mediaSourceKind"] is None
             status, created_directory = http_request(
                 port,
                 "POST",
@@ -1301,6 +1306,13 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 status == 204
                 and headers["access-control-allow-origin"] == "https://allowed.example"
             )
+            assert headers["access-control-max-age"] == "600"
+            vary = {value.strip() for value in headers["vary"].split(",")}
+            assert {
+                "Origin",
+                "Access-Control-Request-Method",
+                "Access-Control-Request-Headers",
+            } <= vary
             for patch_path in (
                 "/api/v1/workspaces/workspace-test",
                 "/api/v1/filesystem/entries",

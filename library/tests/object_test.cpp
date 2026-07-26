@@ -59,6 +59,10 @@ TEST(CurrentSmpl, MatchesMaintainedSemanticContract) {
     EXPECT_EQ(wave_data.loop_end_frame_exclusive, 128U);
     EXPECT_EQ(wave_data.stored_pcm_offset, decoded->header.header_size);
     EXPECT_EQ(wave_data.stored_pcm_bytes, decoded->header.payload_bytes_0x1c);
+    EXPECT_EQ(wave_data.stored_segment_offset, decoded->header.payload_offset_0x24);
+    EXPECT_EQ(wave_data.stored_segment_bytes, decoded->header.payload_bytes_0x20);
+    EXPECT_EQ(wave_data.stored_segment_offset, 0U);
+    EXPECT_EQ(wave_data.stored_segment_bytes, wave_data.stored_pcm_bytes);
     EXPECT_EQ(wave_data.sample_rate.source.offset, 0x28U);
     EXPECT_EQ(wave_data.sample_rate.source.verification, axk::Verification::corroborated);
 }
@@ -79,6 +83,8 @@ TEST(CurrentSmpl, RetainsMetadataOutsideDeclaredPcmAndPreservesWideDerivedLoopEn
     const auto &wave_data = std::get<axk::CurrentSmpl>(outside->payload);
     EXPECT_EQ(wave_data.stored_pcm_offset, 0xacU);
     EXPECT_EQ(wave_data.stored_pcm_bytes, 1U);
+    EXPECT_EQ(wave_data.stored_segment_offset, 0U);
+    EXPECT_EQ(wave_data.stored_segment_bytes, 1U);
     EXPECT_EQ(wave_data.loop_end_frame_inclusive, 4'294'967'296ULL);
     EXPECT_EQ(wave_data.loop_end_frame_exclusive, 4'294'967'297ULL);
 }

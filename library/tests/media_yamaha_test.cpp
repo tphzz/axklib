@@ -3,6 +3,21 @@
 
 #include "media_test_fixtures.hpp"
 
+namespace {
+
+std::vector<std::byte> smpl_segment(std::string_view name, std::uint32_t total_bytes, std::uint32_t segment_offset,
+                                    std::span<const std::byte> pcm) {
+    auto bytes = smpl_object(name);
+    bytes.resize(0xacU + pcm.size());
+    be32(bytes, 0x1cU, total_bytes);
+    be32(bytes, 0x20U, static_cast<std::uint32_t>(pcm.size()));
+    be32(bytes, 0x24U, segment_offset);
+    std::ranges::copy(pcm, bytes.begin() + 0xacU);
+    return bytes;
+}
+
+} // namespace
+
 TEST(StandaloneObject, UsesSharedDecoderAndRejectsArbitraryFiles) {
     auto object = axk::StandaloneObject::open(std::make_shared<axk::MemoryReader>(smpl_object()), "wave-data.obj");
     ASSERT_TRUE(object);
@@ -73,7 +88,61 @@ TEST(AxkObjectDirectory, RecognizesCandidatesFromPrefixesWithoutDecodingPayloads
     EXPECT_FALSE(*support_only);
 }
 
-TEST(AxkObjectDirectory, OpensAFlatFilesystemDirectoryAsMedia) {
+TEST(AxkObjectDirectory, RecognizesBoundedEntryPrefixes) {
+    std::array<std::byte, 0x28U> prefix{};
+    std::ranges::copy(std::as_bytes(std::span{"FSFSDEV3SPLX", 12U}), prefix.begin());
+    EXPECT_TRUE(axk::AxkObjectDirectory::recognizes_entry_prefix(std::span{prefix}.first(12U), false));
+
+    std::ranges::copy(std::as_bytes(std::span{"SMPL", 4U}), prefix.begin() + 0x0cU);
+    prefix[0x1fU] = std::byte{4U};
+    prefix[0x23U] = std::byte{2U};
+    EXPECT_TRUE(axk::AxkObjectDirectory::recognizes_entry_prefix(prefix, true));
+
+    prefix[0x1fU] = std::byte{2U};
+    prefix[0x23U] = std::byte{2U};
+    EXPECT_FALSE(axk::AxkObjectDirectory::recognizes_entry_prefix(prefix, true));
+    EXPECT_FALSE(axk::AxkObjectDirectory::recognizes_entry_prefix(std::span{prefix}.first(12U), true));
+}
+
+TEST(AxkObjectDirectory, AssemblesContiguousWaveDataSegmentsFromNestedDiskFolders) {
+    const std::array first_pcm{std::byte{0x10}, std::byte{0x20}};
+    const std::array second_pcm{std::byte{0x30}, std::byte{0x40}, std::byte{0x50}, std::byte{0x60}};
+    auto directory = axk::AxkObjectDirectory::open(
+        {{"DISK1/SMP_0001.001", std::make_shared<axk::MemoryReader>(smpl_segment("SPLIT", 6U, 2U, second_pcm))},
+         {"DISK2/SMP_0001.001", std::make_shared<axk::MemoryReader>(smpl_segment("SPLIT", 6U, 0U, first_pcm))}},
+        "disk-set");
+    ASSERT_TRUE(directory) << directory.error().message;
+    ASSERT_EQ(directory->stored_objects().size(), 1U);
+    const auto &object = directory->stored_objects().front();
+    EXPECT_EQ(object.logical_path, "DISK2/SMP_0001.001");
+    EXPECT_EQ(object.raw_payload.size(), 0xacU + 6U);
+    EXPECT_FALSE(object.decode_issue);
+    EXPECT_EQ(object.decoded.header.payload_bytes_0x1c, 6U);
+    EXPECT_EQ(object.decoded.header.payload_bytes_0x20, 6U);
+    EXPECT_EQ(object.decoded.header.payload_offset_0x24, 0U);
+    const std::array expected_pcm{std::byte{0x10}, std::byte{0x20}, std::byte{0x30},
+                                  std::byte{0x40}, std::byte{0x50}, std::byte{0x60}};
+    EXPECT_TRUE(std::ranges::equal(std::span{object.raw_payload}.subspan(0xacU), expected_pcm));
+}
+
+TEST(AxkObjectDirectory, PreservesIncompleteWaveDataSegmentWithAnExplicitIssue) {
+    const std::array pcm{std::byte{0x30}, std::byte{0x40}, std::byte{0x50}, std::byte{0x60}};
+    auto directory = axk::AxkObjectDirectory::open(
+        {{"DISK2/SMP_0001.001", std::make_shared<axk::MemoryReader>(smpl_segment("SPLIT", 6U, 2U, pcm))}},
+        "incomplete-disk");
+    ASSERT_TRUE(directory) << directory.error().message;
+    ASSERT_EQ(directory->stored_objects().size(), 1U);
+    const auto &object = directory->stored_objects().front();
+    ASSERT_TRUE(object.decode_issue);
+    EXPECT_EQ(object.decode_issue->message,
+              "SMPL Wave Data is an incomplete multi-disk segment; open its parent object directory");
+    const auto waveform = axk::decode_waveform(object);
+    ASSERT_FALSE(waveform);
+    EXPECT_EQ(waveform.error().message,
+              "SMPL Wave Data is an incomplete multi-disk segment; open its parent object directory");
+}
+
+TEST(AxkObjectDirectory, OpensAFlatOrOneLevelFilesystemDirectoryAsMedia) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-axk-object-directory";
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -93,10 +162,27 @@ TEST(AxkObjectDirectory, OpensAFlatFilesystemDirectoryAsMedia) {
     ASSERT_EQ(objects->size(), 1U);
     EXPECT_EQ(objects->front().decoded.header.name, "FROM PATH");
 
-    ASSERT_TRUE(std::filesystem::create_directory(root / "nested"));
+    std::filesystem::remove_all(root, error);
+    ASSERT_TRUE(std::filesystem::create_directories(root / "DISK1"));
+    ASSERT_TRUE(std::filesystem::create_directories(root / "DISK2"));
+    const std::array first_pcm{std::byte{0x10}, std::byte{0x20}};
+    const std::array second_pcm{std::byte{0x30}, std::byte{0x40}};
+    {
+        const auto bytes = smpl_segment("FROM SET", 4U, 0U, first_pcm);
+        std::ofstream output{root / "DISK1" / "SMP_0001.001", std::ios::binary};
+        output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+    {
+        const auto bytes = smpl_segment("FROM SET", 4U, 2U, second_pcm);
+        std::ofstream output{root / "DISK2" / "SMP_0001.001", std::ios::binary};
+        output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
     const auto nested = axk::open_media(root);
-    ASSERT_FALSE(nested);
-    EXPECT_EQ(nested.error().code, axk::ErrorCode::invalid_argument);
+    ASSERT_TRUE(nested) << nested.error().message;
+    const auto nested_objects = nested->objects();
+    ASSERT_TRUE(nested_objects);
+    ASSERT_EQ(nested_objects->size(), 1U);
+    EXPECT_EQ(nested_objects->front().decoded.header.name, "FROM SET");
     std::filesystem::remove_all(root, error);
 }
 

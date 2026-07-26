@@ -321,11 +321,8 @@ export interface ImageTransport {
     readonly storageMode: 'server' | 'unavailable';
     readonly supportsClientUploads: boolean;
     sandboxRoots(): Promise<SandboxRoot[]>;
-    sandboxDirectory(
-        directory: DirectoryRef,
-        cursor?: string,
-        classifyMediaSources?: boolean,
-    ): Promise<DirectoryListing>;
+    sandboxDirectory(directory: DirectoryRef, cursor?: string): Promise<DirectoryListing>;
+    inspectSandboxMediaSource(directory: DirectoryRef): Promise<'AXK_OBJECT_DIRECTORY' | null>;
     createSandboxDirectory(parent: DirectoryRef, name: string): Promise<void>;
     renameSandboxEntry(entry: FileRef, name: string): Promise<void>;
     deleteSandboxEntry(entry: FileRef): Promise<void>;

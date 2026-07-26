@@ -203,13 +203,17 @@ class AXK_API StandaloneObject {
     MediaObject object_;
 };
 
-// Read-only snapshot of a flat directory containing standalone Yamaha object
-// files. Filesystem and FAT metadata are intentionally not reconstructed.
+// Read-only snapshot of one directory of Yamaha object files or a bounded
+// one-level set of such directories. Filesystem and FAT metadata are
+// intentionally not reconstructed.
 class AXK_API AxkObjectDirectory {
   public:
-    static constexpr std::size_t maximum_entries = 224U;
-    static constexpr std::uint64_t maximum_payload_bytes = 1'474'560U;
+    static constexpr std::size_t maximum_leaf_entries = 224U;
+    static constexpr std::size_t maximum_entries = 1'024U;
+    static constexpr std::uint64_t maximum_payload_bytes = 16U * 1024U * 1024U;
+    static constexpr std::size_t maximum_depth = 2U;
 
+    [[nodiscard]] static bool recognizes_entry_prefix(std::span<const std::byte> prefix, bool nested) noexcept;
     [[nodiscard]] static Result<bool> recognizes(std::vector<AxkObjectDirectoryEntry> entries,
                                                  std::string source_name = {},
                                                  const CancellationToken &cancellation = {});

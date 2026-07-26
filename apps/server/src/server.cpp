@@ -311,12 +311,14 @@ struct CorsMiddleware {
         }
         if (allowed) {
             response.set_header("Access-Control-Allow-Origin", origin);
-            response.set_header("Vary", "Origin");
+            response.set_header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers");
             response.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
             response.set_header("Access-Control-Allow-Headers",
                                 "Authorization, Content-Type, Idempotency-Key, X-Request-Id, Upload-Offset");
             response.set_header("Access-Control-Expose-Headers",
                                 "Content-Length, Content-Range, Location, Upload-Offset, X-Request-Id");
+            if (request.method == crow::HTTPMethod::Options)
+                response.set_header("Access-Control-Max-Age", "600");
         }
     }
 };
@@ -1158,7 +1160,6 @@ class ServerApplication {
         axk::app::DirectoryRef directory;
         std::size_t limit = 200U;
         std::optional<std::string> cursor;
-        bool classify_media_sources = false;
         try {
             const auto &reference = input.at("directory");
             directory.root_id = reference.at("rootId").get<std::string>();
@@ -1167,26 +1168,29 @@ class ServerApplication {
                 limit = found->get<std::size_t>();
             if (const auto found = input.find("cursor"); found != input.end() && !found->is_null())
                 cursor = found->get<std::string>();
-            if (const auto found = input.find("classifyMediaSources"); found != input.end())
-                classify_media_sources = found->get<bool>();
         } catch (const Json::exception &) {
             return error_response(400, {"invalid_request", "directory listing fields do not match the schema"}, id);
         }
         if (cursor && (cursor->empty() || cursor->size() > maximum_cursor_length))
             return error_response(400, {"invalid_cursor", "cursor length is outside the configured contract"}, id);
-        const auto listing = sandbox_.list_directory(directory, limit, cursor, classify_media_sources);
+        const auto started = std::chrono::steady_clock::now();
+        const auto listing = sandbox_.list_directory(directory, limit, cursor);
         if (!listing)
             return error_response(422, listing.error(), id);
         Json entries = Json::array();
         for (const auto &entry : listing->entries) {
-            entries.push_back(
-                {{"name", entry.name},
-                 {"relativePath", entry.relative_path},
-                 {"kind", axk::app::directory_entry_kind_name(entry.kind)},
-                 {"size", entry.size ? Json(*entry.size) : Json{}},
-                 {"mediaSourceKind", entry.media_source_kind
-                                         ? Json(axk::app::directory_media_source_kind_name(*entry.media_source_kind))
-                                         : Json{}}});
+            entries.push_back({{"name", entry.name},
+                               {"relativePath", entry.relative_path},
+                               {"kind", axk::app::directory_entry_kind_name(entry.kind)},
+                               {"size", entry.size ? Json(*entry.size) : Json{}}});
+        }
+        if (auto diagnostic = operation_diagnostic_sink()) {
+            diagnostic({{"event", "filesystem_directory_list"},
+                        {"durationMs", std::chrono::duration_cast<std::chrono::milliseconds>(
+                                           std::chrono::steady_clock::now() - started)
+                                           .count()},
+                        {"entryCount", listing->entries.size()},
+                        {"truncated", listing->truncated}});
         }
         return json_response(
             200,
@@ -1196,6 +1200,43 @@ class ServerApplication {
                {"entries", std::move(entries)},
                {"truncated", listing->truncated},
                {"nextCursor", listing->next_cursor ? Json(*listing->next_cursor) : Json{}}}},
+             {"meta", {{"requestId", id}}}},
+            id);
+    }
+
+    crow::response media_source_inspection_response(const crow::request &request) const {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        const auto parsed = parse_json_body(request, config_);
+        if (!parsed)
+            return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
+        axk::app::DirectoryRef directory;
+        try {
+            const auto &reference = parsed->at("directory");
+            directory.root_id = reference.at("rootId").get<std::string>();
+            directory.relative_path = reference.at("relativePath").get<std::string>();
+        } catch (const Json::exception &) {
+            return error_response(400, {"invalid_request", "media-source fields do not match the schema"}, id);
+        }
+        const auto started = std::chrono::steady_clock::now();
+        const auto inspection = sandbox_.inspect_media_source(directory);
+        if (!inspection)
+            return error_response(422, inspection.error(), id);
+        if (auto diagnostic = operation_diagnostic_sink()) {
+            diagnostic({{"event", "filesystem_media_source_inspect"},
+                        {"durationMs", std::chrono::duration_cast<std::chrono::milliseconds>(
+                                           std::chrono::steady_clock::now() - started)
+                                           .count()},
+                        {"entriesVisited", inspection->entries_visited},
+                        {"prefixesRead", inspection->prefixes_read},
+                        {"recognized", inspection->kind.has_value()}});
+        }
+        return json_response(
+            200,
+            {{"data",
+              {{"mediaSourceKind",
+                inspection->kind ? Json(axk::app::directory_media_source_kind_name(*inspection->kind)) : Json{}}}},
              {"meta", {{"requestId", id}}}},
             id);
     }
@@ -2174,6 +2215,9 @@ class ServerApplication {
         app_.route_dynamic("/api/v1/files/list").methods(crow::HTTPMethod::Post)([this](const crow::request &request) {
             return directory_listing_response(request);
         });
+        app_.route_dynamic("/api/v1/files/media-source/inspect")
+            .methods(crow::HTTPMethod::Post)(
+                [this](const crow::request &request) { return media_source_inspection_response(request); });
         app_.route_dynamic("/api/v1/files/metadata")
             .methods(crow::HTTPMethod::Post)(
                 [this](const crow::request &request) { return metadata_response(request); });

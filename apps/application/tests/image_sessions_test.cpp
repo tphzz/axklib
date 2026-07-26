@@ -5,6 +5,7 @@
 #include <format>
 #include <fstream>
 #include <optional>
+#include <span>
 #include <string_view>
 
 #include <gtest/gtest.h>
@@ -18,6 +19,21 @@ namespace {
 std::filesystem::path fixture_path() {
     return std::filesystem::path{AXK_SOURCE_ROOT} / "tests" / "fixtures" / "images" / "sampler-authored" /
            "HD00_512_single_sbnk_authored.hds";
+}
+
+void write_be32(std::span<std::byte> bytes, std::size_t offset, std::uint32_t value) {
+    ASSERT_LE(offset + 4U, bytes.size());
+    bytes[offset] = static_cast<std::byte>(value >> 24U);
+    bytes[offset + 1U] = static_cast<std::byte>(value >> 16U);
+    bytes[offset + 2U] = static_cast<std::byte>(value >> 8U);
+    bytes[offset + 3U] = static_cast<std::byte>(value);
+}
+
+void write_object_file(const std::filesystem::path &path, std::span<const std::byte> payload) {
+    std::ofstream output{path, std::ios::binary};
+    ASSERT_TRUE(output);
+    output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+    ASSERT_TRUE(output);
 }
 
 void patch_sample_cached_reference(const std::filesystem::path &path, std::uint32_t value) {
@@ -243,6 +259,13 @@ TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
     EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
               opened->available_operations.end());
 
+    const auto content = sessions.content(opened->image_id, "owner-a", 64U);
+    ASSERT_TRUE(content) << content.error().message;
+    ASSERT_EQ(content->items.size(), 1U);
+    EXPECT_EQ(content->items.front().kind, "volume");
+    EXPECT_EQ(content->items.front().name, "Object directory");
+    EXPECT_EQ(content->items.front().partition_index, 0U);
+
     const auto wave_data = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(wave_data) << wave_data.error().message;
     ASSERT_FALSE(wave_data->items.empty());
@@ -258,6 +281,66 @@ TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
     const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);
     EXPECT_EQ(mutation.error().code, "image_mutation_unsupported");
+}
+
+TEST_F(ImageSessionTest, AssemblesNestedMultiDiskWaveDataAndDiagnosesIncompleteLeaf) {
+    const auto source = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(source) << source.error().message;
+    const auto source_objects = source->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(source_objects) << source_objects.error().message;
+    const auto wave_data = std::ranges::find_if(
+        *source_objects, [](const auto &object) { return object.decoded.header.raw_type == "SMPL"; });
+    ASSERT_NE(wave_data, source_objects->end());
+    const auto decoded = axk::decode_object(wave_data->raw_payload);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    ASSERT_GT(decoded->header.payload_bytes_0x1c, 2U);
+
+    const auto disk_set = root_ / "disk-set";
+    const auto first_disk = disk_set / "DISK1";
+    const auto second_disk = disk_set / "DISK2";
+    std::filesystem::create_directories(first_disk);
+    std::filesystem::create_directories(second_disk);
+    const auto header_size = decoded->header.header_size;
+    const auto first_size = decoded->header.payload_bytes_0x1c / 2U;
+    const auto second_size = decoded->header.payload_bytes_0x1c - first_size;
+    std::vector<std::byte> first_segment(wave_data->raw_payload.begin(),
+                                         wave_data->raw_payload.begin() + static_cast<std::ptrdiff_t>(header_size));
+    first_segment.insert(first_segment.end(), wave_data->raw_payload.begin() + static_cast<std::ptrdiff_t>(header_size),
+                         wave_data->raw_payload.begin() + static_cast<std::ptrdiff_t>(header_size + first_size));
+    write_be32(first_segment, 0x20U, first_size);
+    write_be32(first_segment, 0x24U, 0U);
+    std::vector<std::byte> second_segment(wave_data->raw_payload.begin(),
+                                          wave_data->raw_payload.begin() + static_cast<std::ptrdiff_t>(header_size));
+    second_segment.insert(
+        second_segment.end(), wave_data->raw_payload.begin() + static_cast<std::ptrdiff_t>(header_size + first_size),
+        wave_data->raw_payload.begin() + static_cast<std::ptrdiff_t>(header_size + first_size + second_size));
+    write_be32(second_segment, 0x20U, second_size);
+    write_be32(second_segment, 0x24U, first_size);
+    write_object_file(first_disk / "SMP_TEST.001", first_segment);
+    write_object_file(second_disk / "SMP_TEST.001", second_segment);
+
+    axk::app::ImageSessionManager sessions{*sandbox_, 3U, 64U};
+    const auto complete =
+        sessions.open({"workspace", "disk-set", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+    ASSERT_TRUE(complete) << complete.error().message;
+    const auto complete_objects = sessions.objects(complete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(complete_objects) << complete_objects.error().message;
+    ASSERT_EQ(complete_objects->items.size(), 1U);
+    const auto audition = sessions.prepare_audition(complete->image_id, "owner-a", complete_objects->items.front().id);
+    ASSERT_TRUE(audition) << audition.error().message;
+    EXPECT_GT(audition->wav_size_bytes, 44U);
+
+    const auto incomplete =
+        sessions.open({"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+    ASSERT_TRUE(incomplete) << incomplete.error().message;
+    const auto incomplete_objects = sessions.objects(incomplete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(incomplete_objects) << incomplete_objects.error().message;
+    ASSERT_EQ(incomplete_objects->items.size(), 1U);
+    const auto rejected =
+        sessions.prepare_audition(incomplete->image_id, "owner-a", incomplete_objects->items.front().id);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, "audition_unsupported");
+    EXPECT_NE(rejected.error().message.find("open its parent object directory"), std::string::npos);
 }
 
 TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {

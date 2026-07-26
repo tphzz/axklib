@@ -31,7 +31,6 @@ function transport(withRoots = true): ImageTransport {
                           relativePath: 'images/nested.hds',
                           kind: 'FILE',
                           size: 2048,
-                          mediaSourceKind: null,
                       },
                   ]
                 : [
@@ -40,26 +39,24 @@ function transport(withRoots = true): ImageTransport {
                           relativePath: 'images',
                           kind: 'DIRECTORY',
                           size: null,
-                          mediaSourceKind: null,
                       },
                       {
                           name: 'disk.hds',
                           relativePath: 'disk.hds',
                           kind: 'FILE',
                           size: 1024,
-                          mediaSourceKind: null,
                       },
                       {
                           name: 'notes.txt',
                           relativePath: 'notes.txt',
                           kind: 'FILE',
                           size: 20,
-                          mediaSourceKind: null,
                       },
                   ],
             truncated: false,
             nextCursor: null,
         })),
+        inspectSandboxMediaSource: vi.fn().mockResolvedValue(null),
         createSandboxDirectory: vi.fn().mockResolvedValue(undefined),
     } as unknown as ImageTransport;
 }
@@ -311,14 +308,12 @@ describe('ServerStoragePicker', () => {
                         relativePath: 'images',
                         kind: 'DIRECTORY',
                         size: null,
-                        mediaSourceKind: null,
                     },
                     {
                         name: 'disk.hds',
                         relativePath: 'disk.hds',
                         kind: 'FILE',
                         size: 1024,
-                        mediaSourceKind: null,
                     },
                 ],
                 truncated: false,
@@ -382,7 +377,6 @@ describe('ServerStoragePicker', () => {
                           relativePath: 'disk.hds',
                           kind: 'FILE',
                           size: 1024,
-                          mediaSourceKind: null,
                       },
                   ]
                 : [
@@ -391,7 +385,6 @@ describe('ServerStoragePicker', () => {
                           relativePath: 'notes.txt',
                           kind: 'FILE',
                           size: 20,
-                          mediaSourceKind: null,
                       },
                   ],
             truncated: !cursor,
@@ -469,28 +462,24 @@ describe('ServerStoragePicker', () => {
                     relativePath: 'nested',
                     kind: 'DIRECTORY',
                     size: null,
-                    mediaSourceKind: null,
                 },
                 {
                     name: 'kick.wav',
                     relativePath: 'kick.wav',
                     kind: 'FILE',
                     size: 1024,
-                    mediaSourceKind: null,
                 },
                 {
                     name: 'snare.FLAC',
                     relativePath: 'snare.FLAC',
                     kind: 'FILE',
                     size: 2048,
-                    mediaSourceKind: null,
                 },
                 {
                     name: 'notes.txt',
                     relativePath: 'notes.txt',
                     kind: 'FILE',
                     size: 20,
-                    mediaSourceKind: null,
                 },
             ],
             truncated: false,
@@ -630,6 +619,13 @@ describe('ServerStoragePicker', () => {
     it('opens a recognized sampler object folder directly from its parent', async () => {
         const onselect = vi.fn();
         const imageTransport = transport();
+        let finishInspection!: (kind: 'AXK_OBJECT_DIRECTORY' | null) => void;
+        vi.mocked(imageTransport.inspectSandboxMediaSource).mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    finishInspection = resolve;
+                }),
+        );
         vi.mocked(imageTransport.sandboxDirectory).mockResolvedValue({
             directory: { rootId: 'workspace', relativePath: '' },
             entries: [
@@ -638,21 +634,18 @@ describe('ServerStoragePicker', () => {
                     relativePath: 'objects',
                     kind: 'DIRECTORY',
                     size: null,
-                    mediaSourceKind: 'AXK_OBJECT_DIRECTORY',
                 },
                 {
                     name: 'collection',
                     relativePath: 'collection',
                     kind: 'DIRECTORY',
                     size: null,
-                    mediaSourceKind: null,
                 },
                 {
                     name: 'disk.hds',
                     relativePath: 'disk.hds',
                     kind: 'FILE',
                     size: 1024,
-                    mediaSourceKind: null,
                 },
             ],
             truncated: false,
@@ -671,15 +664,23 @@ describe('ServerStoragePicker', () => {
 
         await fireEvent.click(await screen.findByText('Yamaha images'));
         expect(screen.getByText('disk.hds')).toBeTruthy();
-        expect(screen.getByText('Sampler object folder')).toBeTruthy();
+        expect(screen.getAllByText('Folder')).toHaveLength(2);
         expect(screen.getByText('Disk image · 1024 bytes')).toBeTruthy();
         expect(screen.queryByRole('button', { name: 'Open object directory' })).toBeNull();
         const objectDirectory = screen.getByRole('option', { name: /objects/ });
         const collection = screen.getByRole('option', { name: /collection/ });
-        expect(objectDirectory.querySelector('[data-icon="chevron"]')).toBeNull();
+        expect(objectDirectory.querySelector('[data-icon="chevron"]')).toBeTruthy();
         expect(collection.querySelector('[data-icon="chevron"]')).toBeTruthy();
+        expect(imageTransport.inspectSandboxMediaSource).not.toHaveBeenCalled();
         await fireEvent.click(objectDirectory);
 
+        expect(imageTransport.inspectSandboxMediaSource).toHaveBeenCalledWith({
+            rootId: 'workspace',
+            relativePath: 'objects',
+        });
+        expect(await screen.findByText('Inspecting')).toBeTruthy();
+        finishInspection('AXK_OBJECT_DIRECTORY');
+        await waitFor(() => expect(onselect).toHaveBeenCalled());
         expect(onselect).toHaveBeenCalledWith({
             kind: 'axk-object-directory',
             reference: { rootId: 'workspace', relativePath: 'objects' },
@@ -691,11 +692,10 @@ describe('ServerStoragePicker', () => {
             reference: { rootId: 'workspace', relativePath: 'disk.hds' },
             displayName: 'Yamaha images/disk.hds',
         });
-        expect(imageTransport.sandboxDirectory).toHaveBeenCalledWith(
-            { rootId: 'workspace', relativePath: '' },
-            undefined,
-            true,
-        );
+        expect(imageTransport.sandboxDirectory).toHaveBeenCalledWith({
+            rootId: 'workspace',
+            relativePath: '',
+        });
     });
 
     it('offers storage-location management when no locations are configured', async () => {

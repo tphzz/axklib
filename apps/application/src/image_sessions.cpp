@@ -421,6 +421,11 @@ struct axk::app::ImageSessionManager::Implementation {
         const auto *smpl = std::get_if<CurrentSmpl>(&snapshot->second.object.payload);
         if (smpl == nullptr)
             return std::unexpected(session_error("audition_unsupported", "audition requires SMPL Wave Data"));
+        if (smpl->stored_segment_offset != 0U || smpl->stored_segment_bytes != smpl->stored_pcm_bytes) {
+            return std::unexpected(session_error(
+                "audition_unsupported",
+                "Wave Data is split across sampler disks; open its parent object directory to audition it"));
+        }
         if (smpl->sample_rate.value == 0U || smpl->stored_pcm_bytes == 0U)
             return std::unexpected(session_error("audition_unsupported", "Wave Data contains no playable PCM"));
         if (smpl->stored_sample_width_bytes.value != 1U && smpl->stored_sample_width_bytes.value != 2U)
@@ -728,7 +733,7 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
         auto tree = implementation_->sandbox.open_tree(
             directory_reference, {.maximum_entries = AxkObjectDirectory::maximum_entries,
                                   .maximum_total_file_bytes = AxkObjectDirectory::maximum_payload_bytes,
-                                  .maximum_depth = 1U,
+                                  .maximum_depth = AxkObjectDirectory::maximum_depth,
                                   .maximum_path_bytes = 64U * 1024U});
         if (!tree)
             return std::unexpected(tree.error());
@@ -738,17 +743,12 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
         verifiers.reserve(tree->entries().size());
         for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
             const auto &entry = tree->entries()[index];
-            if (entry.kind != SandboxTreeEntryKind::file) {
-                return std::unexpected(session_error("invalid_image_source",
-                                                     "AXK object directories must be flat and contain only files"));
-            }
+            if (entry.kind != SandboxTreeEntryKind::file)
+                continue;
             auto opened = tree->open_file(index);
             if (!opened)
                 return std::unexpected(opened.error());
-            const auto name_path = axk::text::path_from_utf8(entry.relative_path);
-            if (!name_path)
-                return std::unexpected(session_error("invalid_image_source", "object filename is not valid UTF-8"));
-            entries.push_back({axk::text::path_to_utf8(name_path->filename()), opened->reader});
+            entries.push_back({entry.relative_path, opened->reader});
             verifiers.push_back(std::move(opened->verify_unchanged));
         }
         auto directory = AxkObjectDirectory::open(std::move(entries), source.relative_path, cancellation);
@@ -934,6 +934,15 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
         std::ranges::sort(scoped_indices);
         const auto unique_end = std::ranges::unique(scoped_indices).begin();
         scoped_indices.erase(unique_end, scoped_indices.end());
+        if (session->content[item_index].kind == "volume" && !session->content[item_index].partition_index &&
+            !scoped_indices.empty()) {
+            const auto partition_index = session->objects[scoped_indices.front()].partition_index;
+            if (partition_index && std::ranges::all_of(scoped_indices, [&](std::size_t object_index) {
+                    return session->objects[object_index].partition_index == partition_index;
+                })) {
+                session->content[item_index].partition_index = partition_index;
+            }
+        }
         session->object_indices_by_content_scope.emplace(id, scoped_indices);
         return scoped_indices;
     };

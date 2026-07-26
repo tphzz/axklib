@@ -1246,7 +1246,7 @@
         const request = packageExportRequest;
         if (!request || request.busy) return;
         const generation = packageOperationGeneration;
-        const filename = packageExportFilename(request.items);
+        const filename = packageExportFilename(request.items, imageLocation);
         const selection = await chooseServerLocation(
             'save-file',
             'Export axklib package',
@@ -1269,7 +1269,9 @@
         if (!request || request.busy || !isDesktop) return;
         const generation = packageOperationGeneration;
         try {
-            const destination = await selectLocalPackageDestination(packageExportFilename(request.items));
+            const destination = await selectLocalPackageDestination(
+                packageExportFilename(request.items, imageLocation),
+            );
             if (!destination || generation !== packageOperationGeneration || !packageExportRequest) return;
             await runPackageExport(
                 { kind: 'DOWNLOAD', filename: destination.filename },

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
     sandboxRoots: vi.fn(),
     sandboxDirectory: vi.fn(),
+    inspectSandboxMediaSource: vi.fn(),
     openImage: vi.fn(),
     refreshImage: vi.fn(),
     closeImage: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock('./lib/createTransport', () => ({
         supportsClientUploads: true,
         sandboxRoots: mocks.sandboxRoots,
         sandboxDirectory: mocks.sandboxDirectory,
+        inspectSandboxMediaSource: mocks.inspectSandboxMediaSource,
         openImage: mocks.openImage,
         refreshImage: mocks.refreshImage,
         closeImage: mocks.closeImage,
@@ -88,6 +90,7 @@ describe('App panel layout', () => {
             truncated: false,
             nextCursor: null,
         }));
+        mocks.inspectSandboxMediaSource.mockReset().mockResolvedValue(null);
         mocks.hardDiskCreationProfiles.mockReset().mockResolvedValue([
             {
                 profileId: 'FLOPPY_SCALE',
@@ -1004,6 +1007,56 @@ describe('App panel layout', () => {
         expect(await screen.findByRole('heading', { name: 'Export package' })).toBeTruthy();
     });
 
+    it('opens volume package export from a read-only AXK object directory', async () => {
+        const objectDirectoryVolume = {
+            id: 'object-directory-volume',
+            name: 'Object directory',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            tree: [
+                {
+                    id: 'disk-17',
+                    name: 'FS1R',
+                    kind: 'disk',
+                    childCount: 1,
+                    children: [objectDirectoryVolume],
+                },
+            ],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 1,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: objectDirectoryVolume,
+            volumeMutationsAvailable: false,
+            partitionMutationsAvailable: false,
+            objectRenameAvailable: false,
+            objectDeletionAvailable: false,
+            waveDataCleanupAvailable: false,
+            packageImportAvailable: false,
+            packageExportAvailable: true,
+        });
+        render(App);
+
+        await chooseNestedImage();
+        await fireEvent.contextMenu(await screen.findByRole('button', { name: /Object directory/ }));
+        expect(screen.queryByRole('menuitem', { name: 'Import package…' })).toBeNull();
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
+
+        const dialog = screen.getByRole('dialog', { name: 'Export axklib package' });
+        expect(within(dialog).getByText('Export “Object directory”')).toBeTruthy();
+        expect(within(dialog).getByRole('button', { name: /Storage location/ })).toBeTruthy();
+    });
+
     it('suppresses context menus only in the desktop runtime', async () => {
         const runtime = window as unknown as { __TAURI_INTERNALS__?: unknown };
         runtime.__TAURI_INTERNALS__ = {};
@@ -1221,14 +1274,7 @@ describe('App panel layout', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
         expect(await screen.findByText('nested.hds')).toBeTruthy();
-        expect(mocks.sandboxDirectory).toHaveBeenLastCalledWith(
-            {
-                rootId: 'workspace',
-                relativePath: 'images',
-            },
-            undefined,
-            true,
-        );
+        expect(mocks.sandboxDirectory).toHaveBeenLastCalledWith({ rootId: 'workspace', relativePath: 'images' });
     });
 
     it('starts hard-disk image creation through a dedicated destination picker', async () => {

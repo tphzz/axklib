@@ -300,15 +300,23 @@ export class AxklibHttpApiClient {
 
     listDirectory(
         directory: DirectoryRef,
-        options: { limit?: number; cursor?: string; classifyMediaSources?: boolean } = {},
+        options: { limit?: number; cursor?: string } = {},
     ): Promise<DirectoryListing> {
         const input: components['schemas']['DirectoryListRequest'] = {
             directory,
             limit: options.limit ?? 200,
             cursor: options.cursor ?? null,
-            classifyMediaSources: options.classifyMediaSources ?? false,
         };
         return this.request('POST', '/files/list', input);
+    }
+
+    async inspectMediaSource(directory: DirectoryRef): Promise<'AXK_OBJECT_DIRECTORY' | null> {
+        const result = await this.request<components['schemas']['MediaSourceInspectResponse']['data']>(
+            'POST',
+            '/files/media-source/inspect',
+            { directory },
+        );
+        return result.mediaSourceKind;
     }
 
     metadata(reference: FileRef): Promise<EntryMetadata> {

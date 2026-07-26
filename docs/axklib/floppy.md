@@ -27,12 +27,14 @@ A floppy image can contain `FSFSDEV3SPLX` object files without being an SFS
 hard-disk image. Keep those layers separate.
 
 An external tool may expose only the object files from a floppy. Axklib can
-open one such flat leaf directory explicitly as an
-`AXK_OBJECT_DIRECTORY`. This provides read-only object inventory,
-relationships, preview, audition, and package export, but it is not a floppy
-image: FAT geometry, allocation chains, directory ordering, labels, support
-files, and deleted entries cannot be reconstructed from the object set.
-Directories above the leaf remain browser or CLI collection scopes.
+open one flat leaf directory, or a parent containing one level of related disk
+folders, explicitly as an `AXK_OBJECT_DIRECTORY`. The parent form assembles
+complete contiguous Wave Data that Yamaha split across several floppies. This
+provides read-only object inventory, relationships, preview, audition, and
+package export, but it is not a floppy image: FAT geometry, allocation chains,
+directory ordering, labels, support files, and deleted entries cannot be
+reconstructed from the object set. Higher collection directories remain browser
+or CLI navigation scopes.
 
 ## Compatibility Profile
 
