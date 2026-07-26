@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
-import { clientUploadLocation } from '../storageLocations';
+import { clientUploadLocation, serverFileLocation } from '../storageLocations';
 import type { ClientUploadSource } from '../clientUploadSource';
 import type { AudioImportCapabilities, AudioSourceInfo, ImageTransport } from '../transport';
 import AudioImportDialog from './AudioImportDialog.svelte';
@@ -52,6 +52,81 @@ function transport(): ImageTransport {
 }
 
 describe('AudioImportDialog', () => {
+    it('offers the shared workspace and local source choices before staging files', async () => {
+        const onchooseworkspace = vi.fn();
+        const onchooselocal = vi.fn();
+        render(AudioImportDialog, {
+            props: {
+                transport: transport(),
+                files: [],
+                target: { partitionIndex: 0, volumeName: 'My Volume' },
+                existingSampleNames: [],
+                existingWaveformNames: [],
+                onchooseworkspace,
+                onchooselocal,
+                oncommit: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByText('Choose audio files')).toBeTruthy();
+        await fireEvent.click(screen.getByRole('button', { name: /Storage location/ }));
+        await fireEvent.click(screen.getByRole('button', { name: /This computer/ }));
+
+        expect(onchooseworkspace).toHaveBeenCalledOnce();
+        expect(onchooselocal).toHaveBeenCalledOnce();
+    });
+
+    it('inspects workspace files directly and applies the shared collision-free naming policy', async () => {
+        const imageTransport = transport();
+        imageTransport.inspectAudio = vi.fn().mockResolvedValue(
+            sourceInfo({
+                sourceFormat: 'WAV',
+                sourceSubtype: 'PCM_16',
+                channels: 1,
+                sourceSampleRate: 11_000,
+                outputSampleRate: 44_100,
+                sourceSampleWidthBits: 16,
+                sampleWidthConverted: false,
+                projectedOutputBytesTotal: 192_000,
+            }),
+        );
+        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const workspaceFile = serverFileLocation(
+            { rootId: 'workspace', relativePath: 'audio/16bit_11k.wav' },
+            'Yamaha/audio/16bit_11k.wav',
+        );
+        render(AudioImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [workspaceFile],
+                target: { partitionIndex: 0, volumeName: 'My Volume' },
+                existingSampleNames: ['16bit_11k'],
+                existingWaveformNames: ['16bit_11k'],
+                oncommit,
+                oncancel: vi.fn(),
+                onchooseworkspace: vi.fn(),
+                onchooselocal: vi.fn(),
+            },
+        });
+
+        expect(await screen.findAllByDisplayValue('16bit_11k 2')).toHaveLength(2);
+        expect(imageTransport.uploadClientFile).not.toHaveBeenCalled();
+        expect(imageTransport.inspectAudio).toHaveBeenCalledWith(workspaceFile);
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await waitFor(() =>
+            expect(oncommit).toHaveBeenCalledWith([
+                expect.objectContaining({
+                    source: workspaceFile,
+                    sampleName: '16bit_11k 2',
+                    waveformNames: ['16bit_11k 2'],
+                }),
+            ]),
+        );
+        expect(imageTransport.releaseClientUpload).not.toHaveBeenCalled();
+    });
+
     it('aligns mixed mono and stereo files in stable channel columns', async () => {
         const imageTransport = transport();
         imageTransport.uploadClientFile = vi.fn(async (file: ClientUploadSource, _kind, onProgress) => {

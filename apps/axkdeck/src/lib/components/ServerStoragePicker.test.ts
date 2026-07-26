@@ -405,6 +405,62 @@ describe('ServerStoragePicker', () => {
         });
     });
 
+    it('selects several filtered files from one directory with pointer and keyboard controls', async () => {
+        const imageTransport = transport();
+        vi.mocked(imageTransport.sandboxDirectory).mockImplementation(async (directory) => ({
+            directory,
+            entries: [
+                { name: 'nested', relativePath: 'nested', kind: 'DIRECTORY', size: null },
+                { name: 'kick.wav', relativePath: 'kick.wav', kind: 'FILE', size: 1024 },
+                { name: 'snare.FLAC', relativePath: 'snare.FLAC', kind: 'FILE', size: 2048 },
+                { name: 'notes.txt', relativePath: 'notes.txt', kind: 'FILE', size: 20 },
+            ],
+            truncated: false,
+            nextCursor: null,
+        }));
+        const onselectmany = vi.fn();
+        render(ServerStoragePicker, {
+            props: {
+                transport: imageTransport,
+                mode: 'file',
+                multiple: true,
+                title: 'Choose audio files',
+                extensions: ['wav', 'wave', 'flac', 'aif', 'aiff'],
+                onselect: vi.fn(),
+                onselectmany,
+                oncancel: vi.fn(),
+            },
+        });
+
+        await fireEvent.click(await screen.findByText('Yamaha images'));
+        expect(screen.queryByText('notes.txt')).toBeNull();
+        const list = screen.getByRole('listbox', { name: 'Storage entries' });
+        expect(list.getAttribute('aria-multiselectable')).toBe('true');
+
+        const kick = screen.getByRole('option', { name: /kick\.wav/ });
+        await fireEvent.click(kick);
+        expect(kick.getAttribute('aria-selected')).toBe('true');
+
+        await fireEvent.keyDown(list, { key: 'ArrowDown' });
+        await fireEvent.keyDown(list, { key: 'ArrowDown' });
+        expect(activeOption(list).textContent).toContain('snare.FLAC');
+        await fireEvent.keyDown(list, { key: ' ' });
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Select 2 files' }));
+        expect(onselectmany).toHaveBeenCalledWith([
+            {
+                kind: 'server-file',
+                reference: { rootId: 'workspace', relativePath: 'kick.wav' },
+                displayName: 'Yamaha images/kick.wav',
+            },
+            {
+                kind: 'server-file',
+                reference: { rootId: 'workspace', relativePath: 'snare.FLAC' },
+                displayName: 'Yamaha images/snare.FLAC',
+            },
+        ]);
+    });
+
     it('keeps the open-image picker read-only even in writable locations', async () => {
         render(ServerStoragePicker, {
             props: {

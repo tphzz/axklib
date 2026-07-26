@@ -38,7 +38,7 @@
         type RemoteServerSettingsInput,
         type RemoteServerSettingsView,
     } from './lib/serverSettings';
-    import { audioExtensions, isSupportedAudioFile } from './lib/audioImport';
+    import { audioExtensions, audioMediaType } from './lib/audioImport';
     import { browserUploadSource, type ClientUploadSource } from './lib/clientUploadSource';
     import { diagnosticsEnabled, reportDiagnostic, reportError } from './lib/diagnostics';
     import { listenForNativeAudioDrops, type NativeDropPosition } from './lib/nativeAudioDrop';
@@ -112,14 +112,16 @@
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
     type PickerMode = 'file' | 'directory' | 'save-file';
+    type PickerSelection = FileLocation | DirectoryLocation | FileLocation[];
     interface PickerRequest {
         mode: PickerMode;
         title: string;
         extensions: string[];
         suggestedName: string;
+        multiple: boolean;
         initialDirectory?: DirectoryRef | null;
         ondirectorychange?: (directory: DirectoryRef | null) => void;
-        resolve: (selection: FileLocation | DirectoryLocation | null) => void;
+        resolve: (selection: PickerSelection | null) => void;
     }
 
     interface LaneQueries {
@@ -135,6 +137,7 @@
     let hardDiskCreationDirectory = $state<DirectoryLocation | null>(null);
     let lastImageDirectory = $state<DirectoryRef | null>(null);
     let lastPackageDirectory = $state<DirectoryRef | null>(null);
+    let lastAudioDirectory = $state<DirectoryRef | null>(null);
     let openSessionId = $state<number | null>(null);
     let imageOpening = $state(false);
     let imageOpenGeneration = 0;
@@ -230,7 +233,10 @@
         error: string;
     } | null>(null);
     let audioFileInput: HTMLInputElement;
-    let audioImportRequest = $state<{ files: ClientUploadSource[]; target: AudioImportTarget } | null>(null);
+    let audioImportRequest = $state<{
+        files: (ClientUploadSource | FileLocation)[];
+        target: AudioImportTarget;
+    } | null>(null);
     let audioDragActive = $state(false);
     let audioDragTarget = $state<AudioImportTarget | null>(null);
     let activeVolumeId = $state('');
@@ -331,10 +337,22 @@
             : null;
     }
 
-    async function requestAudioImport(files: ClientUploadSource[], target = activeAudioTarget()): Promise<void> {
-        const admitted = files.filter(isSupportedAudioFile);
+    function audioSourceName(source: ClientUploadSource | FileLocation): string {
+        return 'kind' in source ? (source.reference.relativePath.split('/').at(-1) ?? source.displayName) : source.name;
+    }
+
+    async function requestAudioImport(
+        files: (ClientUploadSource | FileLocation)[],
+        target = activeAudioTarget(),
+    ): Promise<void> {
+        const admitted: (ClientUploadSource | FileLocation)[] = [];
+        for (const source of files) {
+            const mediaType = audioMediaType(audioSourceName(source));
+            if (!mediaType) continue;
+            admitted.push('kind' in source ? source : { ...source, type: mediaType });
+        }
         if (files.length > 0 && admitted.length === 0) {
-            sourceStatus = 'No supported audio files were dropped';
+            sourceStatus = 'No supported WAV, FLAC, or AIFF files were selected';
             return;
         }
         if (!target || admitted.length === 0 || !imageLocation) {
@@ -356,17 +374,37 @@
     }
 
     function chooseAudioFiles(): void {
-        if (!activeAudioTarget()) {
+        const target = activeAudioTarget();
+        if (!target || !imageLocation) {
             sourceStatus = 'Select a writable volume first';
             return;
         }
-        audioFileInput.click();
+        audioImportRequest = { files: [], target };
     }
 
     function filesChosen(event: Event): void {
         const input = event.currentTarget as HTMLInputElement;
-        void requestAudioImport(Array.from(input.files ?? []).map(browserUploadSource));
+        void requestAudioImport(
+            Array.from(input.files ?? []).map(browserUploadSource),
+            audioImportRequest?.target ?? activeAudioTarget(),
+        );
         input.value = '';
+    }
+
+    async function chooseWorkspaceAudio(): Promise<void> {
+        const request = audioImportRequest;
+        if (!request) return;
+        const selections = await chooseServerFiles('Choose audio files', [...audioExtensions], {
+            initialDirectory: lastAudioDirectory,
+            ondirectorychange: (directory) => (lastAudioDirectory = directory),
+        });
+        if (!selections || !audioImportRequest) return;
+        await requestAudioImport(selections, request.target);
+    }
+
+    function chooseLocalAudio(): void {
+        if (!audioImportRequest || !transport.supportsClientUploads) return;
+        audioFileInput.click();
     }
 
     function audioTargetForElement(target: EventTarget | null): AudioImportTarget | null {
@@ -2412,11 +2450,38 @@
     ): Promise<FileLocation | DirectoryLocation | null> {
         return new Promise((resolve) => {
             pickerRequest?.resolve(null);
-            pickerRequest = { mode, title, extensions, suggestedName, ...navigation, resolve };
+            pickerRequest = {
+                mode,
+                title,
+                extensions,
+                suggestedName,
+                multiple: false,
+                ...navigation,
+                resolve: (selection) => resolve(Array.isArray(selection) ? null : selection),
+            };
         });
     }
 
-    function finishPicker(selection: FileLocation | DirectoryLocation | null): void {
+    function chooseServerFiles(
+        title: string,
+        extensions: string[],
+        navigation?: Pick<PickerRequest, 'initialDirectory' | 'ondirectorychange'>,
+    ): Promise<FileLocation[] | null> {
+        return new Promise((resolve) => {
+            pickerRequest?.resolve(null);
+            pickerRequest = {
+                mode: 'file',
+                title,
+                extensions,
+                suggestedName: '',
+                multiple: true,
+                ...navigation,
+                resolve: (selection) => resolve(Array.isArray(selection) ? selection : null),
+            };
+        });
+    }
+
+    function finishPicker(selection: PickerSelection | null): void {
         const request = pickerRequest;
         pickerRequest = null;
         request?.resolve(selection);
@@ -2669,6 +2734,7 @@
         title={pickerRequest.title}
         extensions={pickerRequest.extensions}
         suggestedName={pickerRequest.suggestedName}
+        multiple={pickerRequest.multiple}
         initialDirectory={pickerRequest.initialDirectory}
         ondirectorychange={pickerRequest.ondirectorychange}
         onmanagelocations={() => {
@@ -2676,6 +2742,7 @@
             workspaceManagerOpen = true;
         }}
         onselect={(selection) => finishPicker(selection)}
+        onselectmany={(selections) => finishPicker(selections)}
         oncancel={() => finishPicker(null)}
     />
 {/if}
@@ -2796,6 +2863,8 @@
         target={audioImportRequest.target}
         existingSampleNames={samples.map((item) => item.name)}
         existingWaveformNames={waveData.map((item) => item.name)}
+        onchooseworkspace={() => void chooseWorkspaceAudio()}
+        onchooselocal={transport.supportsClientUploads ? chooseLocalAudio : undefined}
         oncommit={commitAudioImport}
         oncancel={() => (audioImportRequest = null)}
     />

@@ -3,6 +3,7 @@
     import { modal } from '../modal';
     import type { ImageSessionPackageImportPlan, PackageInspection } from '../transport';
     import Icon from './Icon.svelte';
+    import ImportSourceChoice from './ImportSourceChoice.svelte';
 
     interface Props {
         targetName: string;
@@ -144,22 +145,16 @@
 
         <div class="package-dialog-content">
             {#if !sourceName}
-                <section class="package-source-choice" aria-label="Package source">
-                    <h3>Choose a package</h3>
-                    <p>Import into <strong>{targetName}</strong> from a configured storage location.</p>
-                    <button class="source-choice-button" type="button" onclick={onchooseworkspace}>
-                        <Icon name="folder-open" size={18} />
-                        <span><strong>Storage location</strong><small>Choose from a configured workspace</small></span>
-                    </button>
-                    {#if desktop}
-                        <button class="source-choice-button" type="button" onclick={onchooselocal}>
-                            <Icon name="hard-drive" size={18} />
-                            <span
-                                ><strong>This computer</strong><small>Choose a local package and upload it</small></span
-                            >
-                        </button>
-                    {/if}
-                </section>
+                <ImportSourceChoice
+                    label="Package source"
+                    heading="Choose a package"
+                    description={`Import into ${targetName} from a configured storage location.`}
+                    workspaceDetail="Choose from a configured workspace"
+                    computerDetail="Choose a local package and upload it"
+                    computerAvailable={desktop}
+                    {onchooseworkspace}
+                    {onchooselocal}
+                />
             {:else}
                 <section class="package-source-summary" aria-label="Selected package">
                     <div>

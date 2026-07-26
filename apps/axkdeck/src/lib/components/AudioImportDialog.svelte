@@ -5,6 +5,7 @@
     import { formatStoredSize } from '../formatBytes';
     import { modal } from '../modal';
     import type { ClientUploadLocation } from '../storageLocations';
+    import type { FileLocation, InputFileLocation } from '../storageLocations';
     import type {
         AudioImportCapabilities,
         AudioImportItem,
@@ -13,20 +14,25 @@
         ImageTransport,
     } from '../transport';
     import Icon from './Icon.svelte';
+    import ImportSourceChoice from './ImportSourceChoice.svelte';
 
     interface Props {
         transport: ImageTransport;
-        files: (File | ClientUploadSource)[];
+        files: (File | ClientUploadSource | FileLocation)[];
         target: AudioImportTarget;
         existingSampleNames: string[];
         existingWaveformNames: string[];
+        onchooseworkspace?: () => void;
+        onchooselocal?: () => void;
         oncommit: (items: AudioImportItem[]) => Promise<void>;
         oncancel: () => void;
     }
 
     interface Row {
         id: number;
-        file: ClientUploadSource;
+        candidate: ClientUploadSource | FileLocation;
+        fileName: string;
+        source?: InputFileLocation;
         upload?: ClientUploadLocation;
         inspection?: AudioSourceInfo;
         targetSampleRate?: number;
@@ -39,7 +45,17 @@
         error: string;
     }
 
-    let { transport, files, target, existingSampleNames, existingWaveformNames, oncommit, oncancel }: Props = $props();
+    let {
+        transport,
+        files,
+        target,
+        existingSampleNames,
+        existingWaveformNames,
+        onchooseworkspace,
+        onchooselocal,
+        oncommit,
+        oncancel,
+    }: Props = $props();
     let rows = $state<Row[]>([]);
     let busy = $state(false);
     let generalError = $state('');
@@ -55,12 +71,20 @@
             validationErrors.every((error) => error === ''),
     );
 
+    function isWorkspaceFile(candidate: ClientUploadSource | FileLocation): candidate is FileLocation {
+        return 'kind' in candidate && candidate.kind === 'server-file';
+    }
+
     $effect(() => {
         rows = files.map((input) => {
-            const file = 'readChunk' in input ? input : browserUploadSource(input);
+            const candidate = 'kind' in input ? input : 'readChunk' in input ? input : browserUploadSource(input);
+            const fileName = isWorkspaceFile(candidate)
+                ? (candidate.reference.relativePath.split('/').at(-1) ?? candidate.displayName)
+                : candidate.name;
             return {
                 id: nextRowId++,
-                file,
+                candidate,
+                fileName,
                 sampleName: '',
                 waveformNames: [],
                 rootKey: defaultRootKey,
@@ -89,16 +113,23 @@
     async function stageOne(id: number): Promise<void> {
         const row = rows.find((candidate) => candidate.id === id);
         if (!row) return;
-        replaceRow(id, { status: 'uploading' });
         try {
-            const upload = await transport.uploadClientFile(
-                row.file,
-                'AUDIO',
-                (sent, total) => replaceRow(id, { progress: total === 0 ? 0 : sent / total }),
-                abortController.signal,
-            );
-            replaceRow(id, { upload, progress: 1 });
-            const inspection = await transport.inspectAudio(upload);
+            let source: InputFileLocation;
+            if (isWorkspaceFile(row.candidate)) {
+                source = row.candidate;
+                replaceRow(id, { source, status: 'checking' });
+            } else {
+                replaceRow(id, { status: 'uploading' });
+                const upload = await transport.uploadClientFile(
+                    row.candidate,
+                    'AUDIO',
+                    (sent, total) => replaceRow(id, { progress: total === 0 ? 0 : sent / total }),
+                    abortController.signal,
+                );
+                source = upload;
+                replaceRow(id, { source, upload, progress: 1, status: 'checking' });
+            }
+            const inspection = await transport.inspectAudio(source);
             replaceRow(id, { inspection, targetSampleRate: inspection.outputSampleRate, status: 'ready' });
         } catch (error) {
             if (!abortController.signal.aborted) {
@@ -108,6 +139,7 @@
     }
 
     async function stageFiles(): Promise<void> {
+        if (rows.length === 0) return;
         try {
             audioImportCapabilities = await transport.audioImportCapabilities();
         } catch (error) {
@@ -125,7 +157,7 @@
         const usedWaveforms = new Set(existingWaveformNames.map((name) => name.toLocaleLowerCase()));
         rows.forEach((row) => {
             if (!row.inspection?.valid) return;
-            const names = defaultAudioImportNames(row.file.name, row.inspection, usedSamples, usedWaveforms);
+            const names = defaultAudioImportNames(row.fileName, row.inspection, usedSamples, usedWaveforms);
             replaceRow(row.id, names);
         });
     }
@@ -192,11 +224,11 @@
 
     async function changeTargetSampleRate(row: Row, event: Event): Promise<void> {
         const targetSampleRate = Number((event.currentTarget as HTMLSelectElement).value);
-        if (!row.upload || !Number.isInteger(targetSampleRate) || row.targetSampleRate === targetSampleRate) return;
+        if (!row.source || !Number.isInteger(targetSampleRate) || row.targetSampleRate === targetSampleRate) return;
         const revision = row.inspectionRevision + 1;
         replaceRow(row.id, { targetSampleRate, inspectionRevision: revision, status: 'checking', error: '' });
         try {
-            const inspection = await transport.inspectAudio(row.upload, targetSampleRate);
+            const inspection = await transport.inspectAudio(row.source, targetSampleRate);
             const current = rows.find((candidate) => candidate.id === row.id);
             if (!current || current.inspectionRevision !== revision || disposed) return;
             replaceRow(row.id, { inspection, status: 'ready' });
@@ -243,7 +275,7 @@
         try {
             await oncommit(
                 rows.map((row) => ({
-                    source: row.upload!,
+                    source: row.source!,
                     sampleName: row.sampleName,
                     waveformNames: [...row.waveformNames],
                     rootKey: row.rootKey,
@@ -277,175 +309,198 @@
             </button>
         </header>
         <div class="audio-import-body">
-            <p class="audio-import-summary">
-                Each file creates one standalone Sample and {rows.some((row) => row.inspection?.channels === 2)
-                    ? 'mono or stereo'
-                    : 'mono'} Wave Data. Imported wave data uses the proven full-waveform forward loop.
-            </p>
-            <div class="audio-import-rows">
-                <table class="audio-import-table">
-                    <colgroup>
-                        <col class="source-column" />
-                        <col class="rate-column" />
-                        <col class="sample-column" />
-                        <col class="wave-column" />
-                        <col class="wave-column" />
-                        <col class="root-key-column" />
-                        <col class="status-column" />
-                        <col class="action-column" />
-                    </colgroup>
-                    <thead>
-                        <tr>
-                            <th scope="col">Source file</th>
-                            <th scope="col">Target rate</th>
-                            <th scope="col">Sample name</th>
-                            <th scope="col">Wave data (mono/left)</th>
-                            <th scope="col">Wave data (right)</th>
-                            <th scope="col">Root key</th>
-                            <th scope="col">Status</th>
-                            <th scope="col"><span class="visually-hidden">Actions</span></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {#each rows as row, index (row.id)}
-                            {@const validationError = validationErrors[index]}
-                            {@const editable =
-                                row.status === 'ready' &&
-                                row.inspection !== undefined &&
-                                row.inspection.valid &&
-                                row.waveformNames.length === row.inspection.channels}
+            {#if files.length === 0}
+                <ImportSourceChoice
+                    label="Audio source"
+                    heading="Choose audio files"
+                    description={`Import into ${target.volumeName} from a configured storage location or this computer.`}
+                    workspaceDetail="Choose one or more files from a configured workspace"
+                    computerDetail="Choose local audio files and upload them"
+                    computerAvailable={onchooselocal !== undefined}
+                    onchooseworkspace={() => onchooseworkspace?.()}
+                    onchooselocal={() => onchooselocal?.()}
+                />
+            {:else}
+                <p class="audio-import-summary">
+                    Each file creates one standalone Sample and {rows.some((row) => row.inspection?.channels === 2)
+                        ? 'mono or stereo'
+                        : 'mono'} Wave Data. Imported wave data uses the proven full-waveform forward loop.
+                </p>
+                <div class="audio-import-rows">
+                    <table class="audio-import-table">
+                        <colgroup>
+                            <col class="source-column" />
+                            <col class="rate-column" />
+                            <col class="sample-column" />
+                            <col class="wave-column" />
+                            <col class="wave-column" />
+                            <col class="root-key-column" />
+                            <col class="status-column" />
+                            <col class="action-column" />
+                        </colgroup>
+                        <thead>
                             <tr>
-                                <td class="source-cell" data-label="Source file">
-                                    <div class="audio-import-file">
-                                        <strong title={row.file.name}>{row.file.name}</strong>
-                                        {#if row.status === 'uploading'}
-                                            <small>Uploading {Math.round(row.progress * 100)}%</small>
-                                        {:else if row.status === 'failed'}
-                                            <small class="error-text">{row.error}</small>
-                                        {:else if row.inspection}
-                                            <small>
-                                                {row.inspection.sourceFormat}
-                                                {row.inspection.sourceSubtype} ·
-                                                {row.inspection.channels === 2 ? 'Stereo' : 'Mono'} ·
-                                                {row.inspection.sourceSampleRate.toLocaleString()} Hz ·
-                                                {conversionDescription(row.inspection)}
-                                                · {row.inspection.durationSeconds.toFixed(2)} s
-                                            </small>
-                                        {:else}
-                                            <small>Waiting</small>
-                                        {/if}
-                                    </div>
-                                </td>
-                                <td data-label="Target rate">
-                                    {#if row.inspection?.valid && audioImportCapabilities}
-                                        <select
-                                            aria-label={`Target sample rate for ${row.file.name}`}
-                                            value={row.targetSampleRate}
-                                            disabled={busy || row.status === 'checking'}
-                                            onchange={(event) => void changeTargetSampleRate(row, event)}
-                                        >
-                                            {#each audioImportCapabilities.supportedSampleRates as rate (rate)}
-                                                <option value={rate}>{rate.toLocaleString()} Hz</option>
-                                            {/each}
-                                        </select>
-                                    {:else}
-                                        <span class="audio-import-unavailable" aria-hidden="true">—</span>
-                                    {/if}
-                                </td>
-                                <td data-label="Sample name">
-                                    {#if editable}
-                                        <input aria-label="Sample name" bind:value={row.sampleName} maxlength="16" />
-                                    {:else}
-                                        <span class="audio-import-unavailable" aria-hidden="true">—</span>
-                                    {/if}
-                                </td>
-                                <td data-label="Wave data (mono/left)">
-                                    {#if editable}
-                                        <input
-                                            aria-label="Wave data (mono/left)"
-                                            bind:value={row.waveformNames[0]}
-                                            maxlength="16"
-                                        />
-                                    {:else}
-                                        <span class="audio-import-unavailable" aria-hidden="true">—</span>
-                                    {/if}
-                                </td>
-                                <td data-label="Wave data (right)">
-                                    {#if editable && row.waveformNames.length === 2}
-                                        <input
-                                            aria-label="Wave data (right)"
-                                            bind:value={row.waveformNames[1]}
-                                            maxlength="16"
-                                        />
-                                    {:else if editable}
-                                        <span class="audio-import-unavailable" aria-label="No right wave data">—</span>
-                                    {:else}
-                                        <span class="audio-import-unavailable" aria-hidden="true">—</span>
-                                    {/if}
-                                </td>
-                                <td data-label="Root key">
-                                    {#if editable}
-                                        <span class="root-key-control"
-                                            ><input
-                                                bind:value={row.rootKey}
-                                                type="number"
-                                                min="0"
-                                                max="127"
-                                                aria-label="Root key"
-                                            />
-                                            <small>{noteName(row.rootKey)}</small></span
-                                        >
-                                    {:else}
-                                        <span class="audio-import-unavailable" aria-hidden="true">—</span>
-                                    {/if}
-                                </td>
-                                <td class="status-cell" data-label="Status">
-                                    {#if row.status === 'waiting'}
-                                        <span class="status-neutral">Checking…</span>
-                                    {:else if row.status === 'uploading'}
-                                        <span class="status-neutral">Uploading {Math.round(row.progress * 100)}%</span>
-                                    {:else if row.status === 'checking'}
-                                        <span class="status-neutral">Checking…</span>
-                                    {:else if row.status === 'removing'}
-                                        <span class="status-neutral">Removing…</span>
-                                    {:else if validationError}
-                                        <span class="status-message status-error">
-                                            <Icon name="close" size={14} />
-                                            <span>{validationError}</span>
-                                        </span>
-                                    {:else if row.inspection}
-                                        <span class="status-message status-valid">
-                                            <Icon name="check" size={14} />
-                                            <span>{fitMessage(row.inspection)}</span>
-                                        </span>
-                                    {/if}
-                                </td>
-                                <td class="action-cell" data-label="Actions">
-                                    {#if ['ready', 'failed'].includes(row.status) && validationError}
-                                        <button
-                                            class="icon-button row-remove-button"
-                                            type="button"
-                                            aria-label={`Remove ${row.file.name}`}
-                                            title="Remove file"
-                                            disabled={busy}
-                                            onclick={() => void removeRow(row)}
-                                        >
-                                            <Icon name="trash" size={15} />
-                                        </button>
-                                    {/if}
-                                </td>
+                                <th scope="col">Source file</th>
+                                <th scope="col">Target rate</th>
+                                <th scope="col">Sample name</th>
+                                <th scope="col">Wave data (mono/left)</th>
+                                <th scope="col">Wave data (right)</th>
+                                <th scope="col">Root key</th>
+                                <th scope="col">Status</th>
+                                <th scope="col"><span class="visually-hidden">Actions</span></th>
                             </tr>
-                        {/each}
-                    </tbody>
-                </table>
-            </div>
+                        </thead>
+                        <tbody>
+                            {#each rows as row, index (row.id)}
+                                {@const validationError = validationErrors[index]}
+                                {@const editable =
+                                    row.status === 'ready' &&
+                                    row.inspection !== undefined &&
+                                    row.inspection.valid &&
+                                    row.waveformNames.length === row.inspection.channels}
+                                <tr>
+                                    <td class="source-cell" data-label="Source file">
+                                        <div class="audio-import-file">
+                                            <strong title={row.fileName}>{row.fileName}</strong>
+                                            {#if row.status === 'uploading'}
+                                                <small>Uploading {Math.round(row.progress * 100)}%</small>
+                                            {:else if row.status === 'failed'}
+                                                <small class="error-text">{row.error}</small>
+                                            {:else if row.inspection}
+                                                <small>
+                                                    {row.inspection.sourceFormat}
+                                                    {row.inspection.sourceSubtype} ·
+                                                    {row.inspection.channels === 2 ? 'Stereo' : 'Mono'} ·
+                                                    {row.inspection.sourceSampleRate.toLocaleString()} Hz ·
+                                                    {conversionDescription(row.inspection)}
+                                                    · {row.inspection.durationSeconds.toFixed(2)} s
+                                                </small>
+                                            {:else}
+                                                <small>Waiting</small>
+                                            {/if}
+                                        </div>
+                                    </td>
+                                    <td data-label="Target rate">
+                                        {#if row.inspection?.valid && audioImportCapabilities}
+                                            <select
+                                                aria-label={`Target sample rate for ${row.fileName}`}
+                                                value={row.targetSampleRate}
+                                                disabled={busy || row.status === 'checking'}
+                                                onchange={(event) => void changeTargetSampleRate(row, event)}
+                                            >
+                                                {#each audioImportCapabilities.supportedSampleRates as rate (rate)}
+                                                    <option value={rate}>{rate.toLocaleString()} Hz</option>
+                                                {/each}
+                                            </select>
+                                        {:else}
+                                            <span class="audio-import-unavailable" aria-hidden="true">—</span>
+                                        {/if}
+                                    </td>
+                                    <td data-label="Sample name">
+                                        {#if editable}
+                                            <input
+                                                aria-label="Sample name"
+                                                bind:value={row.sampleName}
+                                                maxlength="16"
+                                            />
+                                        {:else}
+                                            <span class="audio-import-unavailable" aria-hidden="true">—</span>
+                                        {/if}
+                                    </td>
+                                    <td data-label="Wave data (mono/left)">
+                                        {#if editable}
+                                            <input
+                                                aria-label="Wave data (mono/left)"
+                                                bind:value={row.waveformNames[0]}
+                                                maxlength="16"
+                                            />
+                                        {:else}
+                                            <span class="audio-import-unavailable" aria-hidden="true">—</span>
+                                        {/if}
+                                    </td>
+                                    <td data-label="Wave data (right)">
+                                        {#if editable && row.waveformNames.length === 2}
+                                            <input
+                                                aria-label="Wave data (right)"
+                                                bind:value={row.waveformNames[1]}
+                                                maxlength="16"
+                                            />
+                                        {:else if editable}
+                                            <span class="audio-import-unavailable" aria-label="No right wave data"
+                                                >—</span
+                                            >
+                                        {:else}
+                                            <span class="audio-import-unavailable" aria-hidden="true">—</span>
+                                        {/if}
+                                    </td>
+                                    <td data-label="Root key">
+                                        {#if editable}
+                                            <span class="root-key-control"
+                                                ><input
+                                                    bind:value={row.rootKey}
+                                                    type="number"
+                                                    min="0"
+                                                    max="127"
+                                                    aria-label="Root key"
+                                                />
+                                                <small>{noteName(row.rootKey)}</small></span
+                                            >
+                                        {:else}
+                                            <span class="audio-import-unavailable" aria-hidden="true">—</span>
+                                        {/if}
+                                    </td>
+                                    <td class="status-cell" data-label="Status">
+                                        {#if row.status === 'waiting'}
+                                            <span class="status-neutral">Checking…</span>
+                                        {:else if row.status === 'uploading'}
+                                            <span class="status-neutral"
+                                                >Uploading {Math.round(row.progress * 100)}%</span
+                                            >
+                                        {:else if row.status === 'checking'}
+                                            <span class="status-neutral">Checking…</span>
+                                        {:else if row.status === 'removing'}
+                                            <span class="status-neutral">Removing…</span>
+                                        {:else if validationError}
+                                            <span class="status-message status-error">
+                                                <Icon name="close" size={14} />
+                                                <span>{validationError}</span>
+                                            </span>
+                                        {:else if row.inspection}
+                                            <span class="status-message status-valid">
+                                                <Icon name="check" size={14} />
+                                                <span>{fitMessage(row.inspection)}</span>
+                                            </span>
+                                        {/if}
+                                    </td>
+                                    <td class="action-cell" data-label="Actions">
+                                        {#if ['ready', 'failed'].includes(row.status) && validationError}
+                                            <button
+                                                class="icon-button row-remove-button"
+                                                type="button"
+                                                aria-label={`Remove ${row.fileName}`}
+                                                title="Remove file"
+                                                disabled={busy}
+                                                onclick={() => void removeRow(row)}
+                                            >
+                                                <Icon name="trash" size={15} />
+                                            </button>
+                                        {/if}
+                                    </td>
+                                </tr>
+                            {/each}
+                        </tbody>
+                    </table>
+                </div>
+            {/if}
             {#if generalError}<p class="dialog-error" role="alert">{generalError}</p>{/if}
         </div>
         <footer class="dialog-footer">
             <button class="secondary-button" type="button" disabled={busy} onclick={() => void cancel()}>Cancel</button>
-            <button class="primary-button" type="button" disabled={!ready || busy} onclick={() => void commit()}>
-                {busy ? 'Importing' : `Import ${rows.length} ${rows.length === 1 ? 'file' : 'files'}`}
-            </button>
+            {#if files.length > 0}
+                <button class="primary-button" type="button" disabled={!ready || busy} onclick={() => void commit()}>
+                    {busy ? 'Importing' : `Import ${rows.length} ${rows.length === 1 ? 'file' : 'files'}`}
+                </button>
+            {/if}
         </footer>
     </div>
 </div>

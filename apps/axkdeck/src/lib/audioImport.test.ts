@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { defaultAudioImportNames, isSupportedAudioFile, samplerName, validSamplerName } from './audioImport';
+import {
+    audioMediaType,
+    defaultAudioImportNames,
+    isSupportedAudioFile,
+    samplerName,
+    validSamplerName,
+} from './audioImport';
 import type { AudioSourceInfo } from './transport';
 
 const inspection = (channels: 1 | 2): AudioSourceInfo => ({
@@ -30,6 +36,15 @@ describe('audio import naming', () => {
         expect(isSupportedAudioFile({ name: 'take.WAV' })).toBe(true);
         expect(isSupportedAudioFile({ name: 'take.aiff' })).toBe(true);
         expect(isSupportedAudioFile({ name: 'take.mp3' })).toBe(false);
+    });
+
+    it('derives canonical upload media types from admitted extensions', () => {
+        expect(audioMediaType('take.WAV')).toBe('audio/wav');
+        expect(audioMediaType('take.wave')).toBe('audio/wav');
+        expect(audioMediaType('take.flac')).toBe('audio/flac');
+        expect(audioMediaType('take.AIF')).toBe('audio/aiff');
+        expect(audioMediaType('take.aiff')).toBe('audio/aiff');
+        expect(audioMediaType('take.mp3')).toBeNull();
     });
 
     it('creates bounded printable unique mono and stereo object names', () => {

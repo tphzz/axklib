@@ -23,12 +23,15 @@ const mocks = vi.hoisted(() => ({
     deleteSandboxEntry: vi.fn(),
     hardDiskCreationProfiles: vi.fn(),
     listenForNativeAudioDrops: vi.fn(),
+    audioImportCapabilities: vi.fn(),
+    inspectAudio: vi.fn(),
+    uploadClientFile: vi.fn(),
 }));
 
 vi.mock('./lib/createTransport', () => ({
     createTransport: () => ({
         storageMode: 'server',
-        supportsClientUploads: false,
+        supportsClientUploads: true,
         sandboxRoots: mocks.sandboxRoots,
         sandboxDirectory: mocks.sandboxDirectory,
         openImage: mocks.openImage,
@@ -49,6 +52,9 @@ vi.mock('./lib/createTransport', () => ({
         waitForJob: mocks.waitForJob,
         deleteSandboxEntry: mocks.deleteSandboxEntry,
         hardDiskCreationProfiles: mocks.hardDiskCreationProfiles,
+        audioImportCapabilities: mocks.audioImportCapabilities,
+        inspectAudio: mocks.inspectAudio,
+        uploadClientFile: mocks.uploadClientFile,
     }),
 }));
 
@@ -127,6 +133,35 @@ describe('App panel layout', () => {
         mocks.waitForJob.mockReset();
         mocks.deleteSandboxEntry.mockReset().mockResolvedValue(undefined);
         mocks.listenForNativeAudioDrops.mockReset().mockResolvedValue(() => undefined);
+        mocks.audioImportCapabilities.mockReset().mockResolvedValue({
+            supportedSampleRates: [44_100],
+            defaultUnsupportedSampleRate: 44_100,
+            supportedOutputSampleWidthsBits: [16],
+            sampleWidthPolicy: 'PRESERVE_PCM16_EXPAND_PCM8',
+        });
+        mocks.inspectAudio.mockReset().mockResolvedValue({
+            sourceFormat: 'WAV',
+            sourceSubtype: 'PCM_16',
+            channels: 1,
+            frameCount: 48_000,
+            sourceSampleRate: 44_100,
+            outputSampleRate: 44_100,
+            sourceSampleWidthBits: 16,
+            outputSampleWidthBits: 16,
+            durationSeconds: 1,
+            resampled: false,
+            quantized: false,
+            sampleWidthConverted: false,
+            ditherAlgorithm: 'NONE',
+            projectedOutputFrameCount: 48_000,
+            projectedOutputBytesPerChannel: 96_000,
+            projectedOutputBytesTotal: 96_000,
+            maximumOutputFrameCountPerChannel: 16_777_216,
+            maximumOutputBytesPerChannel: 33_554_432,
+            valid: true,
+            issues: [],
+        });
+        mocks.uploadClientFile.mockReset();
     });
 
     it('keeps one stable toolbar across all side-panel combinations', async () => {
@@ -1011,6 +1046,129 @@ describe('App panel layout', () => {
         delete runtime.__TAURI_INTERNALS__;
     });
 
+    it('selects several workspace audio files and inspects them without uploading', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'My Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 0,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectRenameAvailable: true,
+            objectDeletionAvailable: true,
+            waveDataCleanupAvailable: false,
+        });
+        render(App);
+        await chooseNestedImage();
+        await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import audio' }));
+
+        const sourceDialog = await screen.findByRole('dialog', { name: 'Import audio' });
+        await fireEvent.click(within(sourceDialog).getByRole('button', { name: /Storage location/ }));
+        mocks.sandboxDirectory.mockResolvedValue({
+            directory: { rootId: 'workspace', relativePath: '' },
+            entries: [
+                { name: 'kick.wav', relativePath: 'kick.wav', kind: 'FILE', size: 1024 },
+                { name: 'snare.FLAC', relativePath: 'snare.FLAC', kind: 'FILE', size: 2048 },
+                { name: 'notes.txt', relativePath: 'notes.txt', kind: 'FILE', size: 32 },
+            ],
+            truncated: false,
+            nextCursor: null,
+        });
+        const picker = await screen.findByRole('dialog', { name: 'Choose audio files' });
+        await fireEvent.click(await within(picker).findByText('Yamaha'));
+        await fireEvent.click(await within(picker).findByText('kick.wav'));
+        await fireEvent.click(await within(picker).findByText('snare.FLAC'));
+        expect(within(picker).queryByText('notes.txt')).toBeNull();
+        await fireEvent.click(within(picker).getByRole('button', { name: 'Select 2 files' }));
+
+        await vi.waitFor(() =>
+            expect(mocks.inspectAudio).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    kind: 'server-file',
+                    reference: { rootId: 'workspace', relativePath: 'kick.wav' },
+                }),
+            ),
+        );
+        expect(mocks.inspectAudio).toHaveBeenCalledWith(
+            expect.objectContaining({
+                kind: 'server-file',
+                reference: { rootId: 'workspace', relativePath: 'snare.FLAC' },
+            }),
+        );
+        expect(mocks.uploadClientFile).not.toHaveBeenCalled();
+        expect(await screen.findAllByDisplayValue('kick')).toHaveLength(2);
+        expect(await screen.findAllByDisplayValue('snare')).toHaveLength(2);
+    });
+
+    it('normalizes browser-specific audio MIME types before local upload', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'My Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 0,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectRenameAvailable: true,
+            objectDeletionAvailable: true,
+            waveDataCleanupAvailable: false,
+        });
+        mocks.uploadClientFile.mockResolvedValue({
+            kind: 'client-upload',
+            reference: { uploadId: 'audio-upload' },
+            uploadKind: 'AUDIO',
+            displayName: '16bit_11k.wav',
+        });
+        const { container } = render(App);
+        await chooseNestedImage();
+        await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import audio' }));
+        await fireEvent.click(screen.getByRole('button', { name: /This computer/ }));
+
+        const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+        expect(input).toBeTruthy();
+        const file = new File(['audio'], '16bit_11k.wav', { type: 'audio/vnd.wave' });
+        await fireEvent.change(input!, { target: { files: [file] } });
+
+        await vi.waitFor(() => expect(mocks.uploadClientFile).toHaveBeenCalled());
+        expect(mocks.uploadClientFile.mock.calls[0][0]).toMatchObject({
+            name: '16bit_11k.wav',
+            type: 'audio/wav',
+        });
+    });
+
     it('consumes unsupported and empty file drops without opening the import dialog', async () => {
         render(App);
 
@@ -1023,7 +1181,7 @@ describe('App panel layout', () => {
         Object.defineProperty(unsupportedDrop, 'dataTransfer', { value: unsupportedTransfer });
         window.dispatchEvent(unsupportedDrop);
         expect(unsupportedDrop.defaultPrevented).toBe(true);
-        expect(await screen.findByText('No supported audio files were dropped')).toBeTruthy();
+        expect(await screen.findByText('No supported WAV, FLAC, or AIFF files were selected')).toBeTruthy();
         expect(screen.queryByRole('dialog', { name: 'Import audio' })).toBeNull();
 
         const emptyTransfer = {

@@ -61,6 +61,18 @@ bool valid_media_type(axk::app::UploadKind kind, std::string_view value) {
     return false;
 }
 
+std::string_view disallowed_upload_message(axk::app::UploadKind kind) {
+    switch (kind) {
+    case axk::app::UploadKind::audio:
+        return "audio uploads require a WAV, FLAC, or AIFF file";
+    case axk::app::UploadKind::package:
+        return "package uploads require an axklib package file";
+    case axk::app::UploadKind::manifest:
+        return "manifest uploads require a JSON file";
+    }
+    return "upload type is not allowed";
+}
+
 } // namespace
 
 struct axk::app::UploadStore::Implementation {
@@ -215,8 +227,8 @@ axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::create(UploadC
     auto filename = text::path_from_utf8(request.filename);
     if (!filename || filename->filename() != *filename || !admitted_extension(request.kind, *filename) ||
         !valid_media_type(request.kind, request.media_type)) {
-        return std::unexpected(upload_error("upload_type_not_allowed",
-                                            "only admitted audio, package, and JSON manifest files may be uploaded"));
+        return std::unexpected(
+            upload_error("upload_type_not_allowed", std::string{disallowed_upload_message(request.kind)}));
     }
 
     const std::scoped_lock lock{implementation_->mutex};

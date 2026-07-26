@@ -304,7 +304,7 @@ export interface AudioImportCapabilities {
 }
 
 export interface AudioImportItem {
-    source: ClientUploadLocation;
+    source: InputFileLocation;
     sampleName: string;
     waveformNames: string[];
     rootKey: number;

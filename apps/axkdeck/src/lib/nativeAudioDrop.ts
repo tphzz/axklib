@@ -1,6 +1,6 @@
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import { audioExtensions } from './audioImport';
+import { audioExtensions, audioMediaType } from './audioImport';
 import type { ClientUploadSource } from './clientUploadSource';
 import { nativeExtension, nativeFileSource } from './nativeFileSource';
 
@@ -24,18 +24,7 @@ const maximumNativeDropFileBytes = 4 * 1024 * 1024 * 1024;
 const maximumNativeDropTotalBytes = 8 * 1024 * 1024 * 1024;
 
 function mediaType(path: string): string {
-    switch (nativeExtension(path)) {
-        case 'wav':
-        case 'wave':
-            return 'audio/wav';
-        case 'flac':
-            return 'audio/flac';
-        case 'aif':
-        case 'aiff':
-            return 'audio/aiff';
-        default:
-            return 'application/octet-stream';
-    }
+    return audioMediaType(path) ?? 'application/octet-stream';
 }
 
 function supported(path: string): boolean {

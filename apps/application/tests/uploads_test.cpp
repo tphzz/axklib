@@ -99,6 +99,17 @@ TEST_F(UploadStoreTest, RejectsDiskImagesWrongOwnersOffsetsAndOversizedChunks) {
                                     .sha256 = std::nullopt});
     ASSERT_FALSE(disk);
     EXPECT_EQ(disk.error().code, "upload_type_not_allowed");
+    EXPECT_EQ(disk.error().message, "package uploads require an axklib package file");
+
+    const auto mislabeled_audio = value.create({.owner_id = "owner",
+                                                .filename = "sample.wav",
+                                                .kind = axk::app::UploadKind::audio,
+                                                .media_type = "text/plain",
+                                                .declared_size = 3U,
+                                                .sha256 = std::nullopt});
+    ASSERT_FALSE(mislabeled_audio);
+    EXPECT_EQ(mislabeled_audio.error().code, "upload_type_not_allowed");
+    EXPECT_EQ(mislabeled_audio.error().message, "audio uploads require a WAV, FLAC, or AIFF file");
 
     const auto created = value.create({.owner_id = "owner",
                                        .filename = "object.axkvol",

@@ -9,9 +9,16 @@ export interface AudioImportNames {
     waveformNames: string[];
 }
 
+export function audioMediaType(filename: string): string | null {
+    const extension = filename.split('.').pop()?.toLocaleLowerCase() ?? '';
+    if (extension === 'wav' || extension === 'wave') return 'audio/wav';
+    if (extension === 'flac') return 'audio/flac';
+    if (extension === 'aif' || extension === 'aiff') return 'audio/aiff';
+    return null;
+}
+
 export function isSupportedAudioFile(file: Pick<File, 'name'>): boolean {
-    const extension = file.name.split('.').pop()?.toLocaleLowerCase() ?? '';
-    return audioExtensions.includes(extension as (typeof audioExtensions)[number]);
+    return audioMediaType(file.name) !== null;
 }
 
 export function samplerName(value: string, fallback = 'New Sample'): string {

@@ -1065,7 +1065,7 @@ describe('HttpImageTransport', () => {
         });
     });
 
-    it('imports one audio batch through one atomic alteration job', async () => {
+    it('imports uploaded and workspace audio through one atomic alteration job', async () => {
         let alterationBody: unknown;
         vi.stubGlobal(
             'fetch',
@@ -1131,7 +1131,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
         });
         const mono = clientUploadLocation({ uploadId: 'upload-mono' }, 'AUDIO', 'mono.wav');
-        const stereo = clientUploadLocation({ uploadId: 'upload-stereo' }, 'AUDIO', 'stereo.flac');
+        const stereo = serverFile('audio/stereo.flac');
         const opened = await transport.openImage(serverFile('images/base.hds'));
         const job = await transport.startAudioImport(opened.sessionId, { partitionIndex: 3, volumeName: 'Imported' }, [
             {
@@ -1216,7 +1216,10 @@ describe('HttpImageTransport', () => {
             },
             inputBindings: [
                 { manifestPath: 'audio/import-0', input: { uploadRef: { uploadId: 'upload-mono' } } },
-                { manifestPath: 'audio/import-1', input: { uploadRef: { uploadId: 'upload-stereo' } } },
+                {
+                    manifestPath: 'audio/import-1',
+                    input: { fileRef: { rootId: 'workspace', relativePath: 'audio/stereo.flac' } },
+                },
             ],
         });
     });

@@ -21,10 +21,12 @@
         title: string;
         extensions?: string[];
         suggestedName?: string;
+        multiple?: boolean;
         initialDirectory?: DirectoryRef | null;
         ondirectorychange?: (directory: DirectoryRef | null) => void;
         onmanagelocations?: () => void;
         onselect: (selection: FileLocation | DirectoryLocation) => void;
+        onselectmany?: (selections: FileLocation[]) => void;
         oncancel: () => void;
     }
 
@@ -34,10 +36,12 @@
         title,
         extensions = [],
         suggestedName = '',
+        multiple = false,
         initialDirectory = null,
         ondirectorychange,
         onmanagelocations,
         onselect,
+        onselectmany,
         oncancel,
     }: Props = $props();
 
@@ -55,9 +59,11 @@
     let entryActionError = $state('');
     let listElement = $state<HTMLDivElement | null>(null);
     let activeOptionIndex = $state(-1);
+    let selectedFilePaths = $state<string[]>([]);
 
     const normalizedExtensions = $derived(extensions.map((extension) => extension.toLocaleLowerCase()));
     const visibleEntries = $derived(entries.filter(entryIsVisible));
+    const selectedFilePathSet = $derived(new Set(selectedFilePaths));
     const activeOptionId = $derived(
         activeOptionIndex >= 0
             ? `storage-picker-option-${activeRoot ? 'entry' : 'root'}-${activeOptionIndex}`
@@ -142,6 +148,7 @@
             directory = listing.directory;
             entries = listing.entries;
             nextCursor = listing.nextCursor;
+            selectedFilePaths = [];
             activeOptionIndex = listing.entries.some(entryIsVisible) ? 0 : -1;
             ondirectorychange?.(listing.directory);
             void revealActiveOption();
@@ -178,6 +185,12 @@
         const reference = { rootId: activeRoot.id, relativePath: entry.relativePath };
         if (entry.kind === 'DIRECTORY') {
             void openDirectory(reference, activeRoot);
+            return;
+        }
+        if (multiple) {
+            selectedFilePaths = selectedFilePathSet.has(entry.relativePath)
+                ? selectedFilePaths.filter((path) => path !== entry.relativePath)
+                : [...selectedFilePaths, entry.relativePath];
             return;
         }
         onselect(serverFileLocation(reference, `${activeRoot.displayName}/${entry.relativePath}`));
@@ -232,6 +245,7 @@
         directory = null;
         entries = [];
         nextCursor = null;
+        selectedFilePaths = [];
         error = '';
         selectFirstOption();
         ondirectorychange?.(null);
@@ -257,6 +271,21 @@
                 directory.relativePath ? `${activeRoot.displayName}/${directory.relativePath}` : activeRoot.displayName,
             ),
         );
+    }
+
+    function selectFiles(): void {
+        if (!activeRoot || selectedFilePaths.length === 0 || !onselectmany) return;
+        const selected = visibleEntries.flatMap((entry) =>
+            entry.kind === 'FILE' && selectedFilePathSet.has(entry.relativePath)
+                ? [
+                      serverFileLocation(
+                          { rootId: activeRoot!.id, relativePath: entry.relativePath },
+                          `${activeRoot!.displayName}/${entry.relativePath}`,
+                      ),
+                  ]
+                : [],
+        );
+        if (selected.length > 0) onselectmany(selected);
     }
 
     function selectOutput(): void {
@@ -386,6 +415,7 @@
             class="storage-picker-list"
             role="listbox"
             aria-label="Storage entries"
+            aria-multiselectable={multiple || undefined}
             aria-activedescendant={activeOptionId}
             aria-busy={loading}
             tabindex="0"
@@ -436,7 +466,9 @@
                         class="storage-picker-row"
                         type="button"
                         role="option"
-                        aria-selected={activeOptionIndex === index}
+                        aria-selected={multiple && entry.kind === 'FILE'
+                            ? selectedFilePathSet.has(entry.relativePath)
+                            : activeOptionIndex === index}
                         aria-disabled={loading}
                         data-picker-index={index}
                         tabindex="-1"
@@ -446,7 +478,16 @@
                             activate(entry);
                         }}
                     >
-                        {#if entry.kind === 'DIRECTORY'}<Icon name="folder" size={16} />{/if}
+                        {#if entry.kind === 'DIRECTORY'}
+                            <Icon name="folder" size={16} />
+                        {:else if multiple}
+                            <span
+                                class:storage-picker-selection-checked={selectedFilePathSet.has(entry.relativePath)}
+                                class="storage-picker-selection"
+                            >
+                                {#if selectedFilePathSet.has(entry.relativePath)}<Icon name="check" size={12} />{/if}
+                            </span>
+                        {/if}
                         <span
                             ><strong>{entry.name}</strong><small
                                 >{entry.kind === 'DIRECTORY' ? 'Directory' : `${entry.size ?? 0} bytes`}</small
@@ -473,6 +514,16 @@
                 <button class="primary-button" type="button" onclick={selectOutput}>Select output</button>
             {:else if mode === 'directory' && directory}
                 <button class="primary-button" type="button" onclick={selectCurrentDirectory}>Select directory</button>
+            {:else if mode === 'file' && multiple && directory}
+                <button
+                    class="primary-button"
+                    type="button"
+                    disabled={selectedFilePaths.length === 0}
+                    onclick={selectFiles}
+                >
+                    Select {selectedFilePaths.length}
+                    {selectedFilePaths.length === 1 ? 'file' : 'files'}
+                </button>
             {/if}
             <button class="secondary-button" type="button" onclick={oncancel}>Cancel</button>
         </footer>

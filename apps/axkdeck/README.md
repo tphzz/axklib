@@ -361,13 +361,16 @@ server files or bounded directory archives without moving image ownership into
 the browser.
 
 To import audio, open a writable volume and use **Import audio** in the Samples
-view, or drag WAV, FLAC, or AIFF files onto the active workspace or a writable
-volume in the Volumes sidebar. Axkdeck stages at most three files concurrently
-and shows the source format, sampler conversion, generated Sample/Wave Data
-names, and root key before changing the image. One accepted batch is applied as
-one atomic image alteration. Mono input creates one standalone Sample (SBNK)
-and one Wave Data (SMPL) object; stereo input creates one Sample linked to left
-and right Wave Data objects.
+view. Choose one or more WAV, FLAC, or AIFF files directly from a configured
+storage location, or choose files from **This computer** and upload them. Audio
+files can also be dragged onto the active workspace or a writable volume in the
+Volumes sidebar. All three entry points use the same inspection,
+collision-resistant Sample/Wave Data naming, and review flow. Axkdeck stages at
+most three files concurrently and shows the source format, sampler conversion,
+generated names, and root key before changing the image. One accepted batch is
+applied as one atomic image alteration. Mono input creates one standalone
+Sample (SBNK) and one Wave Data (SMPL) object; stereo input creates one Sample
+linked to left and right Wave Data objects.
 
 Wave Data auditioning uses the server's bounded HTTP range resource to assemble
 one complete WAV before playback. The browser decodes that WAV off the audio
