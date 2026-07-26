@@ -1,6 +1,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -98,6 +99,54 @@ void write_object_directory(const std::filesystem::path &source, const std::file
     }
 }
 
+void write_split_object_directory(const std::filesystem::path &source, const std::filesystem::path &destination) {
+    const auto media = axk::open_media(source);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto objects = media->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(objects) << objects.error().message;
+    const auto wave_data =
+        std::ranges::find_if(*objects, [](const auto &object) { return object.decoded.header.raw_type == "SMPL"; });
+    ASSERT_NE(wave_data, objects->end());
+    const auto &header = wave_data->decoded.header;
+    ASSERT_GT(header.payload_bytes_0x1c, 2U);
+
+    const auto write_be32 = [](std::span<std::byte> bytes, std::size_t offset, std::uint32_t value) {
+        ASSERT_LE(offset + 4U, bytes.size());
+        bytes[offset] = static_cast<std::byte>(value >> 24U);
+        bytes[offset + 1U] = static_cast<std::byte>(value >> 16U);
+        bytes[offset + 2U] = static_cast<std::byte>(value >> 8U);
+        bytes[offset + 3U] = static_cast<std::byte>(value);
+    };
+    const auto write_file = [](const std::filesystem::path &path, std::span<const std::byte> payload) {
+        std::ofstream output{path, std::ios::binary};
+        ASSERT_TRUE(output);
+        output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+        ASSERT_TRUE(output);
+    };
+
+    const auto first_size = header.payload_bytes_0x1c / 2U;
+    const auto second_size = header.payload_bytes_0x1c - first_size;
+    std::vector<std::byte> first_segment(wave_data->raw_payload.begin(),
+                                         wave_data->raw_payload.begin() +
+                                             static_cast<std::ptrdiff_t>(header.header_size + first_size));
+    write_be32(first_segment, 0x20U, first_size);
+    write_be32(first_segment, 0x24U, 0U);
+    std::vector<std::byte> second_segment(wave_data->raw_payload.begin(),
+                                          wave_data->raw_payload.begin() +
+                                              static_cast<std::ptrdiff_t>(header.header_size));
+    second_segment.insert(second_segment.end(),
+                          wave_data->raw_payload.begin() + static_cast<std::ptrdiff_t>(header.header_size + first_size),
+                          wave_data->raw_payload.begin() +
+                              static_cast<std::ptrdiff_t>(header.header_size + first_size + second_size));
+    write_be32(second_segment, 0x20U, second_size);
+    write_be32(second_segment, 0x24U, first_size);
+
+    std::filesystem::create_directories(destination / "DISK1");
+    std::filesystem::create_directories(destination / "DISK2");
+    write_file(destination / "DISK1" / "SMP_TEST.001", first_segment);
+    write_file(destination / "DISK2" / "SMP_TEST.001", second_segment);
+}
+
 class PackageOperationsTest : public testing::Test {
   protected:
     void SetUp() override {
@@ -109,6 +158,7 @@ class PackageOperationsTest : public testing::Test {
         write_empty_target(root_ / "target.hds");
         write_mixed_root_source(root_ / "mixed-roots.hds");
         write_object_directory(root_ / "fixture.hds", root_ / "objects");
+        write_split_object_directory(root_ / "fixture.hds", root_ / "disk-set");
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root_, true}});
         ASSERT_TRUE(sandbox);
         sandbox_ = std::make_unique<axk::app::Sandbox>(std::move(*sandbox));
@@ -440,6 +490,47 @@ TEST_F(PackageOperationsTest, SessionExportsAnAxkObjectDirectoryAsAVolumePackage
     ASSERT_EQ(package->roots.size(), 1U);
     EXPECT_EQ(package->roots.front().display_name, "Object directory");
     EXPECT_EQ(package->nodes.size(), opened->object_count);
+}
+
+TEST_F(PackageOperationsTest, SessionExportRequestsCompanionDisksAndSucceedsAfterExplicitAttachment) {
+    const auto opened =
+        images_->open({"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto content = images_->content(opened->image_id, "owner", 64U);
+    ASSERT_TRUE(content) << content.error().message;
+    ASSERT_EQ(content->items.size(), 1U);
+    const auto &volume = content->items.front();
+    ASSERT_TRUE(volume.partition_index);
+    const nlohmann::json roots{
+        {{"kind", "VOLUME"}, {"partitionIndex", *volume.partition_index}, {"volumeName", volume.name}}};
+    const auto destination = nlohmann::json{
+        {"kind", "WORKSPACE"},
+        {"output", {{"rootId", "workspace"}, {"relativePath", "split-object-directory"}}},
+        {"overwrite", false},
+    };
+
+    const auto rejected = registry_.invoke("images.package_export",
+                                           {{"imageId", opened->image_id},
+                                            {"expectedRevision", opened->revision},
+                                            {"roots", roots},
+                                            {"destination", destination}},
+                                           context());
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, "companion_disks_required") << rejected.error().message;
+
+    const auto attached = images_->attach_companion_directories(
+        opened->image_id, "owner", opened->revision,
+        {axk::app::CompanionDirectorySelectionKind::directories, {{"workspace", "disk-set/DISK1"}}});
+    ASSERT_TRUE(attached) << attached.error().message;
+    const auto exported = registry_.invoke("images.package_export",
+                                           {{"imageId", attached->image_id},
+                                            {"expectedRevision", attached->revision},
+                                            {"roots", roots},
+                                            {"destination", destination}},
+                                           context());
+    ASSERT_TRUE(exported) << exported.error().message;
+    EXPECT_EQ(exported->at("packageKind"), "volume");
+    EXPECT_EQ(exported->at("output").at("relativePath"), "split-object-directory.axkvol");
 }
 
 TEST_F(PackageOperationsTest, SessionExportCombinesEveryPortableObjectRootKindWithoutDuplicatingTheGraph) {

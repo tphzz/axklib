@@ -1,4 +1,5 @@
 import { audioDiagnosticsEnabled, reportDiagnostic, type DiagnosticLevel } from '../diagnostics';
+import { AxklibApiError } from '../httpApiClient';
 import type { AuditionDescriptor, ImageTransport } from '../transport';
 import { userFacingMessage } from '../userFacingMessage';
 import {
@@ -14,6 +15,8 @@ export interface AuditionState {
     status: 'idle' | 'preparing' | 'playing' | 'failed';
     playheadFrame: number;
     error?: string;
+    errorCode?: string;
+    errorContext?: unknown;
 }
 
 export interface AuditionDiagnosticEvent extends Record<string, unknown> {
@@ -26,7 +29,15 @@ export interface AuditionDiagnosticEvent extends Record<string, unknown> {
 
 export type AuditionSequenceResult =
     | { status: 'completed'; playedCount: number; skippedCount: 0 }
-    | { status: 'failed'; playedCount: 0; skippedCount: number; error: string; failedObjectId: string }
+    | {
+          status: 'failed';
+          playedCount: 0;
+          skippedCount: number;
+          error: string;
+          errorCode?: string;
+          errorContext?: unknown;
+          failedObjectId: string;
+      }
     | { status: 'cancelled'; playedCount: 0; skippedCount: number };
 
 interface AuditionControllerOptions {
@@ -292,16 +303,24 @@ export class AuditionController {
             }
             this.activeRequestKey = undefined;
             const message = userFacingMessage(error);
+            const typed = this.typedError(error);
             this.emit(run, 'sequence_failed', { message, failedObjectId }, 'error');
             this.releaseSequence('failed');
             this.run = undefined;
             await this.retireOutputContext('failed', run);
-            this.update({ objectId: failedObjectId, status: 'failed', playheadFrame: 0, error: message });
+            this.update({
+                objectId: failedObjectId,
+                status: 'failed',
+                playheadFrame: 0,
+                error: message,
+                ...typed,
+            });
             this.settleSequence(sequenceGeneration, {
                 status: 'failed',
                 playedCount: 0,
                 skippedCount: objectIds.length,
                 error: message,
+                ...typed,
                 failedObjectId,
             });
         }
@@ -914,10 +933,16 @@ export class AuditionController {
         this.generation += 1;
         this.activeRequestKey = undefined;
         const message = userFacingMessage(error);
+        const typed = this.typedError(error);
         this.emit(run, 'playback_failed', { message }, 'error');
         this.run = undefined;
         await this.retireOutputContext('failed', run);
-        this.update({ objectId, status: 'failed', playheadFrame: 0, error: message });
+        this.update({ objectId, status: 'failed', playheadFrame: 0, error: message, ...typed });
+    }
+
+    private typedError(error: unknown): Pick<AuditionState, 'errorCode' | 'errorContext'> {
+        if (!(error instanceof AxklibApiError)) return {};
+        return { errorCode: error.code, errorContext: error.context };
     }
 
     private emit(

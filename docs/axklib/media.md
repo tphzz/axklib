@@ -55,12 +55,15 @@ floppy volume label or partition layout.
 The parent form supports Yamaha multi-floppy object sets. A split `SMPL` file
 declares its complete logical Wave Data byte count, its local segment size, and
 its segment offset. Axklib groups matching headers and assembles only complete,
-contiguous, byte-identical segment sets. Application image sessions opened on a
-flat leaf also inspect its immediate sibling folders for exact continuation
-segments with the same object filename and normalized Yamaha header. Only those
-segments are admitted; unrelated sibling objects remain outside the session.
-An incomplete leaf without every exact companion remains readable for inventory
-and diagnostics, but cannot be previewed or auditioned.
+contiguous, byte-identical segment sets. A flat leaf opens without inspecting
+its siblings and remains readable for inventory and diagnostics when incomplete.
+Preview, audition, or complete package export then reports that companion disks
+are required. Applications can explicitly attach selected disk folders, or
+explicitly request a bounded immediate-sibling search, to the existing session.
+Only exact continuation segments with the same object filename and normalized
+Yamaha header are admitted; unrelated sibling objects remain outside the
+session. This attachment is session state and does not combine or rewrite the
+source directories.
 
 The profile is intentionally read-only and bounded to 224 entries per leaf,
 1,024 total entries, 16 MiB of aggregate file data, and one nested directory

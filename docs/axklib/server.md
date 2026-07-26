@@ -187,18 +187,27 @@ truth.
 `{"kind":"AXK_OBJECT_DIRECTORY","directory":...}` for a flat directory of
 Yamaha object files or a parent containing one level of related disk folders.
 The parent form assembles complete contiguous multi-disk Wave Data segments.
-For a flat leaf, the image session also searches immediate sibling folders for
-exact continuation segments with the same object filename and normalized Yamaha
-header; no other sibling objects enter the session.
+Opening a flat leaf does not search sibling folders. This keeps image opening
+and directory navigation bounded to the selected source.
 Object-directory sessions are bounded and read-only: inventory, relationships,
 preview, audition, and package export are available, while image alteration and
 package import are not. An incomplete leaf can be inventoried, but split Wave
-Data cannot be previewed or auditioned until every companion folder is available
-under the same configured storage location.
+Data cannot be previewed, auditioned, or exported as a complete package until
+its companion folders are attached.
+
+When an explicit operation encounters missing split Wave Data,
+`POST /api/v1/images/{imageId}/companion-directories` attaches either a selected
+list of `DirectoryRef` values or the explicitly requested immediate siblings.
+The server checks only those directories and admits only exact continuation
+segments with matching filenames and normalized Yamaha headers. The image ID
+and object IDs remain stable, while the session revision advances. Attachments
+are retained only for the lifetime of that image session; the source folders
+and their files are never merged or modified.
 
 `POST /api/v1/files/list` performs only a bounded directory listing. A media
-picker inspects one selected directory with
-`POST /api/v1/files/media-source/inspect` before navigating into it. The
+picker navigates directories without media inspection and inspects the current
+directory with `POST /api/v1/files/media-source/inspect` only when the user
+chooses to open it. The
 response reports `mediaSourceKind: "AXK_OBJECT_DIRECTORY"` when bounded
 file-prefix inspection recognizes Yamaha object data, otherwise `null`.
 Inspection does not decode complete payloads or recurse beyond one related

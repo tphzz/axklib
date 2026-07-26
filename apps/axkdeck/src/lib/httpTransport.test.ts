@@ -279,9 +279,88 @@ describe('HttpImageTransport', () => {
         );
         expect(opened).toMatchObject({
             sessionId: 1,
+            companionDirectories: [],
             packageImportAvailable: false,
             packageExportAvailable: true,
         });
+    });
+
+    it('attaches selected companion directories to the same local image session', async () => {
+        const requests: { path: string; body: unknown }[] = [];
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return json(
+                        {
+                            imageId: 'directory-image',
+                            revision: 1,
+                            source: {
+                                kind: 'AXK_OBJECT_DIRECTORY',
+                                directory: { rootId: 'workspace', relativePath: 'set/DISK2' },
+                            },
+                            companionDirectories: [],
+                            format: 'axk-object-directory',
+                            availableOperations: ['images.content'],
+                            rootCount: 0,
+                            objectCount: 1,
+                            relationshipCount: 0,
+                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        },
+                        201,
+                    );
+                }
+                if (url.pathname.endsWith('/images/directory-image/companion-directories')) {
+                    requests.push({ path: url.pathname, body: JSON.parse(String(init?.body)) });
+                    return json({
+                        imageId: 'directory-image',
+                        revision: 2,
+                        source: {
+                            kind: 'AXK_OBJECT_DIRECTORY',
+                            directory: { rootId: 'workspace', relativePath: 'set/DISK2' },
+                        },
+                        companionDirectories: [{ rootId: 'workspace', relativePath: 'set/DISK1' }],
+                        format: 'axk-object-directory',
+                        availableOperations: ['images.content'],
+                        rootCount: 0,
+                        objectCount: 1,
+                        relationshipCount: 0,
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/images/directory-image/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                throw new Error(`unexpected request ${init?.method} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const opened = await transport.openImage(
+            axkObjectDirectoryLocation({ rootId: 'workspace', relativePath: 'set/DISK2' }),
+        );
+        const attached = await transport.attachCompanionDirectories(opened.sessionId, {
+            kind: 'directories',
+            directories: [{ rootId: 'workspace', relativePath: 'set/DISK1' }],
+        });
+
+        expect(attached).toMatchObject({
+            sessionId: opened.sessionId,
+            companionDirectories: [{ rootId: 'workspace', relativePath: 'set/DISK1' }],
+        });
+        expect(requests).toEqual([
+            {
+                path: '/api/v1/images/directory-image/companion-directories',
+                body: {
+                    expectedRevision: 1,
+                    selection: {
+                        kind: 'DIRECTORIES',
+                        directories: [{ rootId: 'workspace', relativePath: 'set/DISK1' }],
+                    },
+                },
+            },
+        ]);
     });
 
     it('assembles complete audition audio with the server-advertised range limit', async () => {

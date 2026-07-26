@@ -5,6 +5,7 @@ import type {
     AudioImportCapabilities,
     AuditionDescriptor,
     ClientDownload,
+    CompanionDirectorySelection,
     ContentPage,
     HardDiskCreationProfile,
     HardDiskCreationProfileId,
@@ -52,6 +53,7 @@ export interface InMemoryImageTransportOptions {
     opened: Omit<
         OpenedImage,
         | 'sessionId'
+        | 'companionDirectories'
         | 'volumeMutationsAvailable'
         | 'partitionMutationsAvailable'
         | 'objectRenameAvailable'
@@ -67,6 +69,7 @@ export interface InMemoryImageTransportOptions {
         waveDataCleanupAvailable?: boolean;
         packageImportAvailable?: boolean;
         packageExportAvailable?: boolean;
+        companionDirectories?: DirectoryRef[];
     };
     preview?: PreviewEnvelope;
     onClose?: (sessionId: number) => void;
@@ -115,6 +118,7 @@ export class InMemoryImageTransport implements ImageTransport {
         return {
             ...this.options.opened,
             sessionId: this.nextSessionId++,
+            companionDirectories: this.options.opened.companionDirectories ?? [],
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
             objectRenameAvailable: this.options.opened.objectRenameAvailable ?? false,
@@ -132,6 +136,7 @@ export class InMemoryImageTransport implements ImageTransport {
         return {
             ...this.options.opened,
             sessionId,
+            companionDirectories: this.options.opened.companionDirectories ?? [],
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
             objectRenameAvailable: this.options.opened.objectRenameAvailable ?? false,
@@ -140,6 +145,10 @@ export class InMemoryImageTransport implements ImageTransport {
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
         };
+    }
+
+    attachCompanionDirectories(sessionId: number, selection: CompanionDirectorySelection): Promise<OpenedImage> {
+        return this.invoke('attachCompanionDirectories', [sessionId, selection]);
     }
 
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage> {

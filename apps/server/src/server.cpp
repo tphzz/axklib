@@ -1367,9 +1367,14 @@ class ServerApplication {
                 : Json{{"kind", "AXK_OBJECT_DIRECTORY"},
                        {"directory",
                         {{"rootId", summary.source.root_id}, {"relativePath", summary.source.relative_path}}}};
+        Json companion_directories = Json::array();
+        for (const auto &directory : summary.companion_directories) {
+            companion_directories.push_back({{"rootId", directory.root_id}, {"relativePath", directory.relative_path}});
+        }
         return {{"imageId", summary.image_id},
                 {"revision", summary.revision},
                 {"source", source},
+                {"companionDirectories", std::move(companion_directories)},
                 {"format", summary.format},
                 {"availableOperations", summary.available_operations},
                 {"rootCount", summary.root_count},
@@ -1417,6 +1422,45 @@ class ServerApplication {
         auto response = json_response(201, {{"data", image_summary_json(*opened)}, {"meta", {{"requestId", id}}}}, id);
         response.set_header("Location", "/api/v1/images/" + opened->image_id);
         return response;
+    }
+
+    crow::response attach_companion_directories_response(const crow::request &request, const std::string &image_id) {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        const auto parsed = parse_json_body(request, config_);
+        if (!parsed)
+            return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
+
+        std::uint64_t expected_revision{};
+        axk::app::CompanionDirectorySelection selection;
+        try {
+            expected_revision = parsed->at("expectedRevision").get<std::uint64_t>();
+            const auto &wire_selection = parsed->at("selection");
+            const auto kind = wire_selection.at("kind").get<std::string>();
+            if (kind == "DIRECTORIES") {
+                selection.kind = axk::app::CompanionDirectorySelectionKind::directories;
+                for (const auto &directory : wire_selection.at("directories")) {
+                    selection.directories.push_back(
+                        {directory.at("rootId").get<std::string>(), directory.at("relativePath").get<std::string>()});
+                }
+            } else if (kind == "IMMEDIATE_SIBLINGS") {
+                selection.kind = axk::app::CompanionDirectorySelectionKind::immediate_siblings;
+            } else {
+                return error_response(400, {"invalid_request", "companion directory selection kind is unsupported"},
+                                      id);
+            }
+        } catch (const Json::exception &) {
+            return error_response(
+                400, {"invalid_request", "expectedRevision and a valid companion directory selection are required"},
+                id);
+        }
+
+        const auto summary =
+            images_.attach_companion_directories(image_id, request_owner(request), expected_revision, selection);
+        if (!summary)
+            return error_response(status_for_error(summary.error()), summary.error(), id);
+        return json_response(200, {{"data", image_summary_json(*summary)}, {"meta", {{"requestId", id}}}}, id);
     }
 
     crow::response image_response(const crow::request &request, const std::string &image_id) {
@@ -2246,6 +2290,10 @@ class ServerApplication {
             .methods(crow::HTTPMethod::Get,
                      crow::HTTPMethod::Delete)([this](const crow::request &request, std::string image_id) {
                 return image_response(request, image_id);
+            });
+        app_.route_dynamic("/api/v1/images/<string>/companion-directories")
+            .methods(crow::HTTPMethod::Post)([this](const crow::request &request, std::string image_id) {
+                return attach_companion_directories_response(request, image_id);
             });
         app_.route_dynamic("/api/v1/images/<string>/content")(
             [this](const crow::request &request, std::string image_id) {

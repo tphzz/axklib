@@ -673,6 +673,44 @@
         ],
         "type": "object"
       },
+      "CompanionDirectorySelection": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "directories": {
+                "items": {
+                  "$ref": "#/components/schemas/DirectoryRef"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "kind": {
+                "const": "DIRECTORIES"
+              }
+            },
+            "required": [
+              "kind",
+              "directories"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "IMMEDIATE_SIBLINGS"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "CorpusAuditRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2089,6 +2127,23 @@
         ],
         "type": "object"
       },
+      "ImageCompanionDirectoriesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedRevision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/CompanionDirectorySelection"
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "selection"
+        ],
+        "type": "object"
+      },
       "ImageContentItem": {
         "additionalProperties": false,
         "properties": {
@@ -2955,6 +3010,14 @@
             },
             "type": "array"
           },
+          "companionDirectories": {
+            "items": {
+              "$ref": "#/components/schemas/DirectoryRef"
+            },
+            "maxItems": 32,
+            "type": "array",
+            "uniqueItems": true
+          },
           "format": {
             "minLength": 1,
             "type": "string"
@@ -3014,6 +3077,7 @@
           "imageId",
           "revision",
           "source",
+          "companionDirectories",
           "format",
           "availableOperations",
           "rootCount",
@@ -15286,6 +15350,132 @@
           }
         }
       ]
+    },
+    "/images/{imageId}/companion-directories": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "imageId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "images.companionDirectories.attach",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageCompanionDirectoriesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageSessionResponse"
+                }
+              }
+            },
+            "description": "Companion disk folders attached to the existing image session",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Image session revision changed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "No matching companion Wave Data segment was found",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      }
     },
     "/images/{imageId}/content": {
       "get": {

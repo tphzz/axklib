@@ -283,7 +283,7 @@ TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
     EXPECT_EQ(mutation.error().code, "image_mutation_unsupported");
 }
 
-TEST_F(ImageSessionTest, DiscoversExactSiblingSegmentsAndDiagnosesAnIncompleteLeaf) {
+TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest) {
     const auto source = axk::open_media(root_ / "fixture.hds");
     ASSERT_TRUE(source) << source.error().message;
     const auto source_objects = source->objects(axk::MediaObjectReadMode::complete);
@@ -333,36 +333,65 @@ TEST_F(ImageSessionTest, DiscoversExactSiblingSegmentsAndDiagnosesAnIncompleteLe
     EXPECT_GT(audition->wav_size_bytes, 44U);
     ASSERT_TRUE(sessions.close(complete->image_id, "owner-a"));
 
-    const auto sibling_complete =
+    const auto incomplete =
         sessions.open({"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
-    ASSERT_TRUE(sibling_complete) << sibling_complete.error().message;
-    const auto sibling_objects = sessions.objects(sibling_complete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(incomplete) << incomplete.error().message;
+    EXPECT_TRUE(incomplete->companion_directories.empty());
+    const auto sibling_objects = sessions.objects(incomplete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(sibling_objects) << sibling_objects.error().message;
     ASSERT_EQ(sibling_objects->items.size(), 1U);
+    const auto object_id = sibling_objects->items.front().id;
+    const auto rejected = sessions.prepare_audition(incomplete->image_id, "owner-a", object_id);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, "companion_disks_required");
+    EXPECT_NE(rejected.error().message.find("Add companion disk folders"), std::string::npos);
+    EXPECT_TRUE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
+
+    const auto no_match = sessions.attach_companion_directories(
+        incomplete->image_id, "owner-a", incomplete->revision,
+        {axk::app::CompanionDirectorySelectionKind::directories, {{"workspace", "disk-set/DISK2"}}});
+    ASSERT_FALSE(no_match);
+    EXPECT_EQ(no_match.error().code, "companion_segment_not_found");
+    const auto unchanged = sessions.inspect(incomplete->image_id, "owner-a");
+    ASSERT_TRUE(unchanged) << unchanged.error().message;
+    EXPECT_EQ(unchanged->revision, incomplete->revision);
+
+    const auto attached = sessions.attach_companion_directories(
+        incomplete->image_id, "owner-a", incomplete->revision,
+        {axk::app::CompanionDirectorySelectionKind::directories, {{"workspace", "disk-set/DISK1"}}});
+    ASSERT_TRUE(attached) << attached.error().message;
+    EXPECT_EQ(attached->image_id, incomplete->image_id);
+    EXPECT_EQ(attached->revision, incomplete->revision + 1U);
+    EXPECT_EQ(attached->companion_directories, (std::vector<axk::app::DirectoryRef>{{"workspace", "disk-set/DISK1"}}));
+    const auto refreshed_objects = sessions.objects(attached->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(refreshed_objects) << refreshed_objects.error().message;
+    ASSERT_EQ(refreshed_objects->items.size(), 1U);
+    EXPECT_EQ(refreshed_objects->items.front().id, object_id);
     const auto sibling_audition =
-        sessions.prepare_audition(sibling_complete->image_id, "owner-a", sibling_objects->items.front().id);
+        sessions.prepare_audition(attached->image_id, "owner-a", refreshed_objects->items.front().id);
     ASSERT_TRUE(sibling_audition) << sibling_audition.error().message;
     EXPECT_GT(sibling_audition->wav_size_bytes, 44U);
     EXPECT_FALSE(reservations.try_acquire(
         axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
-    ASSERT_TRUE(sessions.close(sibling_complete->image_id, "owner-a"));
+    const auto stale =
+        sessions.attach_companion_directories(attached->image_id, "owner-a", incomplete->revision,
+                                              {axk::app::CompanionDirectorySelectionKind::immediate_siblings, {}});
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, "image_revision_stale");
+    ASSERT_TRUE(sessions.close(attached->image_id, "owner-a"));
     EXPECT_TRUE(reservations.try_acquire(
         axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
 
-    const auto incomplete_leaf = root_ / "incomplete-leaf";
-    std::filesystem::create_directory(incomplete_leaf);
-    write_object_file(incomplete_leaf / "SMP_TEST.001", second_segment);
-    const auto incomplete =
-        sessions.open({"workspace", "incomplete-leaf", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
-    ASSERT_TRUE(incomplete) << incomplete.error().message;
-    const auto incomplete_objects = sessions.objects(incomplete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
-    ASSERT_TRUE(incomplete_objects) << incomplete_objects.error().message;
-    ASSERT_EQ(incomplete_objects->items.size(), 1U);
-    const auto rejected =
-        sessions.prepare_audition(incomplete->image_id, "owner-a", incomplete_objects->items.front().id);
-    ASSERT_FALSE(rejected);
-    EXPECT_EQ(rejected.error().code, "audition_unsupported");
-    EXPECT_NE(rejected.error().message.find("make all companion disk folders available"), std::string::npos);
+    const auto nearby =
+        sessions.open({"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+    ASSERT_TRUE(nearby) << nearby.error().message;
+    const auto nearby_attached =
+        sessions.attach_companion_directories(nearby->image_id, "owner-a", nearby->revision,
+                                              {axk::app::CompanionDirectorySelectionKind::immediate_siblings, {}});
+    ASSERT_TRUE(nearby_attached) << nearby_attached.error().message;
+    EXPECT_EQ(nearby_attached->companion_directories,
+              (std::vector<axk::app::DirectoryRef>{{"workspace", "disk-set/DISK1"}}));
 }
 
 TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {

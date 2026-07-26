@@ -17,6 +17,7 @@
     import ServerConnectionSettings from './lib/components/ServerConnectionSettings.svelte';
     import CreateHardDiskImageDialog from './lib/components/CreateHardDiskImageDialog.svelte';
     import AudioImportDialog from './lib/components/AudioImportDialog.svelte';
+    import CompanionDiskDialog from './lib/components/CompanionDiskDialog.svelte';
     import VolumeActionDialog from './lib/components/VolumeActionDialog.svelte';
     import ServerStoragePicker from './lib/components/ServerStoragePicker.svelte';
     import WorkspaceManager from './lib/components/WorkspaceManager.svelte';
@@ -62,6 +63,7 @@
     import type {
         AudioImportItem,
         AudioImportTarget,
+        CompanionDirectorySelection,
         ObjectDeletionInspection,
         WaveDataOrphanInspection,
         ImageSessionPackageExportResult,
@@ -69,6 +71,7 @@
         ImageSessionPackageImportPlan,
         PackageInspection,
         ObjectRenameMutation,
+        OpenedImage,
         SamplerObject,
         SamplerRelationship,
         PartitionMutation,
@@ -113,7 +116,7 @@
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
     type PickerMode = 'file' | 'directory' | 'save-file' | 'media-source';
-    type PickerParentDialog = 'audio-import' | 'package-import' | 'package-export';
+    type PickerParentDialog = 'audio-import' | 'companion-disks' | 'package-import' | 'package-export';
     type PickerSelection = ImageLocation | DirectoryLocation | FileLocation[];
     interface PickerRequest {
         mode: PickerMode;
@@ -122,6 +125,7 @@
         suggestedName: string;
         multiple: boolean;
         parentDialog?: PickerParentDialog;
+        requireWritableDirectory?: boolean;
         initialDirectory?: DirectoryRef | null;
         ondirectorychange?: (directory: DirectoryRef | null) => void;
         resolve: (selection: PickerSelection | null) => void;
@@ -141,7 +145,9 @@
     let lastImageDirectory = $state<DirectoryRef | null>(null);
     let lastPackageDirectory = $state<DirectoryRef | null>(null);
     let lastAudioDirectory = $state<DirectoryRef | null>(null);
+    let lastCompanionDirectory = $state<DirectoryRef | null>(null);
     let openSessionId = $state<number | null>(null);
+    let companionDirectories = $state<DirectoryRef[]>([]);
     let imageOpening = $state(false);
     let imageOpenGeneration = 0;
     let sourceStatus = $state('Ready');
@@ -235,6 +241,24 @@
         progressLabel: string;
         error: string;
     } | null>(null);
+    type PackageExportDestination =
+        | { kind: 'WORKSPACE'; output: { rootId: string; relativePath: string }; overwrite: boolean }
+        | { kind: 'DOWNLOAD'; filename: string };
+    type CompanionRetry =
+        | { kind: 'audition'; objectId: string }
+        | { kind: 'sample-bank'; bankId: string }
+        | {
+              kind: 'package-export';
+              destination: PackageExportDestination;
+              localDestination?: { candidateId: string };
+          };
+    let companionDiskRequest = $state<{
+        directories: DirectoryRef[];
+        retry: CompanionRetry;
+        busy: boolean;
+        error: string;
+    } | null>(null);
+    let pendingAuditionObjectId = '';
     let audioFileInput: HTMLInputElement;
     let audioImportRequest = $state<{
         files: (ClientUploadSource | FileLocation)[];
@@ -269,7 +293,19 @@
         ) {
             sampleBankPreviewMemberId = state.objectId;
         }
-        if (state.status === 'failed' && state.error) sourceStatus = state.error;
+        if (state.status === 'failed' && state.error) {
+            sourceStatus = state.error;
+            if (
+                state.errorCode === 'companion_disks_required' &&
+                state.objectId &&
+                state.objectId === pendingAuditionObjectId
+            ) {
+                requestCompanionDisks({ kind: 'audition', objectId: state.objectId });
+            }
+            pendingAuditionObjectId = '';
+        } else if (state.status === 'playing') {
+            pendingAuditionObjectId = '';
+        }
     });
 
     onDestroy(() => {
@@ -1197,9 +1233,7 @@
     }
 
     async function runPackageExport(
-        destination:
-            | { kind: 'WORKSPACE'; output: { rootId: string; relativePath: string }; overwrite: boolean }
-            | { kind: 'DOWNLOAD'; filename: string },
+        destination: PackageExportDestination,
         localDestination?: { candidateId: string },
     ): Promise<void> {
         const request = packageExportRequest;
@@ -1221,6 +1255,20 @@
                 }
             });
             if (completed.status !== 'completed') {
+                if (completed.errorCode === 'companion_disks_required') {
+                    packageExportRequest = {
+                        ...request,
+                        busy: false,
+                        progressLabel: '',
+                        error: '',
+                    };
+                    requestCompanionDisks({
+                        kind: 'package-export',
+                        destination,
+                        localDestination,
+                    });
+                    return;
+                }
                 throw new Error(completed.error ?? 'Package export did not complete');
             }
             const result = completed.result as ImageSessionPackageExportResult;
@@ -2149,8 +2197,12 @@
             if (generation !== sampleBankPlaybackGeneration) return;
             playingSampleBankId = '';
             resetSampleBankPreview(item.objectId);
-            if (result.status === 'failed') sourceStatus = result.error;
-            else if (result.status === 'completed' && result.playedCount === 0) {
+            if (result.status === 'failed') {
+                sourceStatus = result.error;
+                if (result.errorCode === 'companion_disks_required') {
+                    requestCompanionDisks({ kind: 'sample-bank', bankId: item.objectId });
+                }
+            } else if (result.status === 'completed' && result.playedCount === 0) {
                 sourceStatus = 'This Sample Bank has no playable Samples';
             }
         });
@@ -2229,6 +2281,7 @@
             return;
         }
         cancelSampleBankPlayback();
+        pendingAuditionObjectId = objectId;
         void auditionController.play(openSessionId, objectId);
     }
 
@@ -2274,6 +2327,37 @@
         splitRatio = Math.min(0.8, Math.max(0.2, splitRatio + (event.key === 'ArrowDown' ? delta : -delta)));
     }
 
+    async function applyOpenedImage(
+        opened: OpenedImage,
+        preferred?: { partitionIndex: number; volumeName?: string },
+    ): Promise<void> {
+        clearPackageExportSelection();
+        companionDirectories = opened.companionDirectories;
+        volumeMutationsAvailable = opened.volumeMutationsAvailable;
+        partitionMutationsAvailable = opened.partitionMutationsAvailable;
+        objectRenameAvailable = opened.objectRenameAvailable;
+        objectDeletionAvailable = opened.objectDeletionAvailable;
+        waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
+        packageImportAvailable = opened.packageImportAvailable;
+        packageExportAvailable = opened.packageExportAvailable;
+        sourceItems = opened.tree;
+        const preferredItem = preferred
+            ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
+            : null;
+        selectedSource = preferredItem ?? opened.initialVolume ?? opened.tree[0] ?? selectedSource;
+        if (selectedSource.kind === 'volume') await loadVolume(selectedSource.id);
+        else clearVolume();
+        sourceStatus = opened.validation.valid ? 'Ready' : `${opened.validation.errorCount} validation errors`;
+    }
+
+    function currentSourcePreference(): { partitionIndex: number; volumeName?: string } | undefined {
+        if (selectedSource.partitionIndex === undefined) return undefined;
+        return {
+            partitionIndex: selectedSource.partitionIndex,
+            volumeName: selectedSource.kind === 'volume' ? selectedSource.name : selectedSource.volumeName,
+        };
+    }
+
     async function openImageLocation(
         location: ImageLocation,
         preferred?: { partitionIndex: number; volumeName?: string },
@@ -2305,22 +2389,7 @@
             imageLocation = location;
             openSessionId = opened.sessionId;
             candidateSessionId = null;
-            clearPackageExportSelection();
-            volumeMutationsAvailable = opened.volumeMutationsAvailable;
-            partitionMutationsAvailable = opened.partitionMutationsAvailable;
-            objectRenameAvailable = opened.objectRenameAvailable;
-            objectDeletionAvailable = opened.objectDeletionAvailable;
-            waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
-            packageImportAvailable = opened.packageImportAvailable;
-            packageExportAvailable = opened.packageExportAvailable;
-            sourceItems = opened.tree;
-            const preferredItem = preferred
-                ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
-                : null;
-            selectedSource = preferredItem ?? opened.initialVolume ?? opened.tree[0] ?? selectedSource;
-            if (selectedSource.kind === 'volume') await loadVolume(selectedSource.id);
-            else clearVolume();
-            sourceStatus = opened.validation.valid ? 'Ready' : `${opened.validation.errorCount} validation errors`;
+            await applyOpenedImage(opened, preferred);
         } catch (error) {
             if (generation !== imageOpenGeneration) return;
             if (candidateSessionId !== null) {
@@ -2341,22 +2410,85 @@
         const sessionId = openSessionId;
         const opened = await transport.refreshImage(sessionId);
         if (openSessionId !== sessionId) return;
-        clearPackageExportSelection();
-        volumeMutationsAvailable = opened.volumeMutationsAvailable;
-        partitionMutationsAvailable = opened.partitionMutationsAvailable;
-        objectRenameAvailable = opened.objectRenameAvailable;
-        objectDeletionAvailable = opened.objectDeletionAvailable;
-        waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
-        packageImportAvailable = opened.packageImportAvailable;
-        packageExportAvailable = opened.packageExportAvailable;
-        sourceItems = opened.tree;
-        const preferredItem = preferred
-            ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
-            : null;
-        selectedSource = preferredItem ?? opened.initialVolume ?? opened.tree[0] ?? selectedSource;
-        if (selectedSource.kind === 'volume') await loadVolume(selectedSource.id);
-        else clearVolume();
-        sourceStatus = opened.validation.valid ? 'Ready' : `${opened.validation.errorCount} validation errors`;
+        await applyOpenedImage(opened, preferred);
+    }
+
+    function requestCompanionDisks(retry: CompanionRetry): void {
+        if (openSessionId === null || imageLocation?.kind !== 'axk-object-directory') return;
+        companionDiskRequest = {
+            directories: [...companionDirectories],
+            retry,
+            busy: false,
+            error: '',
+        };
+    }
+
+    function sameDirectory(left: DirectoryRef, right: DirectoryRef): boolean {
+        return left.rootId === right.rootId && left.relativePath === right.relativePath;
+    }
+
+    async function addCompanionDiskFolder(): Promise<void> {
+        const request = companionDiskRequest;
+        if (!request || request.busy) return;
+        const selection = await chooseServerLocation('directory', 'Choose companion disk folder', [], '', {
+            parentDialog: 'companion-disks',
+            initialDirectory: lastCompanionDirectory,
+            ondirectorychange: (directory) => (lastCompanionDirectory = directory),
+            requireWritableDirectory: false,
+        });
+        if (selection?.kind !== 'server-directory' || companionDiskRequest !== request) return;
+        if (request.directories.some((directory) => sameDirectory(directory, selection.reference))) return;
+        companionDiskRequest = {
+            ...request,
+            directories: [...request.directories, selection.reference],
+            error: '',
+        };
+    }
+
+    function removeCompanionDiskFolder(directory: DirectoryRef): void {
+        if (!companionDiskRequest || companionDiskRequest.busy) return;
+        companionDiskRequest = {
+            ...companionDiskRequest,
+            directories: companionDiskRequest.directories.filter((candidate) => !sameDirectory(candidate, directory)),
+            error: '',
+        };
+    }
+
+    async function retryCompanionAction(retry: CompanionRetry): Promise<void> {
+        if (retry.kind === 'audition') {
+            playObject(retry.objectId);
+            return;
+        }
+        if (retry.kind === 'sample-bank') {
+            const bank = sampleBanks.find((candidate) => candidate.objectId === retry.bankId);
+            if (bank) await playSampleBank(bank);
+            return;
+        }
+        await runPackageExport(retry.destination, retry.localDestination);
+    }
+
+    async function attachCompanionDisks(selection: CompanionDirectorySelection): Promise<void> {
+        const request = companionDiskRequest;
+        if (!request || request.busy || openSessionId === null) return;
+        const sessionId = openSessionId;
+        const preferred = currentSourcePreference();
+        companionDiskRequest = { ...request, busy: true, error: '' };
+        try {
+            await auditionController.invalidateSession(sessionId);
+            const opened = await transport.attachCompanionDirectories(sessionId, selection);
+            if (openSessionId !== sessionId || companionDiskRequest?.retry !== request.retry) return;
+            await applyOpenedImage(opened, preferred);
+            companionDiskRequest = null;
+            await retryCompanionAction(request.retry);
+        } catch (error) {
+            if (companionDiskRequest) {
+                companionDiskRequest = {
+                    ...companionDiskRequest,
+                    busy: false,
+                    error: userFacingMessage(error),
+                };
+            }
+        }
     }
 
     function reportMutationTiming(operation: string, started: number, itemCount: number): void {
@@ -2378,11 +2510,14 @@
         packageImportAbortController = null;
         packageImportRequest = null;
         packageExportRequest = null;
+        companionDiskRequest = null;
         if (packageRequest) await releasePackageImportResources(packageRequest);
         await auditionController.invalidateSession(sessionId);
         await transport.closeImage(sessionId);
         clearPackageExportSelection();
         openSessionId = null;
+        companionDirectories = [];
+        pendingAuditionObjectId = '';
         volumeMutationsAvailable = false;
         partitionMutationsAvailable = false;
         objectRenameAvailable = false;
@@ -2454,7 +2589,10 @@
         title: string,
         extensions: string[] = [],
         suggestedName = '',
-        navigation?: Pick<PickerRequest, 'parentDialog' | 'initialDirectory' | 'ondirectorychange'>,
+        navigation?: Pick<
+            PickerRequest,
+            'parentDialog' | 'initialDirectory' | 'ondirectorychange' | 'requireWritableDirectory'
+        >,
     ): Promise<ImageLocation | DirectoryLocation | null> {
         return new Promise((resolve) => {
             pickerRequest?.resolve(null);
@@ -2473,7 +2611,10 @@
     function chooseServerFiles(
         title: string,
         extensions: string[],
-        navigation?: Pick<PickerRequest, 'parentDialog' | 'initialDirectory' | 'ondirectorychange'>,
+        navigation?: Pick<
+            PickerRequest,
+            'parentDialog' | 'initialDirectory' | 'ondirectorychange' | 'requireWritableDirectory'
+        >,
     ): Promise<FileLocation[] | null> {
         return new Promise((resolve) => {
             pickerRequest?.resolve(null);
@@ -2744,6 +2885,7 @@
         suggestedName={pickerRequest.suggestedName}
         multiple={pickerRequest.multiple}
         initialDirectory={pickerRequest.initialDirectory}
+        requireWritableDirectory={pickerRequest.requireWritableDirectory}
         ondirectorychange={pickerRequest.ondirectorychange}
         onmanagelocations={() => {
             finishPicker(null);
@@ -2752,6 +2894,22 @@
         onselect={(selection) => finishPicker(selection)}
         onselectmany={(selections) => finishPicker(selections)}
         oncancel={() => finishPicker(null)}
+    />
+{/if}
+{#if companionDiskRequest && pickerRequest?.parentDialog !== 'companion-disks'}
+    <CompanionDiskDialog
+        directories={companionDiskRequest.directories}
+        busy={companionDiskRequest.busy}
+        error={companionDiskRequest.error}
+        onadd={() => void addCompanionDiskFolder()}
+        onremove={removeCompanionDiskFolder}
+        onnearby={() => void attachCompanionDisks({ kind: 'immediate-siblings' })}
+        onconfirm={() =>
+            void attachCompanionDisks({
+                kind: 'directories',
+                directories: companionDiskRequest?.directories ?? [],
+            })}
+        oncancel={() => !companionDiskRequest?.busy && (companionDiskRequest = null)}
     />
 {/if}
 {#if hardDiskCreationDirectory}
@@ -2825,7 +2983,7 @@
         onconfirm={() => void applyPackageImport()}
     />
 {/if}
-{#if packageExportRequest && pickerRequest?.parentDialog !== 'package-export'}
+{#if packageExportRequest && pickerRequest?.parentDialog !== 'package-export' && !companionDiskRequest}
     <PackageExportDialog
         items={packageExportRequest.items}
         desktop={isDesktop}

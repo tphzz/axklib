@@ -1,4 +1,5 @@
 import {
+    AxklibApiError,
     AxklibHttpApiClient,
     type ApiJobEvent,
     type ApiJobSnapshot,
@@ -15,6 +16,7 @@ import type {
     ContentPage,
     AuditionDescriptor,
     ClientDownload,
+    CompanionDirectorySelection,
     HardDiskCreationProfile,
     HardDiskCreationProfileId,
     ImageTransport,
@@ -73,6 +75,7 @@ interface ApiImageSummary {
     imageId: string;
     revision: number;
     source: components['schemas']['ImageSourceRef'];
+    companionDirectories?: DirectoryRef[];
     format: string;
     rootCount: number;
     objectCount: number;
@@ -506,6 +509,28 @@ export class HttpImageTransport implements ImageTransport {
         return this.openedImage(sessionId, summary);
     }
 
+    async attachCompanionDirectories(sessionId: number, selection: CompanionDirectorySelection): Promise<OpenedImage> {
+        const session = this.session(sessionId);
+        const wireSelection: components['schemas']['CompanionDirectorySelection'] =
+            selection.kind === 'directories'
+                ? { kind: 'DIRECTORIES', directories: selection.directories }
+                : { kind: 'IMMEDIATE_SIBLINGS' };
+        const summary = await this.client.request<ApiImageSummary>(
+            'POST',
+            `/images/${encodeURIComponent(session.remoteId)}/companion-directories`,
+            {
+                expectedRevision: session.revision,
+                selection: wireSelection,
+            },
+        );
+        session.revision = summary.revision;
+        session.contentCursors.clear();
+        session.contentItems.clear();
+        session.objectCursors.clear();
+        session.relationshipCursors.clear();
+        return this.openedImage(sessionId, summary);
+    }
+
     private async openedImage(sessionId: number, summary: ApiImageSummary): Promise<OpenedImage> {
         const session = this.session(sessionId);
         const roots = await this.allContentChildren(sessionId, '');
@@ -519,6 +544,7 @@ export class HttpImageTransport implements ImageTransport {
         const initialVolume = await this.loadVolumeHierarchy(sessionId, roots.items);
         return {
             sessionId,
+            companionDirectories: summary.companionDirectories ?? [],
             validation: validationSummary(summary),
             objects: [],
             objectTotalCount: 0,
@@ -753,7 +779,13 @@ export class HttpImageTransport implements ImageTransport {
         const localJob = this.mapJob(submitted);
         const completed = await this.waitForJob(localJob.jobId, () => undefined);
         if (completed.status !== 'completed' || !completed.result) {
-            throw new Error(completed.error ?? 'Audio preparation did not complete');
+            throw new AxklibApiError(
+                completed.errorCode ?? 'audition_prepare_failed',
+                completed.error ?? 'Audio preparation did not complete',
+                422,
+                undefined,
+                completed.errorContext,
+            );
         }
         return completed.result as AuditionDescriptor;
     }
@@ -1113,7 +1145,7 @@ export class HttpImageTransport implements ImageTransport {
         this.jobs.set(jobId, job.jobId);
         const progress = job.progress as
             { phase?: string; completed?: number; total?: number | null; message?: string } | undefined;
-        const error = job.error as { message?: string } | undefined;
+        const error = job.error as { code?: string; message?: string; context?: unknown } | undefined;
         return {
             jobId,
             kind: job.operationId,
@@ -1128,6 +1160,8 @@ export class HttpImageTransport implements ImageTransport {
                 : undefined,
             result: job.result,
             error: error?.message,
+            errorCode: error?.code,
+            errorContext: error?.context,
         };
     }
 

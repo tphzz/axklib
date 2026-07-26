@@ -158,11 +158,13 @@ Complete objects use `payload_offset_0x24 == 0` and
 one logical Wave Data object across several disk files. Those files repeat the
 same header, set `payload_bytes_0x20` to the local segment size, and set
 `payload_offset_0x24` to the segment's byte offset. Axklib assembles a complete,
-contiguous set when the shared parent object directory is opened. Application
-image sessions opened on a leaf can also discover exact continuation segments
-in immediate sibling folders without importing unrelated sibling objects. A
-leaf with missing companion segments remains available for inventory but cannot
-be decoded as complete audio.
+contiguous set when the shared parent object directory is opened. Opening one
+leaf does not scan its siblings: the leaf remains immediately available for
+inventory, and missing companion segments are reported only when an explicit
+preview, audition, or package export needs them. An application can then attach
+selected companion disk folders to that image session. Axklib admits only exact
+continuation segments with the same object filename and normalized Yamaha
+header; unrelated sibling objects remain outside the session.
 
 This segment interpretation is **Strong**: it is repeated across independent
 multi-disk object-directory sets and the segment ranges join exactly to

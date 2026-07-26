@@ -138,6 +138,7 @@ TEST(AxkObjectDirectory, PreservesIncompleteWaveDataSegmentWithAnExplicitIssue) 
               "SMPL Wave Data is an incomplete multi-disk segment; open its parent object directory");
     const auto waveform = axk::decode_waveform(object);
     ASSERT_FALSE(waveform);
+    EXPECT_EQ(waveform.error().code, axk::ErrorCode::object_missing);
     EXPECT_EQ(waveform.error().message,
               "SMPL Wave Data is an incomplete multi-disk segment; open its parent object directory");
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { AxklibApiError } from '../httpApiClient';
 import type { AuditionDescriptor, ImageTransport } from '../transport';
 import { AuditionController, type AuditionState } from './auditionController';
 
@@ -318,6 +319,29 @@ describe('AuditionController', () => {
 
         expect(updates.at(-1)?.status).toBe('failed');
         expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('preserves the companion-disk error code for an explicit audition failure', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        vi.mocked(transport.prepareAudition).mockRejectedValueOnce(
+            new AxklibApiError(
+                'companion_disks_required',
+                'Wave Data continues on another sampler disk. Add companion disk folders to audition it.',
+                422,
+            ),
+        );
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+
+        await controller.play(1, 'SMPL-1');
+
+        expect(updates.at(-1)).toMatchObject({
+            objectId: 'SMPL-1',
+            status: 'failed',
+            errorCode: 'companion_disks_required',
+        });
         await controller.dispose();
     });
 

@@ -25,6 +25,7 @@ export interface ValidationSummary {
 
 export interface OpenedImage {
     sessionId: number;
+    companionDirectories: DirectoryRef[];
     tree: DiskTreeItem[];
     validation: ValidationSummary;
     objects: SamplerObject[];
@@ -38,6 +39,9 @@ export interface OpenedImage {
     packageImportAvailable: boolean;
     packageExportAvailable: boolean;
 }
+
+export type CompanionDirectorySelection =
+    { kind: 'directories'; directories: DirectoryRef[] } | { kind: 'immediate-siblings' };
 
 export type VolumeMutation =
     | { kind: 'add'; partitionIndex: number; volumeName: string }
@@ -251,6 +255,8 @@ export interface JobState {
     progress?: { phase: number; completed: number; total?: number; label: string; outputPath?: string };
     result?: unknown;
     error?: string;
+    errorCode?: string;
+    errorContext?: unknown;
 }
 
 export interface ClientDownload {
@@ -328,6 +334,7 @@ export interface ImageTransport {
     deleteSandboxEntry(entry: FileRef): Promise<void>;
     openImage(source: ImageLocation): Promise<OpenedImage>;
     refreshImage(sessionId: number): Promise<OpenedImage>;
+    attachCompanionDirectories(sessionId: number, selection: CompanionDirectorySelection): Promise<OpenedImage>;
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage>;
     objectPage(sessionId: number, offset: number, limit: number, filter?: ObjectPageFilter): Promise<ObjectPage>;
     relationshipPage(

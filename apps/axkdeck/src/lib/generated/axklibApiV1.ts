@@ -574,6 +574,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/images/{imageId}/companion-directories': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.companionDirectories.attach'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/images/{imageId}/content': {
         parameters: {
             query?: {
@@ -1318,6 +1336,16 @@ export interface components {
             data: components['schemas']['Capabilities'];
             meta: components['schemas']['ResponseMeta'];
         };
+        CompanionDirectorySelection:
+            | {
+                  directories: components['schemas']['DirectoryRef'][];
+                  /** @constant */
+                  kind: 'DIRECTORIES';
+              }
+            | {
+                  /** @constant */
+                  kind: 'IMMEDIATE_SIBLINGS';
+              };
         CorpusAuditRequest: {
             destination: components['schemas']['DirectoryRef'];
             /** @default false */
@@ -1656,6 +1684,10 @@ export interface components {
             };
             meta: components['schemas']['ResponseMeta'];
         };
+        ImageCompanionDirectoriesRequest: {
+            expectedRevision: number;
+            selection: components['schemas']['CompanionDirectorySelection'];
+        };
         ImageContentItem: {
             basis: string;
             childCount: number;
@@ -1827,6 +1859,7 @@ export interface components {
         };
         ImageSession: {
             availableOperations: string[];
+            companionDirectories: components['schemas']['DirectoryRef'][];
             format: string;
             imageId: string;
             objectCount: number;
@@ -5639,6 +5672,63 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['ImageCloseResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.companionDirectories.attach': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImageCompanionDirectoriesRequest'];
+            };
+        };
+        responses: {
+            /** @description Companion disk folders attached to the existing image session */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ImageSessionResponse'];
+                };
+            };
+            /** @description Image session revision changed */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description No matching companion Wave Data segment was found */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
                 };
             };
             /** @description Request could not be completed */

@@ -118,11 +118,17 @@ axk::app::Result<std::vector<axk::app::DirectoryEntry>> list_bounded_directory(c
     return entries;
 }
 
-axk::app::Result<std::vector<axk::app::FileRef>>
-append_exact_sibling_segments(const axk::app::Sandbox &sandbox, const axk::app::ImageSourceRef &source,
-                              const axk::AxkObjectDirectory &primary,
-                              std::vector<axk::AxkObjectDirectoryEntry> &entries,
-                              std::vector<std::function<axk::app::Result<void>()>> &verifiers) {
+struct CompanionSegments {
+    std::vector<axk::app::DirectoryRef> directories;
+    std::vector<axk::app::FileRef> files;
+};
+
+axk::app::Result<CompanionSegments>
+append_exact_companion_segments(const axk::app::Sandbox &sandbox, const axk::app::ImageSourceRef &source,
+                                const axk::AxkObjectDirectory &primary,
+                                const std::vector<axk::app::DirectoryRef> &companion_directories,
+                                std::vector<axk::AxkObjectDirectoryEntry> &entries,
+                                std::vector<std::function<axk::app::Result<void>()>> &verifiers) {
     std::unordered_map<std::string, std::vector<std::string>> identities_by_filename;
     for (const auto &object : primary.stored_objects()) {
         auto identity = incomplete_segment_identity(object);
@@ -131,35 +137,18 @@ append_exact_sibling_segments(const axk::app::Sandbox &sandbox, const axk::app::
             identities_by_filename[fold_ascii(*filename)].push_back(std::move(*identity));
     }
     if (identities_by_filename.empty())
-        return std::vector<axk::app::FileRef>{};
+        return CompanionSegments{};
 
-    auto source_path = axk::text::path_from_utf8(source.relative_path);
-    if (!source_path || source_path->filename().empty())
-        return std::vector<axk::app::FileRef>{};
-    const auto parent_path = source_path->parent_path();
-    const auto parent_relative_path = axk::text::path_to_utf8(parent_path);
-    auto siblings = list_bounded_directory(sandbox, {source.root_id, parent_relative_path},
-                                           axk::AxkObjectDirectory::maximum_entries);
-    if (!siblings)
-        return std::unexpected(siblings.error());
-
-    std::vector<axk::app::FileRef> companion_references;
-    std::size_t entries_visited = siblings->size();
-    for (const auto &sibling : *siblings) {
-        if (sibling.kind != axk::app::DirectoryEntryKind::directory || sibling.relative_path == source.relative_path) {
+    CompanionSegments result;
+    for (std::size_t directory_index = 0U; directory_index < companion_directories.size(); ++directory_index) {
+        const auto &directory = companion_directories[directory_index];
+        if (directory.root_id == source.root_id && directory.relative_path == source.relative_path)
             continue;
-        }
-        if (entries_visited >= axk::AxkObjectDirectory::maximum_entries)
-            break;
-        const auto remaining = axk::AxkObjectDirectory::maximum_entries - entries_visited;
-        const auto limit = std::min<std::size_t>(remaining, axk::AxkObjectDirectory::maximum_leaf_entries);
-        auto sibling_listing = sandbox.list_directory({source.root_id, sibling.relative_path}, limit);
-        if (!sibling_listing)
-            continue;
-        entries_visited += sibling_listing->entries.size();
-        if (sibling_listing->truncated)
-            continue;
-        for (const auto &candidate : sibling_listing->entries) {
+        auto listing = list_bounded_directory(sandbox, directory, axk::AxkObjectDirectory::maximum_leaf_entries);
+        if (!listing)
+            return std::unexpected(listing.error());
+        bool matched{};
+        for (const auto &candidate : *listing) {
             if (candidate.kind != axk::app::DirectoryEntryKind::file)
                 continue;
             const auto expected = identities_by_filename.find(fold_ascii(candidate.name));
@@ -168,7 +157,7 @@ append_exact_sibling_segments(const axk::app::Sandbox &sandbox, const axk::app::
                     axk::AxkObjectDirectory::maximum_payload_bytes) {
                 continue;
             }
-            const axk::app::FileRef reference{source.root_id, candidate.relative_path};
+            const axk::app::FileRef reference{directory.root_id, candidate.relative_path};
             auto opened = sandbox.open_file(reference);
             if (!opened)
                 return std::unexpected(opened.error());
@@ -180,12 +169,34 @@ append_exact_sibling_segments(const axk::app::Sandbox &sandbox, const axk::app::
             auto identity = incomplete_segment_identity(decoded->object());
             if (!identity || std::ranges::find(expected->second, *identity) == expected->second.end())
                 continue;
-            entries.push_back({std::format("{}/{}", sibling.name, candidate.name), std::move(opened->reader)});
+            entries.push_back(
+                {std::format("companion-{}/{}", directory_index, candidate.name), std::move(opened->reader)});
             verifiers.push_back(std::move(opened->verify_unchanged));
-            companion_references.push_back(reference);
+            result.files.push_back(reference);
+            matched = true;
         }
+        if (matched)
+            result.directories.push_back(directory);
     }
-    return companion_references;
+    return result;
+}
+
+axk::app::Result<std::vector<axk::app::DirectoryRef>>
+immediate_sibling_directories(const axk::app::Sandbox &sandbox, const axk::app::ImageSourceRef &source) {
+    auto source_path = axk::text::path_from_utf8(source.relative_path);
+    if (!source_path || source_path->filename().empty())
+        return std::vector<axk::app::DirectoryRef>{};
+    const auto parent_relative_path = axk::text::path_to_utf8(source_path->parent_path());
+    auto siblings = list_bounded_directory(sandbox, {source.root_id, parent_relative_path},
+                                           axk::AxkObjectDirectory::maximum_entries);
+    if (!siblings)
+        return std::unexpected(siblings.error());
+    std::vector<axk::app::DirectoryRef> result;
+    for (const auto &sibling : *siblings) {
+        if (sibling.kind == axk::app::DirectoryEntryKind::directory && sibling.relative_path != source.relative_path)
+            result.push_back({source.root_id, sibling.relative_path});
+    }
+    return result;
 }
 
 std::string object_format_name(axk::ObjectFormat format) {
@@ -300,6 +311,7 @@ struct axk::app::ImageSessionManager::Implementation {
         std::string image_id;
         std::string owner_id;
         ImageSourceRef source;
+        std::vector<DirectoryRef> companion_directories;
         std::string format;
         std::vector<ImageContentItem> content;
         std::unordered_map<std::string, std::vector<std::size_t>> content_children;
@@ -380,6 +392,17 @@ struct axk::app::ImageSessionManager::Implementation {
                 return std::format("{}:{}:{}", snapshot.partition.value, snapshot.sfs_id.value,
                                    snapshot.object.header.raw_type);
             }
+            if (session.format == "axk-object-directory") {
+                const auto separator = snapshot.key.find(':');
+                const auto logical_path = separator == std::string::npos
+                                              ? std::string_view{snapshot.key}
+                                              : std::string_view{snapshot.key}.substr(separator + 1U);
+                auto path = axk::text::path_from_utf8(logical_path);
+                const auto filename =
+                    path && !path->filename().empty() ? axk::text::path_to_utf8(path->filename()) : snapshot.key;
+                return std::format("{}:{}:{}", snapshot.object.header.raw_type, fold_ascii(filename),
+                                   snapshot.object.header.name);
+            }
             return snapshot.key;
         };
         std::unordered_map<std::string, std::string> current_ids_by_key;
@@ -444,6 +467,7 @@ struct axk::app::ImageSessionManager::Implementation {
     static void adopt_refreshed_state(Session &current, Session &fresh) {
         preserve_object_ids(current, fresh);
         current.source = std::move(fresh.source);
+        current.companion_directories = std::move(fresh.companion_directories);
         current.format = std::move(fresh.format);
         current.content = std::move(fresh.content);
         current.content_children = std::move(fresh.content_children);
@@ -460,6 +484,7 @@ struct axk::app::ImageSessionManager::Implementation {
         current.descriptors_by_id = std::move(fresh.descriptors_by_id);
         current.snapshots_by_id = std::move(fresh.snapshots_by_id);
         current.catalog_issues = std::move(fresh.catalog_issues);
+        current.companion_path_lease = std::move(fresh.companion_path_lease);
         current.auditions.clear();
         current.root_count = fresh.root_count;
         current.last_access = fresh.last_access;
@@ -547,9 +572,8 @@ struct axk::app::ImageSessionManager::Implementation {
             return std::unexpected(session_error("audition_unsupported", "audition requires SMPL Wave Data"));
         if (smpl->stored_segment_offset != 0U || smpl->stored_segment_bytes != smpl->stored_pcm_bytes) {
             return std::unexpected(session_error(
-                "audition_unsupported",
-                "Wave Data is split across sampler disks; make all companion disk folders available beside this "
-                "object directory"));
+                "companion_disks_required",
+                "Wave Data continues on another sampler disk. Add companion disk folders to audition it."));
         }
         if (smpl->sample_rate.value == 0U || smpl->stored_pcm_bytes == 0U)
             return std::unexpected(session_error("audition_unsupported", "Wave Data contains no playable PCM"));
@@ -825,6 +849,13 @@ axk::app::ImageSessionManager &axk::app::ImageSessionManager::operator=(ImageSes
 axk::app::Result<axk::app::ImageSessionSummary>
 axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string owner_id,
                                     const CancellationToken &cancellation) {
+    return open_with_companion_directories(source, std::move(owner_id), {}, cancellation);
+}
+
+axk::app::Result<axk::app::ImageSessionSummary>
+axk::app::ImageSessionManager::open_with_companion_directories(const ImageSourceRef &source, std::string owner_id,
+                                                               const std::vector<DirectoryRef> &companion_directories,
+                                                               const CancellationToken &cancellation) {
     if (owner_id.empty())
         return std::unexpected(session_error("invalid_owner", "image session owner is required"));
     const FileRef path_reference{source.root_id, source.relative_path};
@@ -840,6 +871,7 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
     std::function<Result<void>()> verify_source_unchanged;
     std::string target_snapshot_id;
     std::optional<MediaContainer> media;
+    std::vector<DirectoryRef> matched_companion_directories;
     if (source.kind == ImageSourceKind::file) {
         const auto file = implementation_->sandbox.open_file(path_reference);
         if (!file)
@@ -865,8 +897,6 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
             return std::unexpected(tree.error());
         std::vector<AxkObjectDirectoryEntry> entries;
         std::vector<std::function<Result<void>()>> verifiers;
-        const auto nested = std::ranges::any_of(
-            tree->entries(), [](const auto &entry) { return entry.kind == SandboxTreeEntryKind::directory; });
         entries.reserve(tree->entries().size());
         verifiers.reserve(tree->entries().size());
         for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
@@ -882,26 +912,25 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
         auto directory = AxkObjectDirectory::open(entries, source.relative_path, cancellation);
         if (!directory)
             return std::unexpected(core_error(directory.error(), source));
-        if (!nested) {
-            auto companion_references =
-                append_exact_sibling_segments(implementation_->sandbox, source, *directory, entries, verifiers);
-            if (!companion_references)
-                return std::unexpected(companion_references.error());
-            if (!companion_references->empty()) {
-                directory = AxkObjectDirectory::open(std::move(entries), source.relative_path, cancellation);
-                if (!directory)
-                    return std::unexpected(core_error(directory.error(), source));
-                if (implementation_->path_reservations != nullptr) {
-                    std::vector<PathAccess> accesses;
-                    accesses.reserve(companion_references->size());
-                    std::ranges::transform(
-                        *companion_references, std::back_inserter(accesses),
-                        [](const FileRef &reference) { return PathAccess{reference, PathAccessMode::shared}; });
-                    auto acquired = implementation_->path_reservations->try_acquire(accesses);
-                    if (!acquired)
-                        return std::unexpected(acquired.error());
-                    companion_path_lease = std::move(*acquired);
-                }
+        auto companions = append_exact_companion_segments(implementation_->sandbox, source, *directory,
+                                                          companion_directories, entries, verifiers);
+        if (!companions)
+            return std::unexpected(companions.error());
+        matched_companion_directories = companions->directories;
+        if (!companions->files.empty()) {
+            directory = AxkObjectDirectory::open(std::move(entries), source.relative_path, cancellation);
+            if (!directory)
+                return std::unexpected(core_error(directory.error(), source));
+            if (implementation_->path_reservations != nullptr) {
+                std::vector<PathAccess> accesses;
+                accesses.reserve(companions->files.size());
+                std::ranges::transform(companions->files, std::back_inserter(accesses), [](const FileRef &reference) {
+                    return PathAccess{reference, PathAccessMode::shared};
+                });
+                auto acquired = implementation_->path_reservations->try_acquire(accesses);
+                if (!acquired)
+                    return std::unexpected(acquired.error());
+                companion_path_lease = std::move(*acquired);
             }
         }
         std::vector<std::byte> snapshot;
@@ -948,6 +977,7 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
     auto session = std::make_shared<Implementation::Session>();
     session->owner_id = std::move(owner_id);
     session->source = source;
+    session->companion_directories = std::move(matched_companion_directories);
     session->source_reader = std::move(source_reader);
     session->verify_source_unchanged = std::move(verify_source_unchanged);
     session->target_snapshot_id = std::move(target_snapshot_id);
@@ -1161,6 +1191,99 @@ axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string ow
     return inspect(session->image_id, session->owner_id);
 }
 
+axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::attach_companion_directories(
+    std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+    const CompanionDirectorySelection &selection, const CancellationToken &cancellation) {
+    constexpr std::size_t maximum_selected_directories = 32U;
+    const auto session = implementation_->owned(image_id, owner_id);
+    if (!session)
+        return std::unexpected(session.error());
+
+    ImageSourceRef source;
+    std::vector<DirectoryRef> current_directories;
+    {
+        const std::scoped_lock access{(*session)->access_mutex};
+        if ((*session)->revision != expected_revision)
+            return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
+        if ((*session)->mutating)
+            return std::unexpected(
+                session_error("image_mutation_in_progress", "image session is being modified", true));
+        if ((*session)->format != "axk-object-directory" ||
+            (*session)->source.kind != ImageSourceKind::axk_object_directory) {
+            return std::unexpected(
+                session_error("companion_directories_unsupported",
+                              "companion disk folders can only be attached to an AXK object directory session"));
+        }
+        source = (*session)->source;
+        current_directories = (*session)->companion_directories;
+    }
+
+    std::vector<DirectoryRef> candidates;
+    if (selection.kind == CompanionDirectorySelectionKind::immediate_siblings) {
+        if (!selection.directories.empty())
+            return std::unexpected(
+                session_error("invalid_companion_directories",
+                              "immediate sibling search does not accept explicit companion directory references"));
+        auto siblings = immediate_sibling_directories(implementation_->sandbox, source);
+        if (!siblings)
+            return std::unexpected(siblings.error());
+        candidates = std::move(*siblings);
+    } else {
+        if (selection.directories.empty() || selection.directories.size() > maximum_selected_directories) {
+            return std::unexpected(
+                session_error("invalid_companion_directories", "select between one and 32 companion disk folders"));
+        }
+        candidates = selection.directories;
+    }
+    std::vector<DirectoryRef> unique_candidates;
+    unique_candidates.reserve(candidates.size());
+    for (const auto &candidate : candidates) {
+        if (candidate.root_id.empty() ||
+            (candidate.root_id == source.root_id && candidate.relative_path == source.relative_path) ||
+            std::ranges::find(unique_candidates, candidate) != unique_candidates.end()) {
+            continue;
+        }
+        unique_candidates.push_back(candidate);
+    }
+    if (unique_candidates.empty())
+        return std::unexpected(
+            session_error("companion_segment_not_found", "No selected folder contains matching Wave Data segments"));
+
+    ImageSessionManager refreshed{implementation_->sandbox,
+                                  1U,
+                                  implementation_->maximum_page_size,
+                                  implementation_->idle_retention,
+                                  implementation_->clock,
+                                  implementation_->path_reservations};
+    auto opened =
+        refreshed.open_with_companion_directories(source, std::string{owner_id}, unique_candidates, cancellation);
+    if (!opened)
+        return std::unexpected(opened.error());
+    if (opened->companion_directories.empty()) {
+        return std::unexpected(
+            session_error("companion_segment_not_found", "No selected folder contains matching Wave Data segments"));
+    }
+    if (opened->companion_directories == current_directories)
+        return inspect(image_id, owner_id);
+
+    std::shared_ptr<Implementation::Session> fresh;
+    {
+        const std::scoped_lock lock{refreshed.implementation_->mutex};
+        fresh = refreshed.implementation_->sessions.at(opened->image_id);
+    }
+    {
+        const std::scoped_lock access{(*session)->access_mutex};
+        if ((*session)->revision != expected_revision)
+            return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
+        if ((*session)->mutating)
+            return std::unexpected(
+                session_error("image_mutation_in_progress", "image session is being modified", true));
+        Implementation::adopt_refreshed_state(**session, *fresh);
+        ++(*session)->revision;
+    }
+    return inspect(image_id, owner_id);
+}
+
 axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::inspect(std::string_view image_id,
                                                                                        std::string_view owner_id) {
     const auto session = implementation_->owned(image_id, owner_id);
@@ -1190,6 +1313,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
     return ImageSessionSummary{.image_id = (*session)->image_id,
                                .revision = (*session)->revision,
                                .source = (*session)->source,
+                               .companion_directories = (*session)->companion_directories,
                                .format = (*session)->format,
                                .available_operations = std::move(available_operations),
                                .root_count = (*session)->root_count,

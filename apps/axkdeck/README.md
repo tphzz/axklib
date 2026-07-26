@@ -245,8 +245,15 @@ It also recognizes flat leaf directories containing externally extracted
 Yamaha objects and labels them **Sampler object folder**. Select that row to
 open it directly. The resulting `AXK_OBJECT_DIRECTORY` session is read-only and
 supports browsing, preview, audition, and package export. Parent collection
-directories remain navigation folders and cannot be opened as one combined
-image.
+directories remain navigation folders unless they are themselves recognized as
+one bounded multi-disk object set.
+
+Opening one sampler object folder does not scan nearby folders. If playback or
+package export needs Wave Data continued on another sampler disk, axkdeck asks
+for companion disk folders at that point. Select only the folders belonging to
+the same disk set, or explicitly use the nearby-folder search. The association
+lasts only for the open image session; axkdeck does not copy, merge, or modify
+the source folders.
 
 ### Create an empty hard-disk image
 

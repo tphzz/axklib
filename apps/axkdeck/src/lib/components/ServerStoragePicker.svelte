@@ -25,6 +25,7 @@
         suggestedName?: string;
         multiple?: boolean;
         initialDirectory?: DirectoryRef | null;
+        requireWritableDirectory?: boolean;
         ondirectorychange?: (directory: DirectoryRef | null) => void;
         onmanagelocations?: () => void;
         onselect: (selection: ImageLocation | DirectoryLocation) => void;
@@ -40,6 +41,7 @@
         suggestedName = '',
         multiple = false,
         initialDirectory = null,
+        requireWritableDirectory = true,
         ondirectorychange,
         onmanagelocations,
         onselect,
@@ -62,9 +64,7 @@
     let listElement = $state<HTMLDivElement | null>(null);
     let activeOptionIndex = $state(-1);
     let selectedFilePaths = $state<string[]>([]);
-    let inspectingEntryPath = $state('');
-    let inspectionGeneration = 0;
-    const mediaSourceCache = new Map<string, 'AXK_OBJECT_DIRECTORY' | null>();
+    let openingCurrentFolder = $state(false);
 
     const normalizedExtensions = $derived(extensions.map((extension) => extension.toLocaleLowerCase()));
     const visibleEntries = $derived(entries.filter(entryIsVisible));
@@ -104,20 +104,8 @@
         return normalizedExtensions.includes(extension);
     }
 
-    function inspectionKey(reference: DirectoryRef): string {
-        return `${reference.rootId}\0${reference.relativePath}`;
-    }
-
-    function isRecognizedMediaDirectory(entry: SandboxEntry): boolean {
-        if (mode !== 'media-source' || !activeRoot) return false;
-        return (
-            mediaSourceCache.get(inspectionKey({ rootId: activeRoot.id, relativePath: entry.relativePath })) ===
-            'AXK_OBJECT_DIRECTORY'
-        );
-    }
-
     function rootIsDisabled(root: SandboxRoot): boolean {
-        return (mode === 'directory' || mode === 'save-file') && !root.writable;
+        return (mode === 'save-file' || (mode === 'directory' && requireWritableDirectory)) && !root.writable;
     }
 
     function enabledOptionIndices(): number[] {
@@ -157,8 +145,6 @@
 
     async function openDirectory(reference: DirectoryRef, root = activeRoot): Promise<boolean> {
         if (!root) return false;
-        ++inspectionGeneration;
-        inspectingEntryPath = '';
         loading = true;
         error = '';
         try {
@@ -203,29 +189,6 @@
         if (!activeRoot || loading) return;
         const reference = { rootId: activeRoot.id, relativePath: entry.relativePath };
         if (entry.kind === 'DIRECTORY') {
-            if (mode === 'media-source') {
-                const key = inspectionKey(reference);
-                let kind = mediaSourceCache.get(key);
-                if (kind === undefined) {
-                    const generation = ++inspectionGeneration;
-                    inspectingEntryPath = entry.relativePath;
-                    error = '';
-                    try {
-                        kind = await transport.inspectSandboxMediaSource(reference);
-                    } catch (reason) {
-                        if (generation === inspectionGeneration) error = userFacingMessage(reason);
-                        return;
-                    } finally {
-                        if (generation === inspectionGeneration) inspectingEntryPath = '';
-                    }
-                    if (generation !== inspectionGeneration) return;
-                    mediaSourceCache.set(key, kind);
-                }
-                if (kind === 'AXK_OBJECT_DIRECTORY') {
-                    onselect(axkObjectDirectoryLocation(reference, `${activeRoot.displayName}/${entry.relativePath}`));
-                    return;
-                }
-            }
             await openDirectory(reference, activeRoot);
             return;
         }
@@ -284,8 +247,6 @@
 
     function goHome(): void {
         activeRoot = null;
-        ++inspectionGeneration;
-        inspectingEntryPath = '';
         directory = null;
         entries = [];
         nextCursor = null;
@@ -315,6 +276,31 @@
                 directory.relativePath ? `${activeRoot.displayName}/${directory.relativePath}` : activeRoot.displayName,
             ),
         );
+    }
+
+    async function openCurrentMediaSource(): Promise<void> {
+        if (!activeRoot || !directory || loading || openingCurrentFolder) return;
+        openingCurrentFolder = true;
+        error = '';
+        try {
+            const kind = await transport.inspectSandboxMediaSource(directory);
+            if (kind !== 'AXK_OBJECT_DIRECTORY') {
+                error = 'Current folder is not a recognized sampler image source';
+                return;
+            }
+            onselect(
+                axkObjectDirectoryLocation(
+                    directory,
+                    directory.relativePath
+                        ? `${activeRoot.displayName}/${directory.relativePath}`
+                        : activeRoot.displayName,
+                ),
+            );
+        } catch (reason) {
+            error = userFacingMessage(reason);
+        } finally {
+            openingCurrentFolder = false;
+        }
     }
 
     function selectFiles(): void {
@@ -523,7 +509,7 @@
                         }}
                     >
                         {#if entry.kind === 'DIRECTORY'}
-                            <Icon name={isRecognizedMediaDirectory(entry) ? 'folder-open' : 'folder'} size={16} />
+                            <Icon name="folder" size={16} />
                         {:else if multiple}
                             <span
                                 class:storage-picker-selection-checked={selectedFilePathSet.has(entry.relativePath)}
@@ -535,11 +521,7 @@
                         <span>
                             <strong>{entry.name}</strong>
                             <small>
-                                {#if isRecognizedMediaDirectory(entry)}
-                                    Sampler object folder
-                                {:else if inspectingEntryPath === entry.relativePath}
-                                    Inspecting
-                                {:else if entry.kind === 'DIRECTORY'}
+                                {#if entry.kind === 'DIRECTORY'}
                                     Folder
                                 {:else if mode === 'media-source'}
                                     Disk image · {entry.size ?? 0} bytes
@@ -548,7 +530,7 @@
                                 {/if}
                             </small>
                         </span>
-                        {#if entry.kind === 'DIRECTORY' && !isRecognizedMediaDirectory(entry)}
+                        {#if entry.kind === 'DIRECTORY'}
                             <Icon name="chevron" size={14} />
                         {/if}
                     </button>
@@ -571,6 +553,15 @@
                 <button class="primary-button" type="button" onclick={selectOutput}>Select output</button>
             {:else if mode === 'directory' && directory}
                 <button class="primary-button" type="button" onclick={selectCurrentDirectory}>Select directory</button>
+            {:else if mode === 'media-source' && directory}
+                <button
+                    class="primary-button"
+                    type="button"
+                    disabled={loading || openingCurrentFolder}
+                    onclick={() => void openCurrentMediaSource()}
+                >
+                    {openingCurrentFolder ? 'Opening' : 'Open current folder'}
+                </button>
             {:else if mode === 'file' && multiple && directory}
                 <button
                     class="primary-button"

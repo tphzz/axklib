@@ -5,6 +5,7 @@ import type {
     AudioImportCapabilities,
     AuditionDescriptor,
     ClientDownload,
+    CompanionDirectorySelection,
     ContentPage,
     HardDiskCreationProfile,
     JobState,
@@ -108,6 +109,9 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     refreshImage(): Promise<OpenedImage> {
+        return this.unavailable();
+    }
+    attachCompanionDirectories(_sessionId: number, _selection: CompanionDirectorySelection): Promise<OpenedImage> {
         return this.unavailable();
     }
     contentChildren(): Promise<ContentPage> {

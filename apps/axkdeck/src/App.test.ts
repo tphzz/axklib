@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     inspectSandboxMediaSource: vi.fn(),
     openImage: vi.fn(),
     refreshImage: vi.fn(),
+    attachCompanionDirectories: vi.fn(),
     closeImage: vi.fn(),
     contentChildren: vi.fn(),
     objectPage: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('./lib/createTransport', () => ({
         inspectSandboxMediaSource: mocks.inspectSandboxMediaSource,
         openImage: mocks.openImage,
         refreshImage: mocks.refreshImage,
+        attachCompanionDirectories: mocks.attachCompanionDirectories,
         closeImage: mocks.closeImage,
         contentChildren: mocks.contentChildren,
         objectPage: mocks.objectPage,
@@ -101,6 +103,7 @@ describe('App panel layout', () => {
         ]);
         mocks.openImage.mockReset().mockResolvedValue({
             sessionId: 17,
+            companionDirectories: [],
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 0 }],
             validation: {
                 valid: true,
@@ -120,6 +123,7 @@ describe('App panel layout', () => {
             waveDataCleanupAvailable: false,
         });
         mocks.refreshImage.mockReset();
+        mocks.attachCompanionDirectories.mockReset();
         mocks.closeImage.mockReset().mockResolvedValue(undefined);
         mocks.contentChildren.mockReset().mockResolvedValue({ items: [], totalCount: 0 });
         mocks.objectPage.mockReset().mockResolvedValue({ objects: [], totalCount: 0 });
@@ -336,6 +340,144 @@ describe('App panel layout', () => {
                 [sample00.key, sample02.key, sample10.key],
                 expect.any(Function),
             );
+        } finally {
+            playSequence.mockRestore();
+        }
+    });
+
+    it('attaches nearby companion folders and retries only after an explicit playback failure', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'Slices',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const samplerObject = (key: string, objectType: string, name: string) => ({
+            key,
+            objectType,
+            name,
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: volume.name,
+            categoryName: objectType,
+            sfsId: 1,
+            storedSizeBytes: 2,
+            sampleRate: objectType === 'SMPL' ? 44_100 : 0,
+            rootKey: 60,
+            frameCount: objectType === 'SMPL' ? 1 : 0,
+            sampleWidthBytes: objectType === 'SMPL' ? 2 : 0,
+        });
+        const bank = samplerObject('SBAC-1', 'SBAC', 'Slice Bank');
+        const sample = samplerObject('SBNK-1', 'SBNK', 'Slice 1');
+        const wave = samplerObject('SMPL-1', 'SMPL', 'Wave 1');
+        const relationships = [
+            {
+                id: 'bank-sample',
+                sourceObjectId: bank.key,
+                targetObjectId: sample.key,
+                candidateObjectIds: [],
+                relationshipType: 'SBAC_SLOT_TO_SBNK',
+                quality: 'Known',
+                basis: 'test',
+                notes: [],
+                assignmentIndex: 1,
+                assignmentName: '',
+                assignmentState: '',
+                receiveChannelDisplay: '',
+            },
+            {
+                id: 'sample-wave',
+                sourceObjectId: sample.key,
+                targetObjectId: wave.key,
+                candidateObjectIds: [],
+                relationshipType: 'SBNK_LEFT_MEMBER_TO_SMPL',
+                quality: 'Known',
+                basis: 'test',
+                notes: [],
+                assignmentName: '',
+                assignmentState: '',
+                receiveChannelDisplay: '',
+            },
+        ];
+        const opened = {
+            sessionId: 17,
+            companionDirectories: [],
+            tree: [{ id: 'disk-17', name: 'DISK2', kind: 'disk' as const, childCount: 1, children: [volume] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 3,
+                relationshipCount: relationships.length,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: false,
+            partitionMutationsAvailable: false,
+            objectRenameAvailable: false,
+            objectDeletionAvailable: false,
+            waveDataCleanupAvailable: false,
+            packageImportAvailable: false,
+            packageExportAvailable: true,
+        };
+        mocks.sandboxDirectory.mockImplementation(async (directory) => ({
+            directory,
+            entries:
+                directory.relativePath === ''
+                    ? [{ name: 'DISK2', relativePath: 'DISK2', kind: 'DIRECTORY', size: null }]
+                    : [],
+            truncated: false,
+            nextCursor: null,
+        }));
+        mocks.inspectSandboxMediaSource.mockResolvedValue('AXK_OBJECT_DIRECTORY');
+        mocks.openImage.mockResolvedValueOnce(opened);
+        mocks.objectPage.mockResolvedValue({
+            objects: [bank, sample, wave],
+            totalCount: 3,
+        });
+        mocks.relationshipPage.mockResolvedValue({ relationships, totalCount: relationships.length });
+        mocks.attachCompanionDirectories.mockResolvedValue({
+            ...opened,
+            companionDirectories: [{ rootId: 'workspace', relativePath: 'DISK1' }],
+        });
+        let sequenceCompletion: ((result: unknown) => void) | undefined;
+        const playSequence = vi
+            .spyOn(AuditionController.prototype, 'playSequence')
+            .mockImplementation((_sessionId, _objectIds, oncomplete) => {
+                sequenceCompletion = oncomplete as (result: unknown) => void;
+            });
+
+        try {
+            render(App);
+            await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
+            const picker = await screen.findByRole('dialog', { name: 'Open image' });
+            await fireEvent.click(await within(picker).findByText('Yamaha'));
+            await fireEvent.click(await within(picker).findByText('DISK2'));
+            await fireEvent.click(within(picker).getByRole('button', { name: 'Open current folder' }));
+            await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
+            await fireEvent.click(await screen.findByRole('button', { name: 'Play Slice Bank' }));
+
+            sequenceCompletion?.({
+                status: 'failed',
+                playedCount: 0,
+                skippedCount: 1,
+                error: 'Wave Data continues on another sampler disk.',
+                errorCode: 'companion_disks_required',
+                failedObjectId: sample.key,
+            });
+
+            const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' });
+            await fireEvent.click(within(dialog).getByRole('button', { name: 'Search nearby folders and retry' }));
+            await vi.waitFor(() =>
+                expect(mocks.attachCompanionDirectories).toHaveBeenCalledWith(17, {
+                    kind: 'immediate-siblings',
+                }),
+            );
+            await vi.waitFor(() => expect(playSequence).toHaveBeenCalledTimes(2));
+            expect(screen.queryByRole('dialog', { name: 'Add companion disks' })).toBeNull();
         } finally {
             playSequence.mockRestore();
         }

@@ -616,41 +616,38 @@ describe('ServerStoragePicker', () => {
         expect(within(readOnlyLocation).getByText('Read-only location')).toBeTruthy();
     });
 
-    it('opens a recognized sampler object folder directly from its parent', async () => {
+    it('navigates directories without inspection and opens only the current folder explicitly', async () => {
         const onselect = vi.fn();
         const imageTransport = transport();
-        let finishInspection!: (kind: 'AXK_OBJECT_DIRECTORY' | null) => void;
-        vi.mocked(imageTransport.inspectSandboxMediaSource).mockImplementation(
-            () =>
-                new Promise((resolve) => {
-                    finishInspection = resolve;
-                }),
+        vi.mocked(imageTransport.sandboxDirectory).mockImplementation(async (directory) =>
+            directory.relativePath
+                ? {
+                      directory,
+                      entries: [],
+                      truncated: false,
+                      nextCursor: null,
+                  }
+                : {
+                      directory,
+                      entries: [
+                          {
+                              name: 'objects',
+                              relativePath: 'objects',
+                              kind: 'DIRECTORY',
+                              size: null,
+                          },
+                          {
+                              name: 'disk.hds',
+                              relativePath: 'disk.hds',
+                              kind: 'FILE',
+                              size: 1024,
+                          },
+                      ],
+                      truncated: false,
+                      nextCursor: null,
+                  },
         );
-        vi.mocked(imageTransport.sandboxDirectory).mockResolvedValue({
-            directory: { rootId: 'workspace', relativePath: '' },
-            entries: [
-                {
-                    name: 'objects',
-                    relativePath: 'objects',
-                    kind: 'DIRECTORY',
-                    size: null,
-                },
-                {
-                    name: 'collection',
-                    relativePath: 'collection',
-                    kind: 'DIRECTORY',
-                    size: null,
-                },
-                {
-                    name: 'disk.hds',
-                    relativePath: 'disk.hds',
-                    kind: 'FILE',
-                    size: 1024,
-                },
-            ],
-            truncated: false,
-            nextCursor: null,
-        });
+        vi.mocked(imageTransport.inspectSandboxMediaSource).mockResolvedValue('AXK_OBJECT_DIRECTORY');
         render(ServerStoragePicker, {
             props: {
                 transport: imageTransport,
@@ -664,37 +661,31 @@ describe('ServerStoragePicker', () => {
 
         await fireEvent.click(await screen.findByText('Yamaha images'));
         expect(screen.getByText('disk.hds')).toBeTruthy();
-        expect(screen.getAllByText('Folder')).toHaveLength(2);
+        expect(screen.getAllByText('Folder')).toHaveLength(1);
         expect(screen.getByText('Disk image · 1024 bytes')).toBeTruthy();
-        expect(screen.queryByRole('button', { name: 'Open object directory' })).toBeNull();
         const objectDirectory = screen.getByRole('option', { name: /objects/ });
-        const collection = screen.getByRole('option', { name: /collection/ });
         expect(objectDirectory.querySelector('[data-icon="chevron"]')).toBeTruthy();
-        expect(collection.querySelector('[data-icon="chevron"]')).toBeTruthy();
         expect(imageTransport.inspectSandboxMediaSource).not.toHaveBeenCalled();
         await fireEvent.click(objectDirectory);
 
+        await waitFor(() =>
+            expect(imageTransport.sandboxDirectory).toHaveBeenCalledWith({
+                rootId: 'workspace',
+                relativePath: 'objects',
+            }),
+        );
+        expect(imageTransport.inspectSandboxMediaSource).not.toHaveBeenCalled();
+        expect(onselect).not.toHaveBeenCalled();
+        await fireEvent.click(screen.getByRole('button', { name: 'Open current folder' }));
         expect(imageTransport.inspectSandboxMediaSource).toHaveBeenCalledWith({
             rootId: 'workspace',
             relativePath: 'objects',
         });
-        expect(await screen.findByText('Inspecting')).toBeTruthy();
-        finishInspection('AXK_OBJECT_DIRECTORY');
         await waitFor(() => expect(onselect).toHaveBeenCalled());
         expect(onselect).toHaveBeenCalledWith({
             kind: 'axk-object-directory',
             reference: { rootId: 'workspace', relativePath: 'objects' },
             displayName: 'Yamaha images/objects',
-        });
-        await fireEvent.click(screen.getByRole('option', { name: /disk.hds/ }));
-        expect(onselect).toHaveBeenLastCalledWith({
-            kind: 'server-file',
-            reference: { rootId: 'workspace', relativePath: 'disk.hds' },
-            displayName: 'Yamaha images/disk.hds',
-        });
-        expect(imageTransport.sandboxDirectory).toHaveBeenCalledWith({
-            rootId: 'workspace',
-            relativePath: '',
         });
     });
 

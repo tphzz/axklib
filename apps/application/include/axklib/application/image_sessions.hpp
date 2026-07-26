@@ -32,12 +32,20 @@ struct ImageSessionSummary {
     std::string image_id;
     std::uint64_t revision{};
     ImageSourceRef source;
+    std::vector<DirectoryRef> companion_directories;
     std::string format;
     std::vector<std::string> available_operations;
     std::size_t root_count{};
     std::size_t object_count{};
     std::size_t relationship_count{};
     ImageValidationSummary validation;
+};
+
+enum class CompanionDirectorySelectionKind : std::uint8_t { directories, immediate_siblings };
+
+struct CompanionDirectorySelection {
+    CompanionDirectorySelectionKind kind{CompanionDirectorySelectionKind::directories};
+    std::vector<DirectoryRef> directories;
 };
 
 struct ImageSessionMutation {
@@ -267,6 +275,11 @@ class ImageSessionManager {
 
     [[nodiscard]] Result<ImageSessionSummary> open(const ImageSourceRef &source, std::string owner_id,
                                                    const CancellationToken &cancellation = {});
+    [[nodiscard]] Result<ImageSessionSummary> attach_companion_directories(std::string_view image_id,
+                                                                           std::string_view owner_id,
+                                                                           std::uint64_t expected_revision,
+                                                                           const CompanionDirectorySelection &selection,
+                                                                           const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageSessionSummary> inspect(std::string_view image_id, std::string_view owner_id);
     [[nodiscard]] Result<ImageObjectDeletionPlan> plan_deletion(std::string_view image_id, std::string_view owner_id,
                                                                 std::uint64_t expected_revision,
@@ -312,6 +325,10 @@ class ImageSessionManager {
     void cleanup();
 
   private:
+    [[nodiscard]] Result<ImageSessionSummary>
+    open_with_companion_directories(const ImageSourceRef &source, std::string owner_id,
+                                    const std::vector<DirectoryRef> &companion_directories,
+                                    const CancellationToken &cancellation);
     struct Implementation;
     std::unique_ptr<Implementation> implementation_;
 };

@@ -57,7 +57,7 @@ static Result<Waveform> decode_waveform_payload(const CurrentSmpl &decoded, std:
                                                 SfsId sfs_id, std::string name, std::span<const std::byte> payload) {
     if (decoded.stored_segment_offset != 0U || decoded.stored_segment_bytes != decoded.stored_pcm_bytes) {
         return std::unexpected{
-            make_error(ErrorCode::object_malformed, ErrorCategory::audio,
+            make_error(ErrorCode::object_missing, ErrorCategory::audio,
                        "SMPL Wave Data is an incomplete multi-disk segment; open its parent object directory")};
     }
     const auto start = decoded.stored_pcm_offset;

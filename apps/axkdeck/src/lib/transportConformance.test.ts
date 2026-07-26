@@ -23,6 +23,7 @@ const object: SamplerObject = {
 };
 
 const opened: Omit<OpenedImage, 'sessionId'> = {
+    companionDirectories: [],
     initialVolume: null,
     volumeMutationsAvailable: false,
     partitionMutationsAvailable: false,
