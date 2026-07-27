@@ -126,6 +126,36 @@ describe('ImageNavigator', () => {
         expect(screen.getByRole('searchbox', { name: 'Search image contents' })).toBeTruthy();
     });
 
+    it('preserves sampler-significant repeated spaces in volume names', () => {
+        const { container } = render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'library.iso' }),
+                items: [
+                    {
+                        id: 'disk',
+                        name: 'library.iso',
+                        kind: 'disk',
+                        childCount: 1,
+                        children: [
+                            {
+                                id: 'volume',
+                                name: '14 S.E.    /2.3M',
+                                kind: 'volume',
+                                childCount: 0,
+                            },
+                        ],
+                    },
+                ],
+            },
+        });
+
+        const label = container.querySelector('.tree-item-name') as HTMLElement;
+        expect(label).toBeTruthy();
+        expect(label.textContent).toBe('14 S.E.    /2.3M');
+        expect(getComputedStyle(label).whiteSpace).toBe('pre');
+    });
+
     it('loads a lazy disk root while keeping that technical root out of the navigator', async () => {
         const onloadchildren = vi.fn().mockResolvedValue({
             items: [{ id: 'volume', name: 'Piano', kind: 'volume', childCount: 0 }],

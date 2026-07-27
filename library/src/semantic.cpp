@@ -277,9 +277,13 @@ static ContentTree build_content_tree_impl(std::string source_path,
                     if (target == nullptr)
                         continue;
                     if (target->object.header.type == ObjectType::sbac) {
-                        node.children.push_back(sample_bank_node(*target, catalog, graph, row, false));
+                        auto child = sample_bank_node(*target, catalog, graph, row, false);
+                        child.scope_role = ContentScopeRole::reference;
+                        node.children.push_back(std::move(child));
                     } else if (target->object.header.type == ObjectType::sbnk) {
-                        node.children.push_back(sample_node(*target, row));
+                        auto child = sample_node(*target, row);
+                        child.scope_role = ContentScopeRole::reference;
+                        node.children.push_back(std::move(child));
                     } else if (target->object.header.type == ObjectType::smpl) {
                         ContentNode child{std::format("object:{}", target->key),
                                           "waveform",
@@ -289,6 +293,7 @@ static ContentTree build_content_tree_impl(std::string source_path,
                                           row->quality,
                                           row->basis,
                                           row->notes};
+                        child.scope_role = ContentScopeRole::reference;
                         if (const auto detail = assignment_detail(*row))
                             child.details.push_back(*detail);
                         node.children.push_back(std::move(child));
@@ -562,6 +567,16 @@ ContentTree build_content_tree(std::string source_path, const ObjectCatalog &cat
     }
     result.roots = std::move(flattened);
     return result;
+}
+
+std::string_view content_scope_role_name(ContentScopeRole role) noexcept {
+    switch (role) {
+    case ContentScopeRole::contained:
+        return "CONTAINED";
+    case ContentScopeRole::reference:
+        return "REFERENCE";
+    }
+    return "CONTAINED";
 }
 
 WaveformOrphanReport analyze_waveform_orphans(const Container &container, const ObjectCatalog &catalog,

@@ -111,6 +111,11 @@ TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
                                        .at("schema")
                                        .at("$ref");
     EXPECT_EQ(content_response, "#/components/schemas/ImageContentPageResponse");
+
+    const auto &content_item = document.at("components").at("schemas").at("ImageContentItem");
+    EXPECT_TRUE(std::ranges::contains(content_item.at("required"), "scopeRole"));
+    EXPECT_EQ(content_item.at("properties").at("scopeRole").at("enum"),
+              nlohmann::json::array({"CONTAINED", "REFERENCE"}));
 }
 
 TEST(ServerContract, DirectoryListingsSeparateMediaSourceInspection) {

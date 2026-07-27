@@ -84,18 +84,7 @@ interface ApiImageSummary {
     validation: { valid: boolean; infoCount: number; warningCount: number; errorCount: number };
 }
 
-interface ApiContentItem {
-    id: string;
-    parentId: string | null;
-    kind: string;
-    name?: string;
-    displayName: string;
-    childCount: number;
-    partitionIndex: number | null;
-    objectId: string | null;
-    objectType: string | null;
-}
-
+type ApiContentItem = components['schemas']['ImageContentItem'];
 type ApiObjectItem = components['schemas']['ImageObjectItem'];
 type ApiRelationshipItem = components['schemas']['ImageRelationshipItem'];
 type ApiObjectDeletionInspection = components['schemas']['ImageObjectDeletionInspection'];
@@ -148,6 +137,7 @@ function mapContentItem(item: ApiContentItem, parent?: DiskTreeItem): DiskTreeIt
         childCount: item.childCount,
         objectId: item.objectId ?? undefined,
         objectType: item.objectType ?? undefined,
+        scopeRole: item.scopeRole,
         volumeId,
         volumeName,
         partitionIndex,

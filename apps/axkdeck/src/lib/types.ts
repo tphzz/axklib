@@ -31,6 +31,7 @@ export interface DiskTreeItem {
     childCount: number;
     objectId?: string;
     objectType?: string;
+    scopeRole?: 'CONTAINED' | 'REFERENCE';
     volumeId?: string;
     volumeName?: string;
     partitionIndex?: number;

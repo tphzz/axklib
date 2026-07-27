@@ -619,7 +619,7 @@ export interface paths {
             query?: {
                 cursor?: components['parameters']['PageCursor'];
                 limit?: components['parameters']['PageLimit'];
-                /** @description Semantic content node whose descendant objects define the query scope. */
+                /** @description Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded. */
                 scopeId?: string;
                 type?: string;
             };
@@ -664,7 +664,7 @@ export interface paths {
             query?: {
                 cursor?: components['parameters']['PageCursor'];
                 limit?: components['parameters']['PageLimit'];
-                /** @description Semantic content node whose descendant objects define the query scope. */
+                /** @description Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded. */
                 scopeId?: string;
                 /** @description Session-local source object identifier. */
                 sourceObjectId?: string;
@@ -1715,6 +1715,11 @@ export interface components {
             parentId: string | null;
             partitionIndex: number | null;
             quality: string;
+            /**
+             * @description Whether the node contributes its objects to ancestor content scopes or is only a navigation reference.
+             * @enum {string}
+             */
+            scopeRole: 'CONTAINED' | 'REFERENCE';
         };
         ImageContentPage: {
             items: components['schemas']['ImageContentItem'][];
@@ -5797,7 +5802,7 @@ export interface operations {
             query?: {
                 cursor?: components['parameters']['PageCursor'];
                 limit?: components['parameters']['PageLimit'];
-                /** @description Semantic content node whose descendant objects define the query scope. */
+                /** @description Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded. */
                 scopeId?: string;
                 type?: string;
             };
@@ -5872,7 +5877,7 @@ export interface operations {
             query?: {
                 cursor?: components['parameters']['PageCursor'];
                 limit?: components['parameters']['PageLimit'];
-                /** @description Semantic content node whose descendant objects define the query scope. */
+                /** @description Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded. */
                 scopeId?: string;
                 /** @description Session-local source object identifier. */
                 sourceObjectId?: string;

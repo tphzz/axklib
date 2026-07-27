@@ -79,6 +79,7 @@ struct ImageContentItem {
     std::size_t child_count{};
     std::optional<std::string> object_id;
     std::optional<std::string> object_type;
+    std::string scope_role;
     std::string quality;
     std::string basis;
     std::string notes;

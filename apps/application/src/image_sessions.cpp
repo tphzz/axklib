@@ -1088,6 +1088,7 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
                               .child_count = node.children.size(),
                               .object_id = std::nullopt,
                               .object_type = std::nullopt,
+                              .scope_role = std::string{axk::content_scope_role_name(node.scope_role)},
                               .quality = std::string{axk::relationship_quality_name(node.quality)},
                               .basis = node.basis,
                               .notes = node.notes,
@@ -1126,6 +1127,8 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
             }
         }
         session->object_indices_by_content_scope.emplace(id, scoped_indices);
+        if (node.scope_role == axk::ContentScopeRole::reference)
+            return std::vector<std::size_t>{};
         return scoped_indices;
     };
     session->content_children.try_emplace("");

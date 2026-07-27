@@ -292,7 +292,7 @@
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
         {"name": "type", "in": "query", "schema": {"type": "string", "minLength": 1, "maxLength": 16}},
-        {"name": "scopeId", "in": "query", "description": "Semantic content node whose descendant objects define the query scope.", "schema": {"type": "string", "minLength": 1}},
+        {"name": "scopeId", "in": "query", "description": "Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded.", "schema": {"type": "string", "minLength": 1}},
         {"$ref": "#/components/parameters/PageLimit"},
         {"$ref": "#/components/parameters/PageCursor"}
       ],
@@ -309,7 +309,7 @@
     "/images/{imageId}/relationships": {
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
-        {"name": "scopeId", "in": "query", "description": "Semantic content node whose descendant objects define the query scope.", "schema": {"type": "string", "minLength": 1}},
+        {"name": "scopeId", "in": "query", "description": "Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded.", "schema": {"type": "string", "minLength": 1}},
         {"name": "sourceObjectId", "in": "query", "description": "Session-local source object identifier.", "schema": {"type": "string", "minLength": 1}},
         {"name": "targetObjectId", "in": "query", "description": "Session-local resolved target object identifier.", "schema": {"type": "string", "minLength": 1}},
         {"name": "type", "in": "query", "description": "Exact relationship type.", "schema": {"type": "string", "minLength": 1, "maxLength": 64}},
@@ -1094,7 +1094,7 @@
       "ImageContentItem": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "parentId", "depth", "partitionIndex", "kind", "displayName", "childCount", "objectId", "objectType", "quality", "basis", "notes", "details"],
+        "required": ["id", "parentId", "depth", "partitionIndex", "kind", "displayName", "childCount", "objectId", "objectType", "scopeRole", "quality", "basis", "notes", "details"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "parentId": {"type": ["string", "null"]},
@@ -1106,6 +1106,11 @@
           "childCount": {"type": "integer", "minimum": 0},
           "objectId": {"type": ["string", "null"]},
           "objectType": {"type": ["string", "null"]},
+          "scopeRole": {
+            "type": "string",
+            "enum": ["CONTAINED", "REFERENCE"],
+            "description": "Whether the node contributes its objects to ancestor content scopes or is only a navigation reference."
+          },
           "quality": {"type": "string"},
           "basis": {"type": "string"},
           "notes": {"type": "array", "items": {"type": "string"}},

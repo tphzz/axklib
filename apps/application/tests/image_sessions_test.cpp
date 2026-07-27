@@ -12,7 +12,9 @@
 
 #include "axklib/alteration.hpp"
 #include "axklib/application/image_sessions.hpp"
+#include "axklib/audio.hpp"
 #include "axklib/media.hpp"
+#include "axklib/writer.hpp"
 
 namespace {
 
@@ -631,6 +633,76 @@ TEST_F(ImageSessionTest, FiltersObjectsByContentScopeAndBindsCursorsToTheScope) 
         sessions.objects(opened->image_id, "owner-a", 1U, *scoped->next_cursor, std::nullopt, roots->items.front().id);
     ASSERT_FALSE(wrong_scope);
     EXPECT_EQ(wrong_scope.error().code, "invalid_cursor");
+}
+
+TEST_F(ImageSessionTest, ExcludesProgramReferencesFromContainingContentScopes) {
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 4U;
+    waveform.pcm = {std::byte{0},    std::byte{0},    std::byte{0xe8}, std::byte{3},
+                    std::byte{0x18}, std::byte{0xfc}, std::byte{0},    std::byte{0}};
+    const auto audio_path = root_ / "program-scope.wav";
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
+
+    axk::VolumeSpec volume_spec;
+    volume_spec.name = "Program Scope";
+    volume_spec.waveforms.push_back({"wave", "Wave", audio_path, 60U, {}});
+    axk::SampleSpec sample;
+    sample.name = "Sample";
+    sample.waveform_id = "wave";
+    sample.root_key = 60U;
+    sample.key_high = 127U;
+    volume_spec.samples.push_back(std::move(sample));
+    auto direct_sample = volume_spec.samples.front();
+    direct_sample.name = "Direct Sample";
+    volume_spec.samples.push_back(std::move(direct_sample));
+    volume_spec.sample_banks.push_back({"Bank", {"Sample"}});
+    volume_spec.programs.push_back({1U, {{"SBAC", "Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume_spec)}}}};
+    const auto image_path = root_ / "program-scope.hds";
+    const auto written = axk::write_hds_image(manifest, image_path);
+    ASSERT_TRUE(written) << written.error().message;
+
+    axk::app::ImageSessionManager sessions{*sandbox_, 4U, 100U};
+    const auto opened = sessions.open({"workspace", "program-scope.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    ASSERT_FALSE(roots->items.empty());
+    EXPECT_TRUE(std::ranges::all_of(roots->items, [](const auto &item) { return item.scope_role == "CONTAINED"; }));
+
+    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes) << volumes.error().message;
+    const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(volume, volumes->items.end());
+    const auto categories = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, volume->id);
+    ASSERT_TRUE(categories) << categories.error().message;
+    const auto programs =
+        std::ranges::find(categories->items, std::string{"Programs"}, &axk::app::ImageContentItem::display_name);
+    ASSERT_NE(programs, categories->items.end());
+    const auto program_nodes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, programs->id);
+    ASSERT_TRUE(program_nodes) << program_nodes.error().message;
+    const auto program =
+        std::ranges::find_if(program_nodes->items, [](const auto &item) { return item.child_count > 0U; });
+    ASSERT_NE(program, program_nodes->items.end());
+
+    const auto program_scope =
+        sessions.objects(opened->image_id, "owner-a", 100U, std::nullopt, std::nullopt, program->id);
+    ASSERT_TRUE(program_scope) << program_scope.error().message;
+    ASSERT_EQ(program_scope->items.size(), 1U);
+    EXPECT_EQ(program_scope->items.front().type, "PROG");
+
+    const auto references = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, program->id);
+    ASSERT_TRUE(references) << references.error().message;
+    ASSERT_FALSE(references->items.empty());
+    EXPECT_TRUE(
+        std::ranges::all_of(references->items, [](const auto &item) { return item.scope_role == "REFERENCE"; }));
+    const auto reference_scope =
+        sessions.objects(opened->image_id, "owner-a", 100U, std::nullopt, std::nullopt, references->items.front().id);
+    ASSERT_TRUE(reference_scope) << reference_scope.error().message;
+    ASSERT_EQ(reference_scope->items.size(), 1U);
+    EXPECT_NE(reference_scope->items.front().type, "PROG");
 }
 
 TEST_F(ImageSessionTest, FiltersRelationshipsByVolumeObjectAndTypeAndBindsCursorsToTheFilter) {

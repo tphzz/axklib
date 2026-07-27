@@ -2278,6 +2278,14 @@
           },
           "quality": {
             "type": "string"
+          },
+          "scopeRole": {
+            "description": "Whether the node contributes its objects to ancestor content scopes or is only a navigation reference.",
+            "enum": [
+              "CONTAINED",
+              "REFERENCE"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -2290,6 +2298,7 @@
           "childCount",
           "objectId",
           "objectType",
+          "scopeRole",
           "quality",
           "basis",
           "notes",
@@ -15687,7 +15696,7 @@
           }
         },
         {
-          "description": "Semantic content node whose descendant objects define the query scope.",
+          "description": "Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded.",
           "in": "query",
           "name": "scopeId",
           "schema": {
@@ -15839,7 +15848,7 @@
           }
         },
         {
-          "description": "Semantic content node whose descendant objects define the query scope.",
+          "description": "Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded.",
           "in": "query",
           "name": "scopeId",
           "schema": {

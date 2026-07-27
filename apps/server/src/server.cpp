@@ -1556,6 +1556,7 @@ class ServerApplication {
                             {"childCount", item.child_count},
                             {"objectId", item.object_id ? Json(*item.object_id) : Json{}},
                             {"objectType", item.object_type ? Json(*item.object_type) : Json{}},
+                            {"scopeRole", item.scope_role},
                             {"quality", item.quality},
                             {"basis", item.basis},
                             {"notes", item.notes},

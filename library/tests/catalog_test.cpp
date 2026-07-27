@@ -417,6 +417,85 @@ TEST(ProgramRelationships, UsesIsoBasisForMissingVisibleOffSampleBank) {
     EXPECT_EQ(graph.relationships.front().basis, "assignment-visible-off-iso-missing-local-sbac");
 }
 
+TEST(ProgramRelationships, DoesNotResolveUniqueSampleBankFromAnotherIsoVolume) {
+    axk::ObjectCatalog catalog;
+
+    axk::DecodedObject sample_bank;
+    sample_bank.header.type = axk::ObjectType::sbac;
+    sample_bank.header.name = "Conga";
+    sample_bank.payload = axk::CurrentSbac{};
+    const axk::ObjectPlacement remote_placement{
+        axk::PartitionIndex{0}, "GROUP", axk::SfsId{1}, "Volume 13", "SBAC", "Conga", "GROUP/F013"};
+    catalog.objects.emplace_back("remote-bank", axk::PartitionIndex{0}, axk::SfsId{1}, "iso:DISC",
+                                 std::move(sample_bank), remote_placement, std::vector<std::byte>{},
+                                 std::vector{remote_placement}, axk::PlacementResolution::exact);
+
+    axk::CurrentProg current_program;
+    axk::ProgAssignment assignment;
+    assignment.name = "Conga";
+    assignment.raw_handle = 1U;
+    assignment.kind = 0x11U;
+    current_program.assignments.push_back(assignment);
+    axk::DecodedObject program;
+    program.header.type = axk::ObjectType::prog;
+    program.header.name = "002";
+    program.payload = std::move(current_program);
+    const axk::ObjectPlacement program_placement{
+        axk::PartitionIndex{0}, "GROUP", axk::SfsId{2}, "Volume 14", "PROG", "002", "GROUP/F014"};
+    catalog.objects.emplace_back("program", axk::PartitionIndex{0}, axk::SfsId{2}, "iso:DISC", std::move(program),
+                                 program_placement, std::vector<std::byte>{}, std::vector{program_placement},
+                                 axk::PlacementResolution::exact);
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    EXPECT_FALSE(graph.relationships.front().target_key);
+    EXPECT_EQ(graph.relationships.front().candidate_keys, std::vector<std::string>{"remote-bank"});
+    EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::tentative);
+    EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x11+name-nonlocal");
+    EXPECT_EQ(graph.relationships.front().assignment_state, axk::AssignmentState::visible_off);
+}
+
+TEST(ProgramRelationships, PrefersUniqueSameIsoVolumeSampleBankOverRemoteDuplicate) {
+    axk::ObjectCatalog catalog;
+    const auto add_sample_bank = [&](std::string key, std::string folder, std::uint32_t id) {
+        axk::DecodedObject sample_bank;
+        sample_bank.header.type = axk::ObjectType::sbac;
+        sample_bank.header.name = "Bank";
+        sample_bank.payload = axk::CurrentSbac{};
+        const axk::ObjectPlacement placement{axk::PartitionIndex{0}, "GROUP", axk::SfsId{id}, "Volume", "SBAC", "Bank",
+                                             std::move(folder)};
+        catalog.objects.emplace_back(std::move(key), axk::PartitionIndex{0}, axk::SfsId{id}, "iso:DISC",
+                                     std::move(sample_bank), placement, std::vector<std::byte>{},
+                                     std::vector{placement}, axk::PlacementResolution::exact);
+    };
+    add_sample_bank("local-bank", "GROUP/F014", 1U);
+    add_sample_bank("remote-bank", "GROUP/F013", 2U);
+
+    axk::CurrentProg current_program;
+    axk::ProgAssignment assignment;
+    assignment.name = "Bank";
+    assignment.raw_handle = 1U;
+    assignment.kind = 0x11U;
+    current_program.assignments.push_back(assignment);
+    axk::DecodedObject program;
+    program.header.type = axk::ObjectType::prog;
+    program.header.name = "002";
+    program.payload = std::move(current_program);
+    const axk::ObjectPlacement placement{
+        axk::PartitionIndex{0}, "GROUP", axk::SfsId{3}, "Volume", "PROG", "002", "GROUP/F014"};
+    catalog.objects.emplace_back("program", axk::PartitionIndex{0}, axk::SfsId{3}, "iso:DISC", std::move(program),
+                                 placement, std::vector<std::byte>{}, std::vector{placement},
+                                 axk::PlacementResolution::exact);
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    ASSERT_TRUE(graph.relationships.front().target_key);
+    EXPECT_EQ(*graph.relationships.front().target_key, "local-bank");
+    EXPECT_EQ(graph.relationships.front().candidate_keys, (std::vector<std::string>{"local-bank", "remote-bank"}));
+    EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::known);
+    EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x11+name+same-folder");
+}
+
 TEST(ProgramRelationships, KeepsSourceLoadReceiveChannelUnknown) {
     axk::ObjectCatalog catalog;
     const axk::ObjectPlacement placement{
@@ -582,6 +661,39 @@ TEST(RelationshipGraph, ResolvesExactIsoSampleBankMemberWithinItsRawVolume) {
     EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::known);
     EXPECT_EQ(graph.relationships.front().basis, "active-sbac-slot-name+same-folder");
     EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
+}
+
+TEST(RelationshipGraph, DoesNotResolveUniqueSampleBankMemberFromAnotherIsoVolume) {
+    axk::ObjectCatalog catalog;
+
+    axk::DecodedObject sample;
+    sample.header.type = axk::ObjectType::sbnk;
+    sample.header.name = "Remote Sample";
+    sample.payload = axk::CurrentSbnk{};
+    const axk::ObjectPlacement remote_placement{axk::PartitionIndex{0}, "GROUP",     axk::SfsId{1}, "Volume 13", "SBNK",
+                                                "Remote Sample",        "GROUP/F013"};
+    catalog.objects.emplace_back("remote-sample", axk::PartitionIndex{0}, axk::SfsId{1}, "iso:DISC", std::move(sample),
+                                 remote_placement, std::vector<std::byte>{}, std::vector{remote_placement},
+                                 axk::PlacementResolution::exact);
+
+    axk::CurrentSbac current_sample_bank;
+    current_sample_bank.slots.push_back({"Remote Sample", 1U, 0x14cU});
+    axk::DecodedObject sample_bank;
+    sample_bank.header.type = axk::ObjectType::sbac;
+    sample_bank.header.name = "Local Bank";
+    sample_bank.payload = std::move(current_sample_bank);
+    const axk::ObjectPlacement local_placement{axk::PartitionIndex{0}, "GROUP",     axk::SfsId{2}, "Volume 14", "SBAC",
+                                               "Local Bank",           "GROUP/F014"};
+    catalog.objects.emplace_back("local-bank", axk::PartitionIndex{0}, axk::SfsId{2}, "iso:DISC",
+                                 std::move(sample_bank), local_placement, std::vector<std::byte>{},
+                                 std::vector{local_placement}, axk::PlacementResolution::exact);
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    EXPECT_FALSE(graph.relationships.front().target_key);
+    EXPECT_EQ(graph.relationships.front().candidate_keys, std::vector<std::string>{"remote-sample"});
+    EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::tentative);
+    EXPECT_EQ(graph.relationships.front().basis, "active-sbac-slot-name-nonlocal");
 }
 
 TEST(RelationshipGraph, KeepsDuplicateExactIsoSampleBankMembersWithinOneRawVolumeTentative) {
@@ -804,6 +916,54 @@ TEST(ProgramRelationships, KeepsVisibleOffRowsOutOfNavigableContent) {
     EXPECT_EQ(graph.relationships[0].receive_channel_display, "off");
     ASSERT_EQ(graph.bitmap_comparisons.size(), 1U);
     EXPECT_EQ(graph.bitmap_comparisons.front().mismatch_class, "nondefault_flag_direct_assignment_without_bitmap");
+}
+
+TEST(ContentTree, DistinguishesContainedObjectsFromProgramReferences) {
+    axk::ObjectCatalog catalog;
+
+    axk::DecodedObject sample_bank;
+    sample_bank.header.type = axk::ObjectType::sbac;
+    sample_bank.header.name = "Local Bank";
+    sample_bank.payload = axk::CurrentSbac{};
+    const axk::ObjectPlacement sample_bank_placement{
+        axk::PartitionIndex{0}, "Partition", axk::SfsId{1}, "Volume", "SBAC", "Local Bank", "GROUP/F001"};
+    catalog.objects.emplace_back("sample-bank", axk::PartitionIndex{0}, axk::SfsId{1}, "iso:DISC",
+                                 std::move(sample_bank), sample_bank_placement, std::vector<std::byte>{},
+                                 std::vector{sample_bank_placement}, axk::PlacementResolution::exact);
+
+    axk::CurrentProg current_program;
+    axk::ProgAssignment assignment;
+    assignment.name = "Local Bank";
+    assignment.raw_handle = 1U;
+    assignment.kind = 0x11U;
+    assignment.raw_row[0x28] = std::byte{0xff};
+    current_program.assignments.push_back(assignment);
+    axk::DecodedObject program;
+    program.header.type = axk::ObjectType::prog;
+    program.header.name = "001";
+    program.payload = std::move(current_program);
+    const axk::ObjectPlacement program_placement{
+        axk::PartitionIndex{0}, "Partition", axk::SfsId{1}, "Volume", "PROG", "001", "GROUP/F001"};
+    catalog.objects.emplace_back("program", axk::PartitionIndex{0}, axk::SfsId{2}, "iso:DISC", std::move(program),
+                                 program_placement, std::vector<std::byte>{}, std::vector{program_placement},
+                                 axk::PlacementResolution::exact);
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    const auto tree = axk::build_content_tree("source.iso", catalog, graph);
+    ASSERT_EQ(tree.roots.size(), 1U);
+    ASSERT_EQ(tree.roots.front().children.size(), 1U);
+    const auto &volume = tree.roots.front().children.front();
+    const auto programs = std::ranges::find(volume.children, std::string{"Programs"}, &axk::ContentNode::display_name);
+    ASSERT_NE(programs, volume.children.end());
+    ASSERT_EQ(programs->children.size(), 1U);
+    ASSERT_EQ(programs->children.front().children.size(), 1U);
+    EXPECT_EQ(programs->children.front().children.front().scope_role, axk::ContentScopeRole::reference);
+
+    const auto sample_structure = std::ranges::find(volume.children, std::string{"Sample Banks/Samples (SBAC/SBNK)"},
+                                                    &axk::ContentNode::display_name);
+    ASSERT_NE(sample_structure, volume.children.end());
+    ASSERT_EQ(sample_structure->children.size(), 1U);
+    EXPECT_EQ(sample_structure->children.front().scope_role, axk::ContentScopeRole::contained);
 }
 
 TEST(Validation, ReportsStableRelationshipAndCoverageResults) {

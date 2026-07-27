@@ -136,6 +136,7 @@ describe('HttpImageTransport', () => {
                                 displayName: 'partition 0: PARTITION 1',
                                 partitionIndex: 0,
                                 childCount: 1,
+                                scopeRole: 'CONTAINED',
                             },
                         ],
                         totalCount: 1,
@@ -154,6 +155,7 @@ describe('HttpImageTransport', () => {
                                 displayName: 'drumloops',
                                 partitionIndex: 0,
                                 childCount: 0,
+                                scopeRole: 'CONTAINED',
                             },
                         ],
                         totalCount: 1,
@@ -208,11 +210,13 @@ describe('HttpImageTransport', () => {
             name: 'PARTITION 1',
             childCount: 1,
             partitionIndex: 0,
+            scopeRole: 'CONTAINED',
         });
         expect(opened.tree[0]?.children?.[0]?.children?.[0]).toMatchObject({
             id: 'volume-1',
             name: 'drumloops',
             volumeName: 'drumloops',
+            scopeRole: 'CONTAINED',
         });
         expect(opened.objects).toEqual([]);
         await expect(

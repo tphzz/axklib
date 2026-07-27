@@ -62,6 +62,7 @@ struct content_node {
     std::string display_name;
     std::string object_key;
     std::string object_type;
+    std::string scope_role;
     std::string quality;
     std::uint64_t child_count{};
 };

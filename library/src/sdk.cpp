@@ -384,8 +384,13 @@ const std::vector<ContentNode> *find_children(const ContentTree &tree, std::stri
 
 content_node public_node(const ContentNode &node) {
     return {
-        node.node_id,         node.node_type,   node.display_name,
-        node.object_key,      node.object_type, std::string{relationship_quality_name(node.quality)},
+        node.node_id,
+        node.node_type,
+        node.display_name,
+        node.object_key,
+        node.object_type,
+        std::string{content_scope_role_name(node.scope_role)},
+        std::string{relationship_quality_name(node.quality)},
         node.children.size(),
     };
 }

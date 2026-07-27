@@ -146,7 +146,7 @@
                     size={14}
                 /></span
             >
-            <span class="tree-item-name">{item.name}</span>
+            <span class="tree-item-name" style:white-space="pre">{item.name}</span>
             {#if metadata}<span class="tree-item-metadata">{metadata}</span>{/if}
             {#if item.kind === 'disk'}<span class="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"
                 ></span>{/if}

@@ -158,10 +158,18 @@ Match match_named_target(const ObjectSnapshot &source, std::string_view name, Ob
                          std::string_view unique_basis, std::string_view ambiguous_basis, bool use_same_volume) {
     auto candidates = named(index, type, name);
     if (candidates.size() == 1) {
+        const auto *candidate = candidates.front();
+        const bool local = !source.placement ||
+                           (source.placement->container_directory.empty() ? same_volume(source, *candidate)
+                                                                          : same_container_folder(source, *candidate));
+        if (!local) {
+            return {nullptr, candidates, RelationshipQuality::tentative, std::format("{}-nonlocal", unique_basis),
+                    "name matches an object outside the source volume"};
+        }
         if (unique_basis.starts_with("assignment-kind-0x")) {
             const auto category = type == ObjectType::sbac ? "SBAC" : type == ObjectType::sbnk ? "SBNK" : "object";
             const auto selector = unique_basis.substr(std::string_view{"assignment-kind-"}.size(), 4U);
-            return {candidates.front(), candidates, RelationshipQuality::known, std::string{unique_basis},
+            return {candidate, candidates, RelationshipQuality::known, std::string{unique_basis},
                     std::format("Input consistency: assignment name matches a "
                                 "same-scope object, and "
                                 "assignment kind byte {} selects {} in tested "
@@ -171,7 +179,7 @@ Match match_named_target(const ObjectSnapshot &source, std::string_view name, Ob
                                 "saves support it.",
                                 selector, category)};
         }
-        return {candidates.front(), candidates, RelationshipQuality::known, std::string{unique_basis},
+        return {candidate, candidates, RelationshipQuality::known, std::string{unique_basis},
                 "name and target category match one object"};
     }
     if (candidates.size() > 1 && use_same_volume) {
