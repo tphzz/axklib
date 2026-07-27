@@ -60,6 +60,17 @@ def require_status(actual: tuple[int, Any], expected: int, context: str) -> Any:
     return document
 
 
+def info_request_for_file(root_id: str, relative_path: str) -> dict[str, Any]:
+    return {
+        "sources": [
+            {
+                "kind": "FILE",
+                "file": {"rootId": root_id, "relativePath": relative_path},
+            }
+        ]
+    }
+
+
 def wait_for_job(client: Client, job_id: str) -> dict[str, Any]:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
@@ -135,9 +146,7 @@ def exercise(server: Path, fixture: Path) -> None:
                 client.request(
                     "POST",
                     "/reports/info",
-                    {
-                        "sources": [{"rootId": "workspace", "relativePath": fixture_name}],
-                    },
+                    info_request_for_file("workspace", fixture_name),
                 ),
                 202,
                 "fixture report submission",

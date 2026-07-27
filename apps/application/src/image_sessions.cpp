@@ -1176,11 +1176,11 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
         scoped_indices.erase(unique_end, scoped_indices.end());
         if (session->content[item_index].kind == "volume" && !session->content[item_index].partition_index &&
             !scoped_indices.empty()) {
-            const auto partition_index = session->objects[scoped_indices.front()].partition_index;
-            if (partition_index && std::ranges::all_of(scoped_indices, [&](std::size_t object_index) {
-                    return session->objects[object_index].partition_index == partition_index;
+            const auto inferred_partition_index = session->objects[scoped_indices.front()].partition_index;
+            if (inferred_partition_index && std::ranges::all_of(scoped_indices, [&](std::size_t object_index) {
+                    return session->objects[object_index].partition_index == inferred_partition_index;
                 })) {
-                session->content[item_index].partition_index = partition_index;
+                session->content[item_index].partition_index = inferred_partition_index;
             }
         }
         session->object_indices_by_content_scope.emplace(id, scoped_indices);
