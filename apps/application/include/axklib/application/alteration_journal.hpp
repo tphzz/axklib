@@ -26,18 +26,21 @@ class AlterationJournalStore {
 
     explicit AlterationJournalStore(std::filesystem::path directory,
                                     std::size_t maximum_journal_bytes = 256U * 1024U * 1024U,
-                                    InterruptionHook interruption_hook = {});
+                                    InterruptionHook interruption_hook = {},
+                                    std::size_t maximum_patch_write_bytes = 1024U * 1024U);
 
     [[nodiscard]] bool storage_ready() const noexcept;
     [[nodiscard]] Result<void> recover(const Sandbox &sandbox);
     [[nodiscard]] Result<void> apply(const std::shared_ptr<SandboxMutation> &target, std::uint64_t image_size_bytes,
                                      std::span<const AlterationJournalPatch> patches,
-                                     const CancellationToken &cancellation = {});
+                                     const CancellationToken &cancellation = {},
+                                     const std::function<Result<void>()> &validate = {});
 
   private:
     std::filesystem::path directory_;
     std::size_t maximum_journal_bytes_;
     InterruptionHook interruption_hook_;
+    std::size_t maximum_patch_write_bytes_;
     std::atomic_bool storage_available_{};
     std::atomic_bool storage_ready_{};
 };

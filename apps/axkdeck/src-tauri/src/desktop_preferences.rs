@@ -113,44 +113,6 @@ fn temporary_sibling(destination: &Path) -> Result<(PathBuf, File), String> {
     Err("could not reserve a desktop preferences staging file".to_owned())
 }
 
-fn publish_temporary(temporary: &Path, destination: &Path) -> Result<(), String> {
-    match std::fs::rename(temporary, destination) {
-        Ok(()) => return Ok(()),
-        Err(error) if !destination.exists() => {
-            return Err(format!("publish desktop preferences: {error}"));
-        }
-        Err(_) => {}
-    }
-
-    let metadata = destination
-        .symlink_metadata()
-        .map_err(|error| format!("inspect desktop preferences destination: {error}"))?;
-    if !metadata.file_type().is_file() {
-        return Err("desktop preferences destination is not a regular file".to_owned());
-    }
-
-    let backup = destination.with_file_name(format!(
-        ".{}.{}-{}.backup",
-        destination
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("desktop-preferences"),
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| "system clock is unavailable".to_owned())?
-            .as_nanos()
-    ));
-    std::fs::rename(destination, &backup)
-        .map_err(|error| format!("preserve existing desktop preferences: {error}"))?;
-    if let Err(error) = std::fs::rename(temporary, destination) {
-        let _ = std::fs::rename(&backup, destination);
-        return Err(format!("publish desktop preferences: {error}"));
-    }
-    std::fs::remove_file(&backup)
-        .map_err(|error| format!("remove desktop preferences backup: {error}"))
-}
-
 fn write_atomically(destination: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = destination
         .parent()
@@ -167,7 +129,11 @@ fn write_atomically(destination: &Path, bytes: &[u8]) -> Result<(), String> {
             .sync_all()
             .map_err(|error| format!("flush desktop preferences: {error}"))?;
         drop(output);
-        publish_temporary(&temporary, destination)
+        let outcome = crate::file_publication::publish_file(&temporary, destination)?;
+        if let Some(warning) = outcome.warning {
+            log::warn!("{warning}");
+        }
+        Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);

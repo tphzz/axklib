@@ -37,7 +37,8 @@ struct WorkspaceSnapshot {
 
 class WorkspaceStore {
   public:
-    [[nodiscard]] static app::Result<WorkspaceStore> open(std::filesystem::path path);
+    [[nodiscard]] static app::Result<WorkspaceStore> open(std::filesystem::path path,
+                                                          std::vector<std::filesystem::path> protected_paths = {});
     [[nodiscard]] static app::Result<std::filesystem::path> default_path();
 
     [[nodiscard]] const std::filesystem::path &path() const noexcept;

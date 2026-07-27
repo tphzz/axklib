@@ -55,6 +55,17 @@ struct ImageSessionMutation {
     std::shared_ptr<SandboxMutation> target;
 };
 
+struct PreparedImageSessionCommit {
+    std::string image_id;
+    std::uint64_t expected_revision{};
+    ImageSessionSummary summary;
+
+  private:
+    std::shared_ptr<void> current_state;
+    std::shared_ptr<void> refreshed_state;
+    friend class ImageSessionManager;
+};
+
 struct ImageSessionRead {
     std::string image_id;
     std::uint64_t revision{};
@@ -306,6 +317,10 @@ class ImageSessionManager {
                                                       std::uint64_t expected_revision);
     [[nodiscard]] Result<ImageSessionMutation> begin_mutation(std::string_view image_id, std::string_view owner_id,
                                                               std::uint64_t expected_revision);
+    [[nodiscard]] Result<PreparedImageSessionCommit>
+    prepare_mutation_commit(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                            const CancellationToken &cancellation = {});
+    [[nodiscard]] ImageSessionSummary finalize_mutation_commit(PreparedImageSessionCommit prepared) noexcept;
     [[nodiscard]] Result<ImageSessionSummary> commit_mutation(std::string_view image_id, std::string_view owner_id,
                                                               std::uint64_t expected_revision,
                                                               const CancellationToken &cancellation = {});

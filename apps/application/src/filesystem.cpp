@@ -11,11 +11,13 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <iomanip>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -878,6 +880,48 @@ std::optional<bool> directory_empty_at(int parent, const std::filesystem::path &
     return empty;
 }
 
+bool synchronize_directory_tree(int directory) {
+    const auto enumeration_descriptor = ::dup(directory);
+    if (enumeration_descriptor < 0)
+        return false;
+    auto *entries = ::fdopendir(enumeration_descriptor);
+    if (entries == nullptr) {
+        ::close(enumeration_descriptor);
+        return false;
+    }
+    bool synchronized = true;
+    while (synchronized) {
+        errno = 0;
+        const auto *entry = ::readdir(entries);
+        if (entry == nullptr)
+            break;
+        const std::string_view name{entry->d_name};
+        if (name == "." || name == "..")
+            continue;
+        struct stat status{};
+        if (::fstatat(directory, entry->d_name, &status, AT_SYMLINK_NOFOLLOW) != 0 || S_ISLNK(status.st_mode)) {
+            synchronized = false;
+            break;
+        }
+        if (!S_ISDIR(status.st_mode))
+            continue;
+        const auto child_descriptor =
+            ::openat(directory, entry->d_name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if (child_descriptor < 0) {
+            synchronized = false;
+            break;
+        }
+        auto child = descriptor_handle(child_descriptor);
+        struct stat opened_status{};
+        synchronized = ::fstat(*child, &opened_status) == 0 && S_ISDIR(opened_status.st_mode) &&
+                       object_identity(opened_status) == object_identity(status) &&
+                       synchronize_directory_tree(*child) && retained_entry_matches(directory, entry->d_name, *child);
+    }
+    const auto enumeration_error = errno;
+    ::closedir(entries);
+    return synchronized && enumeration_error == 0 && ::fsync(directory) == 0;
+}
+
 #endif
 
 } // namespace
@@ -927,6 +971,22 @@ std::uint64_t axk::app::SandboxMutation::size() const noexcept {
 }
 
 const axk::app::FileRef &axk::app::SandboxMutation::reference() const noexcept { return implementation_->reference; }
+
+std::string axk::app::SandboxMutation::stable_identity() const {
+    if (!implementation_)
+        return {};
+    std::ostringstream output;
+    output << std::hex << std::setfill('0');
+#if defined(_WIN32)
+    output << std::setw(16) << implementation_->identity.volume_serial << ':';
+    for (const auto value : implementation_->identity.file_id)
+        output << std::setw(2) << std::to_integer<unsigned int>(value);
+#else
+    output << std::setw(16) << implementation_->identity.device << ':' << std::setw(16)
+           << implementation_->identity.inode;
+#endif
+    return output.str();
+}
 
 axk::Result<void> axk::app::SandboxMutation::read_exact_at(std::uint64_t offset,
                                                            std::span<std::byte> destination) const {
@@ -1104,7 +1164,8 @@ axk::app::Result<axk::app::OpenedSandboxTreeFile> axk::app::SandboxTree::open_fi
 }
 
 axk::app::Result<std::vector<axk::app::Sandbox::Root>>
-axk::app::Sandbox::validate_roots(std::vector<RootDefinition> definitions) {
+axk::app::Sandbox::validate_roots(std::vector<RootDefinition> definitions,
+                                  std::span<const std::filesystem::path> protected_paths) {
     std::vector<Root> roots;
     roots.reserve(definitions.size());
     std::unordered_set<std::string> identifiers;
@@ -1120,6 +1181,11 @@ axk::app::Sandbox::validate_roots(std::vector<RootDefinition> definitions) {
         const auto canonical = std::filesystem::canonical(definition.path, error);
         if (error || !std::filesystem::is_directory(canonical, error) || error)
             return std::unexpected(root_error("sandbox root must name an existing directory"));
+        if (std::ranges::any_of(protected_paths, [&canonical](const auto &protected_path) {
+                return within(canonical, protected_path) || within(protected_path, canonical);
+            })) {
+            return std::unexpected(root_error("sandbox root overlaps protected application state"));
+        }
 #if defined(_WIN32)
         const auto handle = CreateFileW(canonical.c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
                                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
@@ -1146,15 +1212,22 @@ axk::app::Sandbox::validate_roots(std::vector<RootDefinition> definitions) {
     return roots;
 }
 
-axk::app::Result<axk::app::Sandbox> axk::app::Sandbox::create(std::vector<RootDefinition> definitions) {
-    auto roots = validate_roots(std::move(definitions));
+axk::app::Result<axk::app::Sandbox> axk::app::Sandbox::create(std::vector<RootDefinition> definitions,
+                                                              std::vector<std::filesystem::path> protected_paths) {
+    for (auto &path : protected_paths) {
+        std::error_code error;
+        path = std::filesystem::weakly_canonical(path, error);
+        if (error)
+            return std::unexpected(root_error("protected application path cannot be canonicalized"));
+    }
+    auto roots = validate_roots(std::move(definitions), protected_paths);
     if (!roots)
         return std::unexpected(roots.error());
-    return Sandbox{std::move(*roots)};
+    return Sandbox{std::move(*roots), std::move(protected_paths)};
 }
 
 axk::app::Result<void> axk::app::Sandbox::replace_roots(std::vector<RootDefinition> definitions) {
-    auto roots = validate_roots(std::move(definitions));
+    auto roots = validate_roots(std::move(definitions), state_->protected_paths);
     if (!roots)
         return std::unexpected(roots.error());
     const std::unique_lock lock{state_->mutex};
@@ -1944,7 +2017,7 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
             }
             ::close(output);
         }
-        if (::fsync(*staged) != 0) {
+        if (!synchronize_directory_tree(*staged)) {
             staged.reset();
             discard_staged();
             return std::unexpected(

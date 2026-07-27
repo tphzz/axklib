@@ -1686,10 +1686,23 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                 {axk::ProgressPhase::publishing, 0U, 1U, "Committing image changes", std::nullopt});
         }
         const auto journal_started = Clock::now();
-        if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation);
+        std::optional<PreparedImageSessionCommit> prepared_commit;
+        const auto validate_commit = [&]() -> Result<void> {
+            auto validation =
+                images.prepare_mutation_commit(image_id, context.owner_id, expected_revision, CancellationToken{});
+            if (!validation)
+                return std::unexpected(validation.error());
+            prepared_commit.emplace(std::move(*validation));
+            return {};
+        };
+        if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation,
+                                          validate_commit);
             !applied) {
             return std::unexpected(applied.error());
         }
+        if (!prepared_commit)
+            return std::unexpected(
+                operation_error("image_operation_failed", "image mutation validation did not complete"));
         diagnostic("journal-commit", journal_started,
                    {{"imageId", image_id},
                     {"patchCount", patches.size()},
@@ -1698,12 +1711,10 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
 
         const auto refresh_started = Clock::now();
         mutation->target.reset();
-        auto summary = images.commit_mutation(image_id, context.owner_id, expected_revision, CancellationToken{});
-        if (!summary)
-            return std::unexpected(summary.error());
+        auto summary = images.finalize_mutation_commit(std::move(*prepared_commit));
         mutation_finished = true;
         diagnostic("session-refresh", refresh_started,
-                   {{"imageId", image_id}, {"revision", summary->revision}, {"objectCount", summary->object_count}});
+                   {{"imageId", image_id}, {"revision", summary.revision}, {"objectCount", summary.object_count}});
         if (context.progress) {
             context.progress->report({axk::ProgressPhase::publishing, 1U, 1U, "Image changes committed", std::nullopt});
         }
@@ -1712,20 +1723,20 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         for (const auto &operation : prepared->operations)
             operations.push_back(operation_report_json(operation, document->logical_input_paths));
         const auto issue_count =
-            summary->validation.info_count + summary->validation.warning_count + summary->validation.error_count;
+            summary.validation.info_count + summary.validation.warning_count + summary.validation.error_count;
         diagnostic("total", operation_started,
                    {{"imageId", image_id},
-                    {"revision", summary->revision},
+                    {"revision", summary.revision},
                     {"imageBytes", prepared->image_size_bytes},
                     {"patchCount", patches.size()},
                     {"patchBytes", patch_bytes}});
         return Json{{"schemaVersion", "1.0"},
                     {"kind", "ALTERATION"},
                     {"imageId", image_id},
-                    {"revision", summary->revision},
+                    {"revision", summary.revision},
                     {"summary", alteration_summary(prepared->operations)},
-                    {"objectCount", summary->object_count},
-                    {"validation", {{"valid", summary->validation.valid()}, {"issueCount", issue_count}}},
+                    {"objectCount", summary.object_count},
+                    {"validation", {{"valid", summary.validation.valid()}, {"issueCount", issue_count}}},
                     {"warnings", Json::array()},
                     {"applied", !patches.empty()},
                     {"operations", std::move(operations)}};

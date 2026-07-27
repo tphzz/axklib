@@ -587,7 +587,6 @@ struct axk::app::ImageSessionManager::Implementation {
     }
 
     static void adopt_refreshed_state(Session &current, Session &fresh) {
-        preserve_object_ids(current, fresh);
         current.source = std::move(fresh.source);
         current.companion_directories = std::move(fresh.companion_directories);
         current.format = std::move(fresh.format);
@@ -1415,6 +1414,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::a
         if ((*session)->mutating)
             return std::unexpected(
                 session_error("image_mutation_in_progress", "image session is being modified", true));
+        Implementation::preserve_object_ids(**session, *fresh);
         Implementation::adopt_refreshed_state(**session, *fresh);
         ++(*session)->revision;
     }
@@ -1441,7 +1441,12 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
     };
     const auto source_metadata =
         implementation_->sandbox.metadata((*session)->source.root_id, (*session)->source.relative_path);
-    if ((*session)->format == "sfs" && source_metadata && source_metadata->writable) {
+    const auto *mutable_container = (*session)->media ? std::get_if<Container>(&(*session)->media->storage()) : nullptr;
+    const auto supported_mutation_profile =
+        mutable_container != nullptr && mutable_container->superblock().sector_size_bytes == 512U &&
+        std::ranges::all_of(mutable_container->partitions(),
+                            [](const Partition &partition) { return partition.sectors_per_cluster == 2U; });
+    if ((*session)->format == "sfs" && supported_mutation_profile && source_metadata && source_metadata->writable) {
         available_operations.emplace_back("images.alter.volumes");
         available_operations.emplace_back("images.alter.partitions");
         available_operations.emplace_back("images.alter.objects");
@@ -1725,6 +1730,13 @@ axk::app::ImageSessionManager::begin_mutation(std::string_view image_id, std::st
         return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
     if ((*session)->format != "sfs")
         return std::unexpected(session_error("image_mutation_unsupported", "only SFS image sessions can be altered"));
+    const auto *container = (*session)->media ? std::get_if<Container>(&(*session)->media->storage()) : nullptr;
+    if (container == nullptr || container->superblock().sector_size_bytes != 512U ||
+        !std::ranges::all_of(container->partitions(),
+                             [](const Partition &partition) { return partition.sectors_per_cluster == 2U; })) {
+        return std::unexpected(session_error("image_mutation_unsupported",
+                                             "image geometry is outside the supported 512-byte alteration profile"));
+    }
     if ((*session)->mutating)
         return std::unexpected(session_error("entry_in_use", "image session mutation is already active", true));
     if (auto upgraded = (*session)->path_lease.try_upgrade(); !upgraded)
@@ -1740,9 +1752,10 @@ axk::app::ImageSessionManager::begin_mutation(std::string_view image_id, std::st
     return ImageSessionMutation{(*session)->image_id, (*session)->revision, std::move(source), std::move(*target)};
 }
 
-axk::app::Result<axk::app::ImageSessionSummary>
-axk::app::ImageSessionManager::commit_mutation(std::string_view image_id, std::string_view owner_id,
-                                               std::uint64_t expected_revision, const CancellationToken &cancellation) {
+axk::app::Result<axk::app::PreparedImageSessionCommit>
+axk::app::ImageSessionManager::prepare_mutation_commit(std::string_view image_id, std::string_view owner_id,
+                                                       std::uint64_t expected_revision,
+                                                       const CancellationToken &cancellation) {
     std::shared_ptr<Implementation::Session> session;
     {
         const std::scoped_lock lock{implementation_->mutex};
@@ -1751,11 +1764,6 @@ axk::app::ImageSessionManager::commit_mutation(std::string_view image_id, std::s
             return std::unexpected(session_error("image_not_found", "image session does not exist"));
         session = found->second;
     }
-    const auto release_mutation = [&] {
-        session->mutating = false;
-        session->path_lease.downgrade();
-        session->mutation_guard.reset();
-    };
     if (!session->mutating || !session->mutation_guard || session->revision != expected_revision) {
         return std::unexpected(session_error("image_revision_stale", "image session mutation is not current", true));
     }
@@ -1763,20 +1771,45 @@ axk::app::ImageSessionManager::commit_mutation(std::string_view image_id, std::s
     ImageSessionManager refreshed{implementation_->sandbox, 1U, implementation_->maximum_page_size,
                                   implementation_->idle_retention, implementation_->clock};
     auto opened = refreshed.open(session->source, std::string{owner_id}, cancellation);
-    if (!opened) {
-        release_mutation();
+    if (!opened)
         return std::unexpected(opened.error());
-    }
     std::shared_ptr<Implementation::Session> fresh;
     {
         const std::scoped_lock lock{refreshed.implementation_->mutex};
         fresh = refreshed.implementation_->sessions.at(opened->image_id);
     }
+    Implementation::preserve_object_ids(*session, *fresh);
+    opened->image_id = session->image_id;
+    opened->revision = expected_revision + 1U;
+    PreparedImageSessionCommit prepared;
+    prepared.image_id = session->image_id;
+    prepared.expected_revision = expected_revision;
+    prepared.summary = std::move(*opened);
+    prepared.current_state = session;
+    prepared.refreshed_state = std::move(fresh);
+    return prepared;
+}
+
+axk::app::ImageSessionSummary
+axk::app::ImageSessionManager::finalize_mutation_commit(PreparedImageSessionCommit prepared) noexcept {
+    auto session = std::static_pointer_cast<Implementation::Session>(std::move(prepared.current_state));
+    auto fresh = std::static_pointer_cast<Implementation::Session>(std::move(prepared.refreshed_state));
     Implementation::adopt_refreshed_state(*session, *fresh);
     implementation_->remove_auditions_for(session);
     ++session->revision;
-    release_mutation();
-    return inspect(image_id, owner_id);
+    session->mutating = false;
+    session->path_lease.downgrade();
+    session->mutation_guard.reset();
+    return std::move(prepared.summary);
+}
+
+axk::app::Result<axk::app::ImageSessionSummary>
+axk::app::ImageSessionManager::commit_mutation(std::string_view image_id, std::string_view owner_id,
+                                               std::uint64_t expected_revision, const CancellationToken &cancellation) {
+    auto prepared = prepare_mutation_commit(image_id, owner_id, expected_revision, cancellation);
+    if (!prepared)
+        return std::unexpected(prepared.error());
+    return finalize_mutation_commit(std::move(*prepared));
 }
 
 void axk::app::ImageSessionManager::abort_mutation(std::string_view image_id, std::string_view owner_id,

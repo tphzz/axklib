@@ -1287,18 +1287,27 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 patches.reserve(prepared->patches.size());
                 for (auto &patch : prepared->patches)
                     patches.push_back({patch.offset, std::move(patch.original), std::move(patch.replacement)});
-                if (auto applied =
-                        journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation);
+                std::optional<PreparedImageSessionCommit> prepared_commit;
+                const auto validate_commit = [&]() -> Result<void> {
+                    auto validation = images.prepare_mutation_commit(record->image_id, context.owner_id,
+                                                                     record->expected_revision, CancellationToken{});
+                    if (!validation)
+                        return std::unexpected(validation.error());
+                    prepared_commit.emplace(std::move(*validation));
+                    return {};
+                };
+                if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches,
+                                                  context.cancellation, validate_commit);
                     !applied) {
                     return std::unexpected(applied.error());
                 }
+                if (!prepared_commit)
+                    return std::unexpected(
+                        operation_error("image_operation_failed", "image mutation validation did not complete"));
                 mutation->target.reset();
-                auto summary = images.commit_mutation(record->image_id, context.owner_id, record->expected_revision,
-                                                      CancellationToken{});
-                if (!summary)
-                    return std::unexpected(summary.error());
+                auto summary = images.finalize_mutation_commit(std::move(*prepared_commit));
                 mutation_guard.finish();
-                auto result = session_import_result(*record, *summary, !patches.empty());
+                auto result = session_import_result(*record, summary, !patches.empty());
                 claim->consume();
                 return result;
             });

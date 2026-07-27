@@ -63,7 +63,6 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         "allowedOrigins",
         "bearerToken",
         "bindAddress",
-        "connectionFile",
         "eventTicketTtlSeconds",
         "imageIdleSeconds",
         "jobRetentionSeconds",
@@ -122,7 +121,6 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         assign("port", config.port);
         assign("bearerToken", config.bearer_token);
         assign("stateDirectory", config.state_directory);
-        assign("connectionFile", config.connection_file);
         assign("workspaceStore", config.workspace_store);
         assign("maximumJsonBytes", config.maximum_json_bytes);
         assign("maximumJsonDepth", config.maximum_json_depth);
@@ -197,7 +195,6 @@ axk::app::Result<void> apply_environment(axk::server::Config &config) {
     assign_text("AXKLIB_SERVER_BIND", config.bind_address);
     assign_text("AXKLIB_SERVER_TOKEN", config.bearer_token);
     assign_text("AXKLIB_SERVER_STATE_DIRECTORY", config.state_directory);
-    assign_text("AXKLIB_SERVER_CONNECTION_FILE", config.connection_file);
     for (auto result : {apply_integer_environment("AXKLIB_SERVER_PORT", config.port),
                         apply_integer_environment("AXKLIB_SERVER_WORKERS", config.worker_threads),
                         apply_integer_environment("AXKLIB_SERVER_JOB_WORKERS", config.job_worker_threads),
@@ -231,6 +228,8 @@ axk::app::Result<axk::server::CommandLine> axk::server::parse_command_line(int a
         config_path = std::filesystem::path{argv[++index]};
     }
     if (!informational) {
+        if (sidecar_mode_requested && config_path)
+            return std::unexpected(argument_error("--config is not permitted in sidecar connection-file mode"));
         if (!sidecar_mode_requested && !config_path) {
             if (const auto configured = detail::environment_variable("AXKLIB_SERVER_CONFIG"))
                 config_path = std::filesystem::path{*configured};
@@ -279,11 +278,17 @@ axk::app::Result<axk::server::CommandLine> axk::server::parse_command_line(int a
             auto value = value_after(argument);
             if (!value)
                 return std::unexpected(value.error());
+            if (sidecar_mode_requested)
+                return std::unexpected(argument_error("--token is not permitted in sidecar connection-file mode"));
             command_line.config.bearer_token = *value;
         } else if (argument == "--token-sha256") {
             auto value = value_after(argument);
             if (!value)
                 return std::unexpected(value.error());
+            if (sidecar_mode_requested) {
+                return std::unexpected(
+                    argument_error("--token-sha256 is not permitted in sidecar connection-file mode"));
+            }
             const auto separator = value->find('=');
             if (separator == std::string_view::npos || separator == 0U || separator + 1U == value->size())
                 return std::unexpected(argument_error("--token-sha256 must use PRINCIPAL=LOWERCASE_SHA256"));
@@ -417,7 +422,9 @@ axk::app::Result<axk::server::CommandLine> axk::server::parse_command_line(int a
             return std::unexpected(argument_error("unknown option: " + std::string{argument}));
         }
     }
-    if (!command_line.config.connection_file.empty() && command_line.config.bearer_token.empty()) {
+    if (sidecar_mode_requested) {
+        command_line.config.bearer_token.clear();
+        command_line.config.token_hashes.clear();
         auto token = app::secure_random_hex(32U);
         if (!token)
             return std::unexpected(argument_error(token.error().message));

@@ -73,8 +73,6 @@ TEST(ServerConfig, ParsesSafeLoopbackConfiguration) {
     std::array arguments{std::string{"axklib-server"},
                          std::string{"--port"},
                          std::string{"0"},
-                         std::string{"--token"},
-                         std::string{"0123456789abcdef"},
                          std::string{"--workers"},
                          std::string{"3"},
                          std::string{"--job-workers"},
@@ -142,7 +140,7 @@ TEST(ServerConfig, GeneratesSidecarTokenWithoutPuttingASecretInProcessArguments)
                                     [](unsigned char character) { return std::isxdigit(character) != 0; }));
 }
 
-TEST(ServerConfig, AppliesExplicitConfigInSidecarModeWithoutInheritedEnvironment) {
+TEST(ServerConfig, RejectsExplicitConfigInSidecarMode) {
     const auto root = std::filesystem::current_path();
     ScopedEnvironment inherited_bind{"AXKLIB_SERVER_BIND", "0.0.0.0"};
     ScopedEnvironment inherited_token{"AXKLIB_SERVER_TOKEN", "inherited-token-must-not-be-used"};
@@ -159,11 +157,37 @@ TEST(ServerConfig, AppliesExplicitConfigInSidecarModeWithoutInheritedEnvironment
         pointers[index] = arguments[index].data();
 
     const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+    ASSERT_FALSE(parsed);
+    EXPECT_NE(parsed.error().message.find("--config"), std::string::npos);
+}
+
+TEST(ServerConfig, RejectsCallerProvidedCredentialsInSidecarMode) {
+    const auto root = std::filesystem::temp_directory_path();
+    for (const auto option : {"--token", "--token-sha256"}) {
+        std::array arguments{std::string{"axklib-server"}, std::string{"--connection-file"},
+                             (root / "axklib-sidecar.json").string(), std::string{option},
+                             option == std::string_view{"--token"} ? std::string{"0123456789abcdef"}
+                                                                   : std::string{"test=0123456789abcdef"}};
+        std::array<char *, arguments.size()> pointers{};
+        for (std::size_t index = 0; index < arguments.size(); ++index)
+            pointers[index] = arguments[index].data();
+
+        const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+        ASSERT_FALSE(parsed);
+        EXPECT_NE(parsed.error().message.find(option), std::string::npos);
+    }
+}
+
+TEST(ServerConfig, DoesNotEnterSidecarModeFromEnvironment) {
+    ScopedEnvironment inherited_connection{"AXKLIB_SERVER_CONNECTION_FILE", "/tmp/inherited-sidecar.json"};
+    std::array arguments{std::string{"axklib-server"}, std::string{"--token"}, std::string{"0123456789abcdef"}};
+    std::array<char *, arguments.size()> pointers{};
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+        pointers[index] = arguments[index].data();
+
+    const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
     ASSERT_TRUE(parsed) << parsed.error().message;
-    EXPECT_EQ(parsed->config.bind_address, "127.0.0.1");
-    EXPECT_EQ(parsed->config.bearer_token.size(), 64U);
-    EXPECT_NE(parsed->config.bearer_token, "inherited-token-must-not-be-used");
-    EXPECT_FALSE(parsed->config.workspace_store.empty());
+    EXPECT_TRUE(parsed->config.connection_file.empty());
 }
 
 TEST(ServerConfig, AppliesDefaultsThenConfigFileThenCommandLineOverrides) {

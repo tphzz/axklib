@@ -29,6 +29,9 @@ tauri-plugin-fs = "2.5.1"
 tauri-plugin-log = "2"
 url = "2.5.7"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
 [profile.release]
 codegen-units = 1
 lto = true

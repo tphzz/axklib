@@ -2361,23 +2361,20 @@ Result<std::vector<detail::AlterationPatch>> collect_patches(const TransactionSt
     return patches;
 }
 
-Result<std::filesystem::path> copy_to_unique_temporary(const std::filesystem::path &source,
+Result<std::filesystem::path> copy_to_unique_temporary(const RandomAccessReader &source,
                                                        const std::filesystem::path &output) {
-    auto input = FileReader::open(source);
-    if (!input)
-        return std::unexpected{input.error()};
     auto temporary = detail::reserve_temporary_file(output);
     if (!temporary)
         return std::unexpected{temporary.error()};
-    if (auto resized = detail::resize_temporary_file(*temporary, (*input)->size()); !resized) {
+    if (auto resized = detail::resize_temporary_file(*temporary, source.size()); !resized) {
         detail::discard_temporary_file(*temporary);
         return std::unexpected{resized.error()};
     }
-    std::vector<std::byte> buffer(static_cast<std::size_t>(std::min<std::uint64_t>((*input)->size(), 1024U * 1024U)));
-    for (std::uint64_t offset = 0U; offset < (*input)->size(); offset += buffer.size()) {
-        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), (*input)->size() - offset));
+    std::vector<std::byte> buffer(static_cast<std::size_t>(std::min<std::uint64_t>(source.size(), 1024U * 1024U)));
+    for (std::uint64_t offset = 0U; offset < source.size(); offset += buffer.size()) {
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), source.size() - offset));
         auto bytes = std::span{buffer}.first(count);
-        if (auto read = (*input)->read_exact_at(offset, bytes); !read) {
+        if (auto read = source.read_exact_at(offset, bytes); !read) {
             detail::discard_temporary_file(*temporary);
             return std::unexpected{read.error()};
         }
@@ -2403,6 +2400,52 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
     auto actual = open_image(temporary, options);
     if (!actual)
         return std::unexpected{actual.error()};
+    auto expected_patches = collect_patches(state, cancellation);
+    if (!expected_patches)
+        return std::unexpected{expected_patches.error()};
+    auto written_image = FileReader::open(temporary);
+    if (!written_image)
+        return std::unexpected{written_image.error()};
+    if ((*written_image)->size() != state.source->size())
+        return std::unexpected{transaction_error("post-write image size differs from the planned snapshot")};
+    constexpr std::size_t comparison_chunk_size = 1024U * 1024U;
+    std::vector<std::byte> source_bytes(comparison_chunk_size);
+    std::vector<std::byte> written_bytes(comparison_chunk_size);
+    std::size_t patch_index{};
+    for (std::uint64_t offset = 0U; offset < state.source->size();) {
+        if (const auto checked = cancellation.check(); !checked)
+            return std::unexpected{checked.error()};
+        const auto count =
+            static_cast<std::size_t>(std::min<std::uint64_t>(comparison_chunk_size, state.source->size() - offset));
+        auto expected = std::span{source_bytes}.first(count);
+        auto observed = std::span{written_bytes}.first(count);
+        if (auto read = state.source->read_exact_at(offset, expected); !read)
+            return std::unexpected{read.error()};
+        if (auto read = (*written_image)->read_exact_at(offset, observed); !read)
+            return std::unexpected{read.error()};
+        while (patch_index < expected_patches->size() &&
+               (*expected_patches)[patch_index].offset + (*expected_patches)[patch_index].replacement.size() <=
+                   offset) {
+            ++patch_index;
+        }
+        for (auto index = patch_index; index < expected_patches->size(); ++index) {
+            const auto &patch = (*expected_patches)[index];
+            if (patch.offset >= offset + count)
+                break;
+            const auto overlap_begin = std::max(patch.offset, offset);
+            const auto overlap_end = std::min<std::uint64_t>(patch.offset + patch.replacement.size(), offset + count);
+            const auto replacement_offset = static_cast<std::size_t>(overlap_begin - patch.offset);
+            const auto destination_offset = static_cast<std::size_t>(overlap_begin - offset);
+            const auto overlap_size = static_cast<std::size_t>(overlap_end - overlap_begin);
+            std::ranges::copy(std::span{patch.replacement}.subspan(replacement_offset, overlap_size),
+                              expected.begin() + static_cast<std::ptrdiff_t>(destination_offset));
+        }
+        if (!std::ranges::equal(expected, observed))
+            return std::unexpected{transaction_error("post-write image differs from the complete planned snapshot")};
+        offset += count;
+    }
+    if (actual->partitions().size() != state.container.partitions().size())
+        return std::unexpected{transaction_error("post-write validation changed the partition set")};
     for (const auto &[index, expected] : state.partitions) {
         const auto partition = std::ranges::find(actual->partitions(), PartitionIndex{index}, &Partition::index);
         if (partition == actual->partitions().end())
@@ -2463,13 +2506,13 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
                 std::ranges::find(partition->records, source_record.sfs_id, &IndexRecord::sfs_id);
             if (written_record == partition->records.end())
                 return std::unexpected{transaction_error("post-write validation lost an unchanged SFS record")};
-            auto source_index = read_raw(state.container.source_path(), source_record.record_offset.value, 72U);
-            if (!source_index)
-                return std::unexpected{source_index.error()};
+            std::array<std::byte, 72> source_index{};
+            if (auto read = state.source->read_exact_at(source_record.record_offset.value, source_index); !read)
+                return std::unexpected{read.error()};
             auto written_index = read_raw(temporary, written_record->record_offset.value, 72U);
             if (!written_index)
                 return std::unexpected{written_index.error()};
-            if (*source_index != *written_index)
+            if (!std::ranges::equal(source_index, *written_index))
                 return std::unexpected{transaction_error("post-write validation changed untouched SFS ID " +
                                                          std::to_string(source_record.sfs_id.value) + " index record")};
             constexpr std::size_t comparison_chunk_size = 1024U * 1024U;
@@ -2548,6 +2591,10 @@ Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAcce
     if (!container)
         return std::unexpected{container.error()};
     TransactionState state{std::move(source), std::move(*container), {}, {}, {}, {}, {}};
+    if (state.container.superblock().sector_size_bytes != 512U) {
+        return std::unexpected{
+            transaction_error("source sector size is outside the supported 512-byte alteration profile")};
+    }
     if (std::ranges::any_of(state.container.diagnostics(), [](const Error &error) {
             return error.code == ErrorCode::container_invalid_geometry ||
                    error.code == ErrorCode::container_partition_out_of_range;
@@ -2638,7 +2685,7 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
         !distinct) {
         return std::unexpected{distinct.error()};
     }
-    auto temporary_result = copy_to_unique_temporary(state.container.source_path(), output_path);
+    auto temporary_result = copy_to_unique_temporary(*state.source, output_path);
     if (!temporary_result)
         return std::unexpected{temporary_result.error()};
     const auto temporary = std::move(*temporary_result);

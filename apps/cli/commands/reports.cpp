@@ -3,8 +3,6 @@
 #include <string>
 #include <vector>
 
-#include <nlohmann/json.hpp>
-
 #include "handlers.hpp"
 #include "local_operations.hpp"
 #include "requests.hpp"
@@ -13,8 +11,6 @@
 #include "axklib/utf8.hpp"
 
 namespace axk::cli::commands {
-
-using Json = nlohmann::json;
 
 int run_objects_request(const axk::cli::ObjectsRequest &request) {
     if (!request.output_directory)
@@ -28,32 +24,23 @@ int run_objects_request(const axk::cli::ObjectsRequest &request) {
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
     if (!runtime)
         return axk::cli::report_application_failure(runtime.error());
-    auto sources = Json::array();
+    std::vector<app::FileRef> sources;
     for (const auto &path : paths) {
         auto reference = (*runtime)->file_ref(path);
         if (!reference)
             return axk::cli::report_application_failure(reference.error());
-        sources.push_back({{"rootId", reference->root_id}, {"relativePath", reference->relative_path}});
+        sources.push_back(std::move(*reference));
     }
     auto destination = (*runtime)->directory_ref(*request.output_directory);
     if (!destination)
         return axk::cli::report_application_failure(destination.error());
-    Json input{{"sources", std::move(sources)},
-               {"destination", {{"rootId", destination->root_id}, {"relativePath", destination->relative_path}}},
-               {"overwrite", request.overwrite},
-               {"strict", request.strict},
-               {"includePayloads", request.with_payloads},
-               {"pretty", request.pretty}};
-    if (request.object_type)
-        input["objectType"] = *request.object_type;
-    auto result = (*runtime)->invoke("report.objects", input);
+    auto result = (*runtime)->report("report.objects", sources, *destination, request.overwrite, request.strict,
+                                     request.with_payloads, request.pretty, request.object_type);
     if (!result)
         return axk::cli::report_application_failure(result.error());
-    std::cout << "objects=" << result->at("rowCount").get<std::size_t>()
-              << " load_errors=" << result->at("failedCount").get<std::size_t>() << '\n';
+    std::cout << "objects=" << result->row_count << " load_errors=" << result->failed_count << '\n';
     std::cout << "reports written to " << axk::text::path_to_utf8(*request.output_directory) << '\n';
-    return exit_code(result->at("failedCount").get<std::size_t>() == 0U ? ExitStatus::success
-                                                                        : ExitStatus::diagnostics);
+    return exit_code(result->failed_count == 0U ? ExitStatus::success : ExitStatus::diagnostics);
 }
 
 int run_inventory_request(const axk::cli::InventoryRequest &request) {
@@ -66,30 +53,23 @@ int run_inventory_request(const axk::cli::InventoryRequest &request) {
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
     if (!runtime)
         return axk::cli::report_application_failure(runtime.error());
-    auto sources = Json::array();
+    std::vector<app::FileRef> sources;
     for (const auto &path : paths) {
         auto reference = (*runtime)->file_ref(path);
         if (!reference)
             return axk::cli::report_application_failure(reference.error());
-        sources.push_back({{"rootId", reference->root_id}, {"relativePath", reference->relative_path}});
+        sources.push_back(std::move(*reference));
     }
     auto destination = (*runtime)->directory_ref(request.output_directory);
     if (!destination)
         return axk::cli::report_application_failure(destination.error());
-    auto result = (*runtime)->invoke(
-        "report.inventory",
-        {{"sources", std::move(sources)},
-         {"destination", {{"rootId", destination->root_id}, {"relativePath", destination->relative_path}}},
-         {"overwrite", request.overwrite},
-         {"strict", request.strict}});
+    auto result = (*runtime)->report("report.inventory", sources, *destination, request.overwrite, request.strict);
     if (!result)
         return axk::cli::report_application_failure(result.error());
-    std::cout << "objects=" << result->at("rowCount").get<std::size_t>()
-              << " decode_issues=" << result->at("decodeIssueCount").get<std::size_t>()
-              << " load_errors=" << result->at("failedCount").get<std::size_t>() << '\n';
+    std::cout << "objects=" << result->row_count << " decode_issues=" << result->decode_issue_count
+              << " load_errors=" << result->failed_count << '\n';
     std::cout << "reports written to " << axk::text::path_to_utf8(request.output_directory) << '\n';
-    return exit_code(result->at("failedCount").get<std::size_t>() == 0U ? ExitStatus::success
-                                                                        : ExitStatus::diagnostics);
+    return exit_code(result->failed_count == 0U ? ExitStatus::success : ExitStatus::diagnostics);
 }
 
 int run_orphans_request(const axk::cli::OrphansRequest &request) {
@@ -102,29 +82,24 @@ int run_orphans_request(const axk::cli::OrphansRequest &request) {
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
     if (!runtime)
         return axk::cli::report_application_failure(runtime.error());
-    auto sources = Json::array();
+    std::vector<app::FileRef> sources;
     for (const auto &path : paths) {
         auto reference = (*runtime)->file_ref(path);
         if (!reference)
             return axk::cli::report_application_failure(reference.error());
-        sources.push_back({{"rootId", reference->root_id}, {"relativePath", reference->relative_path}});
+        sources.push_back(std::move(*reference));
     }
     auto destination = (*runtime)->directory_ref(request.output_directory);
     if (!destination)
         return axk::cli::report_application_failure(destination.error());
-    auto result = (*runtime)->invoke(
-        "report.orphans",
-        {{"sources", std::move(sources)},
-         {"destination", {{"rootId", destination->root_id}, {"relativePath", destination->relative_path}}},
-         {"overwrite", request.overwrite}});
+    auto result = (*runtime)->report_orphans(sources, *destination, request.overwrite);
     if (!result)
         return axk::cli::report_application_failure(result.error());
-    for (const auto &summary : result->at("summaries")) {
-        std::cout << "image=" << summary.at("sourcePath").get<std::string>()
-                  << " wave_data=" << summary.at("waveformCount").get<std::size_t>()
-                  << " referenced=" << summary.at("referencedCount").get<std::size_t>()
-                  << " known_unreferenced=" << summary.at("knownUnreferencedCount").get<std::size_t>()
-                  << " ambiguous_or_unresolved=" << summary.at("ambiguousOrUnresolvedCount").get<std::size_t>() << '\n';
+    for (const auto &summary : *result) {
+        std::cout << "image=" << summary.source_path << " wave_data=" << summary.waveform_count
+                  << " referenced=" << summary.referenced_count
+                  << " known_unreferenced=" << summary.known_unreferenced_count
+                  << " ambiguous_or_unresolved=" << summary.ambiguous_or_unresolved_count << '\n';
     }
     std::cout << "reports written to " << axk::text::path_to_utf8(request.output_directory) << '\n';
     return exit_code(ExitStatus::success);
@@ -147,34 +122,30 @@ int run_validate_request(const axk::cli::ValidateRequest &request) {
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
     if (!runtime)
         return axk::cli::report_application_failure(runtime.error());
-    auto sources = Json::array();
+    std::vector<app::FileRef> sources;
     for (const auto &path : paths) {
         auto reference = (*runtime)->file_ref(path);
         if (!reference)
             return axk::cli::report_application_failure(reference.error());
-        sources.push_back({{"rootId", reference->root_id}, {"relativePath", reference->relative_path}});
+        sources.push_back(std::move(*reference));
     }
     auto destination = (*runtime)->directory_ref(request.output_directory);
     if (!destination)
         return axk::cli::report_application_failure(destination.error());
-    Json input{{"sources", std::move(sources)},
-               {"destination", {{"rootId", destination->root_id}, {"relativePath", destination->relative_path}}},
-               {"policy", request.policy},
-               {"overwrite", request.overwrite}};
+    std::optional<app::DirectoryRef> exports;
     if (request.exports) {
-        auto exports = (*runtime)->directory_ref(*request.exports);
-        if (!exports)
-            return axk::cli::report_application_failure(exports.error());
-        input["exports"] = {{"rootId", exports->root_id}, {"relativePath", exports->relative_path}};
+        auto reference = (*runtime)->directory_ref(*request.exports);
+        if (!reference)
+            return axk::cli::report_application_failure(reference.error());
+        exports = std::move(*reference);
     }
-    auto result = (*runtime)->invoke("report.validate", input);
+    auto result = (*runtime)->report_validation(sources, *destination, exports, request.policy, request.overwrite);
     if (!result)
         return axk::cli::report_application_failure(result.error());
-    const auto failed = result->at("failed").get<bool>();
-    std::cout << "issues=" << result->at("issueCount").get<std::size_t>() << " failed=" << (failed ? "True" : "False")
-              << " policy=" << result->at("policy").get<std::string>() << '\n';
+    std::cout << "issues=" << result->issue_count << " failed=" << (result->failed ? "True" : "False")
+              << " policy=" << result->policy << '\n';
     std::cout << "reports written to " << axk::text::path_to_utf8(request.output_directory) << '\n';
-    return exit_code(failed ? ExitStatus::diagnostics : ExitStatus::success);
+    return exit_code(result->failed ? ExitStatus::diagnostics : ExitStatus::success);
 }
 
 int run_corpus_audit_request(const axk::cli::CorpusAuditRequest &request) {
@@ -187,36 +158,28 @@ int run_corpus_audit_request(const axk::cli::CorpusAuditRequest &request) {
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
     if (!runtime)
         return axk::cli::report_application_failure(runtime.error());
-    auto sources = Json::array();
+    std::vector<app::FileRef> sources;
     for (const auto &path : paths) {
         auto reference = (*runtime)->file_ref(path);
         if (!reference)
             return axk::cli::report_application_failure(reference.error());
-        sources.push_back({{"rootId", reference->root_id}, {"relativePath", reference->relative_path}});
+        sources.push_back(std::move(*reference));
     }
     auto destination = (*runtime)->directory_ref(request.output_directory);
     if (!destination)
         return axk::cli::report_application_failure(destination.error());
-    auto result = (*runtime)->invoke(
-        "corpus.audit",
-        {{"sources", std::move(sources)},
-         {"destination", {{"rootId", destination->root_id}, {"relativePath", destination->relative_path}}},
-         {"policy", request.policy},
-         {"waveSmokeLimit", request.wave_smoke_limit},
-         {"skipWaveSmoke", request.skip_wave_smoke},
-         {"overwrite", request.overwrite}});
+    auto result = (*runtime)->corpus_audit(sources, *destination, request.policy, request.wave_smoke_limit,
+                                           request.skip_wave_smoke, request.overwrite);
     if (!result)
         return axk::cli::report_application_failure(result.error());
-    std::cout << "containers=" << result->at("loadedCount").get<std::size_t>()
-              << " objects=" << result->at("objectCount").get<std::size_t>()
-              << " validation_issues=" << result->at("validationIssueCount").get<std::size_t>()
-              << " relationships=" << result->at("relationshipCount").get<std::size_t>()
-              << " wave_smoke=" << result->at("waveSmokeDecoded").get<std::size_t>() << '/'
-              << result->at("waveSmokeErrorCount").get<std::size_t>() << '\n';
+    std::cout << "containers=" << result->loaded_count << " objects=" << result->object_count
+              << " validation_issues=" << result->validation_issue_count
+              << " relationships=" << result->relationship_count << " wave_smoke=" << result->wave_smoke_decoded << '/'
+              << result->wave_smoke_error_count << '\n';
     std::cout << "reports written to " << axk::text::path_to_utf8(request.output_directory) << '\n';
-    if (result->at("failedCount").get<std::size_t>() != 0U)
+    if (result->failed_count != 0U)
         return exit_code(ExitStatus::diagnostics);
-    return exit_code(result->at("validationFailed").get<bool>() ? ExitStatus::diagnostics : ExitStatus::success);
+    return exit_code(result->validation_failed ? ExitStatus::diagnostics : ExitStatus::success);
 }
 
 } // namespace axk::cli::commands

@@ -30,7 +30,7 @@ namespace {
 
 constexpr std::array<std::byte, 8> journal_magic{
     std::byte{'A'}, std::byte{'X'}, std::byte{'K'}, std::byte{'J'},
-    std::byte{'N'}, std::byte{'L'}, std::byte{'0'}, std::byte{'1'},
+    std::byte{'N'}, std::byte{'L'}, std::byte{'0'}, std::byte{'2'},
 };
 constexpr std::byte prepared_state{0U};
 constexpr std::size_t checksum_size = 64U;
@@ -79,6 +79,7 @@ std::string checksum(std::span<const std::byte> bytes) {
 struct Journal {
     std::byte state{prepared_state};
     axk::app::FileRef target;
+    std::string target_identity;
     std::uint64_t image_size_bytes{};
     std::vector<axk::app::AlterationJournalPatch> patches;
 };
@@ -86,6 +87,7 @@ struct Journal {
 axk::app::Result<std::vector<std::byte>> encode_journal(const Journal &journal, std::size_t maximum_bytes) {
     if (journal.target.root_id.size() > std::numeric_limits<std::uint32_t>::max() ||
         journal.target.relative_path.size() > std::numeric_limits<std::uint32_t>::max() ||
+        journal.target_identity.size() > std::numeric_limits<std::uint32_t>::max() ||
         journal.patches.size() > std::numeric_limits<std::uint32_t>::max()) {
         return std::unexpected(journal_error("alteration journal metadata exceeds supported limits"));
     }
@@ -96,6 +98,7 @@ axk::app::Result<std::vector<std::byte>> encode_journal(const Journal &journal, 
     bytes.insert(bytes.end(), 7U, std::byte{0U});
     append_u32(bytes, static_cast<std::uint32_t>(journal.target.root_id.size()));
     append_u32(bytes, static_cast<std::uint32_t>(journal.target.relative_path.size()));
+    append_u32(bytes, static_cast<std::uint32_t>(journal.target_identity.size()));
     append_u64(bytes, journal.image_size_bytes);
     append_u32(bytes, static_cast<std::uint32_t>(journal.patches.size()));
     bytes.insert(bytes.end(), reinterpret_cast<const std::byte *>(journal.target.root_id.data()),
@@ -103,6 +106,8 @@ axk::app::Result<std::vector<std::byte>> encode_journal(const Journal &journal, 
     bytes.insert(
         bytes.end(), reinterpret_cast<const std::byte *>(journal.target.relative_path.data()),
         reinterpret_cast<const std::byte *>(journal.target.relative_path.data() + journal.target.relative_path.size()));
+    bytes.insert(bytes.end(), reinterpret_cast<const std::byte *>(journal.target_identity.data()),
+                 reinterpret_cast<const std::byte *>(journal.target_identity.data() + journal.target_identity.size()));
     for (const auto &patch : journal.patches) {
         if (patch.original.size() != patch.replacement.size())
             return std::unexpected(journal_error("alteration patch changes the image size"));
@@ -124,7 +129,7 @@ axk::app::Result<std::vector<std::byte>> encode_journal(const Journal &journal, 
 }
 
 axk::app::Result<Journal> decode_journal(std::span<const std::byte> bytes, std::size_t maximum_bytes) {
-    if (bytes.size() > maximum_bytes || bytes.size() < 36U + checksum_size ||
+    if (bytes.size() > maximum_bytes || bytes.size() < 40U + checksum_size ||
         !std::ranges::equal(journal_magic, bytes.first(journal_magic.size()))) {
         return std::unexpected(journal_error("alteration journal has an invalid header"));
     }
@@ -139,12 +144,20 @@ axk::app::Result<Journal> decode_journal(std::span<const std::byte> bytes, std::
     std::size_t offset = 16U;
     const auto root_size = read_u32(payload, offset);
     const auto path_size = read_u32(payload, offset);
+    const auto identity_size = read_u32(payload, offset);
     const auto image_size = read_u64(payload, offset);
     const auto patch_count = read_u32(payload, offset);
-    if (!root_size || !path_size || !image_size || !patch_count)
-        return std::unexpected(root_size ? path_size ? image_size ? patch_count.error() : image_size.error()
-                                                     : path_size.error()
-                                         : root_size.error());
+    if (!root_size || !path_size || !identity_size || !image_size || !patch_count) {
+        if (!root_size)
+            return std::unexpected(root_size.error());
+        if (!path_size)
+            return std::unexpected(path_size.error());
+        if (!identity_size)
+            return std::unexpected(identity_size.error());
+        if (!image_size)
+            return std::unexpected(image_size.error());
+        return std::unexpected(patch_count.error());
+    }
     if (offset > payload.size() || *root_size > payload.size() - offset)
         return std::unexpected(journal_error("alteration journal root is truncated"));
     journal.target.root_id.assign(reinterpret_cast<const char *>(payload.data() + offset), *root_size);
@@ -153,6 +166,10 @@ axk::app::Result<Journal> decode_journal(std::span<const std::byte> bytes, std::
         return std::unexpected(journal_error("alteration journal path is truncated"));
     journal.target.relative_path.assign(reinterpret_cast<const char *>(payload.data() + offset), *path_size);
     offset += *path_size;
+    if (offset > payload.size() || *identity_size > payload.size() - offset)
+        return std::unexpected(journal_error("alteration journal target identity is truncated"));
+    journal.target_identity.assign(reinterpret_cast<const char *>(payload.data() + offset), *identity_size);
+    offset += *identity_size;
     journal.image_size_bytes = *image_size;
     journal.patches.reserve(*patch_count);
     for (std::uint32_t index = 0U; index < *patch_count; ++index) {
@@ -287,9 +304,11 @@ axk::app::Result<bool> is_committed(const std::filesystem::path &path, std::span
 
 axk::app::AlterationJournalStore::AlterationJournalStore(std::filesystem::path directory,
                                                          std::size_t maximum_journal_bytes,
-                                                         InterruptionHook interruption_hook)
+                                                         InterruptionHook interruption_hook,
+                                                         std::size_t maximum_patch_write_bytes)
     : directory_(std::move(directory)), maximum_journal_bytes_(std::max<std::size_t>(maximum_journal_bytes, 1U)),
-      interruption_hook_(std::move(interruption_hook)) {
+      interruption_hook_(std::move(interruption_hook)),
+      maximum_patch_write_bytes_(std::max<std::size_t>(maximum_patch_write_bytes, 1U)) {
     const auto available = detail::prepare_private_directory(directory_).has_value();
     storage_available_.store(available, std::memory_order_relaxed);
     storage_ready_.store(available, std::memory_order_relaxed);
@@ -302,7 +321,8 @@ bool axk::app::AlterationJournalStore::storage_ready() const noexcept {
 axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared_ptr<SandboxMutation> &target,
                                                                std::uint64_t image_size_bytes,
                                                                std::span<const AlterationJournalPatch> patches,
-                                                               const CancellationToken &cancellation) {
+                                                               const CancellationToken &cancellation,
+                                                               const std::function<Result<void>()> &validate) {
     if (!storage_ready())
         return std::unexpected(journal_error("alteration journal storage is not ready"));
     if (!target || target->size() != image_size_bytes)
@@ -316,7 +336,11 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
             return compared;
     }
 
-    Journal journal{prepared_state, target->reference(), image_size_bytes, {patches.begin(), patches.end()}};
+    const auto target_identity = target->stable_identity();
+    if (target_identity.empty())
+        return std::unexpected(journal_error("alteration target identity is unavailable"));
+    Journal journal{
+        prepared_state, target->reference(), target_identity, image_size_bytes, {patches.begin(), patches.end()}};
     auto encoded = encode_journal(journal, maximum_journal_bytes_);
     if (!encoded)
         return std::unexpected(encoded.error());
@@ -372,12 +396,27 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
         }
         return {};
     };
+    std::size_t write_chunk_index{};
     for (std::size_t index = 0U; index < patches.size(); ++index) {
         const auto &patch = patches[index];
-        if (auto written = target->write_exact_at(patch.offset, patch.replacement); !written) {
-            if (auto recovered = rollback_and_remove(false); !recovered)
-                return recovered;
-            return written;
+        std::size_t replacement_offset{};
+        while (replacement_offset < patch.replacement.size()) {
+            const auto chunk_size = std::min(maximum_patch_write_bytes_, patch.replacement.size() - replacement_offset);
+            const auto chunk = std::span{patch.replacement}.subspan(replacement_offset, chunk_size);
+            if (auto written = target->write_exact_at(patch.offset + replacement_offset, chunk); !written) {
+                if (auto recovered = rollback_and_remove(false); !recovered)
+                    return recovered;
+                return written;
+            }
+            replacement_offset += chunk_size;
+            if (interruption_hook_ && interruption_hook_("after-patch-chunk", write_chunk_index++)) {
+                if (auto flushed = target->flush(); !flushed) {
+                    quarantine();
+                    return flushed;
+                }
+                quarantine();
+                return std::unexpected(journal_error("simulated alteration interruption", true));
+            }
         }
         if (interruption_hook_ && interruption_hook_("after-patch", index)) {
             if (auto flushed = target->flush(); !flushed) {
@@ -405,6 +444,18 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
             return compared;
         }
     }
+    if (validate) {
+        if (auto validated = validate(); !validated) {
+            if (auto recovered = rollback_and_remove(false); !recovered)
+                return recovered;
+            return validated;
+        }
+        if (auto bound = target->verify_bound(); !bound) {
+            if (auto recovered = rollback_and_remove(false); !recovered)
+                return recovered;
+            return bound;
+        }
+    }
     const auto marker = commit_marker_path(path);
     if (auto created = detail::create_private_file(marker); !created) {
         if (auto recovered = rollback_and_remove(true); !recovered)
@@ -419,11 +470,11 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
     }
     if (interruption_hook_ && interruption_hook_("after-commit-marker", patches.size())) {
         quarantine();
-        return std::unexpected(journal_error("simulated alteration interruption", true));
+        return {};
     }
     if (auto removed = remove_completed_journal(path); !removed) {
         quarantine();
-        return removed;
+        return {};
     }
     return {};
 }
@@ -464,6 +515,8 @@ axk::app::Result<void> axk::app::AlterationJournalStore::recover(const Sandbox &
             return std::unexpected(target.error());
         if ((*target)->size() != journal->image_size_bytes)
             return std::unexpected(journal_error("journal target size changed", true));
+        if ((*target)->stable_identity() != journal->target_identity)
+            return std::unexpected(journal_error("journal target identity changed", true));
         if (*committed) {
             for (const auto &patch : journal->patches) {
                 if (auto compared = compare_patch(**target, patch, true); !compared)
@@ -474,7 +527,11 @@ axk::app::Result<void> axk::app::AlterationJournalStore::recover(const Sandbox &
                 std::vector<std::byte> current(patch.original.size());
                 if (auto read = (*target)->read_exact_at(patch.offset, current); !read)
                     return std::unexpected(journal_error(read.error().message));
-                if (!std::ranges::equal(current, patch.original) && !std::ranges::equal(current, patch.replacement)) {
+                const auto recognized =
+                    std::ranges::all_of(std::views::iota(std::size_t{0}, current.size()), [&](std::size_t index) {
+                        return current[index] == patch.original[index] || current[index] == patch.replacement[index];
+                    });
+                if (!recognized) {
                     return std::unexpected(journal_error("uncommitted journal target changed unexpectedly", true));
                 }
             }

@@ -31,10 +31,6 @@ namespace {
 
 using Json = nlohmann::json;
 
-Json file_ref_json(const app::FileRef &reference) {
-    return {{"rootId", reference.root_id}, {"relativePath", reference.relative_path}};
-}
-
 Error argument_error(std::string message) {
     return make_error(ErrorCode::invalid_argument, ErrorCategory::internal, std::move(message));
 }
@@ -210,39 +206,16 @@ int run_package_export(const axk::cli::PackageExportRequest &request) {
     if (!output_ref)
         return report_application_failure(output_ref.error());
 
-    auto service_roots = Json::array();
-    for (const auto &root : roots) {
-        Json value{{"kind", std::string{package_root_kind_name(root.kind)}},
-                   {"groupName", root.group_name},
-                   {"volumeName", root.volume_name},
-                   {"objectName", root.object_name}};
-        if (root.partition_index)
-            value["partitionIndex"] = static_cast<std::uint32_t>(*root.partition_index);
-        service_roots.push_back(std::move(value));
-    }
-    const Json input{{"source", file_ref_json(*source_ref)},
-                     {"output", file_ref_json(*output_ref)},
-                     {"roots", std::move(service_roots)},
-                     {"overwrite", request.overwrite}};
-    auto result = (*runtime)->invoke("package.export", input);
+    auto result = (*runtime)->package_export(*source_ref, *output_ref, roots, request.overwrite);
     if (!result)
         return report_application_failure(result.error());
-    const auto &output = result->at("output");
-    const app::FileRef effective_output{output.at("rootId").get<std::string>(),
-                                        output.at("relativePath").get<std::string>()};
-    auto output_path = (*runtime)->resolve_file(effective_output);
-    if (!output_path)
-        return report_application_failure(output_path.error());
-    auto projected = schema::package_v1::project_package(*output_path, *result);
-    if (!projected)
-        return report_failure(projected.error());
     if (request.format == "json") {
-        auto serialized = schema::package_v1::serialize(*projected, false);
+        auto serialized = schema::package_v1::serialize(*result, false);
         if (!serialized)
             return report_failure(serialized.error());
         std::cout << *serialized << '\n';
     } else {
-        print_package_summary(*projected, false);
+        print_package_summary(*result, false);
     }
     return exit_code(ExitStatus::success);
 }
@@ -255,23 +228,18 @@ int run_package_inspect(const axk::cli::PackageReadRequest &request, bool verify
     auto package_ref = (*runtime)->file_ref(request.package);
     if (!package_ref)
         return report_application_failure(package_ref.error());
-    const auto operation = verify_only ? "package.verify" : "package.inspect";
-    const Json input{{"package", {{"fileRef", file_ref_json(*package_ref)}}}};
-    auto result = (*runtime)->invoke(operation, input);
+    auto result = (*runtime)->package_inspect(request.package, *package_ref, verify_only);
     if (!result)
         return report_application_failure(result.error());
-    auto projected = schema::package_v1::project_package(request.package, *result);
-    if (!projected)
-        return report_failure(projected.error());
     if (request.format == "json") {
-        auto serialized = schema::package_v1::serialize(*projected, false);
+        auto serialized = schema::package_v1::serialize(*result, false);
         if (!serialized)
             return report_failure(serialized.error());
         std::cout << *serialized << '\n';
     } else {
-        print_package_summary(*projected, verify_only);
+        print_package_summary(*result, verify_only);
     }
-    return exit_code(projected->valid ? ExitStatus::success : ExitStatus::diagnostics);
+    return exit_code(result->valid ? ExitStatus::success : ExitStatus::diagnostics);
 }
 
 int run_package_import(const axk::cli::PackageImportRequest &request) {
@@ -310,57 +278,20 @@ int run_package_import(const axk::cli::PackageImportRequest &request) {
         output_ref = (*runtime)->scratch_file_ref("package-plan-output.tmp");
     }
 
-    auto package_inputs = Json::array();
+    std::vector<app::FileRef> package_inputs;
     for (const auto &path : request.packages) {
         auto package_ref = (*runtime)->file_ref(path);
         if (!package_ref)
             return report_application_failure(package_ref.error());
-        package_inputs.push_back({{"fileRef", file_ref_json(*package_ref)}});
-    }
-    auto destinations = Json::array();
-    for (const auto &destination : internal_request.root_destinations) {
-        Json value{{"packageIndex", destination.package_index}, {"rootIndex", destination.root_index},
-                   {"groupName", destination.group_name},       {"volumeName", destination.volume_name},
-                   {"rawGroup", destination.raw_group},         {"rawVolume", destination.raw_volume},
-                   {"create", destination.create_destination}};
-        if (destination.partition_index)
-            value["partitionIndex"] = static_cast<std::uint32_t>(*destination.partition_index);
-        destinations.push_back(std::move(value));
-    }
-    auto renames = Json::array();
-    for (const auto &rename : internal_request.policy.renames) {
-        renames.push_back({{"packageIndex", rename.package_index},
-                           {"nodeId", rename.node_id},
-                           {"destinationName", rename.destination_name}});
-    }
-    const Json input{{"target", file_ref_json(*target_ref)},  {"output", file_ref_json(output_ref)},
-                     {"packages", std::move(package_inputs)}, {"destinations", std::move(destinations)},
-                     {"renames", std::move(renames)},         {"overwrite", request.overwrite}};
-    auto plan = (*runtime)->invoke("package.plan_import", input);
-    if (!plan)
-        return report_application_failure(plan.error());
-
-    std::optional<std::filesystem::path> output_path;
-    std::optional<Json> application_result;
-    if (request.apply && plan->at("valid").get<bool>()) {
-        if (!request.output)
-            return report_failure(argument_error("package import output path is required"));
-        auto applied = (*runtime)->invoke("package.import", {{"planToken", plan->at("planToken").get<std::string>()}});
-        if (!applied)
-            return report_application_failure(applied.error());
-        application_result = std::move(*applied);
-        const auto &output = application_result->at("output");
-        auto resolved = (*runtime)->resolve_file(
-            {output.at("rootId").get<std::string>(), output.at("relativePath").get<std::string>()});
-        if (!resolved)
-            return report_application_failure(resolved.error());
-        output_path = std::move(*resolved);
+        package_inputs.push_back(std::move(*package_ref));
     }
 
-    auto projected = schema::package_v1::project_plan(request.target, request.packages, *plan, output_path,
-                                                      application_result ? &*application_result : nullptr);
+    if (request.apply && !request.output)
+        return report_failure(argument_error("package import output path is required"));
+    auto projected = (*runtime)->package_import(request.target, request.packages, *target_ref, output_ref,
+                                                package_inputs, internal_request, request.apply, request.overwrite);
     if (!projected)
-        return report_failure(projected.error());
+        return report_application_failure(projected.error());
     if (request.format == "json") {
         auto serialized = schema::package_v1::serialize(*projected, false);
         if (!serialized)

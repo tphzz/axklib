@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -251,6 +252,45 @@ void patch_partition_header_be32(const std::filesystem::path &path, const axk::P
     }
 }
 
+void convert_to_parseable_1024_byte_sector_geometry(const std::filesystem::path &path,
+                                                    const axk::Container &container) {
+    ASSERT_EQ(container.superblock().sector_size_bytes, 512U);
+    ASSERT_EQ(container.superblock().total_sector_count % 2U, 0U);
+    ASSERT_EQ(container.partitions().size(), 1U);
+    const auto &partition = container.partitions().front();
+    ASSERT_EQ(partition.sectors_per_cluster, 2U);
+    ASSERT_EQ(partition.start_sector % 2U, 1U);
+    const auto aligned_start = partition.start_sector - 1U;
+    const auto partition_source = static_cast<std::size_t>(partition.start_sector) * 512U;
+    const auto partition_destination = static_cast<std::size_t>(aligned_start) * 512U;
+    const auto partition_bytes = static_cast<std::size_t>(partition.sector_count) * 512U;
+    auto image = bytes(path);
+    ASSERT_LE(partition_source + partition_bytes, image.size());
+    std::memmove(image.data() + partition_destination, image.data() + partition_source, partition_bytes);
+    std::fill(image.begin() + static_cast<std::ptrdiff_t>(partition_destination + partition_bytes), image.end(), '\0');
+
+    const auto put_be32 = [&](std::size_t offset, std::uint32_t value) {
+        ASSERT_LE(offset + 4U, image.size());
+        image[offset] = static_cast<char>((value >> 24U) & 0xffU);
+        image[offset + 1U] = static_cast<char>((value >> 16U) & 0xffU);
+        image[offset + 2U] = static_cast<char>((value >> 8U) & 0xffU);
+        image[offset + 3U] = static_cast<char>(value & 0xffU);
+    };
+    put_be32(0x09cU, 1024U);
+    put_be32(0x0a0U, container.superblock().total_sector_count / 2U);
+    const auto table_offset = 0x0a8U + static_cast<std::size_t>(partition.index.value) * 8U;
+    put_be32(table_offset, aligned_start / 2U);
+    put_be32(table_offset + 4U, (container.superblock().total_sector_count - aligned_start) / 2U);
+    put_be32(partition_destination + 0x94U, 1U);
+    put_be32(partition_destination + 1024U + 0x94U, 1U);
+    std::copy_n(image.begin(), 512U, image.begin() + 1024U);
+
+    std::ofstream output{path, std::ios::binary | std::ios::trunc};
+    ASSERT_TRUE(output);
+    output.write(image.data(), static_cast<std::streamsize>(image.size()));
+    ASSERT_TRUE(output);
+}
+
 void patch_record_name(const std::filesystem::path &path, const axk::Partition &partition,
                        const axk::IndexRecord &record, std::size_t payload_offset, std::string_view name) {
     ASSERT_LE(name.size(), 16U);
@@ -488,6 +528,29 @@ TEST(Alteration, DeleteVolumeDryRunMatchesApplyAndPreservesSource) {
     EXPECT_FALSE(
         std::ranges::any_of(root_record.directory_entries, [](const auto &entry) { return entry.name == "Removed"; }));
     EXPECT_FALSE(axk::alter_hds(source, *manifest, output));
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, RejectsParseableNon512ByteSectorGeometryBeforePlanning) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-sector-profile";
+    const auto source = root / "source.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
+    const auto original = axk::open_image(source);
+    ASSERT_TRUE(original) << original.error().message;
+    convert_to_parseable_1024_byte_sector_geometry(source, *original);
+    const auto converted = axk::open_image(source);
+    ASSERT_TRUE(converted) << converted.error().message;
+    EXPECT_EQ(converted->superblock().sector_size_bytes, 1024U);
+    const auto manifest = axk::parse_alteration_manifest(
+        R"({"schema_version":"1.0","operations":[{"id":"rename","type":"rename_volume","partition_index":0,"volume_name":"Retained","new_volume_name":"Renamed"}]})");
+    ASSERT_TRUE(manifest);
+
+    const auto inspected = axk::inspect_hds_alteration(source, *manifest);
+    ASSERT_FALSE(inspected);
+    EXPECT_NE(inspected.error().message.find("512-byte alteration profile"), std::string::npos);
     std::filesystem::remove_all(root, error);
 }
 

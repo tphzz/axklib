@@ -766,6 +766,7 @@ def cli_version(cli: Path) -> dict[str, str]:
 
 
 def exercise(server: Path, cli: Path, fixture: Path) -> None:
+    global TOKEN
     server = server.resolve()
     cli = cli.resolve()
     fixture = fixture.resolve()
@@ -775,7 +776,8 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
     ):
         root_path = Path(root)
         external_path = Path(external)
-        connection_path = root_path / "state" / "connection.json"
+        state_directory = external_path / "server-state"
+        connection_path = external_path / "connection" / "connection.json"
         (root_path / "download.bin").write_bytes(b"abcdef")
         (root_path / "archive-source" / "nested").mkdir(parents=True)
         (root_path / "reports" / "server").mkdir(parents=True)
@@ -852,7 +854,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
         (object_directory / "SMP00001").write_bytes(b"FSFSDEV3SPLX")
         (ordinary_directory / "readme.txt").write_text("ordinary", encoding="utf-8")
         server_log_path = root_path / "server.log"
-        workspace_store = root_path / "workspaces.json"
+        workspace_store = external_path / "configuration" / "workspaces.json"
         write_workspace_store(workspace_store, root_path)
         server_log = server_log_path.open("wb")
         process = subprocess.Popen(
@@ -860,12 +862,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 str(server),
                 "--port",
                 "0",
-                "--token",
-                TOKEN,
                 "--workspace-store",
                 str(workspace_store),
                 "--state-directory",
-                str(root_path / "state"),
+                str(state_directory),
                 "--connection-file",
                 str(connection_path),
                 "--allow-origin",
@@ -887,7 +887,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 assert stat.S_IMODE(connection_path.stat().st_mode) == 0o600
             assert connection_metadata["schemaVersion"] == 1
             assert connection_metadata["apiVersion"] == "v1"
-            assert connection_metadata["bearerToken"] == TOKEN
+            generated_token = connection_metadata["bearerToken"]
+            assert len(generated_token) == 64
+            assert all(character in "0123456789abcdef" for character in generated_token)
+            TOKEN = generated_token
             assert connection_metadata["pid"] == process.pid
             port = int(connection_metadata["baseUrl"].split(":")[-1].split("/")[0])
             assert connection_metadata["baseUrl"] == f"http://127.0.0.1:{port}/api/v1"

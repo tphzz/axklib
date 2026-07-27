@@ -146,6 +146,49 @@ TEST_F(WorkspaceStoreTest, TreatsPersistedOverlappingWorkspaceTreesAsAConfigurat
     EXPECT_TRUE(store->sandbox().roots().empty());
 }
 
+TEST_F(WorkspaceStoreTest, RejectsWorkspacesThatOverlapProtectedServerState) {
+    const auto state = base_ / "state";
+    std::filesystem::create_directories(state / "alteration-journals");
+    auto store = axk::server::WorkspaceStore::open(store_path_, {state, store_path_});
+    ASSERT_TRUE(store) << store.error().message;
+
+    for (const auto &protected_overlap :
+         std::array{state, state / "alteration-journals", base_, store_path_.parent_path()}) {
+        auto rejected = store->add("Protected", protected_overlap, false, 0U);
+        ASSERT_FALSE(rejected);
+        EXPECT_EQ(rejected.error().code, "workspace_protected_path");
+        EXPECT_EQ(store->snapshot().revision, 0U);
+    }
+
+    const auto alias = base_ / "state-alias";
+    std::error_code error;
+    std::filesystem::create_directory_symlink(state, alias, error);
+    if (!error) {
+        auto rejected = store->add("Alias", alias, false, 0U);
+        ASSERT_FALSE(rejected);
+        EXPECT_EQ(rejected.error().code, "workspace_protected_path");
+    }
+}
+
+TEST_F(WorkspaceStoreTest, TreatsPersistedProtectedWorkspaceAsConfigurationError) {
+    const auto state = base_ / "state";
+    std::filesystem::create_directories(state);
+    std::filesystem::create_directories(store_path_.parent_path());
+    std::ofstream(store_path_) << nlohmann::json{
+        {"schemaVersion", 1U},
+        {"revision", 1U},
+        {"workspaces", {{{"id", "state"}, {"displayName", "State"}, {"path", state.string()}, {"writable", true}}}},
+    };
+
+    auto store = axk::server::WorkspaceStore::open(store_path_, {state, store_path_});
+    ASSERT_TRUE(store) << store.error().message;
+    const auto snapshot = store->snapshot();
+    EXPECT_EQ(snapshot.state, axk::server::WorkspaceConfigurationState::configuration_error);
+    ASSERT_TRUE(snapshot.configuration_issue);
+    EXPECT_EQ(*snapshot.configuration_issue, "workspace directories must not overlap protected server state");
+    EXPECT_TRUE(store->sandbox().roots().empty());
+}
+
 TEST_F(WorkspaceStoreTest, CorruptStoreRequiresExplicitArchiveAndReset) {
     std::filesystem::create_directories(store_path_.parent_path());
     std::ofstream(store_path_) << "not json";

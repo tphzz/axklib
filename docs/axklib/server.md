@@ -92,7 +92,8 @@ the operating system select a free port. Axkdeck sidecar mode does this and
 generates a high-entropy token automatically. Endpoint metadata is exchanged
 through an owner-only connection file and removed after axkdeck consumes it;
 the token is not passed on the sidecar command line. Connection-file sidecar
-mode deliberately ignores headless config-file and environment settings so a
+mode rejects `--config`, ignores environment configuration, rejects
+caller-supplied token options, and always generates a new token so headless or
 machine-wide LAN configuration cannot change the child process's trust model.
 An owning application may also pass `--parent-pid PID` together with
 `--connection-file`; the server then exits when that process no longer exists.
@@ -128,9 +129,8 @@ and incorrectly typed values are errors. A LAN configuration can be written as:
 
 The scalar environment overrides are `AXKLIB_SERVER_BIND`,
 `AXKLIB_SERVER_PORT`, `AXKLIB_SERVER_TOKEN`,
-`AXKLIB_SERVER_STATE_DIRECTORY`, `AXKLIB_SERVER_CONNECTION_FILE`,
-`AXKLIB_SERVER_WORKERS`, `AXKLIB_SERVER_JOB_WORKERS`,
-`AXKLIB_SERVER_WRITE_JOB_WORKERS`, and
+`AXKLIB_SERVER_STATE_DIRECTORY`, `AXKLIB_SERVER_WORKERS`,
+`AXKLIB_SERVER_JOB_WORKERS`, `AXKLIB_SERVER_WRITE_JOB_WORKERS`, and
 `AXKLIB_SERVER_MAX_QUEUED_JOBS`. Prefer the configuration file for the
 workspace-store override, origins, token hashes, and detailed resource limits.
 

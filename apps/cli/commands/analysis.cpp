@@ -50,28 +50,22 @@ int run_relationships_request(const axk::cli::RelationshipsRequest &request) {
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
     if (!runtime)
         return axk::cli::report_application_failure(runtime.error());
-    auto sources = nlohmann::json::array();
+    std::vector<app::FileRef> sources;
     for (const auto &path : paths) {
         auto reference = (*runtime)->file_ref(path);
         if (!reference)
             return axk::cli::report_application_failure(reference.error());
-        sources.push_back({{"rootId", reference->root_id}, {"relativePath", reference->relative_path}});
+        sources.push_back(std::move(*reference));
     }
     auto destination = (*runtime)->directory_ref(request.output_directory);
     if (!destination)
         return axk::cli::report_application_failure(destination.error());
-    auto result = (*runtime)->invoke(
-        "report.relationships",
-        {{"sources", std::move(sources)},
-         {"destination", {{"rootId", destination->root_id}, {"relativePath", destination->relative_path}}},
-         {"overwrite", request.overwrite}});
+    auto result = (*runtime)->report("report.relationships", sources, *destination, request.overwrite);
     if (!result)
         return axk::cli::report_application_failure(result.error());
-    std::cout << "relationships=" << result->at("rowCount").get<std::size_t>()
-              << " ambiguous=" << result->at("ambiguousCount").get<std::size_t>()
-              << " load_errors=" << result->at("failedCount").get<std::size_t>() << '\n';
-    return exit_code(result->at("failedCount").get<std::size_t>() == 0U ? ExitStatus::success
-                                                                        : ExitStatus::diagnostics);
+    std::cout << "relationships=" << result->row_count << " ambiguous=" << result->ambiguous_count
+              << " load_errors=" << result->failed_count << '\n';
+    return exit_code(result->failed_count == 0U ? ExitStatus::success : ExitStatus::diagnostics);
 }
 
 int run_coverage_request(const axk::cli::CoverageRequest &request) {
@@ -84,84 +78,21 @@ int run_coverage_request(const axk::cli::CoverageRequest &request) {
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
     if (!runtime)
         return axk::cli::report_application_failure(runtime.error());
-    auto sources = nlohmann::json::array();
+    std::vector<app::FileRef> sources;
     for (const auto &path : paths) {
         auto reference = (*runtime)->file_ref(path);
         if (!reference)
             return axk::cli::report_application_failure(reference.error());
-        sources.push_back({{"rootId", reference->root_id}, {"relativePath", reference->relative_path}});
+        sources.push_back(std::move(*reference));
     }
     auto destination = (*runtime)->directory_ref(request.output_directory);
     if (!destination)
         return axk::cli::report_application_failure(destination.error());
-    auto result = (*runtime)->invoke(
-        "report.coverage",
-        {{"sources", std::move(sources)},
-         {"destination", {{"rootId", destination->root_id}, {"relativePath", destination->relative_path}}},
-         {"overwrite", request.overwrite}});
+    auto result = (*runtime)->report("report.coverage", sources, *destination, request.overwrite);
     if (!result)
         return axk::cli::report_application_failure(result.error());
-    std::cout << "relationships=" << result->at("rowCount").get<std::size_t>()
-              << " load_errors=" << result->at("failedCount").get<std::size_t>() << '\n';
-    return exit_code(result->at("failedCount").get<std::size_t>() == 0U ? ExitStatus::success
-                                                                        : ExitStatus::diagnostics);
-}
-
-axk::cli::schema::info_v1::NodeOutput info_node_output(const nlohmann::json &node) {
-    axk::cli::schema::info_v1::NodeOutput result{
-        .node_id = node.at("nodeId").get<std::string>(),
-        .node_type = node.at("nodeType").get<std::string>(),
-        .display_name = node.at("displayName").get<std::string>(),
-        .object_key = node.at("objectKey").get<std::string>(),
-        .object_type = node.at("objectType").get<std::string>(),
-        .count = node.at("count").is_null() ? std::nullopt
-                                            : std::optional<std::uint64_t>{node.at("count").get<std::uint64_t>()},
-        .details = node.at("details").get<std::vector<std::string>>(),
-        .quality = node.at("quality").get<std::string>(),
-        .basis = node.at("basis").get<std::string>(),
-        .notes = node.at("notes").get<std::string>(),
-        .selector_path = node.at("selectorPath").get<std::string>(),
-        .children = {},
-    };
-    for (const auto &child : node.at("children"))
-        result.children.push_back(info_node_output(child));
-    return result;
-}
-
-axk::cli::schema::info_v1::InfoOutput info_output(const nlohmann::json &service_result) {
-    axk::cli::schema::info_v1::InfoOutput result;
-    for (const auto &tree : service_result.at("trees")) {
-        axk::cli::schema::info_v1::TreeOutput projected{
-            .source_path_utf8 = tree.at("sourcePath").get<std::string>(),
-            .container_kind = tree.at("containerKind").get<std::string>(),
-            .detected_format = tree.at("detectedFormat").get<std::string>(),
-            .object_count = tree.at("objectCount").get<std::uint64_t>(),
-            .object_counts = tree.at("objectCounts").get<std::map<std::string, std::uint64_t>>(),
-            .recovery = tree.at("recovery").is_null()
-                            ? std::nullopt
-                            : std::optional<std::string>{tree.at("recovery").get<std::string>()},
-            .roots = {},
-            .issues = {},
-        };
-        for (const auto &root : tree.at("roots"))
-            projected.roots.push_back(info_node_output(root));
-        for (const auto &issue : tree.at("issues")) {
-            projected.issues.push_back({.code = issue.at("code").get<std::string>(),
-                                        .severity = issue.at("severity").get<std::string>(),
-                                        .message = issue.at("message").get<std::string>(),
-                                        .source_path_utf8 = issue.at("sourcePath").get<std::string>(),
-                                        .sampler_path = issue.at("samplerPath").get<std::string>(),
-                                        .object_key = issue.at("objectKey").get<std::string>()});
-        }
-        result.trees.push_back(std::move(projected));
-    }
-    for (const auto &error : service_result.at("loadErrors")) {
-        result.load_errors.push_back({.path_utf8 = error.at("path").get<std::string>(),
-                                      .error_code = error.at("errorCode").get<std::uint64_t>(),
-                                      .message = error.at("message").get<std::string>(),
-                                      .original_exception = error.at("originalException").get<std::string>()});
-    }
-    return result;
+    std::cout << "relationships=" << result->row_count << " load_errors=" << result->failed_count << '\n';
+    return exit_code(result->failed_count == 0U ? ExitStatus::success : ExitStatus::diagnostics);
 }
 
 std::string tree_type_label(const axk::cli::schema::info_v1::NodeOutput &node) {
@@ -239,7 +170,7 @@ int run_info_request(const axk::cli::InfoRequest &request) {
     auto runtime = axk::cli::LocalOperationRuntime::create(paths);
     if (!runtime)
         return axk::cli::report_application_failure(runtime.error());
-    auto sources = nlohmann::json::array();
+    std::vector<LocalInfoSource> sources;
     for (const auto &path : paths) {
         std::error_code status_error;
         const auto directory = std::filesystem::is_directory(path, status_error);
@@ -250,24 +181,18 @@ int run_info_request(const axk::cli::InfoRequest &request) {
             auto reference = (*runtime)->directory_ref(path);
             if (!reference)
                 return axk::cli::report_application_failure(reference.error());
-            sources.push_back(
-                {{"kind", "AXK_OBJECT_DIRECTORY"},
-                 {"directory", {{"rootId", reference->root_id}, {"relativePath", reference->relative_path}}}});
+            sources.push_back({.file = std::nullopt, .object_directory = std::move(*reference)});
         } else {
             auto reference = (*runtime)->file_ref(path);
             if (!reference)
                 return axk::cli::report_application_failure(reference.error());
-            sources.push_back({{"kind", "FILE"},
-                               {"file", {{"rootId", reference->root_id}, {"relativePath", reference->relative_path}}}});
+            sources.push_back({.file = std::move(*reference), .object_directory = std::nullopt});
         }
     }
-    auto service_result =
-        (*runtime)->invoke("report.info", {{"sources", std::move(sources)},
-                                           {"strict", request.strict},
-                                           {"includeDefaultPrograms", request.show_default_programs}});
-    if (!service_result)
-        return axk::cli::report_application_failure(service_result.error());
-    const auto output = info_output(*service_result);
+    auto output_result = (*runtime)->info(sources, request.strict, request.show_default_programs);
+    if (!output_result)
+        return axk::cli::report_application_failure(output_result.error());
+    const auto &output = *output_result;
     if (request.format == "json") {
         const auto serialized = axk::cli::schema::info_v1::serialize(output);
         if (!serialized)

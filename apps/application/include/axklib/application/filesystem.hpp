@@ -82,6 +82,7 @@ class SandboxMutation final : public axk::RandomAccessReader {
     [[nodiscard]] Result<void> flush();
     [[nodiscard]] Result<void> verify_bound() const;
     [[nodiscard]] const FileRef &reference() const noexcept;
+    [[nodiscard]] std::string stable_identity() const;
 
   private:
     struct Implementation;
@@ -133,7 +134,8 @@ class SandboxTree {
 
 class Sandbox {
   public:
-    [[nodiscard]] static Result<Sandbox> create(std::vector<RootDefinition> roots);
+    [[nodiscard]] static Result<Sandbox> create(std::vector<RootDefinition> roots,
+                                                std::vector<std::filesystem::path> protected_paths = {});
     [[nodiscard]] Result<void> replace_roots(std::vector<RootDefinition> roots);
 
     [[nodiscard]] std::vector<RootInfo> roots() const;
@@ -173,11 +175,17 @@ class Sandbox {
         mutable std::shared_mutex mutex;
         mutable std::mutex mutation_mutex;
         std::vector<Root> roots;
+        std::vector<std::filesystem::path> protected_paths;
     };
 
-    explicit Sandbox(std::vector<Root> roots) : state_(std::make_shared<State>()) { state_->roots = std::move(roots); }
+    explicit Sandbox(std::vector<Root> roots, std::vector<std::filesystem::path> protected_paths)
+        : state_(std::make_shared<State>()) {
+        state_->roots = std::move(roots);
+        state_->protected_paths = std::move(protected_paths);
+    }
 
-    [[nodiscard]] static Result<std::vector<Root>> validate_roots(std::vector<RootDefinition> roots);
+    [[nodiscard]] static Result<std::vector<Root>>
+    validate_roots(std::vector<RootDefinition> roots, std::span<const std::filesystem::path> protected_paths);
     [[nodiscard]] std::optional<Root> find_root(std::string_view root_id) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_existing(std::string_view root_id,
                                                                  std::string_view relative_path) const;

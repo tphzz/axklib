@@ -80,6 +80,7 @@ add_library(
   src/process_lifetime.cpp
   src/request_validation.cpp
   src/server.cpp
+  src/state_lease.cpp
   src/telemetry.cpp
   src/workspaces.cpp
   "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_contract.cpp"
@@ -159,6 +160,7 @@ if(BUILD_TESTING)
     tests/process_lifetime_test.cpp
     tests/request_validation_test.cpp
     tests/server_contract_test.cpp
+    tests/state_lease_test.cpp
     tests/telemetry_test.cpp
     tests/workspaces_test.cpp
   )

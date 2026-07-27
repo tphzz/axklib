@@ -243,6 +243,7 @@ dependencies = [
  "tauri-plugin-fs",
  "tauri-plugin-log",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

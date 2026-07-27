@@ -788,28 +788,22 @@ TEST(Cli11Adapter, ExtractSfzWritesAudioInstrumentsAndVolumeGraph) {
     ASSERT_TRUE(source) << source.error().message;
     auto destination = (*runtime)->directory_ref(service_output);
     ASSERT_TRUE(destination) << destination.error().message;
-    auto result = (*runtime)->invoke(
-        "extract.sfz",
-        {{"sources", {{{"rootId", source->root_id}, {"relativePath", source->relative_path}}}},
-         {"destination", {{"rootId", destination->root_id}, {"relativePath", destination->relative_path}}},
-         {"scope", "file"},
-         {"stereo", "auto"},
-         {"overwrite", false},
-         {"strict", false}});
+    const std::array sources{*source};
+    auto result = (*runtime)->extract(true, sources, *destination, "file", {}, "auto", false, false);
     ASSERT_TRUE(result) << result.error().message;
 
     const auto &summary = baseline.at("summary");
-    EXPECT_EQ(result->at("waveformCount"), summary.at("waveform_count"));
-    EXPECT_EQ(result->at("writtenFileCount"), summary.at("written_file_count"));
-    EXPECT_EQ(result->at("selectionGraphCount"), summary.at("selection_graph_count"));
-    EXPECT_EQ(result->at("sfzFileCount"), summary.at("sfz_file_count"));
-    EXPECT_EQ(result->at("decodeErrorCount"), summary.at("decode_error_count"));
-    EXPECT_EQ(result->at("loadErrorCount"), summary.at("load_error_count"));
-    ASSERT_EQ(result->at("artifacts").size(), baseline.at("artifacts").size());
+    EXPECT_EQ(result->waveform_count, summary.at("waveform_count"));
+    EXPECT_EQ(result->written_file_count, summary.at("written_file_count"));
+    EXPECT_EQ(result->selection_graph_count, summary.at("selection_graph_count"));
+    EXPECT_EQ(result->sfz_file_count, summary.at("sfz_file_count"));
+    EXPECT_EQ(result->decode_error_count, summary.at("decode_error_count"));
+    EXPECT_EQ(result->load_error_count, summary.at("load_error_count"));
+    ASSERT_EQ(result->artifacts.size(), baseline.at("artifacts").size());
     for (std::size_t index = 0; index < baseline.at("artifacts").size(); ++index) {
-        EXPECT_EQ(result->at("artifacts").at(index).at("relativePath"),
-                  baseline.at("artifacts").at(index).at("relative_path"));
-        EXPECT_EQ(result->at("artifacts").at(index).at("sha256"), baseline.at("artifacts").at(index).at("sha256"));
+        EXPECT_EQ(result->artifacts[index].relative_path,
+                  baseline.at("artifacts").at(index).at("relative_path").get<std::string>());
+        EXPECT_EQ(result->artifacts[index].sha256, baseline.at("artifacts").at(index).at("sha256").get<std::string>());
     }
     EXPECT_EQ(read_artifact_tree(output), read_artifact_tree(service_output));
     std::filesystem::remove_all(root, error);
@@ -878,10 +872,10 @@ TEST(CliArchitecture, KeepsCli11AndJsonAtTheirOwnedBoundaries) {
     EXPECT_NE(info_handler.find("LocalOperationRuntime::create"), std::string::npos);
     EXPECT_EQ(info_handler.find("load_cli_paths(request.paths"), std::string::npos);
     const auto coverage_begin = analysis.find("int run_coverage_request");
-    const auto info_projection_begin = analysis.find("info_node_output");
     ASSERT_NE(coverage_begin, std::string::npos);
-    ASSERT_NE(info_projection_begin, std::string::npos);
-    const auto coverage_handler = analysis.substr(coverage_begin, info_projection_begin - coverage_begin);
+    const auto tree_rendering_begin = analysis.find("tree_type_label");
+    ASSERT_NE(tree_rendering_begin, std::string::npos);
+    const auto coverage_handler = analysis.substr(coverage_begin, tree_rendering_begin - coverage_begin);
     EXPECT_NE(coverage_handler.find("LocalOperationRuntime::create"), std::string::npos);
     EXPECT_EQ(coverage_handler.find("load_cli_paths(request.paths"), std::string::npos);
     const auto relationships_handler_begin = analysis.find("int run_relationships_request");
@@ -920,5 +914,13 @@ TEST(CliArchitecture, KeepsCli11AndJsonAtTheirOwnedBoundaries) {
         if (entry.path().extension() == ".hpp") {
             EXPECT_EQ(read(entry.path()).find("nlohmann"), std::string::npos) << entry.path();
         }
+    }
+    const auto local_interface = read(root / "local_operations.hpp");
+    EXPECT_EQ(local_interface.find("nlohmann"), std::string::npos);
+    EXPECT_EQ(local_interface.find("Result<nlohmann::json>"), std::string::npos);
+    for (const auto filename : {"analysis.cpp", "extract.cpp", "reports.cpp", "writer.cpp"}) {
+        const auto source = read(root / "commands" / filename);
+        EXPECT_EQ(source.find("nlohmann"), std::string::npos) << filename;
+        EXPECT_EQ(source.find("->invoke("), std::string::npos) << filename;
     }
 }

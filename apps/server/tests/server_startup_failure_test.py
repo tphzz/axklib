@@ -46,8 +46,6 @@ def main() -> int:
                 [
                     "--port",
                     str(port),
-                    "--token",
-                    "occupied-port-token",
                     "--connection-file",
                     str(root / "occupied" / "connection.json"),
                 ],

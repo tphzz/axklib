@@ -1,4 +1,5 @@
 mod desktop_preferences;
+mod file_publication;
 mod remote_settings;
 mod server_sidecar;
 
@@ -513,34 +514,11 @@ async fn select_local_sfz_destination(
 }
 
 fn publish_downloaded_file(temporary: &Path, destination: &Path) -> Result<(), String> {
-    if !destination.exists() {
-        return std::fs::rename(temporary, destination)
-            .map_err(|error| format!("publish downloaded package: {error}"));
+    let outcome = file_publication::publish_file(temporary, destination)?;
+    if let Some(warning) = outcome.warning {
+        log::warn!("{warning}");
     }
-    if destination
-        .symlink_metadata()
-        .map_err(|error| format!("inspect package destination: {error}"))?
-        .file_type()
-        .is_symlink()
-    {
-        return Err("refusing to replace a symbolic-link destination".to_owned());
-    }
-    let backup = destination.with_file_name(format!(
-        ".{}.axkdeck-backup-{}",
-        destination
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("package"),
-        candidate_id()?
-    ));
-    std::fs::rename(destination, &backup)
-        .map_err(|error| format!("preserve existing package destination: {error}"))?;
-    if let Err(error) = std::fs::rename(temporary, destination) {
-        let _ = std::fs::rename(&backup, destination);
-        return Err(format!("publish downloaded package: {error}"));
-    }
-    std::fs::remove_file(&backup)
-        .map_err(|error| format!("remove replaced package backup: {error}"))
+    Ok(())
 }
 
 fn download_retained_package(
@@ -577,7 +555,7 @@ fn download_retained_package(
         .write(true)
         .open(&temporary)
         .map_err(|error| format!("create package download staging file: {error}"))?;
-    let result = (|| {
+    let download_result = (|| {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let mut url = url::Url::parse(&connection.base_url)
             .map_err(|error| format!("parse axklib-server URL: {error}"))?;
@@ -617,12 +595,18 @@ fn download_retained_package(
             .sync_all()
             .map_err(|error| format!("flush package download: {error}"))?;
         drop(output);
-        publish_downloaded_file(&temporary, &destination)
+        Ok(())
     })();
-    if result.is_err() {
+    if let Err(error) = download_result {
         let _ = std::fs::remove_file(&temporary);
+        return Err(error);
     }
-    result
+    publish_downloaded_file(&temporary, &destination).map_err(|error| {
+        format!(
+            "{error}; the complete downloaded package remains available at {}",
+            temporary.display()
+        )
+    })
 }
 
 fn parse_tar_octal(field: &[u8]) -> Result<u64, String> {
