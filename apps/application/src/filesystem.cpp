@@ -267,14 +267,45 @@ axk::app::Result<NativeHandle> open_relative(HANDLE parent, const std::filesyste
     return NativeHandle{opened};
 }
 
+axk::app::Result<NativeHandle> reopen_directory(HANDLE directory, std::string_view relative_path) {
+    const auto required = GetFinalPathNameByHandleW(directory, nullptr, 0U, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (required == 0U)
+        return std::unexpected(reference_error("sandbox directory path could not be resolved", relative_path));
+    std::wstring path(required, L'\0');
+    const auto length = GetFinalPathNameByHandleW(directory, path.data(), static_cast<DWORD>(path.size()),
+                                                  FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (length == 0U || length >= path.size())
+        return std::unexpected(reference_error("sandbox directory path changed while it was reopened", relative_path));
+    path.resize(length);
+
+    const auto reopened = CreateFileW(path.c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (reopened == INVALID_HANDLE_VALUE)
+        return std::unexpected(reference_error("sandbox directory could not be reopened", relative_path));
+    NativeHandle owned{reopened};
+
+    FILE_ATTRIBUTE_TAG_INFO tag{};
+    FILE_ID_INFO retained_identity{};
+    FILE_ID_INFO reopened_identity{};
+    if (GetFileInformationByHandleEx(reopened, FileAttributeTagInfo, &tag, sizeof(tag)) == 0 ||
+        (tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U ||
+        GetFileInformationByHandleEx(directory, FileIdInfo, &retained_identity, sizeof(retained_identity)) == 0 ||
+        GetFileInformationByHandleEx(reopened, FileIdInfo, &reopened_identity, sizeof(reopened_identity)) == 0 ||
+        retained_identity.VolumeSerialNumber != reopened_identity.VolumeSerialNumber ||
+        std::memcmp(retained_identity.FileId.Identifier, reopened_identity.FileId.Identifier,
+                    sizeof(retained_identity.FileId.Identifier)) != 0) {
+        return std::unexpected(reference_error("sandbox directory changed while it was reopened", relative_path));
+    }
+    return owned;
+}
+
 axk::app::Result<NativeHandle> open_parent(HANDLE root, const std::filesystem::path &relative,
                                            std::string_view relative_path) {
-    const auto reopened = ReOpenFile(root, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
-                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                     FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
-    if (reopened == INVALID_HANDLE_VALUE)
-        return std::unexpected(reference_error("sandbox root handle could not be reopened", relative_path));
-    NativeHandle owned{reopened};
+    auto reopened = reopen_directory(root, relative_path);
+    if (!reopened)
+        return std::unexpected(reopened.error());
+    NativeHandle owned = std::move(*reopened);
     HANDLE current = owned.get();
     for (const auto &component : relative) {
         auto next = open_relative(current, component, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_OPEN,
