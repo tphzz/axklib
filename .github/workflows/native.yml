@@ -240,9 +240,9 @@ jobs:
             build/native/${{ inputs.debug && 'debug' || 'release' }}
             !build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**
             !build/native/${{ inputs.debug && 'debug' || 'release' }}/*.spdx.json
-          key: native-v2-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
+          key: native-v3-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
           restore-keys: |
-            native-v2-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-
+            native-v3-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-
 
       - name: Prepare native incremental build cache
         id: native-cache-state
@@ -281,17 +281,29 @@ jobs:
       - name: Build native targets
         run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }}
 
+      - name: Verify source tree remains clean
+        shell: bash
+        run: |
+          status="$(git status --porcelain --untracked-files=normal)"
+          if [ -n "$status" ]; then
+            printf 'CI source tree is modified:\n%s\n' "$status" >&2
+            exit 1
+          fi
+
+      - name: Finalize native incremental build cache
+        id: finalize-native-cache
+        shell: bash
+        run: >-
+          python tools/python/native_build_cache.py finalize
+          --source-root "${{ github.workspace }}"
+          --build-directory "${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}"
+
       - name: Resolve and verify build identity
         id: package
         shell: bash
         run: |
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          status="$(git status --porcelain --untracked-files=normal)"
-          if [ -n "$status" ]; then
-            printf 'CI source tree is modified:\n%s\n' "$status" >&2
-            exit 1
-          fi
           sha="$(git rev-parse --short=7 HEAD)"
           test -n "$sha"
           python tools/python/release_metadata.py resolve \
@@ -782,17 +794,6 @@ jobs:
           path: ${{ runner.temp }}/vcpkg/archives
           key: vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
 
-      - name: Save native incremental build cache after failure
-        if: ${{ failure() && steps.configure-native.outcome == 'success' && steps.native-build-cache.outputs.cache-hit != 'true' }}
-        continue-on-error: true
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: |
-            build/native/${{ inputs.debug && 'debug' || 'release' }}
-            !build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**
-            !build/native/${{ inputs.debug && 'debug' || 'release' }}/*.spdx.json
-          key: native-v2-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
-
       - name: Package macOS slice for universal assembly
         if: runner.os == 'macOS'
         shell: bash
@@ -829,6 +830,17 @@ jobs:
           name: release-${{ steps.package.outputs.cli_artifact_stem }}
           path: build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.*
           if-no-files-found: error
+
+      - name: Save native incremental build cache after failure
+        if: ${{ failure() && steps.finalize-native-cache.outcome == 'success' && steps.native-build-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            build/native/${{ inputs.debug && 'debug' || 'release' }}
+            !build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**
+            !build/native/${{ inputs.debug && 'debug' || 'release' }}/*.spdx.json
+          key: native-v3-${{ matrix.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
 
   macos-universal:
     name: macOS universal

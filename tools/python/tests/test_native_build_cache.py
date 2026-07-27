@@ -52,7 +52,11 @@ def test_prepare_reuses_unchanged_inputs_and_marks_changed_inputs_newer(
     assert changed.stat().st_mtime_ns > native_build_cache.NORMALIZED_MTIME_NS
     assert added.stat().st_mtime_ns > native_build_cache.NORMALIZED_MTIME_NS
     assert (build / "cached.o").read_bytes() == b"cached"
-    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) == current
+    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) == {
+        "deleted.cpp": entry("deleted"),
+        "changed.cpp": entry("old"),
+        "unchanged.cpp": entry("same"),
+    }
 
 
 @pytest.mark.parametrize("state_contents", [None, "not-json", '{"schema_version": 999}'])
@@ -79,7 +83,7 @@ def test_prepare_discards_build_tree_without_valid_state(
     assert report == native_build_cache.PreparationReport(False, 0, 1)
     assert not sentinel.exists()
     assert tracked.stat().st_mtime_ns == original_mtime
-    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) == current
+    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) is None
 
 
 def test_prepare_creates_a_marker_for_a_new_owned_build_directory(
@@ -94,6 +98,51 @@ def test_prepare_creates_a_marker_for_a_new_owned_build_directory(
 
     assert report == native_build_cache.PreparationReport(False, 0, 0)
     assert native_build_cache.has_valid_ownership_marker(build)
+    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) is None
+
+
+def test_failed_build_does_not_claim_changed_inputs_are_current(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    build = owned_build_directory(source)
+    header = source / "interface.hpp"
+    header.write_text("new interface", encoding="utf-8")
+    previous = {"interface.hpp": entry("old")}
+    current = {"interface.hpp": entry("new")}
+    native_build_cache.write_state(
+        build / native_build_cache.STATE_FILENAME, previous
+    )
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: current)
+
+    first = native_build_cache.prepare_build_cache(source, build)
+    first_mtime = header.stat().st_mtime_ns
+    second = native_build_cache.prepare_build_cache(source, build)
+
+    assert first == native_build_cache.PreparationReport(True, 0, 1)
+    assert second == native_build_cache.PreparationReport(True, 0, 1)
+    assert first_mtime > native_build_cache.NORMALIZED_MTIME_NS
+    assert header.stat().st_mtime_ns > native_build_cache.NORMALIZED_MTIME_NS
+    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) == previous
+
+
+def test_finalize_records_inputs_only_after_a_successful_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    build = owned_build_directory(source)
+    current = {
+        "CMakeLists.txt": entry("cmake"),
+        "library/source.cpp": entry("source"),
+    }
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: current)
+
+    input_count = native_build_cache.finalize_build_cache(source, build)
+
+    assert input_count == 2
+    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) == current
 
 
 def test_prepare_refuses_to_delete_an_unowned_build_directory(
@@ -161,7 +210,12 @@ def test_prepare_rejects_a_symlinked_build_component_without_touching_its_target
 def test_read_state_rejects_malformed_entries(tmp_path: Path) -> None:
     state = tmp_path / "state.json"
     state.write_text(
-        json.dumps({"schema_version": 1, "entries": {"source.cpp": {"mode": 100644}}}),
+        json.dumps(
+            {
+                "schema_version": native_build_cache.STATE_SCHEMA_VERSION,
+                "entries": {"source.cpp": {"mode": 100644}},
+            }
+        ),
         encoding="utf-8",
     )
     assert native_build_cache.read_state(state) is None

@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-STATE_SCHEMA_VERSION = 1
+STATE_SCHEMA_VERSION = 2
 STATE_FILENAME = ".axklib-native-cache-state.json"
 OWNERSHIP_SCHEMA_VERSION = 1
 OWNERSHIP_FILENAME = ".axklib-native-cache-owner.json"
@@ -201,8 +201,18 @@ def prepare_build_cache(source_root: Path, build_directory: Path) -> Preparation
         changed += sum(
             1 for path in set(current).intersection(previous) if current[path] != previous[path]
         )
-    write_state(state_path, current)
     return PreparationReport(restored, unchanged, changed)
+
+
+def finalize_build_cache(source_root: Path, build_directory: Path) -> int:
+    source_root = source_root.resolve()
+    build_directory = _validated_build_directory(source_root, build_directory)
+    if not build_directory.exists() or not has_valid_ownership_marker(build_directory):
+        raise ValueError("native build cache directory has no valid ownership marker")
+
+    current = read_git_index(source_root)
+    write_state(build_directory / STATE_FILENAME, current)
+    return len(current)
 
 
 def _command_identity(command: Sequence[str]) -> dict[str, object]:
@@ -257,6 +267,12 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--source-root", type=Path, required=True)
     prepare.add_argument("--build-directory", type=Path, required=True)
     prepare.add_argument("--github-output", type=Path, required=True)
+
+    finalize = commands.add_parser(
+        "finalize", help="Record inputs after a successful native build"
+    )
+    finalize.add_argument("--source-root", type=Path, required=True)
+    finalize.add_argument("--build-directory", type=Path, required=True)
     return parser
 
 
@@ -267,6 +283,13 @@ def main() -> int:
             arguments.github_output,
             {"toolchain_fingerprint": toolchain_fingerprint(arguments.triplet)},
         )
+        return 0
+
+    if arguments.command == "finalize":
+        input_count = finalize_build_cache(
+            arguments.source_root, arguments.build_directory
+        )
+        print(f"native build cache: finalized_inputs={input_count}")
         return 0
 
     report = prepare_build_cache(arguments.source_root, arguments.build_directory)

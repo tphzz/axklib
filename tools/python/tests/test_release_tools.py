@@ -529,7 +529,7 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert "library/cmake/ports/**" in workflow
     assert "key: vcpkg-v2-${{ matrix.triplet }}-" in workflow
     assert "vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-" in workflow
-    assert "key: native-v2-${{ matrix.triplet }}-" in workflow
+    assert "key: native-v3-${{ matrix.triplet }}-" in workflow
     assert "key: axkdeck-rust-v1-${{ matrix.artifact }}-" in workflow
     assert "key: axkdeck-rust-v1-macos-universal-" in workflow
     assert "${{ steps.native-toolchain.outputs.toolchain_fingerprint }}" in workflow
@@ -538,10 +538,33 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**" in workflow
     assert "tools/python/native_build_cache.py fingerprint" in workflow
     assert "tools/python/native_build_cache.py prepare" in workflow
+    assert "tools/python/native_build_cache.py finalize" in workflow
+    assert """      - name: Build native targets
+        run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }}
+
+      - name: Verify source tree remains clean
+        shell: bash
+        run: |
+          status="$(git status --porcelain --untracked-files=normal)"
+          if [ -n "$status" ]; then
+            printf 'CI source tree is modified:\\n%s\\n' "$status" >&2
+            exit 1
+          fi
+
+      - name: Finalize native incremental build cache
+""" in workflow
+    assert workflow.index(
+        "      - name: Save native incremental build cache after failure"
+    ) > workflow.index("      - name: Upload Linux or Windows CLI archive")
     assert action_reference_count(workflow, "actions/cache/save", "v6") == 3
     assert "Save vcpkg binary cache after failure" in workflow
     assert "Save native incremental build cache after failure" in workflow
-    assert workflow.count("steps.configure-native.outcome == 'success'") == 2
+    assert workflow.count("steps.configure-native.outcome == 'success'") == 1
+    assert workflow.count("steps.finalize-native-cache.outcome == 'success'") == 1
+    assert (
+        "if: ${{ failure() && steps.finalize-native-cache.outcome == 'success' "
+        "&& steps.native-build-cache.outputs.cache-hit != 'true' }}"
+    ) in workflow
     assert workflow.count("continue-on-error: true") == 2
 
 
