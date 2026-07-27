@@ -198,11 +198,12 @@ its companion folders are attached.
 When an explicit operation encounters missing split Wave Data,
 `POST /api/v1/images/{imageId}/companion-directories` attaches either a selected
 list of `DirectoryRef` values or the explicitly requested immediate siblings.
-The server checks only those directories and admits only exact continuation
-segments with matching filenames and normalized Yamaha headers. The image ID
-and object IDs remain stable, while the session revision advances. Attachments
-are retained only for the lifetime of that image session; the source folders
-and their files are never merged or modified.
+The server checks only those directories and admits exact continuation segments
+with matching filenames and normalized Yamaha headers, plus Wave Data objects
+whose embedded names exactly satisfy active unresolved Sample member lanes.
+The image ID and object IDs remain stable, while the session revision advances.
+Attachments are retained only for the lifetime of that image session; the
+source folders and their files are never merged or modified.
 
 `POST /api/v1/files/list` performs only a bounded directory listing. A media
 picker navigates directories without media inspection and inspects the current

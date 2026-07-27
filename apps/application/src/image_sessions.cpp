@@ -125,12 +125,35 @@ struct CompanionSegments {
     std::vector<axk::app::FileRef> files;
 };
 
+std::unordered_set<std::string> missing_required_wave_data_names(const axk::AxkObjectDirectory &primary) {
+    std::unordered_set<std::string> available_names;
+    for (const auto &object : primary.stored_objects()) {
+        if (object.decoded.header.type == axk::ObjectType::smpl)
+            available_names.insert(object.decoded.header.name);
+    }
+
+    std::unordered_set<std::string> missing_names;
+    const auto add_missing = [&](std::string_view name) {
+        if (!name.empty() && !available_names.contains(std::string{name}))
+            missing_names.emplace(name);
+    };
+    for (const auto &object : primary.stored_objects()) {
+        const auto *sample = std::get_if<axk::CurrentSbnk>(&object.decoded.payload);
+        if (sample == nullptr)
+            continue;
+        add_missing(sample->left.wave_data_name);
+        if (sample->right)
+            add_missing(sample->right->wave_data_name);
+    }
+    return missing_names;
+}
+
 axk::app::Result<CompanionSegments>
-append_exact_companion_segments(const axk::app::Sandbox &sandbox, const axk::app::ImageSourceRef &source,
-                                const axk::AxkObjectDirectory &primary,
-                                const std::vector<axk::app::DirectoryRef> &companion_directories,
-                                std::vector<axk::AxkObjectDirectoryEntry> &entries,
-                                std::vector<std::function<axk::app::Result<void>()>> &verifiers) {
+append_required_companion_wave_data(const axk::app::Sandbox &sandbox, const axk::app::ImageSourceRef &source,
+                                    const axk::AxkObjectDirectory &primary,
+                                    const std::vector<axk::app::DirectoryRef> &companion_directories,
+                                    std::vector<axk::AxkObjectDirectoryEntry> &entries,
+                                    std::vector<std::function<axk::app::Result<void>()>> &verifiers) {
     std::unordered_map<std::string, std::vector<std::string>> identities_by_filename;
     for (const auto &object : primary.stored_objects()) {
         auto identity = incomplete_segment_identity(object);
@@ -138,7 +161,8 @@ append_exact_companion_segments(const axk::app::Sandbox &sandbox, const axk::app
         if (identity && filename)
             identities_by_filename[fold_ascii(*filename)].push_back(std::move(*identity));
     }
-    if (identities_by_filename.empty())
+    const auto missing_names = missing_required_wave_data_names(primary);
+    if (identities_by_filename.empty() && missing_names.empty())
         return CompanionSegments{};
 
     CompanionSegments result;
@@ -153,23 +177,41 @@ append_exact_companion_segments(const axk::app::Sandbox &sandbox, const axk::app
         for (const auto &candidate : *listing) {
             if (candidate.kind != axk::app::DirectoryEntryKind::file)
                 continue;
-            const auto expected = identities_by_filename.find(fold_ascii(candidate.name));
-            if (expected == identities_by_filename.end() ||
-                candidate.size.value_or(axk::AxkObjectDirectory::maximum_payload_bytes + 1U) >
-                    axk::AxkObjectDirectory::maximum_payload_bytes) {
+            const auto expected_segments = identities_by_filename.find(fold_ascii(candidate.name));
+            if (candidate.size.value_or(axk::AxkObjectDirectory::maximum_payload_bytes + 1U) >
+                axk::AxkObjectDirectory::maximum_payload_bytes) {
                 continue;
             }
             const axk::app::FileRef reference{directory.root_id, candidate.relative_path};
             auto opened = sandbox.open_file(reference);
             if (!opened)
                 return std::unexpected(opened.error());
+            bool required_missing_name{};
+            constexpr std::size_t object_header_bytes = 0x42U;
+            if (!missing_names.empty() && opened->reader->size() >= object_header_bytes) {
+                std::array<std::byte, object_header_bytes> prefix{};
+                const auto read = opened->reader->read_exact_at(0U, prefix);
+                if (read) {
+                    const auto header = axk::decode_object_header(prefix);
+                    required_missing_name =
+                        header && header->type == axk::ObjectType::smpl && missing_names.contains(header->name);
+                }
+            }
+            if (expected_segments == identities_by_filename.end() && !required_missing_name)
+                continue;
             auto decoded =
                 axk::StandaloneObject::open(opened->reader, candidate.relative_path,
                                             static_cast<std::size_t>(axk::AxkObjectDirectory::maximum_payload_bytes));
             if (!decoded)
                 continue;
-            auto identity = incomplete_segment_identity(decoded->object());
-            if (!identity || std::ranges::find(expected->second, *identity) == expected->second.end())
+            const auto identity = incomplete_segment_identity(decoded->object());
+            const bool exact_continuation =
+                expected_segments != identities_by_filename.end() && identity &&
+                std::ranges::find(expected_segments->second, *identity) != expected_segments->second.end();
+            const bool exact_missing_name = required_missing_name &&
+                                            decoded->object().decoded.header.type == axk::ObjectType::smpl &&
+                                            missing_names.contains(decoded->object().decoded.header.name);
+            if (!exact_continuation && !exact_missing_name)
                 continue;
             entries.push_back(
                 {std::format("companion-{}/{}", directory_index, candidate.name), std::move(opened->reader)});
@@ -656,6 +698,11 @@ struct axk::app::ImageSessionManager::Implementation {
                         resolved_id = *relationship.target_object_id;
                     }
                 }
+                if (!resolved_id && session.source.kind == ImageSourceKind::axk_object_directory) {
+                    return std::unexpected(session_error(
+                        "companion_disks_required",
+                        "Wave Data continues on another sampler disk. Add companion disk folders to audition it."));
+                }
                 if (!resolved_id)
                     return std::unexpected(session_error(
                         "audition_relationship_ambiguous",
@@ -913,8 +960,8 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
         auto directory = AxkObjectDirectory::open(entries, source.relative_path, cancellation);
         if (!directory)
             return std::unexpected(core_error(directory.error(), source));
-        auto companions = append_exact_companion_segments(implementation_->sandbox, source, *directory,
-                                                          companion_directories, entries, verifiers);
+        auto companions = append_required_companion_wave_data(implementation_->sandbox, source, *directory,
+                                                              companion_directories, entries, verifiers);
         if (!companions)
             return std::unexpected(companions.error());
         matched_companion_directories = companions->directories;

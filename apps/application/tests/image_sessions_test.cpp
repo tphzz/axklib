@@ -31,6 +31,14 @@ void write_be32(std::span<std::byte> bytes, std::size_t offset, std::uint32_t va
     bytes[offset + 3U] = static_cast<std::byte>(value);
 }
 
+void write_ascii_field(std::span<std::byte> bytes, std::size_t offset, std::size_t size, std::string_view value) {
+    ASSERT_LE(offset + size, bytes.size());
+    ASSERT_LE(value.size(), size);
+    std::ranges::fill(bytes.subspan(offset, size), std::byte{' '});
+    std::ranges::transform(value, bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                           [](char character) { return static_cast<std::byte>(character); });
+}
+
 void write_object_file(const std::filesystem::path &path, std::span<const std::byte> payload) {
     std::ofstream output{path, std::ios::binary};
     ASSERT_TRUE(output);
@@ -396,6 +404,106 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     ASSERT_TRUE(nearby_attached) << nearby_attached.error().message;
     EXPECT_EQ(nearby_attached->companion_directories,
               (std::vector<axk::app::DirectoryRef>{{"workspace", "disk-set/DISK1"}}));
+}
+
+TEST_F(ImageSessionTest, AttachesACompleteMissingStereoLaneAlongsideContinuationSegments) {
+    const auto source = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(source) << source.error().message;
+    const auto source_objects = source->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(source_objects) << source_objects.error().message;
+    const auto wave_data = std::ranges::find_if(
+        *source_objects, [](const auto &object) { return object.decoded.header.raw_type == "SMPL"; });
+    const auto sample = std::ranges::find_if(
+        *source_objects, [](const auto &object) { return object.decoded.header.raw_type == "SBNK"; });
+    ASSERT_NE(wave_data, source_objects->end());
+    ASSERT_NE(sample, source_objects->end());
+
+    constexpr std::string_view left_name = "COMPANION LEFT";
+    constexpr std::string_view right_name = "COMPANION RIGHT";
+    constexpr std::string_view unrelated_name = "UNRELATED WAVE";
+    constexpr std::uint32_t left_reference = 0x01020304U;
+    constexpr std::uint32_t right_reference = 0x05060708U;
+    constexpr std::uint32_t unrelated_reference = 0x090a0b0cU;
+    auto left_wave_data = wave_data->raw_payload;
+    auto right_wave_data = wave_data->raw_payload;
+    auto unrelated_wave_data = wave_data->raw_payload;
+    auto stereo_sample = sample->raw_payload;
+    write_ascii_field(left_wave_data, 0x32U, 16U, left_name);
+    write_be32(left_wave_data, 0x78U, left_reference);
+    write_ascii_field(right_wave_data, 0x32U, 16U, right_name);
+    write_be32(right_wave_data, 0x78U, right_reference);
+    write_ascii_field(unrelated_wave_data, 0x32U, 16U, unrelated_name);
+    write_be32(unrelated_wave_data, 0x78U, unrelated_reference);
+    write_ascii_field(stereo_sample, 0x78U, 16U, left_name);
+    write_ascii_field(stereo_sample, 0x88U, 16U, right_name);
+    write_be32(stereo_sample, 0xa0U, left_reference);
+    write_be32(stereo_sample, 0xa4U, right_reference);
+    for (const auto &[left_offset, right_offset] : std::array{std::pair{0xe8U, 0xecU}, std::pair{0xf0U, 0xf4U},
+                                                              std::pair{0xf8U, 0xfcU}, std::pair{0x100U, 0x104U}}) {
+        std::ranges::copy_n(stereo_sample.begin() + static_cast<std::ptrdiff_t>(left_offset), 4U,
+                            stereo_sample.begin() + static_cast<std::ptrdiff_t>(right_offset));
+    }
+    const auto decoded_sample = axk::decode_object(stereo_sample);
+    ASSERT_TRUE(decoded_sample) << decoded_sample.error().message;
+    const auto *decoded_sbnk = std::get_if<axk::CurrentSbnk>(&decoded_sample->payload);
+    ASSERT_NE(decoded_sbnk, nullptr);
+    ASSERT_TRUE(decoded_sbnk->right);
+    EXPECT_EQ(decoded_sbnk->left.wave_data_name, left_name);
+    EXPECT_EQ(decoded_sbnk->right->wave_data_name, right_name);
+
+    const auto decoded_wave_data = axk::decode_object(left_wave_data);
+    ASSERT_TRUE(decoded_wave_data) << decoded_wave_data.error().message;
+    const auto header_size = decoded_wave_data->header.header_size;
+    const auto first_size = decoded_wave_data->header.payload_bytes_0x1c / 2U;
+    const auto second_size = decoded_wave_data->header.payload_bytes_0x1c - first_size;
+    std::vector<std::byte> first_segment(left_wave_data.begin(),
+                                         left_wave_data.begin() + static_cast<std::ptrdiff_t>(header_size));
+    first_segment.insert(first_segment.end(), left_wave_data.begin() + static_cast<std::ptrdiff_t>(header_size),
+                         left_wave_data.begin() + static_cast<std::ptrdiff_t>(header_size + first_size));
+    write_be32(first_segment, 0x20U, first_size);
+    write_be32(first_segment, 0x24U, 0U);
+    std::vector<std::byte> second_segment(left_wave_data.begin(),
+                                          left_wave_data.begin() + static_cast<std::ptrdiff_t>(header_size));
+    second_segment.insert(second_segment.end(),
+                          left_wave_data.begin() + static_cast<std::ptrdiff_t>(header_size + first_size),
+                          left_wave_data.begin() + static_cast<std::ptrdiff_t>(header_size + first_size + second_size));
+    write_be32(second_segment, 0x20U, second_size);
+    write_be32(second_segment, 0x24U, first_size);
+
+    const auto disk_set = root_ / "stereo-disk-set";
+    const auto first_disk = disk_set / "DISK1";
+    const auto second_disk = disk_set / "DISK2";
+    std::filesystem::create_directories(first_disk);
+    std::filesystem::create_directories(second_disk);
+    write_object_file(first_disk / "SAMPLE.003", stereo_sample);
+    write_object_file(first_disk / "LEFT.001", first_segment);
+    write_object_file(second_disk / "LEFT.001", second_segment);
+    write_object_file(second_disk / "RIGHT.002", right_wave_data);
+    write_object_file(second_disk / "UNRELATED.004", unrelated_wave_data);
+
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open(
+        {"workspace", "stereo-disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(samples) << samples.error().message;
+    ASSERT_EQ(samples->items.size(), 1U);
+    const auto rejected = sessions.prepare_audition(opened->image_id, "owner-a", {samples->items.front().id});
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, "companion_disks_required");
+
+    const auto attached = sessions.attach_companion_directories(
+        opened->image_id, "owner-a", opened->revision,
+        {axk::app::CompanionDirectorySelectionKind::directories, {{"workspace", "stereo-disk-set/DISK2"}}});
+    ASSERT_TRUE(attached) << attached.error().message;
+    const auto attached_wave_data = sessions.objects(attached->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(attached_wave_data) << attached_wave_data.error().message;
+    EXPECT_EQ(attached_wave_data->items.size(), 2U);
+    const auto audition = sessions.prepare_audition(attached->image_id, "owner-a", {samples->items.front().id});
+    ASSERT_TRUE(audition) << audition.error().message;
+    ASSERT_EQ(audition->clips.size(), 1U);
+    EXPECT_EQ(audition->clips.front().lanes.size(), 2U);
+    EXPECT_GT(audition->content_size_bytes, 44U);
 }
 
 TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {

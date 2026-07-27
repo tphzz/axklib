@@ -162,9 +162,11 @@ contiguous set when the shared parent object directory is opened. Opening one
 leaf does not scan its siblings: the leaf remains immediately available for
 inventory, and missing companion segments are reported only when an explicit
 preview, audition, or package export needs them. An application can then attach
-selected companion disk folders to that image session. Axklib admits only exact
+selected companion disk folders to that image session. Axklib admits exact
 continuation segments with the same object filename and normalized Yamaha
-header; unrelated sibling objects remain outside the session.
+header, plus a Wave Data object whose embedded name exactly satisfies an active
+but unresolved Sample member lane. Unrelated sibling objects remain outside the
+session.
 
 This segment interpretation is **Strong**: it is repeated across independent
 multi-disk object-directory sets and the segment ranges join exactly to

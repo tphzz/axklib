@@ -61,9 +61,10 @@ Preview, audition, or complete package export then reports that companion disks
 are required. Applications can explicitly attach selected disk folders, or
 explicitly request a bounded immediate-sibling search, to the existing session.
 Only exact continuation segments with the same object filename and normalized
-Yamaha header are admitted; unrelated sibling objects remain outside the
-session. This attachment is session state and does not combine or rewrite the
-source directories.
+Yamaha header, and Wave Data objects whose embedded names exactly satisfy
+active unresolved Sample member lanes, are admitted. Unrelated sibling objects
+remain outside the session. This attachment is session state and does not
+combine or rewrite the source directories.
 
 The profile is intentionally read-only and bounded to 224 entries per leaf,
 1,024 total entries, 16 MiB of aggregate file data, and one nested directory
