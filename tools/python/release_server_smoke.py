@@ -86,11 +86,13 @@ def wait_for_job(client: Client, job_id: str) -> dict[str, Any]:
 
 def exercise(server: Path, fixture: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="axklib-installed-server-") as temporary:
-        workspace = Path(temporary)
+        root = Path(temporary)
+        workspace = root / "workspace"
+        workspace.mkdir()
         fixture_name = "fixture.hds"
         shutil.copyfile(fixture, workspace / fixture_name)
-        state = workspace / "state"
-        workspace_store = workspace / "workspaces.json"
+        state = root / "state"
+        workspace_store = root / "workspaces.json"
         connection_file = state / "connection.json"
         workspace_store.write_text(
             json.dumps(

@@ -2515,7 +2515,6 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
             if (!std::ranges::equal(source_index, *written_index))
                 return std::unexpected{transaction_error("post-write validation changed untouched SFS ID " +
                                                          std::to_string(source_record.sfs_id.value) + " index record")};
-            constexpr std::size_t comparison_chunk_size = 1024U * 1024U;
             for (std::uint64_t offset = 0U; offset < source_record.data_size;) {
                 const auto count = static_cast<std::size_t>(
                     std::min<std::uint64_t>(comparison_chunk_size, source_record.data_size - offset));

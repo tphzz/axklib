@@ -127,7 +127,8 @@ class UploadFile {
                 static_cast<DWORD>(std::min<std::size_t>(bytes.size() - completed, std::numeric_limits<DWORD>::max()));
             DWORD written{};
             if (WriteFile(handle_, bytes.data() + completed, count, &written, nullptr) == 0 || written == 0U) {
-                truncate(offset);
+                if (auto rollback = truncate(offset); !rollback)
+                    return rollback;
                 return std::unexpected(upload_error("upload_storage_unavailable", "upload chunk cannot be stored"));
             }
             completed += written;
@@ -140,7 +141,8 @@ class UploadFile {
             if (written < 0 && errno == EINTR)
                 continue;
             if (written <= 0) {
-                truncate(offset);
+                if (auto rollback = truncate(offset); !rollback)
+                    return rollback;
                 return std::unexpected(upload_error("upload_storage_unavailable", "upload chunk cannot be stored"));
             }
             completed += static_cast<std::size_t>(written);
@@ -148,7 +150,8 @@ class UploadFile {
 #endif
         auto physical_size = size();
         if (!physical_size || *physical_size != offset + bytes.size()) {
-            truncate(offset);
+            if (auto rollback = truncate(offset); !rollback)
+                return rollback;
             return std::unexpected(upload_error("upload_storage_unavailable", "upload chunk size cannot be verified"));
         }
         return {};
@@ -181,15 +184,24 @@ class UploadFile {
   private:
 #if defined(_WIN32)
     explicit UploadFile(HANDLE handle) : handle_(handle) {}
-    void truncate(std::uint64_t size) {
+    axk::app::Result<void> truncate(std::uint64_t size) {
         LARGE_INTEGER position{.QuadPart = static_cast<LONGLONG>(size)};
-        if (SetFilePointerEx(handle_, position, nullptr, FILE_BEGIN) != 0)
-            static_cast<void>(SetEndOfFile(handle_));
+        if (SetFilePointerEx(handle_, position, nullptr, FILE_BEGIN) == 0 || SetEndOfFile(handle_) == 0) {
+            return std::unexpected(
+                upload_error("upload_storage_unavailable", "failed upload chunk cannot be rolled back"));
+        }
+        return {};
     }
     HANDLE handle_{INVALID_HANDLE_VALUE};
 #else
     explicit UploadFile(int descriptor) : descriptor_(descriptor) {}
-    void truncate(std::uint64_t size) { static_cast<void>(::ftruncate(descriptor_, static_cast<off_t>(size))); }
+    axk::app::Result<void> truncate(std::uint64_t size) {
+        if (::ftruncate(descriptor_, static_cast<off_t>(size)) != 0) {
+            return std::unexpected(
+                upload_error("upload_storage_unavailable", "failed upload chunk cannot be rolled back"));
+        }
+        return {};
+    }
     int descriptor_{-1};
 #endif
 };
