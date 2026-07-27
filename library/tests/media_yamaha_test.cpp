@@ -109,12 +109,12 @@ TEST(AxkObjectDirectory, AssemblesContiguousWaveDataSegmentsFromNestedDiskFolder
     const std::array second_pcm{std::byte{0x30}, std::byte{0x40}, std::byte{0x50}, std::byte{0x60}};
     auto directory = axk::AxkObjectDirectory::open(
         {{"DISK1/SMP_0001.001", std::make_shared<axk::MemoryReader>(smpl_segment("SPLIT", 6U, 2U, second_pcm))},
-         {"DISK2/SMP_0001.001", std::make_shared<axk::MemoryReader>(smpl_segment("SPLIT", 6U, 0U, first_pcm))}},
+         {"DISK2/SMP_0001.009", std::make_shared<axk::MemoryReader>(smpl_segment("SPLIT", 6U, 0U, first_pcm))}},
         "disk-set");
     ASSERT_TRUE(directory) << directory.error().message;
     ASSERT_EQ(directory->stored_objects().size(), 1U);
     const auto &object = directory->stored_objects().front();
-    EXPECT_EQ(object.logical_path, "DISK2/SMP_0001.001");
+    EXPECT_EQ(object.logical_path, "DISK2/SMP_0001.009");
     EXPECT_EQ(object.raw_payload.size(), 0xacU + 6U);
     EXPECT_FALSE(object.decode_issue);
     EXPECT_EQ(object.decoded.header.payload_bytes_0x1c, 6U);

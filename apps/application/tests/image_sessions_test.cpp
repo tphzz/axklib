@@ -477,7 +477,7 @@ TEST_F(ImageSessionTest, AttachesACompleteMissingStereoLaneAlongsideContinuation
     std::filesystem::create_directories(second_disk);
     write_object_file(first_disk / "SAMPLE.003", stereo_sample);
     write_object_file(first_disk / "LEFT.001", first_segment);
-    write_object_file(second_disk / "LEFT.001", second_segment);
+    write_object_file(second_disk / "LEFT-CONTINUATION.009", second_segment);
     write_object_file(second_disk / "RIGHT.002", right_wave_data);
     write_object_file(second_disk / "UNRELATED.004", unrelated_wave_data);
 

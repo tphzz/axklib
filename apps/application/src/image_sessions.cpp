@@ -77,6 +77,16 @@ std::string fold_ascii(std::string_view value) {
     return folded;
 }
 
+std::optional<std::string> normalized_segment_header_identity(std::span<const std::byte> header) {
+    if (header.size() < 0x28U)
+        return std::nullopt;
+    std::string identity(header.size(), '\0');
+    std::ranges::transform(header, identity.begin(),
+                           [](std::byte value) { return static_cast<char>(std::to_integer<unsigned char>(value)); });
+    std::fill(identity.begin() + 0x20, identity.begin() + 0x28, '\0');
+    return identity;
+}
+
 std::optional<std::string> incomplete_segment_identity(const axk::MediaObject &object) {
     const auto &header = object.decoded.header;
     if (header.type != axk::ObjectType::smpl ||
@@ -84,18 +94,7 @@ std::optional<std::string> incomplete_segment_identity(const axk::MediaObject &o
         header.header_size < 0x28U || header.header_size > object.raw_payload.size()) {
         return std::nullopt;
     }
-    std::string identity(header.header_size, '\0');
-    std::ranges::transform(std::span{object.raw_payload}.first(header.header_size), identity.begin(),
-                           [](std::byte value) { return static_cast<char>(std::to_integer<unsigned char>(value)); });
-    std::fill(identity.begin() + 0x20, identity.begin() + 0x28, '\0');
-    return identity;
-}
-
-std::optional<std::string> filename_from_logical_path(std::string_view logical_path) {
-    auto path = axk::text::path_from_utf8(logical_path);
-    if (!path || path->filename().empty())
-        return std::nullopt;
-    return axk::text::path_to_utf8(path->filename());
+    return normalized_segment_header_identity(std::span{object.raw_payload}.first(header.header_size));
 }
 
 axk::app::Result<std::vector<axk::app::DirectoryEntry>> list_bounded_directory(const axk::app::Sandbox &sandbox,
@@ -154,15 +153,17 @@ append_required_companion_wave_data(const axk::app::Sandbox &sandbox, const axk:
                                     const std::vector<axk::app::DirectoryRef> &companion_directories,
                                     std::vector<axk::AxkObjectDirectoryEntry> &entries,
                                     std::vector<std::function<axk::app::Result<void>()>> &verifiers) {
-    std::unordered_map<std::string, std::vector<std::string>> identities_by_filename;
+    std::unordered_set<std::string> incomplete_identities;
+    std::unordered_set<std::size_t> incomplete_identity_sizes;
     for (const auto &object : primary.stored_objects()) {
         auto identity = incomplete_segment_identity(object);
-        auto filename = filename_from_logical_path(object.logical_path);
-        if (identity && filename)
-            identities_by_filename[fold_ascii(*filename)].push_back(std::move(*identity));
+        if (identity) {
+            incomplete_identity_sizes.insert(identity->size());
+            incomplete_identities.insert(std::move(*identity));
+        }
     }
     const auto missing_names = missing_required_wave_data_names(primary);
-    if (identities_by_filename.empty() && missing_names.empty())
+    if (incomplete_identities.empty() && missing_names.empty())
         return CompanionSegments{};
 
     CompanionSegments result;
@@ -177,7 +178,6 @@ append_required_companion_wave_data(const axk::app::Sandbox &sandbox, const axk:
         for (const auto &candidate : *listing) {
             if (candidate.kind != axk::app::DirectoryEntryKind::file)
                 continue;
-            const auto expected_segments = identities_by_filename.find(fold_ascii(candidate.name));
             if (candidate.size.value_or(axk::AxkObjectDirectory::maximum_payload_bytes + 1U) >
                 axk::AxkObjectDirectory::maximum_payload_bytes) {
                 continue;
@@ -187,17 +187,28 @@ append_required_companion_wave_data(const axk::app::Sandbox &sandbox, const axk:
             if (!opened)
                 return std::unexpected(opened.error());
             bool required_missing_name{};
+            bool required_continuation{};
             constexpr std::size_t object_header_bytes = 0x42U;
-            if (!missing_names.empty() && opened->reader->size() >= object_header_bytes) {
+            if (opened->reader->size() >= object_header_bytes) {
                 std::array<std::byte, object_header_bytes> prefix{};
                 const auto read = opened->reader->read_exact_at(0U, prefix);
                 if (read) {
                     const auto header = axk::decode_object_header(prefix);
-                    required_missing_name =
-                        header && header->type == axk::ObjectType::smpl && missing_names.contains(header->name);
+                    if (header && header->type == axk::ObjectType::smpl) {
+                        required_missing_name = missing_names.contains(header->name);
+                        const auto header_size = static_cast<std::size_t>(header->header_size);
+                        if (incomplete_identity_sizes.contains(header_size) && header_size <= opened->reader->size()) {
+                            std::vector<std::byte> candidate_header(header_size);
+                            if (const auto header_read = opened->reader->read_exact_at(0U, candidate_header);
+                                header_read) {
+                                const auto identity = normalized_segment_header_identity(candidate_header);
+                                required_continuation = identity && incomplete_identities.contains(*identity);
+                            }
+                        }
+                    }
                 }
             }
-            if (expected_segments == identities_by_filename.end() && !required_missing_name)
+            if (!required_continuation && !required_missing_name)
                 continue;
             auto decoded =
                 axk::StandaloneObject::open(opened->reader, candidate.relative_path,
@@ -206,8 +217,7 @@ append_required_companion_wave_data(const axk::app::Sandbox &sandbox, const axk:
                 continue;
             const auto identity = incomplete_segment_identity(decoded->object());
             const bool exact_continuation =
-                expected_segments != identities_by_filename.end() && identity &&
-                std::ranges::find(expected_segments->second, *identity) != expected_segments->second.end();
+                required_continuation && identity && incomplete_identities.contains(*identity);
             const bool exact_missing_name = required_missing_name &&
                                             decoded->object().decoded.header.type == axk::ObjectType::smpl &&
                                             missing_names.contains(decoded->object().decoded.header.name);

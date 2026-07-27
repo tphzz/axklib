@@ -38,10 +38,11 @@ or CLI navigation scopes. Opening one flat disk folder does not inspect its
 siblings. If an explicit preview, audition, or package export needs a missing
 Wave Data segment, an application can attach selected companion disk folders to
 the current image session or explicitly request a bounded immediate-sibling
-search. Companion matching admits exact continuation segments with the same
-object filename and normalized Yamaha header, plus Wave Data objects whose
-embedded names exactly satisfy active unresolved Sample member lanes. It
-neither merges other sibling objects nor modifies the source folders.
+search. Companion matching admits exact continuation segments with a normalized
+Yamaha header identity, even when Yamaha changes the host filename between
+disks, plus Wave Data objects whose embedded names exactly satisfy active
+unresolved Sample member lanes. It neither merges other sibling objects nor
+modifies the source folders.
 
 ## Compatibility Profile
 

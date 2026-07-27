@@ -163,10 +163,10 @@ leaf does not scan its siblings: the leaf remains immediately available for
 inventory, and missing companion segments are reported only when an explicit
 preview, audition, or package export needs them. An application can then attach
 selected companion disk folders to that image session. Axklib admits exact
-continuation segments with the same object filename and normalized Yamaha
-header, plus a Wave Data object whose embedded name exactly satisfies an active
-but unresolved Sample member lane. Unrelated sibling objects remain outside the
-session.
+continuation segments with a normalized Yamaha header identity, even when
+Yamaha changes the host filename between disks, plus a Wave Data object whose
+embedded name exactly satisfies an active but unresolved Sample member lane.
+Unrelated sibling objects remain outside the session.
 
 This segment interpretation is **Strong**: it is repeated across independent
 multi-disk object-directory sets and the segment ranges join exactly to
