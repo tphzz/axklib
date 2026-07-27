@@ -2058,7 +2058,7 @@ describe('HttpImageTransport', () => {
                         error: null,
                     });
                 }
-                if (url.pathname.endsWith('/jobs/alter-job') && init?.method === 'DELETE') {
+                if (url.pathname.endsWith('/jobs/extract-job') && init?.method === 'DELETE') {
                     return new Response(null, { status: 204 });
                 }
                 throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
@@ -2086,21 +2086,22 @@ describe('HttpImageTransport', () => {
             serverFile('images/altered.hds'),
             [{ logicalPath: 'audio/tone.wav', source: audio }],
         );
-        await expect(
-            transport.startExport(
-                opened.sessionId,
-                serverDirectoryLocation({ rootId: 'workspace', relativePath: 'exports/sfz' }),
-                false,
-                true,
-            ),
-        ).resolves.toMatchObject({ kind: 'extract.sfz', status: 'queued' });
+        const extraction = await transport.startExport(
+            opened.sessionId,
+            serverDirectoryLocation({ rootId: 'workspace', relativePath: 'exports/sfz' }),
+            false,
+            true,
+        );
+        expect(extraction).toMatchObject({ kind: 'extract.sfz', status: 'queued' });
         await expect(transport.jobStatus(alteration.jobId)).resolves.toMatchObject({
             status: 'completed',
             result: { output: { rootId: 'workspace', relativePath: 'images/altered.hds' } },
         });
         await transport.cancelJob(alteration.jobId);
+        await transport.cancelJob();
 
-        expect(requests).toContain('DELETE /api/v1/jobs/alter-job');
+        expect(requests).not.toContain('DELETE /api/v1/jobs/alter-job');
+        expect(requests).toContain('DELETE /api/v1/jobs/extract-job');
         expect(requests.some((request) => request.includes('/files/content'))).toBe(false);
         expect(requests.some((request) => request.includes('images/altered.hds'))).toBe(false);
     });

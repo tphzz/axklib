@@ -4,9 +4,22 @@
 #include <array>
 #include <cctype>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 #include "axklib/application/secure_random.hpp"
 #include "axklib/io.hpp"
@@ -73,12 +86,121 @@ std::string_view disallowed_upload_message(axk::app::UploadKind kind) {
     return "upload type is not allowed";
 }
 
+class UploadFile {
+  public:
+    UploadFile(const UploadFile &) = delete;
+    UploadFile &operator=(const UploadFile &) = delete;
+    ~UploadFile() {
+#if defined(_WIN32)
+        if (handle_ != INVALID_HANDLE_VALUE)
+            CloseHandle(handle_);
+#else
+        if (descriptor_ >= 0)
+            ::close(descriptor_);
+#endif
+    }
+
+    static axk::app::Result<std::shared_ptr<UploadFile>> open(const std::filesystem::path &path) {
+#if defined(_WIN32)
+        const auto handle =
+            CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (handle == INVALID_HANDLE_VALUE)
+            return std::unexpected(upload_error("upload_storage_unavailable", "upload staging file cannot be opened"));
+        return std::shared_ptr<UploadFile>{new UploadFile(handle)};
+#else
+        const auto descriptor = ::open(path.c_str(), O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+        if (descriptor < 0)
+            return std::unexpected(upload_error("upload_storage_unavailable", "upload staging file cannot be opened"));
+        return std::shared_ptr<UploadFile>{new UploadFile(descriptor)};
+#endif
+    }
+
+    axk::app::Result<void> write_at(std::uint64_t offset, std::span<const std::byte> bytes) {
+#if defined(_WIN32)
+        LARGE_INTEGER position{.QuadPart = static_cast<LONGLONG>(offset)};
+        if (SetFilePointerEx(handle_, position, nullptr, FILE_BEGIN) == 0)
+            return std::unexpected(upload_error("upload_storage_unavailable", "upload chunk cannot be positioned"));
+        std::size_t completed{};
+        while (completed < bytes.size()) {
+            const auto count =
+                static_cast<DWORD>(std::min<std::size_t>(bytes.size() - completed, std::numeric_limits<DWORD>::max()));
+            DWORD written{};
+            if (WriteFile(handle_, bytes.data() + completed, count, &written, nullptr) == 0 || written == 0U) {
+                truncate(offset);
+                return std::unexpected(upload_error("upload_storage_unavailable", "upload chunk cannot be stored"));
+            }
+            completed += written;
+        }
+#else
+        std::size_t completed{};
+        while (completed < bytes.size()) {
+            const auto written = ::pwrite(descriptor_, bytes.data() + completed, bytes.size() - completed,
+                                          static_cast<off_t>(offset + completed));
+            if (written < 0 && errno == EINTR)
+                continue;
+            if (written <= 0) {
+                truncate(offset);
+                return std::unexpected(upload_error("upload_storage_unavailable", "upload chunk cannot be stored"));
+            }
+            completed += static_cast<std::size_t>(written);
+        }
+#endif
+        auto physical_size = size();
+        if (!physical_size || *physical_size != offset + bytes.size()) {
+            truncate(offset);
+            return std::unexpected(upload_error("upload_storage_unavailable", "upload chunk size cannot be verified"));
+        }
+        return {};
+    }
+
+    axk::app::Result<std::uint64_t> size() const {
+#if defined(_WIN32)
+        LARGE_INTEGER value{};
+        if (GetFileSizeEx(handle_, &value) == 0 || value.QuadPart < 0)
+            return std::unexpected(upload_error("upload_storage_unavailable", "upload size cannot be inspected"));
+        return static_cast<std::uint64_t>(value.QuadPart);
+#else
+        struct stat status{};
+        if (::fstat(descriptor_, &status) != 0 || status.st_size < 0)
+            return std::unexpected(upload_error("upload_storage_unavailable", "upload size cannot be inspected"));
+        return static_cast<std::uint64_t>(status.st_size);
+#endif
+    }
+
+    axk::app::Result<void> flush() const {
+#if defined(_WIN32)
+        if (FlushFileBuffers(handle_) == 0)
+#else
+        if (::fsync(descriptor_) != 0)
+#endif
+            return std::unexpected(upload_error("upload_storage_unavailable", "upload cannot be synchronized"));
+        return {};
+    }
+
+  private:
+#if defined(_WIN32)
+    explicit UploadFile(HANDLE handle) : handle_(handle) {}
+    void truncate(std::uint64_t size) {
+        LARGE_INTEGER position{.QuadPart = static_cast<LONGLONG>(size)};
+        if (SetFilePointerEx(handle_, position, nullptr, FILE_BEGIN) != 0)
+            static_cast<void>(SetEndOfFile(handle_));
+    }
+    HANDLE handle_{INVALID_HANDLE_VALUE};
+#else
+    explicit UploadFile(int descriptor) : descriptor_(descriptor) {}
+    void truncate(std::uint64_t size) { static_cast<void>(::ftruncate(descriptor_, static_cast<off_t>(size))); }
+    int descriptor_{-1};
+#endif
+};
+
 } // namespace
 
 struct axk::app::UploadStore::Implementation {
     struct Entry {
         UploadCreateRequest request;
         std::filesystem::path path;
+        std::shared_ptr<UploadFile> file;
         std::uint64_t received_size{};
         UploadState state{UploadState::receiving};
         std::chrono::steady_clock::time_point expires_at;
@@ -250,9 +372,16 @@ axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::create(UploadC
     const auto path = implementation_->staging_directory / (id + ".upload");
     if (!detail::create_private_file(path))
         return std::unexpected(upload_error("upload_storage_unavailable", "upload staging file cannot be created"));
+    auto file = UploadFile::open(path);
+    if (!file) {
+        std::error_code cleanup_error;
+        std::filesystem::remove(path, cleanup_error);
+        return std::unexpected(file.error());
+    }
     auto [position, inserted] = implementation_->entries.emplace(
         id, Implementation::Entry{.request = std::move(request),
                                   .path = path,
+                                  .file = std::move(*file),
                                   .received_size = 0U,
                                   .state = UploadState::receiving,
                                   .expires_at = implementation_->clock() + implementation_->retention,
@@ -278,10 +407,8 @@ axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::append(const U
         bytes.size() > entry.request.declared_size - entry.received_size) {
         return std::unexpected(upload_error("invalid_upload_chunk", "upload chunk offset or state is invalid"));
     }
-    std::ofstream output{entry.path, std::ios::binary | std::ios::app};
-    output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    if (!output)
-        return std::unexpected(upload_error("upload_storage_unavailable", "upload chunk cannot be stored"));
+    if (auto written = entry.file->write_at(entry.received_size, bytes); !written)
+        return std::unexpected(written.error());
     entry.received_size += bytes.size();
     entry.expires_at = implementation_->clock() + implementation_->retention;
     return implementation_->snapshot(reference.upload_id, entry);
@@ -296,6 +423,14 @@ axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::complete(const
     auto &entry = (**found).second;
     if (entry.received_size != entry.request.declared_size)
         return std::unexpected(upload_error("upload_incomplete", "upload has not received its declared size"));
+    const auto physical_size = entry.file->size();
+    if (!physical_size)
+        return std::unexpected(physical_size.error());
+    if (*physical_size != entry.request.declared_size)
+        return std::unexpected(
+            upload_error("upload_incomplete", "upload physical size does not match its declaration"));
+    if (auto flushed = entry.file->flush(); !flushed)
+        return std::unexpected(flushed.error());
     if (entry.request.sha256) {
         const auto reader = FileReader::open(entry.path);
         if (!reader)

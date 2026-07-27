@@ -290,7 +290,9 @@ axk::app::AlterationJournalStore::AlterationJournalStore(std::filesystem::path d
                                                          InterruptionHook interruption_hook)
     : directory_(std::move(directory)), maximum_journal_bytes_(std::max<std::size_t>(maximum_journal_bytes, 1U)),
       interruption_hook_(std::move(interruption_hook)) {
-    storage_ready_.store(detail::prepare_private_directory(directory_).has_value(), std::memory_order_relaxed);
+    const auto available = detail::prepare_private_directory(directory_).has_value();
+    storage_available_.store(available, std::memory_order_relaxed);
+    storage_ready_.store(available, std::memory_order_relaxed);
 }
 
 bool axk::app::AlterationJournalStore::storage_ready() const noexcept {
@@ -336,6 +338,7 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
         return published;
     }
 
+    const auto quarantine = [&] { storage_ready_.store(false, std::memory_order_relaxed); };
     const auto rollback = [&]() -> Result<void> {
         for (const auto &patch : std::views::reverse(patches)) {
             if (auto written = target->write_exact_at(patch.offset, patch.original); !written)
@@ -343,61 +346,92 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
         }
         return target->flush();
     };
+    const auto rollback_and_remove = [&](bool remove_marker) -> Result<void> {
+        if (auto restored = rollback(); !restored) {
+            quarantine();
+            return restored;
+        }
+        if (auto removed = remove_file(path, "alteration journal"); !removed) {
+            quarantine();
+            return removed;
+        }
+        if (!remove_marker)
+            return {};
+        const auto marker = commit_marker_path(path);
+        std::error_code error;
+        const auto exists = std::filesystem::exists(marker, error);
+        if (error) {
+            quarantine();
+            return std::unexpected(journal_error("alteration commit marker cannot be inspected", true));
+        }
+        if (exists) {
+            if (auto removed = remove_file(marker, "alteration commit marker"); !removed) {
+                quarantine();
+                return removed;
+            }
+        }
+        return {};
+    };
     for (std::size_t index = 0U; index < patches.size(); ++index) {
         const auto &patch = patches[index];
         if (auto written = target->write_exact_at(patch.offset, patch.replacement); !written) {
-            if (auto restored = rollback(); restored)
-                static_cast<void>(remove_file(path, "alteration journal"));
+            if (auto recovered = rollback_and_remove(false); !recovered)
+                return recovered;
             return written;
         }
         if (interruption_hook_ && interruption_hook_("after-patch", index)) {
-            if (auto flushed = target->flush(); !flushed)
+            if (auto flushed = target->flush(); !flushed) {
+                quarantine();
                 return flushed;
+            }
+            quarantine();
             return std::unexpected(journal_error("simulated alteration interruption", true));
         }
     }
     if (auto flushed = target->flush(); !flushed) {
-        if (auto restored = rollback(); restored)
-            static_cast<void>(remove_file(path, "alteration journal"));
+        if (auto recovered = rollback_and_remove(false); !recovered)
+            return recovered;
         return flushed;
     }
     if (auto bound = target->verify_bound(); !bound) {
-        if (auto restored = rollback(); restored)
-            static_cast<void>(remove_file(path, "alteration journal"));
+        if (auto recovered = rollback_and_remove(false); !recovered)
+            return recovered;
         return bound;
     }
     for (const auto &patch : patches) {
         if (auto compared = compare_patch(*target, patch, true); !compared) {
-            if (auto restored = rollback(); restored)
-                static_cast<void>(remove_file(path, "alteration journal"));
+            if (auto recovered = rollback_and_remove(false); !recovered)
+                return recovered;
             return compared;
         }
     }
     const auto marker = commit_marker_path(path);
     if (auto created = detail::create_private_file(marker); !created) {
-        if (auto restored = rollback(); !restored)
-            return restored;
-        static_cast<void>(remove_file(path, "alteration journal"));
+        if (auto recovered = rollback_and_remove(true); !recovered)
+            return recovered;
         return std::unexpected(created.error());
     }
     const auto journal_checksum = checksum(*encoded);
     if (auto written = write_text_file(marker, journal_checksum); !written) {
-        if (auto restored = rollback(); !restored)
-            return restored;
-        static_cast<void>(remove_file(path, "alteration journal"));
-        static_cast<void>(remove_file(marker, "alteration commit marker"));
+        if (auto recovered = rollback_and_remove(true); !recovered)
+            return recovered;
         return written;
     }
-    if (interruption_hook_ && interruption_hook_("after-commit-marker", patches.size()))
+    if (interruption_hook_ && interruption_hook_("after-commit-marker", patches.size())) {
+        quarantine();
         return std::unexpected(journal_error("simulated alteration interruption", true));
-    if (auto removed = remove_completed_journal(path); !removed)
-        storage_ready_.store(false, std::memory_order_relaxed);
+    }
+    if (auto removed = remove_completed_journal(path); !removed) {
+        quarantine();
+        return removed;
+    }
     return {};
 }
 
 axk::app::Result<void> axk::app::AlterationJournalStore::recover(const Sandbox &sandbox) {
-    if (!storage_ready())
+    if (!storage_available_.load(std::memory_order_relaxed))
         return std::unexpected(journal_error("alteration journal storage is not ready"));
+    storage_ready_.store(false, std::memory_order_relaxed);
     std::vector<std::filesystem::path> journals;
     std::vector<std::filesystem::path> markers;
     std::error_code error;
@@ -485,5 +519,6 @@ axk::app::Result<void> axk::app::AlterationJournalStore::recover(const Sandbox &
                 return removed;
         }
     }
+    storage_ready_.store(true, std::memory_order_relaxed);
     return {};
 }

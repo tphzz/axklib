@@ -13,6 +13,7 @@
 #include <set>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace axk {
 namespace {
@@ -156,16 +157,6 @@ std::string sampler_path(const ObjectSnapshot &item) {
         return std::format("partition {}", item.partition.value);
     return std::format("partition {}: {}/{}", item.partition.value, item.placement->partition_name,
                        item.placement->volume_name);
-}
-
-bool partition_has_unknown_records(const Container &container, PartitionIndex index) {
-    const auto partition =
-        std::ranges::find(container.partitions(), index.value, [](const Partition &p) { return p.index.value; });
-    if (partition == container.partitions().end())
-        return true;
-    return std::ranges::any_of(partition->records, [](const IndexRecord &record) {
-        return record.sfs_id.value != 0U && record.payload_kind == PayloadKind::unknown;
-    });
 }
 
 std::string join(const std::vector<std::string> &values) {
@@ -582,6 +573,38 @@ std::string_view content_scope_role_name(ContentScopeRole role) noexcept {
 WaveformOrphanReport analyze_waveform_orphans(const Container &container, const ObjectCatalog &catalog,
                                               const RelationshipGraph &graph) {
     WaveformOrphanReport result;
+    std::unordered_map<std::string, const ObjectSnapshot *> objects_by_key;
+    objects_by_key.reserve(catalog.objects.size());
+    for (const auto &item : catalog.objects)
+        objects_by_key.emplace(item.key, &item);
+
+    std::unordered_map<std::string, std::vector<const Relationship *>> parents_by_target;
+    std::unordered_map<std::string, std::vector<std::string>> unresolved_relationships_by_scope;
+    parents_by_target.reserve(graph.relationships.size());
+    for (const auto &relation : graph.relationships) {
+        if (relation.target_key)
+            parents_by_target[*relation.target_key].push_back(&relation);
+        if (relation.scope_key.empty() ||
+            (relation.type != "SBNK_LEFT_MEMBER_TO_SMPL" && relation.type != "SBNK_RIGHT_MEMBER_TO_SMPL") ||
+            relation.quality == RelationshipQuality::known) {
+            continue;
+        }
+        unresolved_relationships_by_scope[relation.scope_key].push_back(
+            std::format("Sample relationship is unresolved: {}", relation.source_key));
+    }
+
+    std::unordered_set<std::uint8_t> partitions_with_unknown_records;
+    for (const auto &partition : container.partitions()) {
+        if (std::ranges::any_of(partition.records, [](const IndexRecord &record) {
+                return record.sfs_id.value != 0U && record.payload_kind == PayloadKind::unknown;
+            })) {
+            partitions_with_unknown_records.insert(partition.index.value);
+        }
+    }
+    std::unordered_map<std::uint8_t, std::vector<std::string>> issues_by_partition;
+    for (const auto &issue : catalog.issues)
+        issues_by_partition[issue.partition.value].push_back(issue.message);
+
     for (const auto &item : catalog.objects) {
         const auto *wave_data = std::get_if<CurrentSmpl>(&item.object.payload);
         if (wave_data == nullptr)
@@ -597,15 +620,17 @@ WaveformOrphanReport analyze_waveform_orphans(const Container &container, const 
             row.volume_name = item.placement->volume_name;
         }
 
-        for (const auto *relation : graph.parents(item.key)) {
-            if ((relation->type == "SBNK_LEFT_MEMBER_TO_SMPL" || relation->type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
-                relation->target_key && *relation->target_key == item.key &&
-                relation->quality == RelationshipQuality::known) {
-                if (const auto *sample = find_object(catalog, relation->source_key); sample != nullptr) {
-                    row.referencing_samples.push_back(
-                        sample->placement
-                            ? std::format("{}/{}", sample->placement->volume_name, sample->object.header.name)
-                            : sample->object.header.name);
+        if (const auto parents = parents_by_target.find(item.key); parents != parents_by_target.end()) {
+            for (const auto *relation : parents->second) {
+                if ((relation->type != "SBNK_LEFT_MEMBER_TO_SMPL" && relation->type != "SBNK_RIGHT_MEMBER_TO_SMPL") ||
+                    relation->quality != RelationshipQuality::known) {
+                    continue;
+                }
+                if (const auto sample = objects_by_key.find(relation->source_key); sample != objects_by_key.end()) {
+                    row.referencing_samples.push_back(sample->second->placement
+                                                          ? std::format("{}/{}", sample->second->placement->volume_name,
+                                                                        sample->second->object.header.name)
+                                                          : sample->second->object.header.name);
                 }
             }
         }
@@ -620,19 +645,16 @@ WaveformOrphanReport analyze_waveform_orphans(const Container &container, const 
             std::vector<std::string> blockers;
             if (!item.placement)
                 blockers.emplace_back("waveform has no exact SMPL directory placement");
-            if (partition_has_unknown_records(container, item.partition)) {
+            if (partitions_with_unknown_records.contains(item.partition.value)) {
                 blockers.emplace_back("partition contains an unresolved allocated record");
             }
-            for (const auto &issue : catalog.issues) {
-                if (issue.partition.value == item.partition.value)
-                    blockers.push_back(issue.message);
+            if (const auto issues = issues_by_partition.find(item.partition.value);
+                issues != issues_by_partition.end()) {
+                blockers.insert(blockers.end(), issues->second.begin(), issues->second.end());
             }
-            for (const auto &relation : graph.relationships) {
-                if (relation.scope_key == item.scope_key &&
-                    (relation.type == "SBNK_LEFT_MEMBER_TO_SMPL" || relation.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
-                    relation.quality != RelationshipQuality::known) {
-                    blockers.push_back(std::format("Sample relationship is unresolved: {}", relation.source_key));
-                }
+            if (const auto unresolved = unresolved_relationships_by_scope.find(item.scope_key);
+                unresolved != unresolved_relationships_by_scope.end()) {
+                blockers.insert(blockers.end(), unresolved->second.begin(), unresolved->second.end());
             }
             if (blockers.empty()) {
                 row.status = WaveformStatus::known_unreferenced;

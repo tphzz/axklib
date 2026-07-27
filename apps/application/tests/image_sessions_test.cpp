@@ -921,6 +921,9 @@ TEST_F(ImageSessionTest, EnforcesCapacityAndSurvivesCloseDuringAnExistingPage) {
     ASSERT_FALSE(full);
     EXPECT_EQ(full.error().code, "image_capacity_exhausted");
     EXPECT_TRUE(full.error().retryable);
+    const auto missing = sessions.open({"workspace", "does-not-exist.hds"}, "owner-a");
+    ASSERT_FALSE(missing);
+    EXPECT_EQ(missing.error().code, "image_capacity_exhausted");
     const auto page = sessions.content(opened->image_id, "owner-a", 100U);
     ASSERT_TRUE(page);
     ASSERT_TRUE(sessions.close(opened->image_id, "owner-a"));

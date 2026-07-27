@@ -750,13 +750,48 @@ std::optional<bool> directory_is_empty(HANDLE directory) {
 
 #else
 
-bool delete_tree_at(int parent, const std::filesystem::path &name) {
+struct PosixObjectIdentity {
+    dev_t device{};
+    ino_t inode{};
+
+    friend bool operator==(const PosixObjectIdentity &, const PosixObjectIdentity &) = default;
+};
+
+PosixObjectIdentity object_identity(const struct stat &status) { return {status.st_dev, status.st_ino}; }
+
+std::optional<PosixObjectIdentity> object_identity_at(int parent, const std::filesystem::path &name) {
+    struct stat status{};
+    if (::fstatat(parent, name.c_str(), &status, AT_SYMLINK_NOFOLLOW) != 0 || S_ISLNK(status.st_mode))
+        return std::nullopt;
+    return object_identity(status);
+}
+
+bool retained_entry_matches(int parent, const std::filesystem::path &name, int retained) {
+    struct stat retained_status{};
+    struct stat named_status{};
+    return ::fstat(retained, &retained_status) == 0 &&
+           ::fstatat(parent, name.c_str(), &named_status, AT_SYMLINK_NOFOLLOW) == 0 && !S_ISLNK(named_status.st_mode) &&
+           object_identity(retained_status) == object_identity(named_status) &&
+           (retained_status.st_mode & S_IFMT) == (named_status.st_mode & S_IFMT);
+}
+
+bool delete_tree_at(int parent, const std::filesystem::path &name,
+                    std::optional<PosixObjectIdentity> expected = std::nullopt) {
     const auto descriptor = ::openat(parent, name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (descriptor < 0)
         return false;
-    auto *directory = ::fdopendir(descriptor);
+    auto retained = descriptor_handle(descriptor);
+    struct stat retained_status{};
+    if (::fstat(*retained, &retained_status) != 0 || !S_ISDIR(retained_status.st_mode) ||
+        (expected && object_identity(retained_status) != *expected)) {
+        return false;
+    }
+    const auto enumeration_descriptor = ::dup(*retained);
+    if (enumeration_descriptor < 0)
+        return false;
+    auto *directory = ::fdopendir(enumeration_descriptor);
     if (directory == nullptr) {
-        ::close(descriptor);
+        ::close(enumeration_descriptor);
         return false;
     }
     bool removed = true;
@@ -774,27 +809,54 @@ bool delete_tree_at(int parent, const std::filesystem::path &name) {
             break;
         }
         if (S_ISDIR(status.st_mode)) {
-            if (!delete_tree_at(descriptor, entry->d_name)) {
+            if (!delete_tree_at(*retained, entry->d_name, object_identity(status))) {
                 removed = false;
                 break;
             }
-        } else if (!S_ISREG(status.st_mode) || ::unlinkat(descriptor, entry->d_name, 0) != 0) {
+        } else if (!S_ISREG(status.st_mode)) {
             removed = false;
             break;
+        } else {
+            const auto child_descriptor =
+                ::openat(*retained, entry->d_name, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+            if (child_descriptor < 0) {
+                removed = false;
+                break;
+            }
+            auto child = descriptor_handle(child_descriptor);
+            struct stat opened_status{};
+            if (::fstat(*child, &opened_status) != 0 || !S_ISREG(opened_status.st_mode) ||
+                object_identity(opened_status) != object_identity(status) ||
+                !retained_entry_matches(*retained, entry->d_name, *child) ||
+                ::unlinkat(*retained, entry->d_name, 0) != 0) {
+                removed = false;
+                break;
+            }
         }
     }
     const auto enumeration_error = errno;
     ::closedir(directory);
-    return removed && enumeration_error == 0 && ::unlinkat(parent, name.c_str(), AT_REMOVEDIR) == 0;
+    return removed && enumeration_error == 0 && retained_entry_matches(parent, name, *retained) &&
+           ::unlinkat(parent, name.c_str(), AT_REMOVEDIR) == 0;
 }
 
-std::optional<bool> directory_empty_at(int parent, const std::filesystem::path &name) {
+std::optional<bool> directory_empty_at(int parent, const std::filesystem::path &name,
+                                       std::optional<PosixObjectIdentity> expected = std::nullopt) {
     const auto descriptor = ::openat(parent, name.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (descriptor < 0)
         return std::nullopt;
-    auto *directory = ::fdopendir(descriptor);
+    auto retained = descriptor_handle(descriptor);
+    struct stat retained_status{};
+    if (::fstat(*retained, &retained_status) != 0 || !S_ISDIR(retained_status.st_mode) ||
+        (expected && object_identity(retained_status) != *expected)) {
+        return std::nullopt;
+    }
+    const auto enumeration_descriptor = ::dup(*retained);
+    if (enumeration_descriptor < 0)
+        return std::nullopt;
+    auto *directory = ::fdopendir(enumeration_descriptor);
     if (directory == nullptr) {
-        ::close(descriptor);
+        ::close(enumeration_descriptor);
         return std::nullopt;
     }
     bool empty = true;
@@ -811,7 +873,7 @@ std::optional<bool> directory_empty_at(int parent, const std::filesystem::path &
     }
     const auto enumeration_error = errno;
     ::closedir(directory);
-    if (enumeration_error != 0)
+    if (enumeration_error != 0 || !retained_entry_matches(parent, name, *retained))
         return std::nullopt;
     return empty;
 }
@@ -1813,7 +1875,15 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
                 publication_error("temporary output directory could not be opened", destination.relative_path));
         }
         auto staged = descriptor_handle(staged_descriptor);
-        const auto discard_staged = [&] { static_cast<void>(delete_tree_at(**parent, temporary)); };
+        struct stat staged_status{};
+        if (::fstat(*staged, &staged_status) != 0 || !S_ISDIR(staged_status.st_mode)) {
+            staged.reset();
+            static_cast<void>(::unlinkat(**parent, temporary.c_str(), AT_REMOVEDIR));
+            return std::unexpected(publication_error("temporary output directory identity could not be retained",
+                                                     destination.relative_path));
+        }
+        const auto staged_identity = object_identity(staged_status);
+        const auto discard_staged = [&] { static_cast<void>(delete_tree_at(**parent, temporary, staged_identity)); };
         for (const auto &entry : entries) {
             auto entry_parent = open_parent(*staged, entry.relative.parent_path(), destination.relative_path);
             if (!entry_parent) {
@@ -1896,7 +1966,7 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
                 reference_error("output directory is not a regular directory", destination.relative_path));
         }
         if (destination_exists && !overwrite) {
-            const auto empty = directory_empty_at(**parent, relative->filename());
+            const auto empty = directory_empty_at(**parent, relative->filename(), object_identity(destination_status));
             if (!empty || !*empty) {
                 discard_staged();
                 return std::unexpected(
@@ -1916,15 +1986,21 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
                 publication_error("output directory could not be published atomically", destination.relative_path));
         }
         if (destination_exists && !overwrite) {
-            const auto displaced_empty = directory_empty_at(**parent, temporary);
+            const auto destination_identity = object_identity(destination_status);
+            const auto displaced_empty = directory_empty_at(**parent, temporary, destination_identity);
             if (!displaced_empty || !*displaced_empty) {
-                static_cast<void>(rename_exchange(**parent, temporary.c_str(), relative->filename().c_str()));
-                discard_staged();
+                const auto current_temporary = object_identity_at(**parent, temporary);
+                const auto current_destination = object_identity_at(**parent, relative->filename());
+                if (current_temporary && *current_temporary == destination_identity && current_destination &&
+                    *current_destination == staged_identity &&
+                    rename_exchange(**parent, temporary.c_str(), relative->filename().c_str()) == 0) {
+                    discard_staged();
+                }
                 return std::unexpected(
                     output_exists_error("output directory changed during publication", destination.relative_path));
             }
         }
-        if (destination_exists && !delete_tree_at(**parent, temporary)) {
+        if (destination_exists && !delete_tree_at(**parent, temporary, object_identity(destination_status))) {
             return std::unexpected(
                 publication_error("replaced output directory could not be removed", destination.relative_path));
         }
@@ -2095,9 +2171,9 @@ axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::metadata(std::strin
 axk::app::Result<axk::app::DirectoryListing>
 axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t limit,
                                   std::optional<std::string_view> cursor) const {
-    if (limit == 0U || limit > 1000U)
+    if (limit == 0U || limit > 5000U)
         return std::unexpected(
-            reference_error("directory listing limit must be between 1 and 1000", reference.relative_path));
+            reference_error("directory listing limit must be between 1 and 5000", reference.relative_path));
     const auto root = find_root(reference.root_id);
     if (!root)
         return std::unexpected(reference_error("sandbox root does not exist", reference.relative_path));

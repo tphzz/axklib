@@ -38,6 +38,7 @@ class AlterationJournalStore {
     std::filesystem::path directory_;
     std::size_t maximum_journal_bytes_;
     InterruptionHook interruption_hook_;
+    std::atomic_bool storage_available_{};
     std::atomic_bool storage_ready_{};
 };
 

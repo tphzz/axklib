@@ -216,8 +216,11 @@ export class HttpImageTransport implements ImageTransport {
     readonly supportsClientUploads = true;
     private readonly client: AxklibHttpApiClient;
     private readonly sessions = new Map<number, SessionState>();
-    private readonly jobs = new Map<number, string>();
+    private readonly activeJobs = new Map<number, string>();
+    private readonly terminalJobs = new Map<number, string>();
     private readonly createPlans = new Map<string, ApiWritePlan>();
+    private static readonly maximumRetainedTerminalJobs = 128;
+    private static readonly cancellationConcurrency = 4;
     private nextSessionId = 1;
     private nextJobId = 1;
 
@@ -1013,14 +1016,14 @@ export class HttpImageTransport implements ImageTransport {
     }
 
     async jobStatus(jobId: number): Promise<JobState> {
-        const remoteId = this.jobs.get(jobId);
+        const remoteId = this.remoteJobId(jobId);
         if (!remoteId) throw new Error('Job is closed or unknown');
         const job = await this.client.request<ApiJobSnapshot>('GET', `/jobs/${encodeURIComponent(remoteId)}`);
         return this.mapJob(job, jobId);
     }
 
     waitForJob(jobId: number, onUpdate: (job: JobState) => void, signal?: AbortSignal): Promise<JobState> {
-        const remoteId = this.jobs.get(jobId);
+        const remoteId = this.remoteJobId(jobId);
         if (!remoteId) return Promise.reject(new Error('Job is closed or unknown'));
 
         return new Promise((resolve, reject) => {
@@ -1029,13 +1032,21 @@ export class HttpImageTransport implements ImageTransport {
             let reconnectAttempts = 0;
             let stableConnectionTimer: ReturnType<typeof setTimeout> | undefined;
             let settled = false;
+            let cancellationRequested = false;
             let work = Promise.resolve();
             const handleAbort = (): void => {
-                if (settled) return;
-                void this.cancelJob(jobId);
-                const error = new Error('The job was cancelled');
-                error.name = 'AbortError';
-                fail(error);
+                if (settled || cancellationRequested) return;
+                cancellationRequested = true;
+                enqueue(async () => {
+                    try {
+                        await this.cancelJob(jobId);
+                    } catch (reason) {
+                        await reconcile();
+                        if (!settled) throw reason;
+                        return;
+                    }
+                    await reconcile();
+                });
             };
 
             const clearStableConnectionTimer = (): void => {
@@ -1167,15 +1178,17 @@ export class HttpImageTransport implements ImageTransport {
 
     async cancelJob(jobId?: number): Promise<void> {
         if (jobId !== undefined) {
-            const remoteId = this.jobs.get(jobId);
+            const remoteId = this.activeJobs.get(jobId);
             if (remoteId) await this.client.request('DELETE', `/jobs/${encodeURIComponent(remoteId)}`);
             return;
         }
-        await Promise.all(
-            [...this.jobs.values()].map((remoteId) =>
-                this.client.request('DELETE', `/jobs/${encodeURIComponent(remoteId)}`),
-            ),
-        );
+        const remoteIds = [...new Set(this.activeJobs.values())];
+        for (let offset = 0; offset < remoteIds.length; offset += HttpImageTransport.cancellationConcurrency) {
+            const batch = remoteIds.slice(offset, offset + HttpImageTransport.cancellationConcurrency);
+            await Promise.all(
+                batch.map((remoteId) => this.client.request('DELETE', `/jobs/${encodeURIComponent(remoteId)}`)),
+            );
+        }
     }
 
     private session(sessionId: number): SessionState {
@@ -1190,11 +1203,10 @@ export class HttpImageTransport implements ImageTransport {
 
     private mapJob(job: ApiJobSnapshot, existingId?: number): JobState {
         const jobId = existingId ?? this.nextJobId++;
-        this.jobs.set(jobId, job.jobId);
         const progress = job.progress as
             { phase?: string; completed?: number; total?: number | null; message?: string } | undefined;
         const error = job.error as { code?: string; message?: string; context?: unknown } | undefined;
-        return {
+        const mapped: JobState = {
             jobId,
             kind: job.operationId,
             status: job.state.toLocaleLowerCase() as JobState['status'],
@@ -1211,12 +1223,13 @@ export class HttpImageTransport implements ImageTransport {
             errorCode: error?.code,
             errorContext: error?.context,
         };
+        this.trackJob(jobId, job.jobId, this.terminal(mapped));
+        return mapped;
     }
 
     private mapJobEvent(event: ApiJobEvent, jobId: number): JobState {
-        this.jobs.set(jobId, event.jobId);
         const progress = event.progress;
-        return {
+        const mapped: JobState = {
             jobId,
             kind: event.operationId,
             status: event.state.toLocaleLowerCase() as JobState['status'],
@@ -1229,6 +1242,28 @@ export class HttpImageTransport implements ImageTransport {
                   }
                 : undefined,
         };
+        this.trackJob(jobId, event.jobId, this.terminal(mapped));
+        return mapped;
+    }
+
+    private remoteJobId(jobId: number): string | undefined {
+        return this.activeJobs.get(jobId) ?? this.terminalJobs.get(jobId);
+    }
+
+    private trackJob(jobId: number, remoteId: string, terminal: boolean): void {
+        if (!terminal) {
+            this.terminalJobs.delete(jobId);
+            this.activeJobs.set(jobId, remoteId);
+            return;
+        }
+        this.activeJobs.delete(jobId);
+        this.terminalJobs.delete(jobId);
+        this.terminalJobs.set(jobId, remoteId);
+        while (this.terminalJobs.size > HttpImageTransport.maximumRetainedTerminalJobs) {
+            const oldest = this.terminalJobs.keys().next().value as number | undefined;
+            if (oldest === undefined) break;
+            this.terminalJobs.delete(oldest);
+        }
     }
 
     private terminal(job: JobState): boolean {

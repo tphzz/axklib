@@ -473,6 +473,20 @@ TEST(ServerContract, WaveDataOrphanInspectionIsVolumeScopedAndResponseBounded) {
     EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImageWaveDataOrphanInspection", wrong_type));
 }
 
+TEST(ServerContract, WorkspaceCreateRequestRejectsUnknownFields) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    axk::server::OpenApiValidator validator{document};
+    const auto request =
+        nlohmann::json{{"displayName", "Samples"}, {"path", "/samples"}, {"writable", false}, {"revision", 0U}};
+    EXPECT_TRUE(validator.validate("WorkspaceCreateRequest", request));
+
+    auto misspelled = request;
+    misspelled.erase("writable");
+    misspelled["writeable"] = false;
+    EXPECT_FALSE(validator.validate("WorkspaceCreateRequest", misspelled));
+}
+
 TEST(ServerContract, WireEnumsAreUpperSnakeAndTranslateOnlyAtTheApplicationBoundary) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());

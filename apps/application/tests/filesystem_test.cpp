@@ -196,6 +196,15 @@ TEST_F(SandboxTest, PagesDirectoriesDeterministicallyWithOpaqueCursor) {
     EXPECT_EQ(invalid.error().code, "invalid_file_reference");
 }
 
+TEST_F(SandboxTest, AcceptsThePublicDirectoryPageLimitAndRejectsLargerValues) {
+    const auto value = sandbox();
+    const auto maximum = value.list_directory({"workspace", "images"}, 5000U);
+    ASSERT_TRUE(maximum) << maximum.error().message;
+    const auto excessive = value.list_directory({"workspace", "images"}, 5001U);
+    ASSERT_FALSE(excessive);
+    EXPECT_EQ(excessive.error().code, "invalid_file_reference");
+}
+
 TEST_F(SandboxTest, ResolvesMetadataAndWritableOutputsWithoutAcceptingAliases) {
     const auto value = sandbox();
     const auto metadata = value.metadata("workspace", "images/disk.hds");

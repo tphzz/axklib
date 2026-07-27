@@ -206,14 +206,22 @@ axk::app::DownloadArchiveStore::DownloadArchiveStore(std::filesystem::path stagi
         for (const auto &entry : std::filesystem::directory_iterator{implementation_->staging_directory, error}) {
             if (error)
                 break;
-            if (entry.is_regular_file(error) &&
-                (entry.path().extension() == ".tar" || entry.path().extension() == ".download" ||
-                 entry.path().extension() == ".part"))
-                std::filesystem::remove(entry.path(), error);
+            const auto extension = entry.path().extension();
+            const auto recognized = extension == ".tar" || extension == ".download" || extension == ".part";
+            if (!recognized || !entry.is_regular_file(error)) {
+                implementation_->storage_ready = false;
+                break;
+            }
+            if (!std::filesystem::remove(entry.path(), error) || error) {
+                implementation_->storage_ready = false;
+                break;
+            }
             if (error)
                 break;
         }
     }
+    if (error)
+        implementation_->storage_ready = false;
 }
 
 axk::app::DownloadArchiveStore::~DownloadArchiveStore() = default;

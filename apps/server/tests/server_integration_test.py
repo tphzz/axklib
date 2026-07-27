@@ -944,6 +944,25 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert host_listing["data"]["path"] == root_path.resolve().as_posix()
             secondary_workspace = external_path / "secondary-workspace"
             secondary_workspace.mkdir()
+            status, misspelled_workspace = http_request(
+                port,
+                "POST",
+                "/api/v1/workspaces",
+                {
+                    "displayName": "Misspelled read only",
+                    "path": str(secondary_workspace),
+                    "writeable": False,
+                    "revision": 1,
+                },
+            )
+            assert status == 400, misspelled_workspace
+            assert misspelled_workspace["error"]["code"] == "invalid_request"
+            status, unchanged_workspaces = http_request(
+                port, "GET", "/api/v1/workspaces"
+            )
+            assert status == 200
+            assert unchanged_workspaces["data"]["revision"] == 1
+            assert len(unchanged_workspaces["data"]["workspaces"]) == 1
             status, added_workspace = http_request(
                 port,
                 "POST",

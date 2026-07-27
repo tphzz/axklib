@@ -379,6 +379,8 @@ struct axk::app::ImageSessionManager::Implementation {
         std::optional<MediaContainer> media;
         std::unordered_map<std::string, MediaObjectDescriptor> descriptors_by_id;
         std::unordered_map<std::string, ObjectSnapshot> snapshots_by_id;
+        std::unordered_map<std::string, axk::WaveformStatus> waveform_status_by_id;
+        std::unordered_map<std::string, std::uint64_t> waveform_cluster_counts_by_id;
         std::vector<CatalogIssue> catalog_issues;
         std::unordered_map<std::string, AuditionEntry> auditions;
         std::size_t root_count{};
@@ -405,6 +407,34 @@ struct axk::app::ImageSessionManager::Implementation {
     PathReservationCoordinator *path_reservations;
     std::mutex mutex;
     std::unordered_map<std::string, std::shared_ptr<Session>> sessions;
+    std::unordered_map<std::string, std::weak_ptr<Session>> audition_sessions;
+    std::size_t pending_sessions{};
+
+    struct PendingAdmission {
+        explicit PendingAdmission(Implementation &implementation) : implementation_(&implementation) {}
+        PendingAdmission(const PendingAdmission &) = delete;
+        PendingAdmission &operator=(const PendingAdmission &) = delete;
+        ~PendingAdmission() {
+            if (!active_)
+                return;
+            const std::scoped_lock lock{implementation_->mutex};
+            --implementation_->pending_sessions;
+        }
+
+        bool promote(const std::shared_ptr<Session> &session) {
+            const std::scoped_lock lock{implementation_->mutex};
+            if (implementation_->sessions.contains(session->image_id))
+                return false;
+            implementation_->sessions.emplace(session->image_id, session);
+            --implementation_->pending_sessions;
+            active_ = false;
+            return true;
+        }
+
+      private:
+        Implementation *implementation_;
+        bool active_{true};
+    };
 
     Implementation(const Sandbox &sandbox_value, std::size_t session_count, std::size_t page_size,
                    std::chrono::seconds retention, Clock now, PathReservationCoordinator *reservations,
@@ -423,6 +453,25 @@ struct axk::app::ImageSessionManager::Implementation {
             if (!access_lock)
                 return false;
             return session->last_access + idle_retention <= now;
+        });
+        std::erase_if(audition_sessions, [](const auto &item) { return item.second.expired(); });
+    }
+
+    Result<std::unique_ptr<PendingAdmission>> reserve_session() {
+        const std::scoped_lock lock{mutex};
+        cleanup_locked();
+        if (sessions.size() + pending_sessions >= maximum_sessions)
+            return std::unexpected(
+                session_error("image_capacity_exhausted", "image session capacity is exhausted", true));
+        ++pending_sessions;
+        return std::make_unique<PendingAdmission>(*this);
+    }
+
+    void remove_auditions_for(const std::shared_ptr<Session> &session) {
+        const std::scoped_lock lock{mutex};
+        std::erase_if(audition_sessions, [&](const auto &item) {
+            const auto owner = item.second.lock();
+            return !owner || owner == session;
         });
     }
 
@@ -513,6 +562,22 @@ struct axk::app::ImageSessionManager::Implementation {
             snapshots.emplace(std::move(mapped), std::move(snapshot));
         }
         fresh.snapshots_by_id = std::move(snapshots);
+        decltype(fresh.waveform_status_by_id) waveform_statuses;
+        waveform_statuses.reserve(fresh.waveform_status_by_id.size());
+        for (auto &[id, status] : fresh.waveform_status_by_id) {
+            auto mapped = id;
+            map_id(mapped);
+            waveform_statuses.emplace(std::move(mapped), status);
+        }
+        fresh.waveform_status_by_id = std::move(waveform_statuses);
+        decltype(fresh.waveform_cluster_counts_by_id) waveform_cluster_counts;
+        waveform_cluster_counts.reserve(fresh.waveform_cluster_counts_by_id.size());
+        for (auto &[id, count] : fresh.waveform_cluster_counts_by_id) {
+            auto mapped = id;
+            map_id(mapped);
+            waveform_cluster_counts.emplace(std::move(mapped), count);
+        }
+        fresh.waveform_cluster_counts_by_id = std::move(waveform_cluster_counts);
         fresh.object_indices_by_id.clear();
         fresh.object_indices_by_type.clear();
         for (std::size_t index = 0U; index < fresh.objects.size(); ++index) {
@@ -540,6 +605,8 @@ struct axk::app::ImageSessionManager::Implementation {
         current.media = std::move(fresh.media);
         current.descriptors_by_id = std::move(fresh.descriptors_by_id);
         current.snapshots_by_id = std::move(fresh.snapshots_by_id);
+        current.waveform_status_by_id = std::move(fresh.waveform_status_by_id);
+        current.waveform_cluster_counts_by_id = std::move(fresh.waveform_cluster_counts_by_id);
         current.catalog_issues = std::move(fresh.catalog_issues);
         current.companion_path_lease = std::move(fresh.companion_path_lease);
         current.auditions.clear();
@@ -916,6 +983,9 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
                                                                const CancellationToken &cancellation) {
     if (owner_id.empty())
         return std::unexpected(session_error("invalid_owner", "image session owner is required"));
+    auto admission = implementation_->reserve_session();
+    if (!admission)
+        return std::unexpected(admission.error());
     const FileRef path_reference{source.root_id, source.relative_path};
     PathReservationCoordinator::Lease path_lease;
     PathReservationCoordinator::Lease companion_path_lease;
@@ -1056,6 +1126,19 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
     for (const auto &descriptor : inventory->objects)
         session->descriptors_by_id.emplace(object_ids.at(descriptor.key), descriptor);
     session->catalog_issues = inventory->catalog.issues;
+    if (const auto *sfs = std::get_if<axk::Container>(&media->storage())) {
+        const auto orphan_report = axk::analyze_waveform_orphans(*sfs, inventory->catalog, graph);
+        session->waveform_status_by_id.reserve(orphan_report.rows.size());
+        for (const auto &row : orphan_report.rows)
+            session->waveform_status_by_id.emplace(object_ids.at(row.object_key), row.status);
+        session->waveform_cluster_counts_by_id.reserve(orphan_report.rows.size());
+        for (const auto &object : inventory->catalog.objects) {
+            if (object.object.header.type == axk::ObjectType::smpl) {
+                session->waveform_cluster_counts_by_id.emplace(object_ids.at(object.key),
+                                                               record_cluster_count(*sfs, object));
+            }
+        }
+    }
 
     session->objects.reserve(inventory->catalog.objects.size());
     for (const auto &object : inventory->catalog.objects) {
@@ -1239,15 +1322,8 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
         if (!image_id)
             return std::unexpected(image_id.error());
         session->image_id = std::move(*image_id);
-        const std::scoped_lock lock{implementation_->mutex};
-        implementation_->cleanup_locked();
-        if (implementation_->sessions.size() >= implementation_->maximum_sessions)
-            return std::unexpected(
-                session_error("image_capacity_exhausted", "image session capacity is exhausted", true));
-        if (!implementation_->sessions.contains(session->image_id)) {
-            implementation_->sessions.emplace(session->image_id, session);
+        if ((*admission)->promote(session))
             break;
-        }
     } while (true);
     return inspect(session->image_id, session->owner_id);
 }
@@ -1540,61 +1616,12 @@ axk::app::Result<axk::app::ImageWaveDataOrphanInspection> axk::app::ImageSession
         return std::unexpected(
             session_error("image_mutation_unsupported", "Wave Data cleanup requires an SFS container"));
 
-    ObjectCatalog catalog;
-    catalog.issues = (*session)->catalog_issues;
-    catalog.objects.reserve((*session)->snapshots_by_id.size());
-    for (const auto &[id, snapshot] : (*session)->snapshots_by_id) {
-        static_cast<void>(id);
-        catalog.objects.push_back(snapshot);
-    }
-    std::ranges::sort(catalog.objects, {}, [](const auto &object) { return object.key; });
-    const auto graph = build_relationship_graph(catalog);
-    const auto orphan_report = analyze_waveform_orphans(*container, catalog, graph);
-    std::unordered_map<std::string, WaveformStatus> status_by_key;
-    status_by_key.reserve(orphan_report.rows.size());
-    for (const auto &row : orphan_report.rows)
-        status_by_key.emplace(row.object_key, row.status);
-
     ImageWaveDataOrphanInspection result;
     result.image_id = std::string{image_id};
     result.revision = expected_revision;
     result.content_scope_id = std::string{content_scope_id};
-    for (const auto object_index : scope->second) {
-        if (object_index >= (*session)->objects.size())
-            return std::unexpected(
-                session_error("image_session_invalid", "content scope references an invalid object"));
-        const auto &item = (*session)->objects[object_index];
-        if (item.type != "SMPL")
-            continue;
-        const auto snapshot = (*session)->snapshots_by_id.find(item.id);
-        if (snapshot == (*session)->snapshots_by_id.end())
-            return std::unexpected(session_error("image_session_invalid", "Wave Data snapshot is unavailable"));
-        const auto status = status_by_key.find(snapshot->second.key);
-        if (status == status_by_key.end() || status->second != WaveformStatus::known_unreferenced)
-            continue;
-        const auto partition =
-            std::ranges::find(container->partitions(), snapshot->second.partition, &Partition::index);
-        if (partition == container->partitions().end())
-            return std::unexpected(session_error("image_session_invalid", "Wave Data partition is unavailable"));
-        const auto clusters = record_cluster_count(*container, snapshot->second);
-        const auto cluster_bytes =
-            checked_multiply(container->superblock().sector_size_bytes, partition->sectors_per_cluster);
-        if (!cluster_bytes)
-            return std::unexpected(session_error("image_session_invalid", cluster_bytes.error().message));
-        const auto recoverable_bytes = checked_multiply(clusters, *cluster_bytes);
-        if (!recoverable_bytes)
-            return std::unexpected(session_error("image_session_invalid", recoverable_bytes.error().message));
-        result.candidates.push_back({.object_id = item.id,
-                                     .object_type = item.type,
-                                     .object_name = item.name,
-                                     .partition_index = item.partition_index,
-                                     .partition_name = item.partition_name,
-                                     .volume_name = item.volume_name,
-                                     .stored_size_bytes = item.stored_size_bytes,
-                                     .recoverable_bytes = *recoverable_bytes,
-                                     .recoverable_clusters = clusters});
-    }
-    std::ranges::sort(result.candidates, [](const auto &left, const auto &right) {
+    const auto candidate_limit = std::min(maximum_candidates, std::size_t{1024U});
+    const auto candidate_less = [](const auto &left, const auto &right) {
         if (left.partition_index != right.partition_index)
             return left.partition_index < right.partition_index;
         if (left.volume_name != right.volume_name)
@@ -1602,9 +1629,57 @@ axk::app::Result<axk::app::ImageWaveDataOrphanInspection> axk::app::ImageSession
         if (left.object_name != right.object_name)
             return left.object_name < right.object_name;
         return left.object_id < right.object_id;
-    });
-    result.total_candidate_count = result.candidates.size();
-    result.candidates.resize(std::min({result.candidates.size(), maximum_candidates, std::size_t{1024U}}));
+    };
+    for (const auto object_index : scope->second) {
+        if (object_index >= (*session)->objects.size())
+            return std::unexpected(
+                session_error("image_session_invalid", "content scope references an invalid object"));
+        const auto &item = (*session)->objects[object_index];
+        if (item.type != "SMPL")
+            continue;
+        const auto status = (*session)->waveform_status_by_id.find(item.id);
+        if (status == (*session)->waveform_status_by_id.end() || status->second != WaveformStatus::known_unreferenced) {
+            continue;
+        }
+        if (!item.partition_index)
+            return std::unexpected(session_error("image_session_invalid", "Wave Data partition is unavailable"));
+        const auto partition = std::ranges::find(container->partitions(), *item.partition_index,
+                                                 [](const Partition &value) { return value.index.value; });
+        if (partition == container->partitions().end())
+            return std::unexpected(session_error("image_session_invalid", "Wave Data partition is unavailable"));
+        const auto cluster_count = (*session)->waveform_cluster_counts_by_id.find(item.id);
+        if (cluster_count == (*session)->waveform_cluster_counts_by_id.end())
+            return std::unexpected(session_error("image_session_invalid", "Wave Data allocation is unavailable"));
+        const auto clusters = cluster_count->second;
+        const auto cluster_bytes =
+            checked_multiply(container->superblock().sector_size_bytes, partition->sectors_per_cluster);
+        if (!cluster_bytes)
+            return std::unexpected(session_error("image_session_invalid", cluster_bytes.error().message));
+        const auto recoverable_bytes = checked_multiply(clusters, *cluster_bytes);
+        if (!recoverable_bytes)
+            return std::unexpected(session_error("image_session_invalid", recoverable_bytes.error().message));
+        ++result.total_candidate_count;
+        if (candidate_limit == 0U)
+            continue;
+        ImageWaveDataOrphanCandidate candidate{.object_id = item.id,
+                                               .object_type = item.type,
+                                               .object_name = item.name,
+                                               .partition_index = item.partition_index,
+                                               .partition_name = item.partition_name,
+                                               .volume_name = item.volume_name,
+                                               .stored_size_bytes = item.stored_size_bytes,
+                                               .recoverable_bytes = *recoverable_bytes,
+                                               .recoverable_clusters = clusters};
+        if (result.candidates.size() < candidate_limit) {
+            result.candidates.push_back(std::move(candidate));
+            std::ranges::push_heap(result.candidates, candidate_less);
+        } else if (candidate_less(candidate, result.candidates.front())) {
+            std::ranges::pop_heap(result.candidates, candidate_less);
+            result.candidates.back() = std::move(candidate);
+            std::ranges::push_heap(result.candidates, candidate_less);
+        }
+    }
+    std::ranges::sort_heap(result.candidates, candidate_less);
     return result;
 }
 
@@ -1698,6 +1773,7 @@ axk::app::ImageSessionManager::commit_mutation(std::string_view image_id, std::s
         fresh = refreshed.implementation_->sessions.at(opened->image_id);
     }
     Implementation::adopt_refreshed_state(*session, *fresh);
+    implementation_->remove_auditions_for(session);
     ++session->revision;
     release_mutation();
     return inspect(image_id, owner_id);
@@ -1975,11 +2051,22 @@ axk::app::ImageSessionManager::prepare_audition(std::string_view image_id, std::
     descriptor.audition_id = *audition_id;
     const std::scoped_lock lock{(*session)->access_mutex};
     const auto now = implementation_->clock();
-    std::erase_if((*session)->auditions,
-                  [&](const auto &entry) { return entry.second.last_access + std::chrono::minutes{10} <= now; });
+    std::vector<std::string> expired_auditions;
+    std::erase_if((*session)->auditions, [&](const auto &entry) {
+        const auto expired = entry.second.last_access + std::chrono::minutes{10} <= now;
+        if (expired)
+            expired_auditions.push_back(entry.first);
+        return expired;
+    });
     if ((*session)->auditions.size() >= 256U)
         return std::unexpected(session_error("audition_capacity_exhausted", "audition capacity is exhausted", true));
     (*session)->auditions.emplace(*audition_id, Implementation::AuditionEntry{descriptor, std::move(sources), now});
+    {
+        const std::scoped_lock manager_lock{implementation_->mutex};
+        for (const auto &expired : expired_auditions)
+            implementation_->audition_sessions.erase(expired);
+        implementation_->audition_sessions.emplace(*audition_id, *session);
+    }
     return descriptor;
 }
 
@@ -1991,19 +2078,14 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
     {
         const std::scoped_lock lock{implementation_->mutex};
         implementation_->cleanup_locked();
-        for (const auto &[unused, candidate] : implementation_->sessions) {
-            static_cast<void>(unused);
-            if (candidate->owner_id != owner_id)
-                continue;
-            const std::scoped_lock access_lock{candidate->access_mutex};
-            const auto found = candidate->auditions.find(std::string{audition_id});
-            if (found != candidate->auditions.end()) {
-                session = candidate;
-                break;
-            }
+        const auto found = implementation_->audition_sessions.find(std::string{audition_id});
+        if (found != implementation_->audition_sessions.end()) {
+            session = found->second.lock();
+            if (!session)
+                implementation_->audition_sessions.erase(found);
         }
     }
-    if (!session)
+    if (!session || session->owner_id != owner_id)
         return std::unexpected(session_error("audition_not_found", "audition does not exist"));
     const std::scoped_lock access_lock{session->access_mutex};
     const auto found = session->auditions.find(std::string{audition_id});
@@ -2083,15 +2165,19 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
 
 axk::app::Result<void> axk::app::ImageSessionManager::delete_audition(std::string_view audition_id,
                                                                       std::string_view owner_id) {
-    const std::scoped_lock lock{implementation_->mutex};
-    implementation_->cleanup_locked();
-    for (const auto &[unused, session] : implementation_->sessions) {
-        static_cast<void>(unused);
-        if (session->owner_id != owner_id)
-            continue;
-        const std::scoped_lock access_lock{session->access_mutex};
-        if (session->auditions.erase(std::string{audition_id}) != 0U)
-            return {};
+    std::shared_ptr<Implementation::Session> session;
+    {
+        const std::scoped_lock lock{implementation_->mutex};
+        implementation_->cleanup_locked();
+        const auto found = implementation_->audition_sessions.find(std::string{audition_id});
+        if (found != implementation_->audition_sessions.end())
+            session = found->second.lock();
     }
+    if (!session || session->owner_id != owner_id)
+        return {};
+    const std::scoped_lock access_lock{session->access_mutex};
+    session->auditions.erase(std::string{audition_id});
+    const std::scoped_lock manager_lock{implementation_->mutex};
+    implementation_->audition_sessions.erase(std::string{audition_id});
     return {};
 }

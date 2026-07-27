@@ -949,6 +949,15 @@ class ServerApplication {
 
     const Json &openapi_document() const noexcept { return openapi_document_; }
 
+    axk::app::Result<Json> parse_validated_json_body(const crow::request &request, std::string_view schema_name) const {
+        auto parsed = parse_json_body(request, config_);
+        if (!parsed)
+            return std::unexpected(parsed.error());
+        if (const auto valid = openapi_validator_.validate(schema_name, *parsed); !valid)
+            return std::unexpected(valid.error());
+        return parsed;
+    }
+
     crow::response roots_response(const crow::request &request) {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
@@ -993,7 +1002,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "WorkspaceCreateRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         try {
@@ -1016,7 +1025,8 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(
+            request, request.method == crow::HTTPMethod::Delete ? "RevisionRequest" : "WorkspaceUpdateRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         try {
@@ -1107,7 +1117,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "HostDirectoryListRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         try {
@@ -1175,7 +1185,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "DirectoryListRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         const auto &input = *parsed;
@@ -1196,6 +1206,9 @@ class ServerApplication {
         }
         if (cursor && (cursor->empty() || cursor->size() > maximum_cursor_length))
             return error_response(400, {"invalid_cursor", "cursor length is outside the configured contract"}, id);
+        if (limit > config_.maximum_page_size)
+            return error_response(422, {"invalid_page_size", "directory listing limit exceeds server capabilities"},
+                                  id);
         const auto started = std::chrono::steady_clock::now();
         const auto listing = sandbox_.list_directory(directory, limit, cursor);
         if (!listing)
@@ -1231,7 +1244,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "MediaSourceInspectRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         axk::app::DirectoryRef directory;
@@ -1268,7 +1281,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "EntryRef");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         const auto &input = *parsed;
@@ -1306,7 +1319,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "CreateDirectoryRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         axk::app::DirectoryRef parent;
@@ -1333,7 +1346,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "RenameEntryRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         axk::app::FileRef entry;
@@ -1414,7 +1427,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "ImageOpenRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         const auto &input = *parsed;
@@ -1451,7 +1464,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "ImageCompanionDirectoriesRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
 
@@ -1741,7 +1754,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "UploadCreateRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         const auto &input = *parsed;
@@ -1828,7 +1841,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "UploadMaterializeRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         const auto &input = *parsed;
@@ -1915,7 +1928,7 @@ class ServerApplication {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
-        const auto parsed = parse_json_body(request, config_);
+        const auto parsed = parse_validated_json_body(request, "DirectoryArchiveRequest");
         if (!parsed)
             return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
         axk::app::DirectoryRef directory;

@@ -216,6 +216,25 @@ TEST_F(UploadStoreTest, RejectsHashMismatchAndRemovesOwnedUploads) {
     EXPECT_FALSE(value.inspect(created->reference, "owner"));
 }
 
+#if !defined(_WIN32)
+TEST_F(UploadStoreTest, RejectsPhysicalSizeMismatchBeforeCompletion) {
+    auto value = store();
+    const auto created = value.create({.owner_id = "owner",
+                                       .filename = "manifest.json",
+                                       .kind = axk::app::UploadKind::manifest,
+                                       .media_type = "application/json",
+                                       .declared_size = 3U,
+                                       .sha256 = std::nullopt});
+    ASSERT_TRUE(created) << created.error().message;
+    ASSERT_TRUE(value.append(created->reference, "owner", 0U, bytes("abc")));
+    std::filesystem::resize_file(directory_ / (created->reference.upload_id + ".upload"), 4U);
+
+    const auto completed = value.complete(created->reference, "owner");
+    ASSERT_FALSE(completed);
+    EXPECT_EQ(completed.error().code, "upload_incomplete");
+}
+#endif
+
 TEST_F(UploadStoreTest, LeasePreventsExpiryAndDeletionUntilReleased) {
     auto now = std::chrono::steady_clock::now();
     axk::app::UploadStore value{directory_, 16U, 16U, 2U, 4U, std::chrono::seconds{5}, [&now] { return now; }};

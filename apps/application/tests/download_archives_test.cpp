@@ -140,6 +140,19 @@ TEST_F(DownloadArchiveStoreTest, EnforcesEntryByteAndRetentionLimitsWithoutLeavi
     EXPECT_EQ(expired.error().code, "download_archive_not_found");
 }
 
+TEST_F(DownloadArchiveStoreTest, FailsClosedWhenAStartupLeftoverCannotBeRemoved) {
+    const auto staging = root_ / "startup-leftover";
+    std::filesystem::create_directories(staging / "stale.tar");
+    std::ofstream{staging / "stale.tar/payload"} << "data";
+
+    axk::app::DownloadArchiveStore store{staging, 4096U, 4096U, 4U, std::chrono::seconds{5}};
+
+    EXPECT_FALSE(store.storage_ready());
+    const auto created = store.create("owner", *sandbox_, {"workspace", "exports"});
+    ASSERT_FALSE(created);
+    EXPECT_EQ(created.error().code, "archive_storage_unavailable");
+}
+
 TEST_F(DownloadArchiveStoreTest, RetainsExpiredArchiveAndQuotaWhenRemovalFails) {
     auto now = std::chrono::steady_clock::now();
     axk::app::DownloadArchiveStore store{root_ / "locked",   3584U, 3584U, 4U, std::chrono::seconds{5},

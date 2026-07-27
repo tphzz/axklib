@@ -80,12 +80,13 @@ TEST(AlterationJournalStoreTest, RecoversOriginalBytesAfterInterruptedPartialWri
     };
 
     EXPECT_FALSE(interrupted.apply(*target, 10U, patches));
+    EXPECT_FALSE(interrupted.storage_ready());
     target = {};
     EXPECT_EQ(read_text(workspace / "image.hds"), "01A3456789");
     EXPECT_FALSE(std::filesystem::is_empty(journals));
 
-    axk::app::AlterationJournalStore recovered{journals};
-    ASSERT_TRUE(recovered.recover(*sandbox));
+    ASSERT_TRUE(interrupted.recover(*sandbox));
+    EXPECT_TRUE(interrupted.storage_ready());
     EXPECT_EQ(read_text(workspace / "image.hds"), "0123456789");
     EXPECT_TRUE(std::filesystem::is_empty(journals));
     std::filesystem::remove_all(root, error);
@@ -110,12 +111,13 @@ TEST(AlterationJournalStoreTest, PreservesCommittedBytesAfterInterruptedCleanup)
     };
 
     EXPECT_FALSE(interrupted.apply(*target, 10U, patches));
+    EXPECT_FALSE(interrupted.storage_ready());
     target = {};
     EXPECT_EQ(read_text(workspace / "image.hds"), "01A3456789");
     EXPECT_FALSE(std::filesystem::is_empty(journals));
 
-    axk::app::AlterationJournalStore recovered{journals};
-    ASSERT_TRUE(recovered.recover(*sandbox));
+    ASSERT_TRUE(interrupted.recover(*sandbox));
+    EXPECT_TRUE(interrupted.storage_ready());
     EXPECT_EQ(read_text(workspace / "image.hds"), "01A3456789");
     EXPECT_TRUE(std::filesystem::is_empty(journals));
     std::filesystem::remove_all(root, error);
