@@ -424,9 +424,6 @@ describe('AuditionController', () => {
                 frameCount: 100,
                 sampleRate: 100,
                 wavSizeBytes: 244,
-                loopMode: 1,
-                loopStartFrame: 10,
-                loopLengthFrames: 20,
             }),
         );
         MockAudioContext.nextBuffers = [new MockAudioBuffer(100, 1, 100), new MockAudioBuffer(50, 1, 100)];
@@ -442,6 +439,8 @@ describe('AuditionController', () => {
         expect(MockAudioBufferSourceNode.instances[1]?.loop).toBe(false);
         expect(MockAudioBufferSourceNode.instances[0]?.start).toHaveBeenCalledWith(1.01);
         expect(MockAudioBufferSourceNode.instances[1]?.start).toHaveBeenCalledWith(2.01);
+        expect(MockAudioBufferSourceNode.instances[0]?.stop).toHaveBeenCalledWith(2.01);
+        expect(MockAudioBufferSourceNode.instances[1]?.stop).toHaveBeenCalledWith(2.51);
         expect(MockAudioContext.instances[0]?.gains).toHaveLength(1);
         expect(MockAudioContext.instances[0]?.state).toBe('running');
 
@@ -452,6 +451,93 @@ describe('AuditionController', () => {
         expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
         expect(transport.prepareAuditionBundle).toHaveBeenCalledWith(1, ['SBNK-1', 'SBNK-2'], expect.any(AbortSignal));
         expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('holds short forward-loop Sample Bank members for 500 ms and preserves their loop timelines', async () => {
+        installAudio();
+        const sampleRate = 50_000;
+        const frameCounts = [577, 285, 141, 139, 34, 17];
+        const transport = transportFor(
+            descriptor({
+                frameCount: frameCounts[0],
+                sampleRate,
+                wavSizeBytes: 1_198,
+                loopMode: 1,
+                loopStartFrame: 0,
+                loopLengthFrames: 17,
+            }),
+        );
+        MockAudioContext.nextBuffers = frameCounts.map((frameCount) => new MockAudioBuffer(frameCount, 1, sampleRate));
+        const updates: AuditionState[] = [];
+        const diagnostics: Record<string, unknown>[] = [];
+        const controller = new AuditionController(
+            transport,
+            (state) => updates.push(state),
+            (event) => diagnostics.push(event),
+            () => true,
+        );
+
+        controller.playSequence(
+            1,
+            frameCounts.map((_, index) => `SBNK-${index + 1}`),
+        );
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(frameCounts.length));
+
+        for (const [index, source] of MockAudioBufferSourceNode.instances.entries()) {
+            const startTime = 1.01 + index * 0.5;
+            expect(source.loop).toBe(true);
+            expect(source.loopStart).toBe(0);
+            expect(source.loopEnd).toBeCloseTo(17 / sampleRate);
+            expect(source.start).toHaveBeenCalledWith(startTime);
+            expect(source.stop).toHaveBeenCalledTimes(1);
+            expect(source.stop.mock.calls[0]?.[0]).toBeCloseTo(startTime + 0.5);
+        }
+
+        MockAudioContext.instances[0]!.currentTime = 1.26;
+        animationCallbacks.at(-1)?.(0);
+        expect(updates.at(-1)).toMatchObject({ objectId: 'SBNK-1', status: 'playing' });
+        expect(updates.at(-1)?.playheadFrame).toBeLessThan(17);
+
+        MockAudioContext.instances[0]!.currentTime = 1.76;
+        animationCallbacks.at(-1)?.(0);
+        expect(updates.at(-1)).toMatchObject({ objectId: 'SBNK-2', status: 'playing' });
+        expect(updates.at(-1)?.playheadFrame).toBeLessThan(17);
+
+        expect(diagnostics.find((event) => event.event === 'sequence_scheduled')).toMatchObject({
+            memberCount: 6,
+            naturalDurationSeconds: expect.closeTo(frameCounts.reduce((total, value) => total + value, 0) / sampleRate),
+            scheduledDurationSeconds: 3,
+            loopedMemberCount: 6,
+            extendedMemberCount: 6,
+        });
+        await controller.dispose();
+    });
+
+    it('keeps the natural duration of forward-loop Sample Bank members longer than 500 ms', async () => {
+        installAudio();
+        const transport = transportFor(
+            descriptor({
+                frameCount: 100,
+                sampleRate: 100,
+                wavSizeBytes: 244,
+                loopMode: 1,
+                loopStartFrame: 10,
+                loopLengthFrames: 20,
+            }),
+        );
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(100, 1, 100), new MockAudioBuffer(75, 1, 100)];
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2']);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+
+        expect(MockAudioBufferSourceNode.instances[0]?.loop).toBe(true);
+        expect(MockAudioBufferSourceNode.instances[0]?.start).toHaveBeenCalledWith(1.01);
+        expect(MockAudioBufferSourceNode.instances[0]?.stop).toHaveBeenCalledWith(2.01);
+        expect(MockAudioBufferSourceNode.instances[1]?.loop).toBe(true);
+        expect(MockAudioBufferSourceNode.instances[1]?.start).toHaveBeenCalledWith(2.01);
+        expect(MockAudioBufferSourceNode.instances[1]?.stop).toHaveBeenCalledWith(2.76);
         await controller.dispose();
     });
 

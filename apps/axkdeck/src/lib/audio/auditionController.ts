@@ -136,6 +136,7 @@ const defaultMaximumWorkingSetBytes = 128 * 1024 * 1024;
 const defaultMaximumCacheEntries = 256;
 const startLeadSeconds = 0.01;
 const fadeSeconds = 0.005;
+const minimumForwardLoopSequenceSeconds = 0.5;
 const diagnosticSampleBudget = 32_768;
 
 function monotonicNow(): number {
@@ -750,25 +751,37 @@ export class AuditionController {
         gain.gain.linearRampToValueAtTime(1, sequenceStart + fadeSeconds);
 
         let memberStart = sequenceStart;
+        let naturalDurationSeconds = 0;
+        let loopedMemberCount = 0;
+        let extendedMemberCount = 0;
         const segments = entries.map((entry) => {
             if (!Number.isFinite(entry.buffer.duration) || entry.buffer.duration <= 0) {
                 throw new Error('Sample Bank member duration is invalid');
             }
             const source = context.createBufferSource();
             source.buffer = entry.buffer;
-            source.loop = false;
+            const looped = isForwardLoop(entry.descriptor);
+            if (looped) {
+                source.loop = true;
+                source.loopStart = entry.descriptor.loopStartFrame / entry.descriptor.sampleRate;
+                source.loopEnd =
+                    (entry.descriptor.loopStartFrame + entry.descriptor.loopLengthFrames) / entry.descriptor.sampleRate;
+            }
             source.connect(gain);
             const startFrame = initialPlaybackFrame(entry.descriptor);
-            const timelineDescriptor = isForwardLoop(entry.descriptor)
-                ? { ...entry.descriptor, loopMode: 0, loopStartFrame: 0, loopLengthFrames: 0 }
-                : entry.descriptor;
+            const durationSeconds = looped
+                ? Math.max(entry.buffer.duration, minimumForwardLoopSequenceSeconds)
+                : entry.buffer.duration;
+            naturalDurationSeconds += entry.buffer.duration;
+            if (looped) loopedMemberCount += 1;
+            if (durationSeconds > entry.buffer.duration) extendedMemberCount += 1;
             const segment: ScheduledSequenceSegment = {
                 entry,
                 source,
                 startTime: memberStart,
-                endTime: memberStart + entry.buffer.duration,
+                endTime: memberStart + durationSeconds,
                 startFrame,
-                timelineDescriptor,
+                timelineDescriptor: entry.descriptor,
             };
             memberStart = segment.endTime;
             return segment;
@@ -781,12 +794,18 @@ export class AuditionController {
                 if (index === segments.length - 1) void this.handleSequenceEnded(sequence, run);
             };
             segment.source.start(segment.startTime);
+            segment.source.stop(segment.endTime);
         }
+        const scheduledDurationSeconds = memberStart - sequenceStart;
         this.emit(run, 'sequence_scheduled', {
             memberCount: segments.length,
             startLeadMs: startLeadSeconds * 1000,
             attackMs: fadeSeconds * 1000,
-            durationSeconds: memberStart - sequenceStart,
+            durationSeconds: scheduledDurationSeconds,
+            naturalDurationSeconds,
+            scheduledDurationSeconds,
+            loopedMemberCount,
+            extendedMemberCount,
         });
         this.update({ objectId: entries[0]!.objectId, status: 'playing', playheadFrame: segments[0]!.startFrame });
         this.scheduleSequenceCursor(sequence, run);
