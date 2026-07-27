@@ -51,6 +51,8 @@
         ondeleteobjects?: (objects: PackageExportObject[]) => void;
         packageExportAvailable?: boolean;
         onexportobjects?: (objects: PackageExportObject[]) => void;
+        audioExportAvailable?: boolean;
+        onexportaudio?: (objects: PackageExportObject[]) => void;
         selection?: PackageExportSelectionState;
         onselectionchange?: (selection: PackageExportSelectionState) => void;
         onselectionlimit?: () => void;
@@ -85,6 +87,8 @@
         ondeleteobjects = () => undefined,
         packageExportAvailable = false,
         onexportobjects = () => undefined,
+        audioExportAvailable = false,
+        onexportaudio = () => undefined,
         selection = emptyPackageExportSelection(),
         onselectionchange = () => undefined,
         onselectionlimit = () => undefined,
@@ -195,7 +199,8 @@
         domain: SelectableItem[],
         target: SelectableItem,
     ): void {
-        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable) return;
+        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable && !audioExportAvailable)
+            return;
         event.preventDefault();
         const targetId = objectId(target);
         let menuSelection = selection;
@@ -229,7 +234,8 @@
     ): void {
         if (selectAll(event, scope, domain, visible, target)) return;
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
-        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable) return;
+        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable && !audioExportAvailable)
+            return;
         event.preventDefault();
         const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
         openObjectMenu(
@@ -455,7 +461,8 @@
         onrename={objectRenameAvailable && objectMenu.objects.length === 1
             ? () => onrenameobject(objectMenu!.renameTarget)
             : undefined}
-        onexport={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
+        onexportpackage={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
+        onexportsfz={audioExportAvailable ? () => onexportaudio(objectMenu!.objects) : undefined}
         ondelete={objectDeletionAvailable ? () => ondeleteobjects(objectMenu!.objects) : undefined}
     />
 {/if}

@@ -11,7 +11,9 @@ import type {
     HardDiskCreationProfileId,
     ImageTransport,
     ImageSessionPackageExportDestination,
-    ImageSessionPackageExportRoot,
+    ImageSessionExportRoot,
+    ImageSessionAudioExportDestination,
+    ImageSessionAudioExportInspection,
     ImageSessionPackageImportPlan,
     ImageSessionPackageRename,
     InputBinding,
@@ -61,6 +63,7 @@ export interface InMemoryImageTransportOptions {
         | 'waveDataCleanupAvailable'
         | 'packageImportAvailable'
         | 'packageExportAvailable'
+        | 'audioExportAvailable'
     > & {
         volumeMutationsAvailable?: boolean;
         partitionMutationsAvailable?: boolean;
@@ -69,6 +72,7 @@ export interface InMemoryImageTransportOptions {
         waveDataCleanupAvailable?: boolean;
         packageImportAvailable?: boolean;
         packageExportAvailable?: boolean;
+        audioExportAvailable?: boolean;
         companionDirectories?: DirectoryRef[];
     };
     preview?: PreviewEnvelope;
@@ -126,6 +130,7 @@ export class InMemoryImageTransport implements ImageTransport {
             waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
+            audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
         };
     }
 
@@ -144,6 +149,7 @@ export class InMemoryImageTransport implements ImageTransport {
             waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
+            audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
         };
     }
 
@@ -306,10 +312,26 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startImagePackageExport(
         sessionId: number,
-        roots: ImageSessionPackageExportRoot[],
+        roots: ImageSessionExportRoot[],
         destination: ImageSessionPackageExportDestination,
     ): Promise<JobState> {
         return this.invoke('startImagePackageExport', [sessionId, roots, destination]);
+    }
+
+    inspectImageAudioExport(
+        sessionId: number,
+        roots: ImageSessionExportRoot[],
+    ): Promise<ImageSessionAudioExportInspection> {
+        return this.invoke('inspectImageAudioExport', [sessionId, roots]);
+    }
+
+    startImageAudioExport(
+        sessionId: number,
+        roots: ImageSessionExportRoot[],
+        format: 'SFZ' | 'WAV',
+        destination: ImageSessionAudioExportDestination,
+    ): Promise<JobState> {
+        return this.invoke('startImageAudioExport', [sessionId, roots, format, destination]);
     }
 
     deleteRetainedPackage(download: RetainedDownload): Promise<void> {

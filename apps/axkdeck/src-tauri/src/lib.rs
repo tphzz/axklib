@@ -3,9 +3,9 @@ mod remote_settings;
 mod server_sidecar;
 
 use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -20,6 +20,8 @@ use desktop_preferences::DesktopPreferencesStore;
 const LOG_FILE_SIZE: u128 = 5 * 1024 * 1024;
 const RETAINED_LOG_FILES: usize = 3;
 const MAX_RETAINED_PACKAGE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_RETAINED_SFZ_EXPORT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAX_RETAINED_SFZ_EXPORT_ENTRIES: usize = 100_000;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,8 +87,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        current_build_info, normalize_package_destination, parse_log_level,
-        valid_retained_content_path,
+        checked_tar_path, current_build_info, extract_sfz_tar, normalize_package_destination,
+        normalize_sfz_destination, parse_log_level, valid_retained_content_path,
     };
 
     #[test]
@@ -142,6 +144,73 @@ mod tests {
             "/api/v1/download-archives/id/content?range=all"
         ));
     }
+
+    fn tar_header(path: &str, size: usize) -> [u8; 512] {
+        let mut header = [0_u8; 512];
+        header[..path.len()].copy_from_slice(path.as_bytes());
+        header[100..108].copy_from_slice(b"0000755\0");
+        header[108..116].copy_from_slice(b"0000000\0");
+        header[116..124].copy_from_slice(b"0000000\0");
+        let size_field = format!("{size:011o}\0");
+        header[124..136].copy_from_slice(size_field.as_bytes());
+        header[136..148].copy_from_slice(b"00000000000\0");
+        header[148..156].fill(b' ');
+        header[156] = b'0';
+        header[257..263].copy_from_slice(b"ustar\0");
+        header[263..265].copy_from_slice(b"00");
+        let checksum = header.iter().map(|byte| u64::from(*byte)).sum::<u64>();
+        let checksum_field = format!("{checksum:06o}\0 ");
+        header[148..156].copy_from_slice(checksum_field.as_bytes());
+        header
+    }
+
+    #[test]
+    fn sfz_destination_must_be_new_but_uses_an_existing_parent() {
+        let root =
+            std::env::temp_dir().join(format!("axkdeck-sfz-destination-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).expect("create test root");
+        assert_eq!(
+            normalize_sfz_destination(root.join("Instrument")).expect("normalize destination"),
+            root.canonicalize()
+                .expect("canonical root")
+                .join("Instrument")
+        );
+        std::fs::create_dir(root.join("Existing")).expect("create existing destination");
+        assert!(normalize_sfz_destination(root.join("Existing")).is_err());
+        std::fs::remove_dir_all(root).expect("remove test root");
+    }
+
+    #[test]
+    fn sfz_tar_extraction_rejects_traversal_and_publishes_a_new_folder() {
+        let root =
+            std::env::temp_dir().join(format!("axkdeck-sfz-extraction-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).expect("create test root");
+        let archive_path = root.join("export.tar");
+        let mut archive = std::fs::OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&archive_path)
+            .expect("create test archive");
+        let header = tar_header("Instrument.sfz", 9);
+        std::io::Write::write_all(&mut archive, &header).expect("write header");
+        std::io::Write::write_all(&mut archive, b"<region>\n").expect("write payload");
+        std::io::Write::write_all(&mut archive, &[0_u8; 503]).expect("write padding");
+        std::io::Write::write_all(&mut archive, &[0_u8; 1024]).expect("write end blocks");
+        extract_sfz_tar(&mut archive, &root.join("Instrument")).expect("extract SFZ archive");
+        assert_eq!(
+            std::fs::read_to_string(root.join("Instrument/Instrument.sfz"))
+                .expect("read extracted SFZ"),
+            "<region>\n"
+        );
+
+        let unsafe_header = tar_header("../escape.sfz", 0);
+        assert!(checked_tar_path(&unsafe_header).is_err());
+        assert!(!root.join("escape.sfz").exists());
+        std::fs::remove_dir_all(root).expect("remove test root");
+    }
 }
 
 struct WorkspaceCandidateStore {
@@ -149,6 +218,10 @@ struct WorkspaceCandidateStore {
 }
 
 struct PackageSaveCandidateStore {
+    values: HashMap<String, (PathBuf, Instant)>,
+}
+
+struct SfzSaveCandidateStore {
     values: HashMap<String, (PathBuf, Instant)>,
 }
 
@@ -164,6 +237,13 @@ struct WorkspaceCandidate {
 struct PackageSaveCandidate {
     candidate_id: String,
     filename: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SfzSaveCandidate {
+    candidate_id: String,
+    directory_name: String,
 }
 
 fn candidate_id() -> Result<String, String> {
@@ -190,6 +270,30 @@ fn normalize_package_destination(
         }
     }
     Ok(path)
+}
+
+fn normalize_sfz_destination(path: PathBuf) -> Result<PathBuf, String> {
+    let parent = path
+        .parent()
+        .filter(|value| !value.as_os_str().is_empty())
+        .ok_or_else(|| "the selected SFZ destination has no parent directory".to_owned())?
+        .canonicalize()
+        .map_err(|error| format!("resolve SFZ destination directory: {error}"))?;
+    if !parent.is_dir() {
+        return Err("the selected SFZ destination parent is unavailable".to_owned());
+    }
+    let name = path
+        .file_name()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "the selected SFZ destination has no folder name".to_owned())?;
+    if name == "." || name == ".." {
+        return Err("the selected SFZ destination folder name is invalid".to_owned());
+    }
+    let destination = parent.join(name);
+    if destination.exists() {
+        return Err("the selected SFZ export folder already exists".to_owned());
+    }
+    Ok(destination)
 }
 
 fn valid_retained_content_path(path: &str) -> bool {
@@ -328,6 +432,86 @@ async fn select_local_package_destination(
     }))
 }
 
+#[tauri::command]
+async fn select_local_sfz_destination(
+    app: AppHandle,
+    window: WebviewWindow,
+    suggested_name: String,
+    state: State<'_, Mutex<SfzSaveCandidateStore>>,
+    preferences: State<'_, Mutex<DesktopPreferencesStore>>,
+) -> Result<Option<SfzSaveCandidate>, String> {
+    if suggested_name.is_empty()
+        || suggested_name == "."
+        || suggested_name == ".."
+        || suggested_name.contains('/')
+        || suggested_name.contains('\\')
+    {
+        return Err("the suggested SFZ export folder name is invalid".to_owned());
+    }
+    let starting_directory = match preferences.lock() {
+        Ok(preferences) => preferences.sfz_export_directory(),
+        Err(_) => {
+            log::warn!("desktop preference state is unavailable; using the platform save location");
+            None
+        }
+    };
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app
+            .dialog()
+            .file()
+            .set_title("Save SFZ export folder")
+            .set_file_name(suggested_name)
+            .set_parent(&window);
+        if let Some(directory) = starting_directory {
+            dialog = dialog.set_directory(directory);
+        }
+        dialog.blocking_save_file()
+    })
+    .await
+    .map_err(|error| format!("open SFZ export picker: {error}"))?;
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let destination = normalize_sfz_destination(
+        selected
+            .into_path()
+            .map_err(|_| "the selected destination is not a local filesystem path".to_owned())?,
+    )?;
+    let directory_name = destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "the selected SFZ destination has no valid folder name".to_owned())?
+        .to_owned();
+    if let Some(directory) = destination.parent() {
+        match preferences.lock() {
+            Ok(mut preferences) => {
+                if let Err(error) = preferences.remember_sfz_export_directory(directory) {
+                    log::warn!("could not persist the SFZ export directory: {error}");
+                }
+            }
+            Err(_) => {
+                log::warn!(
+                    "desktop preference state is unavailable; the SFZ export directory was not retained"
+                );
+            }
+        }
+    }
+    let candidate_id = candidate_id()?;
+    let mut candidates = state
+        .lock()
+        .map_err(|_| "SFZ destination state is unavailable".to_owned())?;
+    candidates
+        .values
+        .retain(|_, (_, created)| created.elapsed() < Duration::from_secs(300));
+    candidates
+        .values
+        .insert(candidate_id.clone(), (destination, Instant::now()));
+    Ok(Some(SfzSaveCandidate {
+        candidate_id,
+        directory_name,
+    }))
+}
+
 fn publish_downloaded_file(temporary: &Path, destination: &Path) -> Result<(), String> {
     if !destination.exists() {
         return std::fs::rename(temporary, destination)
@@ -441,6 +625,248 @@ fn download_retained_package(
     result
 }
 
+fn parse_tar_octal(field: &[u8]) -> Result<u64, String> {
+    let text = std::str::from_utf8(field)
+        .map_err(|_| "SFZ archive contains a non-ASCII numeric field".to_owned())?
+        .trim_matches(['\0', ' ']);
+    if text.is_empty() {
+        return Ok(0);
+    }
+    u64::from_str_radix(text, 8)
+        .map_err(|_| "SFZ archive contains an invalid numeric field".to_owned())
+}
+
+fn checked_tar_path(header: &[u8; 512]) -> Result<PathBuf, String> {
+    let field = |range: std::ops::Range<usize>| {
+        let bytes = &header[range];
+        &bytes[..bytes
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(bytes.len())]
+    };
+    let name = std::str::from_utf8(field(0..100))
+        .map_err(|_| "SFZ archive path is not valid UTF-8".to_owned())?;
+    let prefix = std::str::from_utf8(field(345..500))
+        .map_err(|_| "SFZ archive path is not valid UTF-8".to_owned())?;
+    let value = if prefix.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{prefix}/{name}")
+    };
+    let path = PathBuf::from(value);
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("SFZ archive contains an unsafe path".to_owned());
+    }
+    Ok(path)
+}
+
+fn verify_tar_checksum(header: &[u8; 512]) -> Result<(), String> {
+    let expected = parse_tar_octal(&header[148..156])?;
+    let actual = header
+        .iter()
+        .enumerate()
+        .map(|(index, byte)| {
+            if (148..156).contains(&index) {
+                u64::from(b' ')
+            } else {
+                u64::from(*byte)
+            }
+        })
+        .sum::<u64>();
+    if actual != expected {
+        return Err("SFZ archive header checksum is invalid".to_owned());
+    }
+    Ok(())
+}
+
+fn extract_sfz_tar(archive: &mut File, destination: &Path) -> Result<(), String> {
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "the SFZ destination has no parent directory".to_owned())?;
+    if destination.exists() {
+        return Err("the selected SFZ export folder already exists".to_owned());
+    }
+    let name = destination
+        .file_name()
+        .ok_or_else(|| "the SFZ destination has no folder name".to_owned())?;
+    let staging = parent.join(format!(
+        ".{}.axkdeck-extract-{}",
+        name.to_string_lossy(),
+        candidate_id()?
+    ));
+    std::fs::create_dir(&staging)
+        .map_err(|error| format!("create SFZ extraction staging folder: {error}"))?;
+    let result = (|| {
+        archive
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| format!("rewind SFZ archive: {error}"))?;
+        let mut entries = 0_usize;
+        let mut zero_blocks = 0_u8;
+        loop {
+            let mut header = [0_u8; 512];
+            archive
+                .read_exact(&mut header)
+                .map_err(|error| format!("read SFZ archive header: {error}"))?;
+            if header.iter().all(|byte| *byte == 0) {
+                zero_blocks += 1;
+                if zero_blocks == 2 {
+                    break;
+                }
+                continue;
+            }
+            if zero_blocks != 0 {
+                return Err("SFZ archive has a malformed end marker".to_owned());
+            }
+            entries += 1;
+            if entries > MAX_RETAINED_SFZ_EXPORT_ENTRIES {
+                return Err("SFZ archive contains too many entries".to_owned());
+            }
+            verify_tar_checksum(&header)?;
+            if &header[257..263] != b"ustar\0" {
+                return Err("SFZ archive is not in the supported USTAR profile".to_owned());
+            }
+            let relative = checked_tar_path(&header)?;
+            let output_path = staging.join(relative);
+            let size = parse_tar_octal(&header[124..136])?;
+            match header[156] {
+                b'5' => {
+                    if size != 0 {
+                        return Err("SFZ archive directory has an invalid payload".to_owned());
+                    }
+                    std::fs::create_dir_all(&output_path)
+                        .map_err(|error| format!("create SFZ export directory: {error}"))?;
+                }
+                0 | b'0' => {
+                    if let Some(directory) = output_path.parent() {
+                        std::fs::create_dir_all(directory)
+                            .map_err(|error| format!("create SFZ export directory: {error}"))?;
+                    }
+                    let mut output = OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .open(&output_path)
+                        .map_err(|error| format!("create SFZ export file: {error}"))?;
+                    let mut remaining = size;
+                    let mut buffer = vec![0_u8; 1024 * 1024];
+                    while remaining != 0 {
+                        let count = usize::try_from(remaining.min(buffer.len() as u64))
+                            .map_err(|_| "SFZ archive entry size is unsupported".to_owned())?;
+                        archive
+                            .read_exact(&mut buffer[..count])
+                            .map_err(|error| format!("read SFZ archive payload: {error}"))?;
+                        output
+                            .write_all(&buffer[..count])
+                            .map_err(|error| format!("write SFZ export file: {error}"))?;
+                        remaining -= count as u64;
+                    }
+                    output
+                        .sync_all()
+                        .map_err(|error| format!("flush SFZ export file: {error}"))?;
+                    let padding = (512 - size % 512) % 512;
+                    archive
+                        .seek(SeekFrom::Current(i64::try_from(padding).map_err(|_| {
+                            "SFZ archive padding is unsupported".to_owned()
+                        })?))
+                        .map_err(|error| format!("skip SFZ archive padding: {error}"))?;
+                }
+                _ => return Err("SFZ archive contains an unsupported entry type".to_owned()),
+            }
+        }
+        if destination.exists() {
+            return Err("the selected SFZ export folder was created by another process".to_owned());
+        }
+        std::fs::rename(&staging, destination)
+            .map_err(|error| format!("publish SFZ export folder: {error}"))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    result
+}
+
+fn download_retained_sfz_export(
+    connection: server_sidecar::FrontendConnection,
+    destination: PathBuf,
+    content_path: String,
+    expected_size: u64,
+) -> Result<(), String> {
+    if !valid_retained_content_path(&content_path) {
+        return Err("the retained SFZ export path is invalid".to_owned());
+    }
+    if expected_size > MAX_RETAINED_SFZ_EXPORT_BYTES {
+        return Err("the retained SFZ export exceeds the local save limit".to_owned());
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "the SFZ destination has no parent directory".to_owned())?
+        .canonicalize()
+        .map_err(|error| format!("resolve SFZ destination directory: {error}"))?;
+    let destination = parent.join(
+        destination
+            .file_name()
+            .ok_or_else(|| "the SFZ destination has no folder name".to_owned())?,
+    );
+    if destination.exists() {
+        return Err("the selected SFZ export folder already exists".to_owned());
+    }
+    let temporary = parent.join(format!(".axkdeck-sfz-download-{}.tar", candidate_id()?));
+    let mut output = OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| format!("create SFZ download staging file: {error}"))?;
+    let result = (|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut url = url::Url::parse(&connection.base_url)
+            .map_err(|error| format!("parse axklib-server URL: {error}"))?;
+        url.set_path(&content_path);
+        url.set_query(None);
+        url.set_fragment(None);
+        let mut response = reqwest::blocking::Client::new()
+            .get(url)
+            .bearer_auth(connection.bearer_token)
+            .send()
+            .map_err(|error| format!("download SFZ export: {error}"))?
+            .error_for_status()
+            .map_err(|error| format!("download SFZ export: {error}"))?;
+        let mut buffer = vec![0_u8; 1024 * 1024];
+        let mut written = 0_u64;
+        loop {
+            let count = response
+                .read(&mut buffer)
+                .map_err(|error| format!("read SFZ export download: {error}"))?;
+            if count == 0 {
+                break;
+            }
+            written = written
+                .checked_add(count as u64)
+                .ok_or_else(|| "SFZ export download size overflow".to_owned())?;
+            if written > expected_size {
+                return Err("SFZ export download exceeded its declared size".to_owned());
+            }
+            output
+                .write_all(&buffer[..count])
+                .map_err(|error| format!("write SFZ export download: {error}"))?;
+        }
+        if written != expected_size {
+            return Err("SFZ export download ended before its declared size".to_owned());
+        }
+        output
+            .sync_all()
+            .map_err(|error| format!("flush SFZ export download: {error}"))?;
+        extract_sfz_tar(&mut output, &destination)
+    })();
+    drop(output);
+    let _ = std::fs::remove_file(&temporary);
+    result
+}
+
 #[tauri::command]
 async fn save_retained_package(
     candidate_id: String,
@@ -467,6 +893,34 @@ async fn save_retained_package(
     })
     .await
     .map_err(|error| format!("save package worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn save_retained_sfz_export(
+    candidate_id: String,
+    content_path: String,
+    expected_size: u64,
+    candidates: State<'_, Mutex<SfzSaveCandidateStore>>,
+    connections: State<'_, Mutex<remote_settings::ServerConnectionManager>>,
+) -> Result<(), String> {
+    let destination = candidates
+        .lock()
+        .map_err(|_| "SFZ destination state is unavailable".to_owned())?
+        .values
+        .remove(&candidate_id)
+        .filter(|(_, created)| created.elapsed() < Duration::from_secs(300))
+        .map(|(path, _)| path)
+        .ok_or_else(|| "SFZ destination expired; choose it again".to_owned())?;
+    let connection = connections
+        .lock()
+        .map_err(|_| "server connection settings are unavailable".to_owned())?
+        .connection()?
+        .ok_or_else(|| "axklib-server is unavailable".to_owned())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        download_retained_sfz_export(connection, destination, content_path, expected_size)
+    })
+    .await
+    .map_err(|error| format!("save SFZ export worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -673,6 +1127,9 @@ pub fn run() {
         .manage(Mutex::new(PackageSaveCandidateStore {
             values: HashMap::new(),
         }))
+        .manage(Mutex::new(SfzSaveCandidateStore {
+            values: HashMap::new(),
+        }))
         .setup(|app| {
             let log_directory = app
                 .path()
@@ -721,6 +1178,8 @@ pub fn run() {
             select_local_package,
             select_local_package_destination,
             save_retained_package,
+            select_local_sfz_destination,
+            save_retained_sfz_export,
             open_developer_tools,
             diagnostic_log_level,
             desktop_build_info

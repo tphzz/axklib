@@ -21,7 +21,9 @@ import type {
     HardDiskCreationProfileId,
     ImageTransport,
     ImageSessionPackageExportDestination,
-    ImageSessionPackageExportRoot,
+    ImageSessionExportRoot,
+    ImageSessionAudioExportDestination,
+    ImageSessionAudioExportInspection,
     ImageSessionPackageImportPlan,
     ImageSessionPackageRename,
     InputBinding,
@@ -434,7 +436,7 @@ export class HttpImageTransport implements ImageTransport {
 
     async startImagePackageExport(
         sessionId: number,
-        roots: ImageSessionPackageExportRoot[],
+        roots: ImageSessionExportRoot[],
         destination: ImageSessionPackageExportDestination,
     ): Promise<JobState> {
         const session = this.session(sessionId);
@@ -449,6 +451,42 @@ export class HttpImageTransport implements ImageTransport {
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.isJob(job)) throw new Error('images.package_export did not return a job');
+        return this.mapJob(job);
+    }
+
+    async inspectImageAudioExport(
+        sessionId: number,
+        roots: ImageSessionExportRoot[],
+    ): Promise<ImageSessionAudioExportInspection> {
+        const session = this.session(sessionId);
+        const result = await this.client.invoke<ImageSessionAudioExportInspection>('images.audio_export.inspect', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            roots,
+        });
+        if (this.isJob(result)) throw new Error('images.audio_export.inspect unexpectedly returned a job');
+        return result;
+    }
+
+    async startImageAudioExport(
+        sessionId: number,
+        roots: ImageSessionExportRoot[],
+        format: 'SFZ' | 'WAV',
+        destination: ImageSessionAudioExportDestination,
+    ): Promise<JobState> {
+        const session = this.session(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.audio_export',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                roots,
+                format,
+                destination,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.isJob(job)) throw new Error('images.audio_export did not return a job');
         return this.mapJob(job);
     }
 
@@ -546,6 +584,7 @@ export class HttpImageTransport implements ImageTransport {
             waveDataCleanupAvailable: (summary.availableOperations ?? []).includes('images.deletion.orphans.inspect'),
             packageImportAvailable: (summary.availableOperations ?? []).includes('images.package.import'),
             packageExportAvailable: (summary.availableOperations ?? []).includes('images.package.export'),
+            audioExportAvailable: (summary.availableOperations ?? []).includes('images.audio_export'),
             tree: [disk],
         };
     }

@@ -38,6 +38,7 @@ export interface OpenedImage {
     waveDataCleanupAvailable: boolean;
     packageImportAvailable: boolean;
     packageExportAvailable: boolean;
+    audioExportAvailable: boolean;
 }
 
 export type CompanionDirectorySelection =
@@ -282,8 +283,11 @@ export type ImageSessionPackageRename = components['schemas']['ImageSessionPacka
 export type ImageSessionPackageImportPlan = components['schemas']['ImageSessionPackageImportPlan'];
 export type ImageSessionPackageImportResult = components['schemas']['ImageSessionPackageImportResult'];
 export type ImageSessionPackageExportDestination = components['schemas']['ImageSessionPackageExportDestination'];
-export type ImageSessionPackageExportRoot = components['schemas']['ImageSessionPackageExportRoot'];
+export type ImageSessionExportRoot = components['schemas']['ImageSessionExportRoot'];
 export type ImageSessionPackageExportResult = components['schemas']['ImageSessionPackageExportResult'];
+export type ImageSessionAudioExportDestination = components['schemas']['ImageSessionAudioExportDestination'];
+export type ImageSessionAudioExportInspection = components['schemas']['ImageSessionAudioExportInspection'];
+export type ImageSessionAudioExportResult = components['schemas']['ImageSessionAudioExportResult'];
 export type RetainedDownload = components['schemas']['RetainedDownload'];
 
 export interface InputBinding {
@@ -406,8 +410,18 @@ export interface ImageTransport {
     startImagePackageImport(planToken: string): Promise<JobState>;
     startImagePackageExport(
         sessionId: number,
-        roots: ImageSessionPackageExportRoot[],
+        roots: ImageSessionExportRoot[],
         destination: ImageSessionPackageExportDestination,
+    ): Promise<JobState>;
+    inspectImageAudioExport(
+        sessionId: number,
+        roots: ImageSessionExportRoot[],
+    ): Promise<ImageSessionAudioExportInspection>;
+    startImageAudioExport(
+        sessionId: number,
+        roots: ImageSessionExportRoot[],
+        format: 'SFZ' | 'WAV',
+        destination: ImageSessionAudioExportDestination,
     ): Promise<JobState>;
     deleteRetainedPackage(download: RetainedDownload): Promise<void>;
     hardDiskCreationProfiles(): Promise<HardDiskCreationProfile[]>;

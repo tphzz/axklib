@@ -1,6 +1,7 @@
 <script lang="ts">
     import { modal } from '../modal';
     import type { PackageExportSelection } from '../types';
+    import ExportDestinationChooser from './ExportDestinationChooser.svelte';
     import Icon from './Icon.svelte';
 
     interface Props {
@@ -83,16 +84,7 @@
                         {/each}
                     </div>
                 {/if}
-                <button class="source-choice-button" type="button" disabled={busy} onclick={onworkspace}>
-                    <Icon name="folder-open" size={18} />
-                    <span><strong>Storage location</strong><small>Save to a configured workspace</small></span>
-                </button>
-                {#if desktop}
-                    <button class="source-choice-button" type="button" disabled={busy} onclick={onlocal}>
-                        <Icon name="hard-drive" size={18} />
-                        <span><strong>This computer</strong><small>Save with the desktop file chooser</small></span>
-                    </button>
-                {/if}
+                <ExportDestinationChooser {desktop} {busy} {onworkspace} {onlocal} />
                 {#if busy}<p class="dialog-progress" role="status">{progressLabel || 'Exporting package…'}</p>{/if}
                 {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
             </section>

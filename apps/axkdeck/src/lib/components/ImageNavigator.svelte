@@ -24,6 +24,7 @@
         partitionActionsEnabled: boolean;
         packageImportEnabled?: boolean;
         packageExportEnabled?: boolean;
+        audioExportEnabled?: boolean;
         onimageaction: (item: DiskTreeItem, action: ImageTreeAction) => void;
     }
 
@@ -43,6 +44,7 @@
         partitionActionsEnabled,
         packageImportEnabled = false,
         packageExportEnabled = false,
+        audioExportEnabled = false,
         onimageaction,
     }: Props = $props();
     let filter = $state('');
@@ -249,6 +251,7 @@
                         {partitionActionsEnabled}
                         {packageImportEnabled}
                         {packageExportEnabled}
+                        {audioExportEnabled}
                         onrequestmenu={requestTreeMenu}
                     />
                 {:else}
@@ -310,8 +313,12 @@
                     >Export package…</button
                 >
             {/if}
+            {#if audioExportEnabled}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-sfz')}>Export SFZ…</button
+                >
+            {/if}
             {#if volumeActionsEnabled}
-                {#if packageImportEnabled || packageExportEnabled}
+                {#if packageImportEnabled || packageExportEnabled || audioExportEnabled}
                     <div class="context-menu-separator" role="separator"></div>
                 {/if}
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('rename-volume')}

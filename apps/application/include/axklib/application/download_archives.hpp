@@ -59,6 +59,8 @@ class DownloadArchiveStore {
 
     [[nodiscard]] Result<DownloadArchiveSnapshot> create(std::string owner_id, const Sandbox &sandbox,
                                                          const DirectoryRef &source);
+    [[nodiscard]] Result<DownloadArchiveSnapshot>
+    create_owned_directory(std::string owner_id, const std::filesystem::path &source, std::string filename);
     [[nodiscard]] Result<DownloadArchiveSnapshot> retain(std::string owner_id, std::string filename,
                                                          std::string media_type, std::span<const std::byte> content);
     [[nodiscard]] Result<DownloadArchiveSnapshot> inspect(const DownloadArchiveRef &reference,

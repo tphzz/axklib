@@ -217,7 +217,7 @@ describe('ObjectWorkspace', () => {
             onselectionchange,
         });
         await fireEvent.contextMenu(screen.getByRole('button', { name: /Piano/ }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export 2 objects' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
 
         expect(onexportobjects).toHaveBeenCalledWith([
             {

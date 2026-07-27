@@ -650,8 +650,8 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
     return result;
 }
 
-Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem::path &output_directory,
-                                  bool overwrite) {
+Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem::path &output_directory, bool overwrite,
+                                  const CancellationToken &cancellation) {
     if (auto valid = audio_internal::validate_export_plan_paths(plan, output_directory); !valid)
         return std::unexpected{valid.error()};
     SfzExportResult result;
@@ -668,6 +668,8 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
         planned_paths.push_back(std::move(path));
     };
     for (const auto &volume : plan.volumes) {
+        if (const auto check = cancellation.check(); !check)
+            return std::unexpected{check.error()};
         std::set<std::string> banked_samples;
         for (const auto &sample_bank : volume.sample_banks) {
             reserve_path(volume, "B " + display_text(sample_bank.display_name, "instrument"));
@@ -688,6 +690,8 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
     }
     auto planned_path = planned_paths.begin();
     for (const auto &volume : plan.volumes) {
+        if (const auto check = cancellation.check(); !check)
+            return std::unexpected{check.error()};
         std::set<std::string> banked_samples;
         const auto write_instrument = [&](std::string name,
                                           const std::vector<const SampleExport *> &samples) -> Result<void> {
@@ -697,6 +701,8 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
                                            text::path_to_utf8(volume.relative_root), name);
             std::size_t region_count{};
             for (const auto *sample : samples) {
+                if (const auto check = cancellation.check(); !check)
+                    return std::unexpected{check.error()};
                 if (sample->rendered_wav_path && !sample->members.empty()) {
                     const auto waveform = std::ranges::find(volume.waveforms, sample->members.front().waveform_key,
                                                             &PhysicalWaveformExport::object_key);

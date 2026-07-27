@@ -4,6 +4,7 @@
 #include "axklib/application/extraction_operations.hpp"
 #include "axklib/application/file_operations.hpp"
 #include "axklib/application/package_operations.hpp"
+#include "axklib/application/session_audio_export_operations.hpp"
 #include "axklib/application/validation_operations.hpp"
 #include "axklib/application/write_operations.hpp"
 
@@ -209,5 +210,7 @@ axk::app::Result<void> axk::app::bind_session_application_operations(OperationRe
                                                                      DownloadArchiveStore &downloads) {
     if (auto bound = bind_session_write_operations(registry, sandbox, uploads, images, journals); !bound)
         return bound;
-    return bind_session_package_operations(registry, sandbox, uploads, images, journals, downloads);
+    if (auto bound = bind_session_package_operations(registry, sandbox, uploads, images, journals, downloads); !bound)
+        return bound;
+    return bind_session_audio_export_operations(registry, sandbox, images, downloads);
 }

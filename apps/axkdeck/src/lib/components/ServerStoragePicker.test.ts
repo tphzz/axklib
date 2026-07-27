@@ -645,6 +645,31 @@ describe('ServerStoragePicker', () => {
         });
     });
 
+    it('constructs a new directory reference for an audio export', async () => {
+        const onselect = vi.fn();
+        render(ServerStoragePicker, {
+            props: {
+                transport: transport(),
+                mode: 'save-directory',
+                title: 'Export SFZ',
+                suggestedName: 'Grand Piano',
+                onselect,
+                oncancel: vi.fn(),
+            },
+        });
+
+        await fireEvent.click(await screen.findByText('Yamaha images'));
+        await fireEvent.click(await screen.findByText('images'));
+        expect((screen.getByLabelText('Output folder name') as HTMLInputElement).value).toBe('Grand Piano');
+        await fireEvent.click(screen.getByRole('button', { name: 'Select output' }));
+
+        expect(onselect).toHaveBeenCalledWith({
+            kind: 'server-directory',
+            reference: { rootId: 'workspace', relativePath: 'images/Grand Piano' },
+            displayName: 'Yamaha images/images/Grand Piano',
+        });
+    });
+
     it('disables destination workflows for read-only storage locations', async () => {
         render(ServerStoragePicker, {
             props: {

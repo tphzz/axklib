@@ -365,6 +365,43 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
 }
 
 axk::app::Result<axk::app::DownloadArchiveSnapshot>
+axk::app::DownloadArchiveStore::create_owned_directory(std::string owner_id, const std::filesystem::path &source,
+                                                       std::string filename) {
+    if (filename.empty() || filename == "." || filename == ".." || filename.find_first_of("/\\") != std::string::npos ||
+        !filename.ends_with(".tar")) {
+        return std::unexpected(
+            archive_error("invalid_archive_request", "owned directory archive filename must be a TAR basename"));
+    }
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(source, error);
+    if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status)) {
+        return std::unexpected(
+            archive_error("invalid_archive_request", "owned directory archive source is unavailable"));
+    }
+#if !defined(_WIN32)
+    const auto permissions = status.permissions() & std::filesystem::perms::all;
+    if ((permissions & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) !=
+        std::filesystem::perms::none) {
+        return std::unexpected(
+            archive_error("invalid_archive_request", "owned directory archive source is not private"));
+    }
+#endif
+    auto sandbox = Sandbox::create({{"generated-export", "Generated export", source, false}});
+    if (!sandbox)
+        return std::unexpected(sandbox.error());
+    auto created = create(std::move(owner_id), *sandbox, {"generated-export", ""});
+    if (!created)
+        return std::unexpected(created.error());
+
+    const std::scoped_lock lock{implementation_->mutex};
+    const auto found = implementation_->entries.find(created->reference.archive_id);
+    if (found == implementation_->entries.end())
+        return std::unexpected(archive_error("archive_storage_unavailable", "created archive disappeared"));
+    found->second.filename = std::move(filename);
+    return implementation_->snapshot(found->first, found->second);
+}
+
+axk::app::Result<axk::app::DownloadArchiveSnapshot>
 axk::app::DownloadArchiveStore::retain(std::string owner_id, std::string filename, std::string media_type,
                                        std::span<const std::byte> content) {
     if (owner_id.empty() || filename.empty() || media_type.empty())

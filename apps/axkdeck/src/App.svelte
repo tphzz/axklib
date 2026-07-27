@@ -11,6 +11,7 @@
     import WaveDataCleanupDialog from './lib/components/WaveDataCleanupDialog.svelte';
     import ObjectRenameDialog from './lib/components/ObjectRenameDialog.svelte';
     import PackageExportDialog from './lib/components/PackageExportDialog.svelte';
+    import SfzExportDialog from './lib/components/SfzExportDialog.svelte';
     import PackageImportDialog from './lib/components/PackageImportDialog.svelte';
     import PackageSelectionControls from './lib/components/PackageSelectionControls.svelte';
     import ObjectWorkspace from './lib/components/ObjectWorkspace.svelte';
@@ -45,6 +46,7 @@
     import { listenForNativeAudioDrops, type NativeDropPosition } from './lib/nativeAudioDrop';
     import { nativeFileSource } from './lib/nativeFileSource';
     import { saveRetainedPackage, selectLocalPackage, selectLocalPackageDestination } from './lib/nativePackages';
+    import { saveRetainedSfzExport, selectLocalSfzDestination } from './lib/nativeAudioExports';
     import { collectPages } from './lib/pagination';
     import {
         emptyPackageExportSelection,
@@ -66,8 +68,11 @@
         CompanionDirectorySelection,
         ObjectDeletionInspection,
         WaveDataOrphanInspection,
+        ImageSessionAudioExportDestination,
+        ImageSessionAudioExportInspection,
+        ImageSessionAudioExportResult,
         ImageSessionPackageExportResult,
-        ImageSessionPackageExportRoot,
+        ImageSessionExportRoot,
         ImageSessionPackageImportPlan,
         PackageInspection,
         ObjectRenameMutation,
@@ -115,8 +120,8 @@
 
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
-    type PickerMode = 'file' | 'directory' | 'save-file' | 'media-source';
-    type PickerParentDialog = 'audio-import' | 'companion-disks' | 'package-import' | 'package-export';
+    type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source';
+    type PickerParentDialog = 'audio-import' | 'companion-disks' | 'package-import' | 'package-export' | 'audio-export';
     type PickerSelection = ImageLocation | DirectoryLocation | FileLocation[];
     interface PickerRequest {
         mode: PickerMode;
@@ -144,6 +149,7 @@
     let hardDiskCreationDirectory = $state<DirectoryLocation | null>(null);
     let lastImageDirectory = $state<DirectoryRef | null>(null);
     let lastPackageDirectory = $state<DirectoryRef | null>(null);
+    let lastAudioExportDirectory = $state<DirectoryRef | null>(null);
     let lastAudioDirectory = $state<DirectoryRef | null>(null);
     let lastCompanionDirectory = $state<DirectoryRef | null>(null);
     let openSessionId = $state<number | null>(null);
@@ -194,6 +200,7 @@
     let waveDataCleanupAvailable = $state(false);
     let packageImportAvailable = $state(false);
     let packageExportAvailable = $state(false);
+    let audioExportAvailable = $state(false);
     let volumeAction = $state<{ item: DiskTreeItem; action: ImageTreeAction } | null>(null);
     let volumeActionBusy = $state(false);
     let volumeActionError = $state('');
@@ -241,6 +248,17 @@
         progressLabel: string;
         error: string;
     } | null>(null);
+    let audioExportGeneration = 0;
+    let audioExportRequest = $state<{
+        items: PackageExportSelection[];
+        inspection: ImageSessionAudioExportInspection | null;
+        format: 'SFZ' | 'WAV';
+        loading: boolean;
+        busy: boolean;
+        jobId: number | null;
+        progressLabel: string;
+        error: string;
+    } | null>(null);
     type PackageExportDestination =
         | { kind: 'WORKSPACE'; output: { rootId: string; relativePath: string }; overwrite: boolean }
         | { kind: 'DOWNLOAD'; filename: string };
@@ -250,6 +268,12 @@
         | {
               kind: 'package-export';
               destination: PackageExportDestination;
+              localDestination?: { candidateId: string };
+          }
+        | {
+              kind: 'audio-export';
+              destination: ImageSessionAudioExportDestination;
+              format: 'SFZ' | 'WAV';
               localDestination?: { candidateId: string };
           };
     let companionDiskRequest = $state<{
@@ -313,6 +337,10 @@
         void interfaceScaling?.dispose();
         ++imageOpenGeneration;
         ++packageOperationGeneration;
+        ++audioExportGeneration;
+        const audioExportJobId = audioExportRequest?.jobId;
+        if (audioExportJobId !== null && audioExportJobId !== undefined) void transport.cancelJob(audioExportJobId);
+        audioExportRequest = null;
         packageImportAbortController?.abort();
         packageImportAbortController = null;
         const packageRequest = packageImportRequest;
@@ -944,6 +972,20 @@
             };
             return;
         }
+        if (action === 'export-sfz') {
+            if (!audioExportAvailable || item.kind !== 'volume') return;
+            selectedSource = item;
+            void requestAudioExport([
+                {
+                    kind: 'VOLUME',
+                    partitionIndex: item.partitionIndex,
+                    volumeName: item.name,
+                    name: item.name,
+                    typeLabel: 'Volume',
+                },
+            ]);
+            return;
+        }
         const partitionAction = action === 'rename-partition';
         if (partitionAction && (!partitionMutationsAvailable || item.kind !== 'partition')) return;
         if (!partitionAction && !volumeMutationsAvailable) return;
@@ -1220,7 +1262,7 @@
         sourceStatus = `Package export supports at most ${maximumPackageExportRoots.toLocaleString()} selected objects`;
     }
 
-    function packageExportRoots(items: PackageExportSelection[]): ImageSessionPackageExportRoot[] {
+    function exportRoots(items: PackageExportSelection[]): ImageSessionExportRoot[] {
         return items.map((item) =>
             item.kind === 'VOLUME'
                 ? {
@@ -1244,11 +1286,7 @@
         sourceStatus = `Exporting ${exportLabel}`;
         let retained: ImageSessionPackageExportResult['download'] = null;
         try {
-            const job = await transport.startImagePackageExport(
-                sessionId,
-                packageExportRoots(request.items),
-                destination,
-            );
+            const job = await transport.startImagePackageExport(sessionId, exportRoots(request.items), destination);
             const completed = await transport.waitForJob(job.jobId, (update) => {
                 if (packageExportRequest && update.progress?.label) {
                     packageExportRequest = { ...packageExportRequest, progressLabel: update.progress.label };
@@ -1332,6 +1370,183 @@
                 sourceStatus = message;
             }
         }
+    }
+
+    async function requestAudioExport(items: PackageExportSelection[]): Promise<void> {
+        if (!audioExportAvailable || openSessionId === null || items.length === 0) return;
+        const generation = ++audioExportGeneration;
+        const sessionId = openSessionId;
+        audioExportRequest = {
+            items: [...items],
+            inspection: null,
+            format: 'SFZ',
+            loading: true,
+            busy: false,
+            jobId: null,
+            progressLabel: '',
+            error: '',
+        };
+        try {
+            const inspection = await transport.inspectImageAudioExport(sessionId, exportRoots(items));
+            if (generation !== audioExportGeneration || openSessionId !== sessionId || !audioExportRequest) return;
+            audioExportRequest = {
+                ...audioExportRequest,
+                inspection,
+                format: inspection.sfzEligible ? 'SFZ' : 'WAV',
+                loading: false,
+            };
+        } catch (error) {
+            if (generation !== audioExportGeneration || !audioExportRequest) return;
+            const message = userFacingMessage(error);
+            audioExportRequest = { ...audioExportRequest, loading: false, error: message };
+            sourceStatus = message;
+        }
+    }
+
+    async function runAudioExport(
+        destination: ImageSessionAudioExportDestination,
+        format: 'SFZ' | 'WAV',
+        localDestination?: { candidateId: string },
+    ): Promise<void> {
+        const request = audioExportRequest;
+        if (!request || !request.inspection || openSessionId === null || request.busy) return;
+        const sessionId = openSessionId;
+        const generation = audioExportGeneration;
+        const label = request.items.length === 1 ? request.items[0]!.name : `${request.items.length} objects`;
+        audioExportRequest = {
+            ...request,
+            format,
+            busy: true,
+            jobId: null,
+            progressLabel: 'Preparing audio export',
+            error: '',
+        };
+        sourceStatus = `Exporting audio from ${label}`;
+        let retained: ImageSessionAudioExportResult['download'] = null;
+        try {
+            const job = await transport.startImageAudioExport(
+                sessionId,
+                exportRoots(request.items),
+                format,
+                destination,
+            );
+            if (generation !== audioExportGeneration || !audioExportRequest) {
+                await transport.cancelJob(job.jobId).catch(() => undefined);
+                return;
+            }
+            audioExportRequest = { ...audioExportRequest, jobId: job.jobId };
+            const completed = await transport.waitForJob(job.jobId, (update) => {
+                if (generation === audioExportGeneration && audioExportRequest && update.progress?.label) {
+                    audioExportRequest = { ...audioExportRequest, progressLabel: update.progress.label };
+                }
+            });
+            if (completed.status === 'cancelled') {
+                if (generation === audioExportGeneration) audioExportRequest = null;
+                sourceStatus = 'Audio export cancelled';
+                return;
+            }
+            if (completed.status !== 'completed') {
+                if (completed.errorCode === 'companion_disks_required') {
+                    audioExportRequest = {
+                        ...request,
+                        format,
+                        busy: false,
+                        jobId: null,
+                        progressLabel: '',
+                        error: '',
+                    };
+                    requestCompanionDisks({
+                        kind: 'audio-export',
+                        destination,
+                        format,
+                        localDestination,
+                    });
+                    return;
+                }
+                throw new Error(completed.error ?? 'Audio export did not complete');
+            }
+            const result = completed.result as ImageSessionAudioExportResult;
+            retained = result.download;
+            if (localDestination) {
+                if (!retained) throw new Error('Audio export did not provide a retained download');
+                await saveRetainedSfzExport(localDestination.candidateId, retained.contentPath, retained.sizeBytes);
+            }
+            if (generation === audioExportGeneration) audioExportRequest = null;
+            sourceStatus = `Exported audio from ${label}`;
+        } catch (error) {
+            if (generation !== audioExportGeneration || !audioExportRequest) return;
+            const message = userFacingMessage(error);
+            audioExportRequest = {
+                ...audioExportRequest,
+                busy: false,
+                jobId: null,
+                progressLabel: '',
+                error: message,
+            };
+            sourceStatus = message;
+        } finally {
+            if (retained) await transport.deleteRetainedPackage(retained).catch(() => undefined);
+        }
+    }
+
+    async function exportAudioToWorkspace(): Promise<void> {
+        const request = audioExportRequest;
+        if (!request?.inspection || request.busy) return;
+        const generation = audioExportGeneration;
+        const selection = await chooseServerLocation(
+            'save-directory',
+            'Export SFZ',
+            [],
+            request.inspection.defaultDirectoryName,
+            {
+                parentDialog: 'audio-export',
+                initialDirectory: lastAudioExportDirectory,
+                ondirectorychange: (directory) => (lastAudioExportDirectory = directory),
+                requireWritableDirectory: true,
+            },
+        );
+        if (selection?.kind !== 'server-directory' || generation !== audioExportGeneration || !audioExportRequest) {
+            return;
+        }
+        await runAudioExport({ kind: 'WORKSPACE', output: selection.reference }, audioExportRequest.format);
+    }
+
+    async function exportAudioToComputer(): Promise<void> {
+        const request = audioExportRequest;
+        if (!request?.inspection || request.busy || !isDesktop) return;
+        const generation = audioExportGeneration;
+        try {
+            const destination = await selectLocalSfzDestination(request.inspection.defaultDirectoryName);
+            if (!destination || generation !== audioExportGeneration || !audioExportRequest) return;
+            await runAudioExport(
+                { kind: 'DOWNLOAD', directoryName: destination.directoryName },
+                audioExportRequest.format,
+                { candidateId: destination.candidateId },
+            );
+        } catch (error) {
+            if (generation !== audioExportGeneration || !audioExportRequest) return;
+            const message = userFacingMessage(error);
+            audioExportRequest = { ...audioExportRequest, error: message };
+            sourceStatus = message;
+        }
+    }
+
+    function cancelAudioExport(): void {
+        const request = audioExportRequest;
+        if (!request) return;
+        if (request.busy) {
+            if (request.jobId === null) {
+                ++audioExportGeneration;
+                audioExportRequest = null;
+                sourceStatus = 'Cancelling audio export';
+                return;
+            }
+            audioExportRequest = { ...request, progressLabel: 'Cancelling audio export' };
+            void transport.cancelJob(request.jobId);
+            return;
+        }
+        ++audioExportGeneration;
+        audioExportRequest = null;
     }
 
     function cancelObjectDeletion(): void {
@@ -2345,6 +2560,7 @@
         waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
         packageImportAvailable = opened.packageImportAvailable;
         packageExportAvailable = opened.packageExportAvailable;
+        audioExportAvailable = opened.audioExportAvailable;
         sourceItems = opened.tree;
         const preferredItem = preferred
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -2469,7 +2685,11 @@
             if (bank) await playSampleBank(bank);
             return;
         }
-        await runPackageExport(retry.destination, retry.localDestination);
+        if (retry.kind === 'package-export') {
+            await runPackageExport(retry.destination, retry.localDestination);
+            return;
+        }
+        await runAudioExport(retry.destination, retry.format, retry.localDestination);
     }
 
     async function attachCompanionDisks(selection: CompanionDirectorySelection): Promise<void> {
@@ -2515,6 +2735,8 @@
         packageImportAbortController = null;
         packageImportRequest = null;
         packageExportRequest = null;
+        ++audioExportGeneration;
+        audioExportRequest = null;
         companionDiskRequest = null;
         if (packageRequest) await releasePackageImportResources(packageRequest);
         await auditionController.invalidateSession(sessionId);
@@ -2531,6 +2753,7 @@
         objectRenameRequest = null;
         packageImportAvailable = false;
         packageExportAvailable = false;
+        audioExportAvailable = false;
         ++objectDeletionGeneration;
         objectDeletionRequest = null;
         ++waveDataCleanupGeneration;
@@ -2699,11 +2922,14 @@
                 </button>
             {/each}
         </nav>
-        {#if (packageExportAvailable || objectDeletionAvailable) && packageExportSelection.items.length > 0}
+        {#if (packageExportAvailable || audioExportAvailable || objectDeletionAvailable) && packageExportSelection.items.length > 0}
             <PackageSelectionControls
                 count={packageExportSelection.items.length}
-                onexport={packageExportAvailable
+                onexportpackage={packageExportAvailable
                     ? () => requestObjectPackageExport(packageExportSelection.items)
+                    : undefined}
+                onexportsfz={audioExportAvailable
+                    ? () => void requestAudioExport(packageExportSelection.items)
                     : undefined}
                 ondelete={objectDeletionAvailable
                     ? () => requestObjectDeletion(packageExportSelection.items)
@@ -2751,6 +2977,7 @@
             partitionActionsEnabled={partitionMutationsAvailable}
             packageImportEnabled={packageImportAvailable}
             packageExportEnabled={packageExportAvailable}
+            audioExportEnabled={audioExportAvailable}
             onimageaction={requestImageAction}
             onloadchildren={(parentId, offset, limit) =>
                 openSessionId === null
@@ -2797,6 +3024,8 @@
                 ondeleteobjects={requestObjectDeletion}
                 {packageExportAvailable}
                 onexportobjects={requestObjectPackageExport}
+                {audioExportAvailable}
+                onexportaudio={(items) => void requestAudioExport(items)}
                 selection={packageExportSelection}
                 onselectionchange={(selection) => (packageExportSelection = selection)}
                 onselectionlimit={reportPackageExportSelectionLimit}
@@ -2827,6 +3056,8 @@
                 oncleanupwavedata={requestWaveDataCleanup}
                 {packageExportAvailable}
                 onexportobjects={requestObjectPackageExport}
+                {audioExportAvailable}
+                onexportaudio={(items) => void requestAudioExport(items)}
                 selection={packageExportSelection}
                 onselectionchange={(selection) => (packageExportSelection = selection)}
                 onselectionlimit={reportPackageExportSelectionLimit}
@@ -3003,6 +3234,26 @@
                 packageExportRequest = null;
             }
         }}
+    />
+{/if}
+{#if audioExportRequest && pickerRequest?.parentDialog !== 'audio-export' && !companionDiskRequest}
+    <SfzExportDialog
+        items={audioExportRequest.items}
+        inspection={audioExportRequest.inspection}
+        desktop={isDesktop}
+        loading={audioExportRequest.loading}
+        busy={audioExportRequest.busy}
+        progressLabel={audioExportRequest.progressLabel}
+        error={audioExportRequest.error}
+        format={audioExportRequest.format}
+        onformatchange={(format) => {
+            if (audioExportRequest && !audioExportRequest.busy) {
+                audioExportRequest = { ...audioExportRequest, format };
+            }
+        }}
+        onworkspace={() => void exportAudioToWorkspace()}
+        onlocal={() => void exportAudioToComputer()}
+        oncancel={cancelAudioExport}
     />
 {/if}
 {#if objectDeletionRequest}

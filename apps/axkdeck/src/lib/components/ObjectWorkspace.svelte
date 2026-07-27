@@ -41,6 +41,8 @@
         oncleanupwavedata?: () => void;
         packageExportAvailable?: boolean;
         onexportobjects?: (objects: PackageExportObject[]) => void;
+        audioExportAvailable?: boolean;
+        onexportaudio?: (objects: PackageExportObject[]) => void;
         selection?: PackageExportSelectionState;
         onselectionchange?: (selection: PackageExportSelectionState) => void;
         onselectionlimit?: () => void;
@@ -71,6 +73,8 @@
         oncleanupwavedata = () => undefined,
         packageExportAvailable = false,
         onexportobjects = () => undefined,
+        audioExportAvailable = false,
+        onexportaudio = () => undefined,
         selection = emptyPackageExportSelection(),
         onselectionchange = () => undefined,
         onselectionlimit = () => undefined,
@@ -205,7 +209,8 @@
     }
 
     function openObjectMenu(event: MouseEvent, object: SamplerObject, renameTarget: ObjectRenameTarget | null): void {
-        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable) return;
+        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable && !audioExportAvailable)
+            return;
         event.preventDefault();
         let menuSelection = selection;
         if (!selection.items.some((item) => item.objectId === object.key)) {
@@ -236,7 +241,8 @@
     ): void {
         if (selectAll(event, object.key)) return;
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
-        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable) return;
+        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable && !audioExportAvailable)
+            return;
         event.preventDefault();
         const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
         openObjectMenu(
@@ -410,7 +416,8 @@
         onrename={objectRenameAvailable && objectMenu.objects.length === 1 && objectMenu.renameTarget
             ? () => onrenameobject(objectMenu!.renameTarget!)
             : undefined}
-        onexport={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
+        onexportpackage={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
+        onexportsfz={audioExportAvailable ? () => onexportaudio(objectMenu!.objects) : undefined}
         ondelete={objectDeletionAvailable ? () => ondeleteobjects(objectMenu!.objects) : undefined}
     />
 {/if}

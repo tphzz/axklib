@@ -75,6 +75,30 @@ TEST_F(DownloadArchiveStoreTest, CreatesOwnerBoundDeterministicTarAndRemovesItEx
     EXPECT_FALSE(store.inspect(created->reference, "owner-a"));
 }
 
+TEST_F(DownloadArchiveStoreTest, ArchivesOnlyPrivateServerOwnedDirectoriesWithAnExplicitFilename) {
+    const auto owned = root_ / "owned-export";
+    std::filesystem::create_directory(owned);
+    std::filesystem::permissions(owned, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+    std::ofstream{owned / "instrument.sfz"} << "<region>\n";
+    axk::app::DownloadArchiveStore store{root_ / "owned-archives", 1024U * 1024U, 1024U * 1024U, 16U,
+                                         std::chrono::seconds{30}};
+
+    const auto created = store.create_owned_directory("owner", owned, "Instrument.tar");
+    ASSERT_TRUE(created) << created.error().message;
+    EXPECT_EQ(created->filename, "Instrument.tar");
+    EXPECT_EQ(created->media_type, "application/x-tar");
+    EXPECT_EQ(created->entry_count, 1U);
+
+    EXPECT_FALSE(store.create_owned_directory("owner", owned, "../escape.tar"));
+#if !defined(_WIN32)
+    std::filesystem::permissions(owned, std::filesystem::perms::owner_all | std::filesystem::perms::group_read,
+                                 std::filesystem::perm_options::replace);
+    const auto public_source = store.create_owned_directory("owner", owned, "Public.tar");
+    ASSERT_FALSE(public_source);
+    EXPECT_EQ(public_source.error().code, "invalid_archive_request");
+#endif
+}
+
 TEST_F(DownloadArchiveStoreTest, RetainsOwnerBoundNonArchiveDownloads) {
     axk::app::DownloadArchiveStore store{root_ / "retained", 1024U, 1024U, 4U, std::chrono::seconds{30}};
     const std::array payload{std::byte{0x41}, std::byte{0x58}, std::byte{0x4b}};

@@ -17,6 +17,7 @@
         partitionActionsEnabled?: boolean;
         packageImportEnabled?: boolean;
         packageExportEnabled?: boolean;
+        audioExportEnabled?: boolean;
         onrequestmenu?: (item: DiskTreeItem, x: number, y: number) => void;
     }
 
@@ -30,6 +31,7 @@
         partitionActionsEnabled = false,
         packageImportEnabled = false,
         packageExportEnabled = false,
+        audioExportEnabled = false,
         onrequestmenu = () => undefined,
     }: Props = $props();
     let expanded = $state(false);
@@ -91,7 +93,8 @@
         return (
             item.partitionIndex !== undefined &&
             ((item.kind === 'partition' && (volumeActionsEnabled || partitionActionsEnabled)) ||
-                (item.kind === 'volume' && (volumeActionsEnabled || packageImportEnabled || packageExportEnabled)))
+                (item.kind === 'volume' &&
+                    (volumeActionsEnabled || packageImportEnabled || packageExportEnabled || audioExportEnabled)))
         );
     }
 
@@ -172,6 +175,7 @@
                     {partitionActionsEnabled}
                     {packageImportEnabled}
                     {packageExportEnabled}
+                    {audioExportEnabled}
                     {onrequestmenu}
                 />
             {/each}

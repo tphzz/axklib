@@ -1519,6 +1519,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.preview",
                 "auditions.prepare",
                 "images.package.export",
+                "images.audio_export",
                 "images.alter.volumes",
                 "images.alter.partitions",
                 "images.alter.objects",

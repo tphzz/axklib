@@ -2024,7 +2024,7 @@
           }
         ]
       },
-      "ImageSessionPackageExportRoot": {
+      "ImageSessionExportRoot": {
         "oneOf": [
           {
             "type": "object",
@@ -2059,7 +2059,7 @@
             "minItems": 1,
             "maxItems": 1024,
             "uniqueItems": true,
-            "items": {"$ref": "#/components/schemas/ImageSessionPackageExportRoot"}
+            "items": {"$ref": "#/components/schemas/ImageSessionExportRoot"}
           },
           "destination": {"$ref": "#/components/schemas/ImageSessionPackageExportDestination"}
         }
@@ -2096,6 +2096,104 @@
           "output": {
             "oneOf": [
               {"$ref": "#/components/schemas/FileRef"},
+              {"type": "null"}
+            ]
+          },
+          "download": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/RetainedDownload"},
+              {"type": "null"}
+            ]
+          }
+        }
+      },
+      "ImageSessionAudioExportInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "roots"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "roots": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1024,
+            "uniqueItems": true,
+            "items": {"$ref": "#/components/schemas/ImageSessionExportRoot"}
+          }
+        }
+      },
+      "ImageSessionAudioExportInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "rootCount", "programCount", "sampleBankCount", "sampleCount", "waveDataCount", "sfzFileCount", "sfzEligible", "defaultDirectoryName", "issues"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "rootCount": {"type": "integer", "minimum": 1},
+          "programCount": {"type": "integer", "minimum": 0},
+          "sampleBankCount": {"type": "integer", "minimum": 0},
+          "sampleCount": {"type": "integer", "minimum": 0},
+          "waveDataCount": {"type": "integer", "minimum": 0},
+          "sfzFileCount": {"type": "integer", "minimum": 0},
+          "sfzEligible": {"type": "boolean"},
+          "defaultDirectoryName": {"type": "string", "minLength": 1},
+          "issues": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}}
+        }
+      },
+      "ImageSessionAudioExportDestination": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "output"],
+            "properties": {
+              "kind": {"const": "WORKSPACE"},
+              "output": {"$ref": "#/components/schemas/DirectoryRef"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "directoryName"],
+            "properties": {
+              "kind": {"const": "DOWNLOAD"},
+              "directoryName": {"type": "string", "minLength": 1}
+            }
+          }
+        ]
+      },
+      "ImageSessionAudioExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "roots", "format", "destination"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "roots": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1024,
+            "uniqueItems": true,
+            "items": {"$ref": "#/components/schemas/ImageSessionExportRoot"}
+          },
+          "format": {"enum": ["SFZ", "WAV"]},
+          "destination": {"$ref": "#/components/schemas/ImageSessionAudioExportDestination"}
+        }
+      },
+      "ImageSessionAudioExportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "format", "fileCount", "destination", "output", "download"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "format": {"enum": ["SFZ", "WAV"]},
+          "fileCount": {"type": "integer", "minimum": 1},
+          "destination": {"enum": ["WORKSPACE", "DOWNLOAD"]},
+          "output": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/DirectoryRef"},
               {"type": "null"}
             ]
           },

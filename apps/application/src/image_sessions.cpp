@@ -1359,9 +1359,10 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
         else
             ++validation.info_count;
     }
-    std::vector<std::string> available_operations{"images.content",           "images.objects", "images.relationships",
-                                                  "images.validation.issues", "images.preview", "auditions.prepare",
-                                                  "images.package.export"};
+    std::vector<std::string> available_operations{
+        "images.content", "images.objects",    "images.relationships",  "images.validation.issues",
+        "images.preview", "auditions.prepare", "images.package.export", "images.audio_export",
+    };
     const auto source_metadata =
         implementation_->sandbox.metadata((*session)->source.root_id, (*session)->source.relative_path);
     if ((*session)->format == "sfs" && source_metadata && source_metadata->writable) {

@@ -38,7 +38,13 @@ export interface DiskTreeItem {
 }
 
 export type ImageTreeAction =
-    'add-volume' | 'rename-volume' | 'delete-volume' | 'rename-partition' | 'import-package' | 'export-package';
+    | 'add-volume'
+    | 'rename-volume'
+    | 'delete-volume'
+    | 'rename-partition'
+    | 'import-package'
+    | 'export-package'
+    | 'export-sfz';
 
 export interface Program {
     id: string;

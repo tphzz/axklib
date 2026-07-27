@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct DesktopPreferences {
     last_package_export_directory: Option<PathBuf>,
+    last_sfz_export_directory: Option<PathBuf>,
 }
 
 pub struct DesktopPreferencesStore {
@@ -55,6 +56,25 @@ impl DesktopPreferencesStore {
             return Err("the package export location is not a directory".to_owned());
         }
         self.preferences.last_package_export_directory = Some(directory);
+        self.persist()
+    }
+
+    pub fn sfz_export_directory(&self) -> Option<PathBuf> {
+        self.preferences
+            .last_sfz_export_directory
+            .as_ref()
+            .filter(|directory| directory.is_dir())
+            .cloned()
+    }
+
+    pub fn remember_sfz_export_directory(&mut self, directory: &Path) -> Result<(), String> {
+        let directory = directory
+            .canonicalize()
+            .map_err(|error| format!("resolve SFZ export directory: {error}"))?;
+        if !directory.is_dir() {
+            return Err("the SFZ export location is not a directory".to_owned());
+        }
+        self.preferences.last_sfz_export_directory = Some(directory);
         self.persist()
     }
 
@@ -196,6 +216,44 @@ mod tests {
                 export_directory
                     .canonicalize()
                     .expect("canonical export directory")
+            )
+        );
+        fs::remove_dir_all(root).expect("remove temporary directory");
+    }
+
+    #[test]
+    fn sfz_export_directory_is_remembered_separately() {
+        let root = temporary_directory("sfz-reload");
+        let package_directory = root.join("packages");
+        let sfz_directory = root.join("sfz");
+        fs::create_dir(&package_directory).expect("create package directory");
+        fs::create_dir(&sfz_directory).expect("create SFZ directory");
+        let document = root.join("desktop-preferences.json");
+
+        let mut store =
+            DesktopPreferencesStore::load(document.clone()).expect("load empty preferences");
+        store
+            .remember_package_export_directory(&package_directory)
+            .expect("remember package directory");
+        store
+            .remember_sfz_export_directory(&sfz_directory)
+            .expect("remember SFZ directory");
+
+        let reloaded = DesktopPreferencesStore::load(document).expect("reload preferences");
+        assert_eq!(
+            reloaded.package_export_directory(),
+            Some(
+                package_directory
+                    .canonicalize()
+                    .expect("canonical package directory")
+            )
+        );
+        assert_eq!(
+            reloaded.sfz_export_directory(),
+            Some(
+                sfz_directory
+                    .canonicalize()
+                    .expect("canonical SFZ directory")
             )
         );
         fs::remove_dir_all(root).expect("remove temporary directory");

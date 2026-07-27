@@ -21,6 +21,7 @@
 #include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/package_operations.hpp"
+#include "axklib/application/session_audio_export_operations.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/package.hpp"
 #include "axklib/writer.hpp"
@@ -176,6 +177,7 @@ class PackageOperationsTest : public testing::Test {
         ASSERT_TRUE(downloads_->storage_ready());
         ASSERT_TRUE(axk::app::bind_session_package_operations(registry_, *sandbox_, *uploads_, *images_, *journals_,
                                                               *downloads_));
+        ASSERT_TRUE(axk::app::bind_session_audio_export_operations(registry_, *sandbox_, *images_, *downloads_));
     }
 
     void TearDown() override {
@@ -454,6 +456,55 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
         context());
     ASSERT_FALSE(duplicate);
     EXPECT_EQ(duplicate.error().code, "invalid_request");
+}
+
+TEST_F(PackageOperationsTest, SessionInspectsAndExportsSfzToWorkspaceOrRetainedTar) {
+    const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(objects) << objects.error().message;
+    const auto sample = std::ranges::find(objects->items, "SBNK", &axk::app::ImageObjectItem::type);
+    ASSERT_NE(sample, objects->items.end());
+    const nlohmann::json roots{{{"kind", "SBNK"}, {"objectId", sample->id}}};
+    const auto base =
+        nlohmann::json{{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"roots", roots}};
+
+    const auto inspected = registry_.invoke("images.audio_export.inspect", base, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_TRUE(inspected->at("sfzEligible").get<bool>());
+    EXPECT_EQ(inspected->at("sampleCount"), 1U);
+    EXPECT_EQ(inspected->at("waveDataCount"), 1U);
+    EXPECT_EQ(inspected->at("sfzFileCount"), 1U);
+    EXPECT_FALSE(inspected->at("defaultDirectoryName").get<std::string>().empty());
+
+    auto workspace_request = base;
+    workspace_request["format"] = "SFZ";
+    workspace_request["destination"] = {
+        {"kind", "WORKSPACE"},
+        {"output", {{"rootId", "workspace"}, {"relativePath", "sfz-workspace"}}},
+    };
+    const auto workspace = registry_.invoke("images.audio_export", workspace_request, context());
+    ASSERT_TRUE(workspace) << workspace.error().message;
+    EXPECT_EQ(workspace->at("destination"), "WORKSPACE");
+    EXPECT_EQ(workspace->at("format"), "SFZ");
+    EXPECT_GE(workspace->at("fileCount").get<std::size_t>(), 2U);
+    EXPECT_TRUE(std::filesystem::is_directory(root_ / "sfz-workspace"));
+    EXPECT_NE(std::ranges::distance(std::filesystem::recursive_directory_iterator{root_ / "sfz-workspace"},
+                                    std::filesystem::recursive_directory_iterator{}),
+              0);
+
+    auto download_request = base;
+    download_request["format"] = "SFZ";
+    download_request["destination"] = {{"kind", "DOWNLOAD"}, {"directoryName", "Local SFZ"}};
+    const auto download = registry_.invoke("images.audio_export", download_request, context());
+    ASSERT_TRUE(download) << download.error().message;
+    ASSERT_EQ(download->at("destination"), "DOWNLOAD");
+    const auto &retained = download->at("download");
+    ASSERT_EQ(retained.at("filename"), "Local SFZ.tar");
+    const auto content = downloads_->open({retained.at("archiveId").get<std::string>()}, "owner");
+    ASSERT_TRUE(content) << content.error().message;
+    EXPECT_EQ(content->snapshot.media_type, "application/x-tar");
+    EXPECT_GT(content->snapshot.entry_count, 1U);
 }
 
 TEST_F(PackageOperationsTest, SessionExportsAnAxkObjectDirectoryAsAVolumePackage) {

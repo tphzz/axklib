@@ -2,6 +2,7 @@ import { HttpImageTransport } from './httpTransport';
 import type {
     ImageTransport,
     ImageSessionPackageImportPlan,
+    ImageSessionAudioExportInspection,
     AudioImportCapabilities,
     AuditionBundleDescriptor,
     ClientDownload,
@@ -91,6 +92,12 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startImagePackageExport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    inspectImageAudioExport(): Promise<ImageSessionAudioExportInspection> {
+        return this.unavailable();
+    }
+    startImageAudioExport(): Promise<JobState> {
         return this.unavailable();
     }
     deleteRetainedPackage(_download: RetainedDownload): Promise<void> {

@@ -16,7 +16,7 @@
     } from '../storageLocations';
     import Icon from './Icon.svelte';
 
-    type PickerMode = 'file' | 'directory' | 'save-file' | 'media-source';
+    type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source';
     interface Props {
         transport: ImageTransport;
         mode: PickerMode;
@@ -127,7 +127,10 @@
     }
 
     function rootIsDisabled(root: SandboxRoot): boolean {
-        return (mode === 'save-file' || (mode === 'directory' && requireWritableDirectory)) && !root.writable;
+        return (
+            (mode === 'save-file' || mode === 'save-directory' || (mode === 'directory' && requireWritableDirectory)) &&
+            !root.writable
+        );
     }
 
     function enabledOptionIndices(): number[] {
@@ -357,7 +360,10 @@
         if (!activeRoot || !directory) return;
         const filename = outputName.trim();
         if (!filename || filename === '.' || filename === '..' || filename.includes('/') || filename.includes('\\')) {
-            error = 'Enter a filename without directory separators';
+            error =
+                mode === 'save-directory'
+                    ? 'Enter a folder name without directory separators'
+                    : 'Enter a filename without directory separators';
             return;
         }
         if (normalizedExtensions.length > 0) {
@@ -368,8 +374,11 @@
             }
         }
         const relativePath = directory.relativePath ? `${directory.relativePath}/${filename}` : filename;
+        const reference = { rootId: directory.rootId, relativePath };
         onselect(
-            serverFileLocation({ rootId: directory.rootId, relativePath }, `${activeRoot.displayName}/${relativePath}`),
+            mode === 'save-directory'
+                ? serverDirectoryLocation(reference, `${activeRoot.displayName}/${relativePath}`)
+                : serverFileLocation(reference, `${activeRoot.displayName}/${relativePath}`),
         );
     }
 
@@ -469,7 +478,7 @@
                 {/each}
             </ol>
             <div class="storage-picker-location-actions">
-                {#if activeRoot?.writable && directory && (mode === 'directory' || mode === 'save-file')}
+                {#if activeRoot?.writable && directory && (mode === 'directory' || mode === 'save-file' || mode === 'save-directory')}
                     <button
                         class="secondary-button storage-picker-directory-action"
                         type="button"
@@ -601,8 +610,12 @@
                     >Load more</button
                 >
             {/if}
-            {#if mode === 'save-file' && directory}
-                <input bind:value={outputName} aria-label="Output filename" placeholder="Output filename" />
+            {#if (mode === 'save-file' || mode === 'save-directory') && directory}
+                <input
+                    bind:value={outputName}
+                    aria-label={mode === 'save-directory' ? 'Output folder name' : 'Output filename'}
+                    placeholder={mode === 'save-directory' ? 'Output folder name' : 'Output filename'}
+                />
                 <button class="primary-button" type="button" onclick={selectOutput}>Select output</button>
             {:else if mode === 'directory' && directory}
                 <button class="primary-button" type="button" onclick={selectCurrentDirectory}>Select directory</button>

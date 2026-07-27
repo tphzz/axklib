@@ -312,7 +312,7 @@ describe('ContainedObjectWorkspace', () => {
             onselectionchange,
         });
         await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect Strings' }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export 2 objects' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
 
         expect(onexportobjects).toHaveBeenCalledWith([
             program,

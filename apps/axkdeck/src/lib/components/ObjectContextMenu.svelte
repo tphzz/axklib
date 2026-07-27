@@ -7,12 +7,23 @@
         left: number;
         top: number;
         onrename?: () => void;
-        onexport?: () => void;
+        onexportpackage?: () => void;
+        onexportsfz?: () => void;
         ondelete?: () => void;
         onclose: () => void;
     }
 
-    let { objectName, selectionCount = 1, left, top, onrename, onexport, ondelete, onclose }: Props = $props();
+    let {
+        objectName,
+        selectionCount = 1,
+        left,
+        top,
+        onrename,
+        onexportpackage,
+        onexportsfz,
+        ondelete,
+        onclose,
+    }: Props = $props();
     let menu: HTMLDivElement;
 
     $effect(() => {
@@ -51,17 +62,29 @@
             }}>Rename</button
         >
     {/if}
-    {#if onexport}
+    {#if onexportpackage}
         <button
             type="button"
             role="menuitem"
             onclick={() => {
-                onexport?.();
+                onexportpackage?.();
                 onclose();
-            }}>Export {selectionCount === 1 ? 'package' : `${selectionCount} objects`}</button
+            }}>Export package…</button
         >
     {/if}
-    {#if (onrename || onexport) && ondelete}<div class="context-menu-separator" role="separator"></div>{/if}
+    {#if onexportsfz}
+        <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+                onexportsfz?.();
+                onclose();
+            }}>Export SFZ…</button
+        >
+    {/if}
+    {#if (onrename || onexportpackage || onexportsfz) && ondelete}
+        <div class="context-menu-separator" role="separator"></div>
+    {/if}
     {#if ondelete}
         <button
             class="danger-menu-item"

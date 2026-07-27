@@ -1680,6 +1680,30 @@ describe('HttpImageTransport', () => {
                                 resultSchema: 'ImageSessionPackageExportResult',
                                 implemented: true,
                             },
+                            {
+                                id: 'images.audio_export.inspect',
+                                method: 'POST',
+                                route: '/api/v1/image-session-audio-export-inspections',
+                                mode: 'REQUEST',
+                                operationClass: 'READ',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageSessionAudioExportInspectionRequest',
+                                resultSchema: 'ImageSessionAudioExportInspection',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.audio_export',
+                                method: 'POST',
+                                route: '/api/v1/image-session-audio-exports',
+                                mode: 'JOB',
+                                operationClass: 'READ',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'ImageSessionAudioExportRequest',
+                                resultSchema: 'ImageSessionAudioExportResult',
+                                implemented: true,
+                            },
                         ],
                     });
                 }
@@ -1693,7 +1717,11 @@ describe('HttpImageTransport', () => {
                             rootCount: 1,
                             objectCount: 2,
                             relationshipCount: 1,
-                            availableOperations: ['images.package.import', 'images.package.export'],
+                            availableOperations: [
+                                'images.package.import',
+                                'images.package.export',
+                                'images.audio_export',
+                            ],
                             validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
                         },
                         201,
@@ -1722,16 +1750,39 @@ describe('HttpImageTransport', () => {
                 if (url.pathname.endsWith('/image-session-package-import-plan-releases')) {
                     return json({ released: true });
                 }
+                if (url.pathname.endsWith('/image-session-audio-export-inspections')) {
+                    return json({
+                        imageId: 'image-package',
+                        revision: 7,
+                        rootCount: 1,
+                        programCount: 0,
+                        sampleBankCount: 1,
+                        sampleCount: 2,
+                        waveDataCount: 2,
+                        sfzFileCount: 1,
+                        sfzEligible: true,
+                        defaultDirectoryName: 'DRUMS',
+                        issues: [],
+                    });
+                }
                 if (
                     url.pathname.endsWith('/image-session-package-imports') ||
-                    url.pathname.endsWith('/image-session-package-exports')
+                    url.pathname.endsWith('/image-session-package-exports') ||
+                    url.pathname.endsWith('/image-session-audio-exports')
                 ) {
+                    const audioExport = url.pathname.endsWith('/image-session-audio-exports');
                     return json(
                         {
-                            jobId: url.pathname.endsWith('exports') ? 'export-job' : 'import-job',
-                            operationId: url.pathname.endsWith('exports')
-                                ? 'images.package_export'
-                                : 'images.package_import',
+                            jobId: audioExport
+                                ? 'audio-export-job'
+                                : url.pathname.endsWith('exports')
+                                  ? 'export-job'
+                                  : 'import-job',
+                            operationId: audioExport
+                                ? 'images.audio_export'
+                                : url.pathname.endsWith('exports')
+                                  ? 'images.package_export'
+                                  : 'images.package_import',
                             state: 'QUEUED',
                             latestSequence: 1,
                             progress: null,
@@ -1750,7 +1801,11 @@ describe('HttpImageTransport', () => {
 
         const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
         const opened = await transport.openImage(serverFile('images/base.hds'));
-        expect(opened).toMatchObject({ packageImportAvailable: true, packageExportAvailable: true });
+        expect(opened).toMatchObject({
+            packageImportAvailable: true,
+            packageExportAvailable: true,
+            audioExportAvailable: true,
+        });
         const source = serverFile('packages/drums.axkvol');
         const plan = await transport.planImagePackageImport(opened.sessionId, source, 0, 'DRUMS', [
             { nodeId: 'node-1', destinationName: 'DRUM KIT' },
@@ -1781,6 +1836,15 @@ describe('HttpImageTransport', () => {
                 },
             ),
         ).resolves.toMatchObject({ kind: 'images.package_export', status: 'queued' });
+        await expect(
+            transport.inspectImageAudioExport(opened.sessionId, [{ kind: 'SBAC', objectId: 'object-bank' }]),
+        ).resolves.toMatchObject({ sfzEligible: true, defaultDirectoryName: 'DRUMS' });
+        await expect(
+            transport.startImageAudioExport(opened.sessionId, [{ kind: 'SBAC', objectId: 'object-bank' }], 'SFZ', {
+                kind: 'DOWNLOAD',
+                directoryName: 'DRUMS',
+            }),
+        ).resolves.toMatchObject({ kind: 'images.audio_export', status: 'queued' });
         const retained = {
             archiveId: 'archive-package',
             filename: 'DRUMS.axkvol',
@@ -1816,6 +1880,20 @@ describe('HttpImageTransport', () => {
                 { kind: 'SMPL', objectId: 'object-wave-data' },
             ],
             destination: { kind: 'DOWNLOAD', filename: 'DRUMS.axkpkg' },
+        });
+        expect(
+            requests.find((request) => request.path.endsWith('image-session-audio-export-inspections'))?.body,
+        ).toEqual({
+            imageId: 'image-package',
+            expectedRevision: 7,
+            roots: [{ kind: 'SBAC', objectId: 'object-bank' }],
+        });
+        expect(requests.find((request) => request.path.endsWith('image-session-audio-exports'))?.body).toEqual({
+            imageId: 'image-package',
+            expectedRevision: 7,
+            roots: [{ kind: 'SBAC', objectId: 'object-bank' }],
+            format: 'SFZ',
+            destination: { kind: 'DOWNLOAD', directoryName: 'DRUMS' },
         });
         expect(requests.at(-1)?.path).toBe('DELETE /api/v1/download-archives/archive-package/content');
     });

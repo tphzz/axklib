@@ -200,6 +200,17 @@ input:focus-visible {
   background: rgb(255 255 255 / 6%);
 }
 
+.package-selection-export-menu {
+  position: relative;
+}
+
+.package-selection-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+}
+
 .package-selection-delete:hover {
   color: #ffb0ad;
   background: rgb(174 47 47 / 18%);
@@ -1128,6 +1139,51 @@ input:focus-visible {
   background: rgb(255 255 255 / 2%);
   cursor: pointer;
   text-align: left;
+}
+
+.export-destination-choices {
+  display: grid;
+  gap: 9px;
+}
+
+.audio-export-format {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+}
+
+.audio-export-format button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--color-text-muted);
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.audio-export-format button:last-child {
+  border-right: 0;
+}
+
+.audio-export-format button.active {
+  color: var(--color-text-strong);
+  background: var(--color-selection);
+}
+
+.audio-export-format button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.audio-export-guidance,
+.audio-export-issue {
+  padding: 7px 9px;
+  border-radius: 5px;
+  background: rgb(255 255 255 / 3%);
 }
 
 .source-choice-button:hover:not(:disabled) {
