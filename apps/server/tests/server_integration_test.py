@@ -20,7 +20,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from server_test_harness import write_workspace_store
+from server_test_harness import (
+    scaled_timeout,
+    startup_timeout,
+    write_workspace_store,
+)
 
 
 TOKEN = "0123456789abcdef0123456789abcdef"
@@ -137,7 +141,7 @@ def send_text(connection: socket.socket, message: str) -> None:
 
 
 def wait_until_ready(port: int, process: subprocess.Popen[bytes]) -> None:
-    deadline = time.monotonic() + 8
+    deadline = time.monotonic() + startup_timeout()
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError(
@@ -160,7 +164,7 @@ def wait_until_ready(port: int, process: subprocess.Popen[bytes]) -> None:
 def wait_for_connection_file(
     path: Path, process: subprocess.Popen[bytes]
 ) -> dict[str, Any]:
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + startup_timeout()
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError(f"server exited with {process.returncode}")
@@ -173,7 +177,7 @@ def wait_for_connection_file(
 def wait_for_job(
     port: int, job_id: str, process: subprocess.Popen[bytes]
 ) -> dict[str, Any]:
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + scaled_timeout(20.0)
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError(
@@ -778,6 +782,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
         external_path = Path(external)
         state_directory = external_path / "server-state"
         connection_path = external_path / "connection" / "connection.json"
+        connection_path.parent.mkdir(mode=0o700)
         (root_path / "download.bin").write_bytes(b"abcdef")
         (root_path / "archive-source" / "nested").mkdir(parents=True)
         (root_path / "reports" / "server").mkdir(parents=True)
@@ -1431,11 +1436,15 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                         "relativePath": "archive-source",
                     }
                 },
+                headers={"Idempotency-Key": "integration-directory-archive"},
             )
-            assert status == 201, archive
-            assert archive["data"]["filename"] == "archive-source.tar"
-            assert archive["data"]["entryCount"] == 3
-            archive_path = str(archive["data"]["contentPath"])
+            assert status == 202, archive
+            archive_job = wait_for_job(port, str(archive["data"]["jobId"]), process)
+            assert archive_job["state"] == "COMPLETED", archive_job
+            archive_result = archive_job["result"]
+            assert archive_result["filename"] == "archive-source.tar"
+            assert archive_result["entryCount"] == 3
+            archive_path = str(archive_result["contentPath"])
             status, content, headers = raw_http_request(port, "GET", archive_path)
             assert status == 200 and headers["content-type"].startswith(
                 "application/x-tar"
@@ -3162,7 +3171,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, shutdown = http_request(port, "POST", "/api/v1/system/shutdown")
             assert status == 202 and shutdown["data"]["accepted"] is True, shutdown
             shutdown_requested = True
-            process.wait(timeout=5)
+            process.wait(timeout=scaled_timeout(5.0))
             assert process.returncode == 0
             assert not connection_path.exists()
             server_log.flush()
@@ -3211,10 +3220,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             if process.poll() is None:
                 process.terminate()
                 try:
-                    process.wait(timeout=5)
+                    process.wait(timeout=scaled_timeout(5.0))
                 except subprocess.TimeoutExpired:
                     process.kill()
-                    process.wait(timeout=5)
+                    process.wait(timeout=scaled_timeout(5.0))
             if sys.exc_info()[0] is not None:
                 server_log.flush()
                 print(

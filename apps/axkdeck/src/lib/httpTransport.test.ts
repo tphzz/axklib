@@ -1444,12 +1444,54 @@ describe('HttpImageTransport', () => {
                         headers: { 'Content-Disposition': 'attachment; filename="tone.wav"' },
                     });
                 }
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return json({
+                        apiVersion: 'v1',
+                        operations: [
+                            {
+                                id: 'files.archive',
+                                method: 'POST',
+                                route: '/api/v1/files/archive',
+                                mode: 'job',
+                                operationClass: 'read',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'DirectoryArchiveRequest',
+                                resultSchema: 'DirectoryArchiveResult',
+                                implemented: true,
+                            },
+                        ],
+                        limits: {},
+                    });
+                }
                 if (url.pathname.endsWith('/files/archive') && init?.method === 'POST') {
                     expect(JSON.parse(String(init.body))).toEqual({
                         directory: { rootId: 'workspace', relativePath: 'exports/set' },
                     });
                     return json(
                         {
+                            jobId: 'job-archive',
+                            operationId: 'files.archive',
+                            state: 'QUEUED',
+                            latestSequence: 1,
+                            progress: null,
+                            result: null,
+                            error: null,
+                        },
+                        202,
+                    );
+                }
+                if (url.pathname.endsWith('/jobs/job-archive/events')) {
+                    return json({ events: [] });
+                }
+                if (url.pathname.endsWith('/jobs/job-archive')) {
+                    return json({
+                        jobId: 'job-archive',
+                        operationId: 'files.archive',
+                        state: 'COMPLETED',
+                        latestSequence: 2,
+                        progress: null,
+                        result: {
                             archiveId: 'archive-one',
                             filename: 'set.tar',
                             sizeBytes: 9,
@@ -1457,8 +1499,8 @@ describe('HttpImageTransport', () => {
                             expiresInSeconds: 60,
                             contentPath: '/api/v1/download-archives/archive-one/content',
                         },
-                        201,
-                    );
+                        error: null,
+                    });
                 }
                 if (url.pathname.endsWith('/download-archives/archive-one/content') && init?.method === 'GET') {
                     return new Response('tar-bytes');

@@ -37,7 +37,7 @@ function programSelection(): Extract<InspectorSelection, { kind: 'program' }> {
         targetObjectId: 'SBAC-String Bank',
         candidateObjectIds: [],
         relationshipType: 'PROG_ASSIGNMENT_TO_SBAC',
-        quality: 'Known',
+        quality: 'KNOWN',
         basis: 'test',
         notes: [],
         assignmentName: 'String Bank',
@@ -49,6 +49,7 @@ function programSelection(): Extract<InspectorSelection, { kind: 'program' }> {
         targetObjectId: relationship.targetObjectId,
         targetType: 'SBAC',
         targetName: 'String Bank',
+        confirmed: true,
     };
     return { kind: 'program', program, assignments: [assignment] };
 }
@@ -93,6 +94,33 @@ describe('ObjectEditor', () => {
         await fireEvent.click(screen.getByRole('tab', { name: 'Easy Edit' }));
         expect(screen.queryByText('String Bank')).toBeNull();
         expect(screen.getByRole('tabpanel', { name: 'Easy Edit' })).toBeTruthy();
+    });
+
+    it('shows unconfirmed Program assignments without making them navigable', async () => {
+        const onassignmentselect = vi.fn();
+        const selection = programSelection();
+        selection.assignments[0] = {
+            ...selection.assignments[0],
+            confirmed: false,
+            relationship: {
+                ...selection.assignments[0].relationship,
+                quality: 'LIKELY',
+            },
+        };
+        render(ObjectEditor, {
+            props: {
+                selection,
+                assignmentQuery: '',
+                onassignmentquerychange: vi.fn(),
+                onassignmentselect,
+            },
+        });
+
+        const assignment = screen.getByRole('button', { name: /String Bank/ });
+        expect(assignment.hasAttribute('disabled')).toBe(true);
+        expect(screen.getByText('Unconfirmed assignment')).toBeTruthy();
+        await fireEvent.click(assignment);
+        expect(onassignmentselect).not.toHaveBeenCalled();
     });
 
     it('exposes the complete SBNK tab set and remembers the active tab across SBNK selections', async () => {

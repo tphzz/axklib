@@ -1,6 +1,7 @@
 import type { SamplerRelationship } from './transport';
 import type { LinkedWaveDataItem, SampleStructureItem, WaveDataItem } from './types';
 import { compareNaturalNames } from './naturalSort';
+import { isConfirmedRelationship } from './relationshipResolution';
 
 const memberRelationships = [
     { relationshipType: 'SBNK_LEFT_MEMBER_TO_SMPL', role: 'left' },
@@ -15,7 +16,7 @@ export function auditionableSampleIds(
     const confirmedTargets = new Map<string, Set<string>>();
     for (const relationship of relationships) {
         if (
-            relationship.quality !== 'Known' ||
+            !isConfirmedRelationship(relationship) ||
             !relationship.targetObjectId ||
             !waveDataIds.has(relationship.targetObjectId) ||
             !memberRelationships.some((member) => member.relationshipType === relationship.relationshipType)
@@ -46,6 +47,7 @@ export function linkedWaveDataForSample(
             if (
                 relationship.sourceObjectId !== sampleId ||
                 relationship.relationshipType !== memberRelationship.relationshipType ||
+                !isConfirmedRelationship(relationship) ||
                 !relationship.targetObjectId
             ) {
                 continue;
@@ -89,6 +91,7 @@ export function orderedSamplesForBank(
             ({ relationship }) =>
                 relationship.sourceObjectId === bankId &&
                 relationship.relationshipType === 'SBAC_SLOT_TO_SBNK' &&
+                isConfirmedRelationship(relationship) &&
                 Boolean(relationship.targetObjectId),
         )
         .toSorted(

@@ -943,6 +943,44 @@
         ],
         "type": "object"
       },
+      "DirectoryArchiveResult": {
+        "additionalProperties": false,
+        "properties": {
+          "archiveId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "contentPath": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "entryCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expiresInSeconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "filename": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sizeBytes": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "archiveId",
+          "filename",
+          "sizeBytes",
+          "entryCount",
+          "expiresInSeconds",
+          "contentPath"
+        ],
+        "type": "object"
+      },
       "DirectoryListRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1054,57 +1092,6 @@
         "required": [
           "rootId",
           "relativePath"
-        ],
-        "type": "object"
-      },
-      "DownloadArchiveResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "archiveId": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "contentPath": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "entryCount": {
-                "minimum": 0,
-                "type": "integer"
-              },
-              "expiresInSeconds": {
-                "minimum": 0,
-                "type": "integer"
-              },
-              "filename": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "sizeBytes": {
-                "minimum": 0,
-                "type": "integer"
-              }
-            },
-            "required": [
-              "archiveId",
-              "filename",
-              "sizeBytes",
-              "entryCount",
-              "expiresInSeconds",
-              "contentPath"
-            ],
-            "type": "object"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ResponseMeta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
         ],
         "type": "object"
       },
@@ -2995,6 +2982,12 @@
             "type": "array"
           },
           "quality": {
+            "enum": [
+              "KNOWN",
+              "LIKELY",
+              "TENTATIVE",
+              "UNKNOWN"
+            ],
             "type": "string"
           },
           "receiveChannelDisplay": {
@@ -9525,10 +9518,20 @@
     },
     "/files/archive": {
       "post": {
-        "operationId": "filesystem.archive.create",
+        "operationId": "files.archive",
         "requestBody": {
           "content": {
             "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "directory": {
+                      "relativePath": "x",
+                      "rootId": "x"
+                    }
+                  }
+                }
+              },
               "schema": {
                 "$ref": "#/components/schemas/DirectoryArchiveRequest"
               }
@@ -9537,15 +9540,206 @@
           "required": true
         },
         "responses": {
-          "201": {
+          "202": {
             "content": {
               "application/json": {
+                "examples": {
+                  "success": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1"
+                      }
+                    }
+                  },
+                  "warning": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1",
+                        "warnings": [
+                          {
+                            "code": "example_warning",
+                            "context": {},
+                            "message": "operation completed with a warning"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
                 "schema": {
-                  "$ref": "#/components/schemas/DownloadArchiveResponse"
+                  "$ref": "#/components/schemas/JobResponse"
                 }
               }
             },
-            "description": "Bounded temporary TAR archive created",
+            "description": "Job accepted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed or schema-invalid request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authenticated caller is not authorized",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Referenced resource does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request conflicts with current state",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
@@ -9573,7 +9767,35 @@
                 }
               }
             },
-            "description": "Requested archive exceeds configured limits",
+            "description": "Configured request limit exceeded",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported or invalid domain request",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
@@ -9601,21 +9823,14 @@
                 }
               }
             },
-            "description": "Archive staging quota exhausted",
+            "description": "Transient server capacity exhausted",
             "headers": {
-              "Retry-After": {
-                "description": "Minimum retry delay in seconds",
-                "schema": {
-                  "minimum": 1,
-                  "type": "integer"
-                }
-              },
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
               }
             }
           },
-          "default": {
+          "500": {
             "content": {
               "application/json": {
                 "examples": {
@@ -9636,14 +9851,30 @@
                 }
               }
             },
-            "description": "Request could not be completed",
+            "description": "Contained internal failure",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
               }
             }
           }
-        }
+        },
+        "x-axklib-operation-descriptors": [
+          {
+            "cliCommand": null,
+            "cliParity": false,
+            "id": "files.archive",
+            "mode": "job",
+            "operationClass": "read",
+            "requestSchema": "DirectoryArchiveRequest",
+            "requiresIdempotency": true,
+            "resultSchema": "DirectoryArchiveResult",
+            "variant": null
+          }
+        ],
+        "x-axklib-operation-ids": [
+          "files.archive"
+        ]
       }
     },
     "/files/content": {

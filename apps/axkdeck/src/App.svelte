@@ -54,6 +54,7 @@
         type PackageExportSelectionState,
     } from './lib/objectSelection';
     import { packageExportFilename } from './lib/packageExport';
+    import { isConfirmedRelationship } from './lib/relationshipResolution';
     import {
         type ClientUploadLocation,
         type DirectoryLocation,
@@ -682,7 +683,12 @@
     function banksForSample(sampleId: string): SampleStructureItem[] {
         const ids = new Set(
             relationships
-                .filter((item) => item.targetObjectId === sampleId && item.relationshipType === 'SBAC_SLOT_TO_SBNK')
+                .filter(
+                    (item) =>
+                        isConfirmedRelationship(item) &&
+                        item.targetObjectId === sampleId &&
+                        item.relationshipType === 'SBAC_SLOT_TO_SBNK',
+                )
                 .map((item) => item.sourceObjectId),
         );
         return [...ids]
@@ -710,6 +716,7 @@
                     targetObjectId: relationship.targetObjectId,
                     targetType: target?.objectType ?? relationship.relationshipType.replace('PROG_ASSIGNMENT_TO_', ''),
                     targetName: targetName || target?.name || relationship.assignmentName || 'Unresolved assignment',
+                    confirmed: isConfirmedRelationship(relationship),
                 };
             });
     }
@@ -2247,7 +2254,7 @@
     }
 
     function selectAssignment(row: ProgramAssignmentRow): void {
-        if (!row.targetObjectId) return;
+        if (!row.confirmed || !row.targetObjectId) return;
         void inspectObject(row.targetObjectId);
     }
 

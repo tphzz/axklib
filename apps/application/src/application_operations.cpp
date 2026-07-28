@@ -1,6 +1,7 @@
 #include "axklib/application/application_operations.hpp"
 
 #include "axklib/application/audio_operations.hpp"
+#include "axklib/application/directory_archive_operations.hpp"
 #include "axklib/application/extraction_operations.hpp"
 #include "axklib/application/file_operations.hpp"
 #include "axklib/application/package_operations.hpp"
@@ -208,6 +209,8 @@ axk::app::Result<void> axk::app::bind_session_application_operations(OperationRe
                                                                      ImageSessionManager &images,
                                                                      AlterationJournalStore &journals,
                                                                      DownloadArchiveStore &downloads) {
+    if (auto bound = bind_directory_archive_operations(registry, sandbox, downloads); !bound)
+        return bound;
     if (auto bound = bind_session_write_operations(registry, sandbox, uploads, images, journals); !bound)
         return bound;
     if (auto bound = bind_session_package_operations(registry, sandbox, uploads, images, journals, downloads); !bound)

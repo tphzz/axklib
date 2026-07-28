@@ -105,6 +105,7 @@ export interface ProgramAssignmentRow {
     targetType: string;
     targetName: string;
     targetObjectId?: string;
+    confirmed: boolean;
 }
 
 export type InspectorSelection =

@@ -285,6 +285,20 @@ std::string object_type_name(axk::ObjectType type) {
     return "Unknown";
 }
 
+std::string relationship_quality_wire_name(axk::RelationshipQuality quality) {
+    switch (quality) {
+    case axk::RelationshipQuality::known:
+        return "KNOWN";
+    case axk::RelationshipQuality::likely:
+        return "LIKELY";
+    case axk::RelationshipQuality::tentative:
+        return "TENTATIVE";
+    case axk::RelationshipQuality::unknown:
+        return "UNKNOWN";
+    }
+    return "UNKNOWN";
+}
+
 std::optional<std::string> mapped_id(const std::unordered_map<std::string, std::string> &ids, const std::string &key) {
     if (const auto found = ids.find(key); found != ids.end())
         return found->second;
@@ -761,7 +775,7 @@ struct axk::app::ImageSessionManager::Implementation {
                 std::optional<std::string> resolved_id;
                 for (const auto &relationship : session.relationships) {
                     if (relationship.source_object_id != object_id || relationship.type != relationship_type ||
-                        !relationship.target_object_id || relationship.quality != "Known") {
+                        !relationship.target_object_id || relationship.quality != "KNOWN") {
                         continue;
                     }
                     const auto target = session.snapshots_by_id.find(*relationship.target_object_id);
@@ -1190,7 +1204,7 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
                 item.candidate_object_ids.push_back(*candidate_id);
         }
         item.type = relationship.type;
-        item.quality = axk::relationship_quality_name(relationship.quality);
+        item.quality = relationship_quality_wire_name(relationship.quality);
         item.basis = relationship.basis;
         item.notes = relationship.notes;
         item.assignment_index = relationship.assignment_index;

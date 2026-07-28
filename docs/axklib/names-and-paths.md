@@ -290,8 +290,11 @@ Wave Data object with no placement candidate, or with several candidates, is
 not assigned to an arbitrary volume and is not hidden. Its WAV remains in the
 shared physical pool and its resolution metadata is recorded under the partition's
 `Unresolved Wave Data` scope. A volume-scoped export excludes unresolved
-objects. Program, Sample Bank, and Sample scopes include one only when a
-known selected Sample-to-Wave-Data relationship requires it.
+objects. Program, Sample Bank, and Sample scopes traverse only `Known`
+relationships at every dependency boundary: Program assignment, Sample Bank
+membership, and Sample-to-Wave-Data linkage. A `Likely`, `Tentative`, or
+`Unknown` relationship remains an unresolved diagnostic and never contributes
+an object to the exact export closure.
 
 The suffix is the first 12 lowercase hexadecimal characters of SHA-1 over the
 complete emitted WAV container bytes. This 48-bit suffix is retained as an

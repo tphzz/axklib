@@ -58,6 +58,10 @@ TEST_F(UploadStoreTest, ReceivesBoundedChunksAndFinalizesOnlyAfterHashVerificati
     const auto completed = value.complete(created->reference, "owner");
     ASSERT_TRUE(completed) << completed.error().message;
     EXPECT_EQ(completed->state, axk::app::UploadState::ready);
+    const auto repeated = value.complete(created->reference, "owner");
+    ASSERT_TRUE(repeated) << repeated.error().message;
+    EXPECT_EQ(repeated->state, axk::app::UploadState::ready);
+    EXPECT_EQ(repeated->received_size, completed->received_size);
     const auto path = value.resolve(created->reference, "owner");
     ASSERT_TRUE(path) << path.error().message;
     EXPECT_EQ(std::filesystem::file_size(*path), 3U);

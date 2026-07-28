@@ -115,11 +115,15 @@
                         {#each filteredAssignments as row (row.relationship.id)}
                             <button
                                 type="button"
-                                class:unresolved={!row.targetObjectId}
-                                disabled={!row.targetObjectId}
-                                onclick={() => onassignmentselect(row)}
+                                class:unresolved={!row.targetObjectId || !row.confirmed}
+                                disabled={!row.targetObjectId || !row.confirmed}
+                                onclick={() => row.confirmed && onassignmentselect(row)}
                             >
-                                <span><strong>{row.targetName}</strong><small>{row.targetType}</small></span>
+                                <span
+                                    ><strong>{row.targetName}</strong><small
+                                        >{row.confirmed ? row.targetType : 'Unconfirmed assignment'}</small
+                                    ></span
+                                >
                                 <span>{row.relationship.receiveChannelDisplay || 'Unknown'}</span>
                             </button>
                         {:else}

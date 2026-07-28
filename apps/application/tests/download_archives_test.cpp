@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/application/download_archives.hpp"
+#include "axklib/io.hpp"
 
 namespace {
 
@@ -73,6 +74,20 @@ TEST_F(DownloadArchiveStoreTest, CreatesOwnerBoundDeterministicTarAndRemovesItEx
 
     ASSERT_TRUE(store.remove(created->reference, "owner-a"));
     EXPECT_FALSE(store.inspect(created->reference, "owner-a"));
+}
+
+TEST_F(DownloadArchiveStoreTest, CancellationDoesNotPublishOrReserveAnArchive) {
+    axk::app::DownloadArchiveStore store{root_ / "cancelled", 4096U, 4096U, 16U, std::chrono::seconds{30}};
+    axk::CancellationSource cancellation;
+    cancellation.cancel();
+
+    const auto cancelled = store.create("owner", *sandbox_, {"workspace", "exports"}, cancellation.token());
+    ASSERT_FALSE(cancelled);
+    EXPECT_EQ(cancelled.error().code, "operation_cancelled");
+    EXPECT_TRUE(std::filesystem::is_empty(root_ / "cancelled"));
+
+    const auto created = store.create("owner", *sandbox_, {"workspace", "exports"});
+    ASSERT_TRUE(created) << created.error().message;
 }
 
 TEST_F(DownloadArchiveStoreTest, ArchivesOnlyPrivateServerOwnedDirectoriesWithAnExplicitFilename) {

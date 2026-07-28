@@ -164,13 +164,15 @@ export interface RelationshipPageFilter {
     relationshipType?: string;
 }
 
+export type RelationshipQuality = 'KNOWN' | 'LIKELY' | 'TENTATIVE' | 'UNKNOWN';
+
 export interface SamplerRelationship {
     id: string;
     sourceObjectId: string;
     targetObjectId?: string;
     candidateObjectIds: string[];
     relationshipType: string;
-    quality: string;
+    quality: RelationshipQuality;
     basis: string;
     notes: string[];
     assignmentIndex?: number;

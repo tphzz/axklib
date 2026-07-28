@@ -447,7 +447,17 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
             if (!plan)
                 return std::unexpected(core_error(plan.error(), source_display));
             if (selection) {
-                axk::app::filter_export_plan(*plan, graph, request->scope, selector, selection->object_key);
+                const auto excluded =
+                    axk::app::filter_export_plan(*plan, graph, request->scope, selector, selection->object_key);
+                for (const auto &relationship : excluded) {
+                    warnings.push_back({{"code", "unconfirmed_relationship_excluded"},
+                                        {"message", "Unconfirmed relationship excluded from exact extraction"},
+                                        {"source", source_display},
+                                        {"selector", selector},
+                                        {"relationshipType", relationship.type},
+                                        {"sourceObjectKey", relationship.source_key},
+                                        {"targetObjectKey", relationship.target_key}});
+                }
             }
             auto root = selection_root(request->scope, selector);
             if (request->scope == "file")

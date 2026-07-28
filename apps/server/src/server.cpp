@@ -63,6 +63,7 @@
 #else
 #include <cerrno>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -103,8 +104,8 @@ std::uint64_t process_id() {
 #endif
 }
 
-axk::app::Result<void> write_owner_only_file(const std::filesystem::path &path, std::string_view content) {
 #ifdef _WIN32
+axk::app::Result<void> write_owner_only_file(const std::filesystem::path &path, std::string_view content) {
     HANDLE token{};
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token) == 0)
         return std::unexpected(axk::app::Error{"connection_file_failed", "could not inspect the process owner"});
@@ -164,34 +165,8 @@ axk::app::Result<void> write_owner_only_file(const std::filesystem::path &path, 
     }
     CloseHandle(file);
     return {};
-#else
-    const auto descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-    if (descriptor < 0)
-        return std::unexpected(
-            axk::app::Error{"connection_file_failed", "could not create the owner-only connection file"});
-    std::size_t offset{};
-    while (offset < content.size()) {
-        const auto written = ::write(descriptor, content.data() + offset, content.size() - offset);
-        if (written < 0 && errno == EINTR)
-            continue;
-        if (written <= 0) {
-            ::close(descriptor);
-            std::error_code ignored;
-            std::filesystem::remove(path, ignored);
-            return std::unexpected(axk::app::Error{"connection_file_failed", "could not write the connection file"});
-        }
-        offset += static_cast<std::size_t>(written);
-    }
-    if (::fsync(descriptor) != 0) {
-        ::close(descriptor);
-        std::error_code ignored;
-        std::filesystem::remove(path, ignored);
-        return std::unexpected(axk::app::Error{"connection_file_failed", "could not flush the connection file"});
-    }
-    ::close(descriptor);
-    return {};
-#endif
 }
+#endif
 
 std::string readiness_check_name() {
     std::random_device source;
@@ -251,27 +226,36 @@ class ScopedConnectionFile {
 
     ~ScopedConnectionFile() {
         if (published_) {
+#ifdef _WIN32
             std::error_code error;
             std::filesystem::remove(path_, error);
+#else
+            if (parent_descriptor_ >= 0) {
+                static_cast<void>(::unlinkat(parent_descriptor_, filename_.c_str(), 0));
+                static_cast<void>(::fsync(parent_descriptor_));
+            }
+#endif
         }
+#ifndef _WIN32
+        if (parent_descriptor_ >= 0)
+            static_cast<void>(::close(parent_descriptor_));
+#endif
     }
 
     axk::app::Result<void> publish(const Json &document) {
+#ifdef _WIN32
         std::error_code error;
         const auto parent = path_.parent_path();
-        if (!parent.empty()) {
-            std::filesystem::create_directories(parent, error);
-            if (error)
-                return std::unexpected(
-                    axk::app::Error{"connection_file_failed", "could not create the connection-file directory"});
+        const auto metadata = std::filesystem::symlink_status(parent, error);
+        if (error || !std::filesystem::is_directory(metadata) ||
+            (GetFileAttributesW(parent.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0U) {
+            return std::unexpected(axk::app::Error{"connection_file_failed",
+                                                   "connection-file parent must be an existing private directory"});
         }
-
-        std::filesystem::remove(path_, error);
-        error.clear();
+        if (std::filesystem::exists(path_, error) || error)
+            return std::unexpected(axk::app::Error{"connection_file_failed", "connection file already exists"});
         auto temporary = path_;
         temporary += ".tmp." + std::to_string(process_id());
-        std::filesystem::remove(temporary, error);
-        error.clear();
         const auto contents = document.dump(2) + '\n';
         if (auto written = write_owner_only_file(temporary, contents); !written)
             return std::unexpected(written.error());
@@ -282,10 +266,71 @@ class ScopedConnectionFile {
         }
         published_ = true;
         return {};
+#else
+        const auto parent = path_.parent_path();
+        filename_ = path_.filename().string();
+        if (parent.empty() || filename_.empty() || filename_ == "." || filename_ == "..") {
+            return std::unexpected(axk::app::Error{"connection_file_failed",
+                                                   "connection-file parent must be an existing private directory"});
+        }
+        parent_descriptor_ = ::open(parent.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (parent_descriptor_ < 0)
+            return std::unexpected(
+                axk::app::Error{"connection_file_failed", "could not retain the connection-file directory"});
+        struct stat parent_status{};
+        if (::fstat(parent_descriptor_, &parent_status) != 0 || !S_ISDIR(parent_status.st_mode) ||
+            parent_status.st_uid != ::geteuid() || (parent_status.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+            return std::unexpected(
+                axk::app::Error{"connection_file_failed", "connection-file parent is not an owner-only directory"});
+        }
+        struct stat existing{};
+        if (::fstatat(parent_descriptor_, filename_.c_str(), &existing, AT_SYMLINK_NOFOLLOW) == 0 || errno != ENOENT) {
+            return std::unexpected(axk::app::Error{"connection_file_failed", "connection file already exists"});
+        }
+        temporary_name_ = std::format(".{}.tmp.{}", filename_, process_id());
+        const auto temporary =
+            ::openat(parent_descriptor_, temporary_name_.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+        if (temporary < 0)
+            return std::unexpected(
+                axk::app::Error{"connection_file_failed", "could not create the owner-only connection file"});
+        const auto contents = document.dump(2) + '\n';
+        std::size_t offset{};
+        while (offset < contents.size()) {
+            const auto written = ::write(temporary, contents.data() + offset, contents.size() - offset);
+            if (written < 0 && errno == EINTR)
+                continue;
+            if (written <= 0) {
+                static_cast<void>(::close(temporary));
+                static_cast<void>(::unlinkat(parent_descriptor_, temporary_name_.c_str(), 0));
+                return std::unexpected(
+                    axk::app::Error{"connection_file_failed", "could not write the connection file"});
+            }
+            offset += static_cast<std::size_t>(written);
+        }
+        const auto flush_failed = ::fsync(temporary) != 0;
+        const auto close_failed = ::close(temporary) != 0;
+        if (flush_failed || close_failed) {
+            static_cast<void>(::unlinkat(parent_descriptor_, temporary_name_.c_str(), 0));
+            return std::unexpected(axk::app::Error{"connection_file_failed", "could not flush the connection file"});
+        }
+        if (::renameat(parent_descriptor_, temporary_name_.c_str(), parent_descriptor_, filename_.c_str()) != 0 ||
+            ::fsync(parent_descriptor_) != 0) {
+            static_cast<void>(::unlinkat(parent_descriptor_, temporary_name_.c_str(), 0));
+            static_cast<void>(::unlinkat(parent_descriptor_, filename_.c_str(), 0));
+            return std::unexpected(axk::app::Error{"connection_file_failed", "could not publish the connection file"});
+        }
+        published_ = true;
+        return {};
+#endif
     }
 
   private:
     std::filesystem::path path_;
+#ifndef _WIN32
+    int parent_descriptor_{-1};
+    std::string filename_;
+    std::string temporary_name_;
+#endif
     bool published_{};
 };
 
@@ -1925,45 +1970,6 @@ class ServerApplication {
         return response;
     }
 
-    crow::response create_download_archive_response(const crow::request &request) {
-        const auto id = request_id(request);
-        if (auto denied = guard(request, id))
-            return std::move(*denied);
-        const auto parsed = parse_validated_json_body(request, "DirectoryArchiveRequest");
-        if (!parsed)
-            return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
-        axk::app::DirectoryRef directory;
-        try {
-            const auto &value = parsed->at("directory");
-            directory = {value.at("rootId").get<std::string>(), value.at("relativePath").get<std::string>()};
-        } catch (const Json::exception &) {
-            return error_response(400, {"invalid_request", "directory must be one sandbox DirectoryRef"}, id);
-        }
-        auto reservation = path_reservations_.try_acquire(
-            axk::app::PathAccess{{directory.root_id, directory.relative_path}, axk::app::PathAccessMode::shared});
-        if (!reservation)
-            return error_response(409, reservation.error(), id);
-        const auto archive = download_archives_.create(request_owner(request), sandbox_, directory);
-        if (!archive) {
-            audit(id, "archive_create", "denied", request_owner(request), "root", directory.root_id);
-            return error_response(status_for_error(archive.error()), archive.error(), id);
-        }
-        audit(id, "archive_create", "allowed", request_owner(request), "archive", archive->reference.archive_id);
-        const auto content_path = "/api/v1/download-archives/" + archive->reference.archive_id + "/content";
-        auto response = json_response(201,
-                                      {{"data",
-                                        {{"archiveId", archive->reference.archive_id},
-                                         {"filename", archive->filename},
-                                         {"sizeBytes", archive->size_bytes},
-                                         {"entryCount", archive->entry_count},
-                                         {"expiresInSeconds", archive->expires_in_seconds},
-                                         {"contentPath", content_path}}},
-                                       {"meta", {{"requestId", id}}}},
-                                      id);
-        response.set_header("Location", content_path);
-        return response;
-    }
-
     void download_archive_response(const crow::request &request, crow::response &response,
                                    const std::string &archive_id) {
         const auto finish = [&response](crow::response value) {
@@ -2313,9 +2319,6 @@ class ServerApplication {
             });
         app_.route_dynamic("/api/v1/files/content")(
             [this](const crow::request &request) { return download_response(request); });
-        app_.route_dynamic("/api/v1/files/archive")
-            .methods(crow::HTTPMethod::Post)(
-                [this](const crow::request &request) { return create_download_archive_response(request); });
         app_.route_dynamic("/api/v1/download-archives/<string>/content")
             .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(
                 [this](const crow::request &request, crow::response &response, std::string archive_id) {

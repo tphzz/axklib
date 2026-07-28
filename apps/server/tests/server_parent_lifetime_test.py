@@ -7,6 +7,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from server_test_harness import scaled_timeout, startup_timeout
+
 
 def wait_for_file(path: Path, process: subprocess.Popen[str], timeout: float) -> None:
     deadline = time.monotonic() + timeout
@@ -47,14 +49,14 @@ def main() -> int:
             text=True,
         )
         try:
-            wait_for_file(root / "connection.json", server, 10.0)
+            wait_for_file(root / "connection.json", server, startup_timeout())
             owner.terminate()
-            owner.wait(timeout=5.0)
+            owner.wait(timeout=scaled_timeout(5.0))
             started = time.monotonic()
-            server.wait(timeout=2.0)
+            server.wait(timeout=scaled_timeout(2.0))
             elapsed = time.monotonic() - started
             assert server.returncode == 0, server.communicate()
-            assert elapsed < 2.0, elapsed
+            assert elapsed < scaled_timeout(2.0), elapsed
         finally:
             if owner.poll() is None:
                 owner.kill()

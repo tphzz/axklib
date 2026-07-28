@@ -18,6 +18,7 @@ from server_test_harness import (
     process_file_descriptors,
     process_resident_bytes,
     request,
+    scaled_timeout,
     wait_for_connection_file,
     wait_for_job,
     write_workspace_store,
@@ -343,7 +344,7 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             connection.close()
 
         def read_version(_: int) -> int:
-            deadline = time.monotonic() + 8.0
+            deadline = time.monotonic() + scaled_timeout(8.0)
             while True:
                 try:
                     return request(
@@ -432,6 +433,7 @@ def exercise_sidecar_shutdown(server: Path, root: Path) -> None:
     durable = workspace / "completed.bin"
     durable.write_bytes(b"complete")
     connection_file = root / "sidecar" / "connection.json"
+    connection_file.parent.mkdir(mode=0o700)
     workspace_store = root / "sidecar-workspaces.json"
     write_workspace_store(workspace_store, workspace)
     port = choose_port()
@@ -465,9 +467,9 @@ def exercise_sidecar_shutdown(server: Path, root: Path) -> None:
         started = time.monotonic()
         shutdown = request(port, token, "POST", "/api/v1/system/shutdown")
         assert shutdown.status == 202, shutdown.content
-        running.process.wait(timeout=5)
+        running.process.wait(timeout=scaled_timeout(5.0))
         assert running.process.returncode == 0
-        assert time.monotonic() - started < 5.0
+        assert time.monotonic() - started < scaled_timeout(5.0)
         assert not connection_file.exists()
         assert durable.read_bytes() == b"complete"
 

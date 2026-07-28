@@ -15,7 +15,7 @@ function relationship(id: string, type: string, targetObjectId?: string): Sample
         targetObjectId,
         candidateObjectIds: [],
         relationshipType: type,
-        quality: 'Known',
+        quality: 'KNOWN',
         basis: 'test',
         notes: [],
         assignmentName: '',
@@ -118,6 +118,16 @@ describe('linkedWaveDataForSample', () => {
         expect(result).toEqual([{ role: 'left', waveData: left }]);
     });
 
+    it('does not resolve Wave Data through unconfirmed relationships', () => {
+        const candidate = waveData('SMPL-CANDIDATE');
+        const likely = {
+            ...relationship('likely', 'SBNK_LEFT_MEMBER_TO_SMPL', candidate.objectKey),
+            quality: 'LIKELY' as const,
+        };
+
+        expect(linkedWaveDataForSample('SBNK-1', [likely], [candidate])).toEqual([]);
+    });
+
     it('returns each physical Wave Data object once for keyed collection views', () => {
         const shared = waveData('SMPL-SHARED');
         const result = distinctWaveDataForSample(
@@ -142,7 +152,7 @@ describe('auditionableSampleIds', () => {
         const likely = {
             ...relationship('likely', 'SBNK_LEFT_MEMBER_TO_SMPL', left.objectKey),
             sourceObjectId: 'SBNK-LIKELY',
-            quality: 'Likely',
+            quality: 'LIKELY' as const,
         };
         const knownStereo = [
             {
@@ -217,5 +227,16 @@ describe('orderedSamplesForBank', () => {
                 [second, first],
             ),
         ).toEqual([first, second]);
+    });
+
+    it('does not order unconfirmed Sample Bank members for playback', () => {
+        const member = sample('SBNK-1');
+        const likely: SamplerRelationship = {
+            ...relationship('likely', 'SBAC_SLOT_TO_SBNK', member.objectId),
+            sourceObjectId: 'SBAC-1',
+            quality: 'LIKELY',
+        };
+
+        expect(orderedSamplesForBank('SBAC-1', [likely], [member])).toEqual([]);
     });
 });

@@ -145,6 +145,21 @@ axk_enable_sanitizers(axklib_server)
 axk_enable_coverage(axklib_server)
 
 if(BUILD_TESTING)
+  set(AXK_SERVER_PROCESS_TEST_TIMEOUT_SCALE 1)
+  if(AXK_ENABLE_SANITIZERS OR AXK_ENABLE_THREAD_SANITIZER)
+    set(AXK_SERVER_PROCESS_TEST_TIMEOUT_SCALE 5)
+  endif()
+  function(axk_configure_server_process_test test_name base_timeout)
+    math(EXPR test_timeout "${base_timeout} * ${AXK_SERVER_PROCESS_TEST_TIMEOUT_SCALE}")
+    set_tests_properties(
+      "${test_name}"
+      PROPERTIES
+        TIMEOUT "${test_timeout}"
+        LABELS "${ARGN}"
+        ENVIRONMENT "AXK_SERVER_TEST_TIMEOUT_SCALE=${AXK_SERVER_PROCESS_TEST_TIMEOUT_SCALE}"
+    )
+  endfunction()
+
   find_package(GTest CONFIG REQUIRED)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   include(GoogleTest)
@@ -194,26 +209,26 @@ if(BUILD_TESTING)
             --server "$<TARGET_FILE:axk_server_fixture>" --cli "$<TARGET_FILE:axklib_cli>"
             --fixture "${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds"
   )
-  set_tests_properties(Server.LoopbackIntegration PROPERTIES TIMEOUT 45 LABELS server)
+  axk_configure_server_process_test(Server.LoopbackIntegration 45 server)
   add_test(
     NAME Server.ResilienceIntegration
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_resilience_test.py"
             --server "$<TARGET_FILE:axk_server_fixture>"
             --fixture "${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds"
   )
-  set_tests_properties(Server.ResilienceIntegration PROPERTIES TIMEOUT 45 LABELS server)
+  axk_configure_server_process_test(Server.ResilienceIntegration 45 server)
   add_test(
     NAME Server.ParentProcessLifetime
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_parent_lifetime_test.py"
             --server "$<TARGET_FILE:axk_server_fixture>"
   )
-  set_tests_properties(Server.ParentProcessLifetime PROPERTIES TIMEOUT 15 LABELS server)
+  axk_configure_server_process_test(Server.ParentProcessLifetime 15 server)
   add_test(
     NAME Server.StartupFailure
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_startup_failure_test.py"
             --server "$<TARGET_FILE:axk_server_fixture>"
   )
-  set_tests_properties(Server.StartupFailure PROPERTIES TIMEOUT 25 LABELS server)
+  axk_configure_server_process_test(Server.StartupFailure 25 server)
   add_test(
     NAME Server.PerformanceProfile
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_performance_test.py"
@@ -221,7 +236,7 @@ if(BUILD_TESTING)
             "$<TARGET_FILE:axk_server_direct_benchmark>" --report
             "${CMAKE_CURRENT_BINARY_DIR}/server-performance.json"
   )
-  set_tests_properties(Server.PerformanceProfile PROPERTIES TIMEOUT 45 LABELS "performance;server")
+  axk_configure_server_process_test(Server.PerformanceProfile 45 "performance;server")
   add_test(NAME Server.VersionSmoke COMMAND axklib_server --print-version)
   set_tests_properties(Server.VersionSmoke PROPERTIES LABELS server)
   add_test(

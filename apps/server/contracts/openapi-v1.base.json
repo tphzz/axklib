@@ -214,7 +214,7 @@
           "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DirectoryArchiveRequest"}}}
         },
         "responses": {
-          "201": {"description": "Bounded temporary TAR archive created", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DownloadArchiveResponse"}}}},
+          "202": {"description": "Bounded temporary TAR archive job accepted", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobResponse"}}}},
           "413": {"description": "Requested archive exceeds configured limits"},
           "429": {"description": "Archive staging quota exhausted", "headers": {"Retry-After": {"schema": {"type": "integer", "minimum": 1}, "description": "Minimum retry delay in seconds"}}}
         }
@@ -832,25 +832,17 @@
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },
-      "DownloadArchiveResponse": {
+      "DirectoryArchiveResult": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["data", "meta"],
+        "required": ["archiveId", "filename", "sizeBytes", "entryCount", "expiresInSeconds", "contentPath"],
         "properties": {
-          "data": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["archiveId", "filename", "sizeBytes", "entryCount", "expiresInSeconds", "contentPath"],
-            "properties": {
-              "archiveId": {"type": "string", "minLength": 1},
-              "filename": {"type": "string", "minLength": 1},
-              "sizeBytes": {"type": "integer", "minimum": 0},
-              "entryCount": {"type": "integer", "minimum": 0},
-              "expiresInSeconds": {"type": "integer", "minimum": 0},
-              "contentPath": {"type": "string", "minLength": 1}
-            }
-          },
-          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+          "archiveId": {"type": "string", "minLength": 1},
+          "filename": {"type": "string", "minLength": 1},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "entryCount": {"type": "integer", "minimum": 0},
+          "expiresInSeconds": {"type": "integer", "minimum": 0},
+          "contentPath": {"type": "string", "minLength": 1}
         }
       },
       "ReadinessResponse": {
@@ -1063,7 +1055,7 @@
           "targetObjectId": {"type": ["string", "null"]},
           "candidateObjectIds": {"type": "array", "items": {"type": "string", "minLength": 1}},
           "type": {"type": "string", "minLength": 1, "maxLength": 64},
-          "quality": {"type": "string"},
+          "quality": {"type": "string", "enum": ["KNOWN", "LIKELY", "TENTATIVE", "UNKNOWN"]},
           "basis": {"type": "string"},
           "notes": {"type": "array", "items": {"type": "string"}},
           "assignmentIndex": {"type": ["integer", "null"], "minimum": 0},

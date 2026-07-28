@@ -170,6 +170,61 @@ TEST(ExtractionSelection, RetainsUnresolvedWaveDataOnlyForWholeImageOrConfirmedD
     EXPECT_TRUE(selected.unresolved_wave_data.empty());
 }
 
+TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelationships) {
+    axk::ExportPlan source;
+    axk::VolumeExport volume;
+    volume.partition = axk::PartitionIndex{0};
+    volume.relative_root = "partition_00_Test/Volume";
+    volume.waveforms.push_back({"wave", "Wave", "SMPL/Wave.wav", {}});
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Sample";
+    sample.members.push_back({"left", "wave", "SMPL/Wave.wav", axk::RelationshipQuality::known});
+    volume.samples.push_back(std::move(sample));
+    volume.sample_banks.push_back({"bank", "Bank", {"sample"}, {"sample"}});
+    volume.programs.push_back({"program", "Program", {"bank"}});
+    source.volumes.push_back(std::move(volume));
+
+    axk::RelationshipGraph graph;
+    axk::Relationship program_to_bank;
+    program_to_bank.source_key = "program";
+    program_to_bank.target_key = "bank";
+    program_to_bank.type = "PROG_ASSIGNMENT_TO_SBAC";
+    program_to_bank.quality = axk::RelationshipQuality::likely;
+    program_to_bank.assignment_state = axk::AssignmentState::active;
+    graph.relationships.push_back(program_to_bank);
+
+    axk::Relationship bank_to_sample;
+    bank_to_sample.source_key = "bank";
+    bank_to_sample.target_key = "sample";
+    bank_to_sample.type = "SBAC_SLOT_TO_SBNK";
+    bank_to_sample.quality = axk::RelationshipQuality::known;
+    graph.relationships.push_back(bank_to_sample);
+
+    auto selected = source;
+    auto excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
+    EXPECT_TRUE(selected.volumes.empty());
+    ASSERT_EQ(excluded.size(), 1U);
+    EXPECT_EQ(excluded.front().type, "PROG_ASSIGNMENT_TO_SBAC");
+
+    graph.relationships.front().quality = axk::RelationshipQuality::known;
+    graph.relationships.back().quality = axk::RelationshipQuality::likely;
+    selected = source;
+    excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
+    EXPECT_TRUE(selected.volumes.empty());
+    ASSERT_EQ(excluded.size(), 1U);
+    EXPECT_EQ(excluded.front().type, "SBAC_SLOT_TO_SBNK");
+
+    graph.relationships.back().quality = axk::RelationshipQuality::known;
+    selected = source;
+    excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
+    ASSERT_EQ(selected.volumes.size(), 1U);
+    EXPECT_TRUE(excluded.empty());
+    EXPECT_EQ(selected.volumes.front().sample_banks.size(), 1U);
+    EXPECT_EQ(selected.volumes.front().samples.size(), 1U);
+    EXPECT_EQ(selected.volumes.front().waveforms.size(), 1U);
+}
+
 TEST(VolumeGraph, SerializesUnresolvedPlacementCandidatesAndResolutionQuality) {
     axk::UnresolvedWaveDataExport scope;
     scope.partition = axk::PartitionIndex{2};

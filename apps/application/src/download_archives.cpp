@@ -233,7 +233,8 @@ bool axk::app::DownloadArchiveStore::storage_ready() const noexcept {
 }
 
 axk::app::Result<axk::app::DownloadArchiveSnapshot>
-axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sandbox, const DirectoryRef &source) {
+axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sandbox, const DirectoryRef &source,
+                                       CancellationToken cancellation, ProgressSink *progress) {
     if (owner_id.empty())
         return std::unexpected(archive_error("invalid_archive_request", "download archive owner is required"));
     if (!implementation_->storage_ready)
@@ -245,7 +246,13 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
                                            implementation_->maximum_depth, implementation_->maximum_path_bytes});
     if (!tree)
         return std::unexpected(tree.error());
+    if (progress) {
+        progress->report(
+            {axk::ProgressPhase::resolving, 0U, tree->entries().size(), "Inspecting directory", std::nullopt});
+    }
     for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
+        if (cancellation.is_cancelled())
+            return std::unexpected(archive_error("operation_cancelled", "directory archive creation was cancelled"));
         const auto &entry = tree->entries()[index];
         std::string_view name;
         std::string_view prefix;
@@ -261,6 +268,10 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
             archive_size > implementation_->maximum_archive_bytes) {
             return std::unexpected(
                 archive_error("download_archive_too_large", "directory archive exceeds configured limits"));
+        }
+        if (progress) {
+            progress->report({axk::ProgressPhase::resolving, index + 1U, tree->entries().size(), "Inspecting directory",
+                              std::nullopt});
         }
     }
     std::ranges::sort(entries, {}, &SourceEntry::path);
@@ -300,7 +311,17 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
         return std::unexpected(archive_error("archive_storage_unavailable", "download archive cannot be created"));
     }
     std::vector<std::byte> buffer(1024U * 1024U);
+    std::uint64_t written_bytes{};
+    if (progress) {
+        progress->report(
+            {axk::ProgressPhase::writing, written_bytes, archive_size, "Creating directory archive", std::nullopt});
+    }
     for (const auto &entry : entries) {
+        if (cancellation.is_cancelled()) {
+            output.close();
+            release_reservation();
+            return std::unexpected(archive_error("operation_cancelled", "directory archive creation was cancelled"));
+        }
         const auto header = tar_header(entry);
         if (!header) {
             output.close();
@@ -308,6 +329,7 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
             return std::unexpected(header.error());
         }
         output.write(header->data(), static_cast<std::streamsize>(header->size()));
+        written_bytes += header->size();
         if (entry.kind == axk::app::SandboxTreeEntryKind::directory)
             continue;
         auto file = tree->open_file(entry.source_index);
@@ -319,6 +341,12 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
         std::uint64_t remaining = entry.size;
         std::uint64_t offset{};
         while (remaining != 0U) {
+            if (cancellation.is_cancelled()) {
+                output.close();
+                release_reservation();
+                return std::unexpected(
+                    archive_error("operation_cancelled", "directory archive creation was cancelled"));
+            }
             const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.size()));
             const auto read = file->reader->read_exact_at(offset, std::span{buffer}.first(count));
             if (!read) {
@@ -336,6 +364,11 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
             }
             remaining -= count;
             offset += count;
+            written_bytes += count;
+            if (progress) {
+                progress->report({axk::ProgressPhase::writing, written_bytes, archive_size,
+                                  "Creating directory archive", std::nullopt});
+            }
         }
         const std::array<char, tar_block_size> padding{};
         if (const auto unchanged = file->verify_unchanged(); !unchanged) {
@@ -345,9 +378,11 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
         }
         const auto padding_size = padded_size(entry.size) - entry.size;
         output.write(padding.data(), static_cast<std::streamsize>(padding_size));
+        written_bytes += padding_size;
     }
     const std::array<char, tar_block_size * 2U> end_blocks{};
     output.write(end_blocks.data(), static_cast<std::streamsize>(end_blocks.size()));
+    written_bytes += end_blocks.size();
     output.close();
     if (!output) {
         release_reservation();
@@ -368,6 +403,10 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
         implementation_->reserved_bytes -= archive_size;
         std::filesystem::remove(final_path, error);
         return std::unexpected(archive_error("archive_storage_unavailable", "download archive ID collision"));
+    }
+    if (progress) {
+        progress->report(
+            {axk::ProgressPhase::publishing, written_bytes, archive_size, "Directory archive ready", std::nullopt});
     }
     return implementation_->snapshot(position->first, position->second);
 }

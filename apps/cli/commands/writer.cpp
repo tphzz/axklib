@@ -23,11 +23,6 @@
 namespace axk::cli::commands {
 namespace {
 
-int report_application_failure(const axk::app::Error &error) {
-    std::cerr << error.code << ": " << error.message << '\n';
-    return exit_code(ExitStatus::invalid_request);
-}
-
 axk::Result<void> publish_manifest(const std::filesystem::path &output_path, std::string_view contents, bool overwrite,
                                    std::string_view kind) {
     std::error_code filesystem_error;
@@ -64,10 +59,8 @@ int run_create_hds(const std::filesystem::path &manifest_path, const std::filesy
                    bool pretty) {
     static_cast<void>(pretty);
     const auto written = create_image("HDS", manifest_path, output_path, overwrite);
-    if (!written) {
-        std::cerr << written.error().message << '\n';
-        return exit_code(ExitStatus::invalid_request);
-    }
+    if (!written)
+        return report_application_failure(written.error());
     std::cout << "image=" << axk::text::path_to_utf8(output_path) << " size_bytes=" << written->size_bytes
               << " partitions=" << written->partitions.size() << " objects=" << written->object_count
               << " unused_tail_sectors=" << written->unused_tail_sectors << '\n';
@@ -84,10 +77,8 @@ int run_create_media(const std::filesystem::path &manifest_path, const std::file
     static_cast<void>(pretty);
     const auto service_kind = expected_format == "fat12_floppy" ? std::string_view{"FLOPPY"} : std::string_view{"ISO"};
     const auto written = create_image(service_kind, manifest_path, output_path, overwrite);
-    if (!written) {
-        std::cerr << written.error().message << '\n';
-        return exit_code(ExitStatus::invalid_request);
-    }
+    if (!written)
+        return report_application_failure(written.error());
     std::cout << "image=" << axk::text::path_to_utf8(output_path) << " format=" << expected_format
               << " size_bytes=" << written->size_bytes << " objects=" << written->object_count << '\n';
     return exit_code(ExitStatus::success);
@@ -112,7 +103,7 @@ int run_create_manifest(const axk::app::OperationRegistry &registry, std::string
     const auto written = publish_manifest(output_path, *manifest, overwrite, "build");
     if (!written) {
         std::cerr << axk::render_error(written.error()) << '\n';
-        return exit_code(ExitStatus::invalid_request);
+        return exit_code(core_error_status(written.error()));
     }
     std::cout << "manifest=" << axk::text::path_to_utf8(output_path) << " kind=" << kind << '\n';
     return exit_code(ExitStatus::success);
@@ -126,7 +117,7 @@ int run_alter_manifest(const axk::app::OperationRegistry &registry, const std::f
     const auto written = publish_manifest(output_path, *manifest, overwrite, "alteration");
     if (!written) {
         std::cerr << axk::render_error(written.error()) << '\n';
-        return exit_code(ExitStatus::invalid_request);
+        return exit_code(core_error_status(written.error()));
     }
     std::cout << "manifest=" << axk::text::path_to_utf8(output_path) << " kind=alteration\n";
     return exit_code(ExitStatus::success);
@@ -135,14 +126,12 @@ int run_alter_manifest(const axk::app::OperationRegistry &registry, const std::f
 int run_alter_hds(const std::filesystem::path &source_path, const std::filesystem::path &manifest_path,
                   const std::optional<std::filesystem::path> &output_path, bool pretty) {
     const auto altered = alter_image(source_path, manifest_path, output_path);
-    if (!altered) {
-        std::cerr << altered.error().message << '\n';
-        return exit_code(ExitStatus::invalid_request);
-    }
+    if (!altered)
+        return report_application_failure(altered.error());
     const auto serialized = axk::cli::schema::operations_v1::serialize(*altered, pretty);
     if (!serialized) {
         std::cerr << axk::render_error(serialized.error()) << '\n';
-        return exit_code(ExitStatus::invalid_request);
+        return exit_code(core_error_status(serialized.error()));
     }
     std::cout << *serialized << '\n';
     return exit_code(ExitStatus::success);

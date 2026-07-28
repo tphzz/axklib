@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from server_test_harness import scaled_timeout
+
 
 def run_server(server: Path, root: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -19,7 +21,7 @@ def run_server(server: Path, root: Path, arguments: list[str]) -> subprocess.Com
         ],
         capture_output=True,
         text=True,
-        timeout=10.0,
+        timeout=scaled_timeout(10.0),
         check=False,
     )
 

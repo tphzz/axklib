@@ -65,14 +65,16 @@ download, including one bounded byte range, when a user explicitly wants a
 server file on the client machine.
 
 For an explicit directory download, `POST /api/v1/files/archive` accepts a
-`DirectoryRef` and creates a bounded, owner-scoped TAR snapshot in temporary
-server storage. The response contains its authenticated content path and short
-expiry. Download the archive, then delete that content resource; expiry and
-startup cleanup are fallbacks. Archive creation rejects links, non-regular
-entries, source changes, excessive entry counts, and byte-quota overflow. It
-does not move, modify, or take ownership of the source directory or any durable
-job output. Archive content is sent from the retained file in bounded transport
-chunks rather than copied into a response-sized memory buffer. The
+`DirectoryRef` and returns a job resource. The read-job executor creates the
+bounded, owner-scoped TAR snapshot in temporary server storage without
+occupying an HTTP worker. The terminal job result contains its authenticated
+content path and short expiry. Download the archive, then delete that content
+resource; expiry and startup cleanup are fallbacks. Archive creation is
+cancellable and rejects links, non-regular entries, source changes, excessive
+entry counts, and byte-quota overflow. It does not move, modify, or take
+ownership of the source directory or any durable job output. Archive content is
+sent from the retained file in bounded transport chunks rather than copied into
+a response-sized memory buffer. The
 `maximumConcurrentArchiveDownloads` configuration limit, which defaults to
 `1` and accepts values from `1` through `64`, bounds simultaneous transfers.
 Expiry and explicit deletion defer removal while a transfer lease is active.

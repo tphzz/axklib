@@ -97,13 +97,16 @@ axk::app::Result<axk::app::ExtractionSelection> axk::app::resolve_extraction_sel
     return ExtractionSelection{matches.front()->object_key};
 }
 
-void axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &graph, std::string_view scope,
-                                  std::string_view selector_path, std::string_view selector_key) {
+std::vector<axk::app::ExcludedExtractionRelationship>
+axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &graph, std::string_view scope,
+                             std::string_view selector_path, std::string_view selector_key) {
+    std::vector<ExcludedExtractionRelationship> excluded;
+    std::set<std::string> excluded_keys;
     if (scope == "volume") {
         std::erase_if(plan.volumes,
                       [&](const auto &volume) { return text::path_to_utf8(volume.relative_root) != selector_path; });
         plan.unresolved_wave_data.clear();
-        return;
+        return excluded;
     }
     std::set<std::string> programs;
     std::set<std::string> sample_banks;
@@ -120,16 +123,24 @@ void axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &gra
         for (const auto &row : graph.relationships) {
             if (!row.target_key)
                 continue;
-            if (programs.contains(row.source_key) && row.type.starts_with("PROG_ASSIGNMENT_TO_") &&
-                (row.assignment_state == AssignmentState::active ||
-                 row.assignment_state == AssignmentState::source_load)) {
+            const auto active_program_assignment = programs.contains(row.source_key) &&
+                                                   row.type.starts_with("PROG_ASSIGNMENT_TO_") &&
+                                                   (row.assignment_state == AssignmentState::active ||
+                                                    row.assignment_state == AssignmentState::source_load);
+            const auto sample_bank_member = sample_banks.contains(row.source_key) && row.type == "SBAC_SLOT_TO_SBNK";
+            if ((active_program_assignment || sample_bank_member) && row.quality != RelationshipQuality::known) {
+                const auto key = row.source_key + '\0' + row.type + '\0' + *row.target_key;
+                if (excluded_keys.insert(key).second)
+                    excluded.push_back({row.source_key, *row.target_key, row.type});
+                continue;
+            }
+            if (active_program_assignment && row.quality == RelationshipQuality::known) {
                 if (row.type == "PROG_ASSIGNMENT_TO_SBAC")
                     changed = sample_banks.insert(*row.target_key).second || changed;
                 else if (row.type == "PROG_ASSIGNMENT_TO_SBNK")
                     changed = samples.insert(*row.target_key).second || changed;
             }
-            if (sample_banks.contains(row.source_key) && row.type == "SBAC_SLOT_TO_SBNK" &&
-                (row.quality == RelationshipQuality::known || row.quality == RelationshipQuality::likely)) {
+            if (sample_bank_member && row.quality == RelationshipQuality::known) {
                 changed = samples.insert(*row.target_key).second || changed;
             }
         }
@@ -164,4 +175,5 @@ void axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &gra
                       [&](const auto &waveform) { return !confirmed_waveforms.contains(waveform.object_key); });
     }
     std::erase_if(plan.unresolved_wave_data, [](const auto &scope) { return scope.waveforms.empty(); });
+    return excluded;
 }

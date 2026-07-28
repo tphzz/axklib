@@ -210,9 +210,12 @@ class UploadFile {
 
 struct axk::app::UploadStore::Implementation {
     struct Entry {
+        std::mutex mutex;
         UploadCreateRequest request;
         std::filesystem::path path;
         std::shared_ptr<UploadFile> file;
+        std::optional<package_internal::Sha256State> sha256;
+        std::optional<package_internal::Sha256Digest> finalized_sha256;
         std::uint64_t received_size{};
         UploadState state{UploadState::receiving};
         std::chrono::steady_clock::time_point expires_at;
@@ -231,7 +234,7 @@ struct axk::app::UploadStore::Implementation {
     std::uint64_t failed_deletions{};
     bool startup_scan_failed{};
     std::mutex mutex;
-    std::unordered_map<std::string, Entry> entries;
+    std::unordered_map<std::string, std::shared_ptr<Entry>> entries;
     std::unordered_map<std::filesystem::path, std::uint64_t> orphan_files;
 
     Implementation(std::filesystem::path directory, std::uint64_t total_bytes, std::uint64_t upload_bytes,
@@ -277,18 +280,19 @@ struct axk::app::UploadStore::Implementation {
         }
         const auto now = clock();
         for (auto iterator = entries.begin(); iterator != entries.end();) {
-            if (iterator->second.expires_at > now || iterator->second.lease_count != 0U) {
+            const std::scoped_lock entry_lock{iterator->second->mutex};
+            if (iterator->second->expires_at > now || iterator->second->lease_count != 0U) {
                 ++iterator;
                 continue;
             }
             std::error_code error;
-            const auto removed = remove_file(iterator->second.path, error);
+            const auto removed = remove_file(iterator->second->path, error);
             if (!removed && error) {
                 ++failed_deletions;
                 ++iterator;
                 continue;
             }
-            reserved_bytes -= iterator->second.request.declared_size;
+            reserved_bytes -= iterator->second->request.declared_size;
             iterator = entries.erase(iterator);
         }
     }
@@ -306,13 +310,12 @@ struct axk::app::UploadStore::Implementation {
                 .reserved_bytes = reserved_bytes};
     }
 
-    [[nodiscard]] Result<std::unordered_map<std::string, Entry>::iterator> owned(const UploadRef &reference,
-                                                                                 std::string_view owner_id) {
+    [[nodiscard]] Result<std::shared_ptr<Entry>> owned(const UploadRef &reference, std::string_view owner_id) {
         cleanup_locked();
         const auto found = entries.find(reference.upload_id);
-        if (found == entries.end() || found->second.request.owner_id != owner_id)
+        if (found == entries.end() || found->second->request.owner_id != owner_id)
             return std::unexpected(upload_error("upload_not_found", "upload does not exist"));
-        return found;
+        return found->second;
     }
 };
 
@@ -390,18 +393,18 @@ axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::create(UploadC
         std::filesystem::remove(path, cleanup_error);
         return std::unexpected(file.error());
     }
-    auto [position, inserted] = implementation_->entries.emplace(
-        id, Implementation::Entry{.request = std::move(request),
-                                  .path = path,
-                                  .file = std::move(*file),
-                                  .received_size = 0U,
-                                  .state = UploadState::receiving,
-                                  .expires_at = implementation_->clock() + implementation_->retention,
-                                  .lease_count = 0U});
+    auto entry = std::make_shared<Implementation::Entry>();
+    entry->request = std::move(request);
+    entry->path = path;
+    entry->file = std::move(*file);
+    if (entry->request.sha256)
+        entry->sha256.emplace();
+    entry->expires_at = implementation_->clock() + implementation_->retention;
+    auto [position, inserted] = implementation_->entries.emplace(id, std::move(entry));
     if (!inserted)
         return std::unexpected(upload_error("upload_storage_unavailable", "upload ID collision"));
-    implementation_->reserved_bytes += position->second.request.declared_size;
-    return implementation_->snapshot(position->first, position->second);
+    implementation_->reserved_bytes += position->second->request.declared_size;
+    return implementation_->snapshot(position->first, *position->second);
 }
 
 axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::append(const UploadRef &reference,
@@ -410,71 +413,83 @@ axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::append(const U
                                                                          std::span<const std::byte> bytes) {
     if (bytes.empty() || bytes.size() > implementation_->maximum_chunk_bytes)
         return std::unexpected(upload_error("invalid_upload_chunk", "upload chunk size is invalid"));
-    const std::scoped_lock lock{implementation_->mutex};
-    auto found = implementation_->owned(reference, owner_id);
-    if (!found)
-        return std::unexpected(found.error());
-    auto &entry = (**found).second;
-    if (entry.state != UploadState::receiving || offset != entry.received_size ||
-        bytes.size() > entry.request.declared_size - entry.received_size) {
+    std::unique_lock store_lock{implementation_->mutex};
+    auto owned = implementation_->owned(reference, owner_id);
+    if (!owned)
+        return std::unexpected(owned.error());
+    auto entry = *owned;
+    std::unique_lock entry_lock{entry->mutex};
+    store_lock.unlock();
+    if (entry->state != UploadState::receiving || offset != entry->received_size ||
+        bytes.size() > entry->request.declared_size - entry->received_size) {
         return std::unexpected(upload_error("invalid_upload_chunk", "upload chunk offset or state is invalid"));
     }
-    if (auto written = entry.file->write_at(entry.received_size, bytes); !written)
+    if (auto written = entry->file->write_at(entry->received_size, bytes); !written)
         return std::unexpected(written.error());
-    entry.received_size += bytes.size();
-    entry.expires_at = implementation_->clock() + implementation_->retention;
-    return implementation_->snapshot(reference.upload_id, entry);
+    if (entry->sha256)
+        entry->sha256->update(bytes);
+    entry->received_size += bytes.size();
+    entry->expires_at = implementation_->clock() + implementation_->retention;
+    return implementation_->snapshot(reference.upload_id, *entry);
 }
 
 axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::complete(const UploadRef &reference,
                                                                            std::string_view owner_id) {
-    const std::scoped_lock lock{implementation_->mutex};
-    auto found = implementation_->owned(reference, owner_id);
-    if (!found)
-        return std::unexpected(found.error());
-    auto &entry = (**found).second;
-    if (entry.received_size != entry.request.declared_size)
+    std::unique_lock store_lock{implementation_->mutex};
+    auto owned = implementation_->owned(reference, owner_id);
+    if (!owned)
+        return std::unexpected(owned.error());
+    auto entry = *owned;
+    std::unique_lock entry_lock{entry->mutex};
+    store_lock.unlock();
+    if (entry->state == UploadState::ready)
+        return implementation_->snapshot(reference.upload_id, *entry);
+    if (entry->received_size != entry->request.declared_size)
         return std::unexpected(upload_error("upload_incomplete", "upload has not received its declared size"));
-    const auto physical_size = entry.file->size();
+    const auto physical_size = entry->file->size();
     if (!physical_size)
         return std::unexpected(physical_size.error());
-    if (*physical_size != entry.request.declared_size)
+    if (*physical_size != entry->request.declared_size)
         return std::unexpected(
             upload_error("upload_incomplete", "upload physical size does not match its declaration"));
-    if (auto flushed = entry.file->flush(); !flushed)
+    if (auto flushed = entry->file->flush(); !flushed)
         return std::unexpected(flushed.error());
-    if (entry.request.sha256) {
-        const auto reader = FileReader::open(entry.path);
-        if (!reader)
-            return std::unexpected(upload_error("upload_storage_unavailable", "upload cannot be reopened"));
-        const auto digest = package_internal::sha256_reader(**reader);
-        if (!digest || package_internal::hex_digest(*digest) != *entry.request.sha256)
+    if (entry->request.sha256) {
+        if (!entry->finalized_sha256)
+            entry->finalized_sha256 = entry->sha256->finish();
+        if (package_internal::hex_digest(*entry->finalized_sha256) != *entry->request.sha256)
             return std::unexpected(upload_error("upload_hash_mismatch", "upload SHA-256 does not match"));
     }
-    entry.state = UploadState::ready;
-    entry.expires_at = implementation_->clock() + implementation_->retention;
-    return implementation_->snapshot(reference.upload_id, entry);
+    entry->state = UploadState::ready;
+    entry->expires_at = implementation_->clock() + implementation_->retention;
+    return implementation_->snapshot(reference.upload_id, *entry);
 }
 
 axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::inspect(const UploadRef &reference,
                                                                           std::string_view owner_id) {
-    const std::scoped_lock lock{implementation_->mutex};
-    auto found = implementation_->owned(reference, owner_id);
-    if (!found)
-        return std::unexpected(found.error());
-    return implementation_->snapshot(reference.upload_id, (**found).second);
+    std::unique_lock store_lock{implementation_->mutex};
+    auto owned = implementation_->owned(reference, owner_id);
+    if (!owned)
+        return std::unexpected(owned.error());
+    auto entry = *owned;
+    std::unique_lock entry_lock{entry->mutex};
+    store_lock.unlock();
+    return implementation_->snapshot(reference.upload_id, *entry);
 }
 
 axk::app::Result<std::filesystem::path> axk::app::UploadStore::resolve(const UploadRef &reference,
                                                                        std::string_view owner_id) {
-    const std::scoped_lock lock{implementation_->mutex};
-    auto found = implementation_->owned(reference, owner_id);
-    if (!found)
-        return std::unexpected(found.error());
-    if ((**found).second.state != UploadState::ready)
+    std::unique_lock store_lock{implementation_->mutex};
+    auto owned = implementation_->owned(reference, owner_id);
+    if (!owned)
+        return std::unexpected(owned.error());
+    auto entry = *owned;
+    std::unique_lock entry_lock{entry->mutex};
+    store_lock.unlock();
+    if (entry->state != UploadState::ready)
         return std::unexpected(upload_error("upload_not_ready", "upload is not finalized"));
-    (**found).second.expires_at = implementation_->clock() + implementation_->retention;
-    return (**found).second.path;
+    entry->expires_at = implementation_->clock() + implementation_->retention;
+    return entry->path;
 }
 
 axk::app::Result<axk::app::UploadLease> axk::app::UploadStore::lease(const UploadRef &reference,
@@ -482,15 +497,16 @@ axk::app::Result<axk::app::UploadLease> axk::app::UploadStore::lease(const Uploa
     std::filesystem::path path;
     {
         const std::scoped_lock lock{implementation_->mutex};
-        auto found = implementation_->owned(reference, owner_id);
-        if (!found)
-            return std::unexpected(found.error());
-        auto &entry = (**found).second;
-        if (entry.state != UploadState::ready)
+        auto owned = implementation_->owned(reference, owner_id);
+        if (!owned)
+            return std::unexpected(owned.error());
+        auto entry = *owned;
+        const std::scoped_lock entry_lock{entry->mutex};
+        if (entry->state != UploadState::ready)
             return std::unexpected(upload_error("upload_not_ready", "upload is not finalized"));
-        ++entry.lease_count;
-        entry.expires_at = implementation_->clock() + implementation_->retention;
-        path = entry.path;
+        ++entry->lease_count;
+        entry->expires_at = implementation_->clock() + implementation_->retention;
+        path = entry->path;
     }
     auto implementation = implementation_;
     auto guard = std::shared_ptr<void>{new std::byte{}, [implementation, id = reference.upload_id](void *value) {
@@ -499,9 +515,10 @@ axk::app::Result<axk::app::UploadLease> axk::app::UploadStore::lease(const Uploa
                                            const auto found = implementation->entries.find(id);
                                            if (found == implementation->entries.end())
                                                return;
-                                           if (found->second.lease_count != 0U)
-                                               --found->second.lease_count;
-                                           found->second.expires_at =
+                                           const std::scoped_lock entry_lock{found->second->mutex};
+                                           if (found->second->lease_count != 0U)
+                                               --found->second->lease_count;
+                                           found->second->expires_at =
                                                implementation->clock() + implementation->retention;
                                        }};
     UploadLease result;
@@ -527,17 +544,19 @@ axk::app::Result<axk::app::FileRef> axk::app::UploadStore::materialize(const Upl
 
 axk::app::Result<void> axk::app::UploadStore::remove(const UploadRef &reference, std::string_view owner_id) {
     const std::scoped_lock lock{implementation_->mutex};
-    auto found = implementation_->owned(reference, owner_id);
-    if (!found)
-        return std::unexpected(found.error());
-    if ((**found).second.lease_count != 0U)
+    auto owned = implementation_->owned(reference, owner_id);
+    if (!owned)
+        return std::unexpected(owned.error());
+    auto entry = *owned;
+    const std::scoped_lock entry_lock{entry->mutex};
+    if (entry->lease_count != 0U)
         return std::unexpected(upload_error("upload_in_use", "upload is retained by an active operation"));
     std::error_code error;
-    const auto removed = implementation_->remove_file((**found).second.path, error);
+    const auto removed = implementation_->remove_file(entry->path, error);
     if (!removed && error)
         return std::unexpected(upload_error("upload_storage_unavailable", "upload staging file cannot be removed"));
-    implementation_->reserved_bytes -= (**found).second.request.declared_size;
-    implementation_->entries.erase(*found);
+    implementation_->reserved_bytes -= entry->request.declared_size;
+    implementation_->entries.erase(reference.upload_id);
     return {};
 }
 

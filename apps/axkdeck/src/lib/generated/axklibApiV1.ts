@@ -179,7 +179,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations['filesystem.archive.create'];
+        post: operations['files.archive'];
         delete?: never;
         options?: never;
         head?: never;
@@ -1432,6 +1432,14 @@ export interface components {
         DirectoryArchiveRequest: {
             directory: components['schemas']['DirectoryRef'];
         };
+        DirectoryArchiveResult: {
+            archiveId: string;
+            contentPath: string;
+            entryCount: number;
+            expiresInSeconds: number;
+            filename: string;
+            sizeBytes: number;
+        };
         DirectoryListRequest: {
             cursor?: string | null;
             directory: components['schemas']['DirectoryRef'];
@@ -1456,17 +1464,6 @@ export interface components {
         DirectoryRef: {
             relativePath: string;
             rootId: string;
-        };
-        DownloadArchiveResponse: {
-            data: {
-                archiveId: string;
-                contentPath: string;
-                entryCount: number;
-                expiresInSeconds: number;
-                filename: string;
-                sizeBytes: number;
-            };
-            meta: components['schemas']['ResponseMeta'];
         };
         EmptyRequest: Record<string, never>;
         EntryMetadata: {
@@ -1891,7 +1888,8 @@ export interface components {
             candidateObjectIds: string[];
             id: string;
             notes: string[];
-            quality: string;
+            /** @enum {string} */
+            quality: 'KNOWN' | 'LIKELY' | 'TENTATIVE' | 'UNKNOWN';
             receiveChannelDisplay: string;
             sourceObjectId: string;
             targetObjectId: string | null;
@@ -3655,7 +3653,7 @@ export interface operations {
             };
         };
     };
-    'filesystem.archive.create': {
+    'files.archive': {
         parameters: {
             query?: never;
             header?: never;
@@ -3668,17 +3666,67 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Bounded temporary TAR archive created */
-            201: {
+            /** @description Job accepted */
+            202: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;
                 };
                 content: {
-                    'application/json': components['schemas']['DownloadArchiveResponse'];
+                    'application/json': components['schemas']['JobResponse'];
                 };
             };
-            /** @description Requested archive exceeds configured limits */
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
             413: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
@@ -3688,11 +3736,9 @@ export interface operations {
                     'application/json': components['schemas']['ErrorResponse'];
                 };
             };
-            /** @description Archive staging quota exhausted */
-            429: {
+            /** @description Unsupported or invalid domain request */
+            422: {
                 headers: {
-                    /** @description Minimum retry delay in seconds */
-                    'Retry-After'?: number;
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;
                 };
@@ -3700,8 +3746,18 @@ export interface operations {
                     'application/json': components['schemas']['ErrorResponse'];
                 };
             };
-            /** @description Request could not be completed */
-            default: {
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;

@@ -480,7 +480,7 @@ describe('AxklibHttpApiClient', () => {
         );
     });
 
-    it('creates, streams, and explicitly deletes a bounded directory archive', async () => {
+    it('streams and explicitly deletes a bounded directory archive', async () => {
         const snapshot = {
             archiveId: 'archive-1',
             filename: 'sfz-export.tar',
@@ -491,32 +491,23 @@ describe('AxklibHttpApiClient', () => {
         };
         const fetchMock = vi
             .spyOn(globalThis, 'fetch')
-            .mockResolvedValueOnce(jsonResponse({ data: snapshot }, 201))
             .mockResolvedValueOnce(
                 new Response('tar-bytes', { status: 200, headers: { 'Content-Type': 'application/x-tar' } }),
             )
             .mockResolvedValueOnce(new Response(null, { status: 204 }));
         const client = new AxklibHttpApiClient({ baseUrl: 'http://localhost/api/v1', bearerToken: 'token' });
 
-        const created = await client.createDirectoryArchive({ rootId: 'workspace', relativePath: 'exports/sfz' });
-        const opened = await client.openDirectoryArchive(created);
-        await client.deleteDirectoryArchive(created);
+        const opened = await client.openDirectoryArchive(snapshot);
+        await client.deleteDirectoryArchive(snapshot);
 
         expect(await opened.text()).toBe('tar-bytes');
         expect(fetchMock).toHaveBeenNthCalledWith(
             1,
-            'http://localhost/api/v1/files/archive',
-            expect.objectContaining({
-                body: JSON.stringify({ directory: { rootId: 'workspace', relativePath: 'exports/sfz' } }),
-            }),
-        );
-        expect(fetchMock).toHaveBeenNthCalledWith(
-            2,
             'http://localhost/api/v1/download-archives/archive-1/content',
             expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer token' }) }),
         );
         expect(fetchMock).toHaveBeenNthCalledWith(
-            3,
+            2,
             'http://localhost/api/v1/download-archives/archive-1/content',
             expect.objectContaining({ method: 'DELETE' }),
         );

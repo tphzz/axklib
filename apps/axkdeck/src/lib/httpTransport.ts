@@ -4,6 +4,7 @@ import {
     type ApiJobEvent,
     type ApiJobSnapshot,
     type AxklibApiConnection,
+    type DownloadArchiveSnapshot,
     type EventConnection,
 } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
@@ -42,6 +43,7 @@ import type {
     PreviewEnvelope,
     RelationshipPage,
     RelationshipPageFilter,
+    RelationshipQuality,
     SamplerObject,
     SamplerRelationship,
     ValidationSummary,
@@ -175,7 +177,7 @@ function mapRelationship(item: ApiRelationshipItem): SamplerRelationship {
         targetObjectId: item.targetObjectId ?? undefined,
         candidateObjectIds: item.candidateObjectIds,
         relationshipType: item.type,
-        quality: item.quality,
+        quality: relationshipQuality(item.quality),
         basis: item.basis,
         notes: item.notes,
         assignmentIndex: item.assignmentIndex ?? undefined,
@@ -183,6 +185,18 @@ function mapRelationship(item: ApiRelationshipItem): SamplerRelationship {
         assignmentState: item.assignmentState,
         receiveChannelDisplay: item.receiveChannelDisplay,
     };
+}
+
+function relationshipQuality(value: string): RelationshipQuality {
+    switch (value) {
+        case 'KNOWN':
+        case 'LIKELY':
+        case 'TENTATIVE':
+        case 'UNKNOWN':
+            return value;
+        default:
+            throw new Error(`Unsupported relationship quality: ${value}`);
+    }
 }
 
 function validationSummary(summary: ApiImageSummary): ValidationSummary {
@@ -352,7 +366,24 @@ export class HttpImageTransport implements ImageTransport {
 
     async downloadDirectory(location: DirectoryLocation): Promise<ClientDownload> {
         const source = this.serverDirectory(location);
-        const archive = await this.client.createDirectoryArchive(source.reference);
+        const submitted = await this.client.invoke<never>(
+            'files.archive',
+            { directory: source.reference },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.isJob(submitted)) throw new Error('files.archive did not return a job');
+        const localJob = this.mapJob(submitted);
+        const completed = await this.waitForJob(localJob.jobId, () => undefined);
+        if (completed.status !== 'completed' || !completed.result) {
+            throw new AxklibApiError(
+                completed.errorCode ?? 'archive_create_failed',
+                completed.error ?? 'Directory archive creation did not complete',
+                422,
+                undefined,
+                completed.errorContext,
+            );
+        }
+        const archive = completed.result as DownloadArchiveSnapshot;
         try {
             const response = await this.client.openDirectoryArchive(archive);
             return { filename: archive.filename, blob: await response.blob() };

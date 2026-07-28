@@ -355,12 +355,17 @@ TEST(Cli11Adapter, WritesStarterBuildManifestsWithoutSilentReplacement) {
     EXPECT_TRUE(parsed.at("partitions").at(0).at("volumes").empty());
 
     testing::internal::CaptureStderr();
-    EXPECT_EQ(run_cli({"axklib", "create", "manifest", "iso", "-o", output.string()}), 2);
+    EXPECT_EQ(run_cli({"axklib", "create", "manifest", "iso", "-o", output.string()}), 1);
     EXPECT_NE(testing::internal::GetCapturedStderr().find("refusing to replace"), std::string::npos);
 
     EXPECT_EQ(run_cli({"axklib", "create", "manifest", "iso", "-o", output.string(), "--overwrite"}), 0);
     const auto replaced = nlohmann::json::parse(read_bytes(output));
     EXPECT_EQ(replaced.at("format"), "iso9660");
+    const auto blocked_parent = root / "not-a-directory";
+    std::ofstream{blocked_parent} << "file";
+    testing::internal::CaptureStderr();
+    EXPECT_EQ(run_cli({"axklib", "create", "manifest", "hds", "-o", (blocked_parent / "image.json").string()}), 1);
+    EXPECT_FALSE(testing::internal::GetCapturedStderr().empty());
     std::filesystem::remove_all(root, error);
 }
 
@@ -375,7 +380,7 @@ TEST(Cli11Adapter, WritesStarterAlterationManifestWithoutSilentReplacement) {
     const auto parsed = axk::load_alteration_manifest(output);
     ASSERT_TRUE(parsed) << parsed.error().message;
 
-    EXPECT_EQ(run_cli({"axklib", "alter", "manifest", "-o", output.string()}), 2);
+    EXPECT_EQ(run_cli({"axklib", "alter", "manifest", "-o", output.string()}), 1);
     EXPECT_EQ(run_cli({"axklib", "alter", "manifest", "-o", output.string(), "--overwrite"}), 0);
 
     std::filesystem::remove_all(root, error);
@@ -638,6 +643,9 @@ TEST(Cli11Adapter, CreateHdsInvokesSharedPlanAndMatchesDirectWriter) {
     }
     EXPECT_EQ(output, expected.str());
     EXPECT_EQ(read_bytes(cli_path), read_bytes(direct_path));
+    testing::internal::CaptureStderr();
+    EXPECT_EQ(run_cli({"axklib", "create", "hds", manifest_path.string(), "-o", cli_path.string()}), 1);
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("output file already exists"), std::string::npos);
     std::filesystem::remove_all(root, error);
 }
 
@@ -758,6 +766,10 @@ TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedInspectionAndDirectAlterati
     expected["output_path"] = axk::text::path_to_utf8(cli_path);
     EXPECT_EQ(cli_result, expected);
     EXPECT_EQ(read_bytes(cli_path), read_bytes(direct_path));
+    testing::internal::CaptureStderr();
+    EXPECT_EQ(
+        run_cli({"axklib", "alter", "hds", source_path.string(), manifest_path.string(), "-o", cli_path.string()}), 1);
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("output file already exists"), std::string::npos);
     std::filesystem::remove_all(root, error);
 }
 

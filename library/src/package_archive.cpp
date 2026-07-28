@@ -182,56 +182,46 @@ void compress_sha256_block(std::array<std::uint32_t, 8> &state, const std::array
     state[7] += h;
 }
 
-class Sha256State {
-  public:
-    void update(std::span<const std::byte> bytes) {
-        total_bytes_ += bytes.size();
-        while (!bytes.empty()) {
-            const auto count = std::min(bytes.size(), block_.size() - block_size_);
-            std::ranges::copy(bytes.first(count), block_.begin() + static_cast<std::ptrdiff_t>(block_size_));
-            block_size_ += count;
-            bytes = bytes.subspan(count);
-            if (block_size_ == block_.size()) {
-                compress_sha256_block(state_, block_);
-                block_.fill(std::byte{});
-                block_size_ = 0U;
-            }
-        }
-    }
+} // namespace
 
-    [[nodiscard]] Sha256Digest finish() {
-        const auto bit_length = total_bytes_ * 8U;
-        block_[block_size_++] = std::byte{0x80};
-        if (block_size_ > 56U) {
-            std::fill(block_.begin() + static_cast<std::ptrdiff_t>(block_size_), block_.end(), std::byte{});
+void Sha256State::update(std::span<const std::byte> bytes) {
+    total_bytes_ += bytes.size();
+    while (!bytes.empty()) {
+        const auto count = std::min(bytes.size(), block_.size() - block_size_);
+        std::ranges::copy(bytes.first(count), block_.begin() + static_cast<std::ptrdiff_t>(block_size_));
+        block_size_ += count;
+        bytes = bytes.subspan(count);
+        if (block_size_ == block_.size()) {
             compress_sha256_block(state_, block_);
             block_.fill(std::byte{});
             block_size_ = 0U;
         }
-        std::fill(block_.begin() + static_cast<std::ptrdiff_t>(block_size_), block_.begin() + 56, std::byte{});
-        for (std::size_t index = 0; index < 8U; ++index)
-            block_[63U - index] = static_cast<std::byte>(bit_length >> (index * 8U));
-        compress_sha256_block(state_, block_);
-
-        Sha256Digest result{};
-        for (std::size_t index = 0; index < state_.size(); ++index) {
-            result[index * 4U] = static_cast<std::byte>(state_[index] >> 24U);
-            result[index * 4U + 1U] = static_cast<std::byte>(state_[index] >> 16U);
-            result[index * 4U + 2U] = static_cast<std::byte>(state_[index] >> 8U);
-            result[index * 4U + 3U] = static_cast<std::byte>(state_[index]);
-        }
-        return result;
     }
+}
 
-  private:
-    std::array<std::uint32_t, 8> state_{0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
-                                        0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U};
-    std::array<std::byte, 64> block_{};
-    std::size_t block_size_{};
-    std::uint64_t total_bytes_{};
-};
+Sha256Digest Sha256State::finish() {
+    const auto bit_length = total_bytes_ * 8U;
+    block_[block_size_++] = std::byte{0x80};
+    if (block_size_ > 56U) {
+        std::fill(block_.begin() + static_cast<std::ptrdiff_t>(block_size_), block_.end(), std::byte{});
+        compress_sha256_block(state_, block_);
+        block_.fill(std::byte{});
+        block_size_ = 0U;
+    }
+    std::fill(block_.begin() + static_cast<std::ptrdiff_t>(block_size_), block_.begin() + 56, std::byte{});
+    for (std::size_t index = 0; index < 8U; ++index)
+        block_[63U - index] = static_cast<std::byte>(bit_length >> (index * 8U));
+    compress_sha256_block(state_, block_);
 
-} // namespace
+    Sha256Digest result{};
+    for (std::size_t index = 0; index < state_.size(); ++index) {
+        result[index * 4U] = static_cast<std::byte>(state_[index] >> 24U);
+        result[index * 4U + 1U] = static_cast<std::byte>(state_[index] >> 16U);
+        result[index * 4U + 2U] = static_cast<std::byte>(state_[index] >> 8U);
+        result[index * 4U + 3U] = static_cast<std::byte>(state_[index]);
+    }
+    return result;
+}
 
 Sha256Digest sha256(std::span<const std::byte> bytes) {
     Sha256State state;

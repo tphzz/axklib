@@ -155,7 +155,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 38U);
+    EXPECT_EQ(entries.size(), 39U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -232,7 +232,6 @@ TEST(ServerContract, InfrastructureJsonOperationsDeclareConcreteRequestAndRespon
         Expectation{"/files/metadata", "post", "EntryRef", "200", "EntryMetadataResponse"},
         Expectation{"/filesystem/directories", "post", "CreateDirectoryRequest", "201", "EntryMetadataResponse"},
         Expectation{"/filesystem/entries", "patch", "RenameEntryRequest", "200", "EntryMetadataResponse"},
-        Expectation{"/files/archive", "post", "DirectoryArchiveRequest", "201", "DownloadArchiveResponse"},
         Expectation{"/images", "post", "ImageOpenRequest", "201", "ImageSessionResponse"},
         Expectation{"/images/{imageId}", "get", "", "200", "ImageSessionResponse"},
         Expectation{"/images/{imageId}", "delete", "", "200", "ImageCloseResponse"},

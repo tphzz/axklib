@@ -58,7 +58,9 @@ class DownloadArchiveStore {
     DownloadArchiveStore &operator=(const DownloadArchiveStore &) = delete;
 
     [[nodiscard]] Result<DownloadArchiveSnapshot> create(std::string owner_id, const Sandbox &sandbox,
-                                                         const DirectoryRef &source);
+                                                         const DirectoryRef &source,
+                                                         CancellationToken cancellation = {},
+                                                         ProgressSink *progress = nullptr);
     [[nodiscard]] Result<DownloadArchiveSnapshot>
     create_owned_directory(std::string owner_id, const std::filesystem::path &source, std::string filename);
     [[nodiscard]] Result<DownloadArchiveSnapshot> retain(std::string owner_id, std::string filename,

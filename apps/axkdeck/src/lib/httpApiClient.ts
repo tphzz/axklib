@@ -473,10 +473,6 @@ export class AxklibHttpApiClient {
         if (!response.ok) await this.throwResponseError(response);
     }
 
-    createDirectoryArchive(directory: DirectoryRef): Promise<DownloadArchiveSnapshot> {
-        return this.request('POST', '/files/archive', { directory });
-    }
-
     async openDirectoryArchive(snapshot: DownloadArchiveSnapshot): Promise<Response> {
         const response = await this.fetchResponse('GET', this.operationPath(snapshot.contentPath));
         if (!response.ok) await this.throwResponseError(response);
