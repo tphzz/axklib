@@ -71,17 +71,24 @@ add_library(
   axk_server_adapter
   STATIC
   src/archive_download_budget.cpp
+  src/authentication.cpp
   src/config.cpp
+  src/download_reader.cpp
   src/event_delivery_budget.cpp
   src/event_dispatcher.cpp
+  src/event_routes.cpp
   src/event_tickets.cpp
+  src/file_routes.cpp
   src/http_headers.cpp
+  src/infrastructure_routes.cpp
   src/job_json.cpp
+  src/operation_routes.cpp
   src/process_lifetime.cpp
   src/request_validation.cpp
   src/server.cpp
   src/state_lease.cpp
   src/telemetry.cpp
+  src/transport.cpp
   src/workspaces.cpp
   "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_contract.cpp"
 )
@@ -104,6 +111,17 @@ endif()
 axk_set_project_warnings(axk_server_adapter)
 axk_enable_sanitizers(axk_server_adapter)
 axk_enable_coverage(axk_server_adapter)
+
+include("${AXK_REPOSITORY_ROOT}/library/cmake/AxkHeaderSelfContainment.cmake")
+file(GLOB_RECURSE AXK_SERVER_PUBLIC_HEADERS CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/include/axklib/server/*.hpp")
+axk_add_header_self_containment_target(
+  axk_server_header_self_containment
+  CXX_STANDARD 23
+  HEADERS ${AXK_SERVER_PUBLIC_HEADERS}
+  INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  LINK_LIBRARIES axk_server_adapter
+)
 
 if(AXK_BUILD_FUZZERS)
   add_executable(
@@ -167,6 +185,7 @@ if(BUILD_TESTING)
     axk_server_tests
     tests/archive_download_budget_test.cpp
     tests/config_test.cpp
+    tests/download_reader_test.cpp
     tests/event_delivery_budget_test.cpp
     tests/event_dispatcher_test.cpp
     tests/event_tickets_test.cpp

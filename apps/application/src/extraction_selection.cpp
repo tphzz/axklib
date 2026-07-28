@@ -155,7 +155,8 @@ axk::app::ExactExportClosure axk::app::build_exact_export_closure(const Relation
                 row.quality != RelationshipQuality::known) {
                 const auto key = row.source_key + '\0' + row.type + '\0' + *row.target_key;
                 if (excluded_keys.insert(key).second)
-                    closure.excluded.push_back({row.source_key, *row.target_key, row.type});
+                    closure.excluded.push_back({row.source_key, *row.target_key, row.type, row.quality,
+                                                "exact export requires a Known relationship"});
                 continue;
             }
             if (active_program_assignment && row.quality == RelationshipQuality::known) {

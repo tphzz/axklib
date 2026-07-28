@@ -303,6 +303,12 @@ single export plan reuses a path only when the full digest and WAV bytes match;
 if distinct contents ever share the same shortened path, export fails clearly
 instead of overwriting or choosing an order-dependent name.
 
+Rendered stereo is a derived convenience artifact, not an exact physical
+representation. `--stereo auto` may zero-pad the shorter lane only when both
+lanes have confirmed relationships and matching sample rate and decoded width;
+the graph records that padding. Physical mono Wave Data remains byte-for-byte
+represented by the physical WAV outputs.
+
 Rendered stereo names come from sampler-facing Sample names when a known
 stereo relationship supplies a better musical label. For paired sibling `SBNK`
 stereo, terminal `-L` and `-R` are removed from the rendered stem, so

@@ -33,10 +33,22 @@ axk_set_project_warnings(axk_application)
 axk_enable_sanitizers(axk_application)
 axk_enable_coverage(axk_application)
 
+include("${AXK_REPOSITORY_ROOT}/library/cmake/AxkHeaderSelfContainment.cmake")
+file(GLOB_RECURSE AXK_APPLICATION_PUBLIC_HEADERS CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/include/axklib/application/*.hpp")
+axk_add_header_self_containment_target(
+  axk_application_header_self_containment
+  CXX_STANDARD 23
+  HEADERS ${AXK_APPLICATION_PUBLIC_HEADERS}
+  INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  LINK_LIBRARIES axklib::application
+)
+
 if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
   add_executable(axk_application_tests tests/alteration_journal_test.cpp tests/application_operations_test.cpp tests/audio_operations_test.cpp
+                                       tests/content_id_test.cpp
                                        tests/download_archives_test.cpp
                                        tests/extraction_operations_test.cpp tests/file_operations_test.cpp
                                        tests/filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp
@@ -46,6 +58,10 @@ if(BUILD_TESTING)
                                        tests/write_operations_test.cpp)
   target_compile_features(axk_application_tests PRIVATE cxx_std_23)
   target_compile_definitions(axk_application_tests PRIVATE AXK_SOURCE_ROOT="${AXK_REPOSITORY_ROOT}")
+  target_include_directories(
+    axk_application_tests
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${AXK_REPOSITORY_ROOT}/library/internal"
+  )
   target_link_libraries(
     axk_application_tests
     PRIVATE axklib::application GTest::gtest_main

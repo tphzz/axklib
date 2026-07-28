@@ -23,6 +23,11 @@
     import ServerStoragePicker from './lib/components/ServerStoragePicker.svelte';
     import WorkspaceManager from './lib/components/WorkspaceManager.svelte';
     import { AuditionController, type AuditionState } from './lib/audio/auditionController';
+    import { createConnectionActions } from './features/connection/actions';
+    import { PickerController, type PickerRequest, type PickerSelection } from './features/dialogs/picker';
+    import { exportSelectionLabel, imageSessionExportRoots } from './features/export/selection';
+    import { ImageSessionController } from './features/image-session/actions';
+    import { JobController } from './features/jobs/actions';
     import { inspectorSelectionStopsPlayback } from './lib/audio/playbackSelection';
     import { matchesSearch, playbackRowVisible } from './lib/auditionVisibility';
     import { createTransport } from './lib/createTransport';
@@ -33,13 +38,7 @@
         linkedWaveDataForSample,
         orderedSamplesForBank,
     } from './lib/sampleRelationships';
-    import {
-        configureRemoteServer,
-        remoteServerSettings,
-        useLocalServer,
-        type RemoteServerSettingsInput,
-        type RemoteServerSettingsView,
-    } from './lib/serverSettings';
+    import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
     import { audioExtensions, audioMediaType } from './lib/audioImport';
     import { browserUploadSource, type ClientUploadSource } from './lib/clientUploadSource';
     import { diagnosticsEnabled, reportDiagnostic, reportError } from './lib/diagnostics';
@@ -73,7 +72,6 @@
         ImageSessionAudioExportInspection,
         ImageSessionAudioExportResult,
         ImageSessionPackageExportResult,
-        ImageSessionExportRoot,
         ImageSessionPackageImportPlan,
         PackageInspection,
         ObjectRenameMutation,
@@ -121,22 +119,6 @@
 
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
-    type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source';
-    type PickerParentDialog = 'audio-import' | 'companion-disks' | 'package-import' | 'package-export' | 'audio-export';
-    type PickerSelection = ImageLocation | DirectoryLocation | FileLocation[];
-    interface PickerRequest {
-        mode: PickerMode;
-        title: string;
-        extensions: string[];
-        suggestedName: string;
-        multiple: boolean;
-        parentDialog?: PickerParentDialog;
-        requireWritableDirectory?: boolean;
-        initialDirectory?: DirectoryRef | null;
-        ondirectorychange?: (directory: DirectoryRef | null) => void;
-        resolve: (selection: PickerSelection | null) => void;
-    }
-
     interface LaneQueries {
         primary: string;
         secondary: string;
@@ -156,7 +138,6 @@
     let openSessionId = $state<number | null>(null);
     let companionDirectories = $state<DirectoryRef[]>([]);
     let imageOpening = $state(false);
-    let imageOpenGeneration = 0;
     let sourceStatus = $state('Ready');
     let sourceObjectCount = $state(0);
     let workspaceView = $state<WorkspaceView>('programs');
@@ -332,25 +313,38 @@
             pendingAuditionObjectId = '';
         }
     });
+    const connectionActions = createConnectionActions();
+    const jobController = new JobController(transport);
+    const pickerController = new PickerController((request) => {
+        pickerRequest = request;
+    });
+    const imageSessionController = new ImageSessionController(
+        transport,
+        (sessionId) => auditionController.invalidateSession(sessionId),
+        (snapshot) => {
+            openSessionId = snapshot.sessionId;
+            imageLocation = snapshot.location;
+            imageOpening = snapshot.opening;
+        },
+    );
 
     onDestroy(() => {
         stopInterfaceScaleSubscription?.();
         void interfaceScaling?.dispose();
-        ++imageOpenGeneration;
         ++packageOperationGeneration;
         ++audioExportGeneration;
-        const audioExportJobId = audioExportRequest?.jobId;
-        if (audioExportJobId !== null && audioExportJobId !== undefined) void transport.cancelJob(audioExportJobId);
         audioExportRequest = null;
         packageImportAbortController?.abort();
         packageImportAbortController = null;
+        pickerController.dispose();
         const packageRequest = packageImportRequest;
         packageImportRequest = null;
         if (packageRequest) void releasePackageImportResources(packageRequest);
-        const sessionId = openSessionId;
-        openSessionId = null;
-        void auditionController.dispose().catch(() => undefined);
-        if (sessionId !== null) void transport.closeImage(sessionId).catch(() => undefined);
+        void jobController.dispose();
+        void imageSessionController
+            .dispose()
+            .catch(() => undefined)
+            .finally(() => auditionController.dispose().catch(() => undefined));
     });
 
     function setInterfaceScale(mode: InterfaceScaleMode): void {
@@ -544,10 +538,12 @@
         sourceStatus = 'Importing audio';
         try {
             await auditionController.invalidateSession(sessionId);
-            const job = await transport.startAudioImport(sessionId, target, items);
-            const completed = await transport.waitForJob(job.jobId, (update) => {
-                if (update.progress?.label) sourceStatus = update.progress.label;
-            });
+            const completed = await jobController.run(
+                () => transport.startAudioImport(sessionId, target, items),
+                (update) => {
+                    if (update.progress?.label) sourceStatus = update.progress.label;
+                },
+            );
             if (completed.status !== 'completed') throw new Error(completed.error ?? 'Audio import did not complete');
             selectWorkspaceView('samples');
             await refreshOpenImageSession(target);
@@ -1232,10 +1228,12 @@
         sourceStatus = `Importing package into ${request.item.name}`;
         try {
             await auditionController.invalidateSession(sessionId);
-            const job = await transport.startImagePackageImport(request.plan.planToken);
-            const completed = await transport.waitForJob(job.jobId, (update) => {
-                if (update.progress?.label) sourceStatus = update.progress.label;
-            });
+            const completed = await jobController.run(
+                () => transport.startImagePackageImport(request.plan!.planToken),
+                (update) => {
+                    if (update.progress?.label) sourceStatus = update.progress.label;
+                },
+            );
             if (completed.status !== 'completed') {
                 throw new Error(completed.error ?? 'Package import did not complete');
             }
@@ -1269,18 +1267,6 @@
         sourceStatus = `Package export supports at most ${maximumPackageExportRoots.toLocaleString()} selected objects`;
     }
 
-    function exportRoots(items: PackageExportSelection[]): ImageSessionExportRoot[] {
-        return items.map((item) =>
-            item.kind === 'VOLUME'
-                ? {
-                      kind: 'VOLUME',
-                      partitionIndex: item.partitionIndex,
-                      volumeName: item.volumeName,
-                  }
-                : { kind: item.kind, objectId: item.objectId },
-        );
-    }
-
     async function runPackageExport(
         destination: PackageExportDestination,
         localDestination?: { candidateId: string },
@@ -1288,17 +1274,19 @@
         const request = packageExportRequest;
         if (!request || openSessionId === null) return;
         const sessionId = openSessionId;
-        const exportLabel = request.items.length === 1 ? request.items[0]!.name : `${request.items.length} objects`;
+        const exportLabel = exportSelectionLabel(request.items);
         packageExportRequest = { ...request, busy: true, progressLabel: 'Building package', error: '' };
         sourceStatus = `Exporting ${exportLabel}`;
         let retained: ImageSessionPackageExportResult['download'] = null;
         try {
-            const job = await transport.startImagePackageExport(sessionId, exportRoots(request.items), destination);
-            const completed = await transport.waitForJob(job.jobId, (update) => {
-                if (packageExportRequest && update.progress?.label) {
-                    packageExportRequest = { ...packageExportRequest, progressLabel: update.progress.label };
-                }
-            });
+            const completed = await jobController.run(
+                () => transport.startImagePackageExport(sessionId, imageSessionExportRoots(request.items), destination),
+                (update) => {
+                    if (packageExportRequest && update.progress?.label) {
+                        packageExportRequest = { ...packageExportRequest, progressLabel: update.progress.label };
+                    }
+                },
+            );
             if (completed.status !== 'completed') {
                 if (completed.errorCode === 'companion_disks_required') {
                     packageExportRequest = {
@@ -1394,7 +1382,7 @@
             error: '',
         };
         try {
-            const inspection = await transport.inspectImageAudioExport(sessionId, exportRoots(items));
+            const inspection = await transport.inspectImageAudioExport(sessionId, imageSessionExportRoots(items));
             if (generation !== audioExportGeneration || openSessionId !== sessionId || !audioExportRequest) return;
             audioExportRequest = {
                 ...audioExportRequest,
@@ -1419,7 +1407,7 @@
         if (!request || !request.inspection || openSessionId === null || request.busy) return;
         const sessionId = openSessionId;
         const generation = audioExportGeneration;
-        const label = request.items.length === 1 ? request.items[0]!.name : `${request.items.length} objects`;
+        const label = exportSelectionLabel(request.items);
         audioExportRequest = {
             ...request,
             format,
@@ -1431,22 +1419,27 @@
         sourceStatus = `Exporting audio from ${label}`;
         let retained: ImageSessionAudioExportResult['download'] = null;
         try {
-            const job = await transport.startImageAudioExport(
-                sessionId,
-                exportRoots(request.items),
-                format,
-                destination,
+            const completed = await jobController.run(
+                () =>
+                    transport.startImageAudioExport(
+                        sessionId,
+                        imageSessionExportRoots(request.items),
+                        format,
+                        destination,
+                    ),
+                (update) => {
+                    if (generation === audioExportGeneration && audioExportRequest && update.progress?.label) {
+                        audioExportRequest = { ...audioExportRequest, progressLabel: update.progress.label };
+                    }
+                },
+                async (job) => {
+                    if (generation !== audioExportGeneration || !audioExportRequest) {
+                        await jobController.cancel(job.jobId).catch(() => undefined);
+                        throw new Error('Audio export was superseded');
+                    }
+                    audioExportRequest = { ...audioExportRequest, jobId: job.jobId };
+                },
             );
-            if (generation !== audioExportGeneration || !audioExportRequest) {
-                await transport.cancelJob(job.jobId).catch(() => undefined);
-                return;
-            }
-            audioExportRequest = { ...audioExportRequest, jobId: job.jobId };
-            const completed = await transport.waitForJob(job.jobId, (update) => {
-                if (generation === audioExportGeneration && audioExportRequest && update.progress?.label) {
-                    audioExportRequest = { ...audioExportRequest, progressLabel: update.progress.label };
-                }
-            });
             if (completed.status === 'cancelled') {
                 if (generation === audioExportGeneration) audioExportRequest = null;
                 sourceStatus = 'Audio export cancelled';
@@ -1549,7 +1542,7 @@
                 return;
             }
             audioExportRequest = { ...request, progressLabel: 'Cancelling audio export' };
-            void transport.cancelJob(request.jobId);
+            void jobController.cancel(request.jobId);
             return;
         }
         ++audioExportGeneration;
@@ -1752,14 +1745,17 @@
                 sourceStatus = 'Deletion impact changed; review before confirming again';
                 return;
             }
-            const job = await transport.startObjectDeletion(
-                sessionId,
-                request.targets.map((target) => target.objectId),
-                request.cleanupObjectIds,
+            const completed = await jobController.run(
+                () =>
+                    transport.startObjectDeletion(
+                        sessionId,
+                        request.targets.map((target) => target.objectId),
+                        request.cleanupObjectIds,
+                    ),
+                (update) => {
+                    if (update.progress?.label) sourceStatus = update.progress.label;
+                },
             );
-            const completed = await transport.waitForJob(job.jobId, (update) => {
-                if (update.progress?.label) sourceStatus = update.progress.label;
-            });
             if (completed.status !== 'completed') {
                 throw new Error(completed.error ?? 'Object deletion did not complete');
             }
@@ -1964,10 +1960,12 @@
                 sourceStatus = 'Wave Data cleanup requires another review';
                 return;
             }
-            const job = await transport.startObjectDeletion(sessionId, selectedIds, []);
-            const completed = await transport.waitForJob(job.jobId, (update) => {
-                if (update.progress?.label) sourceStatus = update.progress.label;
-            });
+            const completed = await jobController.run(
+                () => transport.startObjectDeletion(sessionId, selectedIds, []),
+                (update) => {
+                    if (update.progress?.label) sourceStatus = update.progress.label;
+                },
+            );
             if (completed.status !== 'completed')
                 throw new Error(completed.error ?? 'Wave Data cleanup did not complete');
             await refreshOpenImageSession(preferred);
@@ -2039,12 +2037,15 @@
         const started = performance.now();
         try {
             await auditionController.invalidateSession(sessionId);
-            const job = partitionMutation
-                ? await transport.startPartitionMutation(sessionId, partitionMutation)
-                : await transport.startVolumeMutation(sessionId, volumeMutation!);
-            const completed = await transport.waitForJob(job.jobId, (update) => {
-                if (update.progress?.label) sourceStatus = update.progress.label;
-            });
+            const completed = await jobController.run(
+                () =>
+                    partitionMutation
+                        ? transport.startPartitionMutation(sessionId, partitionMutation)
+                        : transport.startVolumeMutation(sessionId, volumeMutation!),
+                (update) => {
+                    if (update.progress?.label) sourceStatus = update.progress.label;
+                },
+            );
             if (completed.status !== 'completed') {
                 throw new Error(completed.error ?? 'Image change did not complete');
             }
@@ -2171,10 +2172,12 @@
         sourceStatus = `Renaming ${target.name}`;
         try {
             await auditionController.invalidateSession(sessionId);
-            const job = await transport.startObjectRename(sessionId, objectRenameMutation(target, name));
-            const completed = await transport.waitForJob(job.jobId, (update) => {
-                if (update.progress?.label) sourceStatus = update.progress.label;
-            });
+            const completed = await jobController.run(
+                () => transport.startObjectRename(sessionId, objectRenameMutation(target, name)),
+                (update) => {
+                    if (update.progress?.label) sourceStatus = update.progress.label;
+                },
+            );
             if (completed.status !== 'completed') {
                 throw new Error(completed.error ?? 'Object rename did not complete');
             }
@@ -2590,42 +2593,13 @@
         location: ImageLocation,
         preferred?: { partitionIndex: number; volumeName?: string },
     ): Promise<void> {
-        const generation = ++imageOpenGeneration;
-        const previousSessionId = openSessionId;
-        let candidateSessionId: number | null = null;
-        imageOpening = true;
         sourceStatus = 'Opening image';
         try {
-            const opened = await transport.openImage(location);
-            candidateSessionId = opened.sessionId;
-            if (generation !== imageOpenGeneration) {
-                await transport.closeImage(opened.sessionId);
-                candidateSessionId = null;
-                return;
-            }
-
-            if (previousSessionId !== null) {
-                await auditionController.invalidateSession(previousSessionId);
-                await transport.closeImage(previousSessionId);
-            }
-            if (generation !== imageOpenGeneration) {
-                await transport.closeImage(opened.sessionId);
-                candidateSessionId = null;
-                return;
-            }
-
-            imageLocation = location;
-            openSessionId = opened.sessionId;
-            candidateSessionId = null;
+            const opened = await imageSessionController.open(location);
+            if (!opened) return;
             await applyOpenedImage(opened, preferred);
         } catch (error) {
-            if (generation !== imageOpenGeneration) return;
-            if (candidateSessionId !== null) {
-                await transport.closeImage(candidateSessionId).catch(() => undefined);
-            }
             sourceStatus = userFacingMessage(error);
-        } finally {
-            if (generation === imageOpenGeneration) imageOpening = false;
         }
     }
 
@@ -2635,9 +2609,8 @@
 
     async function refreshOpenImageSession(preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
         if (openSessionId === null) throw new Error('Image session is no longer available');
-        const sessionId = openSessionId;
-        const opened = await transport.refreshImage(sessionId);
-        if (openSessionId !== sessionId) return;
+        const opened = await imageSessionController.refresh();
+        if (!opened) return;
         await applyOpenedImage(opened, preferred);
     }
 
@@ -2735,7 +2708,6 @@
 
     async function closeOpenImageSession(): Promise<void> {
         if (openSessionId === null) return;
-        const sessionId = openSessionId;
         const packageRequest = packageImportRequest;
         ++packageOperationGeneration;
         packageImportAbortController?.abort();
@@ -2746,10 +2718,8 @@
         audioExportRequest = null;
         companionDiskRequest = null;
         if (packageRequest) await releasePackageImportResources(packageRequest);
-        await auditionController.invalidateSession(sessionId);
-        await transport.closeImage(sessionId);
+        await imageSessionController.close();
         clearPackageExportSelection();
-        openSessionId = null;
         companionDirectories = [];
         pendingAuditionObjectId = '';
         volumeMutationsAvailable = false;
@@ -2769,12 +2739,9 @@
 
     async function closeImage(): Promise<void> {
         if (!imageLocation && openSessionId === null) return;
-        ++imageOpenGeneration;
-        imageOpening = false;
         sourceStatus = 'Closing image';
         try {
             await closeOpenImageSession();
-            imageLocation = null;
             sourceItems = [];
             selectedSource = { id: 'none', name: 'No image', kind: 'disk', childCount: 0 };
             clearVolume();
@@ -2820,7 +2787,7 @@
     }
 
     function chooseServerLocation(
-        mode: PickerMode,
+        mode: PickerRequest['mode'],
         title: string,
         extensions: string[] = [],
         suggestedName = '',
@@ -2829,18 +2796,7 @@
             'parentDialog' | 'initialDirectory' | 'ondirectorychange' | 'requireWritableDirectory'
         >,
     ): Promise<ImageLocation | DirectoryLocation | null> {
-        return new Promise((resolve) => {
-            pickerRequest?.resolve(null);
-            pickerRequest = {
-                mode,
-                title,
-                extensions,
-                suggestedName,
-                multiple: false,
-                ...navigation,
-                resolve: (selection) => resolve(Array.isArray(selection) ? null : selection),
-            };
-        });
+        return pickerController.chooseLocation(mode, title, extensions, suggestedName, navigation);
     }
 
     function chooseServerFiles(
@@ -2851,24 +2807,11 @@
             'parentDialog' | 'initialDirectory' | 'ondirectorychange' | 'requireWritableDirectory'
         >,
     ): Promise<FileLocation[] | null> {
-        return new Promise((resolve) => {
-            pickerRequest?.resolve(null);
-            pickerRequest = {
-                mode: 'file',
-                title,
-                extensions,
-                suggestedName: '',
-                multiple: true,
-                ...navigation,
-                resolve: (selection) => resolve(Array.isArray(selection) ? selection : null),
-            };
-        });
+        return pickerController.chooseFiles(title, extensions, navigation);
     }
 
     function finishPicker(selection: PickerSelection | null): void {
-        const request = pickerRequest;
-        pickerRequest = null;
-        request?.resolve(selection);
+        pickerController.finish(selection);
     }
 
     function finishHardDiskCreation(file: FileLocation): void {
@@ -2878,20 +2821,18 @@
 
     async function openConnectionSettings(): Promise<void> {
         try {
-            connectionSettings = await remoteServerSettings();
+            connectionSettings = await connectionActions.load();
         } catch (error) {
             sourceStatus = userFacingMessage(error);
         }
     }
 
     async function saveRemoteConnection(input: RemoteServerSettingsInput): Promise<void> {
-        await configureRemoteServer(input);
-        window.location.reload();
+        await connectionActions.saveRemote(input);
     }
 
     async function switchToLocalConnection(): Promise<void> {
-        await useLocalServer();
-        window.location.reload();
+        await connectionActions.useLocal();
     }
 </script>
 

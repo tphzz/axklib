@@ -11,6 +11,7 @@
 
 #include "axklib/error.hpp"
 #include "axklib/io.hpp"
+#include "axklib/publication.hpp"
 
 namespace axk {
 
@@ -188,6 +189,7 @@ struct WrittenImageLayout {
     std::uint64_t size_bytes{};
     std::vector<WrittenPartitionLayout> partitions;
     std::uint64_t unused_tail_sectors{};
+    PublicationOutcome publication;
 };
 
 struct WrittenMediaImage {
@@ -195,6 +197,7 @@ struct WrittenMediaImage {
     MediaImageFormat format{MediaImageFormat::fat12_floppy};
     std::uint64_t size_bytes{};
     std::size_t object_count{};
+    PublicationOutcome publication;
 };
 
 struct HdsBuildPlanSummary {
@@ -249,7 +252,7 @@ AXK_AUDIO_API Result<MediaBuildManifest> parse_media_build_manifest(std::string_
                                                                     const std::filesystem::path &base_directory = {});
 AXK_AUDIO_API Result<MediaBuildManifest> load_media_build_manifest(const std::filesystem::path &path);
 AXK_AUDIO_API Result<std::string> serialize_build_manifest_template(BuildManifestKind kind);
-AXK_AUDIO_API Result<void>
+AXK_AUDIO_API Result<PublicationOutcome>
 write_build_manifest_template(BuildManifestKind kind, const std::filesystem::path &output_path, bool overwrite = false);
 AXK_AUDIO_API Result<std::vector<PartitionGeometry>> plan_hds_geometry(const HdsBuildManifest &manifest);
 AXK_AUDIO_API std::string_view hds_creation_profile_id(HdsCreationProfileId id);

@@ -88,6 +88,7 @@ nav:
       - CD-ROM Images: axklib/cdrom.md
       - Sampler Data Structures: axklib/sampler-data.md
   - Output Contracts:
+      - Current Contract Index: axklib/current-contracts.md
       - Names, Paths, And Exports: axklib/names-and-paths.md
       - SFZ Export: axklib/sfz.md
       - Report Schemas: axklib/report-schemas.md

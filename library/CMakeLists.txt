@@ -216,6 +216,19 @@ axk_set_project_warnings(axk_audio)
 axk_enable_sanitizers(axk_audio)
 axk_enable_coverage(axk_audio)
 
+include(cmake/AxkHeaderSelfContainment.cmake)
+file(GLOB_RECURSE AXK_LIBRARY_PUBLIC_HEADERS CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/include/axklib/*.hpp")
+axk_add_header_self_containment_target(
+  axk_library_header_self_containment
+  CXX_STANDARD 23
+  HEADERS ${AXK_LIBRARY_PUBLIC_HEADERS}
+  INCLUDE_DIRECTORIES
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/include"
+  LINK_LIBRARIES axklib::audio
+)
+
 if(AXK_BUILD_SHARED_SDK)
   add_library(axklib_shared SHARED src/sdk.cpp)
   add_library(axklib::axklib ALIAS axklib_shared)

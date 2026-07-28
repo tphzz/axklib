@@ -209,7 +209,7 @@ Result<std::string> sfz_region(const SampleExport &sample, const PhysicalWavefor
     return line;
 }
 
-Result<void> write_text_atomic(const std::filesystem::path &path, std::string_view text, bool overwrite) {
+Result<PublicationOutcome> write_text_atomic(const std::filesystem::path &path, std::string_view text, bool overwrite) {
     if (!overwrite && std::filesystem::exists(path)) {
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "refusing to replace an existing SFZ")};
@@ -220,16 +220,21 @@ Result<void> write_text_atomic(const std::filesystem::path &path, std::string_vi
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create SFZ output directory")};
     }
-    const auto temporary = detail::write_temporary_file(path, [&](const detail::TemporaryFileSink &sink) {
+    auto temporary = detail::TemporaryPublication::create(path, [&](const detail::TemporaryFileSink &sink) {
         return sink(std::as_bytes(std::span{text.data(), text.size()}));
     });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    if (const auto published = detail::publish_temporary_file(*temporary, path, overwrite); !published) {
-        detail::discard_temporary_file(*temporary);
+    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
+    auto published = temporary->publish(mode);
+    if (!published)
         return std::unexpected{published.error()};
-    }
-    return {};
+    return std::move(*published);
+}
+
+void append_publication_warnings(std::vector<std::string> &destination, const PublicationOutcome &publication) {
+    for (const auto &warning : publication.warnings)
+        destination.push_back(warning.code + ": " + warning.message);
 }
 
 using VolumeKey = std::pair<std::uint8_t, std::uint32_t>;
@@ -705,8 +710,10 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
     for (const auto &[path, source] : targets) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
-        if (const auto written = audio_internal::write_wav_atomic(path, source, overwrite, cancellation); !written)
+        const auto written = audio_internal::write_wav_atomic(path, source, overwrite, cancellation);
+        if (!written)
             return std::unexpected{written.error()};
+        append_publication_warnings(result.warnings, *written);
         result.written_files.push_back(path);
     }
     return result;
@@ -825,9 +832,11 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
                 text += '\n';
             if (region_count == 0U)
                 return {};
-            if (const auto written = write_text_atomic(path, text, overwrite); !written) {
+            const auto written = write_text_atomic(path, text, overwrite);
+            if (!written) {
                 return std::unexpected{written.error()};
             }
+            append_publication_warnings(result.warnings, *written);
             result.written_files.push_back(path);
             return {};
         };

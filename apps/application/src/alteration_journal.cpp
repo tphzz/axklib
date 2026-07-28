@@ -195,22 +195,16 @@ axk::app::Result<Journal> decode_journal(std::span<const std::byte> bytes, std::
     return journal;
 }
 
-axk::app::Result<void> write_file(const std::filesystem::path &path, std::span<const std::byte> bytes) {
-    std::ofstream output{path, std::ios::binary | std::ios::trunc};
-    if (!output)
-        return std::unexpected(journal_error("alteration journal cannot be opened"));
-    output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    output.close();
-    if (!output)
-        return std::unexpected(journal_error("alteration journal cannot be written"));
-    const auto flushed = axk::detail::flush_file_to_disk(path);
-    if (!flushed)
-        return std::unexpected(journal_error(flushed.error().message));
-    return {};
-}
-
-axk::app::Result<void> write_text_file(const std::filesystem::path &path, std::string_view value) {
-    return write_file(path, std::as_bytes(std::span{value}));
+axk::app::Result<axk::PublicationOutcome> publish_file(const std::filesystem::path &path,
+                                                       std::span<const std::byte> bytes) {
+    auto publication = axk::detail::TemporaryPublication::create(
+        path, [&](const axk::detail::TemporaryFileSink &sink) { return sink(bytes); });
+    if (!publication)
+        return std::unexpected(journal_error(publication.error().message));
+    auto published = publication->publish(axk::detail::PublicationMode::create_only);
+    if (!published)
+        return std::unexpected(journal_error(published.error().message));
+    return std::move(*published);
 }
 
 axk::app::Result<std::vector<std::byte>> read_file(const std::filesystem::path &path, std::size_t maximum_bytes) {
@@ -241,27 +235,6 @@ std::filesystem::path commit_marker_path(const std::filesystem::path &path) {
     auto marker = path;
     marker += ".commit";
     return marker;
-}
-
-axk::app::Result<void> publish_journal(const std::filesystem::path &temporary, const std::filesystem::path &path) {
-#if defined(_WIN32)
-    if (MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_WRITE_THROUGH) == 0)
-        return std::unexpected(journal_error("alteration journal cannot be committed"));
-#else
-    if (::rename(temporary.c_str(), path.c_str()) != 0)
-        return std::unexpected(journal_error("alteration journal cannot be committed"));
-    const auto directory = ::open(path.parent_path().c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY);
-    if (directory < 0)
-        return std::unexpected(journal_error("alteration journal directory cannot be synchronized"));
-    const auto synchronized = ::fsync(directory);
-    const auto sync_error = errno;
-    const auto closed = ::close(directory);
-    if (synchronized != 0 || closed != 0) {
-        errno = sync_error;
-        return std::unexpected(journal_error("alteration journal directory cannot be synchronized"));
-    }
-#endif
-    return {};
 }
 
 axk::app::Result<void> remove_file(const std::filesystem::path &path, std::string_view description) {
@@ -347,22 +320,15 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
     auto identifier = secure_random_hex(16U);
     if (!identifier)
         return std::unexpected(identifier.error());
-    const auto temporary = directory_ / ("alteration-" + *identifier + ".tmp");
     const auto path = directory_ / ("alteration-" + *identifier + ".axkjournal");
-    if (auto created = detail::create_private_file(temporary); !created)
-        return std::unexpected(created.error());
-    if (auto written = write_file(temporary, *encoded); !written) {
-        std::error_code ignored;
-        std::filesystem::remove(temporary, ignored);
-        return written;
-    }
-    if (auto published = publish_journal(temporary, path); !published) {
-        std::error_code filesystem_error;
-        std::filesystem::remove(temporary, filesystem_error);
-        return published;
-    }
-
     const auto quarantine = [&] { storage_ready_.store(false, std::memory_order_relaxed); };
+    auto journal_publication = publish_file(path, *encoded);
+    if (!journal_publication)
+        return std::unexpected{journal_publication.error()};
+    if (journal_publication->durability != axk::PublicationDurability::confirmed) {
+        quarantine();
+        return std::unexpected(journal_error("alteration journal durability could not be confirmed", true));
+    }
     const auto rollback = [&]() -> Result<void> {
         for (const auto &patch : std::views::reverse(patches)) {
             if (auto written = target->write_exact_at(patch.offset, patch.original); !written)
@@ -457,16 +423,15 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
         }
     }
     const auto marker = commit_marker_path(path);
-    if (auto created = detail::create_private_file(marker); !created) {
-        if (auto recovered = rollback_and_remove(true); !recovered)
-            return recovered;
-        return std::unexpected(created.error());
-    }
     const auto journal_checksum = checksum(*encoded);
-    if (auto written = write_text_file(marker, journal_checksum); !written) {
+    auto marker_publication =
+        publish_file(marker, std::as_bytes(std::span{journal_checksum.data(), journal_checksum.size()}));
+    if (!marker_publication || marker_publication->durability != axk::PublicationDurability::confirmed) {
         if (auto recovered = rollback_and_remove(true); !recovered)
             return recovered;
-        return written;
+        if (!marker_publication)
+            return std::unexpected{marker_publication.error()};
+        return std::unexpected(journal_error("alteration commit marker durability could not be confirmed", true));
     }
     if (interruption_hook_ && interruption_hook_("after-commit-marker", patches.size())) {
         quarantine();

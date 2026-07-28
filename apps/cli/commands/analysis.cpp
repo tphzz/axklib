@@ -14,7 +14,6 @@
 #include <string>
 #include <type_traits>
 
-#include "content_id.hpp"
 #include "handlers.hpp"
 #include "local_operations.hpp"
 #include "requests.hpp"

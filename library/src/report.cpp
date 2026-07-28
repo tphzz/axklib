@@ -141,7 +141,7 @@ std::string csv_field(std::string value) {
     return escaped;
 }
 
-Result<void> write_atomic(const std::filesystem::path &path, std::string_view text, bool overwrite) {
+Result<PublicationOutcome> write_atomic(const std::filesystem::path &path, std::string_view text, bool overwrite) {
     std::error_code error;
     if (!overwrite && std::filesystem::exists(path, error)) {
         return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
@@ -153,16 +153,16 @@ Result<void> write_atomic(const std::filesystem::path &path, std::string_view te
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create report output directory")};
     }
-    const auto temporary = detail::write_temporary_file(path, [&](const detail::TemporaryFileSink &sink) {
+    auto temporary = detail::TemporaryPublication::create(path, [&](const detail::TemporaryFileSink &sink) {
         return sink(std::as_bytes(std::span{text.data(), text.size()}));
     });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    if (const auto published = detail::publish_temporary_file(*temporary, path, overwrite); !published) {
-        detail::discard_temporary_file(*temporary);
+    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
+    auto published = temporary->publish(mode);
+    if (!published)
         return std::unexpected{published.error()};
-    }
-    return {};
+    return std::move(*published);
 }
 
 std::string semantic_notes(std::string_view name) {
@@ -318,7 +318,8 @@ ReportSchemaManifest make_report_schema(std::string report_name, std::span<const
     return result;
 }
 
-Result<void> write_report_json(const std::filesystem::path &path, std::span<const ReportRow> rows, bool overwrite) {
+Result<PublicationOutcome> write_report_json(const std::filesystem::path &path, std::span<const ReportRow> rows,
+                                             bool overwrite) {
     try {
         auto value = OrderedJson::array();
         for (const auto &row : rows)
@@ -329,7 +330,8 @@ Result<void> write_report_json(const std::filesystem::path &path, std::span<cons
     }
 }
 
-Result<void> write_report_object(const std::filesystem::path &path, const ReportRow &row, bool overwrite) {
+Result<PublicationOutcome> write_report_object(const std::filesystem::path &path, const ReportRow &row,
+                                               bool overwrite) {
     try {
         return write_atomic(path, json_row(row).dump(2) + "\n", overwrite);
     } catch (const nlohmann::json::exception &error) {
@@ -337,8 +339,8 @@ Result<void> write_report_object(const std::filesystem::path &path, const Report
     }
 }
 
-Result<void> write_report_csv(const std::filesystem::path &path, std::span<const ReportRow> rows,
-                              std::span<const std::string> empty_columns, bool overwrite) {
+Result<PublicationOutcome> write_report_csv(const std::filesystem::path &path, std::span<const ReportRow> rows,
+                                            std::span<const std::string> empty_columns, bool overwrite) {
     std::vector<std::string> columns;
     if (!rows.empty()) {
         for (const auto &[name, value] : rows.front()) {
@@ -378,8 +380,8 @@ Result<void> write_report_csv(const std::filesystem::path &path, std::span<const
     return write_atomic(path, output.str(), overwrite);
 }
 
-Result<void> write_report_schema(const std::filesystem::path &path, const ReportSchemaManifest &manifest,
-                                 bool overwrite) {
+Result<PublicationOutcome> write_report_schema(const std::filesystem::path &path, const ReportSchemaManifest &manifest,
+                                               bool overwrite) {
     try {
         return write_atomic(path, schema_json(manifest).dump(2) + "\n", overwrite);
     } catch (const nlohmann::json::exception &error) {
@@ -387,8 +389,8 @@ Result<void> write_report_schema(const std::filesystem::path &path, const Report
     }
 }
 
-Result<void> write_report_schema_index(const std::filesystem::path &path,
-                                       std::span<const ReportSchemaManifest> manifests, bool overwrite) {
+Result<PublicationOutcome> write_report_schema_index(const std::filesystem::path &path,
+                                                     std::span<const ReportSchemaManifest> manifests, bool overwrite) {
     try {
         auto reports = OrderedJson::array();
         for (const auto &manifest : manifests) {

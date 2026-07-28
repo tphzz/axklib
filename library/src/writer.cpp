@@ -573,8 +573,8 @@ Result<std::string> serialize_build_manifest_template(BuildManifestKind kind) {
     }
 }
 
-Result<void> write_build_manifest_template(BuildManifestKind kind, const std::filesystem::path &output_path,
-                                           bool overwrite) {
+Result<PublicationOutcome> write_build_manifest_template(BuildManifestKind kind,
+                                                         const std::filesystem::path &output_path, bool overwrite) {
     auto serialized = serialize_build_manifest_template(kind);
     if (!serialized)
         return std::unexpected{serialized.error()};
@@ -595,16 +595,16 @@ Result<void> write_build_manifest_template(BuildManifestKind kind, const std::fi
         return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                           "could not create build manifest output directory")};
     }
-    auto temporary = detail::write_temporary_file(output_path, [&](const detail::TemporaryFileSink &sink) {
+    auto temporary = detail::TemporaryPublication::create(output_path, [&](const detail::TemporaryFileSink &sink) {
         return sink(std::as_bytes(std::span{serialized->data(), serialized->size()}));
     });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    if (const auto published = detail::publish_temporary_file(*temporary, output_path, overwrite); !published) {
-        detail::discard_temporary_file(*temporary);
+    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
+    auto published = temporary->publish(mode);
+    if (!published)
         return std::unexpected{published.error()};
-    }
-    return {};
+    return std::move(*published);
 }
 
 Result<std::vector<PartitionGeometry>> plan_hds_geometry(const HdsBuildManifest &manifest) {

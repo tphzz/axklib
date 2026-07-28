@@ -31,13 +31,13 @@
 #include <nlohmann/json.hpp>
 
 #include "archive_download_budget.hpp"
+#include "authentication.hpp"
 #include "axklib/application/alteration_journal.hpp"
 #include "axklib/application/application_operations.hpp"
 #include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/jobs.hpp"
 #include "axklib/application/uploads.hpp"
-#include "axklib/package_archive.hpp"
 #include "axklib/server/event_delivery_budget.hpp"
 #include "axklib/server/event_dispatcher.hpp"
 #include "axklib/server/event_tickets.hpp"
@@ -50,8 +50,11 @@
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 #include "axklib/writer.hpp"
+#include "download_reader.hpp"
 #include "environment.hpp"
 #include "http_headers.hpp"
+#include "route_registration.hpp"
+#include "transport.hpp"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -75,11 +78,10 @@ constexpr std::size_t maximum_cursor_length = 512U;
 
 constexpr std::string_view event_subprotocol{"axklib.events.v1"};
 
-void write_structured_log(std::string line) {
-    static std::mutex mutex;
-    const std::scoped_lock lock{mutex};
-    std::clog << line << '\n';
-}
+using axk::server::detail::CorsMiddleware;
+using axk::server::detail::request_id;
+using axk::server::detail::RequestTelemetryMiddleware;
+using axk::server::detail::write_structured_log;
 
 std::function<void(const Json &)> operation_diagnostic_sink() {
     static const bool enabled = [] {
@@ -333,122 +335,6 @@ class ScopedConnectionFile {
 #endif
     bool published_{};
 };
-
-struct CorsMiddleware {
-    struct context {};
-
-    std::vector<std::string> allowed_origins;
-
-    void before_handle(crow::request &request, crow::response &response, context &) {
-        if (request.method != crow::HTTPMethod::Options)
-            return;
-        const auto origin = request.get_header_value("Origin");
-        response.code =
-            !origin.empty() && std::ranges::find(allowed_origins, origin) != allowed_origins.end() ? 204 : 403;
-        response.end();
-    }
-
-    void after_handle(crow::request &request, crow::response &response, context &) {
-        const auto origin = request.get_header_value("Origin");
-        const auto allowed = !origin.empty() && std::ranges::find(allowed_origins, origin) != allowed_origins.end();
-        if (request.method == crow::HTTPMethod::Options && !allowed) {
-            response.code = 403;
-            return;
-        }
-        if (allowed) {
-            response.set_header("Access-Control-Allow-Origin", origin);
-            response.set_header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers");
-            response.set_header("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
-            response.set_header("Access-Control-Allow-Headers",
-                                "Authorization, Content-Type, Idempotency-Key, If-Match, Range, X-Request-Id, "
-                                "Upload-Offset");
-            response.set_header("Access-Control-Expose-Headers",
-                                "Accept-Ranges, Content-Length, Content-Range, ETag, Location, Upload-Offset, "
-                                "X-Request-Id");
-            if (request.method == crow::HTTPMethod::Options)
-                response.set_header("Access-Control-Max-Age", "600");
-        }
-    }
-};
-
-struct RouteKey {
-    axk::app::HttpMethod method;
-    std::string route;
-
-    friend bool operator<(const RouteKey &left, const RouteKey &right) {
-        if (left.route != right.route)
-            return left.route < right.route;
-        return left.method < right.method;
-    }
-};
-
-std::string next_request_id() {
-    static std::atomic<std::uint64_t> sequence{1U};
-    return "request-" + std::to_string(sequence.fetch_add(1U, std::memory_order_relaxed));
-}
-
-bool valid_request_id(std::string_view value) {
-    return !value.empty() && value.size() <= 96U && std::ranges::all_of(value, [](unsigned char character) {
-        return std::isalnum(character) != 0 || character == '-' || character == '_' || character == '.';
-    });
-}
-
-std::string request_id(const crow::request &request) {
-    const auto supplied = request.get_header_value("X-Request-Id");
-    return valid_request_id(supplied) ? supplied : next_request_id();
-}
-
-struct RequestTelemetryMiddleware {
-    struct context {
-        std::chrono::steady_clock::time_point started;
-        bool begun{};
-    };
-
-    axk::server::RequestTelemetry *telemetry{};
-
-    void before_handle(crow::request &, crow::response &, context &request_context) const {
-        request_context.started = std::chrono::steady_clock::now();
-        request_context.begun = true;
-        if (telemetry != nullptr)
-            telemetry->begin_request();
-    }
-
-    void after_handle(crow::request &request, crow::response &response, context &request_context) const {
-        if (telemetry == nullptr)
-            return;
-        if (!request_context.begun) {
-            request_context.started = std::chrono::steady_clock::now();
-            request_context.begun = true;
-            telemetry->begin_request();
-        }
-        const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
-                                                                                    request_context.started);
-        telemetry->complete_request(response.code, duration);
-        auto id = response.get_header_value("X-Request-Id");
-        if (id.empty()) {
-            id = request_id(request);
-            response.set_header("X-Request-Id", id);
-        }
-        write_structured_log(axk::server::structured_request_log(id, crow::method_name(request.method), request.url,
-                                                                 response.code, duration));
-    }
-};
-
-bool constant_time_equal(std::string_view left, std::string_view right) {
-    const auto size = std::max(left.size(), right.size());
-    std::size_t difference = left.size() ^ right.size();
-    for (std::size_t index = 0; index < size; ++index) {
-        const auto left_byte = index < left.size() ? static_cast<unsigned char>(left[index]) : 0U;
-        const auto right_byte = index < right.size() ? static_cast<unsigned char>(right[index]) : 0U;
-        difference |= left_byte ^ right_byte;
-    }
-    return difference == 0U;
-}
-
-std::string token_digest(std::string_view token) {
-    return axk::package_internal::hex_digest(
-        axk::package_internal::sha256(std::as_bytes(std::span{token.data(), token.size()})));
-}
 
 crow::response json_response(int status, const Json &body, std::string_view request_id_value) {
     crow::response response{status, "application/json", body.dump()};
@@ -830,26 +716,13 @@ class ServerApplication {
     }
 
     std::optional<std::string> authenticated_principal(const crow::request &request) const {
-        constexpr std::string_view prefix{"Bearer "};
-        const auto header = request.get_header_value("Authorization");
-        if (!header.starts_with(prefix))
-            return std::nullopt;
-        const auto token = std::string_view{header}.substr(prefix.size());
-        if (!config_.bearer_token.empty() && constant_time_equal(token, config_.bearer_token))
-            return "loopback";
-        const auto digest = token_digest(token);
-        for (const auto &configured : config_.token_hashes) {
-            if (constant_time_equal(digest, configured.sha256))
-                return configured.principal_id;
-        }
-        return std::nullopt;
+        return axk::server::detail::authenticated_principal(config_, request);
     }
 
     std::string request_owner(const crow::request &request) const { return *authenticated_principal(request); }
 
     bool origin_allowed(const crow::request &request) const {
-        const auto origin = request.get_header_value("Origin");
-        return origin.empty() || std::ranges::find(config_.allowed_origins, origin) != config_.allowed_origins.end();
+        return axk::server::detail::origin_allowed(config_, request);
     }
 
     void audit(std::string_view id, std::string_view action, std::string_view outcome,
@@ -1937,12 +1810,12 @@ class ServerApplication {
                                                      std::to_string(range->offset + range->length - 1U) + "/" +
                                                      std::to_string(size));
         }
-        std::vector<std::byte> bytes(static_cast<std::size_t>(length));
-        if (const auto read = file->reader->read_exact_at(offset, bytes); !read)
-            return error_response(422, {"file_unavailable", "sandbox file content cannot be read"}, id);
-        if (const auto unchanged = file->verify_unchanged(); !unchanged)
-            return error_response(409, unchanged.error(), id);
-        response.body.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        const auto bytes = axk::server::detail::read_verified_download(*file, offset, length);
+        if (!bytes) {
+            const auto status = bytes.error().code == "archive_source_changed" ? 409 : 422;
+            return error_response(status, bytes.error(), id);
+        }
+        response.body.assign(reinterpret_cast<const char *>(bytes->data()), bytes->size());
         set_common_headers();
         audit(id, "file_download", "allowed", request_owner(request), "root", root_id);
         return response;
@@ -2174,299 +2047,270 @@ class ServerApplication {
         }
     }
 
+    crow::response health_ready_response(const crow::request &request) {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        const auto executor_ready = !shutdown_requested_.load(std::memory_order_relaxed);
+        const auto upload_cleanup = uploads_.cleanup_snapshot();
+        const auto startup_cleanup_ready = startup_cleanup_ready_ && cleanup_complete(upload_directory()) &&
+                                           cleanup_complete(download_archive_directory());
+        const auto state_storage_ready = state_storage_ready_ && alteration_journals_.storage_ready();
+        const auto ready = state_storage_ready && startup_cleanup_ready && upload_cleanup.healthy && executor_ready;
+        const auto workspace_snapshot = workspaces_.snapshot();
+        const auto state = [](bool value) { return value ? "READY" : "NOT_READY"; };
+        return json_response(
+            ready ? 200 : 503,
+            {{"data",
+              {{"ready", ready},
+               {"checks",
+                {{"configuration", "READY"},
+                 {"sandbox", "READY"},
+                 {"workspaceConfiguration", axk::server::workspace_configuration_state_name(workspace_snapshot.state)},
+                 {"stateStorage", state(state_storage_ready)},
+                 {"startupCleanup", state(startup_cleanup_ready)},
+                 {"uploadCleanup", state(upload_cleanup.healthy)},
+                 {"executorAdmission", state(executor_ready)}}}}}},
+            id);
+    }
+
+    crow::response metrics_response(const crow::request &request) {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        const auto metrics = request_telemetry_.snapshot();
+        const auto job_metrics = jobs_.metrics();
+        const auto event_metrics = event_dispatcher_.snapshot();
+        const auto upload_cleanup = uploads_.cleanup_snapshot();
+        return json_response(200,
+                             {{"data",
+                               {{"totalRequests", metrics.total_requests},
+                                {"activeRequests", metrics.active_requests},
+                                {"responses2xx", metrics.responses_2xx},
+                                {"responses4xx", metrics.responses_4xx},
+                                {"responses5xx", metrics.responses_5xx},
+                                {"totalDurationMs", metrics.total_duration_ms},
+                                {"submittedJobs", job_metrics.submitted_jobs},
+                                {"queuedJobs", job_metrics.queued_jobs},
+                                {"runningJobs", job_metrics.running_jobs},
+                                {"completedJobs", job_metrics.completed_jobs},
+                                {"failedJobs", job_metrics.failed_jobs},
+                                {"cancelledJobs", job_metrics.cancelled_jobs},
+                                {"publishedJobEvents", job_metrics.published_events},
+                                {"progressJobEvents", job_metrics.progress_events},
+                                {"totalJobQueueWaitMs", job_metrics.total_queue_wait_ms},
+                                {"totalJobExecutionMs", job_metrics.total_execution_ms},
+                                {"totalJobPhaseDurationMs", job_metrics.total_phase_duration_ms},
+                                {"totalJobCancellationLatencyMs", job_metrics.total_cancellation_latency_ms},
+                                {"websocketEventsDelivered", event_metrics.delivered_events},
+                                {"websocketEventsFailed", event_metrics.failed_events},
+                                {"websocketEventsDropped", event_metrics.dropped_events},
+                                {"websocketEventsPending", event_metrics.pending_events},
+                                {"websocketClientsEvicted", websocket_clients_evicted_.load(std::memory_order_relaxed)},
+                                {"uploadCleanupHealthy", upload_cleanup.healthy},
+                                {"uploadCleanupFailedDeletions", upload_cleanup.failed_deletions},
+                                {"uploadOrphanFiles", upload_cleanup.orphan_count},
+                                {"uploadOrphanBytes", upload_cleanup.orphan_bytes},
+                                {"uploadReservedBytes", upload_cleanup.reserved_bytes}}},
+                              {"meta", {{"requestId", id}}}},
+                             id);
+    }
+
+    crow::response shutdown_response(const crow::request &request) {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        if (config_.connection_file.empty()) {
+            return error_response(404, {"route_not_found", "sidecar shutdown is not available in this deployment mode"},
+                                  id);
+        }
+        if (shutdown_requested_.exchange(true))
+            return error_response(409, {"shutdown_in_progress", "server shutdown is already in progress"}, id);
+        return json_response(202, {{"data", {{"accepted", true}}}}, id);
+    }
+
+    crow::response openapi_response(const crow::request &request) {
+        const auto id = request_id(request);
+        if (auto denied = guard(request, id))
+            return std::move(*denied);
+        crow::response response{200, "application/json", openapi_document().dump()};
+        response.set_header("X-Request-Id", id);
+        return response;
+    }
+
     void register_infrastructure_routes() {
-        app_.route_dynamic("/api/v1/system/health/live")([] { return crow::response{204}; });
-        app_.route_dynamic("/api/v1/system/health/ready")([this](const crow::request &request) {
-            const auto id = request_id(request);
-            if (auto denied = guard(request, id))
-                return std::move(*denied);
-            const auto executor_ready = !shutdown_requested_.load(std::memory_order_relaxed);
-            const auto upload_cleanup = uploads_.cleanup_snapshot();
-            const auto startup_cleanup_ready = startup_cleanup_ready_ && cleanup_complete(upload_directory()) &&
-                                               cleanup_complete(download_archive_directory());
-            const auto state_storage_ready = state_storage_ready_ && alteration_journals_.storage_ready();
-            const auto ready = state_storage_ready && startup_cleanup_ready && upload_cleanup.healthy && executor_ready;
-            const auto workspace_snapshot = workspaces_.snapshot();
-            const auto state = [](bool value) { return value ? "READY" : "NOT_READY"; };
-            return json_response(ready ? 200 : 503,
-                                 {{"data",
-                                   {{"ready", ready},
-                                    {"checks",
-                                     {{"configuration", "READY"},
-                                      {"sandbox", "READY"},
-                                      {"workspaceConfiguration",
-                                       axk::server::workspace_configuration_state_name(workspace_snapshot.state)},
-                                      {"stateStorage", state(state_storage_ready)},
-                                      {"startupCleanup", state(startup_cleanup_ready)},
-                                      {"uploadCleanup", state(upload_cleanup.healthy)},
-                                      {"executorAdmission", state(executor_ready)}}}}}},
-                                 id);
-        });
-        app_.route_dynamic("/api/v1/system/capabilities")(
-            [this](const crow::request &request) { return capability_response(request); });
-        app_.route_dynamic("/api/v1/system/metrics")([this](const crow::request &request) {
-            const auto id = request_id(request);
-            if (auto denied = guard(request, id))
-                return std::move(*denied);
-            const auto metrics = request_telemetry_.snapshot();
-            const auto job_metrics = jobs_.metrics();
-            const auto event_metrics = event_dispatcher_.snapshot();
-            const auto upload_cleanup = uploads_.cleanup_snapshot();
-            return json_response(
-                200,
-                {{"data",
-                  {{"totalRequests", metrics.total_requests},
-                   {"activeRequests", metrics.active_requests},
-                   {"responses2xx", metrics.responses_2xx},
-                   {"responses4xx", metrics.responses_4xx},
-                   {"responses5xx", metrics.responses_5xx},
-                   {"totalDurationMs", metrics.total_duration_ms},
-                   {"submittedJobs", job_metrics.submitted_jobs},
-                   {"queuedJobs", job_metrics.queued_jobs},
-                   {"runningJobs", job_metrics.running_jobs},
-                   {"completedJobs", job_metrics.completed_jobs},
-                   {"failedJobs", job_metrics.failed_jobs},
-                   {"cancelledJobs", job_metrics.cancelled_jobs},
-                   {"publishedJobEvents", job_metrics.published_events},
-                   {"progressJobEvents", job_metrics.progress_events},
-                   {"totalJobQueueWaitMs", job_metrics.total_queue_wait_ms},
-                   {"totalJobExecutionMs", job_metrics.total_execution_ms},
-                   {"totalJobPhaseDurationMs", job_metrics.total_phase_duration_ms},
-                   {"totalJobCancellationLatencyMs", job_metrics.total_cancellation_latency_ms},
-                   {"websocketEventsDelivered", event_metrics.delivered_events},
-                   {"websocketEventsFailed", event_metrics.failed_events},
-                   {"websocketEventsDropped", event_metrics.dropped_events},
-                   {"websocketEventsPending", event_metrics.pending_events},
-                   {"websocketClientsEvicted", websocket_clients_evicted_.load(std::memory_order_relaxed)},
-                   {"uploadCleanupHealthy", upload_cleanup.healthy},
-                   {"uploadCleanupFailedDeletions", upload_cleanup.failed_deletions},
-                   {"uploadOrphanFiles", upload_cleanup.orphan_count},
-                   {"uploadOrphanBytes", upload_cleanup.orphan_bytes},
-                   {"uploadReservedBytes", upload_cleanup.reserved_bytes}}},
-                 {"meta", {{"requestId", id}}}},
-                id);
-        });
-        app_.route_dynamic("/api/v1/system/shutdown")
-            .methods(crow::HTTPMethod::Post)([this](const crow::request &request) {
-                const auto id = request_id(request);
-                if (auto denied = guard(request, id))
-                    return std::move(*denied);
-                if (config_.connection_file.empty()) {
-                    return error_response(
-                        404, {"route_not_found", "sidecar shutdown is not available in this deployment mode"}, id);
-                }
-                if (shutdown_requested_.exchange(true)) {
-                    return error_response(409, {"shutdown_in_progress", "server shutdown is already in progress"}, id);
-                }
-                return json_response(202, {{"data", {{"accepted", true}}}}, id);
-            });
-        app_.route_dynamic("/api/v1/roots")([this](const crow::request &request) { return roots_response(request); });
-        app_.route_dynamic("/api/v1/workspaces")
-            .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Post)([this](const crow::request &request) {
-                return request.method == crow::HTTPMethod::Get ? workspace_snapshot_response(request)
-                                                               : workspace_create_response(request);
-            });
-        app_.route_dynamic("/api/v1/workspaces/recovery/reset")
-            .methods(crow::HTTPMethod::Post)(
-                [this](const crow::request &request) { return workspace_reset_response(request); });
-        app_.route_dynamic("/api/v1/workspaces/<string>")
-            .methods(crow::HTTPMethod::Patch,
-                     crow::HTTPMethod::Delete)([this](const crow::request &request, std::string workspace_id) {
-                return workspace_item_response(request, workspace_id);
-            });
-        app_.route_dynamic("/api/v1/host-directories/roots")(
-            [this](const crow::request &request) { return host_directory_roots_response(request); });
-        app_.route_dynamic("/api/v1/host-directories/list")
-            .methods(crow::HTTPMethod::Post)(
-                [this](const crow::request &request) { return host_directory_listing_response(request); });
-        app_.route_dynamic("/api/v1/files/list").methods(crow::HTTPMethod::Post)([this](const crow::request &request) {
-            return directory_listing_response(request);
-        });
-        app_.route_dynamic("/api/v1/files/media-source/inspect")
-            .methods(crow::HTTPMethod::Post)(
-                [this](const crow::request &request) { return media_source_inspection_response(request); });
-        app_.route_dynamic("/api/v1/files/metadata")
-            .methods(crow::HTTPMethod::Post)(
-                [this](const crow::request &request) { return metadata_response(request); });
-        app_.route_dynamic("/api/v1/filesystem/directories")
-            .methods(crow::HTTPMethod::Post)(
-                [this](const crow::request &request) { return create_directory_response(request); });
-        app_.route_dynamic("/api/v1/filesystem/entries")
-            .methods(crow::HTTPMethod::Patch, crow::HTTPMethod::Delete)([this](const crow::request &request) {
-                return request.method == crow::HTTPMethod::Patch ? rename_entry_response(request)
-                                                                 : delete_entry_response(request);
-            });
-        app_.route_dynamic("/api/v1/files/content")
-            .methods(crow::HTTPMethod::GET,
-                     crow::HTTPMethod::HEAD)([this](const crow::request &request, crow::response &response) {
-                response = download_response(request);
-                if (request.method == crow::HTTPMethod::HEAD && response.code == 200) {
-                    // Crow otherwise replaces the declared representation length
-                    // with the empty HEAD response body's length.
-                    response.skip_body = false;
-                    response.manual_length_header = true;
-                }
-                response.end();
-            });
-        app_.route_dynamic("/api/v1/download-archives/<string>/content")
-            .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(
-                [this](const crow::request &request, crow::response &response, std::string archive_id) {
-                    download_archive_response(request, response, archive_id);
-                });
-        app_.route_dynamic("/api/v1/images").methods(crow::HTTPMethod::Post)([this](const crow::request &request) {
-            return create_image_response(request);
-        });
-        app_.route_dynamic("/api/v1/images/<string>")
-            .methods(crow::HTTPMethod::Get,
-                     crow::HTTPMethod::Delete)([this](const crow::request &request, std::string image_id) {
-                return image_response(request, image_id);
-            });
-        app_.route_dynamic("/api/v1/images/<string>/companion-directories")
-            .methods(crow::HTTPMethod::Post)([this](const crow::request &request, std::string image_id) {
-                return attach_companion_directories_response(request, image_id);
-            });
-        app_.route_dynamic("/api/v1/images/<string>/content")(
-            [this](const crow::request &request, std::string image_id) {
-                return image_content_response(request, image_id);
-            });
-        app_.route_dynamic("/api/v1/images/<string>/objects")(
-            [this](const crow::request &request, std::string image_id) {
-                return image_objects_response(request, image_id);
-            });
-        app_.route_dynamic("/api/v1/images/<string>/relationships")(
-            [this](const crow::request &request, std::string image_id) {
-                return image_relationships_response(request, image_id);
-            });
-        app_.route_dynamic("/api/v1/images/<string>/validation/issues")(
-            [this](const crow::request &request, std::string image_id) {
-                return image_validation_response(request, image_id);
-            });
-        app_.route_dynamic("/api/v1/images/<string>/preview")(
-            [this](const crow::request &request, std::string image_id) {
-                return image_preview_response(request, image_id);
-            });
-        app_.route_dynamic("/api/v1/auditions/<string>/content")
-            .methods(crow::HTTPMethod::Get)([this](const crow::request &request, std::string audition_id) {
-                return audition_content_response(request, audition_id);
-            });
-        app_.route_dynamic("/api/v1/auditions/<string>")
-            .methods(crow::HTTPMethod::Delete)([this](const crow::request &request, std::string audition_id) {
-                return audition_delete_response(request, audition_id);
-            });
-        app_.route_dynamic("/api/v1/uploads")
-            .methods(crow::HTTPMethod::Post, crow::HTTPMethod::Options)([this](const crow::request &request) {
-                if (request.method == crow::HTTPMethod::Options)
-                    return preflight_response(request);
-                return create_upload_response(request);
-            });
-        app_.route_dynamic("/api/v1/uploads/<string>")
-            .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Put,
-                     crow::HTTPMethod::Delete)([this](const crow::request &request, std::string upload_id) {
-                return upload_response(request, upload_id);
-            });
-        app_.route_dynamic("/api/v1/uploads/<string>/complete")
-            .methods(crow::HTTPMethod::Post)([this](const crow::request &request, std::string upload_id) {
-                return complete_upload_response(request, upload_id);
-            });
-        app_.route_dynamic("/api/v1/uploads/<string>/materialize")
-            .methods(crow::HTTPMethod::Post)([this](const crow::request &request, std::string upload_id) {
-                return materialize_upload_response(request, upload_id);
-            });
-        app_.route_dynamic("/api/v1/jobs/<string>")
-            .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(
-                [this](const crow::request &request, std::string job_id) { return job_response(request, job_id); });
-        app_.route_dynamic("/api/v1/jobs/<string>/events")(
-            [this](const crow::request &request, std::string job_id) { return job_events_response(request, job_id); });
-        app_.route_dynamic("/api/v1/event-tickets")
-            .methods(crow::HTTPMethod::Post)(
-                [this](const crow::request &request) { return event_ticket_response(request); });
-        app_.route_dynamic("/api/v1/openapi.json")([this](const crow::request &request) {
-            const auto id = request_id(request);
-            if (auto denied = guard(request, id))
-                return std::move(*denied);
-            crow::response response{200, "application/json", openapi_document().dump()};
-            response.set_header("X-Request-Id", id);
-            return response;
-        });
+        axk::server::detail::register_infrastructure_routes(
+            app_,
+            {.health_ready = [this](const crow::request &request) { return health_ready_response(request); },
+             .capabilities = [this](const crow::request &request) { return capability_response(request); },
+             .metrics = [this](const crow::request &request) { return metrics_response(request); },
+             .shutdown = [this](const crow::request &request) { return shutdown_response(request); },
+             .roots = [this](const crow::request &request) { return roots_response(request); },
+             .workspaces =
+                 [this](const crow::request &request) {
+                     return request.method == crow::HTTPMethod::Get ? workspace_snapshot_response(request)
+                                                                    : workspace_create_response(request);
+                 },
+             .workspace_reset = [this](const crow::request &request) { return workspace_reset_response(request); },
+             .workspace_item =
+                 [this](const crow::request &request, const std::string &workspace_id) {
+                     return workspace_item_response(request, workspace_id);
+                 },
+             .host_directory_roots =
+                 [this](const crow::request &request) { return host_directory_roots_response(request); },
+             .host_directory_list =
+                 [this](const crow::request &request) { return host_directory_listing_response(request); },
+             .openapi = [this](const crow::request &request) { return openapi_response(request); }});
+
+        axk::server::detail::register_file_routes(
+            app_,
+            {.directory_list = [this](const crow::request &request) { return directory_listing_response(request); },
+             .media_source_inspect =
+                 [this](const crow::request &request) { return media_source_inspection_response(request); },
+             .metadata = [this](const crow::request &request) { return metadata_response(request); },
+             .create_directory = [this](const crow::request &request) { return create_directory_response(request); },
+             .mutate_entry =
+                 [this](const crow::request &request) {
+                     return request.method == crow::HTTPMethod::Patch ? rename_entry_response(request)
+                                                                      : delete_entry_response(request);
+                 },
+             .file_content =
+                 [this](const crow::request &request, crow::response &response) {
+                     response = download_response(request);
+                     if (request.method == crow::HTTPMethod::HEAD && response.code == 200) {
+                         response.skip_body = false;
+                         response.manual_length_header = true;
+                     }
+                     response.end();
+                 },
+             .download_archive_content =
+                 [this](const crow::request &request, crow::response &response, const std::string &archive_id) {
+                     download_archive_response(request, response, archive_id);
+                 },
+             .create_image = [this](const crow::request &request) { return create_image_response(request); },
+             .image = [this](const crow::request &request,
+                             const std::string &image_id) { return image_response(request, image_id); },
+             .attach_companion_directories =
+                 [this](const crow::request &request, const std::string &image_id) {
+                     return attach_companion_directories_response(request, image_id);
+                 },
+             .image_content = [this](const crow::request &request,
+                                     const std::string &image_id) { return image_content_response(request, image_id); },
+             .image_objects = [this](const crow::request &request,
+                                     const std::string &image_id) { return image_objects_response(request, image_id); },
+             .image_relationships =
+                 [this](const crow::request &request, const std::string &image_id) {
+                     return image_relationships_response(request, image_id);
+                 },
+             .image_validation =
+                 [this](const crow::request &request, const std::string &image_id) {
+                     return image_validation_response(request, image_id);
+                 },
+             .image_preview = [this](const crow::request &request,
+                                     const std::string &image_id) { return image_preview_response(request, image_id); },
+             .audition_content =
+                 [this](const crow::request &request, const std::string &audition_id) {
+                     return audition_content_response(request, audition_id);
+                 },
+             .delete_audition =
+                 [this](const crow::request &request, const std::string &audition_id) {
+                     return audition_delete_response(request, audition_id);
+                 },
+             .uploads =
+                 [this](const crow::request &request) {
+                     return request.method == crow::HTTPMethod::Options ? preflight_response(request)
+                                                                        : create_upload_response(request);
+                 },
+             .upload = [this](const crow::request &request,
+                              const std::string &upload_id) { return upload_response(request, upload_id); },
+             .complete_upload =
+                 [this](const crow::request &request, const std::string &upload_id) {
+                     return complete_upload_response(request, upload_id);
+                 },
+             .materialize_upload =
+                 [this](const crow::request &request, const std::string &upload_id) {
+                     return materialize_upload_response(request, upload_id);
+                 }});
     }
 
     void register_event_route() {
-        CROW_WEBSOCKET_ROUTE(app_, "/api/v1/events")
-            .subprotocols({std::string{event_subprotocol}})
-            .max_payload(config_.maximum_websocket_payload_bytes)
-            .onaccept(std::function<void(const crow::request &, std::optional<crow::response> &, void **)>{
-                [this](const crow::request &request, std::optional<crow::response> &response, void **user_data) {
-                    const auto id = request_id(request);
-                    if (!origin_allowed(request)) {
-                        response = error_response(403, {"origin_denied", "request origin is not allowed"}, id);
-                        return;
-                    }
-                    if (!requests_subprotocol(request, event_subprotocol)) {
-                        response = error_response(
-                            400, {"websocket_subprotocol_required", "axklib.events.v1 subprotocol is required"}, id);
-                        return;
-                    }
-                    const auto *ticket_id = request.url_params.get("ticket");
-                    if (ticket_id == nullptr || *ticket_id == '\0') {
-                        response = error_response(401, {"event_ticket_required", "event ticket is required"}, id);
-                        return;
-                    }
-                    auto owner_id = event_tickets_.consume(ticket_id);
-                    if (!owner_id) {
-                        response = error_response(401, owner_id.error(), id);
-                        return;
-                    }
-                    auto client = std::make_shared<EventClient>(config_.maximum_websocket_delivery_events,
-                                                                config_.maximum_websocket_delivery_bytes);
-                    client->owner_id = std::move(*owner_id);
-                    *user_data = new EventClientHandle{std::move(client)};
-                }})
-            .onopen([this](crow::websocket::connection &connection) {
-                auto *holder = static_cast<EventClientHandle *>(connection.userdata());
-                if (holder == nullptr || !*holder) {
-                    connection.close("missing event client", crow::websocket::UnexpectedCondition);
-                    return;
-                }
-                {
-                    const std::scoped_lock lock{(*holder)->mutex};
-                    (*holder)->connection = &connection;
-                }
-                const std::scoped_lock lock{event_clients_mutex_};
-                event_clients_.push_back(*holder);
-            })
-            .onmessage([](crow::websocket::connection &connection, const std::string &, bool) {
-                connection.close("client messages are not accepted", crow::websocket::PolicyViolated);
-            })
-            .onclose([this](crow::websocket::connection &connection, const std::string &, std::uint16_t) {
-                auto *holder = static_cast<EventClientHandle *>(connection.userdata());
-                if (holder == nullptr)
-                    return;
-                const auto client = *holder;
-                if (client) {
-                    {
-                        const std::scoped_lock lock{client->mutex};
-                        client->connection = nullptr;
-                    }
-                    const std::scoped_lock lock{event_clients_mutex_};
-                    std::erase(event_clients_, client);
-                }
-                delete holder;
-                connection.userdata(nullptr);
-            });
+        axk::server::detail::register_event_routes(
+            app_,
+            {.job = [this](const crow::request &request,
+                           const std::string &job_id) { return job_response(request, job_id); },
+             .job_events = [this](const crow::request &request,
+                                  const std::string &job_id) { return job_events_response(request, job_id); },
+             .event_ticket = [this](const crow::request &request) { return event_ticket_response(request); },
+             .maximum_websocket_payload_bytes = config_.maximum_websocket_payload_bytes,
+             .websocket_accept =
+                 [this](const crow::request &request, std::optional<crow::response> &response, void **user_data) {
+                     const auto id = request_id(request);
+                     if (!origin_allowed(request)) {
+                         response = error_response(403, {"origin_denied", "request origin is not allowed"}, id);
+                         return;
+                     }
+                     if (!requests_subprotocol(request, event_subprotocol)) {
+                         response = error_response(
+                             400, {"websocket_subprotocol_required", "axklib.events.v1 subprotocol is required"}, id);
+                         return;
+                     }
+                     const auto *ticket_id = request.url_params.get("ticket");
+                     if (ticket_id == nullptr || *ticket_id == '\0') {
+                         response = error_response(401, {"event_ticket_required", "event ticket is required"}, id);
+                         return;
+                     }
+                     auto owner_id = event_tickets_.consume(ticket_id);
+                     if (!owner_id) {
+                         response = error_response(401, owner_id.error(), id);
+                         return;
+                     }
+                     auto client = std::make_shared<EventClient>(config_.maximum_websocket_delivery_events,
+                                                                 config_.maximum_websocket_delivery_bytes);
+                     client->owner_id = std::move(*owner_id);
+                     *user_data = new EventClientHandle{std::move(client)};
+                 },
+             .websocket_open =
+                 [this](crow::websocket::connection &connection) {
+                     auto *holder = static_cast<EventClientHandle *>(connection.userdata());
+                     if (holder == nullptr || !*holder) {
+                         connection.close("missing event client", crow::websocket::UnexpectedCondition);
+                         return;
+                     }
+                     {
+                         const std::scoped_lock lock{(*holder)->mutex};
+                         (*holder)->connection = &connection;
+                     }
+                     const std::scoped_lock lock{event_clients_mutex_};
+                     event_clients_.push_back(*holder);
+                 },
+             .websocket_message =
+                 [](crow::websocket::connection &connection, const std::string &, bool) {
+                     connection.close("client messages are not accepted", crow::websocket::PolicyViolated);
+                 },
+             .websocket_close =
+                 [this](crow::websocket::connection &connection, const std::string &, std::uint16_t) {
+                     auto *holder = static_cast<EventClientHandle *>(connection.userdata());
+                     if (holder == nullptr)
+                         return;
+                     const auto client = *holder;
+                     if (client) {
+                         {
+                             const std::scoped_lock lock{client->mutex};
+                             client->connection = nullptr;
+                         }
+                         const std::scoped_lock lock{event_clients_mutex_};
+                         std::erase(event_clients_, client);
+                     }
+                     delete holder;
+                     connection.userdata(nullptr);
+                 }});
     }
 
     void register_operation_routes() {
-        std::map<RouteKey, std::vector<std::string>> routes;
-        for (const auto &entry : registry_.entries())
-            routes[{entry.descriptor.method, entry.descriptor.route}].push_back(entry.descriptor.id);
-
-        for (auto &[key, operation_ids] : routes) {
-            auto &route = app_.route_dynamic(key.route);
-            route.methods(key.method == axk::app::HttpMethod::get ? crow::HTTPMethod::Get : crow::HTTPMethod::Post);
-            route([this, operation_ids = std::move(operation_ids)](const crow::request &request) {
+        axk::server::detail::register_operation_routes(
+            app_, registry_, [this](const crow::request &request, const std::vector<std::string> &operation_ids) {
                 return operation_response(request, operation_ids);
             });
-        }
     }
 
     axk::server::Config config_;

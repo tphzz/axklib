@@ -153,22 +153,6 @@ prepare_authored(const VolumeSpec &volume, const MediaBuildLimits &limits, const
     return result;
 }
 
-class TemporaryFileCleanup {
-  public:
-    explicit TemporaryFileCleanup(std::filesystem::path path) : path_{std::move(path)} {}
-    ~TemporaryFileCleanup() {
-        if (active_)
-            detail::discard_temporary_file(path_);
-    }
-    TemporaryFileCleanup(const TemporaryFileCleanup &) = delete;
-    TemporaryFileCleanup &operator=(const TemporaryFileCleanup &) = delete;
-    void release() noexcept { active_ = false; }
-
-  private:
-    std::filesystem::path path_;
-    bool active_{true};
-};
-
 class MediaRangeReader final : public RandomAccessReader {
   public:
     using Read = std::function<Result<std::vector<std::byte>>(std::uint64_t, std::size_t)>;
@@ -364,22 +348,21 @@ detail::write_prepared_media_image(const PreparedMediaImage &prepared, const std
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create media output directory")};
     }
-    auto temporary = detail::reserve_temporary_file(output_path);
-    if (!temporary)
-        return std::unexpected{temporary.error()};
-    TemporaryFileCleanup cleanup{*temporary};
+    auto publication = detail::TemporaryPublication::create(output_path);
+    if (!publication)
+        return std::unexpected{publication.error()};
     const auto written = prepared.manifest.format == MediaImageFormat::fat12_floppy
-                             ? write_fat12_image(prepared, *temporary, cancellation)
-                             : write_iso9660_image(prepared, *temporary, cancellation);
+                             ? write_fat12_image(prepared, *publication, cancellation)
+                             : write_iso9660_image(prepared, *publication, cancellation);
     if (!written)
         return std::unexpected{written.error()};
-    if (auto validated = validate_written_image(prepared, *temporary, cancellation); !validated)
+    if (auto validated = validate_written_image(prepared, publication->path(), cancellation); !validated)
         return std::unexpected{validated.error()};
     if (validator) {
-        if (auto validated = validator(*temporary); !validated)
+        if (auto validated = validator(publication->path()); !validated)
             return std::unexpected{validated.error()};
     }
-    const auto size = std::filesystem::file_size(*temporary, filesystem_error);
+    const auto size = std::filesystem::file_size(publication->path(), filesystem_error);
     if (filesystem_error) {
         return std::unexpected{
             make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not determine written media image size")};
@@ -388,12 +371,14 @@ detail::write_prepared_media_image(const PreparedMediaImage &prepared, const std
         return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
                                           "written media exceeds the configured output limit")};
     }
-    if (auto flushed = detail::flush_file_to_disk(*temporary); !flushed)
+    if (auto flushed = publication->flush(); !flushed)
         return std::unexpected{flushed.error()};
-    if (auto published = detail::publish_temporary_file(*temporary, output_path, overwrite); !published)
+    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
+    auto published = publication->publish(mode);
+    if (!published)
         return std::unexpected{published.error()};
-    cleanup.release();
-    return WrittenMediaImage{output_path, prepared.manifest.format, size, prepared_object_count(prepared)};
+    return WrittenMediaImage{output_path, prepared.manifest.format, size, prepared_object_count(prepared),
+                             std::move(*published)};
 }
 
 Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,

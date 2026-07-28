@@ -12,6 +12,7 @@
 #include "axklib/error.hpp"
 #include "axklib/export.hpp"
 #include "axklib/media.hpp"
+#include "axklib/publication.hpp"
 
 namespace axk {
 
@@ -114,6 +115,7 @@ struct PackagePublication {
     std::string package_id;
     PackageKind kind{PackageKind::bundle};
     std::uint64_t size_bytes{};
+    PublicationOutcome publication;
 };
 
 enum class PackageImportObjectAction : std::uint8_t {
@@ -267,6 +269,7 @@ struct PackageImportReport {
     bool applied{};
     std::vector<PlannedPackageObject> objects;
     std::vector<PackageAllocationDelta> allocation;
+    PublicationOutcome publication;
 };
 
 AXK_API std::string_view package_root_kind_name(PackageRootKind kind) noexcept;

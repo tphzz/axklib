@@ -2169,11 +2169,12 @@ Result<OperationReport> rename_sbnk(TransactionState &state, OperationContext co
     return report;
 }
 
-Result<void> write_bytes(const std::filesystem::path &output, std::uint64_t offset, std::span<const std::byte> data) {
-    return detail::write_temporary_file_at(output, offset, data);
+Result<void> write_bytes(detail::TemporaryPublication &publication, std::uint64_t offset,
+                         std::span<const std::byte> data) {
+    return publication.write_at(offset, data);
 }
 
-Result<void> write_continuation_lists(const std::filesystem::path &output, const Partition &partition,
+Result<void> write_continuation_lists(detail::TemporaryPublication &publication, const Partition &partition,
                                       const MutablePartition::InsertedRecord &record) {
     constexpr std::size_t extents_per_cluster = (1024U - 12U) / 12U;
     for (std::size_t list_index = 0; list_index < record.continuation_clusters.size(); ++list_index) {
@@ -2201,7 +2202,7 @@ Result<void> write_continuation_lists(const std::filesystem::path &output, const
             (static_cast<std::uint64_t>(partition.start_sector) +
              static_cast<std::uint64_t>(record.continuation_clusters[list_index]) * partition.sectors_per_cluster) *
             512U;
-        if (auto written = write_bytes(output, absolute, block); !written) {
+        if (auto written = write_bytes(publication, absolute, block); !written) {
             return written;
         }
     }
@@ -2361,13 +2362,12 @@ Result<std::vector<detail::AlterationPatch>> collect_patches(const TransactionSt
     return patches;
 }
 
-Result<std::filesystem::path> copy_to_unique_temporary(const RandomAccessReader &source,
-                                                       const std::filesystem::path &output) {
-    auto temporary = detail::reserve_temporary_file(output);
-    if (!temporary)
-        return std::unexpected{temporary.error()};
-    if (auto resized = detail::resize_temporary_file(*temporary, source.size()); !resized) {
-        detail::discard_temporary_file(*temporary);
+Result<detail::TemporaryPublication> copy_to_unique_temporary(const RandomAccessReader &source,
+                                                              const std::filesystem::path &output) {
+    auto publication = detail::TemporaryPublication::create(output);
+    if (!publication)
+        return std::unexpected{publication.error()};
+    if (auto resized = publication->resize(source.size()); !resized) {
         return std::unexpected{resized.error()};
     }
     std::vector<std::byte> buffer(static_cast<std::size_t>(std::min<std::uint64_t>(source.size(), 1024U * 1024U)));
@@ -2375,22 +2375,13 @@ Result<std::filesystem::path> copy_to_unique_temporary(const RandomAccessReader 
         const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), source.size() - offset));
         auto bytes = std::span{buffer}.first(count);
         if (auto read = source.read_exact_at(offset, bytes); !read) {
-            detail::discard_temporary_file(*temporary);
             return std::unexpected{read.error()};
         }
-        if (auto written = detail::write_temporary_file_at(*temporary, offset, bytes); !written) {
-            detail::discard_temporary_file(*temporary);
+        if (auto written = publication->write_at(offset, bytes); !written) {
             return std::unexpected{written.error()};
         }
     }
-    return temporary;
-}
-
-Result<void> flush_file_to_disk(const std::filesystem::path &path) { return detail::flush_file_to_disk(path); }
-
-Result<void> publish_temporary(const std::filesystem::path &temporary, const std::filesystem::path &output,
-                               bool overwrite) {
-    return detail::publish_temporary_file(temporary, output, overwrite);
+    return std::move(*publication);
 }
 
 Result<void> validate_temporary(const std::filesystem::path &temporary, const TransactionState &state,
@@ -2661,10 +2652,11 @@ Result<TransactionState> open_transaction_state(const std::filesystem::path &sou
     return open_transaction_state(*source, source_path, cancellation, progress, include_object_graph);
 }
 
-Result<void> publish(const TransactionState &state, const std::filesystem::path &output_path,
-                     const CancellationToken &cancellation, bool overwrite = false,
-                     const std::function<Result<void>(const std::filesystem::path &)> &temporary_validator = {},
-                     ProgressSink *progress = nullptr) {
+Result<PublicationOutcome>
+publish(const TransactionState &state, const std::filesystem::path &output_path, const CancellationToken &cancellation,
+        bool overwrite = false,
+        const std::function<Result<void>(const std::filesystem::path &)> &temporary_validator = {},
+        ProgressSink *progress = nullptr) {
     if (!overwrite && std::filesystem::exists(output_path))
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "alteration output already exists")};
@@ -2687,13 +2679,11 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
     auto temporary_result = copy_to_unique_temporary(*state.source, output_path);
     if (!temporary_result)
         return std::unexpected{temporary_result.error()};
-    const auto temporary = std::move(*temporary_result);
-    const auto cleanup = [&]() { detail::discard_temporary_file(temporary); };
+    auto publication = std::move(*temporary_result);
     std::uint64_t completed_partitions{};
     for (const auto &[index, item] : state.partitions) {
         static_cast<void>(index);
         if (const auto check = cancellation.check(); !check) {
-            cleanup();
             return std::unexpected{check.error()};
         }
         const auto &partition = *item.source;
@@ -2703,13 +2693,11 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
             for (std::size_t name_index = 0; name_index < item.renamed_name->size(); ++name_index)
                 encoded_name[name_index] = static_cast<std::byte>((*item.renamed_name)[name_index]);
             const auto header_offset = static_cast<std::uint64_t>(partition.start_sector) * 512U + 0x40U;
-            if (auto written = write_bytes(temporary, header_offset, encoded_name); !written) {
-                cleanup();
-                return written;
+            if (auto written = write_bytes(publication, header_offset, encoded_name); !written) {
+                return std::unexpected{written.error()};
             }
-            if (auto written = write_bytes(temporary, header_offset + 1024U, encoded_name); !written) {
-                cleanup();
-                return written;
+            if (auto written = write_bytes(publication, header_offset + 1024U, encoded_name); !written) {
+                return std::unexpected{written.error()};
             }
         }
         for (const auto id : item.deleted) {
@@ -2717,24 +2705,21 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
             if (source_record == nullptr)
                 continue;
             std::array<std::byte, 72> zero{};
-            if (auto written = write_bytes(temporary, source_record->record_offset.value, zero); !written) {
-                cleanup();
-                return written;
+            if (auto written = write_bytes(publication, source_record->record_offset.value, zero); !written) {
+                return std::unexpected{written.error()};
             }
         }
         if (item.root_index && item.root_payload) {
             const auto *root = record(partition, SfsId{1});
-            if (auto written = write_bytes(temporary, root->record_offset.value, *item.root_index); !written) {
-                cleanup();
-                return written;
+            if (auto written = write_bytes(publication, root->record_offset.value, *item.root_index); !written) {
+                return std::unexpected{written.error()};
             }
             const auto payload_offset =
                 (static_cast<std::uint64_t>(partition.start_sector) +
                  static_cast<std::uint64_t>(root->extents[0].cluster_offset) * partition.sectors_per_cluster) *
                 512U;
-            if (auto written = write_bytes(temporary, payload_offset, *item.root_payload); !written) {
-                cleanup();
-                return written;
+            if (auto written = write_bytes(publication, payload_offset, *item.root_payload); !written) {
+                return std::unexpected{written.error()};
             }
         }
         const auto index_base =
@@ -2744,13 +2729,11 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
         for (const auto &[id, changed] : item.changed) {
             const auto *source_record = record(partition, id);
             if (source_record == nullptr) {
-                cleanup();
                 return std::unexpected{transaction_error("changed record has no source index location")};
             }
-            if (auto written = write_bytes(temporary, source_record->record_offset.value, changed.raw_index);
+            if (auto written = write_bytes(publication, source_record->record_offset.value, changed.raw_index);
                 !written) {
-                cleanup();
-                return written;
+                return std::unexpected{written.error()};
             }
             std::size_t payload_offset{};
             for (const auto &extent : changed.extents) {
@@ -2761,25 +2744,22 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
                      static_cast<std::uint64_t>(extent.cluster_offset) * partition.sectors_per_cluster) *
                     512U;
                 if (auto written =
-                        write_bytes(temporary, absolute, std::span{changed.payload}.subspan(payload_offset, count));
+                        write_bytes(publication, absolute, std::span{changed.payload}.subspan(payload_offset, count));
                     !written) {
-                    cleanup();
-                    return written;
+                    return std::unexpected{written.error()};
                 }
                 payload_offset += count;
                 if (payload_offset == changed.payload.size())
                     break;
             }
-            if (auto written = write_continuation_lists(temporary, partition, changed); !written) {
-                cleanup();
-                return written;
+            if (auto written = write_continuation_lists(publication, partition, changed); !written) {
+                return std::unexpected{written.error()};
             }
         }
         for (const auto &[id, inserted] : item.inserted) {
             const auto index_offset = index_base + (id.value / 14U) * 1024U + (id.value % 14U) * 72U;
-            if (auto written = write_bytes(temporary, index_offset, inserted.raw_index); !written) {
-                cleanup();
-                return written;
+            if (auto written = write_bytes(publication, index_offset, inserted.raw_index); !written) {
+                return std::unexpected{written.error()};
             }
             std::size_t payload_offset{};
             for (const auto &extent : inserted.extents) {
@@ -2790,32 +2770,28 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
                      static_cast<std::uint64_t>(extent.cluster_offset) * partition.sectors_per_cluster) *
                     512U;
                 if (auto written =
-                        write_bytes(temporary, absolute, std::span{inserted.payload}.subspan(payload_offset, count));
+                        write_bytes(publication, absolute, std::span{inserted.payload}.subspan(payload_offset, count));
                     !written) {
-                    cleanup();
-                    return written;
+                    return std::unexpected{written.error()};
                 }
                 payload_offset += count;
             }
-            if (auto written = write_continuation_lists(temporary, partition, inserted); !written) {
-                cleanup();
-                return written;
+            if (auto written = write_continuation_lists(publication, partition, inserted); !written) {
+                return std::unexpected{written.error()};
             }
         }
         const auto bitmap_offset =
             (static_cast<std::uint64_t>(partition.start_sector) +
              static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
             512U;
-        if (auto written = write_bytes(temporary, bitmap_offset, item.bitmap); !written) {
-            cleanup();
-            return written;
+        if (auto written = write_bytes(publication, bitmap_offset, item.bitmap); !written) {
+            return std::unexpected{written.error()};
         }
         const auto mirror_offset = static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U;
-        if (auto written = write_bytes(temporary, mirror_offset,
+        if (auto written = write_bytes(publication, mirror_offset,
                                        std::span{item.bitmap}.first(std::min<std::size_t>(512, item.bitmap.size())));
             !written) {
-            cleanup();
-            return written;
+            return std::unexpected{written.error()};
         }
         ++completed_partitions;
         if (progress) {
@@ -2823,40 +2799,35 @@ Result<void> publish(const TransactionState &state, const std::filesystem::path 
                               "writing alteration image", output_path.string()});
         }
     }
-    if (auto flushed = flush_file_to_disk(temporary); !flushed) {
-        cleanup();
+    if (auto flushed = publication.flush(); !flushed) {
         return std::unexpected{flushed.error()};
     }
     if (const auto check = cancellation.check(); !check) {
-        cleanup();
         return std::unexpected{check.error()};
     }
     if (auto distinct = require_distinct_source_and_output(state.container.source_path(), output_path, "alteration");
         !distinct) {
-        cleanup();
         return std::unexpected{distinct.error()};
     }
-    auto validated = validate_temporary(temporary, state, cancellation);
+    auto validated = validate_temporary(publication.path(), state, cancellation);
     if (!validated) {
-        cleanup();
         return std::unexpected{validated.error()};
     }
     if (temporary_validator) {
-        auto package_validated = temporary_validator(temporary);
+        auto package_validated = temporary_validator(publication.path());
         if (!package_validated) {
-            cleanup();
             return std::unexpected{package_validated.error()};
         }
     }
     if (const auto check = cancellation.check(); !check) {
-        cleanup();
         return std::unexpected{check.error()};
     }
-    if (auto published = publish_temporary(temporary, output_path, overwrite); !published) {
-        cleanup();
+    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
+    auto published = publication.publish(mode);
+    if (!published) {
         return std::unexpected{published.error()};
     }
-    return {};
+    return std::move(*published);
 }
 
 bool has_action(const PlannedPackageObject &object, PackageImportObjectAction action) {
@@ -3090,9 +3061,15 @@ Result<PackageImportReport> apply_fat12_package_import(const std::filesystem::pa
     auto digest = package_internal::sha256_reader(**reader, cancellation);
     if (!digest)
         return std::unexpected{digest.error()};
-    return PackageImportReport{
-        target_path, output_path,  plan.plan_id,   plan.target_snapshot_id, package_internal::hex_digest(*digest),
-        true,        plan.objects, plan.allocation};
+    return PackageImportReport{target_path,
+                               output_path,
+                               plan.plan_id,
+                               plan.target_snapshot_id,
+                               package_internal::hex_digest(*digest),
+                               true,
+                               plan.objects,
+                               plan.allocation,
+                               std::move(written->publication)};
 }
 
 Result<PackageImportReport>
@@ -3267,9 +3244,15 @@ apply_iso9660_package_import(const std::filesystem::path &target_path, std::span
     auto digest = package_internal::sha256_reader(**reader, cancellation);
     if (!digest)
         return std::unexpected{digest.error()};
-    return PackageImportReport{
-        target_path, output_path,  plan.plan_id,   plan.target_snapshot_id, package_internal::hex_digest(*digest),
-        true,        plan.objects, plan.allocation};
+    return PackageImportReport{target_path,
+                               output_path,
+                               plan.plan_id,
+                               plan.target_snapshot_id,
+                               package_internal::hex_digest(*digest),
+                               true,
+                               plan.objects,
+                               plan.allocation,
+                               std::move(written->publication)};
 }
 
 Result<void> grow_package_category_directories(TransactionState &state, const PackageImportPlan &plan,
@@ -3788,7 +3771,7 @@ Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, con
     auto applied = publish(state, output_path, cancellation, overwrite, {}, progress);
     if (!applied)
         return std::unexpected{applied.error()};
-    return AlterationResult{source_path, output_path, true, std::move(state.reports)};
+    return AlterationResult{source_path, output_path, true, std::move(state.reports), std::move(*applied)};
 }
 
 Result<AlterationInspection> inspect_hds_alteration(const std::filesystem::path &source_path,
@@ -4010,15 +3993,16 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
         const auto validator = [&](const std::filesystem::path &temporary) {
             return validate_package_result(temporary, packages, plan, cancellation);
         };
-        if (auto published = publish(state, output_path, cancellation, overwrite, validator, progress); !published) {
+        auto published = publish(state, output_path, cancellation, overwrite, validator, progress);
+        if (!published) {
             return std::unexpected{published.error()};
         }
         auto output_snapshot = file_snapshot_id(output_path, cancellation);
         if (!output_snapshot)
             return std::unexpected{output_snapshot.error()};
         return PackageImportReport{
-            target_path, output_path,  plan.plan_id,   plan.target_snapshot_id, std::move(*output_snapshot),
-            true,        plan.objects, plan.allocation};
+            target_path, output_path,  plan.plan_id,    plan.target_snapshot_id, std::move(*output_snapshot),
+            true,        plan.objects, plan.allocation, std::move(*published)};
     } catch (const std::exception &error) {
         return std::unexpected{transaction_error(std::string{"package import callback failed: "} + error.what())};
     } catch (...) {

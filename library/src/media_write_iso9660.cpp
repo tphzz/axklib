@@ -198,7 +198,7 @@ Result<std::uint32_t> checked_iso9660_sector_count(std::size_t directory_count,
     return static_cast<std::uint32_t>(sectors);
 }
 
-Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::filesystem::path &temporary_path,
+Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPublication &publication,
                                  const CancellationToken &cancellation) {
     const auto &manifest = image.manifest;
     if (!iso_identifier(manifest.iso_volume_id, 32U)) {
@@ -442,7 +442,7 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
         return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
                                           "ISO9660 output exceeds the configured build limit")};
     }
-    if (auto resized = resize_temporary_file(temporary_path, output_size); !resized)
+    if (auto resized = publication.resize(output_size); !resized)
         return resized;
 
     std::vector<std::size_t> directory_indices;
@@ -464,13 +464,11 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "ISO9660 path table exceeds the narrow one-sector profile")};
     }
-    if (auto written = write_temporary_file_at(
-            temporary_path, static_cast<std::uint64_t>(little_path_sector) * sector_size, little_path);
+    if (auto written = publication.write_at(static_cast<std::uint64_t>(little_path_sector) * sector_size, little_path);
         !written) {
         return written;
     }
-    if (auto written = write_temporary_file_at(temporary_path,
-                                               static_cast<std::uint64_t>(big_path_sector) * sector_size, big_path);
+    if (auto written = publication.write_at(static_cast<std::uint64_t>(big_path_sector) * sector_size, big_path);
         !written) {
         return written;
     }
@@ -500,7 +498,7 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
             std::ranges::copy(record, directory_bytes.begin() + static_cast<std::ptrdiff_t>(offset));
             offset += record.size();
         }
-        if (auto written = write_temporary_file_at(temporary_path, directory_offset, directory_bytes); !written)
+        if (auto written = publication.write_at(directory_offset, directory_bytes); !written)
             return written;
     }
     constexpr std::size_t write_chunk_size = 1024U * 1024U;
@@ -513,9 +511,8 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
             if (const auto check = cancellation.check(); !check)
                 return std::unexpected{check.error()};
             const auto count = std::min(write_chunk_size, data.size() - offset);
-            if (auto written = write_temporary_file_at(temporary_path,
-                                                       static_cast<std::uint64_t>(node.sector) * sector_size + offset,
-                                                       data.subspan(offset, count));
+            if (auto written = publication.write_at(static_cast<std::uint64_t>(node.sector) * sector_size + offset,
+                                                    data.subspan(offset, count));
                 !written) {
                 return written;
             }
@@ -556,9 +553,9 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::fil
 
     if (const auto check = cancellation.check(); !check)
         return std::unexpected{check.error()};
-    if (auto written = write_temporary_file_at(temporary_path, 16U * sector_size, pvd); !written)
+    if (auto written = publication.write_at(16U * sector_size, pvd); !written)
         return written;
-    return write_temporary_file_at(temporary_path, 17U * sector_size, terminator);
+    return publication.write_at(17U * sector_size, terminator);
 }
 
 } // namespace axk::detail

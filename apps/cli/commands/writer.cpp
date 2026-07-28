@@ -41,15 +41,19 @@ axk::Result<void> publish_manifest(const std::filesystem::path &output_path, std
         return std::unexpected{axk::make_error(axk::ErrorCode::io_open_failed, axk::ErrorCategory::io,
                                                "could not create manifest output directory")};
     }
-    auto temporary = axk::detail::write_temporary_file(output_path, [&](const axk::detail::TemporaryFileSink &sink) {
-        return sink(std::as_bytes(std::span{contents.data(), contents.size()}));
-    });
+    auto temporary =
+        axk::detail::TemporaryPublication::create(output_path, [&](const axk::detail::TemporaryFileSink &sink) {
+            return sink(std::as_bytes(std::span{contents.data(), contents.size()}));
+        });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    if (auto published = axk::detail::publish_temporary_file(*temporary, output_path, overwrite); !published) {
-        axk::detail::discard_temporary_file(*temporary);
-        return published;
-    }
+    const auto mode =
+        overwrite ? axk::detail::PublicationMode::replace_existing : axk::detail::PublicationMode::create_only;
+    auto published = temporary->publish(mode);
+    if (!published)
+        return std::unexpected{published.error()};
+    for (const auto &warning : published->warnings)
+        std::cerr << "warning[" << warning.code << "]: " << warning.message << '\n';
     return {};
 }
 

@@ -194,7 +194,8 @@ Result<std::vector<std::byte>> wav_bytes(const Waveform &waveform) {
     return result;
 }
 
-Result<void> write_wav_atomic(const std::filesystem::path &path, const Waveform &waveform, bool overwrite) {
+Result<PublicationOutcome> write_wav_atomic(const std::filesystem::path &path, const Waveform &waveform,
+                                            bool overwrite) {
     return audio_internal::write_wav_atomic(path, audio_internal::WavSource::from_physical(waveform), overwrite);
 }
 

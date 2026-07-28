@@ -20,7 +20,6 @@
 
 #include <nlohmann/json.hpp>
 
-#include "axklib/application/content_id.hpp"
 #include "axklib/application/extraction_selection.hpp"
 #include "axklib/application/volume_graph.hpp"
 #include "axklib/audio_export.hpp"
@@ -29,6 +28,7 @@
 #include "axklib/relationship.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/wav_stream.hpp"
+#include "content_id.hpp"
 
 namespace {
 
@@ -455,6 +455,8 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
                                         {"source", source_display},
                                         {"selector", selector},
                                         {"relationshipType", relationship.type},
+                                        {"relationshipQuality", axk::relationship_quality_name(relationship.quality)},
+                                        {"reason", relationship.reason},
                                         {"sourceObjectKey", relationship.source_key},
                                         {"targetObjectKey", relationship.target_key}});
                 }

@@ -130,7 +130,7 @@ extern "C" DRESULT disk_ioctl(BYTE drive, BYTE command, void *buffer) {
 
 namespace axk::detail {
 
-Result<void> write_fat12_image(const PreparedMediaImage &image, const std::filesystem::path &temporary_path,
+Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublication &publication,
                                const CancellationToken &cancellation) {
     if (image.objects.size() + image.retained_files.size() > 224U) {
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
@@ -232,9 +232,9 @@ Result<void> write_fat12_image(const PreparedMediaImage &image, const std::files
     f_mount(nullptr, "", 0);
     reset_disk();
 
-    if (auto resized = resize_temporary_file(temporary_path, disk.bytes.size()); !resized)
+    if (auto resized = publication.resize(disk.bytes.size()); !resized)
         return resized;
-    return write_temporary_file_at(temporary_path, 0U, disk.bytes);
+    return publication.write_at(0U, disk.bytes);
 }
 
 } // namespace axk::detail

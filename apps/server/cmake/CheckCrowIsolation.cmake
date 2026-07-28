@@ -79,6 +79,18 @@ endif()
 if(AXK_SERVER_IMPLEMENTATION MATCHES "bind_application_operations")
   message(FATAL_ERROR "The Crow adapter binds application operations independently")
 endif()
+if(AXK_SERVER_IMPLEMENTATION MATCHES "route_dynamic|CROW_WEBSOCKET_ROUTE")
+  message(FATAL_ERROR "Endpoint registration escaped the transport route modules")
+endif()
+
+foreach(AXK_ROUTE_MODULE IN ITEMS infrastructure_routes file_routes event_routes operation_routes)
+  file(READ "${AXK_SOURCE_ROOT}/apps/server/src/${AXK_ROUTE_MODULE}.cpp" AXK_ROUTE_SOURCE)
+  if(AXK_ROUTE_SOURCE MATCHES
+     "application/(alteration|audition|download|extraction|file|image|jobs|package|session|upload|write)")
+    message(FATAL_ERROR
+      "Transport route module depends on an application-domain family: ${AXK_ROUTE_MODULE}.cpp")
+  endif()
+endforeach()
 
 if(NOT AXK_SERVER_USES_CROW)
   message(FATAL_ERROR "The server adapter does not include upstream Crow")

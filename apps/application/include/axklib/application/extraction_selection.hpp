@@ -22,6 +22,8 @@ struct ExcludedExtractionRelationship {
     std::string source_key;
     std::string target_key;
     std::string type;
+    RelationshipQuality quality{RelationshipQuality::unknown};
+    std::string reason;
 };
 
 struct ExactExportClosure {

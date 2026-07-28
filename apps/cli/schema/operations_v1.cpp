@@ -90,7 +90,7 @@ AlterationOutput project_alteration(const AlterationResult &altered) {
 }
 
 AlterationOutput project_alteration(const AlterationInspection &inspection) {
-    return project_alteration(AlterationResult{inspection.source_path, std::nullopt, false, inspection.operations});
+    return project_alteration(AlterationResult{inspection.source_path, std::nullopt, false, inspection.operations, {}});
 }
 
 Result<std::string> serialize(const AlterationOutput &output, bool pretty) {

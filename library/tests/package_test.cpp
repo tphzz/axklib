@@ -1929,12 +1929,12 @@ TEST(PackageImportPlanner, RejectsFat12RootExhaustionAndInvalidExistingChains) {
     full.manifest.format = axk::MediaImageFormat::fat12_floppy;
     for (std::size_t index = 0U; index < 224U; ++index)
         full.retained_files.push_back({std::format("R{:07}.DAT", index), {static_cast<std::byte>(index)}});
-    const auto full_temporary = axk::detail::reserve_temporary_file(full_target);
-    ASSERT_TRUE(full_temporary) << full_temporary.error().message;
-    const auto full_written = axk::detail::write_fat12_image(full, *full_temporary, {});
+    auto full_publication = axk::detail::TemporaryPublication::create(full_target);
+    ASSERT_TRUE(full_publication) << full_publication.error().message;
+    const auto full_written = axk::detail::write_fat12_image(full, *full_publication, {});
     ASSERT_TRUE(full_written) << full_written.error().message;
-    ASSERT_TRUE(axk::detail::flush_file_to_disk(*full_temporary));
-    ASSERT_TRUE(axk::detail::publish_temporary_file(*full_temporary, full_target, false));
+    ASSERT_TRUE(full_publication->flush());
+    ASSERT_TRUE(full_publication->publish(axk::detail::PublicationMode::create_only));
     const auto full_image = axk::FatImage::open(full_target);
     ASSERT_TRUE(full_image) << full_image.error().message;
     EXPECT_EQ(full_image->files().size(), 224U);

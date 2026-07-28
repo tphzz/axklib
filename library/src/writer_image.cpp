@@ -417,26 +417,6 @@ Result<std::size_t> detail::checked_directory_index_size(std::span<const Prepare
     return pages * sfs_directory_index_page_bytes;
 }
 
-namespace {
-
-class TemporaryFileCleanup {
-  public:
-    explicit TemporaryFileCleanup(std::filesystem::path path) : path_(std::move(path)) {}
-    ~TemporaryFileCleanup() {
-        if (active_)
-            detail::discard_temporary_file(path_);
-    }
-    TemporaryFileCleanup(const TemporaryFileCleanup &) = delete;
-    TemporaryFileCleanup &operator=(const TemporaryFileCleanup &) = delete;
-    void release() noexcept { active_ = false; }
-
-  private:
-    std::filesystem::path path_;
-    bool active_{true};
-};
-
-} // namespace
-
 Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, const std::filesystem::path &output_path,
                                            bool overwrite, const CancellationToken &cancellation) {
     if (const auto check = cancellation.check(); !check)
@@ -462,11 +442,10 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
     if (filesystem_error)
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create HDS output directory")};
-    const auto temporary = detail::reserve_temporary_file(output_path);
-    if (!temporary)
-        return std::unexpected{temporary.error()};
-    TemporaryFileCleanup cleanup{*temporary};
-    if (auto resized = detail::resize_temporary_file(*temporary, manifest.size_bytes); !resized)
+    auto publication = detail::TemporaryPublication::create(output_path);
+    if (!publication)
+        return std::unexpected{publication.error()};
+    if (auto resized = publication->resize(manifest.size_bytes); !resized)
         return std::unexpected{resized.error()};
     std::vector<std::byte> superblock(512);
     const std::string_view magic{"YAMAHA_dev3"};
@@ -493,12 +472,11 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
             !written)
             return std::unexpected{written.error()};
     }
-    if (!detail::write_temporary_file_at(*temporary, 0, superblock) ||
-        !detail::write_temporary_file_at(*temporary, 512, superblock)) {
+    if (!publication->write_at(0, superblock) || !publication->write_at(512, superblock)) {
         return std::unexpected{
             make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write HDS superblocks")};
     }
-    WrittenImageLayout layout{output_path, manifest.size_bytes, {}, 0};
+    WrittenImageLayout layout{output_path, manifest.size_bytes, {}, 0, {}};
     for (std::size_t partition_index = 0; partition_index < geometries->size(); ++partition_index) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
@@ -508,7 +486,7 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
         const auto token_text = std::format("{:08x}", 0xab432100U | geometry.index);
         std::ranges::transform(token_text, token.begin(), [](char value) { return static_cast<std::byte>(value); });
         const auto token_offset = geometry.index == 0 ? 1024U : (geometry.start_sector - 1U) * 512U;
-        if (!detail::write_temporary_file_at(*temporary, token_offset, token))
+        if (!publication->write_at(token_offset, token))
             return std::unexpected{
                 make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write HDS transfer token")};
         std::vector<std::byte> header(1024);
@@ -564,8 +542,7 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
                 return std::unexpected{written.error()};
         }
         const auto start = geometry.start_sector * 512U;
-        if (!detail::write_temporary_file_at(*temporary, start, header) ||
-            !detail::write_temporary_file_at(*temporary, start + 1024U, header))
+        if (!publication->write_at(start, header) || !publication->write_at(start + 1024U, header))
             return std::unexpected{
                 make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write partition headers")};
         std::vector<std::byte> bitmap(geometry.bitmap_cluster_count * cluster_size);
@@ -603,16 +580,13 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
             }
             std::ranges::copy(*bytes, std::span{index}.subspan(offset, bytes->size()).begin());
             if (!record.payload.empty() &&
-                !detail::write_temporary_file_at(*temporary, (geometry.start_sector + record.cluster * 2U) * 512U,
-                                                 record.payload))
+                !publication->write_at((geometry.start_sector + record.cluster * 2U) * 512U, record.payload))
                 return std::unexpected{
                     make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write partition payload")};
         }
-        if (!detail::write_temporary_file_at(*temporary, start + 2048U, std::span{bitmap}.first(512)) ||
-            !detail::write_temporary_file_at(*temporary, (geometry.start_sector + geometry.bitmap_cluster * 2U) * 512U,
-                                             bitmap) ||
-            !detail::write_temporary_file_at(
-                *temporary, (geometry.start_sector + geometry.directory_index_cluster * 2U) * 512U, index))
+        if (!publication->write_at(start + 2048U, std::span{bitmap}.first(512)) ||
+            !publication->write_at((geometry.start_sector + geometry.bitmap_cluster * 2U) * 512U, bitmap) ||
+            !publication->write_at((geometry.start_sector + geometry.directory_index_cluster * 2U) * 512U, index))
             return std::unexpected{
                 make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write partition allocation data")};
         const auto free_clusters = geometry.cluster_count - geometry.first_payload_cluster - allocated;
@@ -622,13 +596,15 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
     if (const auto check = cancellation.check(); !check) {
         return std::unexpected{check.error()};
     }
-    if (auto flushed = detail::flush_file_to_disk(*temporary); !flushed)
+    if (auto flushed = publication->flush(); !flushed)
         return std::unexpected{flushed.error()};
-    if (auto validated = validate_hds_image(*temporary, all_records, cancellation); !validated)
+    if (auto validated = validate_hds_image(publication->path(), all_records, cancellation); !validated)
         return std::unexpected{validated.error()};
-    if (auto published = detail::publish_temporary_file(*temporary, output_path, overwrite); !published)
+    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
+    auto published = publication->publish(mode);
+    if (!published)
         return std::unexpected{published.error()};
-    cleanup.release();
+    layout.publication = std::move(*published);
     const auto &last = geometries->back();
     layout.unused_tail_sectors = manifest.size_bytes / 512U - (last.start_sector + last.filesystem_sector_count);
     return layout;

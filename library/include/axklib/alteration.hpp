@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "axklib/io.hpp"
+#include "axklib/publication.hpp"
 #include "axklib/types.hpp"
 #include "axklib/writer.hpp"
 
@@ -146,8 +147,8 @@ struct AlterationManifest {
 };
 
 AXK_AUDIO_API Result<std::string> serialize_alteration_manifest_template();
-AXK_AUDIO_API Result<void> write_alteration_manifest_template(const std::filesystem::path &output_path,
-                                                              bool overwrite = false);
+AXK_AUDIO_API Result<PublicationOutcome> write_alteration_manifest_template(const std::filesystem::path &output_path,
+                                                                            bool overwrite = false);
 
 struct AudioImportSummary {
     std::filesystem::path source_path;
@@ -185,6 +186,7 @@ struct AlterationResult {
     std::optional<std::filesystem::path> output_path;
     bool applied{};
     std::vector<OperationReport> operations;
+    PublicationOutcome publication;
 };
 
 struct AlterationInspection {

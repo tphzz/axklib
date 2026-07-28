@@ -11,7 +11,9 @@
 #include <gtest/gtest.h>
 
 #include "axklib/alteration.hpp"
+#include "axklib/application/audition_operations.hpp"
 #include "axklib/application/image_sessions.hpp"
+#include "axklib/application/operation_registry.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/media.hpp"
 #include "axklib/writer.hpp"
@@ -1030,6 +1032,31 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     const auto header = sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U);
     ASSERT_TRUE(header) << header.error().message;
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
+}
+
+TEST_F(ImageSessionTest, InvokesAuditionPreparationThroughTheApplicationRegistryWithoutCrow) {
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(objects) << objects.error().message;
+    ASSERT_FALSE(objects->items.empty());
+
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_audition_operations(registry, sessions));
+    const auto result = registry.invoke("auditions.prepare",
+                                        {{"imageId", opened->image_id}, {"objectIds", {objects->items.front().id}}},
+                                        {.owner_id = "owner-a",
+                                         .request_id = "request-a",
+                                         .cancellation = {},
+                                         .progress = nullptr,
+                                         .display_path = {},
+                                         .diagnostic = {}});
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_TRUE(result->at("auditionId").get<std::string>().starts_with("audition-"));
+    ASSERT_EQ(result->at("clips").size(), 1U);
+    EXPECT_EQ(result->at("clips").front().at("objectId"), objects->items.front().id);
+    EXPECT_FALSE(result->at("clips").front().at("lanes").empty());
 }
 
 TEST_F(ImageSessionTest, UsesTheSamplePlaybackWindowForPreviewAndAudition) {

@@ -13,6 +13,16 @@ std::string read_text(const std::filesystem::path &path) {
     return {std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
 }
 
+bool journal_state_empty(const std::filesystem::path &path) {
+    for (const auto &entry : std::filesystem::directory_iterator{path}) {
+        if (entry.path().filename() != ".axklib-publication")
+            return false;
+        if (!entry.is_directory() || !std::filesystem::is_empty(entry.path()))
+            return false;
+    }
+    return true;
+}
+
 TEST(AlterationJournalStoreTest, AppliesPreparedPatchesAndRemovesCommittedJournal) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-journal-test";
     const auto workspace = root / "workspace";
@@ -33,7 +43,7 @@ TEST(AlterationJournalStoreTest, AppliesPreparedPatchesAndRemovesCommittedJourna
     ASSERT_TRUE(store.apply(*target, 10U, patches));
     target = {};
     EXPECT_EQ(read_text(workspace / "image.hds"), "01AB456789");
-    EXPECT_TRUE(std::filesystem::is_empty(journals));
+    EXPECT_TRUE(journal_state_empty(journals));
     std::filesystem::remove_all(root, error);
 }
 
@@ -55,7 +65,7 @@ TEST(AlterationJournalStoreTest, RejectsStaleOriginalBytesWithoutWriting) {
     EXPECT_FALSE(store.apply(*target, 10U, patches));
     target = {};
     EXPECT_EQ(read_text(workspace / "image.hds"), "0123456789");
-    EXPECT_TRUE(std::filesystem::is_empty(journals));
+    EXPECT_TRUE(journal_state_empty(journals));
     std::filesystem::remove_all(root, error);
 }
 
@@ -83,12 +93,12 @@ TEST(AlterationJournalStoreTest, RecoversOriginalBytesAfterInterruptedPartialWri
     EXPECT_FALSE(interrupted.storage_ready());
     target = {};
     EXPECT_EQ(read_text(workspace / "image.hds"), "01A3456789");
-    EXPECT_FALSE(std::filesystem::is_empty(journals));
+    EXPECT_FALSE(journal_state_empty(journals));
 
     ASSERT_TRUE(interrupted.recover(*sandbox));
     EXPECT_TRUE(interrupted.storage_ready());
     EXPECT_EQ(read_text(workspace / "image.hds"), "0123456789");
-    EXPECT_TRUE(std::filesystem::is_empty(journals));
+    EXPECT_TRUE(journal_state_empty(journals));
     std::filesystem::remove_all(root, error);
 }
 
@@ -121,7 +131,7 @@ TEST(AlterationJournalStoreTest, RecoversOriginalBytesAfterInterruptionWithinAMu
 
     ASSERT_TRUE(interrupted.recover(*sandbox));
     EXPECT_EQ(read_text(workspace / "image.hds"), "0123456789");
-    EXPECT_TRUE(std::filesystem::is_empty(journals));
+    EXPECT_TRUE(journal_state_empty(journals));
     std::filesystem::remove_all(root, error);
 }
 
@@ -182,7 +192,7 @@ TEST(AlterationJournalStoreTest, RollsBackBeforeCommitWhenSemanticValidationFail
     EXPECT_EQ(applied.error().code, "image_invalid");
     target = {};
     EXPECT_EQ(read_text(workspace / "image.hds"), "0123456789");
-    EXPECT_TRUE(std::filesystem::is_empty(journals));
+    EXPECT_TRUE(journal_state_empty(journals));
     std::filesystem::remove_all(root, error);
 }
 
@@ -208,12 +218,12 @@ TEST(AlterationJournalStoreTest, PreservesCommittedBytesAfterInterruptedCleanup)
     EXPECT_FALSE(interrupted.storage_ready());
     target = {};
     EXPECT_EQ(read_text(workspace / "image.hds"), "01A3456789");
-    EXPECT_FALSE(std::filesystem::is_empty(journals));
+    EXPECT_FALSE(journal_state_empty(journals));
 
     ASSERT_TRUE(interrupted.recover(*sandbox));
     EXPECT_TRUE(interrupted.storage_ready());
     EXPECT_EQ(read_text(workspace / "image.hds"), "01A3456789");
-    EXPECT_TRUE(std::filesystem::is_empty(journals));
+    EXPECT_TRUE(journal_state_empty(journals));
     std::filesystem::remove_all(root, error);
 }
 
@@ -231,7 +241,7 @@ TEST(AlterationJournalStoreTest, RemovesAnOrphanCommitMarkerDuringRecovery) {
     std::ofstream(journals / "alteration-orphan.axkjournal.commit", std::ios::binary) << "orphan";
 
     ASSERT_TRUE(store.recover(*sandbox));
-    EXPECT_TRUE(std::filesystem::is_empty(journals));
+    EXPECT_TRUE(journal_state_empty(journals));
     std::filesystem::remove_all(root, error);
 }
 

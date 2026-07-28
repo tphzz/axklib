@@ -213,6 +213,8 @@ TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelatio
     EXPECT_TRUE(selected.volumes.empty());
     ASSERT_EQ(excluded.size(), 1U);
     EXPECT_EQ(excluded.front().type, "PROG_ASSIGNMENT_TO_SBAC");
+    EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
+    EXPECT_EQ(excluded.front().reason, "exact export requires a Known relationship");
 
     graph.relationships.front().quality = axk::RelationshipQuality::known;
     graph.relationships[1].quality = axk::RelationshipQuality::likely;
@@ -221,6 +223,7 @@ TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelatio
     EXPECT_TRUE(selected.volumes.empty());
     ASSERT_EQ(excluded.size(), 1U);
     EXPECT_EQ(excluded.front().type, "SBAC_SLOT_TO_SBNK");
+    EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
 
     graph.relationships[1].quality = axk::RelationshipQuality::known;
     selected = source;
@@ -237,6 +240,7 @@ TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelatio
     EXPECT_TRUE(selected.volumes.empty());
     ASSERT_EQ(excluded.size(), 1U);
     EXPECT_EQ(excluded.front().type, "SBNK_LEFT_MEMBER_TO_SMPL");
+    EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
 }
 
 TEST(VolumeGraph, SerializesUnresolvedPlacementCandidatesAndResolutionQuality) {

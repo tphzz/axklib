@@ -15,6 +15,8 @@
 
 namespace axk::detail {
 
+class TemporaryPublication;
+
 inline constexpr std::size_t sfs_directory_index_page_bytes = 1024U;
 inline constexpr std::size_t sfs_directory_index_record_bytes = 72U;
 inline constexpr std::size_t sfs_directory_index_records_per_page = 14U;
@@ -92,11 +94,11 @@ Result<WrittenMediaImage>
 write_prepared_media_image(const PreparedMediaImage &image, const std::filesystem::path &output_path, bool overwrite,
                            const CancellationToken &cancellation,
                            const std::function<Result<void>(const std::filesystem::path &)> &validator = {});
-Result<void> write_fat12_image(const PreparedMediaImage &image, const std::filesystem::path &temporary_path,
+Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublication &publication,
                                const CancellationToken &cancellation);
 Result<std::uint32_t> checked_iso9660_sector_count(std::size_t directory_count,
                                                    std::span<const std::uint64_t> file_sizes);
-Result<void> write_iso9660_image(const PreparedMediaImage &image, const std::filesystem::path &temporary_path,
+Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPublication &publication,
                                  const CancellationToken &cancellation);
 
 } // namespace axk::detail

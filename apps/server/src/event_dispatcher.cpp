@@ -3,9 +3,10 @@
 #include <algorithm>
 #include <utility>
 
-axk::server::EventDispatcher::EventDispatcher(std::size_t maximum_pending_events, Sink sink)
+axk::server::EventDispatcher::EventDispatcher(std::size_t maximum_pending_events, Sink sink,
+                                              std::shared_ptr<const EventDispatcherHooks> hooks)
     : maximum_pending_events_(std::max<std::size_t>(maximum_pending_events, 1U)), sink_(std::move(sink)),
-      worker_([this] { run(); }) {}
+      hooks_(std::move(hooks)), worker_([this] { run(); }) {}
 
 axk::server::EventDispatcher::~EventDispatcher() { shutdown(); }
 
@@ -82,7 +83,11 @@ void axk::server::EventDispatcher::run() noexcept {
         bool delivered{};
         try {
             if (sink_) {
+                if (hooks_ && hooks_->before_sink)
+                    hooks_->before_sink();
                 sink_(event);
+                if (hooks_ && hooks_->after_sink)
+                    hooks_->after_sink();
                 delivered = true;
             }
         } catch (...) {

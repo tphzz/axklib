@@ -1,7 +1,10 @@
+#include <barrier>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
+#include <thread>
 
 #include <gtest/gtest.h>
 
@@ -20,39 +23,75 @@ TEST(FilePublication, AtomicallyReplacesAnExistingDestination) {
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
-    const auto candidate = axk::detail::write_temporary_file(output, [](const auto &sink) {
+    auto publication = axk::detail::TemporaryPublication::create(output, [](const auto &sink) {
         constexpr std::string_view replacement{"replacement"};
         return sink(std::as_bytes(std::span{replacement}));
     });
-    ASSERT_TRUE(candidate);
+    ASSERT_TRUE(publication);
+    const auto candidate = publication->path();
     std::ofstream{output, std::ios::binary} << "original";
 
-    const auto published = axk::detail::publish_temporary_file(*candidate, output, true);
+    const auto published = publication->publish(axk::detail::PublicationMode::replace_existing);
 
     ASSERT_TRUE(published) << published.error().message;
     EXPECT_EQ(read_text(output), "replacement");
-    EXPECT_FALSE(std::filesystem::exists(*candidate));
+    EXPECT_FALSE(std::filesystem::exists(candidate));
     std::filesystem::remove_all(root, error);
 }
 
-TEST(FilePublication, NoOverwritePreservesAConcurrentWinnerAndTheCandidate) {
+TEST(FilePublication, NoOverwritePreservesAConcurrentWinnerAndOwnerCanDiscardCandidate) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-file-publication-no-overwrite";
     const auto output = root / "output.bin";
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
-    const auto candidate = axk::detail::write_temporary_file(output, [](const auto &sink) {
+    auto publication = axk::detail::TemporaryPublication::create(output, [](const auto &sink) {
         constexpr std::string_view content{"candidate"};
         return sink(std::as_bytes(std::span{content}));
     });
-    ASSERT_TRUE(candidate);
+    ASSERT_TRUE(publication);
+    const auto candidate = publication->path();
     std::ofstream{output, std::ios::binary} << "original";
 
-    const auto published = axk::detail::publish_temporary_file(*candidate, output, false);
+    const auto published = publication->publish(axk::detail::PublicationMode::create_only);
 
     ASSERT_FALSE(published);
     EXPECT_EQ(read_text(output), "original");
-    EXPECT_EQ(read_text(*candidate), "candidate");
+    EXPECT_EQ(read_text(candidate), "candidate");
+    ASSERT_TRUE(publication->discard());
+    EXPECT_FALSE(std::filesystem::exists(candidate));
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(FilePublication, NoOverwriteRacePreservesTheWinnerAtTheAtomicPublicationBoundary) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-file-publication-concurrent-winner";
+    const auto output = root / "output.bin";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    std::barrier publication_ready{2};
+    std::barrier winner_created{2};
+    auto hooks = std::make_shared<axk::detail::PublicationHooks>();
+    hooks->before_publish = [&] {
+        publication_ready.arrive_and_wait();
+        winner_created.arrive_and_wait();
+    };
+    auto publication = axk::detail::TemporaryPublication::create(output, hooks);
+    ASSERT_TRUE(publication) << publication.error().message;
+    ASSERT_TRUE(publication->append(std::as_bytes(std::span{"candidate", 9U})));
+    ASSERT_TRUE(publication->flush());
+    std::thread winner{[&] {
+        publication_ready.arrive_and_wait();
+        std::ofstream{output, std::ios::binary} << "winner";
+        winner_created.arrive_and_wait();
+    }};
+
+    const auto published = publication->publish(axk::detail::PublicationMode::create_only);
+    winner.join();
+
+    ASSERT_FALSE(published);
+    EXPECT_EQ(read_text(output), "winner");
+    ASSERT_TRUE(publication->discard());
     std::filesystem::remove_all(root, error);
 }
 
@@ -65,17 +104,18 @@ TEST(FilePublication, RepeatedNoOverwriteFailuresReleaseTheCandidateForCleanup) 
     std::ofstream{output, std::ios::binary} << "winner";
 
     for (std::size_t attempt = 0; attempt < 128U; ++attempt) {
-        const auto candidate = axk::detail::write_temporary_file(output, [](const auto &sink) {
+        auto publication = axk::detail::TemporaryPublication::create(output, [](const auto &sink) {
             constexpr std::string_view content{"candidate"};
             return sink(std::as_bytes(std::span{content}));
         });
-        ASSERT_TRUE(candidate) << candidate.error().message;
+        ASSERT_TRUE(publication) << publication.error().message;
+        const auto candidate = publication->path();
 
-        const auto published = axk::detail::publish_temporary_file(*candidate, output, false);
+        const auto published = publication->publish(axk::detail::PublicationMode::create_only);
 
         ASSERT_FALSE(published);
-        axk::detail::discard_temporary_file(*candidate);
-        EXPECT_FALSE(std::filesystem::exists(*candidate));
+        ASSERT_TRUE(publication->discard());
+        EXPECT_FALSE(std::filesystem::exists(candidate));
     }
 
     EXPECT_EQ(read_text(output), "winner");
@@ -87,19 +127,23 @@ TEST(FilePublication, RepeatedNoOverwriteFailuresReleaseTheCandidateForCleanup) 
     std::filesystem::remove_all(root, error);
 }
 
-TEST(FilePublication, FailedReplacementLeavesTheOriginalDestinationIntact) {
-    const auto root = std::filesystem::temp_directory_path() / "axklib-file-publication-failed-replace";
-    const auto missing_temporary = root / ".missing.tmp";
+TEST(FilePublication, PublishingTwiceFailsAndLeavesTheCommittedDestinationIntact) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-file-publication-double-publish";
     const auto output = root / "output.bin";
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
-    std::ofstream{output, std::ios::binary} << "original";
+    auto publication = axk::detail::TemporaryPublication::create(output, [](const auto &sink) {
+        constexpr std::string_view content{"committed"};
+        return sink(std::as_bytes(std::span{content}));
+    });
+    ASSERT_TRUE(publication);
+    ASSERT_TRUE(publication->publish(axk::detail::PublicationMode::replace_existing));
 
-    const auto published = axk::detail::publish_temporary_file(missing_temporary, output, true);
+    const auto published = publication->publish(axk::detail::PublicationMode::replace_existing);
 
     ASSERT_FALSE(published);
-    EXPECT_EQ(read_text(output), "original");
+    EXPECT_EQ(read_text(output), "committed");
     std::filesystem::remove_all(root, error);
 }
 
@@ -110,16 +154,16 @@ TEST(FilePublication, ExclusivelyReservesUniqueRegularTemporarySiblings) {
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
 
-    const auto first = axk::detail::reserve_temporary_file(output);
-    const auto second = axk::detail::reserve_temporary_file(output);
+    auto first = axk::detail::TemporaryPublication::create(output);
+    auto second = axk::detail::TemporaryPublication::create(output);
 
     ASSERT_TRUE(first) << first.error().message;
     ASSERT_TRUE(second) << second.error().message;
-    EXPECT_NE(*first, *second);
-    EXPECT_TRUE(std::filesystem::is_regular_file(*first));
-    EXPECT_TRUE(std::filesystem::is_regular_file(*second));
-    axk::detail::discard_temporary_file(*first);
-    axk::detail::discard_temporary_file(*second);
+    EXPECT_NE(first->path(), second->path());
+    EXPECT_TRUE(std::filesystem::is_regular_file(first->path()));
+    EXPECT_TRUE(std::filesystem::is_regular_file(second->path()));
+    ASSERT_TRUE(first->discard());
+    ASSERT_TRUE(second->discard());
     std::filesystem::remove_all(root, error);
 }
 
@@ -130,17 +174,18 @@ TEST(FilePublication, StreamsAndFlushesThroughTheExclusivelyCreatedFile) {
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
 
-    const auto temporary = axk::detail::write_temporary_file(output, [](const axk::detail::TemporaryFileSink &sink) {
-        const std::string first{"candidate"};
-        const std::string second{"-data"};
-        if (auto written = sink(std::as_bytes(std::span{first.data(), first.size()})); !written)
-            return written;
-        return sink(std::as_bytes(std::span{second.data(), second.size()}));
-    });
+    auto publication =
+        axk::detail::TemporaryPublication::create(output, [](const axk::detail::TemporaryFileSink &sink) {
+            const std::string first{"candidate"};
+            const std::string second{"-data"};
+            if (auto written = sink(std::as_bytes(std::span{first.data(), first.size()})); !written)
+                return written;
+            return sink(std::as_bytes(std::span{second.data(), second.size()}));
+        });
 
-    ASSERT_TRUE(temporary) << temporary.error().message;
-    EXPECT_EQ(read_text(*temporary), "candidate-data");
-    axk::detail::discard_temporary_file(*temporary);
+    ASSERT_TRUE(publication) << publication.error().message;
+    EXPECT_EQ(read_text(publication->path()), "candidate-data");
+    ASSERT_TRUE(publication->discard());
     std::filesystem::remove_all(root, error);
 }
 
@@ -152,19 +197,63 @@ TEST(FilePublication, ProducerFailureRemovesTheExclusiveCandidateAndPreservesThe
     std::filesystem::create_directories(root);
     std::ofstream{output, std::ios::binary} << "original";
 
-    const auto temporary =
-        axk::detail::write_temporary_file(output, [](const axk::detail::TemporaryFileSink &) -> axk::Result<void> {
+    const auto publication = axk::detail::TemporaryPublication::create(
+        output, [](const axk::detail::TemporaryFileSink &) -> axk::Result<void> {
             return std::unexpected{
                 axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io, "injected producer failure")};
         });
 
-    ASSERT_FALSE(temporary);
+    ASSERT_FALSE(publication);
     EXPECT_EQ(read_text(output), "original");
 #if !defined(_WIN32)
     EXPECT_TRUE(std::filesystem::is_empty(root / ".axklib-publication"));
 #else
     EXPECT_EQ(std::distance(std::filesystem::directory_iterator{root}, std::filesystem::directory_iterator{}), 1);
 #endif
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(FilePublication, DestructionDiscardsAnUnpublishedCandidate) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-file-publication-destructor";
+    const auto output = root / "output.bin";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    std::filesystem::path candidate;
+    {
+        auto publication = axk::detail::TemporaryPublication::create(output, [](const auto &sink) {
+            constexpr std::string_view content{"candidate"};
+            return sink(std::as_bytes(std::span{content}));
+        });
+        ASSERT_TRUE(publication);
+        candidate = publication->path();
+        ASSERT_TRUE(std::filesystem::exists(candidate));
+    }
+
+    EXPECT_FALSE(std::filesystem::exists(candidate));
+    EXPECT_FALSE(std::filesystem::exists(output));
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(FilePublication, MoveTransfersSoleCleanupOwnership) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-file-publication-move";
+    const auto output = root / "output.bin";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    std::filesystem::path candidate;
+    {
+        auto created = axk::detail::TemporaryPublication::create(output);
+        ASSERT_TRUE(created);
+        candidate = created->path();
+        auto first = std::move(*created);
+        auto second = std::move(first);
+        ASSERT_TRUE(std::filesystem::exists(candidate));
+        ASSERT_TRUE(second.append(std::as_bytes(std::span{"owned", 5U})));
+    }
+
+    EXPECT_FALSE(std::filesystem::exists(candidate));
+    EXPECT_FALSE(std::filesystem::exists(output));
     std::filesystem::remove_all(root, error);
 }
 
@@ -177,26 +266,27 @@ TEST(FilePublication, RejectsCandidatePathReplacementBeforePublication) {
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
     std::ofstream{victim, std::ios::binary} << "victim";
-    const auto candidate = axk::detail::write_temporary_file(output, [](const auto &sink) {
+    auto publication = axk::detail::TemporaryPublication::create(output, [](const auto &sink) {
         constexpr std::string_view content{"validated"};
         return sink(std::as_bytes(std::span{content}));
     });
-    ASSERT_TRUE(candidate);
-    std::filesystem::rename(*candidate, displaced);
+    ASSERT_TRUE(publication);
+    const auto candidate = publication->path();
+    std::filesystem::rename(candidate, displaced);
 #if defined(_WIN32)
-    std::ofstream{*candidate, std::ios::binary} << "substitute";
+    std::ofstream{candidate, std::ios::binary} << "substitute";
 #else
-    std::filesystem::create_symlink(victim, *candidate);
+    std::filesystem::create_symlink(victim, candidate);
 #endif
 
-    const auto published = axk::detail::publish_temporary_file(*candidate, output, true);
+    const auto published = publication->publish(axk::detail::PublicationMode::replace_existing);
 
     ASSERT_FALSE(published);
     EXPECT_FALSE(std::filesystem::exists(output));
     EXPECT_EQ(read_text(displaced), "validated");
     EXPECT_EQ(read_text(victim), "victim");
 #if defined(_WIN32)
-    EXPECT_EQ(read_text(*candidate), "substitute");
+    EXPECT_EQ(read_text(candidate), "substitute");
 #endif
     std::filesystem::remove_all(root, error);
 }
@@ -210,15 +300,15 @@ TEST(FilePublication, PublishesThroughTheRetainedParentAfterPathRebinding) {
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(original_parent);
-    const auto candidate = axk::detail::write_temporary_file(output, [](const auto &sink) {
+    auto publication = axk::detail::TemporaryPublication::create(output, [](const auto &sink) {
         constexpr std::string_view content{"validated"};
         return sink(std::as_bytes(std::span{content}));
     });
-    ASSERT_TRUE(candidate);
+    ASSERT_TRUE(publication);
     std::filesystem::rename(original_parent, retained_parent);
     std::filesystem::create_directories(original_parent);
 
-    const auto published = axk::detail::publish_temporary_file(*candidate, output, true);
+    const auto published = publication->publish(axk::detail::PublicationMode::replace_existing);
 
     ASSERT_TRUE(published) << published.error().message;
     EXPECT_FALSE(std::filesystem::exists(output));

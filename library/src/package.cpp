@@ -975,33 +975,6 @@ Result<void> preflight_output(const std::filesystem::path &path, bool overwrite)
     return {};
 }
 
-class TemporaryPackageCleanup {
-  public:
-    explicit TemporaryPackageCleanup(std::filesystem::path path) : path_{std::move(path)} {}
-    ~TemporaryPackageCleanup() {
-        if (active_)
-            detail::discard_temporary_file(path_);
-    }
-    TemporaryPackageCleanup(const TemporaryPackageCleanup &) = delete;
-    TemporaryPackageCleanup &operator=(const TemporaryPackageCleanup &) = delete;
-    void release() noexcept { active_ = false; }
-
-  private:
-    std::filesystem::path path_;
-    bool active_{true};
-};
-
-Result<std::filesystem::path> reserve_unique_temporary(const std::filesystem::path &output) {
-    return detail::reserve_temporary_file(output);
-}
-
-Result<void> flush_package_file(const std::filesystem::path &path) { return detail::flush_file_to_disk(path); }
-
-Result<void> publish_temporary_package(const std::filesystem::path &temporary, const std::filesystem::path &output,
-                                       bool overwrite) {
-    return detail::publish_temporary_file(temporary, output, overwrite);
-}
-
 Result<std::vector<std::byte>> read_package_reader(const RandomAccessReader &reader,
                                                    const CancellationToken &cancellation);
 
@@ -1372,19 +1345,18 @@ Result<PackagePublication> publish_portable_package(const PackageBuild &build, c
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create package output directory")};
     }
-    auto temporary = reserve_unique_temporary(*resolved);
-    if (!temporary)
-        return std::unexpected{temporary.error()};
-    TemporaryPackageCleanup cleanup{*temporary};
-    if (auto resized = detail::resize_temporary_file(*temporary, build.archive.size()); !resized)
+    auto publication = detail::TemporaryPublication::create(*resolved);
+    if (!publication)
+        return std::unexpected{publication.error()};
+    if (auto resized = publication->resize(build.archive.size()); !resized)
         return std::unexpected{resized.error()};
-    if (auto written = detail::write_temporary_file_at(*temporary, 0U, build.archive); !written)
+    if (auto written = publication->write_at(0U, build.archive); !written)
         return std::unexpected{written.error()};
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected{checked.error()};
-    if (const auto flushed = flush_package_file(*temporary); !flushed)
+    if (const auto flushed = publication->flush(); !flushed)
         return std::unexpected{flushed.error()};
-    auto reopened = open_portable_package(*temporary, cancellation);
+    auto reopened = open_portable_package(publication->path(), cancellation);
     if (!reopened)
         return std::unexpected{reopened.error()};
     if (reopened->package_id != build.package.package_id) {
@@ -1394,12 +1366,13 @@ Result<PackagePublication> publish_portable_package(const PackageBuild &build, c
         return std::unexpected{checked.error()};
     if (const auto available = preflight_output(*resolved, overwrite); !available)
         return std::unexpected{available.error()};
-    if (const auto published = publish_temporary_package(*temporary, *resolved, overwrite); !published) {
+    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
+    auto published = publication->publish(mode);
+    if (!published) {
         return std::unexpected{published.error()};
     }
-    cleanup.release();
     return PackagePublication{*resolved, build.package.package_id, build.package.kind,
-                              static_cast<std::uint64_t>(build.archive.size())};
+                              static_cast<std::uint64_t>(build.archive.size()), std::move(*published)};
 }
 
 Result<PackagePublication> export_portable_package(const MediaContainer &source,

@@ -37,7 +37,8 @@ The source modules reflect that boundary:
   and writer/transaction command families.
 - `apps/cli/schema/` owns versioned machine-output data structures and their private
   JSON serialization.
-- `apps/cli/content_id.*` owns pooled-export identifiers and collision handling.
+- `apps/application/src/content_id.*` owns pooled-export identifiers and
+  collision handling as an application-private extraction helper.
 
 Command modules orchestrate public library services; they do not contain disk
 layout, object decoding, allocation, or audio-conversion rules. Core targets do

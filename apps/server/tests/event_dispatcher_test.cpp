@@ -1,6 +1,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -103,6 +104,67 @@ TEST(EventDispatcher, ThrowingSinkCountsFailureInsteadOfDelivery) {
     EXPECT_EQ(snapshot.delivered_events, 0U);
     EXPECT_EQ(snapshot.failed_events, 1U);
     EXPECT_EQ(snapshot.dropped_events, 0U);
+    EXPECT_EQ(snapshot.pending_events, 0U);
+}
+
+TEST(EventDispatcher, DeliveryHooksProvideDeterministicSinkBoundaries) {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool before_sink{};
+    bool release_sink{};
+    bool after_sink{};
+    auto hooks = std::make_shared<axk::server::EventDispatcherHooks>();
+    hooks->before_sink = [&] {
+        std::unique_lock lock{mutex};
+        before_sink = true;
+        condition.notify_all();
+        condition.wait(lock, [&] { return release_sink; });
+    };
+    hooks->after_sink = [&] {
+        const std::scoped_lock lock{mutex};
+        after_sink = true;
+        condition.notify_all();
+    };
+    axk::server::EventDispatcher dispatcher{1U, [](const axk::app::JobEvent &) {}, hooks};
+
+    EXPECT_TRUE(dispatcher.publish(event(1U)));
+    {
+        std::unique_lock lock{mutex};
+        ASSERT_TRUE(condition.wait_for(lock, 1s, [&] { return before_sink; }));
+        EXPECT_FALSE(after_sink);
+        release_sink = true;
+    }
+    condition.notify_all();
+    {
+        std::unique_lock lock{mutex};
+        ASSERT_TRUE(condition.wait_for(lock, 1s, [&] { return after_sink; }));
+    }
+    dispatcher.shutdown();
+    EXPECT_EQ(dispatcher.snapshot().delivered_events, 1U);
+}
+
+TEST(EventDispatcher, MissingSinkIsAnExplicitDeliveryFailure) {
+    axk::server::EventDispatcher dispatcher{1U, {}};
+
+    EXPECT_TRUE(dispatcher.publish(event(1U)));
+    dispatcher.shutdown();
+
+    const auto snapshot = dispatcher.snapshot();
+    EXPECT_EQ(snapshot.delivered_events, 0U);
+    EXPECT_EQ(snapshot.failed_events, 1U);
+    EXPECT_EQ(snapshot.dropped_events, 0U);
+}
+
+TEST(EventDispatcher, PublicationAfterShutdownIsDroppedWithoutRestartingTheWorker) {
+    axk::server::EventDispatcher dispatcher{1U, [](const axk::app::JobEvent &) {}};
+    dispatcher.shutdown();
+
+    EXPECT_FALSE(dispatcher.publish(event(1U)));
+
+    const auto snapshot = dispatcher.snapshot();
+    EXPECT_EQ(snapshot.delivered_events, 0U);
+    EXPECT_EQ(snapshot.failed_events, 0U);
+    EXPECT_EQ(snapshot.dropped_events, 1U);
     EXPECT_EQ(snapshot.pending_events, 0U);
 }
 

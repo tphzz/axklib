@@ -10,6 +10,7 @@
 
 #include "axklib/error.hpp"
 #include "axklib/export.hpp"
+#include "axklib/publication.hpp"
 
 namespace axk {
 
@@ -69,15 +70,17 @@ struct ReportSchemaOptions {
 
 AXK_API ReportSchemaManifest make_report_schema(std::string report_name, std::span<const ReportRow> rows,
                                                 ReportSchemaOptions options = {});
-AXK_API Result<void> write_report_json(const std::filesystem::path &path, std::span<const ReportRow> rows,
-                                       bool overwrite = false);
-AXK_API Result<void> write_report_object(const std::filesystem::path &path, const ReportRow &row,
-                                         bool overwrite = false);
-AXK_API Result<void> write_report_csv(const std::filesystem::path &path, std::span<const ReportRow> rows,
-                                      std::span<const std::string> empty_columns = {}, bool overwrite = false);
-AXK_API Result<void> write_report_schema(const std::filesystem::path &path, const ReportSchemaManifest &manifest,
-                                         bool overwrite = false);
-AXK_API Result<void> write_report_schema_index(const std::filesystem::path &path,
-                                               std::span<const ReportSchemaManifest> manifests, bool overwrite = false);
+AXK_API Result<PublicationOutcome> write_report_json(const std::filesystem::path &path, std::span<const ReportRow> rows,
+                                                     bool overwrite = false);
+AXK_API Result<PublicationOutcome> write_report_object(const std::filesystem::path &path, const ReportRow &row,
+                                                       bool overwrite = false);
+AXK_API Result<PublicationOutcome> write_report_csv(const std::filesystem::path &path, std::span<const ReportRow> rows,
+                                                    std::span<const std::string> empty_columns = {},
+                                                    bool overwrite = false);
+AXK_API Result<PublicationOutcome> write_report_schema(const std::filesystem::path &path,
+                                                       const ReportSchemaManifest &manifest, bool overwrite = false);
+AXK_API Result<PublicationOutcome> write_report_schema_index(const std::filesystem::path &path,
+                                                             std::span<const ReportSchemaManifest> manifests,
+                                                             bool overwrite = false);
 
 } // namespace axk
