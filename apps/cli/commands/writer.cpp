@@ -47,7 +47,7 @@ axk::Result<void> publish_manifest(const std::filesystem::path &output_path, std
     if (!temporary)
         return std::unexpected{temporary.error()};
     if (auto published = axk::detail::publish_temporary_file(*temporary, output_path, overwrite); !published) {
-        std::filesystem::remove(*temporary, filesystem_error);
+        axk::detail::discard_temporary_file(*temporary);
         return published;
     }
     return {};
@@ -56,15 +56,23 @@ axk::Result<void> publish_manifest(const std::filesystem::path &output_path, std
 } // namespace
 
 int run_create_hds(const std::filesystem::path &manifest_path, const std::filesystem::path &output_path, bool overwrite,
-                   bool pretty) {
-    static_cast<void>(pretty);
-    const auto written = create_image("HDS", manifest_path, output_path, overwrite);
-    if (!written)
-        return report_application_failure(written.error());
-    std::cout << "image=" << axk::text::path_to_utf8(output_path) << " size_bytes=" << written->size_bytes
-              << " partitions=" << written->partitions.size() << " objects=" << written->object_count
-              << " unused_tail_sectors=" << written->unused_tail_sectors << '\n';
-    for (const auto &partition : written->partitions) {
+                   bool dry_run) {
+    const auto created = create_image("HDS", manifest_path, output_path, overwrite, !dry_run);
+    if (!created)
+        return report_application_failure(created.error());
+    if (dry_run) {
+        std::cout << "plan=create kind=" << created->plan.kind << " output=" << axk::text::path_to_utf8(output_path)
+                  << " format=" << created->plan.format << " objects=" << created->plan.object_count
+                  << " size_bytes=" << created->plan.size_bytes.value_or(0U)
+                  << " partitions=" << created->plan.partition_count.value_or(0U)
+                  << " overwrite=" << (created->plan.overwrite ? "true" : "false") << " valid=true\n";
+        return exit_code(ExitStatus::success);
+    }
+    const auto &written = *created->written;
+    std::cout << "image=" << axk::text::path_to_utf8(output_path) << " size_bytes=" << written.size_bytes
+              << " partitions=" << written.partitions.size() << " objects=" << written.object_count
+              << " unused_tail_sectors=" << written.unused_tail_sectors << '\n';
+    for (const auto &partition : written.partitions) {
         std::cout << "partition=" << partition.index << " name='" << partition.name
                   << "' start_sector=" << partition.start_sector << " sector_count=" << partition.sector_count
                   << " cluster_count=" << partition.cluster_count << " free_kib=" << partition.free_kib << '\n';
@@ -73,14 +81,20 @@ int run_create_hds(const std::filesystem::path &manifest_path, const std::filesy
 }
 
 int run_create_media(const std::filesystem::path &manifest_path, const std::filesystem::path &output_path,
-                     std::string_view expected_format, bool overwrite, bool pretty) {
-    static_cast<void>(pretty);
+                     std::string_view expected_format, bool overwrite, bool dry_run) {
     const auto service_kind = expected_format == "fat12_floppy" ? std::string_view{"FLOPPY"} : std::string_view{"ISO"};
-    const auto written = create_image(service_kind, manifest_path, output_path, overwrite);
-    if (!written)
-        return report_application_failure(written.error());
+    const auto created = create_image(service_kind, manifest_path, output_path, overwrite, !dry_run);
+    if (!created)
+        return report_application_failure(created.error());
+    if (dry_run) {
+        std::cout << "plan=create kind=" << created->plan.kind << " output=" << axk::text::path_to_utf8(output_path)
+                  << " format=" << created->plan.format << " objects=" << created->plan.object_count
+                  << " overwrite=" << (created->plan.overwrite ? "true" : "false") << " valid=true\n";
+        return exit_code(ExitStatus::success);
+    }
+    const auto &written = *created->written;
     std::cout << "image=" << axk::text::path_to_utf8(output_path) << " format=" << expected_format
-              << " size_bytes=" << written->size_bytes << " objects=" << written->object_count << '\n';
+              << " size_bytes=" << written.size_bytes << " objects=" << written.object_count << '\n';
     return exit_code(ExitStatus::success);
 }
 

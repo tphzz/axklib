@@ -601,10 +601,10 @@ axk::app::Result<axk::cli::schema::package_v1::PlanOutput> axk::cli::LocalOperat
     return *projected;
 }
 
-axk::app::Result<axk::cli::ImageWriteResult> axk::cli::create_image(std::string_view kind,
-                                                                    const std::filesystem::path &manifest_path,
-                                                                    const std::filesystem::path &output_path,
-                                                                    bool overwrite) {
+axk::app::Result<axk::cli::ImageCreationResult> axk::cli::create_image(std::string_view kind,
+                                                                       const std::filesystem::path &manifest_path,
+                                                                       const std::filesystem::path &output_path,
+                                                                       bool overwrite, bool apply) {
     auto prepared = app::prepare_local_build_manifest(kind, manifest_path);
     if (!prepared)
         return std::unexpected(app::Error{"manifest_invalid", axk::render_error(prepared.error())});
@@ -633,23 +633,43 @@ axk::app::Result<axk::cli::ImageWriteResult> axk::cli::create_image(std::string_
                                              local_context());
     if (!plan)
         return std::unexpected(plan.error());
+    const auto &summary = plan->at("summary");
+    ImageCreationResult result{
+        .plan =
+            {
+                .kind = plan->at("kind").get<std::string>(),
+                .format = summary.at("format").get<std::string>(),
+                .output_path = output_path,
+                .overwrite = plan->at("overwrite").get<bool>(),
+                .object_count = summary.at("objectCount").get<std::size_t>(),
+                .size_bytes = summary.contains("sizeBytes")
+                                  ? std::optional<std::uint64_t>{summary.at("sizeBytes").get<std::uint64_t>()}
+                                  : std::nullopt,
+                .partition_count = summary.contains("partitionCount")
+                                       ? std::optional<std::size_t>{summary.at("partitionCount").get<std::size_t>()}
+                                       : std::nullopt,
+            },
+        .written = std::nullopt,
+    };
+    if (!apply)
+        return result;
     auto operation = std::string{"create."};
     operation += kind == "HDS" ? "hds" : kind == "FLOPPY" ? "floppy" : "iso";
     auto written = (*runtime)->registry_.invoke(operation, {{"planToken", plan->at("planToken")}}, local_context());
     if (!written)
         return std::unexpected(written.error());
-    ImageWriteResult result{.size_bytes = written->at("sizeBytes").get<std::uint64_t>(),
-                            .object_count = written->at("objectCount").get<std::size_t>(),
-                            .unused_tail_sectors = written->value("unusedTailSectors", std::uint64_t{}),
-                            .partitions = {}};
+    result.written = ImageWriteResult{.size_bytes = written->at("sizeBytes").get<std::uint64_t>(),
+                                      .object_count = written->at("objectCount").get<std::size_t>(),
+                                      .unused_tail_sectors = written->value("unusedTailSectors", std::uint64_t{}),
+                                      .partitions = {}};
     if (const auto partitions = written->find("partitions"); partitions != written->end()) {
         for (const auto &partition : *partitions) {
-            result.partitions.push_back({.index = partition.at("index").get<std::uint32_t>(),
-                                         .name = partition.at("name").get<std::string>(),
-                                         .start_sector = partition.at("startSector").get<std::uint32_t>(),
-                                         .sector_count = partition.at("sectorCount").get<std::uint32_t>(),
-                                         .cluster_count = partition.at("clusterCount").get<std::uint32_t>(),
-                                         .free_kib = partition.at("freeKiB").get<std::uint64_t>()});
+            result.written->partitions.push_back({.index = partition.at("index").get<std::uint32_t>(),
+                                                  .name = partition.at("name").get<std::string>(),
+                                                  .start_sector = partition.at("startSector").get<std::uint32_t>(),
+                                                  .sector_count = partition.at("sectorCount").get<std::uint32_t>(),
+                                                  .cluster_count = partition.at("clusterCount").get<std::uint32_t>(),
+                                                  .free_kib = partition.at("freeKiB").get<std::uint64_t>()});
         }
     }
     return result;

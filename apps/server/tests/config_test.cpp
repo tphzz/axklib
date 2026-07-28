@@ -359,6 +359,10 @@ TEST(ServerConfig, RejectsWeakAuthenticationAndUnsafeLanDefaults) {
     ASSERT_FALSE(lan);
     EXPECT_NE(lan.error().message.find("allowed origin"), std::string::npos);
     config.allowed_origins.push_back("https://sampler.example.test");
+    lan = axk::server::validate_config(config);
+    ASSERT_FALSE(lan);
+    EXPECT_NE(lan.error().message.find("unsafe"), std::string::npos);
+    config.allow_insecure_remote_http = true;
     EXPECT_TRUE(axk::server::validate_config(config));
 
     config.connection_file = std::filesystem::temp_directory_path() / "axklib-server.json";
@@ -377,6 +381,7 @@ TEST(ServerConfig, ParsesNamedLanTokenHashesAndRejectsWildcards) {
         std::string{"operator=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"},
         std::string{"--allow-origin"},
         std::string{"https://sampler.example.test"},
+        std::string{"--allow-insecure-remote-http"},
         std::string{"--workspace-store"},
         (root / "workspaces.json").string(),
     };
@@ -389,12 +394,26 @@ TEST(ServerConfig, ParsesNamedLanTokenHashesAndRejectsWildcards) {
     ASSERT_EQ(parsed->config.token_hashes.size(), 1U);
     EXPECT_EQ(parsed->config.token_hashes.front().principal_id, "operator");
     EXPECT_TRUE(parsed->config.bearer_token.empty());
+    EXPECT_TRUE(parsed->config.allow_insecure_remote_http);
 
     auto wildcard = parsed->config;
     wildcard.allowed_origins = {"*"};
     const auto rejected = axk::server::validate_config(wildcard);
     ASSERT_FALSE(rejected);
     EXPECT_NE(rejected.error().message.find("non-wildcard"), std::string::npos);
+}
+
+TEST(ServerConfig, RejectsInsecureRemoteOverrideInSidecarMode) {
+    const auto root = std::filesystem::temp_directory_path();
+    std::array arguments{std::string{"axklib-server"}, std::string{"--connection-file"},
+                         (root / "axklib-sidecar.json").string(), std::string{"--allow-insecure-remote-http"}};
+    std::array<char *, arguments.size()> pointers{};
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+        pointers[index] = arguments[index].data();
+
+    const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+    ASSERT_FALSE(parsed);
+    EXPECT_NE(parsed.error().message.find("--allow-insecure-remote-http"), std::string::npos);
 }
 
 } // namespace

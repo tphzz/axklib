@@ -2,6 +2,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 
 #include <gtest/gtest.h>
@@ -90,6 +91,19 @@ TEST(EventDispatcher, TerminalEventCanReplaceQueuedProgress) {
     dispatcher.shutdown();
     EXPECT_EQ(delivered, (std::vector<std::string>{"running", "completed"}));
     EXPECT_EQ(dispatcher.snapshot().dropped_events, 1U);
+}
+
+TEST(EventDispatcher, ThrowingSinkCountsFailureInsteadOfDelivery) {
+    axk::server::EventDispatcher dispatcher{1U, [](const axk::app::JobEvent &) { throw std::runtime_error{"sink"}; }};
+
+    EXPECT_TRUE(dispatcher.publish(event(1U)));
+    dispatcher.shutdown();
+
+    const auto snapshot = dispatcher.snapshot();
+    EXPECT_EQ(snapshot.delivered_events, 0U);
+    EXPECT_EQ(snapshot.failed_events, 1U);
+    EXPECT_EQ(snapshot.dropped_events, 0U);
+    EXPECT_EQ(snapshot.pending_events, 0U);
 }
 
 } // namespace

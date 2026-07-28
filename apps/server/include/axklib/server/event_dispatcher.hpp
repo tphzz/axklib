@@ -14,6 +14,7 @@ namespace axk::server {
 
 struct EventDispatcherSnapshot {
     std::uint64_t delivered_events{};
+    std::uint64_t failed_events{};
     std::uint64_t dropped_events{};
     std::size_t pending_events{};
 };
@@ -43,6 +44,7 @@ class EventDispatcher {
     std::condition_variable condition_;
     std::deque<app::JobEvent> pending_;
     std::uint64_t delivered_events_{};
+    std::uint64_t failed_events_{};
     std::uint64_t dropped_events_{};
     bool stopping_{};
     std::thread worker_;

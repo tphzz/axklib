@@ -1418,12 +1418,46 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             query = urlencode({"rootId": "workspace", "relativePath": "download.bin"})
             status, content, headers = raw_http_request(
                 port,
+                "HEAD",
+                f"/api/v1/files/content?{query}",
+            )
+            assert status == 200 and content == b"", (status, content)
+            assert headers["content-length"] == "6"
+            revision = headers["etag"]
+
+            status, content, headers = raw_http_request(
+                port,
+                "HEAD",
+                "/api/v1/files/content",
+            )
+            assert status == 400 and content == b"", (status, content)
+            assert int(headers["content-length"]) > 0
+
+            status, content, headers = raw_http_request(
+                port,
                 "GET",
                 f"/api/v1/files/content?{query}",
                 headers={"Range": "bytes=1-3"},
             )
+            assert status == 428, (status, content)
+
+            status, content, headers = raw_http_request(
+                port,
+                "GET",
+                f"/api/v1/files/content?{query}",
+                headers={"Range": "bytes=1-3", "If-Match": '"stale"'},
+            )
+            assert status == 412, (status, content)
+
+            status, content, headers = raw_http_request(
+                port,
+                "GET",
+                f"/api/v1/files/content?{query}",
+                headers={"Range": "bytes=1-3", "If-Match": revision},
+            )
             assert status == 206 and content == b"bcd", (status, content)
             assert headers["content-range"] == "bytes 1-3/6"
+            assert headers["etag"] == revision
             assert (root_path / "download.bin").read_bytes() == b"abcdef"
 
             status, archive = http_request(

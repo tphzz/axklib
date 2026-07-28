@@ -321,15 +321,15 @@ int axk::cli::run(int argc, char **argv) {
     }
     if (*writer_commands.create_hds) {
         return run_create_hds(writer_commands.create_manifest, writer_commands.create_output,
-                              writer_commands.create_overwrite, writer_commands.create_pretty);
+                              writer_commands.create_overwrite, writer_commands.create_dry_run);
     }
     if (*writer_commands.create_floppy) {
         return run_create_media(writer_commands.create_manifest, writer_commands.create_output, "fat12_floppy",
-                                writer_commands.create_overwrite, writer_commands.create_pretty);
+                                writer_commands.create_overwrite, writer_commands.create_dry_run);
     }
     if (*writer_commands.create_iso) {
         return run_create_media(writer_commands.create_manifest, writer_commands.create_output, "iso9660",
-                                writer_commands.create_overwrite, writer_commands.create_pretty);
+                                writer_commands.create_overwrite, writer_commands.create_dry_run);
     }
     if (*writer_commands.create_manifest_command)
         return run_create_manifest(registry, writer_commands.create_manifest_kind,

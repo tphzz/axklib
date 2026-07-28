@@ -628,6 +628,15 @@ TEST(Cli11Adapter, CreateHdsInvokesSharedPlanAndMatchesDirectWriter) {
     ASSERT_TRUE(direct) << axk::render_error(direct.error());
 
     testing::internal::CaptureStdout();
+    ASSERT_EQ(run_cli({"axklib", "create", "hds", manifest_path.string(), "-o", cli_path.string(), "--dry-run"}), 0);
+    const auto plan_output = testing::internal::GetCapturedStdout();
+    EXPECT_NE(plan_output.find("plan=create kind=HDS"), std::string::npos);
+    EXPECT_NE(plan_output.find("size_bytes=1048576"), std::string::npos);
+    EXPECT_NE(plan_output.find("partitions=1"), std::string::npos);
+    EXPECT_NE(plan_output.find("valid=true"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(cli_path));
+
+    testing::internal::CaptureStdout();
     ASSERT_EQ(run_cli({"axklib", "create", "hds", manifest_path.string(), "-o", cli_path.string()}), 0);
     const auto output = testing::internal::GetCapturedStdout();
     std::ostringstream expected;
@@ -712,6 +721,15 @@ TEST(Cli11Adapter, CreateFloppyAndIsoInvokeSharedPlanAndMatchDirectWriter) {
         ASSERT_TRUE(manifest) << kind << ": " << axk::render_error(manifest.error());
         const auto direct = axk::write_media_image(*manifest, direct_path, false);
         ASSERT_TRUE(direct) << kind << ": " << axk::render_error(direct.error());
+
+        testing::internal::CaptureStdout();
+        ASSERT_EQ(run_cli({"axklib", "create", kind, manifest_path.string(), "-o", cli_path.string(), "--dry-run"}), 0)
+            << kind;
+        const auto plan_output = testing::internal::GetCapturedStdout();
+        EXPECT_NE(plan_output.find("plan=create"), std::string::npos) << kind;
+        EXPECT_NE(plan_output.find("objects=" + std::to_string(direct->object_count)), std::string::npos) << kind;
+        EXPECT_NE(plan_output.find("valid=true"), std::string::npos) << kind;
+        EXPECT_FALSE(std::filesystem::exists(cli_path)) << kind;
 
         testing::internal::CaptureStdout();
         ASSERT_EQ(run_cli({"axklib", "create", kind, manifest_path.string(), "-o", cli_path.string()}), 0) << kind;

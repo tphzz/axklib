@@ -601,7 +601,7 @@ Result<void> write_build_manifest_template(BuildManifestKind kind, const std::fi
     if (!temporary)
         return std::unexpected{temporary.error()};
     if (const auto published = detail::publish_temporary_file(*temporary, output_path, overwrite); !published) {
-        std::filesystem::remove(*temporary, filesystem_error);
+        detail::discard_temporary_file(*temporary);
         return std::unexpected{published.error()};
     }
     return {};

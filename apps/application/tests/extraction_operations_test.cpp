@@ -201,6 +201,13 @@ TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelatio
     bank_to_sample.quality = axk::RelationshipQuality::known;
     graph.relationships.push_back(bank_to_sample);
 
+    axk::Relationship sample_to_wave;
+    sample_to_wave.source_key = "sample";
+    sample_to_wave.target_key = "wave";
+    sample_to_wave.type = "SBNK_LEFT_MEMBER_TO_SMPL";
+    sample_to_wave.quality = axk::RelationshipQuality::known;
+    graph.relationships.push_back(sample_to_wave);
+
     auto selected = source;
     auto excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
     EXPECT_TRUE(selected.volumes.empty());
@@ -208,14 +215,14 @@ TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelatio
     EXPECT_EQ(excluded.front().type, "PROG_ASSIGNMENT_TO_SBAC");
 
     graph.relationships.front().quality = axk::RelationshipQuality::known;
-    graph.relationships.back().quality = axk::RelationshipQuality::likely;
+    graph.relationships[1].quality = axk::RelationshipQuality::likely;
     selected = source;
     excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
     EXPECT_TRUE(selected.volumes.empty());
     ASSERT_EQ(excluded.size(), 1U);
     EXPECT_EQ(excluded.front().type, "SBAC_SLOT_TO_SBNK");
 
-    graph.relationships.back().quality = axk::RelationshipQuality::known;
+    graph.relationships[1].quality = axk::RelationshipQuality::known;
     selected = source;
     excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
     ASSERT_EQ(selected.volumes.size(), 1U);
@@ -223,6 +230,13 @@ TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelatio
     EXPECT_EQ(selected.volumes.front().sample_banks.size(), 1U);
     EXPECT_EQ(selected.volumes.front().samples.size(), 1U);
     EXPECT_EQ(selected.volumes.front().waveforms.size(), 1U);
+
+    graph.relationships[2].quality = axk::RelationshipQuality::likely;
+    selected = source;
+    excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
+    EXPECT_TRUE(selected.volumes.empty());
+    ASSERT_EQ(excluded.size(), 1U);
+    EXPECT_EQ(excluded.front().type, "SBNK_LEFT_MEMBER_TO_SMPL");
 }
 
 TEST(VolumeGraph, SerializesUnresolvedPlacementCandidatesAndResolutionQuality) {

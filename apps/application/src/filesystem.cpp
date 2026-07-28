@@ -24,6 +24,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <hash-library/sha256.h>
+
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -538,6 +540,27 @@ struct NativeIdentity {
 
     friend bool operator==(const NativeIdentity &, const NativeIdentity &) = default;
 };
+
+std::string revision_token(const NativeIdentity &identity) {
+    std::ostringstream source;
+    source << std::hex << std::setfill('0');
+#if defined(_WIN32)
+    source << std::setw(16) << identity.volume_serial << ':';
+    for (const auto value : identity.file_id)
+        source << std::setw(2) << std::to_integer<unsigned int>(value);
+    source << ':' << std::setw(16) << identity.size << ':' << std::setw(16) << identity.last_write_time << ':'
+           << std::setw(16) << identity.change_time;
+#else
+    source << std::setw(16) << identity.device << ':' << std::setw(16) << identity.inode << ':' << std::setw(16)
+           << identity.size << ':' << std::setw(16) << identity.modification_seconds << ':' << std::setw(16)
+           << identity.modification_nanoseconds << ':' << std::setw(16) << identity.change_seconds << ':'
+           << std::setw(16) << identity.change_nanoseconds;
+#endif
+    const auto serialized = source.str();
+    SHA256 hash;
+    hash.add(serialized.data(), serialized.size());
+    return hash.getHash();
+}
 
 #if defined(_WIN32)
 axk::app::Result<NativeIdentity> native_identity(HANDLE handle, std::string_view relative_path) {
@@ -1297,8 +1320,9 @@ axk::app::Result<axk::app::SandboxFile> axk::app::Sandbox::open_file(const FileR
     auto reader = std::make_shared<NativeFileReader>(std::move(handle), size, reference.relative_path);
 #endif
     const auto expected = *identity;
-    return SandboxFile{reference, filename, size, reader,
-                       [reader, expected] { return reader->verify_unchanged(expected); }};
+    return SandboxFile{reference, filename,
+                       size,      revision_token(expected),
+                       reader,    [reader, expected] { return reader->verify_unchanged(expected); }};
 }
 
 axk::app::Result<std::shared_ptr<axk::app::SandboxMutation>>

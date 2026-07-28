@@ -63,11 +63,11 @@ foreach(AXK_SERVER_SOURCE_FILE IN LISTS AXK_SERVER_SOURCE_FILES)
     message(FATAL_ERROR "A second HTTP or WebSocket framework entered the Crow adapter: ${AXK_SERVER_SOURCE_FILE}")
   endif()
   if(AXK_SERVER_SOURCE MATCHES
-     "report[.](info|objects|relationships|inventory|coverage|orphans|validate)|extract[.](wav|sfz)|package[.](export|inspect|verify|plan_import|import)|create[.](hds|floppy|iso|manifest)|alter[.](hds|manifest)")
+     "auditions[.]prepare|report[.](info|objects|relationships|inventory|coverage|orphans|validate)|extract[.](wav|sfz)|package[.](export|inspect|verify|plan_import|import)|create[.](hds|floppy|iso|manifest)|alter[.](hds|manifest)")
     message(FATAL_ERROR "A domain operation ID was hard-coded in the Crow adapter: ${AXK_SERVER_SOURCE_FILE}")
   endif()
   if(AXK_SERVER_SOURCE MATCHES
-     "bind_(file|extraction|package|write)_operations|application/(file|extraction|package|write)_operations[.]hpp")
+     "bind_(audition|file|extraction|package|write)_operations|application/(audition|file|extraction|package|write)_operations[.]hpp")
     message(FATAL_ERROR "The Crow adapter knows an individual application-operation family: ${AXK_SERVER_SOURCE_FILE}")
   endif()
 endforeach()

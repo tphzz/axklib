@@ -489,15 +489,15 @@ void discard_temporary_file(const std::filesystem::path &path) noexcept {
 
 Result<void> publish_temporary_file(const std::filesystem::path &temporary, const std::filesystem::path &output,
                                     bool overwrite) {
-    const auto retained = find_retained(temporary);
+    // Publication takes sole ownership of the retained native resources. This
+    // guarantees that every success and failure path releases them.
+    const auto retained = release_retained(temporary);
     if (!retained || retained->output_filename != output.filename())
         return identity_error();
 #if defined(_WIN32)
     const auto publication_handle = open_retained_candidate(temporary, *retained, DELETE | FILE_READ_ATTRIBUTES);
-    if (!publication_handle) {
-        static_cast<void>(release_retained(temporary));
+    if (!publication_handle)
         return identity_error();
-    }
     if (retained->handle != INVALID_HANDLE_VALUE) {
         CloseHandle(retained->handle);
         retained->handle = INVALID_HANDLE_VALUE;
@@ -531,7 +531,6 @@ Result<void> publish_temporary_file(const std::filesystem::path &temporary, cons
         S_ISREG(candidate_identity.st_mode) && candidate_identity.st_dev == retained->identity.st_dev &&
         candidate_identity.st_ino == retained->identity.st_ino;
     if (!valid) {
-        static_cast<void>(release_retained(temporary));
         return identity_error();
     }
     if (overwrite) {
@@ -554,7 +553,6 @@ Result<void> publish_temporary_file(const std::filesystem::path &temporary, cons
                                           "output was published but its directory could not be synchronized")};
     }
 #endif
-    static_cast<void>(release_retained(temporary));
     return {};
 }
 

@@ -65,6 +65,7 @@ struct SandboxFile {
     FileRef reference;
     std::string filename;
     std::uint64_t size{};
+    std::string revision;
     std::shared_ptr<const axk::RandomAccessReader> reader;
     std::function<Result<void>()> verify_unchanged;
 };

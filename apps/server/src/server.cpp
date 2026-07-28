@@ -358,11 +358,13 @@ struct CorsMiddleware {
         if (allowed) {
             response.set_header("Access-Control-Allow-Origin", origin);
             response.set_header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers");
-            response.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+            response.set_header("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
             response.set_header("Access-Control-Allow-Headers",
-                                "Authorization, Content-Type, Idempotency-Key, X-Request-Id, Upload-Offset");
+                                "Authorization, Content-Type, Idempotency-Key, If-Match, Range, X-Request-Id, "
+                                "Upload-Offset");
             response.set_header("Access-Control-Expose-Headers",
-                                "Content-Length, Content-Range, Location, Upload-Offset, X-Request-Id");
+                                "Accept-Ranges, Content-Length, Content-Range, ETag, Location, Upload-Offset, "
+                                "X-Request-Id");
             if (request.method == crow::HTTPMethod::Options)
                 response.set_header("Access-Control-Max-Age", "600");
         }
@@ -788,60 +790,6 @@ class ServerApplication {
                      const axk::MediaBuildLimits &media_limits) {
         auto prepared = axk::app::make_application_registry(sandbox, uploads, std::move(registry), media_limits);
         if (!prepared)
-            std::terminate();
-        const auto bound = prepared->bind(
-            "auditions.prepare",
-            [&images](const Json &request, const axk::app::OperationContext &context) -> axk::app::Result<Json> {
-                const auto image = request.find("imageId");
-                const auto objects = request.find("objectIds");
-                if (image == request.end() || objects == request.end() || !image->is_string() || !objects->is_array()) {
-                    return std::unexpected(axk::app::Error{"invalid_request", "imageId and objectIds are required"});
-                }
-                std::vector<std::string> object_ids;
-                object_ids.reserve(objects->size());
-                for (const auto &object : *objects) {
-                    if (!object.is_string())
-                        return std::unexpected(
-                            axk::app::Error{"invalid_request", "audition object IDs must be strings"});
-                    object_ids.push_back(object.get<std::string>());
-                }
-                if (context.progress != nullptr) {
-                    context.progress->report({axk::ProgressPhase::reading, 0U, object_ids.size(),
-                                              "Preparing bounded audio sources", std::nullopt});
-                }
-                auto audition = images.prepare_audition(image->get_ref<const std::string &>(), context.owner_id,
-                                                        object_ids, context.cancellation);
-                if (!audition)
-                    return std::unexpected(audition.error());
-                if (context.progress != nullptr) {
-                    context.progress->report({axk::ProgressPhase::reading, object_ids.size(), object_ids.size(),
-                                              "Audio sources ready", std::nullopt});
-                }
-                Json clips = Json::array();
-                for (const auto &clip : audition->clips) {
-                    Json lanes = Json::array();
-                    for (const auto &lane : clip.lanes) {
-                        lanes.push_back({{"role", lane.role},
-                                         {"sourceObjectId", lane.source_object_id},
-                                         {"sampleRate", lane.sample_rate},
-                                         {"sampleWidthBytes", lane.sample_width_bytes},
-                                         {"frameCount", lane.frame_count},
-                                         {"contentOffsetBytes", lane.content_offset_bytes},
-                                         {"wavSizeBytes", lane.wav_size_bytes},
-                                         {"loopStartFrame", lane.loop_start_frame},
-                                         {"loopLengthFrames", lane.loop_length_frames}});
-                    }
-                    clips.push_back({{"objectId", clip.object_id},
-                                     {"loopMode", clip.loop_mode},
-                                     {"loopModeLabel", clip.loop_mode_label},
-                                     {"warnings", clip.warnings},
-                                     {"lanes", std::move(lanes)}});
-                }
-                return Json{{"auditionId", audition->audition_id},
-                            {"contentSizeBytes", audition->content_size_bytes},
-                            {"clips", std::move(clips)}};
-            });
-        if (!bound)
             std::terminate();
         if (const auto session_operations =
                 axk::app::bind_session_application_operations(*prepared, sandbox, uploads, images, journals, downloads);
@@ -1919,7 +1867,7 @@ class ServerApplication {
             id);
     }
 
-    crow::response download_response(const crow::request &request) const {
+    crow::response download_response(const crow::request &request) {
         const auto id = request_id(request);
         if (auto denied = guard(request, id))
             return std::move(*denied);
@@ -1928,14 +1876,37 @@ class ServerApplication {
         if (root_id == nullptr || relative_path == nullptr)
             return error_response(400, {"invalid_request", "rootId and relativePath query parameters are required"},
                                   id);
-        const auto file = sandbox_.open_file({root_id, relative_path});
+        const axk::app::FileRef reference{root_id, relative_path};
+        auto reservation = path_reservations_.try_acquire({reference, axk::app::PathAccessMode::shared});
+        if (!reservation)
+            return error_response(409, reservation.error(), id);
+        const auto file = sandbox_.open_file(reference);
         if (!file) {
             audit(id, "file_download", "denied", request_owner(request), "root", root_id);
             return error_response(404, file.error(), id);
         }
         const auto size = file->size;
+        const auto revision = '"' + file->revision + '"';
 
         crow::response response;
+        const auto set_common_headers = [&] {
+            response.set_header("Content-Type", "application/octet-stream");
+            response.set_header("X-Request-Id", id);
+            response.set_header("Cache-Control", "no-store");
+            response.set_header("Accept-Ranges", "bytes");
+            response.set_header("ETag", revision);
+            response.set_header("Content-Disposition", axk::server::attachment_content_disposition(file->filename));
+        };
+        if (request.method == crow::HTTPMethod::HEAD) {
+            if (const auto unchanged = file->verify_unchanged(); !unchanged)
+                return error_response(409, unchanged.error(), id);
+            response.code = 200;
+            response.set_header("Content-Length", std::to_string(size));
+            set_common_headers();
+            audit(id, "file_download_inspect", "allowed", request_owner(request), "root", root_id);
+            return response;
+        }
+
         const auto range_header = request.get_header_value("Range");
         std::uint64_t offset{};
         auto length = size;
@@ -1944,6 +1915,15 @@ class ServerApplication {
                 return error_response(413, {"download_too_large", "file requires a bounded byte range"}, id);
             response.code = 200;
         } else {
+            const auto expected_revision = request.get_header_value("If-Match");
+            if (expected_revision.empty())
+                return error_response(
+                    428, {"download_precondition_required", "ranged file downloads require an If-Match revision"}, id);
+            if (expected_revision != revision) {
+                response = error_response(412, {"download_revision_changed", "sandbox file revision changed"}, id);
+                response.set_header("ETag", revision);
+                return response;
+            }
             const auto range = parse_byte_range(range_header, size, config_.maximum_download_range_bytes);
             if (!range) {
                 response = error_response(416, {"invalid_range", "requested byte range is invalid or too large"}, id);
@@ -1960,12 +1940,10 @@ class ServerApplication {
         std::vector<std::byte> bytes(static_cast<std::size_t>(length));
         if (const auto read = file->reader->read_exact_at(offset, bytes); !read)
             return error_response(422, {"file_unavailable", "sandbox file content cannot be read"}, id);
+        if (const auto unchanged = file->verify_unchanged(); !unchanged)
+            return error_response(409, unchanged.error(), id);
         response.body.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
-        response.set_header("Content-Type", "application/octet-stream");
-        response.set_header("X-Request-Id", id);
-        response.set_header("Cache-Control", "no-store");
-        response.set_header("Accept-Ranges", "bytes");
-        response.set_header("Content-Disposition", axk::server::attachment_content_disposition(file->filename));
+        set_common_headers();
         audit(id, "file_download", "allowed", request_owner(request), "root", root_id);
         return response;
     }
@@ -2256,6 +2234,7 @@ class ServerApplication {
                    {"totalJobPhaseDurationMs", job_metrics.total_phase_duration_ms},
                    {"totalJobCancellationLatencyMs", job_metrics.total_cancellation_latency_ms},
                    {"websocketEventsDelivered", event_metrics.delivered_events},
+                   {"websocketEventsFailed", event_metrics.failed_events},
                    {"websocketEventsDropped", event_metrics.dropped_events},
                    {"websocketEventsPending", event_metrics.pending_events},
                    {"websocketClientsEvicted", websocket_clients_evicted_.load(std::memory_order_relaxed)},
@@ -2317,8 +2296,18 @@ class ServerApplication {
                 return request.method == crow::HTTPMethod::Patch ? rename_entry_response(request)
                                                                  : delete_entry_response(request);
             });
-        app_.route_dynamic("/api/v1/files/content")(
-            [this](const crow::request &request) { return download_response(request); });
+        app_.route_dynamic("/api/v1/files/content")
+            .methods(crow::HTTPMethod::GET,
+                     crow::HTTPMethod::HEAD)([this](const crow::request &request, crow::response &response) {
+                response = download_response(request);
+                if (request.method == crow::HTTPMethod::HEAD && response.code == 200) {
+                    // Crow otherwise replaces the declared representation length
+                    // with the empty HEAD response body's length.
+                    response.skip_body = false;
+                    response.manual_length_header = true;
+                }
+                response.end();
+            });
         app_.route_dynamic("/api/v1/download-archives/<string>/content")
             .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(
                 [this](const crow::request &request, crow::response &response, std::string archive_id) {

@@ -197,12 +197,31 @@
         "parameters": [
           {"name": "rootId", "in": "query", "required": true, "schema": {"type": "string"}},
           {"name": "relativePath", "in": "query", "required": true, "schema": {"type": "string"}},
-          {"name": "Range", "in": "header", "schema": {"type": "string"}}
+          {"name": "Range", "in": "header", "schema": {"type": "string"}},
+          {"name": "If-Match", "in": "header", "schema": {"type": "string"}, "description": "Required for ranged downloads; use the ETag returned by HEAD"}
         ],
         "responses": {
           "200": {"description": "Authenticated streamed sandbox file"},
           "206": {"description": "Bounded byte range"},
+          "412": {"description": "The file revision no longer matches If-Match"},
+          "428": {"description": "A ranged request omitted If-Match"},
           "416": {"description": "Invalid or oversized byte range"}
+        }
+      },
+      "head": {
+        "operationId": "filesystem.download.inspect",
+        "parameters": [
+          {"name": "rootId", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "relativePath", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Stable sandbox file metadata",
+            "headers": {
+              "Content-Length": {"schema": {"type": "integer", "minimum": 0}},
+              "ETag": {"schema": {"type": "string"}}
+            }
+          }
         }
       }
     },
@@ -2848,7 +2867,8 @@
               "totalDurationMs", "submittedJobs", "queuedJobs", "runningJobs", "completedJobs", "failedJobs",
               "cancelledJobs", "publishedJobEvents", "progressJobEvents", "totalJobQueueWaitMs",
               "totalJobExecutionMs", "totalJobPhaseDurationMs", "totalJobCancellationLatencyMs",
-              "websocketEventsDelivered", "websocketEventsDropped", "websocketEventsPending",
+              "websocketEventsDelivered", "websocketEventsFailed", "websocketEventsDropped",
+              "websocketEventsPending",
               "websocketClientsEvicted", "uploadCleanupHealthy", "uploadCleanupFailedDeletions",
               "uploadOrphanFiles", "uploadOrphanBytes", "uploadReservedBytes"
             ],
@@ -2872,6 +2892,7 @@
               "totalJobPhaseDurationMs": {"type": "integer", "minimum": 0},
               "totalJobCancellationLatencyMs": {"type": "integer", "minimum": 0},
               "websocketEventsDelivered": {"type": "integer", "minimum": 0},
+              "websocketEventsFailed": {"type": "integer", "minimum": 0},
               "websocketEventsDropped": {"type": "integer", "minimum": 0},
               "websocketEventsPending": {"type": "integer", "minimum": 0},
               "websocketClientsEvicted": {"type": "integer", "minimum": 0},

@@ -447,10 +447,40 @@ export class AxklibHttpApiClient {
         });
     }
 
-    async openDownload(reference: FileRef, range?: { start: number; end?: number }): Promise<Response> {
+    async inspectDownload(reference: FileRef): Promise<{ size: number; revision: string }> {
+        const query = new URLSearchParams({ rootId: reference.rootId, relativePath: reference.relativePath });
+        const response = await this.fetchResponse('HEAD', `/files/content?${query}`);
+        if (!response.ok) await this.throwResponseError(response);
+        const size = Number(response.headers.get('Content-Length'));
+        const revision = response.headers.get('ETag') ?? '';
+        if (!Number.isSafeInteger(size) || size < 0 || revision.length === 0) {
+            throw new AxklibApiError(
+                'invalid_download_metadata',
+                'axklib-server returned invalid download metadata',
+                response.status,
+            );
+        }
+        return { size, revision };
+    }
+
+    async openDownload(
+        reference: FileRef,
+        range?: { start: number; end?: number },
+        revision?: string,
+    ): Promise<Response> {
         const query = new URLSearchParams({ rootId: reference.rootId, relativePath: reference.relativePath });
         const headers: Record<string, string> = {};
-        if (range) headers.Range = `bytes=${range.start}-${range.end ?? ''}`;
+        if (range) {
+            if (!revision) {
+                throw new AxklibApiError(
+                    'download_revision_required',
+                    'ranged downloads require an inspected file revision',
+                    0,
+                );
+            }
+            headers.Range = `bytes=${range.start}-${range.end ?? ''}`;
+            headers['If-Match'] = revision;
+        }
         const response = await this.fetchResponse('GET', `/files/content?${query}`, undefined, headers);
         if (!response.ok) await this.throwResponseError(response);
         return response;
@@ -559,7 +589,7 @@ export class AxklibHttpApiClient {
     }
 
     private fetchResponse(
-        method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+        method: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
         path: string,
         body?: BodyInit,
         headers: Record<string, string> = {},

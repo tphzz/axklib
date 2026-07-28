@@ -62,7 +62,10 @@ WAV, SFZ, report, package, and image outputs are written to caller-selected
 server `FileRef` or `DirectoryRef` destinations. They remain after the job
 record expires. `GET /api/v1/files/content` provides an authenticated streamed
 download, including one bounded byte range, when a user explicitly wants a
-server file on the client machine.
+server file on the client machine. `HEAD` returns the current quoted revision
+as `ETag`. A ranged `GET` must send that value in `If-Match`; a changed file is
+rejected instead of returning bytes from mixed revisions. Downloads hold the
+same shared path reservation used by image sessions while reading.
 
 For an explicit directory download, `POST /api/v1/files/archive` accepts a
 `DirectoryRef` and returns a job resource. The read-job executor creates the
@@ -117,6 +120,7 @@ and incorrectly typed values are errors. A LAN configuration can be written as:
 {
   "bindAddress": "0.0.0.0",
   "port": 7331,
+  "allowInsecureRemoteHttp": true,
   "tokenHashes": [
     {
       "principalId": "studio",
@@ -153,9 +157,14 @@ during planning; an oversized ISO projection is rejected during apply before
 the temporary file is resized or published. These values are reported by
 `GET /api/v1/system/capabilities`.
 
-Non-loopback startup rejects plaintext tokens, wildcard or missing origins,
-and missing named token hashes. Terminate HTTPS at a trusted reverse proxy;
-Crow TLS is intentionally not enabled in axklib-server.
+The application listener is plaintext because Crow TLS is intentionally not
+enabled. Non-loopback startup is therefore rejected unless
+`allowInsecureRemoteHttp` or `--allow-insecure-remote-http` is explicit, in
+addition to named token hashes and non-wildcard origins. The flag acknowledges
+that bearer credentials are exposed on the application connection; it does not
+make HTTP secure. Keep the listener loopback-only or place it on a private
+backend behind a trusted HTTPS reverse proxy. Never expose plaintext remote
+mode directly to an untrusted network.
 
 ## Operations And Jobs
 

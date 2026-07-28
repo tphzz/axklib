@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -103,4 +104,3 @@ class JobManager {
 [[nodiscard]] bool is_terminal(JobState state) noexcept;
 
 } // namespace axk::app
-#include <chrono>

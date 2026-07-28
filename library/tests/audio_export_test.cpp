@@ -175,14 +175,14 @@ TEST(AudioExport, PrefersRenderedStereoAndEmitsSamplerParametersToSfz) {
     left.object_key = "left";
     left.name = "Left";
     left.format = {1, 2, 44100};
-    left.frame_count = 2;
+    left.frame_count = 100;
     left.root_key = 60;
     left.fine_tune_cents = 3;
     left.loop_mode = 1;
     left.loop_mode_label = "Forward";
     left.loop_start = 10;
     left.loop_length = 80;
-    left.pcm = {std::byte{}, std::byte{}, std::byte{}, std::byte{}};
+    left.pcm.resize(200U);
     auto right = left;
     right.object_key = "right";
     right.name = "Right";
@@ -211,6 +211,11 @@ TEST(AudioExport, PrefersRenderedStereoAndEmitsSamplerParametersToSfz) {
     sample.coarse_tune = 1;
     sample.decoded.left.root_key = 61;
     sample.decoded.left.fine_tune_cents = 4;
+    sample.decoded.left.wave_length_frames = 100;
+    sample.decoded.left.loop_start_frame = 10;
+    sample.decoded.left.loop_length_frames = 80;
+    sample.decoded.loop_mode = 1;
+    sample.decoded.right = sample.decoded.left;
     auto invalid_tune = sample;
     invalid_tune.object_key = "invalid-tune";
     invalid_tune.display_name = "Invalid Tune";
@@ -244,7 +249,7 @@ TEST(AudioExport, PrefersRenderedStereoAndEmitsSamplerParametersToSfz) {
     const std::string invalid_text{std::istreambuf_iterator<char>{invalid_input}, {}};
     EXPECT_EQ(invalid_text.find("transpose="), std::string::npos);
     EXPECT_NE(invalid_text.find("tune=4"), std::string::npos);
-    EXPECT_NE(invalid_text.find("loop_start=23423 loop_end=4294990715"), std::string::npos);
+    EXPECT_NE(invalid_text.find("loop_start=10 loop_end=89"), std::string::npos);
     EXPECT_TRUE(std::filesystem::is_regular_file(output / "partition_00_hd1/Vol 1/Invalid Tune (2).sfz"));
     std::filesystem::remove_all(output, error);
 }
@@ -317,6 +322,7 @@ TEST(AudioExport, DeduplicatesSfzNamesAcrossLogicalVolumesSharingOneDirectory) {
     first_sample.object_key = "sample-one";
     first_sample.display_name = "Duplicate";
     first_sample.members = {{"left", "wave-one", "SMPL/Wave.wav", axk::RelationshipQuality::known}};
+    first_sample.decoded.left.wave_length_frames = 1;
     first.samples = {first_sample};
     auto second = first;
     second.waveforms[0].object_key = "wave-two";
@@ -334,6 +340,64 @@ TEST(AudioExport, DeduplicatesSfzNamesAcrossLogicalVolumesSharingOneDirectory) {
     EXPECT_TRUE(std::filesystem::is_regular_file(output / "shared-volume/Duplicate.sfz"));
     EXPECT_TRUE(std::filesystem::is_regular_file(output / "shared-volume/Duplicate (2).sfz"));
     std::filesystem::remove_all(output, error);
+}
+
+TEST(AudioExport, UsesEachSamplesPlaybackWindowAndLoopPolicyForSharedWaveData) {
+    axk::Waveform waveform;
+    waveform.format = {1, 2, 44'100};
+    waveform.frame_count = 100;
+    waveform.loop_mode = 1;
+    waveform.loop_mode_label = "Forward";
+    waveform.loop_start = 5;
+    waveform.loop_length = 90;
+    waveform.pcm.resize(200U);
+
+    axk::SampleExport first;
+    first.object_key = "first";
+    first.display_name = "First";
+    first.members = {{"left", "shared", "SMPL/Shared.wav", axk::RelationshipQuality::known}};
+    first.decoded.left.wave_start_frame = 20;
+    first.decoded.left.wave_length_frames = 40;
+    first.decoded.left.loop_start_frame = 25;
+    first.decoded.left.loop_length_frames = 10;
+    first.decoded.loop_mode = 0;
+
+    auto second = first;
+    second.object_key = "second";
+    second.display_name = "Second";
+    second.decoded.left.wave_start_frame = 60;
+    second.decoded.left.wave_length_frames = 20;
+    second.decoded.left.loop_start_frame = 65;
+    second.decoded.left.loop_length_frames = 5;
+    second.decoded.loop_mode = 1;
+
+    axk::VolumeExport volume;
+    volume.relative_root = "volume";
+    volume.waveforms = {{"shared", "Shared", "SMPL/Shared.wav", waveform}};
+    volume.samples = {first, second};
+    axk::ExportPlan plan;
+    plan.volumes = {volume};
+
+    const auto output = std::filesystem::temp_directory_path() / "axklib-sfz-sample-window-test";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto result = axk::write_sfz(plan, output);
+    ASSERT_TRUE(result) << result.error().message;
+    std::ifstream first_input{output / "volume/First.sfz"};
+    const std::string first_text{std::istreambuf_iterator<char>{first_input}, {}};
+    EXPECT_NE(first_text.find("offset=20 end=59 loop_mode=one_shot"), std::string::npos);
+    EXPECT_EQ(first_text.find("loop_start="), std::string::npos);
+    std::ifstream second_input{output / "volume/Second.sfz"};
+    const std::string second_text{std::istreambuf_iterator<char>{second_input}, {}};
+    EXPECT_NE(second_text.find("offset=60 end=79 loop_mode=loop_continuous loop_start=65 loop_end=69"),
+              std::string::npos);
+
+    plan.volumes.front().samples.front().decoded.left.wave_length_frames = 81;
+    std::filesystem::remove_all(output, error);
+    const auto invalid = axk::write_sfz(plan, output);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, axk::ErrorCode::object_malformed);
+    EXPECT_FALSE(std::filesystem::exists(output));
 }
 
 TEST(AudioExport, RejectsEveryEscapingPlanPathBeforeCreatingOutput) {

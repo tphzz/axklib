@@ -60,6 +60,7 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         return std::unexpected(argument_error("server config file must contain one JSON object"));
 
     static const std::set<std::string, std::less<>> known_keys{
+        "allowInsecureRemoteHttp",
         "allowedOrigins",
         "bearerToken",
         "bindAddress",
@@ -120,6 +121,7 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         assign("bindAddress", config.bind_address);
         assign("port", config.port);
         assign("bearerToken", config.bearer_token);
+        assign("allowInsecureRemoteHttp", config.allow_insecure_remote_http);
         assign("stateDirectory", config.state_directory);
         assign("workspaceStore", config.workspace_store);
         assign("maximumJsonBytes", config.maximum_json_bytes);
@@ -307,6 +309,12 @@ axk::app::Result<axk::server::CommandLine> axk::server::parse_command_line(int a
                 replaced_origins = true;
             }
             command_line.config.allowed_origins.emplace_back(*value);
+        } else if (argument == "--allow-insecure-remote-http") {
+            if (sidecar_mode_requested) {
+                return std::unexpected(
+                    argument_error("--allow-insecure-remote-http is not permitted in sidecar connection-file mode"));
+            }
+            command_line.config.allow_insecure_remote_http = true;
         } else if (argument == "--workspace-store") {
             auto value = value_after(argument);
             if (!value)
@@ -447,6 +455,8 @@ std::string axk::server::command_line_help() {
            "  --token TOKEN           bearer token (generated in sidecar mode)\n"
            "  --token-sha256 ID=HASH named LAN bearer-token SHA-256; repeatable\n"
            "  --allow-origin ORIGIN   exact permitted browser origin; repeatable\n"
+           "  --allow-insecure-remote-http\n"
+           "                         explicitly permit cleartext non-loopback HTTP\n"
            "  --workspace-store PATH persisted per-user workspace registry\n"
            "  --state-directory PATH private upload and sidecar state directory\n"
            "  --connection-file PATH atomically publish sidecar connection metadata\n"
@@ -492,6 +502,10 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
             return std::unexpected(argument_error("non-loopback listening requires at least one hashed bearer token"));
         if (config.allowed_origins.empty())
             return std::unexpected(argument_error("non-loopback listening requires at least one exact allowed origin"));
+        if (!config.allow_insecure_remote_http) {
+            return std::unexpected(argument_error(
+                "non-loopback HTTP is unsafe; pass --allow-insecure-remote-http only behind a trusted TLS terminator"));
+        }
     }
     if (std::ranges::any_of(config.allowed_origins,
                             [](const auto &origin) { return origin.empty() || origin == "*"; })) {
@@ -501,6 +515,10 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
         return std::unexpected(argument_error("sidecar connection files require a loopback listen address"));
     if (!config.connection_file.empty() && !config.token_hashes.empty())
         return std::unexpected(argument_error("sidecar mode does not accept LAN token hashes"));
+    if (!config.connection_file.empty() && config.allow_insecure_remote_http) {
+        return std::unexpected(
+            argument_error("--allow-insecure-remote-http is not permitted in sidecar connection-file mode"));
+    }
     if (config.maximum_json_bytes == 0U || config.maximum_json_depth == 0U || config.maximum_json_depth > 256U ||
         config.maximum_json_nodes == 0U || config.maximum_json_container_items == 0U ||
         config.maximum_json_string_bytes == 0U || config.stream_threshold_bytes == 0U) {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <format>
+#include <functional>
 #include <ranges>
 #include <set>
 #include <string>
@@ -100,13 +101,11 @@ axk::app::Result<axk::app::ExtractionSelection> axk::app::resolve_extraction_sel
 std::vector<axk::app::ExcludedExtractionRelationship>
 axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &graph, std::string_view scope,
                              std::string_view selector_path, std::string_view selector_key) {
-    std::vector<ExcludedExtractionRelationship> excluded;
-    std::set<std::string> excluded_keys;
     if (scope == "volume") {
         std::erase_if(plan.volumes,
                       [&](const auto &volume) { return text::path_to_utf8(volume.relative_root) != selector_path; });
         plan.unresolved_wave_data.clear();
-        return excluded;
+        return {};
     }
     std::set<std::string> programs;
     std::set<std::string> sample_banks;
@@ -117,63 +116,114 @@ axk::app::filter_export_plan(ExportPlan &plan, const RelationshipGraph &graph, s
         sample_banks.insert(std::string{selector_key});
     else if (scope == "sbnk")
         samples.insert(std::string{selector_key});
+    auto closure =
+        build_exact_export_closure(graph, std::move(programs), std::move(sample_banks), std::move(samples), {});
+    filter_export_plan(plan, closure);
+    return closure.excluded;
+}
+
+axk::app::ExactExportClosure axk::app::build_exact_export_closure(const RelationshipGraph &graph,
+                                                                  std::set<std::string> programs,
+                                                                  std::set<std::string> sample_banks,
+                                                                  std::set<std::string> samples,
+                                                                  std::set<std::string> wave_data) {
+    ExactExportClosure closure;
+    closure.programs = std::move(programs);
+    closure.sample_banks = std::move(sample_banks);
+    closure.samples = std::move(samples);
+    closure.wave_data = std::move(wave_data);
+    std::set<std::string> excluded_keys;
     bool changed = true;
     while (changed) {
         changed = false;
         for (const auto &row : graph.relationships) {
             if (!row.target_key)
                 continue;
-            const auto active_program_assignment = programs.contains(row.source_key) &&
+            const auto active_program_assignment = closure.programs.contains(row.source_key) &&
                                                    row.type.starts_with("PROG_ASSIGNMENT_TO_") &&
                                                    (row.assignment_state == AssignmentState::active ||
                                                     row.assignment_state == AssignmentState::source_load);
-            const auto sample_bank_member = sample_banks.contains(row.source_key) && row.type == "SBAC_SLOT_TO_SBNK";
-            if ((active_program_assignment || sample_bank_member) && row.quality != RelationshipQuality::known) {
+            const auto sample_bank_member =
+                closure.sample_banks.contains(row.source_key) && row.type == "SBAC_SLOT_TO_SBNK";
+            const auto sample_wave_data =
+                closure.samples.contains(row.source_key) &&
+                (row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL");
+            const auto wave_data_parent =
+                closure.wave_data.contains(*row.target_key) &&
+                (row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL");
+            if ((active_program_assignment || sample_bank_member || sample_wave_data || wave_data_parent) &&
+                row.quality != RelationshipQuality::known) {
                 const auto key = row.source_key + '\0' + row.type + '\0' + *row.target_key;
                 if (excluded_keys.insert(key).second)
-                    excluded.push_back({row.source_key, *row.target_key, row.type});
+                    closure.excluded.push_back({row.source_key, *row.target_key, row.type});
                 continue;
             }
             if (active_program_assignment && row.quality == RelationshipQuality::known) {
-                if (row.type == "PROG_ASSIGNMENT_TO_SBAC")
-                    changed = sample_banks.insert(*row.target_key).second || changed;
-                else if (row.type == "PROG_ASSIGNMENT_TO_SBNK")
-                    changed = samples.insert(*row.target_key).second || changed;
+                closure.program_targets.emplace(row.source_key, *row.target_key);
+                if (row.type == "PROG_ASSIGNMENT_TO_SBAC") {
+                    changed = closure.sample_banks.insert(*row.target_key).second || changed;
+                } else if (row.type == "PROG_ASSIGNMENT_TO_SBNK") {
+                    changed = closure.samples.insert(*row.target_key).second || changed;
+                }
             }
             if (sample_bank_member && row.quality == RelationshipQuality::known) {
-                changed = samples.insert(*row.target_key).second || changed;
+                closure.sample_bank_members.emplace(row.source_key, *row.target_key);
+                changed = closure.samples.insert(*row.target_key).second || changed;
+            }
+            if (sample_wave_data && row.quality == RelationshipQuality::known) {
+                closure.sample_wave_data.emplace(row.source_key, *row.target_key);
+                changed = closure.wave_data.insert(*row.target_key).second || changed;
+            }
+            if (wave_data_parent && row.quality == RelationshipQuality::known) {
+                closure.sample_wave_data.emplace(row.source_key, *row.target_key);
+                changed = closure.samples.insert(row.source_key).second || changed;
             }
         }
     }
-    std::set<std::string> confirmed_waveforms;
-    for (const auto &row : graph.relationships) {
-        if (!row.target_key || !samples.contains(row.source_key) || row.quality != RelationshipQuality::known)
-            continue;
-        if (row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL")
-            confirmed_waveforms.insert(*row.target_key);
-    }
+    return closure;
+}
+
+void axk::app::filter_export_plan(ExportPlan &plan, const ExactExportClosure &closure,
+                                  const std::set<std::pair<std::uint8_t, std::string>> &whole_volumes) {
     for (auto &volume : plan.volumes) {
-        std::erase_if(volume.samples, [&](const auto &sample) { return !samples.contains(sample.object_key); });
-        std::set<std::string> waveforms;
-        for (const auto &sample : volume.samples) {
-            for (const auto &member : sample.members)
-                waveforms.insert(member.waveform_key);
+        if (whole_volumes.contains({volume.partition.value, volume.volume_name}))
+            continue;
+        std::erase_if(volume.samples, [&](const auto &sample) { return !closure.samples.contains(sample.object_key); });
+        for (auto &sample : volume.samples) {
+            const auto previous_member_count = sample.members.size();
+            std::erase_if(sample.members, [&](const auto &member) {
+                return member.quality != RelationshipQuality::known ||
+                       !closure.sample_wave_data.contains({sample.object_key, member.waveform_key});
+            });
+            if (sample.members.size() != previous_member_count) {
+                sample.rendered_wav_path.reset();
+                sample.stereo_decision.reset();
+            }
         }
-        std::erase_if(volume.waveforms, [&](const auto &waveform) { return !waveforms.contains(waveform.object_key); });
+        std::erase_if(volume.samples, [](const auto &sample) { return sample.members.empty(); });
+        std::erase_if(volume.waveforms,
+                      [&](const auto &waveform) { return !closure.wave_data.contains(waveform.object_key); });
         std::erase_if(volume.sample_banks,
-                      [&](const auto &sample_bank) { return !sample_banks.contains(sample_bank.object_key); });
+                      [&](const auto &sample_bank) { return !closure.sample_banks.contains(sample_bank.object_key); });
         for (auto &sample_bank : volume.sample_banks) {
-            std::erase_if(sample_bank.member_sample_keys, [&](const auto &key) { return !samples.contains(key); });
-            std::erase_if(sample_bank.relationship_sample_keys,
-                          [&](const auto &key) { return !samples.contains(key); });
+            const auto is_known_member = [&](const auto &key) {
+                return closure.sample_bank_members.contains({sample_bank.object_key, key});
+            };
+            std::erase_if(sample_bank.member_sample_keys, std::not_fn(is_known_member));
+            std::erase_if(sample_bank.relationship_sample_keys, std::not_fn(is_known_member));
         }
-        std::erase_if(volume.programs, [&](const auto &program) { return !programs.contains(program.object_key); });
+        std::erase_if(volume.programs,
+                      [&](const auto &program) { return !closure.programs.contains(program.object_key); });
+        for (auto &program : volume.programs) {
+            std::erase_if(program.assignment_target_keys, [&](const auto &key) {
+                return !closure.program_targets.contains({program.object_key, key});
+            });
+        }
     }
-    std::erase_if(plan.volumes, [](const auto &volume) { return volume.waveforms.empty() && volume.samples.empty(); });
+    std::erase_if(plan.volumes, [](const auto &volume) { return volume.samples.empty() && volume.waveforms.empty(); });
     for (auto &unresolved_scope : plan.unresolved_wave_data) {
         std::erase_if(unresolved_scope.waveforms,
-                      [&](const auto &waveform) { return !confirmed_waveforms.contains(waveform.object_key); });
+                      [&](const auto &waveform) { return !closure.wave_data.contains(waveform.object_key); });
     }
     std::erase_if(plan.unresolved_wave_data, [](const auto &scope) { return scope.waveforms.empty(); });
-    return excluded;
 }

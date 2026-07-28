@@ -244,6 +244,22 @@ TEST_F(SandboxTest, RetainsWritableFileIdentityAcrossBoundedMutation) {
     EXPECT_FALSE((*mutation)->write_exact_at(4U, replacement));
 }
 
+TEST_F(SandboxTest, ExposesAnOpaqueRevisionThatChangesWithRetainedFileContent) {
+    const auto value = sandbox();
+    const auto first = value.open_file({"workspace", "images/disk.hds"});
+    ASSERT_TRUE(first) << first.error().message;
+    ASSERT_EQ(first->revision.size(), 64U);
+    EXPECT_TRUE(std::ranges::all_of(first->revision, [](unsigned char character) {
+        return std::isdigit(character) != 0 || (character >= 'a' && character <= 'f');
+    }));
+
+    std::ofstream(root_ / "images" / "disk.hds", std::ios::binary | std::ios::trunc) << "changed";
+    EXPECT_FALSE(first->verify_unchanged());
+    const auto second = value.open_file({"workspace", "images/disk.hds"});
+    ASSERT_TRUE(second) << second.error().message;
+    EXPECT_NE(second->revision, first->revision);
+}
+
 TEST_F(SandboxTest, RejectsOutputsInReadOnlyRootsAndEscapingParents) {
     const auto read_only = axk::app::Sandbox::create({{"workspace", "Workspace", root_, false}});
     ASSERT_TRUE(read_only) << read_only.error().message;

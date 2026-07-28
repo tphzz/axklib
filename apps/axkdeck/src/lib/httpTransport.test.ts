@@ -410,6 +410,61 @@ describe('HttpImageTransport', () => {
         expect(requestedRanges).toEqual(['bytes=0-3', 'bytes=4-7', 'bytes=8-9']);
     });
 
+    it('assembles file downloads from ranges bound to one server revision', async () => {
+        const requests: Array<{ method: string; range?: string; revision?: string }> = [];
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return json({
+                        apiVersion: 'v1',
+                        operations: [],
+                        limits: { maximumDownloadRangeBytes: 4 },
+                    });
+                }
+                if (url.pathname.endsWith('/files/content')) {
+                    const headers = init?.headers as Record<string, string>;
+                    requests.push({
+                        method: String(init?.method),
+                        range: headers.Range,
+                        revision: headers['If-Match'],
+                    });
+                    if (init?.method === 'HEAD') {
+                        return new Response(null, {
+                            status: 200,
+                            headers: { 'Content-Length': '10', ETag: '"revision-1"' },
+                        });
+                    }
+                    const match = /^bytes=(\d+)-(\d+)$/.exec(headers.Range);
+                    if (!match) throw new Error(`invalid range ${headers.Range}`);
+                    const start = Number(match[1]);
+                    const end = Number(match[2]);
+                    return new Response(
+                        Uint8Array.from({ length: end - start + 1 }, (_, index) => start + index),
+                        { status: 206, headers: { ETag: '"revision-1"' } },
+                    );
+                }
+                throw new Error(`unexpected request ${init?.method} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://127.0.0.1:4000/api/v1',
+            bearerToken: 'secret',
+        });
+        const result = await transport.downloadFile(serverFile('exports/tone.wav'));
+
+        expect(result.filename).toBe('tone.wav');
+        expect(Array.from(new Uint8Array(await result.blob.arrayBuffer()))).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        expect(requests).toEqual([
+            { method: 'HEAD', range: undefined, revision: undefined },
+            { method: 'GET', range: 'bytes=0-3', revision: '"revision-1"' },
+            { method: 'GET', range: 'bytes=4-7', revision: '"revision-1"' },
+            { method: 'GET', range: 'bytes=8-9', revision: '"revision-1"' },
+        ]);
+    });
+
     it('rejects truncated audition ranges and forwards cancellation', async () => {
         const controller = new AbortController();
         vi.stubGlobal(
@@ -1440,8 +1495,18 @@ describe('HttpImageTransport', () => {
                 if (url.pathname.endsWith('/files/content')) {
                     expect(url.searchParams.get('rootId')).toBe('workspace');
                     expect(url.searchParams.get('relativePath')).toBe('exports/tone.wav');
+                    if (init?.method === 'HEAD') {
+                        return new Response(null, {
+                            headers: { 'Content-Length': '10', ETag: '"tone-revision"' },
+                        });
+                    }
+                    expect((init?.headers as Record<string, string>)['If-Match']).toBe('"tone-revision"');
                     return new Response('wave-bytes', {
-                        headers: { 'Content-Disposition': 'attachment; filename="tone.wav"' },
+                        status: 206,
+                        headers: {
+                            'Content-Disposition': 'attachment; filename="tone.wav"',
+                            ETag: '"tone-revision"',
+                        },
                     });
                 }
                 if (url.pathname.endsWith('/system/capabilities')) {
@@ -1461,7 +1526,7 @@ describe('HttpImageTransport', () => {
                                 implemented: true,
                             },
                         ],
-                        limits: {},
+                        limits: { maximumDownloadRangeBytes: 10 },
                     });
                 }
                 if (url.pathname.endsWith('/files/archive') && init?.method === 'POST') {

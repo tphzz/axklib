@@ -118,6 +118,7 @@ optional `programs` using the common schema in [Writer And
 Alteration](write.md#common-authored-content), then build and check it:
 
 ```bash
+axklib create hds image.json -o HD00_512_generated.hds --dry-run
 axklib create hds image.json -o HD00_512_generated.hds
 axklib info HD00_512_generated.hds
 axklib validate HD00_512_generated.hds -o reports/generated-hds --policy strict
@@ -138,6 +139,7 @@ Place `tone.wav` next to the manifest or change the relative path, edit the
 sampler-facing names, then create and validate the image:
 
 ```bash
+axklib create floppy floppy.json -o authored.ima --dry-run
 axklib create floppy floppy.json -o authored.ima
 axklib info authored.ima
 axklib validate authored.ima -o reports/authored-floppy --policy strict
@@ -152,6 +154,7 @@ The ISO starter is an empty staging volume:
 
 ```bash
 axklib create manifest iso -o cdrom.json
+axklib create iso cdrom.json -o staging.iso --dry-run
 axklib create iso cdrom.json -o staging.iso
 ```
 

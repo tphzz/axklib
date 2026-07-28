@@ -69,6 +69,7 @@ def main() -> int:
                 "test=" + "0" * 64,
                 "--allow-origin",
                 "https://example.invalid",
+                "--allow-insecure-remote-http",
             ],
         )
         assert_typed_startup_failure(denied)

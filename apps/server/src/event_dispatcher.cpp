@@ -46,7 +46,11 @@ bool axk::server::EventDispatcher::publish(app::JobEvent event) noexcept {
 axk::server::EventDispatcherSnapshot axk::server::EventDispatcher::snapshot() const noexcept {
     const std::scoped_lock lock{mutex_};
     return {
-        .delivered_events = delivered_events_, .dropped_events = dropped_events_, .pending_events = pending_.size()};
+        .delivered_events = delivered_events_,
+        .failed_events = failed_events_,
+        .dropped_events = dropped_events_,
+        .pending_events = pending_.size(),
+    };
 }
 
 void axk::server::EventDispatcher::shutdown() noexcept {
@@ -75,14 +79,20 @@ void axk::server::EventDispatcher::run() noexcept {
             event = std::move(pending_.front());
             pending_.pop_front();
         }
+        bool delivered{};
         try {
-            if (sink_)
+            if (sink_) {
                 sink_(event);
+                delivered = true;
+            }
         } catch (...) {
         }
         {
             const std::scoped_lock lock{mutex_};
-            ++delivered_events_;
+            if (delivered)
+                ++delivered_events_;
+            else
+                ++failed_events_;
         }
     }
 }

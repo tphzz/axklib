@@ -159,7 +159,7 @@ Result<void> write_atomic(const std::filesystem::path &path, std::string_view te
     if (!temporary)
         return std::unexpected{temporary.error()};
     if (const auto published = detail::publish_temporary_file(*temporary, path, overwrite); !published) {
-        std::filesystem::remove(*temporary, error);
+        detail::discard_temporary_file(*temporary);
         return std::unexpected{published.error()};
     }
     return {};

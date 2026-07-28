@@ -359,9 +359,27 @@ export class HttpImageTransport implements ImageTransport {
 
     async downloadFile(location: FileLocation): Promise<ClientDownload> {
         const source = this.serverFile(location);
-        const response = await this.client.openDownload(source.reference);
+        const metadata = await this.client.inspectDownload(source.reference);
+        const limits = await this.client.serverLimits();
+        const rangeLimit = limits.maximumDownloadRangeBytes;
+        if (!Number.isSafeInteger(rangeLimit) || rangeLimit <= 0) {
+            throw new Error('axklib-server advertised an invalid download range limit');
+        }
+        const parts: ArrayBuffer[] = [];
+        for (let start = 0; start < metadata.size; start += rangeLimit) {
+            const end = Math.min(metadata.size, start + rangeLimit) - 1;
+            const response = await this.client.openDownload(source.reference, { start, end }, metadata.revision);
+            const part = await response.arrayBuffer();
+            const expectedSize = end - start + 1;
+            if (part.byteLength !== expectedSize) {
+                throw new Error(
+                    `Download range ${start}-${end} returned ${part.byteLength} bytes; expected ${expectedSize}`,
+                );
+            }
+            parts.push(part);
+        }
         const filename = source.reference.relativePath.split('/').pop() || source.displayName;
-        return { filename, blob: await response.blob() };
+        return { filename, blob: new Blob(parts, { type: 'application/octet-stream' }) };
     }
 
     async downloadDirectory(location: DirectoryLocation): Promise<ClientDownload> {

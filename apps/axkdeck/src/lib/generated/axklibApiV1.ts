@@ -198,7 +198,7 @@ export interface paths {
         post?: never;
         delete?: never;
         options?: never;
-        head?: never;
+        head: operations['filesystem.download.inspect'];
         patch?: never;
         trace?: never;
     };
@@ -2310,6 +2310,7 @@ export interface components {
                 websocketClientsEvicted: number;
                 websocketEventsDelivered: number;
                 websocketEventsDropped: number;
+                websocketEventsFailed: number;
                 websocketEventsPending: number;
             };
             meta: components['schemas']['ResponseMeta'];
@@ -3775,6 +3776,8 @@ export interface operations {
                 rootId: string;
             };
             header?: {
+                /** @description Required for ranged downloads; use the ETag returned by HEAD */
+                'If-Match'?: string;
                 Range?: string;
             };
             path?: never;
@@ -3798,9 +3801,63 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description The file revision no longer matches If-Match */
+            412: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
             /** @description Invalid or oversized byte range */
             416: {
                 headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A ranged request omitted If-Match */
+            428: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'filesystem.download.inspect': {
+        parameters: {
+            query: {
+                relativePath: string;
+                rootId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stable sandbox file metadata */
+            200: {
+                headers: {
+                    'Content-Length'?: number;
+                    ETag?: string;
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;
                 };

@@ -260,12 +260,23 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
         assert completed.status == 200, completed.content
 
         sparse_query = urlencode({"rootId": "workspace", "relativePath": "sparse.bin"})
+        inspected = request(
+            port,
+            TOKEN_A,
+            "HEAD",
+            f"/api/v1/files/content?{sparse_query}",
+        )
+        assert inspected.status == 200, inspected.content
+        revision = inspected.headers["etag"]
         tail = request(
             port,
             TOKEN_A,
             "GET",
             f"/api/v1/files/content?{sparse_query}",
-            headers={"Range": f"bytes={sparse.stat().st_size - 4}-"},
+            headers={
+                "Range": f"bytes={sparse.stat().st_size - 4}-",
+                "If-Match": revision,
+            },
         )
         assert tail.status == 206 and tail.content == b"tail", tail
         excessive_range = request(
@@ -273,7 +284,7 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             TOKEN_A,
             "GET",
             f"/api/v1/files/content?{sparse_query}",
-            headers={"Range": "bytes=0-4"},
+            headers={"Range": "bytes=0-4", "If-Match": revision},
         )
         assert excessive_range.status == 416, excessive_range.content
 

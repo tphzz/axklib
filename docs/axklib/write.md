@@ -18,6 +18,16 @@ Manifest-relative input paths are resolved relative to the manifest file, not
 the current working directory. Output publication is atomic. Existing output
 files are refused unless `--overwrite` is supplied.
 
+Run any create command with `--dry-run` first to validate the complete manifest
+and its bound inputs through the canonical build planner without creating the
+output:
+
+```bash
+axklib create hds image.json --output HD00_512_generated.hds --dry-run
+axklib create floppy floppy.json --output generated.ima --dry-run
+axklib create iso cdrom.json --output generated.iso --dry-run
+```
+
 ## Generate A Starter Manifest
 
 Generate a canonical starter instead of writing the schema from memory:

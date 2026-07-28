@@ -15,7 +15,7 @@ struct WriterCommandState {
     std::string create_manifest_kind;
     std::filesystem::path create_manifest_output;
     bool create_overwrite{};
-    bool create_pretty{};
+    bool create_dry_run{};
     bool create_manifest_overwrite{};
     CLI::App *create_hds{};
     CLI::App *create_floppy{};

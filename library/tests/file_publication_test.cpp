@@ -56,6 +56,37 @@ TEST(FilePublication, NoOverwritePreservesAConcurrentWinnerAndTheCandidate) {
     std::filesystem::remove_all(root, error);
 }
 
+TEST(FilePublication, RepeatedNoOverwriteFailuresReleaseTheCandidateForCleanup) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-file-publication-repeated-no-overwrite";
+    const auto output = root / "output.bin";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    std::ofstream{output, std::ios::binary} << "winner";
+
+    for (std::size_t attempt = 0; attempt < 128U; ++attempt) {
+        const auto candidate = axk::detail::write_temporary_file(output, [](const auto &sink) {
+            constexpr std::string_view content{"candidate"};
+            return sink(std::as_bytes(std::span{content}));
+        });
+        ASSERT_TRUE(candidate) << candidate.error().message;
+
+        const auto published = axk::detail::publish_temporary_file(*candidate, output, false);
+
+        ASSERT_FALSE(published);
+        axk::detail::discard_temporary_file(*candidate);
+        EXPECT_FALSE(std::filesystem::exists(*candidate));
+    }
+
+    EXPECT_EQ(read_text(output), "winner");
+#if !defined(_WIN32)
+    EXPECT_TRUE(std::filesystem::is_empty(root / ".axklib-publication"));
+#else
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator{root}, std::filesystem::directory_iterator{}), 1);
+#endif
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(FilePublication, FailedReplacementLeavesTheOriginalDestinationIntact) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-file-publication-failed-replace";
     const auto missing_temporary = root / ".missing.tmp";

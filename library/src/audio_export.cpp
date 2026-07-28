@@ -117,11 +117,77 @@ const ObjectSnapshot *object(const ObjectCatalog &catalog, std::string_view key)
     return found == catalog.objects.end() ? nullptr : &*found;
 }
 
-std::string sfz_region(const SampleExport &sample, const PhysicalWaveformExport &waveform, std::string_view role,
-                       std::string sample_path, std::optional<int> pan) {
+struct SamplePlaybackWindow {
+    std::uint64_t start{};
+    std::uint64_t end{};
+    std::optional<std::uint64_t> loop_start;
+    std::optional<std::uint64_t> loop_end;
+    bool one_shot{};
+};
+
+const CurrentSbnkMember *sample_member(const SampleExport &sample, std::string_view role) {
     const auto *member = &sample.decoded.left;
     if (role == "right" && sample.decoded.right)
         member = &*sample.decoded.right;
+    return member;
+}
+
+Result<SamplePlaybackWindow> sample_playback_window(const SampleExport &sample, const PhysicalWaveformExport &waveform,
+                                                    std::string_view role) {
+    const auto *member = sample_member(sample, role);
+    if (role == "right" && !sample.decoded.right) {
+        return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::audio,
+                                          "SFZ Sample right member metadata is missing")};
+    }
+    if (member->wave_length_frames == 0U) {
+        return std::unexpected{
+            make_error(ErrorCode::object_malformed, ErrorCategory::audio, "SFZ Sample playback window is empty")};
+    }
+    const auto start = static_cast<std::uint64_t>(member->wave_start_frame);
+    const auto length = static_cast<std::uint64_t>(member->wave_length_frames);
+    if (start > waveform.waveform.frame_count || length > waveform.waveform.frame_count - start) {
+        return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::audio,
+                                          "SFZ Sample playback window exceeds its confirmed Wave Data")};
+    }
+    SamplePlaybackWindow result;
+    result.start = start;
+    result.end = start + length - 1U;
+    if (sample.decoded.loop_mode == 0U || sample.decoded.loop_mode == 4U) {
+        result.one_shot = true;
+        return result;
+    }
+    if (sample.decoded.loop_mode != 1U) {
+        return std::unexpected{
+            make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
+                       "SFZ exact export does not support reverse or bidirectional Sample playback modes")};
+    }
+    const auto loop_start = static_cast<std::uint64_t>(member->loop_start_frame);
+    const auto loop_length = static_cast<std::uint64_t>(member->loop_length_frames);
+    if (loop_length == 0U || loop_start < result.start || loop_start > result.end ||
+        loop_length > result.end - loop_start + 1U) {
+        return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::audio,
+                                          "SFZ Sample loop lies outside its playback window")};
+    }
+    result.loop_start = loop_start;
+    result.loop_end = loop_start + loop_length - 1U;
+    return result;
+}
+
+bool rendered_window_compatible(const SampleExport &sample) {
+    if (!sample.rendered_wav_path || sample.members.size() != 2U || !sample.decoded.right)
+        return false;
+    const auto &left = sample.decoded.left;
+    const auto &right = *sample.decoded.right;
+    return left.wave_start_frame == right.wave_start_frame && left.wave_length_frames == right.wave_length_frames &&
+           left.loop_start_frame == right.loop_start_frame && left.loop_length_frames == right.loop_length_frames;
+}
+
+Result<std::string> sfz_region(const SampleExport &sample, const PhysicalWaveformExport &waveform,
+                               std::string_view role, std::string sample_path, std::optional<int> pan) {
+    const auto *member = sample_member(sample, role);
+    const auto window = sample_playback_window(sample, waveform, role);
+    if (!window)
+        return std::unexpected{window.error()};
     std::string line{"<region>"};
     const auto key_low = sample.key_low == 255U ? member->root_key : sample.key_low;
     const auto key_high = sample.key_high == 128U ? member->root_key : sample.key_high;
@@ -132,16 +198,12 @@ std::string sfz_region(const SampleExport &sample, const PhysicalWaveformExport 
     line += std::format(" tune={}", member->fine_tune_cents);
     if (pan)
         line += std::format(" pan={}", *pan);
-    auto loop_label = waveform.waveform.loop_mode_label;
-    std::ranges::transform(loop_label, loop_label.begin(),
-                           [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-    if (loop_label.contains("one") && loop_label.contains("shot")) {
+    line += std::format(" offset={} end={}", window->start, window->end);
+    if (window->one_shot) {
         line += " loop_mode=one_shot";
-    } else if (!loop_label.empty() && waveform.waveform.loop_length != 0U) {
-        const auto loop_end =
-            static_cast<std::uint64_t>(waveform.waveform.loop_start) + waveform.waveform.loop_length - 1U;
+    } else {
         line +=
-            std::format(" loop_mode=loop_continuous loop_start={} loop_end={}", waveform.waveform.loop_start, loop_end);
+            std::format(" loop_mode=loop_continuous loop_start={} loop_end={}", *window->loop_start, *window->loop_end);
     }
     line += " sample=" + std::move(sample_path);
     return line;
@@ -164,7 +226,7 @@ Result<void> write_text_atomic(const std::filesystem::path &path, std::string_vi
     if (!temporary)
         return std::unexpected{temporary.error()};
     if (const auto published = detail::publish_temporary_file(*temporary, path, overwrite); !published) {
-        std::filesystem::remove(*temporary, error);
+        detail::discard_temporary_file(*temporary);
         return std::unexpected{published.error()};
     }
     return {};
@@ -654,6 +716,22 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
                                   const CancellationToken &cancellation) {
     if (auto valid = audio_internal::validate_export_plan_paths(plan, output_directory); !valid)
         return std::unexpected{valid.error()};
+    for (const auto &volume : plan.volumes) {
+        for (const auto &sample : volume.samples) {
+            for (const auto &member : sample.members) {
+                if (member.quality != RelationshipQuality::known)
+                    continue;
+                const auto waveform =
+                    std::ranges::find(volume.waveforms, member.waveform_key, &PhysicalWaveformExport::object_key);
+                if (waveform == volume.waveforms.end()) {
+                    return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::audio,
+                                                      "SFZ Sample references missing confirmed Wave Data")};
+                }
+                if (auto window = sample_playback_window(sample, *waveform, member.role); !window)
+                    return std::unexpected{window.error()};
+            }
+        }
+    }
     SfzExportResult result;
     std::vector<std::filesystem::path> planned_paths;
     std::set<std::filesystem::path> reserved_paths;
@@ -703,14 +781,16 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
             for (const auto *sample : samples) {
                 if (const auto check = cancellation.check(); !check)
                     return std::unexpected{check.error()};
-                if (sample->rendered_wav_path && !sample->members.empty()) {
+                if (rendered_window_compatible(*sample)) {
                     const auto waveform = std::ranges::find(volume.waveforms, sample->members.front().waveform_key,
                                                             &PhysicalWaveformExport::object_key);
                     if (waveform != volume.waveforms.end()) {
                         text += "// " + display_text(sample->display_name, "sample") + '\n';
-                        text += sfz_region(*sample, *waveform, sample->members.front().role,
-                                           text::path_to_utf8(*sample->rendered_wav_path), {}) +
-                                '\n';
+                        auto region = sfz_region(*sample, *waveform, sample->members.front().role,
+                                                 text::path_to_utf8(*sample->rendered_wav_path), {});
+                        if (!region)
+                            return std::unexpected{region.error()};
+                        text += *region + '\n';
                         ++region_count;
                     }
                 } else {
@@ -732,9 +812,11 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
                         else if (physical_pair && member.role == "right")
                             pan = 100;
                         text += "// " + display_text(sample->display_name, "sample") + '\n';
-                        text += sfz_region(*sample, *waveform, member.role,
-                                           text::path_to_utf8(member.relative_wav_path), pan) +
-                                '\n';
+                        auto region = sfz_region(*sample, *waveform, member.role,
+                                                 text::path_to_utf8(member.relative_wav_path), pan);
+                        if (!region)
+                            return std::unexpected{region.error()};
+                        text += *region + '\n';
                         ++region_count;
                     }
                 }

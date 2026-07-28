@@ -240,7 +240,7 @@ Result<void> write_wav_atomic(const std::filesystem::path &path, const WavSource
     if (!temporary)
         return std::unexpected{temporary.error()};
     if (const auto published = detail::publish_temporary_file(*temporary, path, overwrite); !published) {
-        std::filesystem::remove(*temporary, error);
+        detail::discard_temporary_file(*temporary);
         return std::unexpected{published.error()};
     }
     return {};

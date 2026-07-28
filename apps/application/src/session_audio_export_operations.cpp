@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/download_archives.hpp"
+#include "axklib/application/extraction_selection.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/audio_export.hpp"
 #include "axklib/relationship.hpp"
@@ -36,10 +37,7 @@ struct AudioExportRoot {
 
 struct AudioExportSelection {
     std::set<std::pair<std::uint8_t, std::string>> volumes;
-    std::set<std::string> programs;
-    std::set<std::string> sample_banks;
-    std::set<std::string> samples;
-    std::set<std::string> wave_data;
+    axk::app::ExactExportClosure closure;
     std::vector<Json> issues;
     std::string default_directory_name;
     std::size_t sfz_file_count{};
@@ -174,13 +172,13 @@ std::optional<std::string_view> expected_object_type(std::string_view kind) {
 void insert_object(AudioExportSelection &selection, const axk::ObjectSnapshot &object) {
     const auto type = object.object.header.raw_type;
     if (type == "PROG")
-        selection.programs.insert(object.key);
+        selection.closure.programs.insert(object.key);
     else if (type == "SBAC")
-        selection.sample_banks.insert(object.key);
+        selection.closure.sample_banks.insert(object.key);
     else if (type == "SBNK")
-        selection.samples.insert(object.key);
+        selection.closure.samples.insert(object.key);
     else if (type == "SMPL")
-        selection.wave_data.insert(object.key);
+        selection.closure.wave_data.insert(object.key);
 }
 
 axk::app::Result<AudioExportSelection> resolve_selection(const std::vector<AudioExportRoot> &roots,
@@ -222,68 +220,25 @@ axk::app::Result<AudioExportSelection> resolve_selection(const std::vector<Audio
         root_names.push_back(object->second->object.header.name);
     }
 
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        for (const auto &relationship : graph.relationships) {
-            if (!relationship.target_key)
-                continue;
-            if (selection.programs.contains(relationship.source_key) &&
-                relationship.type.starts_with("PROG_ASSIGNMENT_TO_") &&
-                (relationship.assignment_state == axk::AssignmentState::active ||
-                 relationship.assignment_state == axk::AssignmentState::source_load)) {
-                if (relationship.type == "PROG_ASSIGNMENT_TO_SBAC")
-                    changed = selection.sample_banks.insert(*relationship.target_key).second || changed;
-                else if (relationship.type == "PROG_ASSIGNMENT_TO_SBNK")
-                    changed = selection.samples.insert(*relationship.target_key).second || changed;
-            }
-            if (selection.sample_banks.contains(relationship.source_key) && relationship.type == "SBAC_SLOT_TO_SBNK" &&
-                (relationship.quality == axk::RelationshipQuality::known ||
-                 relationship.quality == axk::RelationshipQuality::likely)) {
-                changed = selection.samples.insert(*relationship.target_key).second || changed;
-            }
-            if (selection.samples.contains(relationship.source_key) &&
-                (relationship.type == "SBNK_LEFT_MEMBER_TO_SMPL" || relationship.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
-                relationship.quality == axk::RelationshipQuality::known) {
-                changed = selection.wave_data.insert(*relationship.target_key).second || changed;
-            }
-            if (selection.wave_data.contains(*relationship.target_key) &&
-                (relationship.type == "SBNK_LEFT_MEMBER_TO_SMPL" || relationship.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
-                relationship.quality == axk::RelationshipQuality::known) {
-                changed = selection.samples.insert(relationship.source_key).second || changed;
-            }
-        }
-    }
-
-    std::set<std::string> known_samples_in_banks;
-    for (const auto &relationship : graph.relationships) {
-        if (!relationship.target_key || !selection.sample_banks.contains(relationship.source_key) ||
-            !selection.samples.contains(*relationship.target_key) || relationship.type != "SBAC_SLOT_TO_SBNK" ||
-            relationship.quality != axk::RelationshipQuality::known) {
-            continue;
-        }
-        known_samples_in_banks.insert(*relationship.target_key);
-    }
+    selection.closure = axk::app::build_exact_export_closure(
+        graph, std::move(selection.closure.programs), std::move(selection.closure.sample_banks),
+        std::move(selection.closure.samples), std::move(selection.closure.wave_data));
     const auto sample_has_wave_data = [&](std::string_view sample_key) {
-        return std::ranges::any_of(graph.relationships, [&](const auto &relationship) {
-            return relationship.source_key == sample_key && relationship.target_key &&
-                   selection.wave_data.contains(*relationship.target_key) &&
-                   (relationship.type == "SBNK_LEFT_MEMBER_TO_SMPL" ||
-                    relationship.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
-                   relationship.quality == axk::RelationshipQuality::known;
-        });
+        return std::ranges::any_of(selection.closure.sample_wave_data,
+                                   [&](const auto &relationship) { return relationship.first == sample_key; });
     };
-    for (const auto &bank : selection.sample_banks) {
-        const auto has_playable_member = std::ranges::any_of(graph.relationships, [&](const auto &relationship) {
-            return relationship.source_key == bank && relationship.target_key &&
-                   known_samples_in_banks.contains(*relationship.target_key) &&
-                   sample_has_wave_data(*relationship.target_key);
-        });
+    for (const auto &bank : selection.closure.sample_banks) {
+        const auto has_playable_member =
+            std::ranges::any_of(selection.closure.sample_bank_members, [&](const auto &relationship) {
+                return relationship.first == bank && sample_has_wave_data(relationship.second);
+            });
         if (has_playable_member)
             ++selection.sfz_file_count;
     }
-    for (const auto &sample : selection.samples) {
-        if (!known_samples_in_banks.contains(sample) && sample_has_wave_data(sample))
+    for (const auto &sample : selection.closure.samples) {
+        const auto is_bank_member = std::ranges::any_of(selection.closure.sample_bank_members,
+                                                        [&](const auto &member) { return member.second == sample; });
+        if (!is_bank_member && sample_has_wave_data(sample))
             ++selection.sfz_file_count;
     }
     if (selection.sfz_file_count == 0U) {
@@ -297,7 +252,7 @@ axk::app::Result<AudioExportSelection> resolve_selection(const std::vector<Audio
             continue;
         const auto referenced = std::ranges::any_of(graph.relationships, [&](const auto &relationship) {
             return relationship.target_key && *relationship.target_key == root.object_key &&
-                   selection.samples.contains(relationship.source_key) &&
+                   selection.closure.samples.contains(relationship.source_key) &&
                    (relationship.type == "SBNK_LEFT_MEMBER_TO_SMPL" ||
                     relationship.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
                    relationship.quality == axk::RelationshipQuality::known;
@@ -314,46 +269,15 @@ axk::app::Result<AudioExportSelection> resolve_selection(const std::vector<Audio
     return selection;
 }
 
-void filter_plan(axk::ExportPlan &plan, const AudioExportSelection &selection) {
-    for (auto &volume : plan.volumes) {
-        const bool whole_volume = selection.volumes.contains({volume.partition.value, volume.volume_name});
-        if (!whole_volume) {
-            std::erase_if(volume.programs,
-                          [&](const auto &program) { return !selection.programs.contains(program.object_key); });
-            std::erase_if(volume.sample_banks,
-                          [&](const auto &bank) { return !selection.sample_banks.contains(bank.object_key); });
-            for (auto &bank : volume.sample_banks) {
-                std::erase_if(bank.member_sample_keys,
-                              [&](const auto &key) { return !selection.samples.contains(key); });
-                std::erase_if(bank.relationship_sample_keys,
-                              [&](const auto &key) { return !selection.samples.contains(key); });
-            }
-            std::erase_if(volume.samples,
-                          [&](const auto &sample) { return !selection.samples.contains(sample.object_key); });
-            std::erase_if(volume.waveforms,
-                          [&](const auto &waveform) { return !selection.wave_data.contains(waveform.object_key); });
-        }
-    }
-    std::erase_if(plan.volumes, [](const auto &volume) {
-        return volume.programs.empty() && volume.sample_banks.empty() && volume.samples.empty() &&
-               volume.waveforms.empty();
-    });
-    for (auto &scope : plan.unresolved_wave_data) {
-        std::erase_if(scope.waveforms,
-                      [&](const auto &waveform) { return !selection.wave_data.contains(waveform.object_key); });
-    }
-    std::erase_if(plan.unresolved_wave_data, [](const auto &scope) { return scope.waveforms.empty(); });
-}
-
 Json inspection_json(std::string_view image_id, std::uint64_t revision, std::size_t root_count,
                      const AudioExportSelection &selection) {
     return {{"imageId", image_id},
             {"revision", revision},
             {"rootCount", root_count},
-            {"programCount", selection.programs.size()},
-            {"sampleBankCount", selection.sample_banks.size()},
-            {"sampleCount", selection.samples.size()},
-            {"waveDataCount", selection.wave_data.size()},
+            {"programCount", selection.closure.programs.size()},
+            {"sampleBankCount", selection.closure.sample_banks.size()},
+            {"sampleCount", selection.closure.samples.size()},
+            {"waveDataCount", selection.closure.wave_data.size()},
             {"sfzFileCount", selection.sfz_file_count},
             {"sfzEligible", selection.sfz_eligible()},
             {"defaultDirectoryName", selection.default_directory_name},
@@ -432,7 +356,7 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                         "sfz_semantics_unavailable",
                         "The selection cannot produce reliable SFZ instruments; export it as WAV instead."));
                 }
-                if (selection->wave_data.empty())
+                if (selection->closure.wave_data.empty())
                     return std::unexpected(
                         operation_error("audio_export_empty", "The selection contains no exportable Wave Data."));
 
@@ -447,7 +371,7 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                 }
                 if (!plan)
                     return std::unexpected(core_error(plan.error(), session->source.relative_path));
-                filter_plan(*plan, *selection);
+                axk::app::filter_export_plan(*plan, selection->closure, selection->volumes);
                 session->lease.reset();
 
                 auto staging = sandbox.create_staging_directory("axklib-audio-export");

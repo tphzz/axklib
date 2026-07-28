@@ -95,6 +95,21 @@ struct ImageWriteResult {
     std::vector<ImagePartitionResult> partitions;
 };
 
+struct ImageBuildPlanResult {
+    std::string kind;
+    std::string format;
+    std::filesystem::path output_path;
+    bool overwrite{};
+    std::size_t object_count{};
+    std::optional<std::uint64_t> size_bytes;
+    std::optional<std::size_t> partition_count;
+};
+
+struct ImageCreationResult {
+    ImageBuildPlanResult plan;
+    std::optional<ImageWriteResult> written;
+};
+
 struct LocalInfoSource {
     std::optional<app::FileRef> file;
     std::optional<app::DirectoryRef> object_directory;
@@ -152,8 +167,10 @@ class LocalOperationRuntime {
                    const axk::PackageImportRequest &request, bool apply, bool overwrite) const;
 
   private:
-    friend app::Result<ImageWriteResult> create_image(std::string_view kind, const std::filesystem::path &manifest_path,
-                                                      const std::filesystem::path &output_path, bool overwrite);
+    friend app::Result<ImageCreationResult> create_image(std::string_view kind,
+                                                         const std::filesystem::path &manifest_path,
+                                                         const std::filesystem::path &output_path, bool overwrite,
+                                                         bool apply);
     friend app::Result<schema::operations_v1::AlterationOutput>
     alter_image(const std::filesystem::path &source_path, const std::filesystem::path &manifest_path,
                 const std::optional<std::filesystem::path> &output_path);
@@ -176,9 +193,10 @@ class LocalOperationRuntime {
     app::OperationRegistry registry_;
 };
 
-[[nodiscard]] app::Result<ImageWriteResult> create_image(std::string_view kind,
-                                                         const std::filesystem::path &manifest_path,
-                                                         const std::filesystem::path &output_path, bool overwrite);
+[[nodiscard]] app::Result<ImageCreationResult> create_image(std::string_view kind,
+                                                            const std::filesystem::path &manifest_path,
+                                                            const std::filesystem::path &output_path, bool overwrite,
+                                                            bool apply);
 [[nodiscard]] app::Result<schema::operations_v1::AlterationOutput>
 alter_image(const std::filesystem::path &source_path, const std::filesystem::path &manifest_path,
             const std::optional<std::filesystem::path> &output_path);

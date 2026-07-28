@@ -20,6 +20,7 @@ struct Config {
     std::string bearer_token;
     std::vector<TokenHash> token_hashes;
     std::vector<std::string> allowed_origins;
+    bool allow_insecure_remote_http{};
     std::filesystem::path workspace_store;
     std::filesystem::path state_directory;
     std::filesystem::path connection_file;

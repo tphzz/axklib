@@ -458,24 +458,51 @@ describe('AxklibHttpApiClient', () => {
         );
     });
 
-    it('opens an explicit authenticated download as a streamable response', async () => {
-        const response = new Response('bytes', { status: 206, headers: { 'Content-Range': 'bytes 2-6/10' } });
-        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response);
+    it('binds ranged downloads to the revision returned by HEAD', async () => {
+        const response = new Response('bytes', {
+            status: 206,
+            headers: { 'Content-Range': 'bytes 2-6/10', ETag: '"revision-1"' },
+        });
+        const fetchMock = vi
+            .spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(
+                new Response(null, { status: 200, headers: { 'Content-Length': '10', ETag: '"revision-1"' } }),
+            )
+            .mockResolvedValueOnce(response);
         const client = new AxklibHttpApiClient({ baseUrl: 'http://localhost/api/v1', bearerToken: 'token' });
 
+        const metadata = await client.inspectDownload({
+            rootId: 'workspace',
+            relativePath: 'exports/out.wav',
+        });
         const opened = await client.openDownload(
             { rootId: 'workspace', relativePath: 'exports/out.wav' },
             {
                 start: 2,
                 end: 6,
             },
+            metadata.revision,
         );
 
+        expect(metadata).toEqual({ size: 10, revision: '"revision-1"' });
         expect(opened.body).not.toBeNull();
-        expect(fetchMock).toHaveBeenCalledWith(
+        expect(fetchMock).toHaveBeenNthCalledWith(
+            1,
             'http://localhost/api/v1/files/content?rootId=workspace&relativePath=exports%2Fout.wav',
             expect.objectContaining({
-                headers: expect.objectContaining({ Authorization: 'Bearer token', Range: 'bytes=2-6' }),
+                method: 'HEAD',
+                headers: expect.objectContaining({ Authorization: 'Bearer token' }),
+            }),
+        );
+        expect(fetchMock).toHaveBeenNthCalledWith(
+            2,
+            'http://localhost/api/v1/files/content?rootId=workspace&relativePath=exports%2Fout.wav',
+            expect.objectContaining({
+                headers: expect.objectContaining({
+                    Authorization: 'Bearer token',
+                    Range: 'bytes=2-6',
+                    'If-Match': '"revision-1"',
+                }),
             }),
         );
     });

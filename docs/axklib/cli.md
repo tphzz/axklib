@@ -39,7 +39,7 @@ naming.
 | `package inspect` / `verify` | Inspect bounded package metadata or fully verify every payload. |
 | `package plan-import` / `import` | Plan or publish a portable-package import. |
 | `create manifest` | Generate an HDS, floppy, or ISO authoring starter. |
-| `create hds` / `floppy` / `iso` | Create a fresh image from a versioned JSON manifest. |
+| `create hds` / `floppy` / `iso` | Plan or create a fresh image from a versioned JSON manifest. |
 | `alter manifest` | Generate an ordered HDS alteration starter. |
 | `alter hds` | Plan or publish an ordered HDS alteration. |
 | `validate` | Validate container allocation, directories, objects, and relationships. |
@@ -126,10 +126,17 @@ axklib create manifest iso -o cdrom.json
 Edit sampler-facing names, geometry, and audio paths, then create the image:
 
 ```bash
+axklib create hds image.json -o HD00_512_generated.hds --dry-run
+axklib create floppy floppy.json -o authored.ima --dry-run
+axklib create iso cdrom.json -o authored.iso --dry-run
 axklib create hds image.json -o HD00_512_generated.hds
 axklib create floppy floppy.json -o authored.ima
 axklib create iso cdrom.json -o authored.iso
 ```
+
+`--dry-run` invokes the same manifest parser and application build planner as
+creation, reports the admitted format, size where applicable, partition count,
+and object count, and does not create the output file.
 
 The HDS starter is immediately buildable and object-empty. The floppy starter
 references `tone.wav` because a generated Yamaha FAT12 image must contain at
