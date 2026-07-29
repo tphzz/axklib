@@ -52,6 +52,66 @@ def write_package_basename(path: Path, source_identity: str = "main-a1b2c3d") ->
     path.write_text(f"axklib-{source_identity}\n", encoding="utf-8")
 
 
+def write_desktop_license_inputs(directory: Path) -> tuple[Path, Path]:
+    crate = directory / "reqwest"
+    crate.mkdir()
+    (crate / "Cargo.toml").write_text("[package]\nname = \"reqwest\"\n", encoding="utf-8")
+    (crate / "LICENSE").write_text("reqwest license text\n", encoding="utf-8")
+    cargo = directory / "cargo-metadata.json"
+    cargo.write_text(
+        json.dumps(
+            {
+                "packages": [
+                    {
+                        "id": "path+file:///axkdeck#2.3.4",
+                        "name": "axkdeck",
+                        "version": "2.3.4",
+                        "license": "MIT OR Apache-2.0",
+                        "license_file": None,
+                        "manifest_path": str(crate / "Cargo.toml"),
+                    },
+                    {
+                        "id": "registry+https://github.com/rust-lang/crates.io-index#reqwest@0.12.0",
+                        "name": "reqwest",
+                        "version": "0.12.0",
+                        "license": "MIT OR Apache-2.0",
+                        "license_file": None,
+                        "manifest_path": str(crate / "Cargo.toml"),
+                    },
+                ],
+                "resolve": {
+                    "nodes": [
+                        {"id": "path+file:///axkdeck#2.3.4"},
+                        {
+                            "id": "registry+https://github.com/rust-lang/crates.io-index#reqwest@0.12.0"
+                        },
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    package = directory / "tauri-api"
+    package.mkdir()
+    (package / "LICENSE").write_text("Tauri license text\n", encoding="utf-8")
+    pnpm = directory / "pnpm-licenses.json"
+    pnpm.write_text(
+        json.dumps(
+            {
+                "Apache-2.0 OR MIT": [
+                    {
+                        "name": "@tauri-apps/api",
+                        "versions": ["2.11.1"],
+                        "paths": [str(package)],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return cargo, pnpm
+
+
 def test_pnpm_packages_preserve_scopes_and_separate_peer_context(tmp_path: Path) -> None:
     lockfile = tmp_path / "pnpm-lock.yaml"
     lockfile.write_text(
@@ -218,6 +278,7 @@ def test_desktop_sbom_uses_the_shared_monorepo_version(
     output = tmp_path / "desktop.json"
     version_file = tmp_path / "version.json"
     package_file = tmp_path / "package-basename.txt"
+    cargo_metadata, pnpm_licenses = write_desktop_license_inputs(tmp_path)
     write_metadata(version_file, metadata("2.3.4", "2.3.4", "v2.3.4"))
     write_package_basename(package_file, "v2.3.4-a1b2c3d")
     monkeypatch.setattr(
@@ -230,6 +291,10 @@ def test_desktop_sbom_uses_the_shared_monorepo_version(
             str(root / "apps/axkdeck"),
             "--profile",
             "server",
+            "--cargo-metadata-file",
+            str(cargo_metadata),
+            "--pnpm-license-file",
+            str(pnpm_licenses),
             "--version-metadata-file",
             str(version_file),
             "--package-basename-file",
@@ -246,6 +311,37 @@ def test_desktop_sbom_uses_the_shared_monorepo_version(
     assert document["comment"] == "axklib source identity: v2.3.4-a1b2c3d"
     assert len(desktop) == 1
     assert desktop[0]["versionInfo"] == "2.3.4"
+    assert {
+        ("reqwest", "MIT OR Apache-2.0"),
+        ("@tauri-apps/api", "Apache-2.0 OR MIT"),
+    } <= {(item["name"], item["licenseDeclared"]) for item in document["packages"]}
+    assert all(item["licenseDeclared"] != "NOASSERTION" for item in document["packages"])
+
+
+def test_license_bundle_is_deterministic_and_rejects_unresolved_packages(
+    tmp_path: Path,
+) -> None:
+    material = tmp_path / "LICENSE"
+    material.write_text("license text\n", encoding="utf-8")
+    packages = [generate_sbom.package("dependency", "1.0", "test", license_expression="MIT")]
+    output = tmp_path / "THIRD-PARTY-LICENSES.txt"
+
+    generate_sbom.write_license_bundle(
+        output,
+        packages,
+        [
+            generate_sbom.LicenseMaterial("dependency", material),
+            generate_sbom.LicenseMaterial("duplicate", material),
+        ],
+    )
+
+    text = output.read_text(encoding="utf-8")
+    assert "- dependency 1.0: MIT" in text
+    assert text.count("license text") == 1
+    with pytest.raises(ValueError, match="unresolved licenses"):
+        generate_sbom.write_license_bundle(
+            output, [generate_sbom.package("unknown", "1.0", "test")], []
+        )
 
 
 def test_version_metadata_rejects_inconsistent_values(tmp_path: Path) -> None:
@@ -506,8 +602,11 @@ def test_native_workflow_creates_only_release_drafts() -> None:
     assert workflow.count("path: ${{ runner.temp }}/vcpkg/archives") == 2
     assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}" not in workflow
     assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.." not in workflow
+    assert "  pull_request:" in workflow
+    assert "  push:" in workflow
     assert "draft-release:" in workflow
-    assert "if: ${{ !inputs.debug }}" in workflow
+    assert "if: ${{ github.event_name == 'workflow_dispatch' && !inputs.debug }}" in workflow
+    assert "macos-universal:\n    name: macOS universal\n    if: github.event_name == 'workflow_dispatch'" in workflow
     assert action_reference_count(workflow, "actions/download-artifact", "v8") == 1
     assert "gh release create" in workflow
     assert "--draft" in workflow
@@ -605,6 +704,18 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
         line for line in workflow.splitlines() if "pnpm/action-setup@" in line
     )
     assert "if-no-files-found: error" in workflow
+
+
+def test_clang_tidy_preset_uses_clang_compile_commands() -> None:
+    root = Path(__file__).resolve().parents[3]
+    presets = json.loads((root / "CMakePresets.json").read_text(encoding="utf-8"))
+    clang_tidy = next(
+        preset for preset in presets["configurePresets"] if preset["name"] == "clang-tidy"
+    )
+
+    assert clang_tidy["cacheVariables"]["CMAKE_C_COMPILER"] == "clang"
+    assert clang_tidy["cacheVariables"]["CMAKE_CXX_COMPILER"] == "clang++"
+    assert clang_tidy["cacheVariables"]["CMAKE_CXX_CLANG_TIDY"] == "clang-tidy"
 
 
 def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:

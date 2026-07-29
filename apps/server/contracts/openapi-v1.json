@@ -365,11 +365,17 @@
           "maximumDownloadArchiveBytes",
           "maximumDownloadArchiveTotalBytes",
           "maximumDownloadArchiveEntries",
+          "maximumDownloadArchiveDepth",
+          "maximumDownloadArchivePathBytes",
+          "maximumConcurrentArchiveDownloads",
           "downloadArchiveRetentionSeconds",
           "maximumWebsocketDeliveryEvents",
           "maximumWebsocketDeliveryBytes",
           "maximumQueuedJobs",
           "maximumImageSessions",
+          "maximumMediaBuildObjectBytes",
+          "maximumMediaBuildPayloadBytes",
+          "maximumMediaBuildOutputBytes",
           "maximumPageSize"
         ],
         "type": "object"
@@ -1274,6 +1280,16 @@
         ],
         "type": "object"
       },
+      "ExportIssue": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/Issue"
+          },
+          {
+            "$ref": "#/components/schemas/RelationshipDiagnostic"
+          }
+        ]
+      },
       "ExtractionArtifact": {
         "additionalProperties": false,
         "properties": {
@@ -1456,7 +1472,7 @@
           },
           "warnings": {
             "items": {
-              "$ref": "#/components/schemas/Issue"
+              "$ref": "#/components/schemas/ExportIssue"
             },
             "type": "array"
           },
@@ -3291,7 +3307,7 @@
           },
           "issues": {
             "items": {
-              "$ref": "#/components/schemas/Issue"
+              "$ref": "#/components/schemas/ExportIssue"
             },
             "type": "array"
           },
@@ -6158,6 +6174,97 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "RelationshipDiagnostic": {
+        "additionalProperties": false,
+        "properties": {
+          "assignmentState": {
+            "enum": [
+              "CONFIRMED_ACTIVE",
+              "SOURCE_LOAD_ASSIGNMENT",
+              "CONFIRMED_VISIBLE_OFF",
+              "CONFIRMED_DUPLICATE_NOT_ACTIVE",
+              "UNKNOWN"
+            ],
+            "x-axklib-application-enum": {
+              "CONFIRMED_ACTIVE": "confirmed-active",
+              "CONFIRMED_DUPLICATE_NOT_ACTIVE": "confirmed-duplicate-not-active",
+              "CONFIRMED_VISIBLE_OFF": "confirmed-visible-off",
+              "SOURCE_LOAD_ASSIGNMENT": "source-load-assignment",
+              "UNKNOWN": "unknown"
+            }
+          },
+          "basis": {
+            "type": "string"
+          },
+          "candidateObjectKeys": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "code": {
+            "const": "unconfirmed_relationship_excluded"
+          },
+          "fatal": {
+            "const": false
+          },
+          "message": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "relationshipQuality": {
+            "enum": [
+              "KNOWN",
+              "LIKELY",
+              "TENTATIVE",
+              "UNKNOWN"
+            ],
+            "x-axklib-application-enum": {
+              "KNOWN": "Known",
+              "LIKELY": "Likely",
+              "TENTATIVE": "Tentative",
+              "UNKNOWN": "Unknown"
+            }
+          },
+          "relationshipType": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "sourceObjectKey": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "targetObjectKey": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "fatal",
+          "relationshipType",
+          "relationshipQuality",
+          "reason",
+          "sourceObjectKey",
+          "candidateObjectKeys",
+          "basis",
+          "assignmentState"
         ],
         "type": "object"
       },
@@ -17131,6 +17238,7 @@
           "name": "bins",
           "required": true,
           "schema": {
+            "maximum": 4096,
             "minimum": 1,
             "type": "integer"
           }
@@ -18348,6 +18456,355 @@
         ],
         "x-axklib-operation-ids": [
           "package.export"
+        ]
+      }
+    },
+    "/package-import-plan-releases": {
+      "post": {
+        "operationId": "package.plan_import.release",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "planToken": "x"
+                  }
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/PlanTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "value": {
+                      "data": {
+                        "released": true
+                      },
+                      "meta": {
+                        "requestId": "request-1"
+                      }
+                    }
+                  },
+                  "warning": {
+                    "value": {
+                      "data": {
+                        "released": true
+                      },
+                      "meta": {
+                        "requestId": "request-1",
+                        "warnings": [
+                          {
+                            "code": "example_warning",
+                            "context": {},
+                            "message": "operation completed with a warning"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PlanReleaseResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Operation completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed or schema-invalid request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authenticated caller is not authorized",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Referenced resource does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request conflicts with current state",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Configured request limit exceeded",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported or invalid domain request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Transient server capacity exhausted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Contained internal failure",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "x-axklib-operation-descriptors": [
+          {
+            "cliCommand": null,
+            "cliParity": false,
+            "id": "package.plan_import.release",
+            "mode": "request",
+            "operationClass": "write",
+            "requestSchema": "PlanTokenRequest",
+            "requiresIdempotency": false,
+            "resultSchema": "PlanReleaseResult",
+            "variant": null
+          }
+        ],
+        "x-axklib-operation-ids": [
+          "package.plan_import.release"
         ]
       }
     },

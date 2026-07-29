@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
+    import { onDestroy, onMount } from 'svelte';
 
     interface Props {
         objectName: string;
@@ -25,9 +25,47 @@
         onclose,
     }: Props = $props();
     let menu: HTMLDivElement;
+    const invoker =
+        typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
+
+    function menuItems(): HTMLButtonElement[] {
+        return menu ? Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')) : [];
+    }
+
+    function focusItem(index: number): void {
+        const items = menuItems();
+        if (items.length === 0) return;
+        const normalized = (index + items.length) % items.length;
+        items.forEach((item, itemIndex) => (item.tabIndex = itemIndex === normalized ? 0 : -1));
+        items[normalized].focus();
+    }
+
+    function handleMenuKey(event: KeyboardEvent): void {
+        const items = menuItems();
+        const current = items.indexOf(document.activeElement as HTMLButtonElement);
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            onclose();
+        } else if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            focusItem(current + 1);
+        } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            focusItem(current - 1);
+        } else if (event.key === 'Home') {
+            event.preventDefault();
+            focusItem(0);
+        } else if (event.key === 'End') {
+            event.preventDefault();
+            focusItem(items.length - 1);
+        }
+        event.stopPropagation();
+    }
 
     $effect(() => {
-        queueMicrotask(() => menu?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
+        queueMicrotask(() => focusItem(0));
     });
 
     onMount(() => {
@@ -38,9 +76,11 @@
         window.addEventListener('pointerdown', dismissFromOutsidePointer, true);
         return () => window.removeEventListener('pointerdown', dismissFromOutsidePointer, true);
     });
-</script>
 
-<svelte:window onkeydown={(event) => event.key === 'Escape' && onclose()} />
+    onDestroy(() => {
+        if (invoker?.isConnected) invoker.focus();
+    });
+</script>
 
 <div
     bind:this={menu}
@@ -50,7 +90,7 @@
     tabindex="-1"
     style={`left: ${left}px; top: ${top}px;`}
     onclick={(event) => event.stopPropagation()}
-    onkeydown={(event) => event.stopPropagation()}
+    onkeydown={handleMenuKey}
 >
     {#if onrename}
         <button

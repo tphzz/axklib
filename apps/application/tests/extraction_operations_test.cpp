@@ -215,6 +215,8 @@ TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelatio
     EXPECT_EQ(excluded.front().type, "PROG_ASSIGNMENT_TO_SBAC");
     EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
     EXPECT_EQ(excluded.front().reason, "exact export requires a Known relationship");
+    ASSERT_TRUE(excluded.front().target_key);
+    EXPECT_EQ(*excluded.front().target_key, "bank");
 
     graph.relationships.front().quality = axk::RelationshipQuality::known;
     graph.relationships[1].quality = axk::RelationshipQuality::likely;
@@ -241,6 +243,22 @@ TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelatio
     ASSERT_EQ(excluded.size(), 1U);
     EXPECT_EQ(excluded.front().type, "SBNK_LEFT_MEMBER_TO_SMPL");
     EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
+
+    graph.relationships[2].target_key.reset();
+    graph.relationships[2].candidate_keys = {"wave", "other-wave"};
+    graph.relationships[2].basis = "ambiguous Wave Data candidates";
+    graph.relationships[2].assignment_state = axk::AssignmentState::unknown;
+    selected = source;
+    excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
+    EXPECT_TRUE(selected.volumes.empty());
+    ASSERT_EQ(excluded.size(), 1U);
+    EXPECT_EQ(excluded.front().type, "SBNK_LEFT_MEMBER_TO_SMPL");
+    EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
+    EXPECT_FALSE(excluded.front().target_key);
+    EXPECT_EQ(excluded.front().candidate_keys, (std::vector<std::string>{"wave", "other-wave"}));
+    EXPECT_EQ(excluded.front().basis, "ambiguous Wave Data candidates");
+    EXPECT_EQ(excluded.front().assignment_state, axk::AssignmentState::unknown);
+    EXPECT_EQ(excluded.front().reason, "exact export requires a concrete Known relationship target");
 }
 
 TEST(VolumeGraph, SerializesUnresolvedPlacementCandidatesAndResolutionQuality) {
@@ -267,6 +285,37 @@ TEST(VolumeGraph, SerializesUnresolvedPlacementCandidatesAndResolutionQuality) {
     EXPECT_EQ(placement.at("resolution"), "ambiguous");
     EXPECT_EQ(placement.at("quality"), "unresolved");
     EXPECT_EQ(placement.at("candidates").size(), 2U);
+}
+
+TEST(VolumeGraph, RetainsTargetlessExactDependencyDiagnostics) {
+    axk::VolumeExport volume;
+    volume.partition = axk::PartitionIndex{0};
+    volume.partition_name = "Disk 1";
+    volume.volume_name = "Volume";
+    volume.relative_root = "partition_00_Disk_1/Volume";
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Sample";
+    volume.samples.push_back(std::move(sample));
+
+    axk::RelationshipGraph graph;
+    axk::Relationship relationship;
+    relationship.source_key = "sample";
+    relationship.type = "SBNK_LEFT_MEMBER_TO_SMPL";
+    relationship.quality = axk::RelationshipQuality::tentative;
+    relationship.candidate_keys = {"wave-a", "wave-b"};
+    relationship.basis = "ambiguous Wave Data candidates";
+    graph.relationships.push_back(std::move(relationship));
+
+    const auto serialized = axk::app::serialize_volume_graph(volume, graph, "fixture.hds");
+    ASSERT_TRUE(serialized) << serialized.error().message;
+    const auto json = nlohmann::json::parse(*serialized);
+    ASSERT_EQ(json.at("relationships").size(), 1U);
+    const auto &serialized_relationship = json.at("relationships").at(0);
+    EXPECT_TRUE(serialized_relationship.at("target_key").is_null());
+    EXPECT_EQ(serialized_relationship.at("candidate_keys"), (nlohmann::json::array({"wave-a", "wave-b"})));
+    EXPECT_EQ(serialized_relationship.at("quality"), "Tentative");
+    EXPECT_EQ(serialized_relationship.at("basis"), "ambiguous Wave Data candidates");
 }
 
 TEST_F(ExtractionOperationsTest, SfzPublishesPersistentCollectionAndContentAddressedResult) {

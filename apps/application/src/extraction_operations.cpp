@@ -29,6 +29,7 @@
 #include "axklib/utf8.hpp"
 #include "axklib/wav_stream.hpp"
 #include "content_id.hpp"
+#include "relationship_diagnostic.hpp"
 
 namespace {
 
@@ -449,17 +450,10 @@ axk::app::Result<Json> extract(const Json &input, const axk::app::OperationConte
             if (selection) {
                 const auto excluded =
                     axk::app::filter_export_plan(*plan, graph, request->scope, selector, selection->object_key);
-                for (const auto &relationship : excluded) {
-                    warnings.push_back({{"code", "unconfirmed_relationship_excluded"},
-                                        {"message", "Unconfirmed relationship excluded from exact extraction"},
-                                        {"source", source_display},
-                                        {"selector", selector},
-                                        {"relationshipType", relationship.type},
-                                        {"relationshipQuality", axk::relationship_quality_name(relationship.quality)},
-                                        {"reason", relationship.reason},
-                                        {"sourceObjectKey", relationship.source_key},
-                                        {"targetObjectKey", relationship.target_key}});
-                }
+                for (const auto &relationship : excluded)
+                    warnings.push_back(axk::app::relationship_diagnostic(
+                        relationship, "Unconfirmed relationship excluded from exact extraction", source_display,
+                        selector));
             }
             auto root = selection_root(request->scope, selector);
             if (request->scope == "file")

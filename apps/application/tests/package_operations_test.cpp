@@ -206,8 +206,8 @@ class PackageOperationsTest : public testing::Test {
 };
 
 TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegistryContract) {
-    for (const auto operation :
-         {"package.export", "package.inspect", "package.verify", "package.plan_import", "package.import"}) {
+    for (const auto operation : {"package.export", "package.inspect", "package.verify", "package.plan_import",
+                                 "package.plan_import.release", "package.import"}) {
         EXPECT_TRUE(registry_.is_implemented(operation));
     }
     const auto exported = registry_.invoke(
@@ -221,6 +221,15 @@ TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegis
     EXPECT_EQ(exported->at("output").at("relativePath"), "sample.axksbnk");
     EXPECT_TRUE(exported->at("payloadsVerified").get<bool>());
     EXPECT_TRUE(std::filesystem::is_regular_file(root_ / "sample.axksbnk"));
+    const auto wrong_extension = registry_.invoke(
+        "package.export",
+        {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}},
+         {"output", {{"rootId", "workspace"}, {"relativePath", "sample.zip"}}},
+         {"roots",
+          {{{"kind", "sbnk"}, {"partitionIndex", 0U}, {"volumeName", "New Volume"}, {"objectName", "sine wave"}}}}},
+        context());
+    ASSERT_FALSE(wrong_extension);
+    EXPECT_EQ(wrong_extension.error().code, "package_extension_mismatch");
 
     const nlohmann::json file_input = {
         {"package", {{"fileRef", {{"rootId", "workspace"}, {"relativePath", "sample.axksbnk"}}}}}};
@@ -291,6 +300,20 @@ TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegis
     ASSERT_FALSE(reserved);
     EXPECT_EQ(reserved.error().code, "destination_reserved");
 
+    auto releasable_request = import_request;
+    releasable_request["output"]["relativePath"] = "released.hds";
+    const auto releasable = registry_.invoke("package.plan_import", releasable_request, context());
+    ASSERT_TRUE(releasable) << releasable.error().message;
+    const auto released = registry_.invoke("package.plan_import.release",
+                                           {{"planToken", releasable->at("planToken").get<std::string>()}}, context());
+    ASSERT_TRUE(released) << released.error().message;
+    EXPECT_TRUE(released->at("released").get<bool>());
+    EXPECT_FALSE(uploads_->remove(upload->reference, "owner"));
+    EXPECT_FALSE(
+        registry_.invoke("package.import", {{"planToken", releasable->at("planToken").get<std::string>()}}, context()));
+    const auto replanned_released = registry_.invoke("package.plan_import", releasable_request, context());
+    ASSERT_TRUE(replanned_released) << replanned_released.error().message;
+
     auto other = context();
     other.owner_id = "other";
     const auto denied =
@@ -302,6 +325,9 @@ TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegis
         registry_.invoke("package.import", {{"planToken", planned->at("planToken").get<std::string>()}}, context());
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_TRUE(applied->at("applied").get<bool>());
+    ASSERT_TRUE(registry_.invoke("package.plan_import.release",
+                                 {{"planToken", replanned_released->at("planToken").get<std::string>()}}, context()));
+    EXPECT_TRUE(uploads_->remove(upload->reference, "owner"));
     EXPECT_TRUE(std::filesystem::is_regular_file(root_ / "imported.hds"));
     EXPECT_NE(read_bytes(root_ / "imported.hds"), read_bytes(root_ / "target.hds"));
     EXPECT_FALSE(
@@ -406,6 +432,11 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
     const auto package = axk::open_portable_package(*content->reader, content->snapshot.filename);
     ASSERT_TRUE(package) << package.error().message;
     EXPECT_EQ(package->kind, axk::PackageKind::volume);
+    auto wrong_extension = base;
+    wrong_extension["destination"] = {{"kind", "DOWNLOAD"}, {"filename", "local-volume.zip"}};
+    const auto rejected_extension = registry_.invoke("images.package_export", wrong_extension, context());
+    ASSERT_FALSE(rejected_extension);
+    EXPECT_EQ(rejected_extension.error().code, "package_extension_mismatch");
 
     const auto objects = images_->objects(opened->image_id, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;

@@ -137,8 +137,6 @@ axk::app::ExactExportClosure axk::app::build_exact_export_closure(const Relation
     while (changed) {
         changed = false;
         for (const auto &row : graph.relationships) {
-            if (!row.target_key)
-                continue;
             const auto active_program_assignment = closure.programs.contains(row.source_key) &&
                                                    row.type.starts_with("PROG_ASSIGNMENT_TO_") &&
                                                    (row.assignment_state == AssignmentState::active ||
@@ -149,16 +147,22 @@ axk::app::ExactExportClosure axk::app::build_exact_export_closure(const Relation
                 closure.samples.contains(row.source_key) &&
                 (row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL");
             const auto wave_data_parent =
-                closure.wave_data.contains(*row.target_key) &&
+                row.target_key && closure.wave_data.contains(*row.target_key) &&
                 (row.type == "SBNK_LEFT_MEMBER_TO_SMPL" || row.type == "SBNK_RIGHT_MEMBER_TO_SMPL");
-            if ((active_program_assignment || sample_bank_member || sample_wave_data || wave_data_parent) &&
-                row.quality != RelationshipQuality::known) {
-                const auto key = row.source_key + '\0' + row.type + '\0' + *row.target_key;
+            const auto relevant =
+                active_program_assignment || sample_bank_member || sample_wave_data || wave_data_parent;
+            if (relevant && (!row.target_key || row.quality != RelationshipQuality::known)) {
+                const auto key = row.source_key + '\0' + row.type + '\0' + row.target_key.value_or("<missing-target>");
                 if (excluded_keys.insert(key).second)
-                    closure.excluded.push_back({row.source_key, *row.target_key, row.type, row.quality,
-                                                "exact export requires a Known relationship"});
+                    closure.excluded.push_back({row.source_key, row.target_key, row.candidate_keys, row.type,
+                                                row.quality, row.basis, row.assignment_state,
+                                                row.target_key
+                                                    ? "exact export requires a Known relationship"
+                                                    : "exact export requires a concrete Known relationship target"});
                 continue;
             }
+            if (!row.target_key)
+                continue;
             if (active_program_assignment && row.quality == RelationshipQuality::known) {
                 closure.program_targets.emplace(row.source_key, *row.target_key);
                 if (row.type == "PROG_ASSIGNMENT_TO_SBAC") {

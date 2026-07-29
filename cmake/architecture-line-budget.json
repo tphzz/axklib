@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "maximumLines": 700,
+  "sourceRoots": [
+    {
+      "path": "library/include",
+      "extensions": [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"]
+    },
+    {
+      "path": "library/internal",
+      "extensions": [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"]
+    },
+    {
+      "path": "library/src",
+      "extensions": [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"]
+    },
+    {
+      "path": "library/adapters",
+      "extensions": [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"]
+    },
+    {
+      "path": "library/tools",
+      "extensions": [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"]
+    },
+    {
+      "path": "apps/application",
+      "extensions": [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"]
+    },
+    {
+      "path": "apps/cli",
+      "extensions": [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"]
+    },
+    {
+      "path": "apps/server",
+      "extensions": [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"]
+    },
+    {
+      "path": "apps/axkdeck/src",
+      "extensions": [".ts", ".svelte"]
+    },
+    {
+      "path": "apps/axkdeck/vite.config.ts",
+      "extensions": [".ts"]
+    },
+    {
+      "path": "apps/axkdeck/src-tauri/src",
+      "extensions": [".rs"]
+    },
+    {
+      "path": "apps/axkdeck/src-tauri/build.rs",
+      "extensions": [".rs"]
+    }
+  ],
+  "classifiedExclusions": [
+    {
+      "path": "library/include/axklib/generated",
+      "classification": "generated",
+      "reason": "Generated from maintained Yamaha effect and field data"
+    },
+    {
+      "path": "apps/axkdeck/src/lib/generated",
+      "classification": "generated",
+      "reason": "Generated from the canonical OpenAPI contract"
+    },
+    {
+      "path": "apps/axkdeck/src/vite-env.d.ts",
+      "classification": "machine-maintained",
+      "reason": "Vite environment declarations are maintained by the frontend toolchain"
+    }
+  ],
+  "legacyFiles": {
+    "apps/application/src/file_operations.cpp": 2249,
+    "apps/application/src/filesystem.cpp": 2668,
+    "apps/application/src/image_sessions.cpp": 2230,
+    "apps/application/src/jobs.cpp": 739,
+    "apps/application/src/package_operations.cpp": 1296,
+    "apps/application/src/validation_operations.cpp": 1413,
+    "apps/application/src/write_operations.cpp": 1839,
+    "apps/axkdeck/src/App.svelte": 3254,
+    "apps/axkdeck/src/lib/audio/auditionController.ts": 1109,
+    "apps/axkdeck/src/lib/components/AudioImportDialog.svelte": 768,
+    "apps/axkdeck/src/lib/httpTransport.ts": 1413,
+    "apps/axkdeck/src-tauri/src/lib.rs": 1173,
+    "apps/axkdeck/src-tauri/src/server_sidecar.rs": 1210,
+    "apps/cli/local_operations.cpp": 755,
+    "apps/server/src/server.cpp": 2390,
+    "library/src/alteration.cpp": 4013,
+    "library/src/audio_export.cpp": 869,
+    "library/src/media_yamaha.cpp": 1207,
+    "library/src/package.cpp": 1472,
+    "library/src/package_import.cpp": 2409,
+    "library/src/sdk.cpp": 1275,
+    "library/src/semantic.cpp": 822,
+    "library/src/sfs.cpp": 1042,
+    "library/src/writer.cpp": 710
+  }
+}

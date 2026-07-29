@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-import tomllib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +22,12 @@ class PnpmIdentity:
     name: str
     version: str
     peer_context: str = ""
+
+
+@dataclass(frozen=True)
+class LicenseMaterial:
+    component: str
+    path: Path
 
 
 def creation_timestamp() -> str:
@@ -111,6 +116,128 @@ def pnpm_packages(lockfile: Path) -> list[dict[str, object]]:
         ]
         rows.append(row)
     return rows
+
+
+def cargo_packages(metadata_file: Path) -> tuple[list[dict[str, object]], list[LicenseMaterial]]:
+    loaded: object = json.loads(metadata_file.read_text(encoding="utf-8"))
+    if (
+        not isinstance(loaded, dict)
+        or not isinstance(loaded.get("packages"), list)
+        or not isinstance(loaded.get("resolve"), dict)
+        or not isinstance(loaded["resolve"].get("nodes"), list)
+    ):
+        raise ValueError("Cargo metadata must contain a resolved package graph")
+    resolved_ids = {
+        value.get("id")
+        for value in loaded["resolve"]["nodes"]
+        if isinstance(value, dict) and isinstance(value.get("id"), str)
+    }
+    rows: list[dict[str, object]] = []
+    materials: list[LicenseMaterial] = []
+    for value in loaded["packages"]:
+        if not isinstance(value, dict):
+            raise ValueError("Cargo package metadata must be an object")
+        name = value.get("name")
+        version = value.get("version")
+        package_id = value.get("id")
+        license_expression = value.get("license")
+        license_file = value.get("license_file")
+        manifest_path = value.get("manifest_path")
+        if package_id not in resolved_ids:
+            continue
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(version, str)
+            or not version
+            or not isinstance(manifest_path, str)
+            or not manifest_path
+        ):
+            raise ValueError("Cargo package identity is incomplete")
+        if name == "axkdeck":
+            continue
+        if not isinstance(license_expression, str) or not license_expression:
+            if not isinstance(license_file, str) or not license_file:
+                raise ValueError(f"Cargo package {name}@{version} has no declared license")
+            license_expression = f"LicenseRef-{re.sub(r'[^A-Za-z0-9.-]', '-', name)}"
+        row = package(name, version, "crates.io", license_expression=license_expression)
+        row["externalRefs"] = [
+            {
+                "referenceCategory": "PACKAGE-MANAGER",
+                "referenceType": "purl",
+                "referenceLocator": f"pkg:cargo/{quote(name, safe='')}@{version}",
+            }
+        ]
+        rows.append(row)
+        directory = Path(manifest_path).parent
+        candidates = [Path(license_file)] if isinstance(license_file, str) and license_file else []
+        candidates.extend(
+            path
+            for path in directory.iterdir()
+            if path.is_file()
+            and path.name.upper().startswith(("LICENSE", "COPYING", "NOTICE", "COPYRIGHT"))
+        )
+        for candidate in candidates:
+            path = candidate if candidate.is_absolute() else directory / candidate
+            if path.is_file():
+                materials.append(LicenseMaterial(f"Cargo {name} {version}", path))
+    return rows, materials
+
+
+def pnpm_runtime_packages(
+    license_file: Path,
+) -> tuple[list[dict[str, object]], list[LicenseMaterial]]:
+    loaded: object = json.loads(license_file.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError("pnpm license inventory must be an object")
+    rows: list[dict[str, object]] = []
+    materials: list[LicenseMaterial] = []
+    seen: set[tuple[str, str]] = set()
+    for declared_license, packages in loaded.items():
+        if not isinstance(declared_license, str) or not declared_license or declared_license == "UNKNOWN":
+            raise ValueError("pnpm runtime package has no declared license")
+        if not isinstance(packages, list):
+            raise ValueError("pnpm license group must be an array")
+        for value in packages:
+            if not isinstance(value, dict):
+                raise ValueError("pnpm package license entry must be an object")
+            name = value.get("name")
+            versions = value.get("versions")
+            paths = value.get("paths")
+            if (
+                not isinstance(name, str)
+                or not name
+                or not isinstance(versions, list)
+                or not versions
+                or not all(isinstance(version, str) and version for version in versions)
+                or not isinstance(paths, list)
+                or not all(isinstance(path, str) and path for path in paths)
+            ):
+                raise ValueError("pnpm package license entry is incomplete")
+            for version in versions:
+                identity = (name, version)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                row = package(name, version, "npm", license_expression=declared_license)
+                row["externalRefs"] = [
+                    {
+                        "referenceCategory": "PACKAGE-MANAGER",
+                        "referenceType": "purl",
+                        "referenceLocator": f"pkg:npm/{quote(name, safe='/')}@{version}",
+                    }
+                ]
+                rows.append(row)
+            for raw_path in paths:
+                directory = Path(raw_path)
+                for path in directory.iterdir():
+                    if path.is_file() and path.name.upper().startswith(
+                        ("LICENSE", "COPYING", "NOTICE", "COPYRIGHT")
+                    ):
+                        materials.append(
+                            LicenseMaterial(f"pnpm {name} {', '.join(versions)}", path)
+                        )
+    return rows, materials
 
 
 def dependency_name(value: object) -> str:
@@ -219,6 +346,75 @@ def vcpkg_packages(root: Path, profile: str) -> list[dict[str, object]]:
     return rows
 
 
+def vcpkg_license_materials(
+    installed_root: Path, packages: list[dict[str, object]]
+) -> list[LicenseMaterial]:
+    names = {str(row["name"]) for row in packages if row["supplier"] == "Organization: vcpkg"}
+    found: dict[str, Path] = {}
+    for path in installed_root.rglob("copyright"):
+        name = path.parent.name
+        if name in names and name not in found:
+            found[name] = path
+    missing = sorted(names - found.keys())
+    if missing:
+        raise ValueError(f"vcpkg license material is missing for: {', '.join(missing)}")
+    return [LicenseMaterial(f"vcpkg {name}", found[name]) for name in sorted(found)]
+
+
+def validate_declared_licenses(packages: list[dict[str, object]]) -> None:
+    unresolved = sorted(
+        f"{row['name']}@{row['versionInfo']}"
+        for row in packages
+        if row.get("licenseDeclared") in {None, "", "NOASSERTION"}
+    )
+    if unresolved:
+        raise ValueError(f"distributed packages have unresolved licenses: {', '.join(unresolved)}")
+
+
+def write_license_bundle(
+    output: Path, packages: list[dict[str, object]], materials: list[LicenseMaterial]
+) -> None:
+    validate_declared_licenses(packages)
+    sections = [
+        "axkdeck third-party license inventory",
+        "========================================",
+        "",
+        "Distributed components and declared licenses:",
+        "",
+    ]
+    for row in sorted(packages, key=lambda value: (str(value["name"]), str(value["versionInfo"]))):
+        sections.append(
+            f"- {row['name']} {row['versionInfo']}: {row['licenseDeclared']}"
+        )
+    sections.extend(["", "Bundled license and notice texts", "================================", ""])
+    grouped: dict[str, tuple[list[str], str]] = {}
+    for material in materials:
+        raw = material.path.read_bytes()
+        if len(raw) > 2 * 1024 * 1024 or b"\0" in raw:
+            raise ValueError(f"license material is not bounded text: {material.path}")
+        digest = hashlib.sha256(raw).hexdigest()
+        text = raw.decode("utf-8", errors="replace").replace("\r\n", "\n").rstrip()
+        if digest in grouped:
+            grouped[digest][0].append(material.component)
+        else:
+            grouped[digest] = ([material.component], text)
+    for digest in sorted(grouped):
+        components, text = grouped[digest]
+        sections.extend(
+            [
+                f"Components: {', '.join(sorted(set(components)))}",
+                f"SHA-256: {digest}",
+                "",
+                text,
+                "",
+                "------------------------------------------------------------------------",
+                "",
+            ]
+        )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("\n".join(sections).rstrip() + "\n", encoding="utf-8", newline="\n")
+
+
 def sbom_document(
     profile: str,
     source_identity: str,
@@ -262,6 +458,10 @@ def main() -> int:
     parser.add_argument("--version-metadata-file", required=True, type=Path)
     parser.add_argument("--package-basename-file", required=True, type=Path)
     parser.add_argument("--axkdeck-root", type=Path)
+    parser.add_argument("--cargo-metadata-file", type=Path, action="append")
+    parser.add_argument("--pnpm-license-file", type=Path)
+    parser.add_argument("--vcpkg-installed-root", type=Path)
+    parser.add_argument("--license-bundle", type=Path)
     parser.add_argument(
         "--profile", choices=("sdk", "cli", "server", "workspace"), default="workspace"
     )
@@ -272,8 +472,13 @@ def main() -> int:
     ).removeprefix("axklib-")
     packages = [package("axklib", version, "axklib", license_expression="MPL-2.0")]
     packages.extend(vcpkg_packages(args.axklib_root, args.profile))
+    materials: list[LicenseMaterial] = []
     product = "axklib"
     if args.axkdeck_root:
+        if not args.cargo_metadata_file or not args.pnpm_license_file:
+            parser.error(
+                "--axkdeck-root requires --cargo-metadata-file and --pnpm-license-file"
+            )
         product = "axkdeck"
         packages.append(
             package(
@@ -284,13 +489,25 @@ def main() -> int:
                 comment=f"monorepo source identity: {source_identity}",
             )
         )
-        cargo = tomllib.loads((args.axkdeck_root / "src-tauri/Cargo.lock").read_text())
-        packages.extend(
-            package(item["name"], item["version"], "crates.io")
-            for item in cargo["package"]
-            if item["name"] != "axkdeck"
-        )
-        packages.extend(pnpm_packages(args.axkdeck_root / "pnpm-lock.yaml"))
+        cargo_rows: list[dict[str, object]] = []
+        cargo_materials: list[LicenseMaterial] = []
+        for metadata_file in args.cargo_metadata_file:
+            rows, rows_materials = cargo_packages(metadata_file)
+            cargo_rows.extend(rows)
+            cargo_materials.extend(rows_materials)
+        pnpm_rows, pnpm_materials = pnpm_runtime_packages(args.pnpm_license_file)
+        packages.extend(cargo_rows)
+        packages.extend(pnpm_rows)
+        materials.extend(cargo_materials)
+        materials.extend(pnpm_materials)
+    validate_declared_licenses(packages)
+    if args.license_bundle:
+        if not args.axkdeck_root or not args.vcpkg_installed_root:
+            parser.error(
+                "--license-bundle requires --axkdeck-root and --vcpkg-installed-root"
+            )
+        materials.extend(vcpkg_license_materials(args.vcpkg_installed_root, packages))
+        write_license_bundle(args.license_bundle, packages, materials)
     document = sbom_document(
         args.profile, source_identity, packages, creation_timestamp(), product=product
     )

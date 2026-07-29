@@ -11,6 +11,8 @@
 #include <utility>
 
 #include "axklib/application/secure_random.hpp"
+#include "job_request_resources.hpp"
+#include "jobs_test_access.hpp"
 
 namespace {
 
@@ -45,77 +47,6 @@ std::string progress_phase_name(axk::ProgressPhase phase) {
 
 axk::app::Error job_error(std::string code, std::string message, bool retryable = false) {
     return {std::move(code), std::move(message), {}, retryable};
-}
-
-std::optional<std::string> destination_key(const Json &request, std::string_view member) {
-    const auto found = request.find(member);
-    if (found == request.end() || !found->is_object())
-        return std::nullopt;
-    const auto root = found->find("rootId");
-    const auto relative = found->find("relativePath");
-    if (root == found->end() || relative == found->end() || !root->is_string() || !relative->is_string())
-        return std::nullopt;
-
-    std::string normalized;
-    std::string_view remaining{relative->get_ref<const std::string &>()};
-    while (!remaining.empty()) {
-        const auto separator = remaining.find('/');
-        const auto component = remaining.substr(0U, separator);
-        if (!component.empty() && component != ".") {
-            if (!normalized.empty())
-                normalized.push_back('/');
-            normalized.append(component);
-        }
-        if (separator == std::string_view::npos)
-            break;
-        remaining.remove_prefix(separator + 1U);
-    }
-    return root->get<std::string>() + '\0' + normalized;
-}
-
-std::vector<std::string> destination_keys(const Json &request) {
-    std::vector<std::string> result;
-    for (const auto member : {"destination", "output"}) {
-        if (auto key = destination_key(request, member); key && std::ranges::find(result, *key) == result.end())
-            result.push_back(std::move(*key));
-    }
-    return result;
-}
-
-bool destinations_overlap(std::string_view left, std::string_view right) {
-    const auto left_separator = left.find('\0');
-    const auto right_separator = right.find('\0');
-    if (left_separator == std::string_view::npos || right_separator == std::string_view::npos ||
-        left.substr(0U, left_separator) != right.substr(0U, right_separator)) {
-        return false;
-    }
-    left.remove_prefix(left_separator + 1U);
-    right.remove_prefix(right_separator + 1U);
-    if (left == right)
-        return true;
-    const auto is_parent = [](std::string_view parent, std::string_view child) {
-        return !parent.empty() && child.size() > parent.size() && child.starts_with(parent) &&
-               child[parent.size()] == '/';
-    };
-    return is_parent(left, right) || is_parent(right, left);
-}
-
-void collect_upload_ids(const Json &value, std::vector<std::string> &result) {
-    if (value.is_object()) {
-        if (const auto reference = value.find("uploadRef"); reference != value.end() && reference->is_object()) {
-            const auto upload_id = reference->find("uploadId");
-            if (upload_id != reference->end() && upload_id->is_string()) {
-                const auto &id = upload_id->get_ref<const std::string &>();
-                if (std::ranges::find(result, id) == result.end())
-                    result.push_back(id);
-            }
-        }
-        for (const auto &item : value.items())
-            collect_upload_ids(item.value(), result);
-    } else if (value.is_array()) {
-        for (const auto &item : value)
-            collect_upload_ids(item, result);
-    }
 }
 
 } // namespace
@@ -352,9 +283,25 @@ struct axk::app::JobManager::Impl {
         return operation_class == OperationClass::write ? write_queue : read_queue;
     }
 
+    bool claim_running(const std::shared_ptr<Record> &record) {
+        std::optional<JobEvent> event;
+        {
+            const std::scoped_lock lock{mutex, record->mutex};
+            if (stopping || record->state != JobState::queued)
+                return false;
+            const auto previous = record->state;
+            record->state = JobState::running;
+            record_transition_locked(*record, previous, record->state);
+            event = append_event_locked(*record, "running");
+        }
+        emit(*event);
+        return true;
+    }
+
     void worker_loop(OperationClass operation_class) {
         for (;;) {
             std::shared_ptr<Record> record;
+            std::function<void()> before_claim;
             {
                 std::unique_lock lock{mutex};
                 auto &queue = queue_for(operation_class);
@@ -366,20 +313,19 @@ struct axk::app::JobManager::Impl {
                 }
                 record = std::move(queue.front());
                 queue.pop_front();
+                before_claim = before_running_claim;
             }
 
-            {
-                const std::scoped_lock lock{record->mutex};
-                if (is_terminal(record->state))
+            if (before_claim)
+                before_claim();
+            if (!claim_running(record)) {
+                if (!stopping)
                     continue;
-            }
-            if (stopping) {
                 record->cancellation.cancel();
                 transition(record, JobState::cancelled, "cancelled");
                 continue;
             }
 
-            transition(record, JobState::running, "running");
             ProgressAdapter progress{*this, record};
             auto context = record->context;
             context.cancellation = record->cancellation.token();
@@ -459,6 +405,7 @@ struct axk::app::JobManager::Impl {
     std::deque<std::shared_ptr<Record>> read_queue;
     std::deque<std::shared_ptr<Record>> write_queue;
     std::unordered_map<SubscriptionId, EventSink> subscribers;
+    std::function<void()> before_running_claim;
     std::vector<std::thread> workers;
     SubscriptionId next_subscription{1U};
     std::atomic_bool stopping{};
@@ -487,6 +434,11 @@ axk::app::JobManager::JobManager(const OperationRegistry &registry, std::size_t 
 
 axk::app::JobManager::~JobManager() = default;
 
+void axk::app::JobManagerTestAccess::set_before_running_claim(JobManager &manager, std::function<void()> hook) {
+    const std::scoped_lock lock{manager.impl_->mutex};
+    manager.impl_->before_running_claim = std::move(hook);
+}
+
 axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string operation_id, nlohmann::json request,
                                                                      OperationContext context,
                                                                      std::optional<std::string> idempotency_key) {
@@ -504,7 +456,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
     if (idempotency_key && (idempotency_key->empty() || idempotency_key->size() > 128U))
         return std::unexpected(job_error("invalid_idempotency_key", "idempotency key must contain 1 to 128 bytes"));
 
-    const std::scoped_lock submission_lock{impl_->submission_mutex};
+    std::unique_lock submission_lock{impl_->submission_mutex};
     const auto request_fingerprint = request.dump();
     const auto idempotency_index =
         idempotency_key ? std::optional<std::string>{context.owner_id + '\0' + *idempotency_key} : std::nullopt;
@@ -554,7 +506,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
     record->path_lease = std::move(path_lease);
     if (impl_->uploads != nullptr) {
         std::vector<std::string> upload_ids;
-        collect_upload_ids(record->request, upload_ids);
+        job_detail::collect_upload_ids(record->request, upload_ids);
         record->upload_leases.reserve(upload_ids.size());
         for (const auto &upload_id : upload_ids) {
             auto lease = impl_->uploads->lease(UploadRef{upload_id}, record->context.owner_id);
@@ -564,7 +516,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
         }
     }
     if (record->operation_class == OperationClass::write)
-        record->destination_keys = destination_keys(record->request);
+        record->destination_keys = job_detail::destination_keys(record->request);
     record->idempotency_index = idempotency_index;
     JobEvent queued_event;
     JobSnapshot initial_snapshot;
@@ -591,7 +543,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
         if (!replayed_record) {
             for (const auto &candidate : record->destination_keys) {
                 if (std::ranges::any_of(impl_->destination_reservations, [&](const auto &reserved) {
-                        return destinations_overlap(candidate, reserved.first);
+                        return job_detail::destinations_overlap(candidate, reserved.first);
                     })) {
                     return std::unexpected(
                         job_error("destination_reserved", "destination is reserved by another active job", true));
@@ -638,6 +590,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
             }
         }
     }
+    submission_lock.unlock();
     if (replayed_record)
         return impl_->snapshot(replayed_record);
     for (const auto &sink : sinks) {

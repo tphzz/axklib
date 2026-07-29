@@ -1,5 +1,16 @@
 import type { components } from './generated/axklibApiV1';
 import type { ClientUploadSource } from './clientUploadSource';
+import { AxklibApiError } from './httpErrors';
+import {
+    downloadTimeoutMs,
+    fetchWithTimeout,
+    maximumJsonResponseBytes,
+    readBoundedBlob,
+    readBoundedText,
+    requestTimeoutMs,
+} from './httpResponse';
+
+export { AxklibApiError } from './httpErrors';
 
 export interface AxklibApiConnection {
     baseUrl: string;
@@ -84,31 +95,6 @@ interface ApiErrorEnvelope {
 }
 
 const pendingWorkspaceSnapshots = new Map<string, Promise<WorkspaceSnapshot>>();
-
-export class AxklibApiError extends Error {
-    readonly code: string;
-    readonly status: number;
-    readonly requestId?: string;
-    readonly context?: unknown;
-    readonly retryable: boolean;
-
-    constructor(
-        code: string,
-        message: string,
-        status: number,
-        requestId?: string,
-        context?: unknown,
-        retryable = false,
-    ) {
-        super(message);
-        this.name = 'AxklibApiError';
-        this.code = code;
-        this.status = status;
-        this.requestId = requestId;
-        this.context = context;
-        this.retryable = retryable;
-    }
-}
 
 export type JobEventListener = (event: ApiJobEvent) => void;
 
@@ -481,7 +467,14 @@ export class AxklibHttpApiClient {
             headers.Range = `bytes=${range.start}-${range.end ?? ''}`;
             headers['If-Match'] = revision;
         }
-        const response = await this.fetchResponse('GET', `/files/content?${query}`, undefined, headers);
+        const response = await this.fetchResponse(
+            'GET',
+            `/files/content?${query}`,
+            undefined,
+            headers,
+            undefined,
+            downloadTimeoutMs,
+        );
         if (!response.ok) await this.throwResponseError(response);
         return response;
     }
@@ -504,9 +497,20 @@ export class AxklibHttpApiClient {
     }
 
     async openDirectoryArchive(snapshot: DownloadArchiveSnapshot): Promise<Response> {
-        const response = await this.fetchResponse('GET', this.operationPath(snapshot.contentPath));
+        const response = await this.fetchResponse(
+            'GET',
+            this.operationPath(snapshot.contentPath),
+            undefined,
+            {},
+            undefined,
+            downloadTimeoutMs,
+        );
         if (!response.ok) await this.throwResponseError(response);
         return response;
+    }
+
+    async readBoundedBlob(response: Response, expectedBytes: number, maximumBytes: number): Promise<Blob> {
+        return readBoundedBlob(response, expectedBytes, maximumBytes);
     }
 
     async deleteDirectoryArchive(snapshot: DownloadArchiveSnapshot): Promise<void> {
@@ -594,20 +598,25 @@ export class AxklibHttpApiClient {
         body?: BodyInit,
         headers: Record<string, string> = {},
         signal?: AbortSignal,
+        timeoutMs = requestTimeoutMs,
     ): Promise<Response> {
-        return fetch(`${this.baseUrl}${path}`, {
-            method,
-            headers: {
-                Authorization: `Bearer ${this.bearerToken}`,
-                ...headers,
+        return fetchWithTimeout(
+            `${this.baseUrl}${path}`,
+            {
+                method,
+                headers: {
+                    Authorization: `Bearer ${this.bearerToken}`,
+                    ...headers,
+                },
+                body,
             },
-            body,
             signal,
-        });
+            timeoutMs,
+        );
     }
 
     private async readEnvelope<Result>(response: Response): Promise<Result> {
-        const body = await response.text();
+        const body = await readBoundedText(response, maximumJsonResponseBytes);
         if (response.ok && body.length === 0) return undefined as Result;
         let document: ApiEnvelope<Result> & ApiErrorEnvelope;
         try {
@@ -626,8 +635,9 @@ export class AxklibHttpApiClient {
     private async throwResponseError(response: Response): Promise<never> {
         let document: ApiErrorEnvelope = {};
         try {
-            document = (await response.json()) as ApiErrorEnvelope;
-        } catch {
+            document = JSON.parse(await readBoundedText(response, maximumJsonResponseBytes)) as ApiErrorEnvelope;
+        } catch (error) {
+            if (error instanceof AxklibApiError) throw error;
             // A proxy may replace the JSON body. Preserve the status without exposing it as a parsing failure.
         }
         return this.throwDocumentError(document, response.status);

@@ -811,6 +811,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/package-import-plan-releases': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['package.plan_import.release'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/package-import-plans': {
         parameters: {
             query?: never;
@@ -1281,11 +1297,11 @@ export interface components {
         ApiLimits: {
             downloadArchiveRetentionSeconds: number;
             maximumAuditionBundleBytes: number;
-            maximumConcurrentArchiveDownloads?: number;
+            maximumConcurrentArchiveDownloads: number;
             maximumDownloadArchiveBytes: number;
-            maximumDownloadArchiveDepth?: number;
+            maximumDownloadArchiveDepth: number;
             maximumDownloadArchiveEntries: number;
-            maximumDownloadArchivePathBytes?: number;
+            maximumDownloadArchivePathBytes: number;
             maximumDownloadArchiveTotalBytes: number;
             maximumDownloadRangeBytes: number;
             maximumImageSessions: number;
@@ -1294,9 +1310,9 @@ export interface components {
             maximumJsonDepth: number;
             maximumJsonNodes: number;
             maximumJsonStringBytes: number;
-            maximumMediaBuildObjectBytes?: number;
-            maximumMediaBuildOutputBytes?: number;
-            maximumMediaBuildPayloadBytes?: number;
+            maximumMediaBuildObjectBytes: number;
+            maximumMediaBuildOutputBytes: number;
+            maximumMediaBuildPayloadBytes: number;
             maximumPageSize: number;
             maximumQueuedJobs: number;
             maximumUploadBytes: number;
@@ -1511,6 +1527,7 @@ export interface components {
             };
             meta: Record<string, never>;
         };
+        ExportIssue: components['schemas']['Issue'] | components['schemas']['RelationshipDiagnostic'];
         ExtractionArtifact: {
             fileRef: components['schemas']['FileRef'];
             mediaType: string;
@@ -1555,7 +1572,7 @@ export interface components {
             schemaVersion: '1.0';
             selectionGraphCount: number;
             sfzFileCount: number;
-            warnings: components['schemas']['Issue'][];
+            warnings: components['schemas']['ExportIssue'][];
             waveformCount: number;
             writtenFileCount: number;
         };
@@ -1955,7 +1972,7 @@ export interface components {
         ImageSessionAudioExportInspection: {
             defaultDirectoryName: string;
             imageId: string;
-            issues: components['schemas']['Issue'][];
+            issues: components['schemas']['ExportIssue'][];
             programCount: number;
             revision: number;
             rootCount: number;
@@ -2572,6 +2589,30 @@ export interface components {
                 };
                 ready: boolean;
             };
+        };
+        RelationshipDiagnostic: {
+            /** @enum {unknown} */
+            assignmentState:
+                | 'CONFIRMED_ACTIVE'
+                | 'SOURCE_LOAD_ASSIGNMENT'
+                | 'CONFIRMED_VISIBLE_OFF'
+                | 'CONFIRMED_DUPLICATE_NOT_ACTIVE'
+                | 'UNKNOWN';
+            basis: string;
+            candidateObjectKeys: string[];
+            /** @constant */
+            code: 'unconfirmed_relationship_excluded';
+            /** @constant */
+            fatal: false;
+            message: string;
+            reason: string;
+            /** @enum {unknown} */
+            relationshipQuality: 'KNOWN' | 'LIKELY' | 'TENTATIVE' | 'UNKNOWN';
+            relationshipType: string;
+            selector?: string;
+            source?: string;
+            sourceObjectKey: string;
+            targetObjectKey?: string;
         };
         RelationshipsRequest: components['schemas']['ReportRequest'];
         RelationshipsResult: {
@@ -6658,6 +6699,124 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'package.plan_import.release': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['PlanTokenRequest'];
+            };
+        };
+        responses: {
+            /** @description Operation completed */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': {
+                        data: components['schemas']['PlanReleaseResult'];
+                        meta: components['schemas']['ResponseMeta'];
+                    };
                 };
             };
             /** @description Malformed or schema-invalid request */

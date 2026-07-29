@@ -155,7 +155,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 39U);
+    EXPECT_EQ(entries.size(), 40U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -335,6 +335,82 @@ TEST(ServerContract, EveryHttpResponseCarriesRequestIdAndPaginationIsBounded) {
     EXPECT_EQ(parameters.at("PageLimit").at("schema").at("maximum"), 5000);
     EXPECT_EQ(parameters.at("PageCursor").at("schema").at("minLength"), 1);
     EXPECT_EQ(parameters.at("PageCursor").at("schema").at("maxLength"), 512);
+
+    const auto &preview_parameters = document.at("paths").at("/images/{imageId}/preview").at("parameters");
+    const auto bins = std::ranges::find_if(preview_parameters, [](const auto &parameter) {
+        return parameter.is_object() && parameter.value("name", "") == "bins";
+    });
+    ASSERT_NE(bins, preview_parameters.end());
+    EXPECT_EQ(bins->at("schema").at("maximum"), 4096);
+
+    const auto &limits = document.at("components").at("schemas").at("ApiLimits");
+    for (const auto name :
+         {"maximumDownloadArchiveDepth", "maximumDownloadArchivePathBytes", "maximumConcurrentArchiveDownloads",
+          "maximumMediaBuildObjectBytes", "maximumMediaBuildPayloadBytes", "maximumMediaBuildOutputBytes"}) {
+        EXPECT_TRUE(std::ranges::contains(limits.at("required"), name)) << name;
+    }
+}
+
+TEST(ServerContract, RelationshipDiagnosticsValidateForInspectionAndTerminalExtractionResults) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    axk::server::OpenApiValidator validator{document};
+    const auto diagnostic = nlohmann::json{
+        {"code", "unconfirmed_relationship_excluded"},
+        {"message", "Unconfirmed relationship excluded from exact export"},
+        {"fatal", false},
+        {"relationshipType", "SBNK_LEFT_MEMBER_TO_SMPL"},
+        {"relationshipQuality", "Tentative"},
+        {"reason", "exact export requires a concrete Known relationship target"},
+        {"sourceObjectKey", "sample"},
+        {"candidateObjectKeys", nlohmann::json::array({"wave-a", "wave-b"})},
+        {"basis", "ambiguous Wave Data candidates"},
+        {"assignmentState", "unknown"},
+    };
+    const auto wire_diagnostic = validator.wire_value("RelationshipDiagnostic", diagnostic);
+    EXPECT_EQ(wire_diagnostic.at("relationshipQuality"), "TENTATIVE");
+    EXPECT_EQ(wire_diagnostic.at("assignmentState"), "UNKNOWN");
+    const auto wire_issue = validator.wire_value("ExportIssue", diagnostic);
+    EXPECT_EQ(wire_issue.at("relationshipQuality"), "TENTATIVE");
+    EXPECT_EQ(wire_issue.at("assignmentState"), "UNKNOWN");
+    const auto inspection = nlohmann::json{
+        {"imageId", "image-1"},
+        {"revision", 2U},
+        {"rootCount", 1U},
+        {"programCount", 0U},
+        {"sampleBankCount", 0U},
+        {"sampleCount", 1U},
+        {"waveDataCount", 0U},
+        {"sfzFileCount", 0U},
+        {"sfzEligible", false},
+        {"defaultDirectoryName", "Sample"},
+        {"issues", nlohmann::json::array({diagnostic})},
+    };
+    const auto wire_inspection = validator.wire_value("ImageSessionAudioExportInspection", inspection);
+    EXPECT_EQ(wire_inspection.at("issues").at(0).at("relationshipQuality"), "TENTATIVE");
+    EXPECT_EQ(wire_inspection.at("issues").at(0).at("assignmentState"), "UNKNOWN");
+    EXPECT_TRUE(validator.validate("ImageSessionAudioExportInspection", wire_inspection));
+
+    const auto extraction = nlohmann::json{
+        {"schemaVersion", "1.0"},
+        {"mode", "WAV"},
+        {"destination", directory_ref()},
+        {"artifactCount", 0U},
+        {"waveformCount", 0U},
+        {"writtenFileCount", 0U},
+        {"selectionGraphCount", 0U},
+        {"sfzFileCount", 0U},
+        {"decodeErrorCount", 0U},
+        {"loadErrorCount", 0U},
+        {"artifacts", nlohmann::json::array()},
+        {"warnings", nlohmann::json::array({diagnostic})},
+    };
+    const auto wire_extraction = validator.wire_value("ExtractionResult", extraction);
+    EXPECT_TRUE(validator.validate("ExtractionResult", wire_extraction));
+
+    auto invalid = wire_inspection;
+    invalid["issues"][0]["unexpected"] = true;
+    EXPECT_FALSE(validator.validate("ImageSessionAudioExportInspection", invalid));
 }
 
 TEST(ServerContract, CanonicalReportRequestSchemasMatchApplicationInputs) {

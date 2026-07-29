@@ -18,6 +18,8 @@
 
 namespace axk::app {
 
+class JobManagerTestAccess;
+
 enum class JobState : std::uint8_t { queued, running, completed, failed, cancelled };
 
 struct JobProgress {
@@ -96,6 +98,8 @@ class JobManager {
     void shutdown() noexcept;
 
   private:
+    friend class JobManagerTestAccess;
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

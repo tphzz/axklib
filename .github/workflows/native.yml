@@ -1,6 +1,8 @@
 name: Native CI
 
 on:
+  pull_request:
+  push:
   workflow_dispatch:
     inputs:
       debug:
@@ -27,8 +29,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  architecture:
+    name: Architecture
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout axklib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - name: Enforce architecture budgets
+        run: cmake -DAXK_SOURCE_ROOT="${GITHUB_WORKSPACE}" -P cmake/ArchitectureCheck.cmake
+
   release-tools:
     name: Release tools
+    needs: architecture
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout axklib
@@ -56,6 +71,7 @@ jobs:
             --ref-type "${GITHUB_REF_TYPE}" --ref-name "${GITHUB_REF_NAME}"
   desktop-static:
     name: Desktop static checks
+    needs: architecture
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout axklib
@@ -479,9 +495,19 @@ jobs:
         run: |
           set -euo pipefail
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          cargo_target=$(rustc -vV | sed -n 's/^host: //p')
+          cargo metadata --manifest-path apps/axkdeck/src-tauri/Cargo.toml \
+            --locked --format-version 1 --filter-platform "$cargo_target" \
+            > "$root/axkdeck-cargo-metadata.json"
+          (cd apps/axkdeck && pnpm licenses list --prod --json) \
+            > "$root/axkdeck-pnpm-licenses.json"
           uv --project tools/python run python tools/python/generate_sbom.py \
             --axklib-root . \
             --axkdeck-root apps/axkdeck \
+            --cargo-metadata-file "$root/axkdeck-cargo-metadata.json" \
+            --pnpm-license-file "$root/axkdeck-pnpm-licenses.json" \
+            --vcpkg-installed-root "$root/vcpkg_installed/${{ matrix.triplet }}" \
+            --license-bundle apps/axkdeck/src-tauri/resources/THIRD-PARTY-LICENSES.txt \
             --version-metadata-file "$root/version_metadata.json" \
             --package-basename-file "$root/package_basename.txt" \
             --profile server \
@@ -572,6 +598,7 @@ jobs:
             find "$root" -type f -name axklib-server -print -quit | grep .
             find "$root" -type f -name axkdeck.spdx.json -print -quit | grep .
             find "$root" -type f -name LGPL-2.1-or-later.txt -print -quit | grep .
+            find "$root" -type f -name THIRD-PARTY-LICENSES.txt -print -quit | grep .
           done
 
       - name: Install and inspect Windows desktop package
@@ -589,6 +616,7 @@ jobs:
           if (-not (Get-ChildItem $install -Recurse -Filter axklib-server.exe)) { throw 'axklib-server.exe missing' }
           if (-not (Get-ChildItem $install -Recurse -Filter axkdeck.spdx.json)) { throw 'desktop SBOM missing' }
           if (-not (Get-ChildItem $install -Recurse -Filter LGPL-2.1-or-later.txt)) { throw 'LGPL notice missing' }
+          if (-not (Get-ChildItem $install -Recurse -Filter THIRD-PARTY-LICENSES.txt)) { throw 'third-party license bundle missing' }
           $uninstaller = Get-ChildItem $install -Recurse -Filter 'uninstall.exe' | Select-Object -First 1
           if ($null -eq $uninstaller) { throw 'NSIS uninstaller missing' }
           $process = Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru
@@ -844,6 +872,7 @@ jobs:
 
   macos-universal:
     name: macOS universal
+    if: github.event_name == 'workflow_dispatch'
     needs: native
     runs-on: macos-15
     steps:
@@ -1049,9 +1078,22 @@ jobs:
 
       - name: Generate universal desktop SBOM
         run: |
+          cargo metadata --manifest-path apps/axkdeck/src-tauri/Cargo.toml \
+            --locked --format-version 1 --filter-platform aarch64-apple-darwin \
+            > build/tmp/axkdeck-cargo-arm64-metadata.json
+          cargo metadata --manifest-path apps/axkdeck/src-tauri/Cargo.toml \
+            --locked --format-version 1 --filter-platform x86_64-apple-darwin \
+            > build/tmp/axkdeck-cargo-x64-metadata.json
+          (cd apps/axkdeck && pnpm licenses list --prod --json) \
+            > build/tmp/axkdeck-pnpm-licenses.json
           uv --project tools/python run python tools/python/generate_sbom.py \
             --axklib-root . \
             --axkdeck-root apps/axkdeck \
+            --cargo-metadata-file build/tmp/axkdeck-cargo-arm64-metadata.json \
+            --cargo-metadata-file build/tmp/axkdeck-cargo-x64-metadata.json \
+            --pnpm-license-file build/tmp/axkdeck-pnpm-licenses.json \
+            --vcpkg-installed-root build/tmp/arm64/share/licenses \
+            --license-bundle apps/axkdeck/src-tauri/resources/THIRD-PARTY-LICENSES.txt \
             --version-metadata-file build/tmp/macos-arm64-version-metadata.json \
             --package-basename-file build/tmp/macos-arm64-package-basename.txt \
             --profile server \
@@ -1187,6 +1229,7 @@ jobs:
           lipo "$sidecar" -verify_arch x86_64 arm64
           test -f "$app/Contents/Resources/licenses/axkdeck.spdx.json"
           test -f "$app/Contents/Resources/licenses/LGPL-2.1-or-later.txt"
+          test -f "$app/Contents/Resources/licenses/THIRD-PARTY-LICENSES.txt"
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign --verify --strict --verbose=2 "$main"
           codesign --verify --strict --verbose=2 "$sidecar"
@@ -1221,7 +1264,7 @@ jobs:
 
   draft-release:
     name: Draft release
-    if: ${{ !inputs.debug }}
+    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.debug }}
     needs:
       - native
       - macos-universal

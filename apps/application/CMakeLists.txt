@@ -8,9 +8,11 @@ find_package(unofficial-hash-library CONFIG REQUIRED)
 
 add_library(axk_application STATIC src/alteration_journal.cpp src/application_operations.cpp src/audio_operations.cpp src/audition_operations.cpp src/content_digest.cpp src/content_id.cpp src/directory_archive_operations.cpp src/download_archives.cpp
                                    src/extraction_operations.cpp src/extraction_selection.cpp src/file_operations.cpp
-                                   src/filesystem.cpp src/image_sessions.cpp src/jobs.cpp
-                                   src/operation_registry.cpp src/package_operations.cpp src/path_reservations.cpp
-                                   src/private_storage.cpp src/session_audio_export_operations.cpp src/system_service.cpp
+                                   src/filesystem.cpp src/image_sessions.cpp src/job_request_resources.cpp src/jobs.cpp
+                                   src/operation_registry.cpp src/package_filename.cpp src/package_operations.cpp
+                                   src/package_plan_store.cpp src/path_reservations.cpp
+                                   src/private_storage.cpp src/relationship_diagnostic.cpp
+                                   src/session_audio_export_operations.cpp src/system_service.cpp
                                    src/secure_random.cpp src/uploads.cpp src/validation_operations.cpp src/volume_graph.cpp
                                    src/write_operations.cpp)
 add_library(axklib::application ALIAS axk_application)

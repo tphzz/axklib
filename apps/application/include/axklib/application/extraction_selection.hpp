@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -20,9 +21,12 @@ struct ExtractionSelection {
 
 struct ExcludedExtractionRelationship {
     std::string source_key;
-    std::string target_key;
+    std::optional<std::string> target_key;
+    std::vector<std::string> candidate_keys;
     std::string type;
     RelationshipQuality quality{RelationshipQuality::unknown};
+    std::string basis;
+    AssignmentState assignment_state{AssignmentState::unknown};
     std::string reason;
 };
 

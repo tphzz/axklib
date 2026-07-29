@@ -34,7 +34,6 @@ axk::app::Error local_error(std::string code, std::string message,
     context.relative_path = std::move(relative_path);
     return {std::move(code), std::move(message), std::move(context)};
 }
-
 axk::app::Result<std::filesystem::path> normalized_absolute(const std::filesystem::path &path) {
     if (path.empty())
         return std::unexpected(local_error("invalid_local_path", "local path must not be empty"));
@@ -44,7 +43,6 @@ axk::app::Result<std::filesystem::path> normalized_absolute(const std::filesyste
         return std::unexpected(local_error("invalid_local_path", "local path cannot be made absolute"));
     return absolute.lexically_normal();
 }
-
 axk::app::Result<std::string> generic_relative_utf8(const std::filesystem::path &path) {
     std::string result;
     for (const auto &component : path) {
@@ -65,7 +63,6 @@ axk::app::Result<std::string> generic_relative_utf8(const std::filesystem::path 
         return std::unexpected(local_error("invalid_local_path", "local path must name an entry"));
     return result;
 }
-
 axk::app::Result<std::filesystem::path> reserve_staging_directory() {
     std::error_code error;
     const auto parent = std::filesystem::temp_directory_path(error);
@@ -84,9 +81,7 @@ axk::app::Result<std::filesystem::path> reserve_staging_directory() {
     }
     return std::unexpected(local_error("local_staging_unavailable", "temporary staging directory cannot be created"));
 }
-
 using Json = nlohmann::json;
-
 Json file_ref_json(const axk::app::FileRef &reference) {
     return {{"rootId", reference.root_id}, {"relativePath", reference.relative_path}};
 }
@@ -576,7 +571,6 @@ axk::app::Result<axk::cli::schema::package_v1::PlanOutput> axk::cli::LocalOperat
                          local_context([this](const app::FileRef &reference) { return display_path(reference); }));
     if (!plan)
         return std::unexpected(plan.error());
-
     std::optional<std::filesystem::path> output_path;
     std::optional<Json> application_result;
     if (apply && plan->at("valid").get<bool>()) {
@@ -592,6 +586,12 @@ axk::app::Result<axk::cli::schema::package_v1::PlanOutput> axk::cli::LocalOperat
         if (!resolved)
             return std::unexpected(resolved.error());
         output_path = std::move(*resolved);
+    }
+    if (!application_result) {
+        auto released =
+            registry_.invoke("package.plan_import.release", {{"planToken", plan->at("planToken")}}, local_context());
+        if (!released)
+            return std::unexpected(released.error());
     }
     const std::vector<std::filesystem::path> package_path_vector{package_paths.begin(), package_paths.end()};
     auto projected = schema::package_v1::project_plan(target_path, package_path_vector, *plan, output_path,

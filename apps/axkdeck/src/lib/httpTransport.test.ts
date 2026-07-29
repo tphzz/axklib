@@ -467,6 +467,7 @@ describe('HttpImageTransport', () => {
 
     it('rejects truncated audition ranges and forwards cancellation', async () => {
         const controller = new AbortController();
+        let requestSignal: AbortSignal | undefined;
         vi.stubGlobal(
             'fetch',
             vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -478,7 +479,9 @@ describe('HttpImageTransport', () => {
                         limits: { maximumDownloadRangeBytes: 8 },
                     });
                 }
-                expect(init?.signal).toBe(controller.signal);
+                requestSignal = init?.signal ?? undefined;
+                expect(requestSignal).toBeInstanceOf(AbortSignal);
+                expect(requestSignal?.aborted).toBe(false);
                 return new Response(Uint8Array.of(1, 2, 3), {
                     status: 206,
                     headers: { 'Content-Range': 'bytes 0-3/4' },
@@ -494,6 +497,8 @@ describe('HttpImageTransport', () => {
         await expect(transport.readAuditionContent('audition-1', 4, controller.signal)).rejects.toThrow(
             'returned 3 bytes; expected 4',
         );
+        controller.abort();
+        expect(requestSignal?.aborted).toBe(true);
     });
 
     it('discovers create operations generically and applies the exact reserved plan token', async () => {

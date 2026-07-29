@@ -32,17 +32,16 @@
 #include "axklib/package_import_planning.hpp"
 #include "axklib/utf8.hpp"
 #include "content_digest.hpp"
+#include "package_filename.hpp"
+#include "package_plan_store.hpp"
 
 namespace {
 
 using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
-
-struct PackageInput {
-    std::variant<axk::app::FileRef, axk::app::UploadRef> reference;
-
-    friend bool operator==(const PackageInput &, const PackageInput &) = default;
-};
+using PackageInput = axk::app::package_plan_internal::PackageInput;
+using PackagePlanRecord = axk::app::package_plan_internal::Record;
+using PackagePlanStore = axk::app::package_plan_internal::Store;
 
 struct ResolvedPackage {
     std::shared_ptr<const axk::RandomAccessReader> reader;
@@ -54,29 +53,6 @@ struct VerifiedPackageSnapshot {
     PackageInput input;
     axk::PortablePackage package;
     std::uint64_t retained_payload_bytes{};
-};
-
-struct PackagePlanRecord {
-    std::string token;
-    std::string owner_id;
-    Clock::time_point expires_at;
-    axk::app::FileRef target;
-    axk::app::FileRef output;
-    std::filesystem::path output_path;
-    bool overwrite{};
-    std::vector<PackageInput> inputs;
-    std::vector<ResolvedPackage> resolved;
-    std::vector<axk::PortablePackage> packages;
-    axk::PackageImportPlan plan;
-    bool claimed{};
-};
-
-struct PackageOperationState {
-    std::mutex mutex;
-    std::unordered_map<std::string, std::shared_ptr<PackagePlanRecord>> plans;
-    std::unordered_map<std::string, std::string> destination_reservations;
-    std::chrono::minutes retention{15};
-    std::size_t maximum_plans{128U};
 };
 
 struct SessionPackagePlanRecord {
@@ -512,77 +488,6 @@ Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::
             {"allocation", std::move(allocation)}};
 }
 
-void cleanup_plans(PackageOperationState &state, Clock::time_point now) {
-    for (auto current = state.plans.begin(); current != state.plans.end();) {
-        if (!current->second->claimed && current->second->expires_at <= now) {
-            const auto reservation = normalized_path(current->second->output_path);
-            if (const auto found = state.destination_reservations.find(reservation);
-                found != state.destination_reservations.end() && found->second == current->first) {
-                state.destination_reservations.erase(found);
-            }
-            current = state.plans.erase(current);
-        } else {
-            ++current;
-        }
-    }
-}
-
-class PackagePlanClaim {
-  public:
-    PackagePlanClaim(std::shared_ptr<PackageOperationState> state, std::shared_ptr<PackagePlanRecord> record)
-        : state_(std::move(state)), record_(std::move(record)) {}
-    ~PackagePlanClaim() { release(); }
-    PackagePlanClaim(const PackagePlanClaim &) = delete;
-    PackagePlanClaim &operator=(const PackagePlanClaim &) = delete;
-    PackagePlanClaim(PackagePlanClaim &&other) noexcept
-        : state_(std::move(other.state_)), record_(std::move(other.record_)),
-          active_(std::exchange(other.active_, false)) {}
-    PackagePlanClaim &operator=(PackagePlanClaim &&) = delete;
-
-    [[nodiscard]] const std::shared_ptr<PackagePlanRecord> &record() const noexcept { return record_; }
-
-    void consume() {
-        if (!active_)
-            return;
-        std::lock_guard lock{state_->mutex};
-        const auto reservation = normalized_path(record_->output_path);
-        if (const auto found = state_->destination_reservations.find(reservation);
-            found != state_->destination_reservations.end() && found->second == record_->token) {
-            state_->destination_reservations.erase(found);
-        }
-        state_->plans.erase(record_->token);
-        active_ = false;
-    }
-
-  private:
-    void release() {
-        if (!active_)
-            return;
-        std::lock_guard lock{state_->mutex};
-        if (const auto found = state_->plans.find(record_->token); found != state_->plans.end())
-            found->second->claimed = false;
-        active_ = false;
-    }
-
-    std::shared_ptr<PackageOperationState> state_;
-    std::shared_ptr<PackagePlanRecord> record_;
-    bool active_{true};
-};
-
-axk::app::Result<PackagePlanClaim> claim_plan(const std::shared_ptr<PackageOperationState> &state,
-                                              std::string_view token, std::string_view owner_id) {
-    std::lock_guard lock{state->mutex};
-    cleanup_plans(*state, Clock::now());
-    const auto found = state->plans.find(std::string{token});
-    if (found == state->plans.end() || found->second->owner_id != owner_id) {
-        return std::unexpected(operation_error("package_plan_not_found", "package import plan is absent or expired"));
-    }
-    if (found->second->claimed)
-        return std::unexpected(operation_error("package_plan_in_use", "package import plan is already being applied"));
-    found->second->claimed = true;
-    return PackagePlanClaim{state, found->second};
-}
-
 void cleanup_session_plans(SessionPackageOperationState &state, Clock::time_point now) {
     for (auto current = state.plans.begin(); current != state.plans.end();) {
         if (!current->second->claimed && current->second->expires_at <= now)
@@ -751,7 +656,7 @@ axk::app::Result<Json> read_operation(const Json &input, const axk::app::Operati
 
 axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &registry, const Sandbox &sandbox,
                                                          UploadStore &uploads) {
-    auto state = std::make_shared<PackageOperationState>();
+    auto state = std::make_shared<PackagePlanStore>();
 
     if (!registry.is_implemented("package.inspect")) {
         auto bound =
@@ -803,15 +708,10 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
                 return Result<Json>{std::unexpected(core_error(build.error(), source->relative_path))};
             auto effective_output = *output;
             const auto required = std::string{build->required_extension};
-            if (!effective_output.relative_path.ends_with(required)) {
-                const auto extension = std::filesystem::path{effective_output.relative_path}.extension().string();
-                if (!extension.empty()) {
-                    return Result<Json>{std::unexpected(
-                        operation_error("package_extension_mismatch",
-                                        std::format("package output must use {}", required), output->relative_path))};
-                }
-                effective_output.relative_path += required;
-            }
+            auto filename = package_internal::resolve_filename(effective_output.relative_path, required);
+            if (!filename)
+                return Result<Json>{std::unexpected(filename.error())};
+            effective_output.relative_path = std::move(*filename);
             if (context.progress)
                 context.progress->report(
                     {axk::ProgressPhase::exporting, 0U, 1U, "Publishing portable package", std::nullopt});
@@ -831,98 +731,86 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
             return bound;
     }
     if (!registry.is_implemented("package.plan_import")) {
-        auto bound = registry.bind(
-            "package.plan_import", [state, &sandbox, &uploads](const Json &input, const OperationContext &context) {
-                auto target = parse_file_ref(input, "target");
-                auto output = parse_file_ref(input, "output");
-                if (!target)
-                    return Result<Json>{std::unexpected(target.error())};
-                if (!output)
-                    return Result<Json>{std::unexpected(output.error())};
-                if (const auto distinct = sandbox.require_distinct(*target, *output); !distinct)
-                    return Result<Json>{std::unexpected(distinct.error())};
-                auto target_file = sandbox.open_file(*target);
-                if (!target_file)
-                    return Result<Json>{std::unexpected(target_file.error())};
-                auto target_staging = sandbox.create_staging_directory("axklib-package-plan");
-                if (!target_staging)
-                    return Result<Json>{std::unexpected(target_staging.error())};
-                TemporaryDirectoryCleanup target_cleanup{*target_staging};
-                const auto target_path = *target_staging / "target.img";
-                if (auto staged = write_reader(target_path, *target_file->reader); !staged)
-                    return Result<Json>{std::unexpected(staged.error())};
-                const auto overwrite = input.value("overwrite", false);
-                auto output_path = sandbox.resolve_output_file(*output, overwrite);
-                if (!output_path)
-                    return Result<Json>{std::unexpected(output_path.error())};
+        auto bound = registry.bind("package.plan_import", [state, &sandbox, &uploads](const Json &input,
+                                                                                      const OperationContext &context) {
+            auto target = parse_file_ref(input, "target");
+            auto output = parse_file_ref(input, "output");
+            if (!target)
+                return Result<Json>{std::unexpected(target.error())};
+            if (!output)
+                return Result<Json>{std::unexpected(output.error())};
+            if (const auto distinct = sandbox.require_distinct(*target, *output); !distinct)
+                return Result<Json>{std::unexpected(distinct.error())};
+            auto target_file = sandbox.open_file(*target);
+            if (!target_file)
+                return Result<Json>{std::unexpected(target_file.error())};
+            auto target_staging = sandbox.create_staging_directory("axklib-package-plan");
+            if (!target_staging)
+                return Result<Json>{std::unexpected(target_staging.error())};
+            TemporaryDirectoryCleanup target_cleanup{*target_staging};
+            const auto target_path = *target_staging / "target.img";
+            if (auto staged = write_reader(target_path, *target_file->reader); !staged)
+                return Result<Json>{std::unexpected(staged.error())};
+            const auto overwrite = input.value("overwrite", false);
+            auto output_path = sandbox.resolve_output_file(*output, overwrite);
+            if (!output_path)
+                return Result<Json>{std::unexpected(output_path.error())};
 
-                std::vector<PackageInput> inputs;
-                try {
-                    if (!input.contains("packages") || !input.at("packages").is_array() ||
-                        input.at("packages").empty() || input.at("packages").size() > 256U) {
-                        return Result<Json>{std::unexpected(
-                            operation_error("invalid_request", "packages must contain 1 to 256 references"))};
-                    }
-                    for (const auto &value : input.at("packages")) {
-                        auto parsed = parse_package_input(value);
-                        if (!parsed)
-                            return Result<Json>{std::unexpected(parsed.error())};
-                        inputs.push_back(std::move(*parsed));
-                    }
-                } catch (const Json::exception &) {
-                    return Result<Json>{std::unexpected(operation_error("invalid_request", "packages are malformed"))};
+            std::vector<PackageInput> inputs;
+            try {
+                if (!input.contains("packages") || !input.at("packages").is_array() || input.at("packages").empty() ||
+                    input.at("packages").size() > 256U) {
+                    return Result<Json>{std::unexpected(
+                        operation_error("invalid_request", "packages must contain 1 to 256 references"))};
                 }
-                auto import_request = parse_import_request(input);
-                if (!import_request)
-                    return Result<Json>{std::unexpected(import_request.error())};
+                for (const auto &value : input.at("packages")) {
+                    auto parsed = parse_package_input(value);
+                    if (!parsed)
+                        return Result<Json>{std::unexpected(parsed.error())};
+                    inputs.push_back(std::move(*parsed));
+                }
+            } catch (const Json::exception &) {
+                return Result<Json>{std::unexpected(operation_error("invalid_request", "packages are malformed"))};
+            }
+            auto import_request = parse_import_request(input);
+            if (!import_request)
+                return Result<Json>{std::unexpected(import_request.error())};
 
-                std::vector<ResolvedPackage> resolved;
-                std::vector<axk::PortablePackage> packages;
-                resolved.reserve(inputs.size());
-                packages.reserve(inputs.size());
-                for (const auto &source : inputs) {
-                    auto item = resolve_package(source, context.owner_id, sandbox, uploads);
-                    if (!item)
-                        return Result<Json>{std::unexpected(item.error())};
-                    auto package = read_package(*item, true, context);
-                    if (!package)
-                        return Result<Json>{std::unexpected(package.error())};
-                    resolved.push_back(std::move(*item));
-                    packages.push_back(std::move(*package));
-                }
-                auto plan = axk::plan_package_import(target_path, packages, *import_request, context.cancellation);
-                if (!plan)
-                    return Result<Json>{std::unexpected(core_error(plan.error(), target->relative_path))};
+            auto retained_sources = package_plan_internal::retain_sources(inputs, context.owner_id, sandbox, uploads);
+            if (!retained_sources)
+                return Result<Json>{std::unexpected(retained_sources.error())};
+            auto admission = package_plan_internal::admit(state, retained_sources->source_bytes);
+            if (!admission)
+                return Result<Json>{std::unexpected(admission.error())};
 
-                const auto now = Clock::now();
-                auto token = axk::app::secure_random_hex(24U);
-                if (!token)
-                    return Result<Json>{std::unexpected(token.error())};
-                auto record = std::make_shared<PackagePlanRecord>(PackagePlanRecord{
-                    *token, context.owner_id, now + state->retention, *target, *output, *output_path, overwrite,
-                    std::move(inputs), std::move(resolved), std::move(packages), std::move(*plan), false});
-                {
-                    std::lock_guard lock{state->mutex};
-                    cleanup_plans(*state, now);
-                    if (state->plans.size() >= state->maximum_plans) {
-                        return Result<Json>{std::unexpected(operation_error(
-                            "package_plan_capacity", "too many package import plans are active", std::nullopt, true))};
-                    }
-                    const auto reservation = normalized_path(*output_path);
-                    if (state->destination_reservations.contains(reservation)) {
-                        return Result<Json>{std::unexpected(
-                            operation_error("destination_reserved", "destination is reserved by another active plan"))};
-                    }
-                    if (state->plans.contains(*token)) {
-                        return Result<Json>{
-                            std::unexpected(operation_error("secure_random_failed", "package plan token collision"))};
-                    }
-                    state->destination_reservations.emplace(reservation, *token);
-                    state->plans.emplace(*token, record);
-                }
-                return Result<Json>{
-                    plan_json(record->plan, *token, static_cast<std::uint64_t>(state->retention.count() * 60))};
-            });
+            std::vector<axk::PortablePackage> packages;
+            packages.reserve(inputs.size());
+            for (const auto &source : inputs) {
+                auto item = resolve_package(source, context.owner_id, sandbox, uploads);
+                if (!item)
+                    return Result<Json>{std::unexpected(item.error())};
+                auto package = read_package(*item, true, context);
+                if (!package)
+                    return Result<Json>{std::unexpected(package.error())};
+                packages.push_back(std::move(*package));
+            }
+            auto plan = axk::plan_package_import(target_path, packages, *import_request, context.cancellation);
+            if (!plan)
+                return Result<Json>{std::unexpected(core_error(plan.error(), target->relative_path))};
+
+            const auto now = Clock::now();
+            auto token = axk::app::secure_random_hex(24U);
+            if (!token)
+                return Result<Json>{std::unexpected(token.error())};
+            auto record = std::make_shared<PackagePlanRecord>(
+                PackagePlanRecord{*token, context.owner_id, now + state->retention, *target, *output, *output_path,
+                                  overwrite, std::move(inputs), std::move(retained_sources->upload_leases),
+                                  retained_sources->source_bytes, std::move(*plan), false});
+            if (auto stored = admission->commit(record); !stored)
+                return Result<Json>{std::unexpected(stored.error())};
+            return Result<Json>{
+                plan_json(record->plan, *token, static_cast<std::uint64_t>(state->retention.count() * 60))};
+        });
         if (!bound)
             return bound;
     }
@@ -935,7 +823,7 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
             } catch (const Json::exception &) {
                 return Result<Json>{std::unexpected(operation_error("invalid_request", "planToken is required"))};
             }
-            auto claim = claim_plan(state, token, context.owner_id);
+            auto claim = package_plan_internal::claim(state, token, context.owner_id);
             if (!claim)
                 return Result<Json>{std::unexpected(claim.error())};
             const auto record = claim->record();
@@ -1003,6 +891,23 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
         if (!bound)
             return bound;
     }
+    if (!registry.is_implemented("package.plan_import.release")) {
+        auto bound = registry.bind(
+            "package.plan_import.release", [state](const Json &input, const OperationContext &context) -> Result<Json> {
+                std::string token;
+                try {
+                    token = input.at("planToken").get<std::string>();
+                } catch (const Json::exception &) {
+                    return std::unexpected(operation_error("invalid_request", "planToken is required"));
+                }
+                if (auto released = package_plan_internal::release(state, token, context.owner_id); !released) {
+                    return std::unexpected(released.error());
+                }
+                return Json{{"released", true}};
+            });
+        if (!bound)
+            return bound;
+    }
     auto accesses_bound = registry.bind_path_accesses(
         "package.import",
         [state](const Json &input, const OperationContext &context) -> Result<std::vector<PathAccess>> {
@@ -1012,21 +917,7 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
             } catch (const Json::exception &) {
                 return std::unexpected(operation_error("invalid_request", "planToken is required"));
             }
-            std::lock_guard lock{state->mutex};
-            cleanup_plans(*state, Clock::now());
-            const auto found = state->plans.find(token);
-            if (found == state->plans.end() || found->second->owner_id != context.owner_id || found->second->claimed) {
-                return std::unexpected(
-                    operation_error("package_plan_not_found", "package import plan is expired or unknown"));
-            }
-            std::vector<PathAccess> accesses{{found->second->target, PathAccessMode::shared}};
-            accesses.reserve(found->second->inputs.size() + 2U);
-            for (const auto &input_reference : found->second->inputs) {
-                if (const auto *file = std::get_if<FileRef>(&input_reference.reference))
-                    accesses.push_back({*file, PathAccessMode::shared});
-            }
-            accesses.push_back({found->second->output, PathAccessMode::exclusive});
-            return accesses;
+            return package_plan_internal::path_accesses(state, token, context.owner_id);
         });
     if (!accesses_bound)
         return accesses_bound;
@@ -1357,15 +1248,10 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     auto output = parse_file_ref(destination, "output");
                     if (!output)
                         return std::unexpected(output.error());
-                    const auto required = std::string{build.required_extension};
-                    if (!output->relative_path.ends_with(required)) {
-                        if (!std::filesystem::path{output->relative_path}.extension().empty()) {
-                            return std::unexpected(operation_error("package_extension_mismatch",
-                                                                   std::format("package output must use {}", required),
-                                                                   output->relative_path));
-                        }
-                        output->relative_path += required;
-                    }
+                    auto resolved = package_internal::resolve_filename(output->relative_path, build.required_extension);
+                    if (!resolved)
+                        return std::unexpected(resolved.error());
+                    output->relative_path = std::move(*resolved);
                     const axk::MemoryReader archive{build.archive};
                     if (auto published = sandbox.publish_file(*output, destination.value("overwrite", false), archive);
                         !published) {
@@ -1381,8 +1267,10 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                         filename.find_first_of("/\\") != std::string::npos) {
                         return std::unexpected(operation_error("invalid_request", "download filename is invalid"));
                     }
-                    if (!filename.ends_with(build.required_extension))
-                        filename += build.required_extension;
+                    auto resolved = package_internal::resolve_filename(filename, build.required_extension);
+                    if (!resolved)
+                        return std::unexpected(resolved.error());
+                    filename = std::move(*resolved);
                     auto retained =
                         downloads.retain(context.owner_id, filename, "application/octet-stream", build.archive);
                     if (!retained)

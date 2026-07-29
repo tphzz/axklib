@@ -23,6 +23,7 @@
 #include "axklib/audio_export.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/utf8.hpp"
+#include "relationship_diagnostic.hpp"
 
 namespace {
 
@@ -223,16 +224,9 @@ axk::app::Result<AudioExportSelection> resolve_selection(const std::vector<Audio
     selection.closure = axk::app::build_exact_export_closure(
         graph, std::move(selection.closure.programs), std::move(selection.closure.sample_banks),
         std::move(selection.closure.samples), std::move(selection.closure.wave_data));
-    for (const auto &relationship : selection.closure.excluded) {
-        selection.issues.push_back({{"code", "unconfirmed_relationship_excluded"},
-                                    {"message", "Unconfirmed relationship excluded from exact export"},
-                                    {"fatal", false},
-                                    {"relationshipType", relationship.type},
-                                    {"relationshipQuality", axk::relationship_quality_name(relationship.quality)},
-                                    {"reason", relationship.reason},
-                                    {"sourceObjectKey", relationship.source_key},
-                                    {"targetObjectKey", relationship.target_key}});
-    }
+    for (const auto &relationship : selection.closure.excluded)
+        selection.issues.push_back(
+            axk::app::relationship_diagnostic(relationship, "Unconfirmed relationship excluded from exact export"));
     const auto sample_has_wave_data = [&](std::string_view sample_key) {
         return std::ranges::any_of(selection.closure.sample_wave_data,
                                    [&](const auto &relationship) { return relationship.first == sample_key; });

@@ -357,7 +357,7 @@
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
         {"name": "objectId", "in": "query", "required": true, "schema": {"type": "string"}},
-        {"name": "bins", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1}}
+        {"name": "bins", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1, "maximum": 4096}}
       ],
       "get": {"operationId": "images.preview", "responses": {"200": {"description": "Bounded physical Wave Data or Sample playback-window min/max lanes", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImagePreviewResponse"}}}}}}
     },
@@ -1249,7 +1249,7 @@
       "ApiLimits": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["maximumJsonBytes", "maximumJsonDepth", "maximumJsonNodes", "maximumJsonContainerItems", "maximumJsonStringBytes", "maximumUploadBytes", "maximumUploadTotalBytes", "maximumUploadChunkBytes", "maximumDownloadRangeBytes", "maximumAuditionBundleBytes", "maximumDownloadArchiveBytes", "maximumDownloadArchiveTotalBytes", "maximumDownloadArchiveEntries", "downloadArchiveRetentionSeconds", "maximumWebsocketDeliveryEvents", "maximumWebsocketDeliveryBytes", "maximumQueuedJobs", "maximumImageSessions", "maximumPageSize"],
+        "required": ["maximumJsonBytes", "maximumJsonDepth", "maximumJsonNodes", "maximumJsonContainerItems", "maximumJsonStringBytes", "maximumUploadBytes", "maximumUploadTotalBytes", "maximumUploadChunkBytes", "maximumDownloadRangeBytes", "maximumAuditionBundleBytes", "maximumDownloadArchiveBytes", "maximumDownloadArchiveTotalBytes", "maximumDownloadArchiveEntries", "maximumDownloadArchiveDepth", "maximumDownloadArchivePathBytes", "maximumConcurrentArchiveDownloads", "downloadArchiveRetentionSeconds", "maximumWebsocketDeliveryEvents", "maximumWebsocketDeliveryBytes", "maximumQueuedJobs", "maximumImageSessions", "maximumMediaBuildObjectBytes", "maximumMediaBuildPayloadBytes", "maximumMediaBuildOutputBytes", "maximumPageSize"],
         "properties": {
           "maximumJsonBytes": {"type": "integer", "minimum": 1},
           "maximumJsonDepth": {"type": "integer", "minimum": 1},
@@ -1608,6 +1608,38 @@
           "fatal": {"type": "boolean"}
         }
       },
+      "RelationshipDiagnostic": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "fatal", "relationshipType", "relationshipQuality", "reason", "sourceObjectKey", "candidateObjectKeys", "basis", "assignmentState"],
+        "properties": {
+          "code": {"const": "unconfirmed_relationship_excluded"},
+          "message": {"type": "string", "minLength": 1},
+          "source": {"type": "string"},
+          "selector": {"type": "string"},
+          "fatal": {"const": false},
+          "relationshipType": {"type": "string", "minLength": 1},
+          "relationshipQuality": {
+            "enum": ["KNOWN", "LIKELY", "TENTATIVE", "UNKNOWN"],
+            "x-axklib-application-enum": {"KNOWN": "Known", "LIKELY": "Likely", "TENTATIVE": "Tentative", "UNKNOWN": "Unknown"}
+          },
+          "reason": {"type": "string", "minLength": 1},
+          "sourceObjectKey": {"type": "string", "minLength": 1},
+          "targetObjectKey": {"type": "string", "minLength": 1},
+          "candidateObjectKeys": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "basis": {"type": "string"},
+          "assignmentState": {
+            "enum": ["CONFIRMED_ACTIVE", "SOURCE_LOAD_ASSIGNMENT", "CONFIRMED_VISIBLE_OFF", "CONFIRMED_DUPLICATE_NOT_ACTIVE", "UNKNOWN"],
+            "x-axklib-application-enum": {"CONFIRMED_ACTIVE": "confirmed-active", "SOURCE_LOAD_ASSIGNMENT": "source-load-assignment", "CONFIRMED_VISIBLE_OFF": "confirmed-visible-off", "CONFIRMED_DUPLICATE_NOT_ACTIVE": "confirmed-duplicate-not-active", "UNKNOWN": "unknown"}
+          }
+        }
+      },
+      "ExportIssue": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/Issue"},
+          {"$ref": "#/components/schemas/RelationshipDiagnostic"}
+        ]
+      },
       "ExtractionResult": {
         "type": "object",
         "additionalProperties": false,
@@ -1637,7 +1669,7 @@
           "decodeErrorCount": {"type": "integer", "minimum": 0},
           "loadErrorCount": {"type": "integer", "minimum": 0},
           "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/ExtractionArtifact"}},
-          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}}
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/ExportIssue"}}
         }
       },
       "PackageRootSelector": {
@@ -2149,7 +2181,7 @@
           "sfzFileCount": {"type": "integer", "minimum": 0},
           "sfzEligible": {"type": "boolean"},
           "defaultDirectoryName": {"type": "string", "minLength": 1},
-          "issues": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}}
+          "issues": {"type": "array", "items": {"$ref": "#/components/schemas/ExportIssue"}}
         }
       },
       "ImageSessionAudioExportDestination": {

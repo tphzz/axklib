@@ -212,18 +212,28 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
         for (const auto &row : graph.relationships) {
             if (!volume_keys.contains(row.source_key))
                 continue;
-            if (!row.target_key)
-                continue;
-            const auto retained_relationship = relationship_edges.contains({row.source_key, *row.target_key});
-            if (!retained_relationship && !volume_edges.contains({row.source_key, *row.target_key}))
-                continue;
             if (row.type == "SBNK_PROGRAM_BITMAP_TO_PROG") {
                 continue;
+            }
+            if (row.target_key) {
+                const auto retained_relationship = relationship_edges.contains({row.source_key, *row.target_key});
+                if (!retained_relationship && !volume_edges.contains({row.source_key, *row.target_key}))
+                    continue;
+            } else {
+                const auto scoped_dependency = row.type == "SBAC_SLOT_TO_SBNK" ||
+                                               row.type == "SBNK_LEFT_MEMBER_TO_SMPL" ||
+                                               row.type == "SBNK_RIGHT_MEMBER_TO_SMPL" ||
+                                               (row.type.starts_with("PROG_ASSIGNMENT_TO_") &&
+                                                (row.assignment_state == axk::AssignmentState::active ||
+                                                 row.assignment_state == axk::AssignmentState::source_load));
+                if (!scoped_dependency)
+                    continue;
             }
             relationships.push_back({
                 {"relationship_type", row.type},
                 {"source_key", row.source_key},
-                {"target_key", row.target_key ? *row.target_key : ""},
+                {"target_key", row.target_key ? OrderedJson(*row.target_key) : OrderedJson(nullptr)},
+                {"candidate_keys", row.candidate_keys},
                 {"quality", axk::relationship_quality_name(row.quality)},
                 {"basis", row.basis},
                 {"active_assignment_state", axk::assignment_state_name(row.assignment_state)},

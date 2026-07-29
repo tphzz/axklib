@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/application/jobs.hpp"
+#include "jobs_test_access.hpp"
 
 namespace {
 
@@ -141,6 +142,74 @@ TEST(JobManager, CancelsQueuedWorkAndEnforcesOwnership) {
     }
     condition.notify_all();
     EXPECT_EQ(wait_terminal(jobs, first->job_id).state, axk::app::JobState::completed);
+}
+
+TEST(JobManager, CancellationAfterQueuePopPreventsOperationExecution) {
+    std::atomic_uint32_t calls{};
+    auto registry = test_registry([&](const nlohmann::json &, const axk::app::OperationContext &) {
+        calls.fetch_add(1U);
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::JobManager jobs{registry, 1U, 1U, 2U, 8U};
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool worker_waiting{};
+    bool release_worker{};
+    axk::app::JobManagerTestAccess::set_before_running_claim(jobs, [&] {
+        std::unique_lock lock{mutex};
+        worker_waiting = true;
+        condition.notify_all();
+        condition.wait(lock, [&] { return release_worker; });
+    });
+
+    const auto submitted = jobs.submit(
+        "test.job", {},
+        {.owner_id = "owner", .request_id = "race", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(submitted);
+    {
+        std::unique_lock lock{mutex};
+        condition.wait(lock, [&] { return worker_waiting; });
+    }
+    ASSERT_TRUE(jobs.cancel(submitted->job_id, "owner"));
+    {
+        const std::scoped_lock lock{mutex};
+        release_worker = true;
+    }
+    condition.notify_all();
+
+    EXPECT_EQ(wait_terminal(jobs, submitted->job_id).state, axk::app::JobState::cancelled);
+    EXPECT_EQ(calls.load(), 0U);
+}
+
+TEST(JobManager, QueuedSubscriberCanSubmitAnotherJobReentrantly) {
+    std::atomic_uint32_t calls{};
+    auto registry = test_registry([&](const nlohmann::json &, const axk::app::OperationContext &) {
+        calls.fetch_add(1U);
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::JobManager jobs{registry, 1U, 1U, 4U, 8U};
+    std::optional<axk::app::JobSnapshot> nested;
+    bool submitted_nested{};
+    const auto subscription = jobs.subscribe([&](const axk::app::JobEvent &event) {
+        if (event.type != "queued" || submitted_nested)
+            return;
+        submitted_nested = true;
+        auto result = jobs.submit(
+            "test.job", {},
+            {.owner_id = "owner", .request_id = "nested", .cancellation = {}, .progress = nullptr, .display_path = {}});
+        ASSERT_TRUE(result) << result.error().message;
+        nested = *result;
+    });
+
+    const auto outer = jobs.submit(
+        "test.job", {},
+        {.owner_id = "owner", .request_id = "outer", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(outer);
+    ASSERT_TRUE(nested);
+    EXPECT_EQ(wait_terminal(jobs, outer->job_id).state, axk::app::JobState::completed);
+    EXPECT_EQ(wait_terminal(jobs, nested->job_id).state, axk::app::JobState::completed);
+    EXPECT_EQ(calls.load(), 2U);
+    jobs.unsubscribe(subscription);
 }
 
 TEST(JobManager, RetainsReferencedUploadsWhileWorkWaitsInTheQueue) {

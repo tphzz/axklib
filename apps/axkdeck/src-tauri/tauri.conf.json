@@ -45,6 +45,7 @@
     "resources": {
       "resources/LGPL-2.1-or-later.txt": "licenses/LGPL-2.1-or-later.txt",
       "resources/THIRD-PARTY-NOTICES.md": "licenses/THIRD-PARTY-NOTICES.md",
+      "resources/THIRD-PARTY-LICENSES.txt": "licenses/THIRD-PARTY-LICENSES.txt",
       "resources/axkdeck.spdx.json": "licenses/axkdeck.spdx.json"
     },
     "windows": {

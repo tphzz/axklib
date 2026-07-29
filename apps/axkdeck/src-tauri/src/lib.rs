@@ -1,6 +1,7 @@
 mod desktop_preferences;
 mod file_publication;
 mod remote_settings;
+mod retained_download;
 mod server_sidecar;
 
 use std::collections::HashMap;
@@ -562,7 +563,7 @@ fn download_retained_package(
         url.set_path(&content_path);
         url.set_query(None);
         url.set_fragment(None);
-        let mut response = reqwest::blocking::Client::new()
+        let mut response = retained_download::client()?
             .get(url)
             .bearer_auth(connection.bearer_token)
             .send()
@@ -812,7 +813,7 @@ fn download_retained_sfz_export(
         url.set_path(&content_path);
         url.set_query(None);
         url.set_fragment(None);
-        let mut response = reqwest::blocking::Client::new()
+        let mut response = retained_download::client()?
             .get(url)
             .bearer_auth(connection.bearer_token)
             .send()
@@ -1085,7 +1086,6 @@ fn configure_linux_webkit() {
 pub fn run() {
     #[cfg(target_os = "linux")]
     configure_linux_webkit();
-
     let log_level = configured_log_level();
     let log_targets = vec![
         Target::new(TargetKind::LogDir {

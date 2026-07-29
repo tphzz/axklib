@@ -68,6 +68,8 @@ import {
     type UploadKind,
 } from './storageLocations';
 import type { ClientUploadSource } from './clientUploadSource';
+import { downloadServerFile, readDirectoryArchive } from './httpDownloads';
+import { collectPages } from './pagination';
 
 const ALTERATION_MANIFEST_SCHEMA_VERSION = '1.0';
 
@@ -359,27 +361,7 @@ export class HttpImageTransport implements ImageTransport {
 
     async downloadFile(location: FileLocation): Promise<ClientDownload> {
         const source = this.serverFile(location);
-        const metadata = await this.client.inspectDownload(source.reference);
-        const limits = await this.client.serverLimits();
-        const rangeLimit = limits.maximumDownloadRangeBytes;
-        if (!Number.isSafeInteger(rangeLimit) || rangeLimit <= 0) {
-            throw new Error('axklib-server advertised an invalid download range limit');
-        }
-        const parts: ArrayBuffer[] = [];
-        for (let start = 0; start < metadata.size; start += rangeLimit) {
-            const end = Math.min(metadata.size, start + rangeLimit) - 1;
-            const response = await this.client.openDownload(source.reference, { start, end }, metadata.revision);
-            const part = await response.arrayBuffer();
-            const expectedSize = end - start + 1;
-            if (part.byteLength !== expectedSize) {
-                throw new Error(
-                    `Download range ${start}-${end} returned ${part.byteLength} bytes; expected ${expectedSize}`,
-                );
-            }
-            parts.push(part);
-        }
-        const filename = source.reference.relativePath.split('/').pop() || source.displayName;
-        return { filename, blob: new Blob(parts, { type: 'application/octet-stream' }) };
+        return downloadServerFile(this.client, source.reference, source.displayName);
     }
 
     async downloadDirectory(location: DirectoryLocation): Promise<ClientDownload> {
@@ -403,8 +385,7 @@ export class HttpImageTransport implements ImageTransport {
         }
         const archive = completed.result as DownloadArchiveSnapshot;
         try {
-            const response = await this.client.openDirectoryArchive(archive);
-            return { filename: archive.filename, blob: await response.blob() };
+            return await readDirectoryArchive(this.client, archive);
         } finally {
             await this.client.deleteDirectoryArchive(archive).catch(() => undefined);
         }
@@ -741,14 +722,10 @@ export class HttpImageTransport implements ImageTransport {
     }
 
     private async allContentChildren(sessionId: number, parentId: string): Promise<ContentPage> {
-        const items: DiskTreeItem[] = [];
-        let totalCount = 1;
-        while (items.length < totalCount) {
-            const page = await this.contentChildren(sessionId, parentId, items.length, 256);
-            items.push(...page.items);
-            totalCount = page.totalCount;
-        }
-        return { items, totalCount };
+        const items = await collectPages((offset, limit) => this.contentChildren(sessionId, parentId, offset, limit), {
+            key: (item) => item.id,
+        });
+        return { items, totalCount: items.length };
     }
 
     async closeImage(sessionId: number): Promise<void> {

@@ -8,6 +8,7 @@ requires-python = ">=3.13"
 dependencies = ["PyYAML>=6.0.2"]
 
 [project.scripts]
+axk-architecture-check = "architecture_check:main"
 axk-check-benchmark = "check_benchmark:main"
 axk-check-production-boundary = "check_production_boundary:main"
 axk-desktop-release = "desktop_release:main"
@@ -25,6 +26,7 @@ dev = [
 
 [tool.setuptools]
 py-modules = [
+  "architecture_check",
   "check_benchmark",
   "check_production_boundary",
   "desktop_release",

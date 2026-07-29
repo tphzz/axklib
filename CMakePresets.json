@@ -66,6 +66,8 @@
       "inherits": "debug",
       "displayName": "Native Clang-Tidy",
       "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_CXX_CLANG_TIDY": "clang-tidy",
         "AXK_WARNINGS_AS_ERRORS": "OFF"
       }
