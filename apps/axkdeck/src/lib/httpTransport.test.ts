@@ -465,9 +465,7 @@ describe('HttpImageTransport', () => {
         ]);
     });
 
-    it('rejects truncated audition ranges and forwards cancellation', async () => {
-        const controller = new AbortController();
-        let requestSignal: AbortSignal | undefined;
+    it('rejects truncated audition ranges', async () => {
         vi.stubGlobal(
             'fetch',
             vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -479,9 +477,7 @@ describe('HttpImageTransport', () => {
                         limits: { maximumDownloadRangeBytes: 8 },
                     });
                 }
-                requestSignal = init?.signal ?? undefined;
-                expect(requestSignal).toBeInstanceOf(AbortSignal);
-                expect(requestSignal?.aborted).toBe(false);
+                expect(init?.signal).toBeInstanceOf(AbortSignal);
                 return new Response(Uint8Array.of(1, 2, 3), {
                     status: 206,
                     headers: { 'Content-Range': 'bytes 0-3/4' },
@@ -494,10 +490,48 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
         });
 
-        await expect(transport.readAuditionContent('audition-1', 4, controller.signal)).rejects.toThrow(
-            'returned 3 bytes; expected 4',
+        await expect(transport.readAuditionContent('audition-1', 4)).rejects.toThrow('returned 3 bytes; expected 4');
+    });
+
+    it('forwards cancellation while an audition request is active', async () => {
+        const controller = new AbortController();
+        let requestSignal: AbortSignal | undefined;
+        let notifyRequestStarted!: () => void;
+        const requestStarted = new Promise<void>((resolve) => {
+            notifyRequestStarted = resolve;
+        });
+        vi.stubGlobal(
+            'fetch',
+            vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return Promise.resolve(
+                        json({
+                            apiVersion: 'v1',
+                            operations: [],
+                            limits: { maximumDownloadRangeBytes: 8 },
+                        }),
+                    );
+                }
+                const effectiveSignal = init?.signal;
+                if (!(effectiveSignal instanceof AbortSignal)) throw new Error('missing request cancellation signal');
+                requestSignal = effectiveSignal;
+                notifyRequestStarted();
+                return new Promise<Response>((_resolve, reject) => {
+                    effectiveSignal.addEventListener('abort', () => reject(effectiveSignal.reason), { once: true });
+                });
+            }),
         );
-        controller.abort();
+
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://127.0.0.1:4000/api/v1',
+            bearerToken: 'secret',
+        });
+        const request = transport.readAuditionContent('audition-1', 4, controller.signal);
+        await requestStarted;
+        controller.abort(new DOMException('cancelled', 'AbortError'));
+
+        await expect(request).rejects.toMatchObject({ name: 'AbortError' });
         expect(requestSignal?.aborted).toBe(true);
     });
 
