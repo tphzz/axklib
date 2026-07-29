@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -7,6 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{ffi::OsString, fmt::Write as _};
 
 use serde::{Deserialize, Serialize};
 use url::{Host, Url};
@@ -117,10 +117,10 @@ impl PrivateRuntimeDirectory {
             let mut random = [0_u8; 16];
             getrandom::fill(&mut random)
                 .map_err(|error| format!("generate sidecar runtime directory name: {error}"))?;
-            let name = random
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>();
+            let mut name = String::with_capacity(random.len() * 2);
+            for byte in random {
+                write!(&mut name, "{byte:02x}").expect("writing to a String cannot fail");
+            }
             let path = parent.join(format!("axkdeck-server-{name}"));
             match create_private_directory(&path) {
                 Ok(()) => return Self::open(path),

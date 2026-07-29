@@ -391,6 +391,8 @@ TEST(AudioExport, UsesEachSamplesPlaybackWindowAndLoopPolicyForSharedWaveData) {
     const std::string second_text{std::istreambuf_iterator<char>{second_input}, {}};
     EXPECT_NE(second_text.find("offset=60 end=79 loop_mode=loop_continuous loop_start=65 loop_end=69"),
               std::string::npos);
+    first_input.close();
+    second_input.close();
 
     plan.volumes.front().samples.front().decoded.left.wave_length_frames = 81;
     std::filesystem::remove_all(output, error);
