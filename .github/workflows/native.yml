@@ -404,6 +404,7 @@ jobs:
           test -f "$scan/server/share/axklib/axklib-server.spdx.json"
           test -f "$scan/server/share/axklib/server/openapi-v1.json"
           test -f "$scan/server/share/doc/axklib/server.md"
+          test -f "$scan/server/share/licenses/openssl/copyright"
 
       - name: Smoke-test installed server
         if: matrix.run_tests
