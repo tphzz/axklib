@@ -95,6 +95,8 @@ add_library(
   STATIC
   src/audio.cpp
   src/audio_export.cpp
+  src/audio_export_support.cpp
+  src/audio_sfz_export.cpp
   src/wav_stream.cpp
   src/bytes.cpp
   src/catalog.cpp
@@ -104,20 +106,32 @@ add_library(
   src/file_publication.cpp
   src/io.cpp
   src/media.cpp
+  src/media_catalog.cpp
   src/media_fat12.cpp
   src/media_iso9660.cpp
+  src/media_object_directory.cpp
   src/media_yamaha.cpp
   src/object.cpp
   src/package.cpp
   src/package_archive.cpp
+  src/package_build.cpp
   src/package_import.cpp
+  src/package_import_fat12.cpp
+  src/package_import_iso9660.cpp
   src/package_import_plan.cpp
+  src/package_import_sfs.cpp
+  src/package_import_support.cpp
   src/package_manifest.cpp
+  src/package_parse.cpp
   src/package_relocation.cpp
+  src/package_support.cpp
   src/relationship.cpp
   src/report.cpp
   src/semantic.cpp
+  src/semantic_analysis.cpp
   src/sfs.cpp
+  src/sfs_container.cpp
+  src/sfs_directory.cpp
   src/utf8.cpp
   src/version.cpp
   "${AXK_BUILD_INFO_CPP}"
@@ -175,9 +189,16 @@ add_library(
   adapters/audio_resample_soxr.cpp
   adapters/pcm16_quantizer.cpp
   src/alteration.cpp
-  src/deletion.cpp
   src/alteration_manifest.cpp
   src/alteration_manifest_json.cpp
+  src/alteration_package_flat.cpp
+  src/alteration_package_sfs.cpp
+  src/alteration_program.cpp
+  src/alteration_publication.cpp
+  src/alteration_sample.cpp
+  src/alteration_support.cpp
+  src/alteration_volume.cpp
+  src/deletion.cpp
   src/media_build.cpp
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
@@ -185,6 +206,7 @@ add_library(
   src/sfs_write_codec.cpp
   src/writer.cpp
   src/writer_image.cpp
+  src/writer_profiles.cpp
 )
 add_library(axklib::audio ALIAS axk_audio)
 target_compile_features(axk_audio PUBLIC cxx_std_23)
@@ -230,7 +252,13 @@ axk_add_header_self_containment_target(
 )
 
 if(AXK_BUILD_SHARED_SDK)
-  add_library(axklib_shared SHARED src/sdk.cpp)
+  add_library(
+    axklib_shared SHARED
+    src/sdk.cpp
+    src/sdk_image.cpp
+    src/sdk_package.cpp
+    src/sdk_writer.cpp
+  )
   add_library(axklib::axklib ALIAS axklib_shared)
   target_compile_features(axklib_shared PRIVATE cxx_std_23)
   target_compile_definitions(axklib_shared PRIVATE AXK_SDK_EXPORTS)

@@ -1,0 +1,266 @@
+<script lang="ts">
+    import type { DeletionWorkflow } from '../deletion/workflow.svelte';
+    import type { PickerRequest, PickerSelection } from './picker';
+    import type { ExportWorkflow } from '../export/workflow.svelte';
+    import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
+    import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
+    import type { MutationWorkflow } from '../mutation/workflow.svelte';
+    import AudioImportDialog from '../../lib/components/AudioImportDialog.svelte';
+    import CompanionDiskDialog from '../../lib/components/CompanionDiskDialog.svelte';
+    import CreateHardDiskImageDialog from '../../lib/components/CreateHardDiskImageDialog.svelte';
+    import Icon from '../../lib/components/Icon.svelte';
+    import ObjectDeletionDialog from '../../lib/components/ObjectDeletionDialog.svelte';
+    import ObjectRenameDialog from '../../lib/components/ObjectRenameDialog.svelte';
+    import PackageExportDialog from '../../lib/components/PackageExportDialog.svelte';
+    import PackageImportDialog from '../../lib/components/PackageImportDialog.svelte';
+    import ServerConnectionSettings from '../../lib/components/ServerConnectionSettings.svelte';
+    import ServerStoragePicker from '../../lib/components/ServerStoragePicker.svelte';
+    import SfzExportDialog from '../../lib/components/SfzExportDialog.svelte';
+    import VolumeActionDialog from '../../lib/components/VolumeActionDialog.svelte';
+    import WaveDataCleanupDialog from '../../lib/components/WaveDataCleanupDialog.svelte';
+    import WorkspaceManager from '../../lib/components/WorkspaceManager.svelte';
+    import type { RemoteServerSettingsInput, RemoteServerSettingsView } from '../../lib/serverSettings';
+    import type { DirectoryLocation, DirectoryRef, FileLocation } from '../../lib/storageLocations';
+    import type { CompanionDirectorySelection, ImageTransport } from '../../lib/transport';
+
+    interface CompanionDialogState {
+        directories: DirectoryRef[];
+        busy: boolean;
+        error: string;
+    }
+
+    interface Props {
+        transport: ImageTransport;
+        isDesktop: boolean;
+        pickerRequest: PickerRequest | null;
+        finishPicker: (selection: PickerSelection | null) => void;
+        manageLocations: () => void;
+        companionRequest: CompanionDialogState | null;
+        addCompanion: () => void;
+        removeCompanion: (directory: DirectoryRef) => void;
+        attachCompanions: (selection: CompanionDirectorySelection) => void;
+        cancelCompanions: () => void;
+        hardDiskDirectory: DirectoryLocation | null;
+        finishHardDisk: (file: FileLocation) => void;
+        cancelHardDisk: () => void;
+        workspaceManagerOpen: boolean;
+        activeWorkspaceId: string | null;
+        closeWorkspaceManager: () => void;
+        connectionSettings: RemoteServerSettingsView | null;
+        saveRemoteConnection: (input: RemoteServerSettingsInput) => Promise<void>;
+        switchToLocalConnection: () => Promise<void>;
+        closeConnectionSettings: () => void;
+        mutation: MutationWorkflow;
+        packageImport: PackageImportWorkflow;
+        exports: ExportWorkflow;
+        deletion: DeletionWorkflow;
+        audioImport: AudioImportWorkflow;
+        audioFileInput?: HTMLInputElement;
+        sampleNames: string[];
+        waveDataNames: string[];
+    }
+
+    let {
+        transport,
+        isDesktop,
+        pickerRequest,
+        finishPicker,
+        manageLocations,
+        companionRequest,
+        addCompanion,
+        removeCompanion,
+        attachCompanions,
+        cancelCompanions,
+        hardDiskDirectory,
+        finishHardDisk,
+        cancelHardDisk,
+        workspaceManagerOpen,
+        activeWorkspaceId,
+        closeWorkspaceManager,
+        connectionSettings,
+        saveRemoteConnection,
+        switchToLocalConnection,
+        closeConnectionSettings,
+        mutation,
+        packageImport,
+        exports,
+        deletion,
+        audioImport,
+        audioFileInput,
+        sampleNames,
+        waveDataNames,
+    }: Props = $props();
+</script>
+
+{#if pickerRequest}
+    <ServerStoragePicker
+        {transport}
+        mode={pickerRequest.mode}
+        title={pickerRequest.title}
+        extensions={pickerRequest.extensions}
+        suggestedName={pickerRequest.suggestedName}
+        multiple={pickerRequest.multiple}
+        initialDirectory={pickerRequest.initialDirectory}
+        requireWritableDirectory={pickerRequest.requireWritableDirectory}
+        ondirectorychange={pickerRequest.ondirectorychange}
+        onmanagelocations={() => {
+            finishPicker(null);
+            manageLocations();
+        }}
+        onselect={(selection) => finishPicker(selection)}
+        onselectmany={(selections) => finishPicker(selections)}
+        oncancel={() => finishPicker(null)}
+    />
+{/if}
+{#if companionRequest && pickerRequest?.parentDialog !== 'companion-disks'}
+    <CompanionDiskDialog
+        directories={companionRequest.directories}
+        busy={companionRequest.busy}
+        error={companionRequest.error}
+        onadd={addCompanion}
+        onremove={removeCompanion}
+        onnearby={() => attachCompanions({ kind: 'immediate-siblings' })}
+        onconfirm={() => attachCompanions({ kind: 'directories', directories: companionRequest.directories })}
+        oncancel={cancelCompanions}
+    />
+{/if}
+{#if hardDiskDirectory}
+    <CreateHardDiskImageDialog
+        {transport}
+        directory={hardDiskDirectory}
+        onsuccess={finishHardDisk}
+        oncancel={cancelHardDisk}
+    />
+{/if}
+<WorkspaceManager open={workspaceManagerOpen} {activeWorkspaceId} onclose={closeWorkspaceManager} />
+{#if connectionSettings}
+    <ServerConnectionSettings
+        settings={connectionSettings}
+        onsave={saveRemoteConnection}
+        onuselocal={switchToLocalConnection}
+        oncancel={closeConnectionSettings}
+    />
+{/if}
+{#if mutation.volumeAction}
+    {#key `${mutation.volumeAction.action}:${mutation.volumeAction.item.id}`}
+        <VolumeActionDialog
+            action={mutation.volumeAction.action}
+            item={mutation.volumeAction.item}
+            busy={mutation.volumeActionBusy}
+            error={mutation.volumeActionError}
+            oncancel={() => mutation.cancelVolumeAction()}
+            onsubmit={(name) => void mutation.submitVolumeAction(name)}
+        />
+    {/key}
+{/if}
+{#if mutation.objectRenameRequest}
+    {#key mutation.objectRenameRequest.target.object.key}
+        <ObjectRenameDialog
+            target={mutation.objectRenameRequest.target}
+            busy={mutation.objectRenameRequest.busy}
+            error={mutation.objectRenameRequest.error}
+            oncancel={() => mutation.cancelObjectRename()}
+            onsubmit={(name) => void mutation.submitObjectRename(name)}
+        />
+    {/key}
+{/if}
+{#if packageImport.request && pickerRequest?.parentDialog !== 'package-import'}
+    <PackageImportDialog
+        targetName={packageImport.request.item.name}
+        desktop={isDesktop}
+        sourceName={packageImport.request.sourceName}
+        inspection={packageImport.request.inspection}
+        plan={packageImport.request.plan}
+        renames={packageImport.request.renames}
+        status={packageImport.request.status}
+        progress={packageImport.request.progress}
+        error={packageImport.request.error}
+        onchooseworkspace={() => void packageImport.chooseWorkspace()}
+        onchooselocal={() => void packageImport.chooseLocal()}
+        onchange={() => void packageImport.resetSource()}
+        onrename={(nodeId, name) => packageImport.rename(nodeId, name)}
+        onreplan={() => void packageImport.replan()}
+        oncancel={() => void packageImport.close()}
+        onconfirm={() => void packageImport.apply()}
+    />
+{/if}
+{#if exports.packageRequest && pickerRequest?.parentDialog !== 'package-export' && !companionRequest}
+    <PackageExportDialog
+        items={exports.packageRequest.items}
+        desktop={isDesktop}
+        busy={exports.packageRequest.busy}
+        progressLabel={exports.packageRequest.progressLabel}
+        error={exports.packageRequest.error}
+        onworkspace={() => void exports.packageToWorkspace()}
+        onlocal={() => void exports.packageToComputer()}
+        oncancel={() => exports.closePackage()}
+    />
+{/if}
+{#if exports.audioRequest && pickerRequest?.parentDialog !== 'audio-export' && !companionRequest}
+    <SfzExportDialog
+        items={exports.audioRequest.items}
+        inspection={exports.audioRequest.inspection}
+        desktop={isDesktop}
+        loading={exports.audioRequest.loading}
+        busy={exports.audioRequest.busy}
+        progressLabel={exports.audioRequest.progressLabel}
+        error={exports.audioRequest.error}
+        format={exports.audioRequest.format}
+        onformatchange={(format) => exports.setAudioFormat(format)}
+        onworkspace={() => void exports.audioToWorkspace()}
+        onlocal={() => void exports.audioToComputer()}
+        oncancel={() => exports.cancelAudio()}
+    />
+{/if}
+{#if deletion.objectRequest}
+    <ObjectDeletionDialog
+        inspection={deletion.objectRequest.inspection}
+        loading={deletion.objectRequest.loading}
+        busy={deletion.objectRequest.busy}
+        error={deletion.objectRequest.error}
+        onselectionchange={(objectId, selected) => deletion.updateObjectSelection(objectId, selected)}
+        onselectall={(selected) => deletion.updateAllObjectDependencies(selected)}
+        oncancel={() => deletion.cancelObjects()}
+        onconfirm={() => void deletion.submitObjects()}
+    />
+{/if}
+{#if deletion.cleanupRequest}
+    <WaveDataCleanupDialog
+        volumeName={deletion.cleanupRequest.volumeName}
+        inspection={deletion.cleanupRequest.inspection}
+        selectedObjectIds={deletion.cleanupRequest.selectedObjectIds}
+        loading={deletion.cleanupRequest.loading}
+        busy={deletion.cleanupRequest.busy}
+        error={deletion.cleanupRequest.error}
+        onselectionchange={(objectId, selected) => deletion.updateCleanupSelection(objectId, selected)}
+        onselectall={(selected) => deletion.updateAllCleanup(selected)}
+        oncancel={() => deletion.cancelCleanup()}
+        onconfirm={() => void deletion.submitCleanup()}
+    />
+{/if}
+{#if audioImport.request && pickerRequest?.parentDialog !== 'audio-import'}
+    <AudioImportDialog
+        {transport}
+        files={audioImport.request.files}
+        target={audioImport.request.target}
+        existingSampleNames={sampleNames}
+        existingWaveformNames={waveDataNames}
+        onchooseworkspace={() => void audioImport.chooseWorkspace()}
+        onchooselocal={transport.supportsClientUploads && audioFileInput
+            ? () => audioImport.chooseLocal(audioFileInput)
+            : undefined}
+        oncommit={(items) => audioImport.commit(items)}
+        oncancel={() => (audioImport.request = null)}
+    />
+{/if}
+{#if audioImport.dragActive && !audioImport.request}
+    <div class="audio-drop-overlay" aria-hidden="true">
+        <Icon name="upload" size={24} />
+        <strong
+            >{audioImport.dragTarget
+                ? `Import audio into ${audioImport.dragTarget.volumeName}`
+                : 'Select a writable volume'}</strong
+        >
+        <span>WAV, FLAC, and AIFF</span>
+    </div>
+{/if}

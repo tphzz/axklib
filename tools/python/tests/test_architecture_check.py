@@ -15,7 +15,7 @@ def write_policy(
     root: Path,
     *,
     legacy_files: dict[str, int] | None = None,
-    exclusions: list[dict[str, str]] | None = None,
+    exclusions: list[dict[str, str | bool]] | None = None,
 ) -> Path:
     policy = {
         "version": 1,
@@ -109,6 +109,43 @@ def test_rejects_unknown_or_unexplained_exclusion(tmp_path: Path) -> None:
     assert issue_codes(tmp_path, policy) == [
         "invalid_exclusion_classification",
         "missing_exclusion_reason",
+    ]
+
+
+def test_explicit_vendored_exclusion_may_be_absent(tmp_path: Path) -> None:
+    policy = write_policy(
+        tmp_path,
+        exclusions=[
+            {
+                "path": "src/.venv",
+                "classification": "vendored",
+                "reason": "Local dependency environment",
+                "mayBeAbsent": True,
+            }
+        ],
+    )
+    write_lines(tmp_path / "src/tool.py", 1)
+
+    assert architecture_check.check_repository(tmp_path, policy) == []
+
+
+def test_rejects_invalid_optional_exclusion_flag(tmp_path: Path) -> None:
+    policy = write_policy(
+        tmp_path,
+        exclusions=[
+            {
+                "path": "src/generated",
+                "classification": "generated",
+                "reason": "Generated output",
+                "mayBeAbsent": "yes",
+            }
+        ],
+    )
+    write_lines(tmp_path / "src/tool.py", 1)
+
+    assert issue_codes(tmp_path, policy) == [
+        "invalid_exclusion_presence",
+        "exclusion_path_missing",
     ]
 
 

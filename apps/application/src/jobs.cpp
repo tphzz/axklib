@@ -12,44 +12,8 @@
 
 #include "axklib/application/secure_random.hpp"
 #include "job_request_resources.hpp"
+#include "jobs_support.hpp"
 #include "jobs_test_access.hpp"
-
-namespace {
-
-using Json = nlohmann::json;
-
-std::uint64_t timestamp_unix_ms() {
-    const auto duration = std::chrono::system_clock::now().time_since_epoch();
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
-}
-
-std::string progress_phase_name(axk::ProgressPhase phase) {
-    switch (phase) {
-    case axk::ProgressPhase::opening:
-        return "opening";
-    case axk::ProgressPhase::reading:
-        return "reading";
-    case axk::ProgressPhase::resolving:
-        return "resolving";
-    case axk::ProgressPhase::validating:
-        return "validating";
-    case axk::ProgressPhase::exporting:
-        return "exporting";
-    case axk::ProgressPhase::writing:
-        return "writing";
-    case axk::ProgressPhase::allocating:
-        return "allocating";
-    case axk::ProgressPhase::publishing:
-        return "publishing";
-    }
-    return "unknown";
-}
-
-axk::app::Error job_error(std::string code, std::string message, bool retryable = false) {
-    return {std::move(code), std::move(message), {}, retryable};
-}
-
-} // namespace
 
 struct axk::app::JobManager::Impl {
     struct Record {
@@ -58,14 +22,14 @@ struct axk::app::JobManager::Impl {
         std::string job_id;
         std::string operation_id;
         OperationClass operation_class{OperationClass::read};
-        Json request;
+        nlohmann::json request;
         std::optional<std::string> idempotency_index;
         std::vector<std::string> destination_keys;
         OperationContext context;
         JobState state{JobState::queued};
         std::uint64_t latest_sequence{};
         std::optional<JobProgress> progress;
-        std::optional<Json> result;
+        std::optional<nlohmann::json> result;
         std::optional<Error> error;
         std::deque<JobEvent> events;
         CancellationSource cancellation;
@@ -151,7 +115,7 @@ struct axk::app::JobManager::Impl {
                        .owner_id = record.context.owner_id,
                        .type = std::move(type),
                        .state = record.state,
-                       .timestamp_unix_ms = timestamp_unix_ms(),
+                       .timestamp_unix_ms = job_runtime_detail::timestamp_unix_ms(),
                        .progress = std::move(progress)};
         record.events.push_back(event);
         while (record.events.size() > maximum_replay)
@@ -160,18 +124,14 @@ struct axk::app::JobManager::Impl {
         return event;
     }
 
-    static std::uint64_t elapsed_ms(Clock::time_point start, Clock::time_point end) noexcept {
-        return static_cast<std::uint64_t>(
-            std::max<std::int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count(), 0));
-    }
-
     void record_transition_locked(Record &record, JobState previous, JobState next) noexcept {
         const auto current = now();
         if (next == JobState::running) {
             record.running_at = current;
             queued_jobs.fetch_sub(1U, std::memory_order_relaxed);
             running_jobs.fetch_add(1U, std::memory_order_relaxed);
-            total_queue_wait_ms.fetch_add(elapsed_ms(record.submitted_at, current), std::memory_order_relaxed);
+            total_queue_wait_ms.fetch_add(job_runtime_detail::elapsed_ms(record.submitted_at, current),
+                                          std::memory_order_relaxed);
             return;
         }
         if (!is_terminal(next))
@@ -181,14 +141,16 @@ struct axk::app::JobManager::Impl {
         else if (previous == JobState::running)
             running_jobs.fetch_sub(1U, std::memory_order_relaxed);
         if (record.phase_started_at) {
-            total_phase_duration_ms.fetch_add(elapsed_ms(*record.phase_started_at, current), std::memory_order_relaxed);
+            total_phase_duration_ms.fetch_add(job_runtime_detail::elapsed_ms(*record.phase_started_at, current),
+                                              std::memory_order_relaxed);
             record.phase_started_at.reset();
         }
         if (record.running_at)
-            total_execution_ms.fetch_add(elapsed_ms(*record.running_at, current), std::memory_order_relaxed);
+            total_execution_ms.fetch_add(job_runtime_detail::elapsed_ms(*record.running_at, current),
+                                         std::memory_order_relaxed);
         if (record.cancellation_requested_at) {
-            total_cancellation_latency_ms.fetch_add(elapsed_ms(*record.cancellation_requested_at, current),
-                                                    std::memory_order_relaxed);
+            total_cancellation_latency_ms.fetch_add(
+                job_runtime_detail::elapsed_ms(*record.cancellation_requested_at, current), std::memory_order_relaxed);
         }
         if (next == JobState::completed)
             completed_jobs.fetch_add(1U, std::memory_order_relaxed);
@@ -217,7 +179,7 @@ struct axk::app::JobManager::Impl {
     }
 
     void transition(const std::shared_ptr<Record> &record, JobState state, std::string type,
-                    std::optional<Json> result = std::nullopt, std::optional<Error> error = std::nullopt) {
+                    std::optional<nlohmann::json> result = std::nullopt, std::optional<Error> error = std::nullopt) {
         std::optional<JobEvent> event;
         std::vector<UploadLease> released_upload_leases;
         if (is_terminal(state)) {
@@ -259,7 +221,8 @@ struct axk::app::JobManager::Impl {
             const std::scoped_lock lock{record->mutex};
             if (record->state != JobState::running)
                 return;
-            JobProgress update{progress_phase_name(progress.phase), progress.completed, progress.total, progress.label};
+            JobProgress update{job_runtime_detail::progress_phase_name(progress.phase), progress.completed,
+                               progress.total, progress.label};
             if (record->progress && record->progress->phase == update.phase &&
                 record->progress->completed > update.completed) {
                 return;
@@ -267,8 +230,8 @@ struct axk::app::JobManager::Impl {
             const auto current = now();
             if (!record->progress || record->progress->phase != update.phase) {
                 if (record->phase_started_at) {
-                    total_phase_duration_ms.fetch_add(elapsed_ms(*record->phase_started_at, current),
-                                                      std::memory_order_relaxed);
+                    total_phase_duration_ms.fetch_add(
+                        job_runtime_detail::elapsed_ms(*record->phase_started_at, current), std::memory_order_relaxed);
                 }
                 record->phase_started_at = current;
             }
@@ -331,14 +294,16 @@ struct axk::app::JobManager::Impl {
             context.cancellation = record->cancellation.token();
             context.progress = &progress;
 
-            Result<Json> result = std::unexpected(job_error("operation_failed", "operation failed"));
+            Result<nlohmann::json> result =
+                std::unexpected(job_runtime_detail::job_error("operation_failed", "operation failed"));
             try {
                 result = registry.invoke(record->operation_id, record->request, context);
             } catch (...) {
-                result = std::unexpected(job_error("operation_exception", "operation raised an unexpected exception"));
+                result = std::unexpected(
+                    job_runtime_detail::job_error("operation_exception", "operation raised an unexpected exception"));
             }
             if (result) {
-                transition(record, JobState::completed, "completed", std::optional<Json>{std::move(*result)});
+                transition(record, JobState::completed, "completed", std::optional<nlohmann::json>{std::move(*result)});
             } else if (record->cancellation.token().is_cancelled() || result.error().code == "operation_cancelled") {
                 transition(record, JobState::cancelled, "cancelled");
             } else {
@@ -444,17 +409,21 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
                                                                      std::optional<std::string> idempotency_key) {
     const auto *descriptor = impl_->registry.find(operation_id);
     if (descriptor == nullptr)
-        return std::unexpected(job_error("unknown_operation", "operation is not registered"));
+        return std::unexpected(job_runtime_detail::job_error("unknown_operation", "operation is not registered"));
     if (descriptor->mode != ExecutionMode::job)
-        return std::unexpected(job_error("invalid_execution_mode", "operation does not run as a job"));
+        return std::unexpected(
+            job_runtime_detail::job_error("invalid_execution_mode", "operation does not run as a job"));
     if (!impl_->registry.is_implemented(operation_id))
-        return std::unexpected(job_error("operation_not_implemented", "operation is registered but not implemented"));
+        return std::unexpected(
+            job_runtime_detail::job_error("operation_not_implemented", "operation is registered but not implemented"));
     if (context.owner_id.empty())
-        return std::unexpected(job_error("invalid_job_owner", "job owner must not be empty"));
+        return std::unexpected(job_runtime_detail::job_error("invalid_job_owner", "job owner must not be empty"));
     if (descriptor->requires_idempotency && !idempotency_key)
-        return std::unexpected(job_error("idempotency_key_required", "operation requires an idempotency key"));
+        return std::unexpected(
+            job_runtime_detail::job_error("idempotency_key_required", "operation requires an idempotency key"));
     if (idempotency_key && (idempotency_key->empty() || idempotency_key->size() > 128U))
-        return std::unexpected(job_error("invalid_idempotency_key", "idempotency key must contain 1 to 128 bytes"));
+        return std::unexpected(
+            job_runtime_detail::job_error("invalid_idempotency_key", "idempotency key must contain 1 to 128 bytes"));
 
     std::unique_lock submission_lock{impl_->submission_mutex};
     const auto request_fingerprint = request.dump();
@@ -469,8 +438,8 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
             if (found != impl_->idempotent_submissions.end()) {
                 if (found->second.operation_id != operation_id ||
                     found->second.request_fingerprint != request_fingerprint) {
-                    return std::unexpected(
-                        job_error("idempotency_conflict", "idempotency key was already used for another request"));
+                    return std::unexpected(job_runtime_detail::job_error(
+                        "idempotency_conflict", "idempotency key was already used for another request"));
                 }
                 const auto job = impl_->jobs.find(found->second.job_id);
                 if (job != impl_->jobs.end())
@@ -491,8 +460,8 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
             const auto has_destination = std::ranges::any_of(
                 *resolved_accesses, [](const PathAccess &access) { return access.mode == PathAccessMode::exclusive; });
             if (has_destination)
-                return std::unexpected(
-                    job_error("destination_reserved", "destination is reserved by another active operation", true));
+                return std::unexpected(job_runtime_detail::job_error(
+                    "destination_reserved", "destination is reserved by another active operation", true));
             return std::unexpected(acquired.error());
         }
         path_lease = std::move(*acquired);
@@ -526,14 +495,15 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
         const std::scoped_lock lock{impl_->mutex};
         impl_->cleanup_expired_locked();
         if (impl_->stopping)
-            return std::unexpected(job_error("job_runtime_stopping", "job runtime is stopping", true));
+            return std::unexpected(
+                job_runtime_detail::job_error("job_runtime_stopping", "job runtime is stopping", true));
         if (record->idempotency_index) {
             const auto found = impl_->idempotent_submissions.find(*record->idempotency_index);
             if (found != impl_->idempotent_submissions.end()) {
                 if (found->second.operation_id != record->operation_id ||
                     found->second.request_fingerprint != request_fingerprint) {
-                    return std::unexpected(
-                        job_error("idempotency_conflict", "idempotency key was already used for another request"));
+                    return std::unexpected(job_runtime_detail::job_error(
+                        "idempotency_conflict", "idempotency key was already used for another request"));
                 }
                 const auto replayed = impl_->jobs.find(found->second.job_id);
                 if (replayed != impl_->jobs.end())
@@ -545,15 +515,16 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
                 if (std::ranges::any_of(impl_->destination_reservations, [&](const auto &reserved) {
                         return job_detail::destinations_overlap(candidate, reserved.first);
                     })) {
-                    return std::unexpected(
-                        job_error("destination_reserved", "destination is reserved by another active job", true));
+                    return std::unexpected(job_runtime_detail::job_error(
+                        "destination_reserved", "destination is reserved by another active job", true));
                 }
             }
             if (impl_->read_queue.size() + impl_->write_queue.size() >= impl_->maximum_queue)
-                return std::unexpected(
-                    job_error("job_queue_full", "job queue has reached its configured capacity", true));
+                return std::unexpected(job_runtime_detail::job_error(
+                    "job_queue_full", "job queue has reached its configured capacity", true));
             if (impl_->jobs.size() >= impl_->maximum_jobs)
-                return std::unexpected(job_error("job_capacity_full", "retained job capacity is exhausted", true));
+                return std::unexpected(
+                    job_runtime_detail::job_error("job_capacity_full", "retained job capacity is exhausted", true));
             do {
                 auto job_id = impl_->next_id();
                 if (!job_id)
@@ -615,7 +586,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::status(std::string
         impl_->cleanup_expired_locked();
         const auto found = impl_->jobs.find(std::string{job_id});
         if (found == impl_->jobs.end() || found->second->context.owner_id != owner_id)
-            return std::unexpected(job_error("job_not_found", "job is closed or unknown"));
+            return std::unexpected(job_runtime_detail::job_error("job_not_found", "job is closed or unknown"));
         record = found->second;
     }
     return impl_->snapshot(record);
@@ -628,7 +599,7 @@ axk::app::Result<void> axk::app::JobManager::cancel(std::string_view job_id, std
         impl_->cleanup_expired_locked();
         const auto found = impl_->jobs.find(std::string{job_id});
         if (found == impl_->jobs.end() || found->second->context.owner_id != owner_id)
-            return std::unexpected(job_error("job_not_found", "job is closed or unknown"));
+            return std::unexpected(job_runtime_detail::job_error("job_not_found", "job is closed or unknown"));
         record = found->second;
     }
 
@@ -672,12 +643,13 @@ axk::app::JobManager::replay(std::string_view job_id, std::string_view owner_id,
         impl_->cleanup_expired_locked();
         const auto found = impl_->jobs.find(std::string{job_id});
         if (found == impl_->jobs.end() || found->second->context.owner_id != owner_id)
-            return std::unexpected(job_error("job_not_found", "job is closed or unknown"));
+            return std::unexpected(job_runtime_detail::job_error("job_not_found", "job is closed or unknown"));
         record = found->second;
     }
     const std::scoped_lock lock{record->mutex};
     if (!record->events.empty() && after_sequence < record->events.front().sequence - 1U) {
-        return std::unexpected(job_error("job_event_replay_expired", "requested job events are no longer retained"));
+        return std::unexpected(
+            job_runtime_detail::job_error("job_event_replay_expired", "requested job events are no longer retained"));
     }
     std::vector<JobEvent> events;
     for (const auto &event : record->events) {
@@ -717,23 +689,3 @@ void axk::app::JobManager::unsubscribe(SubscriptionId subscription_id) noexcept 
 }
 
 void axk::app::JobManager::shutdown() noexcept { impl_->shutdown(); }
-
-std::string_view axk::app::job_state_name(JobState state) noexcept {
-    switch (state) {
-    case JobState::queued:
-        return "QUEUED";
-    case JobState::running:
-        return "RUNNING";
-    case JobState::completed:
-        return "COMPLETED";
-    case JobState::failed:
-        return "FAILED";
-    case JobState::cancelled:
-        return "CANCELLED";
-    }
-    return "FAILED";
-}
-
-bool axk::app::is_terminal(JobState state) noexcept {
-    return state == JobState::completed || state == JobState::failed || state == JobState::cancelled;
-}

@@ -111,6 +111,7 @@ def check_repository(root: Path, policy_path: Path) -> list[ArchitectureIssue]:
         exclusions.append(relative)
         classification = entry.get("classification")
         reason = entry.get("reason")
+        may_be_absent = entry.get("mayBeAbsent", False)
         if classification not in ALLOWED_EXCLUSION_CLASSIFICATIONS:
             issues.append(
                 ArchitectureIssue(
@@ -127,7 +128,15 @@ def check_repository(root: Path, policy_path: Path) -> list[ArchitectureIssue]:
                     "Classified exclusions require a non-empty reason",
                 )
             )
-        if not root.joinpath(*relative.parts).exists():
+        if not isinstance(may_be_absent, bool):
+            issues.append(
+                ArchitectureIssue(
+                    "invalid_exclusion_presence",
+                    relative.as_posix(),
+                    "mayBeAbsent must be a boolean when specified",
+                )
+            )
+        if not root.joinpath(*relative.parts).exists() and may_be_absent is not True:
             issues.append(
                 ArchitectureIssue(
                     "exclusion_path_missing",

@@ -51,13 +51,27 @@ endif()
 file(GLOB_RECURSE AXK_SERVER_SOURCE_FILES
   LIST_DIRECTORIES false
   "${AXK_SOURCE_ROOT}/apps/server/src/*.cpp"
+  "${AXK_SOURCE_ROOT}/apps/server/src/*.hpp"
   "${AXK_SOURCE_ROOT}/apps/server/include/*.hpp")
 
 set(AXK_SERVER_USES_CROW FALSE)
+set(AXK_SERVER_USES_APPLICATION_REGISTRY FALSE)
 foreach(AXK_SERVER_SOURCE_FILE IN LISTS AXK_SERVER_SOURCE_FILES)
   file(READ "${AXK_SERVER_SOURCE_FILE}" AXK_SERVER_SOURCE)
   if(AXK_SERVER_SOURCE MATCHES "[#]include[ \t]*[<\"]crow")
     set(AXK_SERVER_USES_CROW TRUE)
+  endif()
+  if(AXK_SERVER_SOURCE MATCHES "make_application_registry")
+    set(AXK_SERVER_USES_APPLICATION_REGISTRY TRUE)
+  endif()
+  if(AXK_SERVER_SOURCE MATCHES "bind_application_operations")
+    message(FATAL_ERROR
+      "The Crow adapter binds application operations independently: ${AXK_SERVER_SOURCE_FILE}")
+  endif()
+  if(AXK_SERVER_SOURCE MATCHES "route_dynamic|CROW_WEBSOCKET_ROUTE" AND
+     NOT AXK_SERVER_SOURCE_FILE MATCHES "/(infrastructure|file|event|operation)_routes[.]cpp$")
+    message(FATAL_ERROR
+      "Endpoint registration escaped the transport route modules: ${AXK_SERVER_SOURCE_FILE}")
   endif()
   if(AXK_SERVER_SOURCE MATCHES "boost/beast|cpp-httplib|httplib[.]h|websocketpp|pistache|restinio")
     message(FATAL_ERROR "A second HTTP or WebSocket framework entered the Crow adapter: ${AXK_SERVER_SOURCE_FILE}")
@@ -72,15 +86,8 @@ foreach(AXK_SERVER_SOURCE_FILE IN LISTS AXK_SERVER_SOURCE_FILES)
   endif()
 endforeach()
 
-file(READ "${AXK_SOURCE_ROOT}/apps/server/src/server.cpp" AXK_SERVER_IMPLEMENTATION)
-if(NOT AXK_SERVER_IMPLEMENTATION MATCHES "make_application_registry")
+if(NOT AXK_SERVER_USES_APPLICATION_REGISTRY)
   message(FATAL_ERROR "The Crow adapter does not consume the shared application-registry factory")
-endif()
-if(AXK_SERVER_IMPLEMENTATION MATCHES "bind_application_operations")
-  message(FATAL_ERROR "The Crow adapter binds application operations independently")
-endif()
-if(AXK_SERVER_IMPLEMENTATION MATCHES "route_dynamic|CROW_WEBSOCKET_ROUTE")
-  message(FATAL_ERROR "Endpoint registration escaped the transport route modules")
 endif()
 
 foreach(AXK_ROUTE_MODULE IN ITEMS infrastructure_routes file_routes event_routes operation_routes)

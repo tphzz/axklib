@@ -1,0 +1,160 @@
+import type { components } from './generated/axklibApiV1';
+import type { AxklibHttpApiClient } from './httpApiClient';
+import type { HttpImageSessions } from './httpImageSessions';
+import type { HttpJobController } from './httpJobController';
+import { randomIdempotencyKey, serverFile, serverInput } from './httpTransportWire';
+import type { FileLocation, InputFileLocation } from './storageLocations';
+import type {
+    ImageSessionAudioExportDestination,
+    ImageSessionAudioExportInspection,
+    ImageSessionExportRoot,
+    ImageSessionPackageExportDestination,
+    ImageSessionPackageImportPlan,
+    ImageSessionPackageRename,
+    JobState,
+    PackageImportDestination,
+    PackageImportPlan,
+    PackageInspection,
+} from './transport';
+
+export class HttpPackageOperations {
+    constructor(
+        private readonly client: AxklibHttpApiClient,
+        private readonly jobs: HttpJobController,
+        private readonly imageSessions: HttpImageSessions,
+    ) {}
+
+    async inspect(source: InputFileLocation, verify: boolean): Promise<PackageInspection> {
+        const result = await this.client.invoke<PackageInspection>(verify ? 'package.verify' : 'package.inspect', {
+            package: serverInput(source),
+        });
+        if (this.jobs.isJob(result)) throw new Error('package inspection unexpectedly returned a job');
+        return result;
+    }
+
+    async planImport(
+        target: FileLocation,
+        output: FileLocation,
+        packages: InputFileLocation[],
+        destinations: PackageImportDestination[],
+        overwrite: boolean,
+    ): Promise<PackageImportPlan> {
+        const result = await this.client.invoke<PackageImportPlan>('package.plan_import', {
+            target: serverFile(target).reference,
+            output: serverFile(output).reference,
+            packages: packages.map((source) => serverInput(source)),
+            destinations,
+            renames: [],
+            overwrite,
+        });
+        if (this.jobs.isJob(result)) throw new Error('package import planning unexpectedly returned a job');
+        return result;
+    }
+
+    async startImport(planToken: string): Promise<JobState> {
+        const job = await this.client.invoke<never>(
+            'package.import',
+            { planToken },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('package.import did not return a job');
+        return this.jobs.map(job);
+    }
+
+    async planImageImport(
+        sessionId: number,
+        source: InputFileLocation,
+        partitionIndex: number,
+        volumeName: string,
+        renames: ImageSessionPackageRename[] = [],
+        replacePlanToken?: string,
+    ): Promise<ImageSessionPackageImportPlan> {
+        const session = this.imageSessions.get(sessionId);
+        const result = await this.client.invoke<ImageSessionPackageImportPlan>('images.package_import.plan', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            package: serverInput(source),
+            partitionIndex,
+            volumeName,
+            renames,
+            ...(replacePlanToken ? { replacePlanToken } : {}),
+        });
+        if (this.jobs.isJob(result)) throw new Error('image package import planning unexpectedly returned a job');
+        return result;
+    }
+
+    async releaseImageImportPlan(planToken: string): Promise<void> {
+        const result = await this.client.invoke<{ released: true }>('images.package_import.release', { planToken });
+        if (this.jobs.isJob(result)) throw new Error('image package plan release unexpectedly returned a job');
+    }
+
+    async startImageImport(planToken: string): Promise<JobState> {
+        const job = await this.client.invoke<never>(
+            'images.package_import',
+            { planToken },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.package_import did not return a job');
+        return this.jobs.map(job);
+    }
+
+    async startImageExport(
+        sessionId: number,
+        roots: ImageSessionExportRoot[],
+        destination: ImageSessionPackageExportDestination,
+    ): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.package_export',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                roots,
+                destination,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.package_export did not return a job');
+        return this.jobs.map(job);
+    }
+
+    async inspectAudioExport(
+        sessionId: number,
+        roots: ImageSessionExportRoot[],
+    ): Promise<ImageSessionAudioExportInspection> {
+        const session = this.imageSessions.get(sessionId);
+        const result = await this.client.invoke<ImageSessionAudioExportInspection>('images.audio_export.inspect', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            roots,
+        });
+        if (this.jobs.isJob(result)) throw new Error('images.audio_export.inspect unexpectedly returned a job');
+        return result;
+    }
+
+    async startAudioExport(
+        sessionId: number,
+        roots: ImageSessionExportRoot[],
+        format: 'SFZ' | 'WAV',
+        destination: ImageSessionAudioExportDestination,
+    ): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.audio_export',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                roots,
+                format,
+                destination,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.audio_export did not return a job');
+        return this.jobs.map(job);
+    }
+
+    deleteRetained(download: components['schemas']['RetainedDownload']): Promise<void> {
+        return this.client.deleteRetainedDownload(download.contentPath);
+    }
+}

@@ -6,15 +6,32 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(unofficial-hash-library CONFIG REQUIRED)
 
-add_library(axk_application STATIC src/alteration_journal.cpp src/application_operations.cpp src/audio_operations.cpp src/audition_operations.cpp src/content_digest.cpp src/content_id.cpp src/directory_archive_operations.cpp src/download_archives.cpp
-                                   src/extraction_operations.cpp src/extraction_selection.cpp src/file_operations.cpp
-                                   src/filesystem.cpp src/image_sessions.cpp src/job_request_resources.cpp src/jobs.cpp
+add_library(axk_application STATIC src/alteration_journal.cpp src/application_operations.cpp src/audio_operations.cpp src/audition_operations.cpp src/content_digest.cpp src/content_id.cpp src/corpus_audit_operations.cpp src/directory_archive_operations.cpp src/download_archives.cpp
+                                   src/extraction_operations.cpp src/extraction_selection.cpp
+                                   src/file_coverage_operations.cpp src/file_coverage_support.cpp
+                                   src/file_info_operations.cpp src/file_inventory_operations.cpp
+                                   src/file_operations.cpp src/file_operations_support.cpp
+                                   src/file_relationship_operations.cpp
+                                   src/filesystem.cpp src/filesystem_directory.cpp
+                                   src/filesystem_directory_publication.cpp src/filesystem_entry_mutations.cpp
+                                   src/filesystem_file_publication.cpp src/filesystem_native.cpp
+                                   src/filesystem_native_publication.cpp src/filesystem_paths.cpp
+                                   src/filesystem_roots.cpp src/filesystem_support.cpp src/filesystem_tree.cpp
+                                   src/image_session_access.cpp src/image_session_audition.cpp
+                                   src/image_session_inspection.cpp src/image_session_open.cpp
+                                   src/image_session_support.cpp src/image_sessions.cpp
+                                   src/job_request_resources.cpp src/jobs.cpp
+                                   src/jobs_support.cpp
                                    src/operation_registry.cpp src/package_filename.cpp src/package_operations.cpp
+                                   src/package_operations_support.cpp src/session_package_operations.cpp
                                    src/package_plan_store.cpp src/path_reservations.cpp
                                    src/private_storage.cpp src/relationship_diagnostic.cpp
                                    src/session_audio_export_operations.cpp src/system_service.cpp
-                                   src/secure_random.cpp src/uploads.cpp src/validation_operations.cpp src/volume_graph.cpp
-                                   src/write_operations.cpp)
+                                   src/secure_random.cpp src/uploads.cpp src/validation_allocation.cpp
+                                   src/validation_exports.cpp src/validation_operations.cpp
+                                   src/validation_operations_support.cpp src/validation_semantics.cpp src/volume_graph.cpp
+                                   src/session_write_operations.cpp src/write_manifest_operations.cpp
+                                   src/write_manifest_support.cpp src/write_operations.cpp src/write_plan_support.cpp)
 add_library(axklib::application ALIAS axk_application)
 target_compile_features(axk_application PUBLIC cxx_std_23)
 target_include_directories(

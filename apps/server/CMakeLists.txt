@@ -86,6 +86,15 @@ add_library(
   src/process_lifetime.cpp
   src/request_validation.cpp
   src/server.cpp
+  src/server_application.cpp
+  src/server_image_responses.cpp
+  src/server_infrastructure_responses.cpp
+  src/server_job_responses.cpp
+  src/server_lifecycle.cpp
+  src/server_route_binding.cpp
+  src/server_support.cpp
+  src/server_transfer_responses.cpp
+  src/server_workspace_responses.cpp
   src/state_lease.cpp
   src/telemetry.cpp
   src/transport.cpp

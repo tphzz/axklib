@@ -5,6 +5,7 @@
 #include <format>
 #include <ranges>
 
+#include "axklib/bytes.hpp"
 #include "axklib/utf8.hpp"
 #include "media_internal.hpp"
 
@@ -81,6 +82,57 @@ bool unsafe_component(std::string_view value) {
     return value.empty() || value == "." || value == ".." || value.find('/') != std::string_view::npos ||
            value.find('\\') != std::string_view::npos ||
            std::ranges::any_of(value, [](unsigned char ch) { return ch < 0x20 || ch == 0x7f; });
+}
+
+Result<MediaDecode> decode_media_object(std::span<const std::byte> bytes, std::uint64_t stored_size) {
+    auto decoded = decode_object(bytes);
+    if (decoded) {
+        std::optional<Error> issue;
+        if (std::holds_alternative<CurrentSmpl>(decoded->payload)) {
+            const auto stored_end = checked_add(decoded->header.header_size, decoded->header.payload_bytes_0x20);
+            const auto logical_end =
+                checked_add(decoded->header.payload_offset_0x24, decoded->header.payload_bytes_0x20);
+            if (!stored_end || *stored_end > stored_size) {
+                issue = make_error(ErrorCode::object_malformed, ErrorCategory::object,
+                                   "SMPL stored segment range exceeds the object payload");
+            } else if (!logical_end || *logical_end > decoded->header.payload_bytes_0x1c) {
+                issue = make_error(ErrorCode::object_malformed, ErrorCategory::object,
+                                   "SMPL segment range exceeds the declared Wave Data payload");
+            } else if (decoded->header.payload_offset_0x24 != 0U ||
+                       decoded->header.payload_bytes_0x20 != decoded->header.payload_bytes_0x1c) {
+                issue =
+                    make_error(ErrorCode::object_missing, ErrorCategory::object,
+                               "SMPL Wave Data is an incomplete multi-disk segment; open its parent object directory");
+            }
+        }
+        return MediaDecode{std::move(*decoded), std::move(issue)};
+    }
+    auto header = decode_object_header(bytes);
+    if (!header)
+        return std::unexpected{header.error()};
+    std::vector<std::byte> raw{bytes.begin(), bytes.end()};
+    return MediaDecode{DecodedObject{std::move(*header), ObjectFormat::unknown, GenericObject{std::move(raw)}},
+                       decoded.error()};
+}
+
+std::string object_category(ObjectType type) {
+    switch (type) {
+    case ObjectType::smpl:
+        return "SMPL";
+    case ObjectType::sbnk:
+        return "SBNK";
+    case ObjectType::sbac:
+        return "SBAC";
+    case ObjectType::prog:
+        return "PROG";
+    case ObjectType::sequ:
+        return "SEQU";
+    case ObjectType::prf3:
+        return "PRF3";
+    case ObjectType::unknown:
+        return "UNKNOWN";
+    }
+    return "UNKNOWN";
 }
 
 } // namespace detail

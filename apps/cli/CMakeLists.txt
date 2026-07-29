@@ -46,6 +46,7 @@ add_library(
   STATIC
   app.cpp
   command_line.cpp
+  local_operation_projection.cpp
   local_operations.cpp
   commands/analysis.cpp
   commands/extract.cpp
