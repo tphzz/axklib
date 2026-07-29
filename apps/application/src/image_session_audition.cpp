@@ -1,5 +1,6 @@
 #include "image_sessions_internal.hpp"
 
+#include <format>
 #include <unordered_set>
 
 axk::app::Result<axk::app::ImageWaveformPreview>

@@ -1,5 +1,7 @@
 #include "filesystem_internal.hpp"
 
+#include <format>
+
 namespace axk::app::filesystem_internal {
 
 std::filesystem::path temporary_entry_name(const std::filesystem::path &destination) {

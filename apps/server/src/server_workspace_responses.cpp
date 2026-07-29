@@ -1,6 +1,7 @@
 #include "server_application.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <limits>
 #include <utility>
 
