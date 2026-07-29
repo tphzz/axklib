@@ -6,13 +6,21 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+
+def create_owner_only_directory(path: Path) -> None:
+    path.mkdir(mode=stat.S_IRWXU)
+    if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) != stat.S_IRWXU:
+        raise RuntimeError("could not create an owner-only server state directory")
 
 
 def wait_for_connection(path: Path, process: subprocess.Popen[bytes]) -> dict[str, Any]:
@@ -92,6 +100,7 @@ def exercise(server: Path, fixture: Path) -> None:
         fixture_name = "fixture.hds"
         shutil.copyfile(fixture, workspace / fixture_name)
         state = root / "state"
+        create_owner_only_directory(state)
         workspace_store = root / "workspaces.json"
         connection_file = state / "connection.json"
         workspace_store.write_text(

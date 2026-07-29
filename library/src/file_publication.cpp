@@ -40,6 +40,61 @@ bool same_identity(const BY_HANDLE_FILE_INFORMATION &left, const BY_HANDLE_FILE_
     return left.dwVolumeSerialNumber == right.dwVolumeSerialNumber && left.nFileIndexHigh == right.nFileIndexHigh &&
            left.nFileIndexLow == right.nFileIndexLow;
 }
+
+class OwnedHandle {
+  public:
+    OwnedHandle() = default;
+    explicit OwnedHandle(HANDLE value) : value_{value} {}
+    OwnedHandle(const OwnedHandle &) = delete;
+    OwnedHandle &operator=(const OwnedHandle &) = delete;
+    OwnedHandle(OwnedHandle &&other) noexcept : value_{std::exchange(other.value_, INVALID_HANDLE_VALUE)} {}
+    OwnedHandle &operator=(OwnedHandle &&other) noexcept {
+        if (this != &other) {
+            if (value_ != INVALID_HANDLE_VALUE)
+                CloseHandle(value_);
+            value_ = std::exchange(other.value_, INVALID_HANDLE_VALUE);
+        }
+        return *this;
+    }
+    ~OwnedHandle() {
+        if (value_ != INVALID_HANDLE_VALUE)
+            CloseHandle(value_);
+    }
+
+    [[nodiscard]] HANDLE get() const noexcept { return value_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return value_ != INVALID_HANDLE_VALUE; }
+
+  private:
+    HANDLE value_{INVALID_HANDLE_VALUE};
+};
+
+OwnedHandle open_retained_candidate(const std::filesystem::path &path,
+                                    const BY_HANDLE_FILE_INFORMATION &expected_identity, DWORD desired_access) {
+    OwnedHandle handle{CreateFileW(path.c_str(), desired_access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                   nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                                   nullptr)};
+    if (!handle)
+        return {};
+    BY_HANDLE_FILE_INFORMATION identity{};
+    if (GetFileInformationByHandle(handle.get(), &identity) == 0 ||
+        (identity.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U ||
+        !same_identity(expected_identity, identity)) {
+        return {};
+    }
+    return handle;
+}
+
+void discard_unidentified_candidate(HANDLE &handle) noexcept {
+    OwnedHandle deletion_handle{
+        ReOpenFile(handle, DELETE | FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0)};
+    CloseHandle(handle);
+    handle = INVALID_HANDLE_VALUE;
+    if (!deletion_handle)
+        return;
+    FILE_DISPOSITION_INFO disposition{TRUE};
+    static_cast<void>(
+        SetFileInformationByHandle(deletion_handle.get(), FileDispositionInfo, &disposition, sizeof(disposition)));
+}
 #else
 Result<int> open_private_staging_directory(int output_parent_descriptor) {
     constexpr std::string_view staging_name{".axklib-publication"};
@@ -155,7 +210,7 @@ Result<TemporaryPublication> TemporaryPublication::create(const std::filesystem:
                 CloseHandle(parent_handle);
             return std::unexpected{identity_error().error()};
         }
-        const auto handle = CreateFileW(candidate->c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
+        const auto handle = CreateFileW(candidate->c_str(), GENERIC_READ | GENERIC_WRITE,
                                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_NEW,
                                         FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
         if (handle == INVALID_HANDLE_VALUE) {
@@ -173,9 +228,7 @@ Result<TemporaryPublication> TemporaryPublication::create(const std::filesystem:
         impl->handle = handle;
         impl->output_parent_handle = parent_handle;
         if (GetFileInformationByHandle(handle, &impl->identity) == 0) {
-            FILE_DISPOSITION_INFO disposition{TRUE};
-            static_cast<void>(
-                SetFileInformationByHandle(handle, FileDispositionInfo, &disposition, sizeof(disposition)));
+            discard_unidentified_candidate(impl->handle);
             return std::unexpected{
                 make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not identify a temporary output")};
         }
@@ -334,21 +387,15 @@ Result<axk::PublicationOutcome> TemporaryPublication::publish(PublicationMode mo
         return std::unexpected{identity_error().error()};
     axk::PublicationOutcome outcome;
 #if defined(_WIN32)
-    const auto identity_handle = CreateFileW(
-        impl_->candidate_path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-    BY_HANDLE_FILE_INFORMATION candidate_identity{};
-    const auto valid = identity_handle != INVALID_HANDLE_VALUE &&
-                       GetFileInformationByHandle(identity_handle, &candidate_identity) != 0 &&
-                       (candidate_identity.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0U &&
-                       same_identity(impl_->identity, candidate_identity);
-    if (identity_handle != INVALID_HANDLE_VALUE)
-        CloseHandle(identity_handle);
-    if (!valid)
+    const auto publication_handle =
+        open_retained_candidate(impl_->candidate_path, impl_->identity, DELETE | FILE_READ_ATTRIBUTES);
+    if (!publication_handle)
         return std::unexpected{identity_error().error()};
 
     if (impl_->hooks && impl_->hooks->before_publish)
         impl_->hooks->before_publish();
+    CloseHandle(impl_->handle);
+    impl_->handle = INVALID_HANDLE_VALUE;
     const auto filename = impl_->destination_path.filename().native();
     std::vector<std::byte> rename_buffer(sizeof(FILE_RENAME_INFO) + filename.size() * sizeof(wchar_t));
     auto *rename_info = reinterpret_cast<FILE_RENAME_INFO *>(rename_buffer.data());
@@ -358,7 +405,7 @@ Result<axk::PublicationOutcome> TemporaryPublication::publish(PublicationMode mo
     std::memcpy(rename_info->FileName, filename.data(), rename_info->FileNameLength);
     IO_STATUS_BLOCK status{};
     constexpr auto rename_information_class = static_cast<FILE_INFORMATION_CLASS>(10);
-    const auto renamed = NtSetInformationFile(impl_->handle, &status, rename_info,
+    const auto renamed = NtSetInformationFile(publication_handle.get(), &status, rename_info,
                                               static_cast<ULONG>(rename_buffer.size()), rename_information_class);
     if (renamed < 0) {
         const std::error_code error{static_cast<int>(RtlNtStatusToDosError(renamed)), std::system_category()};
@@ -406,13 +453,22 @@ Result<axk::PublicationOutcome> TemporaryPublication::publish(PublicationMode mo
 Result<void> TemporaryPublication::discard() {
     if (impl_ == nullptr || !impl_->active)
         return {};
-    impl_->active = false;
 #if defined(_WIN32)
+    const auto deletion_handle =
+        open_retained_candidate(impl_->candidate_path, impl_->identity, DELETE | FILE_READ_ATTRIBUTES);
+    if (!deletion_handle)
+        return identity_error();
+    if (impl_->handle != INVALID_HANDLE_VALUE) {
+        CloseHandle(impl_->handle);
+        impl_->handle = INVALID_HANDLE_VALUE;
+    }
     FILE_DISPOSITION_INFO disposition{TRUE};
-    if (SetFileInformationByHandle(impl_->handle, FileDispositionInfo, &disposition, sizeof(disposition)) == 0) {
+    if (SetFileInformationByHandle(deletion_handle.get(), FileDispositionInfo, &disposition, sizeof(disposition)) ==
+        0) {
         return std::unexpected{
             make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not discard temporary output")};
     }
+    impl_->active = false;
 #else
     struct stat candidate_identity{};
     const auto candidate_name = impl_->candidate_path.filename();
@@ -425,6 +481,7 @@ Result<void> TemporaryPublication::discard() {
         return std::unexpected{
             make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not discard temporary output")};
     }
+    impl_->active = false;
     if (::fsync(impl_->candidate_parent_descriptor) != 0) {
         return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
                                           "temporary output was discarded but directory synchronization failed")};
