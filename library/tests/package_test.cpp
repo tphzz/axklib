@@ -703,20 +703,44 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     EXPECT_EQ(copied_program->package.package_id, original_program->package.package_id);
     EXPECT_EQ(copied_program->archive, original_program->archive);
 
-    std::vector<std::byte> sequence_payload(0x80U);
+    std::vector<std::byte> sequence_payload(0x90U);
     axk::ByteWriter writer{sequence_payload};
     ASSERT_TRUE(writer.write_ascii_field(0U, 12U, "FSFSDEV3SPLX", std::byte{}));
     ASSERT_TRUE(writer.write_ascii_field(0x0cU, 4U, "SEQU", std::byte{}));
     ASSERT_TRUE(writer.write_ascii_field(0x32U, 16U, "Sequence", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x54U, 16U, "Track title", std::byte{' '}));
+    ASSERT_TRUE(writer.write_be16(0x7cU, 1U));
+    ASSERT_TRUE(writer.write_be16(0x7eU, 96U));
+    ASSERT_TRUE(writer.write_be32(0x80U, 0U));
+    ASSERT_TRUE(writer.write_be32(0x84U, 0U));
+    ASSERT_TRUE(writer.write_be16(0x88U, 1U));
+    ASSERT_TRUE(writer.write_u8(0x8aU, 0xffU));
+    ASSERT_TRUE(writer.write_u8(0x8bU, 0x2fU));
+    ASSERT_TRUE(writer.write_u8(0x8cU, 0U));
+    ASSERT_TRUE(writer.write_u8(0x8dU, 0xfdU));
     auto sequence_object =
         axk::StandaloneObject::open(std::make_shared<axk::MemoryReader>(std::move(sequence_payload)), "sequence.bin");
     ASSERT_TRUE(sequence_object) << sequence_object.error().message;
     const axk::MediaContainer sequence_media{std::move(*sequence_object)};
     const std::vector sequence{root(axk::PackageRootKind::sequ, "Standalone object", "Sequence")};
-    const auto unsupported = axk::build_portable_package(sequence_media, sequence);
-    ASSERT_FALSE(unsupported);
-    EXPECT_EQ(unsupported.error().code, axk::ErrorCode::unsupported_profile);
-    EXPECT_NE(unsupported.error().message.find("SEQU"), std::string::npos);
+    const auto built_sequence = axk::build_portable_package(sequence_media, sequence);
+    ASSERT_TRUE(built_sequence) << built_sequence.error().message;
+    EXPECT_EQ(built_sequence->package.kind, axk::PackageKind::sequence);
+    EXPECT_EQ(built_sequence->required_extension, ".axkseq");
+    ASSERT_EQ(built_sequence->package.nodes.size(), 1U);
+    EXPECT_TRUE(built_sequence->package.nodes.front().relocations.empty());
+
+    axk::package_internal::PackageNodeRelocationContext sequence_context;
+    sequence_context.destination_name = "Renamed";
+    const auto renamed = axk::package_internal::relocate_package_node(
+        built_sequence->package, built_sequence->package.nodes.front(), sequence_context);
+    ASSERT_TRUE(renamed) << renamed.error().message;
+    const auto renamed_object = axk::decode_object(*renamed);
+    ASSERT_TRUE(renamed_object) << renamed_object.error().message;
+    EXPECT_EQ(renamed_object->header.name, "Renamed");
+    EXPECT_TRUE(std::ranges::equal(
+        std::span<const std::byte>{*renamed}.subspan(0x54U, 16U),
+        std::span<const std::byte>{built_sequence->package.nodes.front().raw_payload}.subspan(0x54U, 16U)));
     std::filesystem::remove_all(output_root, error);
 }
 

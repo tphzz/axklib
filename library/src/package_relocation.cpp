@@ -221,8 +221,9 @@ Result<RelocationProfile> build_relocation_profile(const DecodedObject &object,
         break;
     }
     case ObjectType::sequ:
-        return std::unexpected{profile_error(object, "SEQU portability is not admitted without a "
-                                                     "proven dependency profile")};
+        if (!std::holds_alternative<CurrentSequence>(object.payload))
+            return std::unexpected{profile_error(object, "current SEQU payload is not decoded")};
+        break;
     case ObjectType::prf3:
         return std::unexpected{profile_error(object, "PRF3 portability is not admitted for package version 1")};
     case ObjectType::unknown:
@@ -340,6 +341,9 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
                     return std::unexpected{written.error()};
             }
         }
+    } else if (node.object_type == "SEQU") {
+        if (!std::holds_alternative<CurrentSequence>(source_decoded->payload))
+            return std::unexpected{relocation_error(node, "Sequence source payload is not decoded")};
     } else {
         return std::unexpected{relocation_error(node, "package node type has no admitted relocation implementation")};
     }

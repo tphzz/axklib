@@ -6,7 +6,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(unofficial-hash-library CONFIG REQUIRED)
 
-add_library(axk_application STATIC src/alteration_journal.cpp src/application_operations.cpp src/audio_operations.cpp src/audition_operations.cpp src/content_digest.cpp src/content_id.cpp src/corpus_audit_operations.cpp src/directory_archive_operations.cpp src/download_archives.cpp
+add_library(axk_application STATIC src/alteration_journal.cpp src/application_operations.cpp src/audio_export_layout.cpp src/audio_operations.cpp src/audition_operations.cpp src/content_digest.cpp src/content_id.cpp src/corpus_audit_operations.cpp src/directory_archive_operations.cpp src/download_archives.cpp
                                    src/extraction_operations.cpp src/extraction_selection.cpp
                                    src/file_coverage_operations.cpp src/file_coverage_support.cpp
                                    src/file_info_operations.cpp src/file_inventory_operations.cpp
@@ -26,7 +26,8 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/application_op
                                    src/package_operations_support.cpp src/session_package_operations.cpp
                                    src/package_plan_store.cpp src/path_reservations.cpp
                                    src/private_storage.cpp src/relationship_diagnostic.cpp
-                                   src/session_audio_export_operations.cpp src/system_service.cpp
+                                   src/session_audio_export_operations.cpp src/session_sequence_operations.cpp
+                                   src/system_service.cpp
                                    src/secure_random.cpp src/uploads.cpp src/validation_allocation.cpp
                                    src/validation_exports.cpp src/validation_operations.cpp
                                    src/validation_operations_support.cpp src/validation_semantics.cpp src/volume_graph.cpp
@@ -66,7 +67,7 @@ axk_add_header_self_containment_target(
 if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
-  add_executable(axk_application_tests tests/alteration_journal_test.cpp tests/application_operations_test.cpp tests/audio_operations_test.cpp
+  add_executable(axk_application_tests tests/alteration_journal_test.cpp tests/application_operations_test.cpp tests/audio_export_layout_test.cpp tests/audio_operations_test.cpp
                                        tests/content_id_test.cpp
                                        tests/download_archives_test.cpp
                                        tests/extraction_operations_test.cpp tests/file_operations_test.cpp

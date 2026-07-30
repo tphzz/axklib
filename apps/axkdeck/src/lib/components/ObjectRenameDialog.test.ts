@@ -67,6 +67,21 @@ describe('ObjectRenameDialog', () => {
         expect(screen.getByRole('alert').textContent).toContain('Rename failed');
     });
 
+    it('uses Sequence terminology for SEQU renames', () => {
+        render(ObjectRenameDialog, {
+            props: {
+                target: { kind: 'sequence', object: { ...object, objectType: 'SEQU' }, name: 'Demo Song' },
+                busy: false,
+                error: '',
+                oncancel: vi.fn(),
+                onsubmit: vi.fn(),
+            },
+        });
+
+        expect(screen.getByRole('dialog', { name: 'Rename Sequence' })).toBeTruthy();
+        expect((screen.getByLabelText('Sequence name') as HTMLInputElement).maxLength).toBe(16);
+    });
+
     it('keeps the primary and secondary footer actions aligned', () => {
         const actionGeometry = appStyles.match(
             /\.secondary-button,\s*\.primary-button,\s*\.danger-button\s*\{[^}]+\}/,

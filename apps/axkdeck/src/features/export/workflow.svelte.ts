@@ -1,4 +1,4 @@
-import { saveRetainedSfzExport, selectLocalSfzDestination } from '../../lib/nativeAudioExports';
+import { saveRetainedDirectoryExport, selectLocalDirectoryExportDestination } from '../../lib/nativeDirectoryExports';
 import { saveRetainedPackage, selectLocalPackageDestination } from '../../lib/nativePackages';
 import { packageExportFilename } from '../../lib/packageExport';
 import type { DirectoryRef, ImageLocation } from '../../lib/storageLocations';
@@ -7,6 +7,8 @@ import type {
     ImageSessionAudioExportInspection,
     ImageSessionAudioExportResult,
     ImageSessionPackageExportResult,
+    ImageSessionSequenceExportDestination,
+    ImageSessionSequenceExportResult,
     ImageTransport,
 } from '../../lib/transport';
 import type { PackageExportSelection } from '../../lib/types';
@@ -27,6 +29,14 @@ export interface AudioExportRequest {
     inspection: ImageSessionAudioExportInspection | null;
     format: 'SFZ' | 'WAV';
     loading: boolean;
+    busy: boolean;
+    jobId: number | null;
+    progressLabel: string;
+    error: string;
+}
+
+export interface SequenceExportRequest {
+    items: PackageExportSelection[];
     busy: boolean;
     jobId: number | null;
     progressLabel: string;
@@ -64,18 +74,23 @@ interface ExportWorkflowDependencies {
 export class ExportWorkflow {
     packageRequest = $state<PackageExportRequest | null>(null);
     audioRequest = $state<AudioExportRequest | null>(null);
+    sequenceRequest = $state<SequenceExportRequest | null>(null);
     private generation = 0;
     private audioGeneration = 0;
+    private sequenceGeneration = 0;
     private lastPackageDirectory = $state<DirectoryRef | null>(null);
     private lastAudioDirectory = $state<DirectoryRef | null>(null);
+    private lastSequenceDirectory = $state<DirectoryRef | null>(null);
 
     constructor(private readonly dependencies: ExportWorkflowDependencies) {}
 
     dispose(): void {
         ++this.generation;
         ++this.audioGeneration;
+        ++this.sequenceGeneration;
         this.audioRequest = null;
         this.packageRequest = null;
+        this.sequenceRequest = null;
     }
 
     requestPackage(items: PackageExportSelection[]): void {
@@ -293,7 +308,11 @@ export class ExportWorkflow {
             retained = result.download;
             if (localDestination) {
                 if (!retained) throw new Error('Audio export did not provide a retained download');
-                await saveRetainedSfzExport(localDestination.candidateId, retained.contentPath, retained.sizeBytes);
+                await saveRetainedDirectoryExport(
+                    localDestination.candidateId,
+                    retained.contentPath,
+                    retained.sizeBytes,
+                );
             }
             if (generation === this.audioGeneration) this.audioRequest = null;
             this.dependencies.setStatus(`Exported audio from ${label}`);
@@ -338,7 +357,10 @@ export class ExportWorkflow {
         if (!request?.inspection || request.busy || !this.dependencies.isDesktop) return;
         const generation = this.audioGeneration;
         try {
-            const destination = await selectLocalSfzDestination(request.inspection.defaultDirectoryName);
+            const destination = await selectLocalDirectoryExportDestination(
+                request.inspection.defaultDirectoryName,
+                'SFZ',
+            );
             if (!destination || generation !== this.audioGeneration || !this.audioRequest) return;
             await this.runAudio(
                 { kind: 'DOWNLOAD', directoryName: destination.directoryName },
@@ -376,4 +398,170 @@ export class ExportWorkflow {
         ++this.audioGeneration;
         this.audioRequest = null;
     }
+
+    requestSequence(items: PackageExportSelection[]): void {
+        if (items.length === 0 || items.some((item) => item.kind !== 'SEQU')) return;
+        ++this.sequenceGeneration;
+        this.sequenceRequest = {
+            items: [...items],
+            busy: false,
+            jobId: null,
+            progressLabel: '',
+            error: '',
+        };
+    }
+
+    async runSequence(
+        destination: ImageSessionSequenceExportDestination,
+        localDestination?: { candidateId: string },
+    ): Promise<void> {
+        const request = this.sequenceRequest;
+        const sessionId = this.dependencies.sessionId();
+        if (!request || sessionId === null || request.busy) return;
+        const generation = this.sequenceGeneration;
+        const label = sequenceSelectionLabel(request.items);
+        this.sequenceRequest = {
+            ...request,
+            busy: true,
+            jobId: null,
+            progressLabel: 'Preparing MIDI export',
+            error: '',
+        };
+        this.dependencies.setStatus(`Exporting MIDI from ${label}`);
+        let retained: ImageSessionSequenceExportResult['download'] = null;
+        try {
+            const completed = await this.dependencies.jobs.run(
+                () =>
+                    this.dependencies.transport.startImageSequenceExport(
+                        sessionId,
+                        request.items.map((item) => {
+                            if (item.kind === 'VOLUME') throw new Error('MIDI export requires Sequence objects');
+                            return item.objectId;
+                        }),
+                        destination,
+                    ),
+                (update) => {
+                    if (generation === this.sequenceGeneration && this.sequenceRequest && update.progress?.label) {
+                        this.sequenceRequest = { ...this.sequenceRequest, progressLabel: update.progress.label };
+                    }
+                },
+                async (job) => {
+                    if (generation !== this.sequenceGeneration || !this.sequenceRequest) {
+                        await this.dependencies.jobs.cancel(job.jobId).catch(() => undefined);
+                        throw new Error('MIDI export was superseded');
+                    }
+                    this.sequenceRequest = { ...this.sequenceRequest, jobId: job.jobId };
+                },
+            );
+            if (completed.status === 'cancelled') {
+                if (generation === this.sequenceGeneration) this.sequenceRequest = null;
+                this.dependencies.setStatus('MIDI export cancelled');
+                return;
+            }
+            if (completed.status !== 'completed') {
+                throw new Error(completed.error ?? 'MIDI export did not complete');
+            }
+            const result = completed.result as ImageSessionSequenceExportResult;
+            retained = result.download;
+            if (localDestination) {
+                if (!retained) throw new Error('MIDI export did not provide a retained download');
+                await saveRetainedDirectoryExport(
+                    localDestination.candidateId,
+                    retained.contentPath,
+                    retained.sizeBytes,
+                );
+            }
+            if (generation === this.sequenceGeneration) this.sequenceRequest = null;
+            this.dependencies.setStatus(`Exported MIDI from ${label}`);
+        } catch (error) {
+            if (generation !== this.sequenceGeneration || !this.sequenceRequest) return;
+            const message = userFacingMessage(error);
+            this.sequenceRequest = {
+                ...this.sequenceRequest,
+                busy: false,
+                jobId: null,
+                progressLabel: '',
+                error: message,
+            };
+            this.dependencies.setStatus(message);
+        } finally {
+            if (retained) await this.dependencies.transport.deleteRetainedPackage(retained).catch(() => undefined);
+        }
+    }
+
+    async sequenceToWorkspace(): Promise<void> {
+        const request = this.sequenceRequest;
+        if (!request || request.busy) return;
+        const generation = this.sequenceGeneration;
+        const selection = await this.dependencies.picker.chooseLocation(
+            'save-directory',
+            'Export MIDI',
+            [],
+            sequenceDirectoryName(request.items),
+            {
+                parentDialog: 'sequence-export',
+                initialDirectory: this.lastSequenceDirectory,
+                ondirectorychange: (directory) => (this.lastSequenceDirectory = directory),
+                requireWritableDirectory: true,
+            },
+        );
+        if (selection?.kind !== 'server-directory' || generation !== this.sequenceGeneration || !this.sequenceRequest) {
+            return;
+        }
+        await this.runSequence({ kind: 'WORKSPACE', output: selection.reference });
+    }
+
+    async sequenceToComputer(): Promise<void> {
+        const request = this.sequenceRequest;
+        if (!request || request.busy || !this.dependencies.isDesktop) return;
+        const generation = this.sequenceGeneration;
+        try {
+            const destination = await selectLocalDirectoryExportDestination(
+                sequenceDirectoryName(request.items),
+                'MIDI',
+            );
+            if (!destination || generation !== this.sequenceGeneration || !this.sequenceRequest) return;
+            await this.runSequence(
+                { kind: 'DOWNLOAD', directoryName: destination.directoryName },
+                { candidateId: destination.candidateId },
+            );
+        } catch (error) {
+            if (generation !== this.sequenceGeneration || !this.sequenceRequest) return;
+            const message = userFacingMessage(error);
+            this.sequenceRequest = { ...this.sequenceRequest, error: message };
+            this.dependencies.setStatus(message);
+        }
+    }
+
+    cancelSequence(): void {
+        const request = this.sequenceRequest;
+        if (!request) return;
+        if (request.busy) {
+            if (request.jobId === null) {
+                ++this.sequenceGeneration;
+                this.sequenceRequest = null;
+                this.dependencies.setStatus('Cancelling MIDI export');
+                return;
+            }
+            this.sequenceRequest = { ...request, progressLabel: 'Cancelling MIDI export' };
+            void this.dependencies.jobs.cancel(request.jobId);
+            return;
+        }
+        ++this.sequenceGeneration;
+        this.sequenceRequest = null;
+    }
+}
+
+function sequenceSelectionLabel(items: readonly PackageExportSelection[]): string {
+    return items.length === 1 ? `Sequence “${items[0]!.name}”` : `${items.length} Sequences`;
+}
+
+function sequenceDirectoryName(items: readonly PackageExportSelection[]): string {
+    const source = items.length === 1 ? items[0]!.name : `${items[0]?.name ?? 'Sequences'} and others`;
+    return (
+        source
+            .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+            .replace(/[ .]+$/g, '')
+            .trim() || 'Sequences'
+    );
 }

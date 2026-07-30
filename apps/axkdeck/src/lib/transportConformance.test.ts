@@ -33,6 +33,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
     packageImportAvailable: false,
     packageExportAvailable: false,
     audioExportAvailable: false,
+    sequenceExportAvailable: false,
     tree: [
         {
             id: 'disk',

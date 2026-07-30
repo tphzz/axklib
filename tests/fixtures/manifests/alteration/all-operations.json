@@ -15,6 +15,9 @@
     {"id":"delete-program","type":"delete_program","partition_index":0,"volume_name":"Volume","program_number":128},
     {"id":"insert-program","type":"insert_program","partition_index":{"operation_ref":"delete-program"},"volume_name":"Volume","program":{"number":128,"assignments":[{"sample_bank":"Group","receive_channel":1},{"sample":"Direct Sample","receive_channel":2}]}},
     {"id":"rename-program","type":"rename_program","partition_index":0,"volume_name":"Volume","program_number":1,"new_program_name":"Piano"},
+    {"id":"delete-sequence","type":"delete_sequence","partition_index":0,"volume_name":"Volume","sequence_name":"Delete Sequence"},
+    {"id":"insert-sequence","type":"insert_sequence","partition_index":{"operation_ref":"delete-sequence"},"volume_name":"Volume","sequence":{"name":"Insert Sequence","midi_path":"sequence.mid"}},
+    {"id":"rename-sequence","type":"rename_sequence","partition_index":0,"volume_name":"Volume","sequence_name":"Old Sequence","new_sequence_name":"New Sequence"},
     {"id":"rename-volume","type":"rename_volume","partition_index":0,"volume_name":"Old Volume","new_volume_name":"New Volume"},
     {"id":"rename-partition","type":"rename_partition","partition_index":0,"partition_name":"Old Partition","new_partition_name":"New Partition"}
   ]

@@ -1,13 +1,13 @@
 import type { PreviewEnvelope, SamplerObject, SamplerRelationship } from './transport';
 
-export type WorkspaceView = 'programs' | 'sample-banks' | 'samples' | 'wave-data';
-export type PackageExportObjectKind = 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL';
+export type WorkspaceView = 'programs' | 'sequences' | 'sample-banks' | 'samples' | 'wave-data';
+export type PackageExportObjectKind = 'PROGRAM' | 'SEQU' | 'SBAC' | 'SBNK' | 'SMPL';
 
 export interface PackageExportObject {
     kind: PackageExportObjectKind;
     objectId: string;
     name: string;
-    typeLabel: 'Program' | 'Sample Bank' | 'Sample' | 'Wave Data';
+    typeLabel: 'Program' | 'Sequence' | 'Sample Bank' | 'Sample' | 'Wave Data';
     partitionIndex: number;
     partitionName: string;
     volumeName: string;
@@ -54,9 +54,16 @@ export interface Program {
     object: SamplerObject;
 }
 
+export interface SequenceItem {
+    id: string;
+    objectId: string;
+    name: string;
+    object: SamplerObject;
+}
+
 export type ObjectRenameTarget =
     | { kind: 'program'; object: SamplerObject; name: string; programNumber: number }
-    | { kind: 'sample-bank' | 'sample' | 'wave-data'; object: SamplerObject; name: string };
+    | { kind: 'sequence' | 'sample-bank' | 'sample' | 'wave-data'; object: SamplerObject; name: string };
 
 export interface SampleStructureItem {
     id: string;
@@ -110,6 +117,7 @@ export interface ProgramAssignmentRow {
 
 export type InspectorSelection =
     | { kind: 'program'; program: Program; assignments: ProgramAssignmentRow[] }
+    | { kind: 'sequence'; sequence: SequenceItem }
     | {
           kind: 'sample-bank';
           item: SampleStructureItem;

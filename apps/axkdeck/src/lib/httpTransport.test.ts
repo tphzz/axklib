@@ -1460,6 +1460,113 @@ describe('HttpImageTransport', () => {
         });
     });
 
+    it('imports uploaded and workspace MIDI through one atomic alteration job', async () => {
+        let alterationBody: unknown;
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return json({
+                        apiVersion: 'v1',
+                        limits: {},
+                        operations: [
+                            {
+                                id: 'images.alter',
+                                method: 'POST',
+                                route: '/api/v1/image-session-alterations',
+                                mode: 'job',
+                                operationClass: 'write',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'ImageSessionAlterationRequest',
+                                resultSchema: 'ImageSessionAlterationResult',
+                                implemented: true,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return json({
+                        imageId: 'image-midi',
+                        revision: 4,
+                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        format: 'sfs',
+                        rootCount: 0,
+                        objectCount: 0,
+                        relationshipCount: 0,
+                        availableOperations: ['images.alter.objects'],
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                if (url.pathname.endsWith('/image-session-alterations')) {
+                    alterationBody = JSON.parse(String(init?.body));
+                    return json(
+                        {
+                            jobId: 'job-midi-import',
+                            operationId: 'images.alter',
+                            state: 'QUEUED',
+                            latestSequence: 0,
+                            progress: null,
+                            result: null,
+                            error: null,
+                        },
+                        202,
+                    );
+                }
+                throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+        });
+        const uploaded = clientUploadLocation({ uploadId: 'upload-midi' }, 'MIDI', 'Intro.mid');
+        const workspace = serverFile('midi/Ending.midi');
+        const opened = await transport.openImage(serverFile('images/base.hds'));
+        await transport.startSequenceImport(opened.sessionId, { partitionIndex: 2, volumeName: 'Songs' }, [
+            { source: uploaded, sequenceName: 'Intro' },
+            { source: workspace, sequenceName: 'Ending' },
+        ]);
+
+        expect(alterationBody).toEqual({
+            imageId: 'image-midi',
+            expectedRevision: 4,
+            manifest: {
+                inline: {
+                    schema_version: '1.0',
+                    operations: [
+                        {
+                            id: 'sequence-0',
+                            type: 'insert_sequence',
+                            partition_index: 2,
+                            volume_name: 'Songs',
+                            sequence: { name: 'Intro', midi_path: 'sequence/import-0.mid' },
+                        },
+                        {
+                            id: 'sequence-1',
+                            type: 'insert_sequence',
+                            partition_index: 2,
+                            volume_name: 'Songs',
+                            sequence: { name: 'Ending', midi_path: 'sequence/import-1.mid' },
+                        },
+                    ],
+                },
+            },
+            inputBindings: [
+                { manifestPath: 'sequence/import-0.mid', input: { uploadRef: { uploadId: 'upload-midi' } } },
+                {
+                    manifestPath: 'sequence/import-1.mid',
+                    input: { fileRef: { rootId: 'workspace', relativePath: 'midi/Ending.midi' } },
+                },
+            ],
+        });
+    });
+
     it('rejects desktop paths instead of relabeling them as sandbox paths', async () => {
         const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
         const desktopPath = { kind: 'native-file', path: 'C:\\Users\\example\\disk.hds' } as unknown as FileLocation;

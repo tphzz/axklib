@@ -17,6 +17,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "audio_export_layout.hpp"
 #include "axklib/application/download_archives.hpp"
 #include "axklib/application/extraction_selection.hpp"
 #include "axklib/application/image_sessions.hpp"
@@ -376,6 +377,17 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                 if (!plan)
                     return std::unexpected(core_error(plan.error(), session->source.relative_path));
                 axk::app::filter_export_plan(*plan, selection->closure, selection->volumes);
+                const auto flat_media = session->media->kind() == axk::MediaKind::fat12_floppy ||
+                                        session->media->kind() == axk::MediaKind::standalone_object ||
+                                        session->media->kind() == axk::MediaKind::axk_object_directory;
+                const auto flatten_selected_volume =
+                    flat_media && roots->size() == 1U && roots->front().kind == "VOLUME";
+                axk::app::PooledPathAllocator pooled_paths;
+                if (auto laid_out =
+                        axk::app::apply_audio_export_layout(*plan, {{}, !flatten_selected_volume, true}, pooled_paths);
+                    !laid_out) {
+                    return std::unexpected(core_error(laid_out.error(), session->source.relative_path));
+                }
                 session->lease.reset();
 
                 auto staging = sandbox.create_staging_directory("axklib-audio-export");

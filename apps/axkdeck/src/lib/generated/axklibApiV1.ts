@@ -556,6 +556,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/image-session-sequence-exports': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.sequence_export'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/image-wave-data-orphan-inspections': {
         parameters: {
             query?: never;
@@ -1285,6 +1301,9 @@ export interface components {
                 | 'DELETE_PROGRAM'
                 | 'INSERT_PROGRAM'
                 | 'RENAME_PROGRAM'
+                | 'DELETE_SEQUENCE'
+                | 'INSERT_SEQUENCE'
+                | 'RENAME_SEQUENCE'
                 | 'RENAME_VOLUME'
                 | 'RENAME_PARTITION';
             volumeName: string;
@@ -1781,7 +1800,7 @@ export interface components {
             objectId: string;
             objectName: string;
             /** @enum {unknown} */
-            objectType: 'PROG' | 'SBAC' | 'SBNK' | 'SMPL';
+            objectType: 'PROG' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU';
             partitionIndex: number | null;
             partitionName: string;
             prerequisiteObjectIds: string[];
@@ -1860,6 +1879,7 @@ export interface components {
             name: string;
             partitionIndex: number | null;
             partitionName: string;
+            sequence: components['schemas']['SequenceMetadata'] | null;
             /** @description Complete stored object file or record size, including object metadata and stored payload bytes. */
             sizeBytes: number;
             type: string;
@@ -2015,7 +2035,7 @@ export interface components {
               }
             | {
                   /** @enum {unknown} */
-                  kind: 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL';
+                  kind: 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU';
                   objectId: string;
               };
         ImageSessionPackageExportDestination:
@@ -2050,7 +2070,7 @@ export interface components {
              * @description Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.
              * @enum {unknown}
              */
-            packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'BUNDLE';
+            packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQUENCE' | 'BUNDLE';
             payloadsVerified: boolean;
             relationshipCount: number;
             relationships: components['schemas']['PackageRelationship'][];
@@ -2113,6 +2133,22 @@ export interface components {
         ImageSessionResponse: {
             data: components['schemas']['ImageSession'];
             meta: components['schemas']['ResponseMeta'];
+        };
+        ImageSessionSequenceExportRequest: {
+            destination: components['schemas']['ImageSessionAudioExportDestination'];
+            expectedRevision: number;
+            imageId: string;
+            objectIds: string[];
+        };
+        ImageSessionSequenceExportResult: {
+            /** @enum {unknown} */
+            destination: 'WORKSPACE' | 'DOWNLOAD';
+            download: components['schemas']['RetainedDownload'] | null;
+            fileCount: number;
+            imageId: string;
+            output: components['schemas']['DirectoryRef'] | null;
+            revision: number;
+            sequenceCount: number;
         };
         ImageSourceRef:
             | {
@@ -2419,7 +2455,7 @@ export interface components {
              * @description Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.
              * @enum {unknown}
              */
-            packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'BUNDLE';
+            packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQUENCE' | 'BUNDLE';
             payloadsVerified: boolean;
             relationshipCount: number;
             relationships: components['schemas']['PackageRelationship'][];
@@ -2508,7 +2544,7 @@ export interface components {
              * @description Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.
              * @enum {unknown}
              */
-            packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'BUNDLE';
+            packageKind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQUENCE' | 'BUNDLE';
             payloadsVerified: boolean;
             relationshipCount: number;
             relationships: components['schemas']['PackageRelationship'][];
@@ -2550,13 +2586,13 @@ export interface components {
         PackageRoot: {
             displayName: string;
             /** @enum {unknown} */
-            kind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL';
+            kind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU';
             nodeIds: string[];
         };
         PackageRootSelector: {
             groupName?: string;
             /** @enum {unknown} */
-            kind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL';
+            kind: 'VOLUME' | 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU';
             objectName?: string;
             partitionIndex?: number | null;
             volumeName?: string;
@@ -2672,12 +2708,20 @@ export interface components {
             };
             meta: components['schemas']['ResponseMeta'];
         };
+        SequenceMetadata: {
+            endTick: number;
+            eventCount: number;
+            firstTick: number;
+            formatVersion: number;
+            tempoBpm: number | null;
+            ticksPerQuarterNote: number;
+        };
         Upload: {
             declaredSize: number;
             expiresInSeconds: number;
             filename: string;
             /** @enum {unknown} */
-            kind: 'AUDIO' | 'PACKAGE' | 'MANIFEST';
+            kind: 'AUDIO' | 'MIDI' | 'PACKAGE' | 'MANIFEST';
             mediaType: string;
             receivedSize: number;
             /** @enum {unknown} */
@@ -2687,7 +2731,7 @@ export interface components {
         UploadCreateRequest: {
             filename: string;
             /** @enum {unknown} */
-            kind: 'AUDIO' | 'PACKAGE' | 'MANIFEST';
+            kind: 'AUDIO' | 'MIDI' | 'PACKAGE' | 'MANIFEST';
             mediaType: string;
             sha256?: string | null;
             size: number;
@@ -5846,6 +5890,121 @@ export interface operations {
         requestBody: {
             content: {
                 'application/json': components['schemas']['PackageImportRequest'];
+            };
+        };
+        responses: {
+            /** @description Job accepted */
+            202: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.sequence_export': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImageSessionSequenceExportRequest'];
             };
         };
         responses: {

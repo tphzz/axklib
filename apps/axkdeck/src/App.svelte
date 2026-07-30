@@ -9,6 +9,7 @@
     import { ExportWorkflow } from './features/export/workflow.svelte';
     import { AudioImportWorkflow, audioExtensions } from './features/import/audioWorkflow.svelte';
     import { PackageImportWorkflow } from './features/import/packageWorkflow.svelte';
+    import { SequenceImportWorkflow } from './features/import/sequenceWorkflow.svelte';
     import { ImageSessionWorkflow } from './features/image-session/workflow.svelte';
     import { JobController } from './features/jobs/actions';
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
@@ -23,6 +24,7 @@
     } from './lib/objectSelection';
     import { userFacingMessage } from './lib/userFacingMessage';
     import type { InterfaceScaleController } from './lib/interfaceScale';
+    import { midiExtensions } from './lib/midiImport';
     import type {
         DiskTreeItem,
         InspectorSelection,
@@ -41,12 +43,13 @@
     const workspaceTabs: {
         id: WorkspaceView;
         label: string;
-        icon: 'music' | 'layers' | 'archive' | 'waveform';
+        icon: 'music' | 'layers' | 'archive' | 'waveform' | 'list';
     }[] = [
         { id: 'programs', label: 'Programs', icon: 'music' },
         { id: 'sample-banks', label: 'Sample Banks', icon: 'layers' },
         { id: 'samples', label: 'Samples', icon: 'archive' },
         { id: 'wave-data', label: 'Wave Data', icon: 'waveform' },
+        { id: 'sequences', label: 'Sequences', icon: 'list' },
     ];
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
@@ -56,6 +59,7 @@
     let connectionSettings = $state<RemoteServerSettingsView | null>(null);
     let workspaceManagerOpen = $state(false);
     let audioFileInput = $state<HTMLInputElement>();
+    let sequenceFileInput = $state<HTMLInputElement>();
     let packageExportSelection = $state<PackageExportSelectionState>(emptyPackageExportSelection());
     const connectionActions = createConnectionActions();
     const jobController = new JobController(transport);
@@ -157,6 +161,31 @@
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
     });
+    const sequenceImportWorkflow = new SequenceImportWorkflow({
+        transport,
+        jobs: jobController,
+        picker: pickerController,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        imageLocation: () => imageSessionWorkflow.location,
+        mutationsAvailable: () => mutationWorkflow.objectRenameAvailable,
+        selectedVolume: () => {
+            const selected = imageSessionWorkflow.selectedSource;
+            return selected.kind === 'volume' && selected.partitionIndex !== undefined
+                ? { partitionIndex: selected.partitionIndex, volumeName: selected.name }
+                : null;
+        },
+        sequences: () => catalog.sequences,
+        refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
+        invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
+        selectWorkspace: (view) => auditionWorkflow.selectWorkspaceView(view),
+        selectSequence: (sequence) => {
+            catalog.selectedSequenceId = sequence.objectId;
+            catalog.inspectorObjectId = sequence.objectId;
+            catalog.editorObjectIds.sequences = sequence.objectId;
+        },
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        reportTiming: reportMutationTiming,
+    });
     imageSessionWorkflow.connect({
         catalog,
         audition: auditionWorkflow,
@@ -170,6 +199,7 @@
     const sampleBanks = $derived(catalog.sampleBanks);
     const samples = $derived(catalog.samples);
     const waveData = $derived(catalog.waveData);
+    const sequences = $derived(catalog.sequences);
 
     onDestroy(() => {
         exportWorkflow.dispose();
@@ -204,7 +234,9 @@
               ? catalog.selectedBankId
               : workspaceView === 'samples'
                 ? catalog.selectedSampleId
-                : catalog.selectedWaveDataId,
+                : workspaceView === 'wave-data'
+                  ? catalog.selectedWaveDataId
+                  : catalog.selectedSequenceId,
     );
     const inspectorSelection = $derived.by<InspectorSelection>(() =>
         catalog.selectionForObject(catalog.inspectorObjectId, auditionWorkflow.sampleBankPreviewMemberId),
@@ -305,6 +337,11 @@
         await exportWorkflow.requestAudio(items);
     }
 
+    function requestSequenceExport(items: PackageExportObject[]): void {
+        if (!imageSessionWorkflow.sequenceExportAvailable) return;
+        exportWorkflow.requestSequence(items);
+    }
+
     function requestObjectDeletion(targets: PackageExportObject[]): void {
         if (!imageSessionWorkflow.objectDeletionAvailable) return;
         deletionWorkflow.requestObjects(targets);
@@ -363,6 +400,14 @@
     accept={audioExtensions.map((extension) => `.${extension}`).join(',')}
     onchange={(event) => audioImportWorkflow.filesChosen(event)}
 />
+<input
+    bind:this={sequenceFileInput}
+    class="sr-only"
+    type="file"
+    multiple
+    accept={midiExtensions.map((extension) => `.${extension}`).join(',')}
+    onchange={(event) => sequenceImportWorkflow.filesChosen(event)}
+/>
 
 <WorkspaceShell
     {transport}
@@ -380,10 +425,12 @@
     audition={auditionWorkflow}
     mutation={mutationWorkflow}
     audioImport={audioImportWorkflow}
+    sequenceImport={sequenceImportWorkflow}
     {programs}
     {sampleBanks}
     {samples}
     {waveData}
+    {sequences}
     {bankMembers}
     {bankMemberWaveData}
     {sampleWaveData}
@@ -397,6 +444,7 @@
     packageImportAvailable={imageSessionWorkflow.packageImportAvailable}
     packageExportAvailable={imageSessionWorkflow.packageExportAvailable}
     audioExportAvailable={imageSessionWorkflow.audioExportAvailable}
+    sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
     openConnectionSettings={() => void openConnectionSettings()}
     openImage={() => void imageSessionWorkflow.chooseAndOpen()}
     createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}
@@ -407,6 +455,7 @@
     selectWorkspace={(view) => auditionWorkflow.selectWorkspaceView(view)}
     exportPackage={requestObjectPackageExport}
     exportAudio={(items) => void requestAudioExport(items)}
+    exportMidi={requestSequenceExport}
     deleteObjects={requestObjectDeletion}
     cleanupWaveData={requestWaveDataCleanup}
     clearSelection={clearPackageExportSelection}
@@ -441,6 +490,9 @@
     deletion={deletionWorkflow}
     audioImport={audioImportWorkflow}
     {audioFileInput}
+    sequenceImport={sequenceImportWorkflow}
+    {sequenceFileInput}
     sampleNames={samples.map((item) => item.name)}
     waveDataNames={waveData.map((item) => item.name)}
+    sequenceNames={sequences.map((item) => item.name)}
 />

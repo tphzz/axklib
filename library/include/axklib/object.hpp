@@ -174,8 +174,29 @@ struct CurrentProg {
     std::vector<ProgAssignment> assignments;
 };
 
+enum class SequenceEventKind : std::uint8_t {
+    channel,
+    system_exclusive,
+    meta,
+};
+
+struct SequenceEvent {
+    std::uint32_t tick{};
+    SequenceEventKind kind{SequenceEventKind::channel};
+    std::vector<std::byte> message;
+
+    friend bool operator==(const SequenceEvent &, const SequenceEvent &) = default;
+};
+
 struct CurrentSequence {
     std::vector<std::byte> raw_payload;
+    std::uint16_t format_version{};
+    std::uint16_t ticks_per_quarter_note{};
+    std::uint32_t first_tick{};
+    std::uint32_t end_tick{};
+    std::uint64_t event_count{};
+    std::optional<std::uint16_t> tempo_bpm;
+    std::vector<SequenceEvent> events;
 };
 
 struct CurrentProfile {

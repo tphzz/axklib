@@ -49,6 +49,7 @@ export class ImageSessionWorkflow {
     packageImportAvailable = $state(false);
     packageExportAvailable = $state(false);
     audioExportAvailable = $state(false);
+    sequenceExportAvailable = $state(false);
 
     private readonly controller: ImageSessionController;
     private collaborators: SessionCollaborators | null = null;
@@ -259,6 +260,7 @@ export class ImageSessionWorkflow {
         this.packageImportAvailable = opened.packageImportAvailable;
         this.packageExportAvailable = opened.packageExportAvailable;
         this.audioExportAvailable = opened.audioExportAvailable;
+        this.sequenceExportAvailable = opened.sequenceExportAvailable;
         this.sourceItems = opened.tree;
         const preferredItem = preferred
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -302,6 +304,7 @@ export class ImageSessionWorkflow {
         this.packageImportAvailable = false;
         this.packageExportAvailable = false;
         this.audioExportAvailable = false;
+        this.sequenceExportAvailable = false;
         collaborators.deletion.dispose();
     }
 }

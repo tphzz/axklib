@@ -101,6 +101,16 @@ export function mapObject(item: ApiObjectItem): SamplerObject {
         loopModeLabel: item.waveform?.loopModeLabel,
         loopStartFrame: item.waveform?.loopStartFrame,
         loopLengthFrames: item.waveform?.loopLengthFrames,
+        sequence: item.sequence
+            ? {
+                  formatVersion: item.sequence.formatVersion,
+                  ticksPerQuarterNote: item.sequence.ticksPerQuarterNote,
+                  firstTick: item.sequence.firstTick,
+                  endTick: item.sequence.endTick,
+                  eventCount: item.sequence.eventCount,
+                  initialBeatsPerMinute: item.sequence.tempoBpm ?? undefined,
+              }
+            : undefined,
     };
 }
 

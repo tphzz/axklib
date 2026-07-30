@@ -14,6 +14,7 @@ import type {
     ImageSessionExportRoot,
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
+    ImageSessionSequenceExportDestination,
     ImageSessionPackageImportPlan,
     ImageSessionPackageRename,
     InputBinding,
@@ -32,6 +33,8 @@ import type {
     PreviewEnvelope,
     RelationshipPage,
     RelationshipPageFilter,
+    SequenceImportItem,
+    SequenceImportTarget,
     VolumeMutation,
     WaveDataOrphanInspection,
 } from '../transport';
@@ -64,6 +67,7 @@ export interface InMemoryImageTransportOptions {
         | 'packageImportAvailable'
         | 'packageExportAvailable'
         | 'audioExportAvailable'
+        | 'sequenceExportAvailable'
     > & {
         volumeMutationsAvailable?: boolean;
         partitionMutationsAvailable?: boolean;
@@ -73,6 +77,7 @@ export interface InMemoryImageTransportOptions {
         packageImportAvailable?: boolean;
         packageExportAvailable?: boolean;
         audioExportAvailable?: boolean;
+        sequenceExportAvailable?: boolean;
         companionDirectories?: DirectoryRef[];
     };
     preview?: PreviewEnvelope;
@@ -131,6 +136,7 @@ export class InMemoryImageTransport implements ImageTransport {
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
+            sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
         };
     }
 
@@ -150,6 +156,7 @@ export class InMemoryImageTransport implements ImageTransport {
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
+            sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
         };
     }
 
@@ -256,6 +263,22 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState> {
         return this.invoke('startAudioImport', [sessionId, target, items]);
+    }
+
+    startSequenceImport(
+        sessionId: number,
+        target: SequenceImportTarget,
+        items: SequenceImportItem[],
+    ): Promise<JobState> {
+        return this.invoke('startSequenceImport', [sessionId, target, items]);
+    }
+
+    startImageSequenceExport(
+        sessionId: number,
+        objectIds: string[],
+        destination: ImageSessionSequenceExportDestination,
+    ): Promise<JobState> {
+        return this.invoke('startImageSequenceExport', [sessionId, objectIds, destination]);
     }
 
     downloadFile(source: FileLocation): Promise<ClientDownload> {

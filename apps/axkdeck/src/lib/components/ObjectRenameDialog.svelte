@@ -18,11 +18,13 @@
     const subject = $derived(
         target.kind === 'program'
             ? 'Program'
-            : target.kind === 'sample-bank'
-              ? 'Sample Bank'
-              : target.kind === 'sample'
-                ? 'Sample'
-                : 'Wave Data',
+            : target.kind === 'sequence'
+              ? 'Sequence'
+              : target.kind === 'sample-bank'
+                ? 'Sample Bank'
+                : target.kind === 'sample'
+                  ? 'Sample'
+                  : 'Wave Data',
     );
     const maximumLength = $derived(target.kind === 'program' ? 8 : 16);
     const trimmedValue = $derived(value.trim());

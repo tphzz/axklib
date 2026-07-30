@@ -4,6 +4,7 @@ import type { PackageExportSelection } from './types';
 const extensions = {
     VOLUME: 'axkvol',
     PROGRAM: 'axkprg',
+    SEQU: 'axkseq',
     SBAC: 'axksbac',
     SBNK: 'axksbnk',
     SMPL: 'axksmpl',

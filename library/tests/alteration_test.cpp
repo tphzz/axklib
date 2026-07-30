@@ -100,6 +100,24 @@ axk::Waveform test_waveform() {
     return result;
 }
 
+std::vector<std::byte> test_midi() {
+    return {
+        std::byte{'M'}, std::byte{'T'},  std::byte{'h'},  std::byte{'d'},  std::byte{0},   std::byte{0},
+        std::byte{0},   std::byte{6},    std::byte{0},    std::byte{0},    std::byte{0},   std::byte{1},
+        std::byte{0},   std::byte{96},   std::byte{'M'},  std::byte{'T'},  std::byte{'r'}, std::byte{'k'},
+        std::byte{0},   std::byte{0},    std::byte{0},    std::byte{12},   std::byte{0},   std::byte{0x90},
+        std::byte{60},  std::byte{100},  std::byte{96},   std::byte{0x80}, std::byte{60},  std::byte{0},
+        std::byte{0},   std::byte{0xff}, std::byte{0x2f}, std::byte{0},
+    };
+}
+
+void write_bytes(const std::filesystem::path &path, std::span<const std::byte> content) {
+    std::ofstream output{path, std::ios::binary};
+    ASSERT_TRUE(output);
+    output.write(reinterpret_cast<const char *>(content.data()), static_cast<std::streamsize>(content.size()));
+    ASSERT_TRUE(output);
+}
+
 class CancellingProgress final : public axk::ProgressSink {
   public:
     CancellingProgress(axk::CancellationSource &source, std::uint64_t cancel_after)
@@ -302,6 +320,73 @@ void patch_record_name(const std::filesystem::path &path, const axk::Partition &
 
 } // namespace
 
+TEST(Alteration, InsertsRenamesAndDeletesSequenceObjects) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-sequence";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    const auto source = root / "source.hds";
+    const auto inserted = root / "inserted.hds";
+    const auto renamed = root / "renamed.hds";
+    const auto removed = root / "removed.hds";
+    const auto midi = root / "source.mid";
+    write_bytes(midi, test_midi());
+
+    const auto written = axk::write_hds_image(source_manifest(), source);
+    ASSERT_TRUE(written) << written.error().message;
+
+    const axk::AlterationManifest insert_manifest{
+        "1.0",
+        {{"insert-sequence", axk::InsertSequenceOperation{axk::PartitionIndex{0U}, "Retained", {"Original", midi}}}},
+    };
+    const auto inserted_result = axk::alter_hds(source, insert_manifest, inserted);
+    ASSERT_TRUE(inserted_result) << inserted_result.error().message;
+    auto inserted_container = axk::open_image(inserted);
+    ASSERT_TRUE(inserted_container) << inserted_container.error().message;
+    auto inserted_catalog = axk::build_object_catalog(*inserted_container);
+    ASSERT_TRUE(inserted_catalog) << inserted_catalog.error().message;
+    const auto sequence = std::ranges::find_if(inserted_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sequ && object.object.header.name == "Original";
+    });
+    ASSERT_NE(sequence, inserted_catalog->objects.end());
+    const auto *decoded = std::get_if<axk::CurrentSequence>(&sequence->object.payload);
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(decoded->event_count, 3U);
+
+    const axk::AlterationManifest rename_manifest{
+        "1.0",
+        {{"rename-sequence", axk::RenameSequenceOperation{axk::PartitionIndex{0U}, "Retained", "Original", "Renamed"}}},
+    };
+    const auto renamed_result = axk::alter_hds(inserted, rename_manifest, renamed);
+    ASSERT_TRUE(renamed_result) << renamed_result.error().message;
+    auto renamed_container = axk::open_image(renamed);
+    ASSERT_TRUE(renamed_container) << renamed_container.error().message;
+    auto renamed_catalog = axk::build_object_catalog(*renamed_container);
+    ASSERT_TRUE(renamed_catalog) << renamed_catalog.error().message;
+    const auto renamed_sequence = std::ranges::find_if(renamed_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sequ && object.object.header.name == "Renamed";
+    });
+    ASSERT_NE(renamed_sequence, renamed_catalog->objects.end());
+    const auto *renamed_decoded = std::get_if<axk::CurrentSequence>(&renamed_sequence->object.payload);
+    ASSERT_NE(renamed_decoded, nullptr);
+    EXPECT_EQ(renamed_decoded->raw_payload[0x54U], std::byte{'O'});
+
+    const axk::AlterationManifest delete_manifest{
+        "1.0",
+        {{"delete-sequence", axk::DeleteSequenceOperation{axk::PartitionIndex{0U}, "Retained", "Renamed"}}},
+    };
+    const auto removed_result = axk::alter_hds(renamed, delete_manifest, removed);
+    ASSERT_TRUE(removed_result) << removed_result.error().message;
+    auto removed_container = axk::open_image(removed);
+    ASSERT_TRUE(removed_container) << removed_container.error().message;
+    auto removed_catalog = axk::build_object_catalog(*removed_container);
+    ASSERT_TRUE(removed_catalog) << removed_catalog.error().message;
+    EXPECT_EQ(std::ranges::count(removed_catalog->objects, axk::ObjectType::sequ,
+                                 [](const auto &object) { return object.object.header.type; }),
+              0U);
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(AlterationManifest, RequiresStrictOrderedBackwardReferences) {
     constexpr std::string_view valid = R"({
     "schema_version":"1.0","operations":[
@@ -422,7 +507,8 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
         std::string_view{"insert_sbnk"},      std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
         std::string_view{"rename_waveform"},  std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
         std::string_view{"insert_sbac"},      std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
-        std::string_view{"insert_program"},   std::string_view{"rename_program"},  std::string_view{"rename_volume"},
+        std::string_view{"insert_program"},   std::string_view{"rename_program"},  std::string_view{"delete_sequence"},
+        std::string_view{"insert_sequence"},  std::string_view{"rename_sequence"}, std::string_view{"rename_volume"},
         std::string_view{"rename_partition"},
     };
     ASSERT_EQ(parsed->operations.size(), expected.size());

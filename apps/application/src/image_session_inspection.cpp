@@ -17,8 +17,9 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
             ++validation.info_count;
     }
     std::vector<std::string> available_operations{
-        "images.content", "images.objects",    "images.relationships",  "images.validation.issues",
-        "images.preview", "auditions.prepare", "images.package.export", "images.audio_export",
+        "images.content",           "images.objects",      "images.relationships",
+        "images.validation.issues", "images.preview",      "auditions.prepare",
+        "images.package.export",    "images.audio_export", "images.sequence_export",
     };
     const auto source_metadata =
         implementation_->sandbox.metadata((*session)->source.root_id, (*session)->source.relative_path);

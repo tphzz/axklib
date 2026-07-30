@@ -726,6 +726,58 @@ input:focus-visible {
   white-space: nowrap;
 }
 
+.sequence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sequence-row {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--density-row);
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 7px;
+  overflow: hidden;
+  color: var(--color-text);
+  border: 1px solid transparent;
+  border-bottom-color: var(--color-border);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: 130ms ease;
+}
+
+.sequence-row:hover {
+  border-color: rgb(104 151 187 / 42%);
+  border-radius: 5px;
+  background: #293036;
+}
+
+.sequence-row.active,
+.sequence-row.selected {
+  border-color: rgb(104 151 187 / 68%);
+  border-radius: 5px;
+  background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
+}
+
+.sequence-row strong {
+  overflow: hidden;
+  color: var(--color-text-strong);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sequence-row span {
+  color: var(--color-text-muted);
+  font-size: 8.5px;
+  white-space: nowrap;
+}
+
 .object-slot {
   color: var(--color-text-muted);
   font-size: 8.5px;

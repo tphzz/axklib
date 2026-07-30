@@ -12,6 +12,7 @@ import type {
     ImageSessionPackageImportPlan,
     ImageSessionPackageRename,
     JobState,
+    ImageSessionSequenceExportDestination,
     PackageImportDestination,
     PackageImportPlan,
     PackageInspection,
@@ -151,6 +152,26 @@ export class HttpPackageOperations {
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.jobs.isJob(job)) throw new Error('images.audio_export did not return a job');
+        return this.jobs.map(job);
+    }
+
+    async startSequenceExport(
+        sessionId: number,
+        objectIds: string[],
+        destination: ImageSessionSequenceExportDestination,
+    ): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.sequence_export',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                objectIds,
+                destination,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.sequence_export did not return a job');
         return this.jobs.map(job);
     }
 

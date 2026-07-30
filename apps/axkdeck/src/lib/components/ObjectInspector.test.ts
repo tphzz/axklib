@@ -77,6 +77,41 @@ function samplePreview(
 }
 
 describe('ObjectInspector', () => {
+    it('shows decoded timing and storage metadata for a selected Sequence', () => {
+        const sequenceObject = {
+            ...object('SEQU', 'DJ TSUYOSHI DEMO'),
+            storedSizeBytes: 41_204,
+            sequence: {
+                formatVersion: 1,
+                ticksPerQuarterNote: 96,
+                firstTick: 0,
+                endTick: 40_408,
+                eventCount: 6_735,
+                initialBeatsPerMinute: 134.5,
+            },
+        };
+        render(ObjectInspector, {
+            props: {
+                selection: {
+                    kind: 'sequence',
+                    sequence: {
+                        id: sequenceObject.key,
+                        objectId: sequenceObject.key,
+                        name: sequenceObject.name,
+                        object: sequenceObject,
+                    },
+                },
+            },
+        });
+
+        expect(screen.getByRole('heading', { name: 'Sequence details' })).toBeTruthy();
+        expect(screen.getByText('DJ TSUYOSHI DEMO')).toBeTruthy();
+        expect(screen.getByText('6,735')).toBeTruthy();
+        expect(screen.getByText('96')).toBeTruthy();
+        expect(screen.getByText('134.5 BPM')).toBeTruthy();
+        expect(screen.getByText('40,408')).toBeTruthy();
+    });
+
     it('shows structural metadata for a selected SBAC', () => {
         const bankObject = object('SBAC', 'STRINGS');
         const sampleObject = object('SBNK', 'Strings C3');

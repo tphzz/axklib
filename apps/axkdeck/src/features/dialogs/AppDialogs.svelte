@@ -4,6 +4,7 @@
     import type { ExportWorkflow } from '../export/workflow.svelte';
     import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
     import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
+    import type { SequenceImportWorkflow } from '../import/sequenceWorkflow.svelte';
     import type { MutationWorkflow } from '../mutation/workflow.svelte';
     import AudioImportDialog from '../../lib/components/AudioImportDialog.svelte';
     import CompanionDiskDialog from '../../lib/components/CompanionDiskDialog.svelte';
@@ -13,6 +14,8 @@
     import ObjectRenameDialog from '../../lib/components/ObjectRenameDialog.svelte';
     import PackageExportDialog from '../../lib/components/PackageExportDialog.svelte';
     import PackageImportDialog from '../../lib/components/PackageImportDialog.svelte';
+    import MidiExportDialog from '../../lib/components/MidiExportDialog.svelte';
+    import MidiImportDialog from '../../lib/components/MidiImportDialog.svelte';
     import ServerConnectionSettings from '../../lib/components/ServerConnectionSettings.svelte';
     import ServerStoragePicker from '../../lib/components/ServerStoragePicker.svelte';
     import SfzExportDialog from '../../lib/components/SfzExportDialog.svelte';
@@ -56,8 +59,11 @@
         deletion: DeletionWorkflow;
         audioImport: AudioImportWorkflow;
         audioFileInput?: HTMLInputElement;
+        sequenceImport: SequenceImportWorkflow;
+        sequenceFileInput?: HTMLInputElement;
         sampleNames: string[];
         waveDataNames: string[];
+        sequenceNames: string[];
     }
 
     let {
@@ -87,8 +93,11 @@
         deletion,
         audioImport,
         audioFileInput,
+        sequenceImport,
+        sequenceFileInput,
         sampleNames,
         waveDataNames,
+        sequenceNames,
     }: Props = $props();
 </script>
 
@@ -212,6 +221,18 @@
         oncancel={() => exports.cancelAudio()}
     />
 {/if}
+{#if exports.sequenceRequest && pickerRequest?.parentDialog !== 'sequence-export'}
+    <MidiExportDialog
+        items={exports.sequenceRequest.items}
+        desktop={isDesktop}
+        busy={exports.sequenceRequest.busy}
+        progressLabel={exports.sequenceRequest.progressLabel}
+        error={exports.sequenceRequest.error}
+        onworkspace={() => void exports.sequenceToWorkspace()}
+        onlocal={() => void exports.sequenceToComputer()}
+        oncancel={() => exports.cancelSequence()}
+    />
+{/if}
 {#if deletion.objectRequest}
     <ObjectDeletionDialog
         inspection={deletion.objectRequest.inspection}
@@ -251,6 +272,20 @@
             : undefined}
         oncommit={(items) => audioImport.commit(items)}
         oncancel={() => (audioImport.request = null)}
+    />
+{/if}
+{#if sequenceImport.request && pickerRequest?.parentDialog !== 'sequence-import'}
+    <MidiImportDialog
+        {transport}
+        files={sequenceImport.request.files}
+        target={sequenceImport.request.target}
+        existingSequenceNames={sequenceNames}
+        onchooseworkspace={() => void sequenceImport.chooseWorkspace()}
+        onchooselocal={transport.supportsClientUploads && sequenceFileInput
+            ? () => sequenceImport.chooseLocal(sequenceFileInput)
+            : undefined}
+        oncommit={(items) => sequenceImport.commit(items)}
+        oncancel={() => (sequenceImport.request = null)}
     />
 {/if}
 {#if audioImport.dragActive && !audioImport.request}

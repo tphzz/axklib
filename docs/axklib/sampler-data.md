@@ -57,7 +57,7 @@ some helper functions and as fallback display names by user-facing renderers.
 | `SBNK` | Sampler-visible Sample object. Stores Sample parameters and links to Wave Data storage. |
 | `SBAC` | Sampler-visible Sample Bank object. User-facing trees render it as `B <name>`. |
 | `PROG` | Program object, Program display name, effects, controller data, and assignment rows. |
-| `SEQU` | Sequence object. Currently surfaced as an object identity and tree entry. |
+| `SEQU` | Sequence object. Current timeline events, timing, tempo, and MIDI conversion are decoded. |
 | `PRF3` | Profile/preference-style object. Currently surfaced as an object identity; type-specific fields are not public yet. |
 | other known tags | Recognized by low-level helpers, but not loaded as normal public objects unless a container reader explicitly supports them. |
 
@@ -78,9 +78,11 @@ the embedded header supplies its sampler object name.
 `SMPL` and `SBNK` have variable total file sizes. Consumers must use the
 big-endian length and offset fields in the object rather than inferring payload
 boundaries from a FAT cluster count, ISO extent padding, or an `Fnnn` name.
-`SEQU` and `PRF3` can be inventoried and transferred as complete known-type
-payloads, but their type-specific inner formats are not part of the current
-public decoder contract.
+`SEQU` can be inventoried, transferred, renamed, and decoded through the current
+timeline profile. See [Sequence Data And MIDI Conversion](sequences.md).
+`PRF3` can be inventoried and transferred as a complete known-type payload, but
+its type-specific inner format is not part of the current public decoder
+contract.
 
 ## AxklibObject Identity
 
@@ -605,8 +607,10 @@ that are useful for diagnostics but should not become normal Program children us
 
 `SEQU` and `PRF3` are loaded as supported object identities when their payloads
 use the shared header. Current public behavior preserves object name, type,
-placement metadata, raw payload bytes, and report identity fields. Type-specific
-parameter sections are not currently exposed as public fields.
+placement metadata, raw payload bytes, and report identity fields. The current
+`SEQU` timeline, event model, package profile, and Standard MIDI File conversion
+are documented in [Sequence Data And MIDI Conversion](sequences.md). `PRF3`
+type-specific parameter sections are not currently exposed as public fields.
 
 ## Relationship Graph
 

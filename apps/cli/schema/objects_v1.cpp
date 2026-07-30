@@ -2,6 +2,7 @@
 
 #include <iomanip>
 #include <sstream>
+#include <string_view>
 
 #include <nlohmann/json.hpp>
 
@@ -117,8 +118,26 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"effect_blocks_hex", std::move(effects)},
                 {"assignments", std::move(assignments)}};
     }
-    if (const auto *sequence = std::get_if<CurrentSequence>(&object.payload))
-        return {{"kind", "SEQU"}, {"raw_payload_hex", hex(sequence->raw_payload)}};
+    if (const auto *sequence = std::get_if<CurrentSequence>(&object.payload)) {
+        auto events = OrderedJson::array();
+        for (const auto &event : sequence->events) {
+            std::string_view kind{"channel"};
+            if (event.kind == SequenceEventKind::meta)
+                kind = "meta";
+            else if (event.kind == SequenceEventKind::system_exclusive)
+                kind = "system_exclusive";
+            events.push_back({{"tick", event.tick}, {"kind", kind}, {"message_hex", hex(event.message)}});
+        }
+        return {{"kind", "SEQU"},
+                {"format_version", sequence->format_version},
+                {"ticks_per_quarter_note", sequence->ticks_per_quarter_note},
+                {"first_tick", sequence->first_tick},
+                {"end_tick", sequence->end_tick},
+                {"event_count", sequence->event_count},
+                {"tempo_bpm", sequence->tempo_bpm ? OrderedJson(*sequence->tempo_bpm) : OrderedJson(nullptr)},
+                {"events", std::move(events)},
+                {"raw_payload_hex", hex(sequence->raw_payload)}};
+    }
     if (const auto *profile = std::get_if<CurrentProfile>(&object.payload))
         return {{"kind", "PRF3"}, {"raw_payload_hex", hex(profile->raw_payload)}};
     return {{"kind", "generic"}};

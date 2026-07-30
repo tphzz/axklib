@@ -109,6 +109,15 @@ struct WaveformMetadata {
     std::uint32_t loop_length_frames{};
 };
 
+struct SequenceMetadata {
+    std::uint16_t format_version{};
+    std::uint16_t ticks_per_quarter_note{};
+    std::uint32_t first_tick{};
+    std::uint32_t end_tick{};
+    std::uint64_t event_count{};
+    std::optional<std::uint16_t> tempo_bpm;
+};
+
 struct ImageObjectItem {
     std::string id;
     std::string type;
@@ -121,6 +130,7 @@ struct ImageObjectItem {
     std::string entry_name;
     std::uint64_t stored_size_bytes{};
     std::optional<WaveformMetadata> waveform;
+    std::optional<SequenceMetadata> sequence;
 };
 
 struct ImageRelationshipItem {

@@ -221,6 +221,15 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
                             {"loopStartFrame", item.waveform->loop_start_frame},
                             {"loopLengthFrames", item.waveform->loop_length_frames}};
             }
+            Json sequence;
+            if (item.sequence) {
+                sequence = {{"formatVersion", item.sequence->format_version},
+                            {"ticksPerQuarterNote", item.sequence->ticks_per_quarter_note},
+                            {"firstTick", item.sequence->first_tick},
+                            {"endTick", item.sequence->end_tick},
+                            {"eventCount", item.sequence->event_count},
+                            {"tempoBpm", item.sequence->tempo_bpm ? Json(*item.sequence->tempo_bpm) : Json{}}};
+            }
             return Json{{"id", item.id},
                         {"type", item.type},
                         {"name", item.name},
@@ -231,7 +240,8 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
                         {"categoryName", item.category_name},
                         {"entryName", item.entry_name},
                         {"sizeBytes", item.stored_size_bytes},
-                        {"waveform", std::move(waveform)}};
+                        {"waveform", std::move(waveform)},
+                        {"sequence", std::move(sequence)}};
         });
 }
 

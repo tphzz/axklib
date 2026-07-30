@@ -237,11 +237,12 @@ std::string sanitize_path_component(std::string_view value, std::string_view fal
 }
 
 StructuredObjectPath structured_object_path(const MediaObject &object) {
-    auto group = sanitize_path_component(object.group_label.value, "objects");
     auto volume = sanitize_path_component(object.volume_label.value, "volume");
     auto category = sanitize_path_component(detail::object_category(object.decoded.header.type), "objects");
     auto name = sanitize_path_component(object.decoded.header.name, "unnamed");
-    std::filesystem::path path{group};
+    std::filesystem::path path;
+    if (!object.group_label.value.empty())
+        path /= sanitize_path_component(object.group_label.value, "objects");
     path /= volume;
     path /= category;
     path /= name;
@@ -261,12 +262,16 @@ std::vector<StructuredObjectPath> structured_object_paths(std::span<const MediaO
         const auto &volumes = raw_volumes.at(
             {detail::upper_ascii(object.group_label.value), detail::upper_ascii(object.volume_label.value)});
         if (volumes.size() > 1U && !object.raw_volume.empty()) {
-            auto group = sanitize_path_component(object.group_label.value, "objects");
             auto volume =
                 sanitize_path_component(std::format("{} ({})", object.volume_label.value, object.raw_volume), "volume");
             auto category = sanitize_path_component(detail::object_category(object.decoded.header.type), "objects");
             auto name = sanitize_path_component(object.decoded.header.name, "unnamed");
-            path.relative_path = std::filesystem::path{group} / volume / category / name;
+            path.relative_path.clear();
+            if (!object.group_label.value.empty())
+                path.relative_path /= sanitize_path_component(object.group_label.value, "objects");
+            path.relative_path /= volume;
+            path.relative_path /= category;
+            path.relative_path /= name;
         }
         result.push_back(std::move(path));
     }

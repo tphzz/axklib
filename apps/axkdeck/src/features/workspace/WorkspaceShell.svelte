@@ -3,6 +3,7 @@
     import type { AuditionWorkflow, LaneQueries } from '../audition/workflow.svelte';
     import type { CatalogWorkflow } from '../catalog/workflow.svelte';
     import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
+    import type { SequenceImportWorkflow } from '../import/sequenceWorkflow.svelte';
     import type { MutationWorkflow } from '../mutation/workflow.svelte';
     import AuditionBar from '../../lib/components/AuditionBar.svelte';
     import ContainedObjectWorkspace from '../../lib/components/ContainedObjectWorkspace.svelte';
@@ -13,6 +14,7 @@
     import ObjectInspector from '../../lib/components/ObjectInspector.svelte';
     import ObjectWorkspace from '../../lib/components/ObjectWorkspace.svelte';
     import PackageSelectionControls from '../../lib/components/PackageSelectionControls.svelte';
+    import SequenceWorkspace from '../sequence/SequenceWorkspace.svelte';
     import type { InterfaceScaleController, InterfaceScaleMode, InterfaceScaleState } from '../../lib/interfaceScale';
     import type { ImageLocation } from '../../lib/storageLocations';
     import type { ImageTransport } from '../../lib/transport';
@@ -24,6 +26,7 @@
         PackageExportSelection,
         Program,
         SampleStructureItem,
+        SequenceItem,
         WaveDataItem,
         WorkspaceView,
     } from '../../lib/types';
@@ -32,7 +35,7 @@
     interface WorkspaceTab {
         id: WorkspaceView;
         label: string;
-        icon: 'music' | 'layers' | 'archive' | 'waveform';
+        icon: 'music' | 'layers' | 'archive' | 'waveform' | 'list';
     }
 
     interface Props {
@@ -51,10 +54,12 @@
         audition: AuditionWorkflow;
         mutation: MutationWorkflow;
         audioImport: AudioImportWorkflow;
+        sequenceImport: SequenceImportWorkflow;
         programs: Program[];
         sampleBanks: SampleStructureItem[];
         samples: SampleStructureItem[];
         waveData: WaveDataItem[];
+        sequences: SequenceItem[];
         bankMembers: SampleStructureItem[];
         bankMemberWaveData: WaveDataItem[];
         sampleWaveData: WaveDataItem[];
@@ -68,6 +73,7 @@
         packageImportAvailable: boolean;
         packageExportAvailable: boolean;
         audioExportAvailable: boolean;
+        sequenceExportAvailable: boolean;
         openConnectionSettings: () => void;
         openImage: () => void;
         createImage: () => void;
@@ -78,6 +84,7 @@
         selectWorkspace: (view: WorkspaceView) => void;
         exportPackage: (items: PackageExportObject[]) => void;
         exportAudio: (items: PackageExportSelection[]) => void;
+        exportMidi: (items: PackageExportObject[]) => void;
         deleteObjects: (items: PackageExportObject[]) => void;
         cleanupWaveData: () => void;
         clearSelection: () => void;
@@ -101,10 +108,12 @@
         audition,
         mutation,
         audioImport,
+        sequenceImport,
         programs,
         sampleBanks,
         samples,
         waveData,
+        sequences,
         bankMembers,
         bankMemberWaveData,
         sampleWaveData,
@@ -118,6 +127,7 @@
         packageImportAvailable,
         packageExportAvailable,
         audioExportAvailable,
+        sequenceExportAvailable,
         openConnectionSettings,
         openImage,
         createImage,
@@ -128,6 +138,7 @@
         selectWorkspace,
         exportPackage,
         exportAudio,
+        exportMidi,
         deleteObjects,
         cleanupWaveData,
         clearSelection,
@@ -142,8 +153,8 @@
     let resizing = $state(false);
     let interfaceScaleState = $state<InterfaceScaleState | null>(null);
     let stopInterfaceScaleSubscription: (() => void) | undefined;
-    const lowerPanelAvailable = $derived(workspaceView !== 'wave-data');
-    const auditionAvailable = $derived(workspaceView !== 'programs');
+    const lowerPanelAvailable = $derived(workspaceView !== 'wave-data' && workspaceView !== 'sequences');
+    const auditionAvailable = $derived(workspaceView !== 'programs' && workspaceView !== 'sequences');
 
     onMount(() => {
         interfaceScaleState = interfaceScaling?.state() ?? null;
@@ -204,11 +215,14 @@
                 </button>
             {/each}
         </nav>
-        {#if (packageExportAvailable || audioExportAvailable || objectDeletionAvailable) && packageSelection.items.length > 0}
+        {#if (packageExportAvailable || audioExportAvailable || sequenceExportAvailable || objectDeletionAvailable) && packageSelection.items.length > 0}
             <PackageSelectionControls
                 count={packageSelection.items.length}
                 onexportpackage={packageExportAvailable ? () => exportPackage(packageSelection.items) : undefined}
                 onexportsfz={audioExportAvailable ? () => exportAudio(packageSelection.items) : undefined}
+                onexportmidi={sequenceExportAvailable && packageSelection.items.every((item) => item.kind === 'SEQU')
+                    ? () => exportMidi(packageSelection.items as PackageExportObject[])
+                    : undefined}
                 ondelete={objectDeletionAvailable ? () => deleteObjects(packageSelection.items) : undefined}
                 onclear={clearSelection}
             />
@@ -308,6 +322,31 @@
                 onexportobjects={exportPackage}
                 {audioExportAvailable}
                 onexportaudio={exportAudio}
+                selection={packageSelection}
+                onselectionchange={selectionChanged}
+                onselectionlimit={selectionLimit}
+            />
+        {:else if workspaceView === 'sequences'}
+            <SequenceWorkspace
+                {sequences}
+                activeObjectId={activeCollectionObjectId}
+                query={audition.laneQueries.sequences.primary}
+                onquerychange={(value) => audition.updateLaneQuery('sequences', 'primary', value)}
+                onselect={(item) => {
+                    catalog.selectedSequenceId = item.objectId;
+                    catalog.inspectorObjectId = item.objectId;
+                    catalog.editorObjectIds.sequences = item.objectId;
+                }}
+                objectRenameAvailable={mutation.objectRenameAvailable}
+                onrenameobject={(target) => mutation.requestObjectRename(target)}
+                {objectDeletionAvailable}
+                ondeleteobjects={deleteObjects}
+                {packageExportAvailable}
+                onexportobjects={exportPackage}
+                {sequenceExportAvailable}
+                onexportmidi={exportMidi}
+                sequenceImportAvailable={mutation.objectRenameAvailable && sequenceImport.activeTarget() !== null}
+                onimportmidi={() => sequenceImport.chooseFiles()}
                 selection={packageSelection}
                 onselectionchange={selectionChanged}
                 onselectionlimit={selectionLimit}

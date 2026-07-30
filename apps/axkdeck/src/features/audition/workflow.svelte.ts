@@ -35,6 +35,7 @@ export class AuditionWorkflow {
     sampleBankPreviewMemberId = $state('');
     laneQueries = $state<Record<WorkspaceView, LaneQueries>>({
         programs: { primary: '', secondary: '', tertiary: '' },
+        sequences: { primary: '', secondary: '', tertiary: '' },
         'sample-banks': { primary: '', secondary: '', tertiary: '' },
         samples: { primary: '', secondary: '', tertiary: '' },
         'wave-data': { primary: '', secondary: '', tertiary: '' },

@@ -28,3 +28,14 @@ metadata.
 Confirmed stereo members use one rendered stereo WAV only when both member
 windows and loop policies match. Otherwise the SFZ keeps the confirmed mono
 lanes and applies each lane's own window. Physical mono WAVs remain exact.
+
+One export operation owns one content-addressed `_samples` pool. Wave Data
+shared by Samples in different selected volumes is therefore emitted once and
+referenced from every volume view. The pool is selection-wide, not
+volume-local.
+
+Flat media with one logical volume, including Yamaha FAT12 floppies and sampler
+object directories, does not add synthetic `objects/FAT root` or
+`objects/Object directory` levels. Its SFZ files and graph sit directly below
+the chosen export directory beside the shared `_samples` pool. SFS/HDS and
+ISO9660 exports retain their real partition/group and volume hierarchy.

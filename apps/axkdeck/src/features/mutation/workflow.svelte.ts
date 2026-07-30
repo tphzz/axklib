@@ -22,6 +22,7 @@ interface MutationWorkflowDependencies {
 interface ObjectSelectionSnapshot {
     view: WorkspaceView;
     programId: string;
+    sequenceId: string;
     bankId: string;
     bankMemberId: string;
     sampleId: string;
@@ -217,6 +218,7 @@ export class MutationWorkflow {
         return {
             view: this.dependencies.workspaceView(),
             programId: catalog.selectedProgramId,
+            sequenceId: catalog.selectedSequenceId,
             bankId: catalog.selectedBankId,
             bankMemberId: catalog.selectedBankMemberId,
             sampleId: catalog.selectedSampleId,
@@ -233,6 +235,7 @@ export class MutationWorkflow {
         const exists = (objectId: string): boolean => Boolean(objectId && catalog.objectsById.has(objectId));
         this.dependencies.setWorkspaceView(snapshot.view);
         catalog.selectedProgramId = exists(snapshot.programId) ? snapshot.programId : '';
+        catalog.selectedSequenceId = exists(snapshot.sequenceId) ? snapshot.sequenceId : '';
         catalog.selectedBankId = exists(snapshot.bankId) ? snapshot.bankId : '';
         catalog.selectedBankMemberId = exists(snapshot.bankMemberId) ? snapshot.bankMemberId : '';
         catalog.selectedSampleId = exists(snapshot.sampleId) ? snapshot.sampleId : '';
@@ -246,6 +249,7 @@ export class MutationWorkflow {
               : '';
         catalog.editorObjectIds = {
             programs: exists(snapshot.editorIds.programs) ? snapshot.editorIds.programs : '',
+            sequences: exists(snapshot.editorIds.sequences) ? snapshot.editorIds.sequences : '',
             'sample-banks': exists(snapshot.editorIds['sample-banks']) ? snapshot.editorIds['sample-banks'] : '',
             samples: exists(snapshot.editorIds.samples) ? snapshot.editorIds.samples : '',
             'wave-data': exists(snapshot.editorIds['wave-data']) ? snapshot.editorIds['wave-data'] : '',
@@ -279,6 +283,14 @@ export class MutationWorkflow {
                 kind: 'sample',
                 sampleName: target.name,
                 newSampleName: name,
+            };
+        }
+        if (target.kind === 'sequence') {
+            return {
+                ...common,
+                kind: 'sequence',
+                sequenceName: target.name,
+                newSequenceName: name,
             };
         }
         return {

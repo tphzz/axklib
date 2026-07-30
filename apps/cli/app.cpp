@@ -187,7 +187,7 @@ int axk::cli::run(int argc, char **argv) {
     const auto configure_extract = [](CLI::App &command, axk::cli::ExtractRequest &request) {
         command.add_option("scope", request.scope, "selection scope")
             ->required()
-            ->check(CLI::IsMember({"file", "volume", "program", "sbac", "sbnk"}));
+            ->check(CLI::IsMember({"file", "volume", "program", "sbac", "sbnk", "sequence"}));
         command.add_option("paths", request.paths, "input files or directories")->required()->expected(1, -1);
         command.add_option("-o,--output-dir", request.output_directory, "export output directory")->required();
         command.add_option("--path", request.selector_paths, "selector path from info --format paths");
@@ -212,7 +212,8 @@ int axk::cli::run(int argc, char **argv) {
     auto *package_export = package->add_subcommand("export", "export one portable package");
     package_export->add_option("source", package_export_request.source, "source sampler image")->required();
     package_export
-        ->add_option("--root", package_export_request.roots, "root selector: volume or program|sbac|sbnk|smpl=NAME")
+        ->add_option("--root", package_export_request.roots,
+                     "root selector: volume or program|sbac|sbnk|smpl|sequence=NAME")
         ->required()
         ->expected(1, -1);
     package_export->add_option("--partition", package_export_request.partition_index, "numeric source partition index");

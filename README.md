@@ -6,10 +6,14 @@ application, and a Crow-based REST and WebSocket server backed by a C++23
 implementation.
 
 The project reads SFS HDA/HDS images, Yamaha-supported FAT12 floppy and ISO9660
-sample CD-ROM profiles, and standalone sampler objects. It can inspect and
-validate media, export exact waveform audio and rendered SFZ instruments,
-transfer dependency-complete object packages, create supported HDS/floppy/ISO
-images, and apply ordered changes to existing HDS images.
+sample CD-ROM profiles, and standalone sampler objects. It provides full binary codecs for
+`SMPL` (Wave Data), `SBNK` (Sample), `SBAC` (Sample Bank), `PROG` (Program),
+and the current `SEQU` (Sequence) timeline profile.
+It can inspect and validate media, export exact waveform audio and rendered SFZ instruments,
+convert Sequences to and from Standard MIDI File format 0, transfer dependency-complete
+object packages, create multi-partition HDS (1–8 partitions up to 2 GiB),
+FAT12 floppy, and ISO9660 CD-ROM images, and execute transactional alterations (insert, delete, rename)
+on existing HDS images with atomic rollback safety.
 
 Documentation is published at <https://tphzz.github.io/axklib/>.
 

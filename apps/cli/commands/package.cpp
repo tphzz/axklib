@@ -46,8 +46,10 @@ Result<PackageRootKind> parse_root_kind(std::string_view value) {
         return PackageRootKind::sbnk;
     if (value == "smpl" || value == "wave-data")
         return PackageRootKind::smpl;
+    if (value == "sequence" || value == "sequ")
+        return PackageRootKind::sequ;
     return std::unexpected{argument_error("package root kind must be volume, program, sample-bank, sample, "
-                                          "wave-data, sbac, sbnk, or smpl")};
+                                          "wave-data, sequence, sbac, sbnk, smpl, or sequ")};
 }
 
 Result<PackageRootSelector> parse_root(const std::string &value, const axk::cli::PackageExportRequest &request) {

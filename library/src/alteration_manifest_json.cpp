@@ -15,6 +15,7 @@
 #include "axklib/file_publication.hpp"
 
 #include "alteration_manifest_internal.hpp"
+#include "alteration_manifest_sequence.hpp"
 
 namespace axk {
 namespace {
@@ -123,7 +124,8 @@ std::string_view operation_type_name(const AlterationOperationData &operation) n
         std::string_view{"insert_sbnk"},      std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
         std::string_view{"rename_waveform"},  std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
         std::string_view{"insert_sbac"},      std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
-        std::string_view{"insert_program"},   std::string_view{"rename_program"},  std::string_view{"rename_volume"},
+        std::string_view{"insert_program"},   std::string_view{"rename_program"},  std::string_view{"delete_sequence"},
+        std::string_view{"insert_sequence"},  std::string_view{"rename_sequence"}, std::string_view{"rename_volume"},
         std::string_view{"rename_partition"},
     };
     return names[operation.index()];
@@ -215,7 +217,8 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 *type != "insert_sbnk" && *type != "insert_waveform" && *type != "delete_waveform" &&
                 *type != "delete_program" && *type != "insert_program" && *type != "delete_sbac" &&
                 *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
-                *type != "rename_sbac" && *type != "rename_program" && *type != "rename_volume" &&
+                *type != "rename_sbac" && *type != "rename_program" && *type != "delete_sequence" &&
+                *type != "insert_sequence" && *type != "rename_sequence" && *type != "rename_volume" &&
                 *type != "rename_partition") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
@@ -544,6 +547,12 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (!waveform)
                     return std::unexpected{waveform.error()};
                 data = DeleteWaveformOperation{std::move(selector), std::move(*volume), std::move(*waveform)};
+            } else if (*type == "delete_sequence" || *type == "insert_sequence" || *type == "rename_sequence") {
+                auto sequence =
+                    detail::parse_sequence_operation_json(row, *type, std::move(selector), base_directory, context);
+                if (!sequence)
+                    return std::unexpected{sequence.error()};
+                data = std::move(*sequence);
             } else {
                 if (auto valid = exact_fields(row, {"id", "type", "partition_index", "volume_name", "audio"}, context);
                     !valid) {

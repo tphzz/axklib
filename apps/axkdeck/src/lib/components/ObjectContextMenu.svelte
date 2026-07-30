@@ -9,6 +9,7 @@
         onrename?: () => void;
         onexportpackage?: () => void;
         onexportsfz?: () => void;
+        onexportmidi?: () => void;
         ondelete?: () => void;
         onclose: () => void;
     }
@@ -21,6 +22,7 @@
         onrename,
         onexportpackage,
         onexportsfz,
+        onexportmidi,
         ondelete,
         onclose,
     }: Props = $props();
@@ -122,7 +124,17 @@
             }}>Export SFZ…</button
         >
     {/if}
-    {#if (onrename || onexportpackage || onexportsfz) && ondelete}
+    {#if onexportmidi}
+        <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+                onexportmidi?.();
+                onclose();
+            }}>Export MIDI…</button
+        >
+    {/if}
+    {#if (onrename || onexportpackage || onexportsfz || onexportmidi) && ondelete}
         <div class="context-menu-separator" role="separator"></div>
     {/if}
     {#if ondelete}

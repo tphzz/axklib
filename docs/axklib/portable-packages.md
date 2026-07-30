@@ -18,16 +18,19 @@ person; it does not select a parser or override the manifest.
 | One or more Sample Banks | `sbac` | `.axksbac` | Sampler-visible `B <name>` Sample Banks, their Samples, and required Wave Data |
 | One or more Samples | `sbnk` | `.axksbnk` | Samples (`SBNK`) and their Wave Data dependencies |
 | One or more Wave Data objects | `smpl` | `.axksmpl` | Wave Data (`SMPL`) storage objects |
-| One or more admitted sequences | `sequence` | `.axkseq` | Reserved for a future admitted SEQU dependency profile |
+| One or more Sequences | `sequence` | `.axkseq` | Byte-preserved Sequence (`SEQU`) objects with no external dependency edges |
 | Different root kinds | `bundle` | `.axkpkg` | A mixed-type collection of explicitly selected roots |
 
 Dependencies never change the extension. A Program containing SBAC, SBNK, and
 SMPL nodes remains `.axkprg`, as do two selected Programs. A Program and a
-Sample selected together form `.axkpkg`. Version 1
-currently admits current-format `PROG`, `SBAC`, `SBNK`, and `SMPL` objects.
-`SEQU`, `PRF3`, unknown types, and non-current object profiles are rejected
-because their portable dependency and relocation contracts are not admitted.
-Consequently `.axkseq` is reserved but cannot currently be produced.
+Sample selected together form `.axkpkg`. Version 1 currently admits
+current-format `PROG`, `SBAC`, `SBNK`, `SMPL`, and `SEQU` objects. `PRF3`,
+unknown types, and non-current object profiles are rejected because their
+portable dependency and relocation contracts are not admitted. A Sequence has
+no admitted external dependency, so `.axkseq` contains its raw object payload
+without relationship or relocation entries. Complete `.axkvol` export may
+include Sequences. Optional Sequence rename changes only its current object-name
+field and preserves the internal track/lane label.
 
 Writers append the derived extension to a suffix-free output stem. A different
 recognized package extension or an unrelated extension is rejected. Readers
@@ -52,14 +55,16 @@ program=NAME
 sample-bank=NAME
 sample=NAME
 wave-data=NAME
+sequence=NAME
 ```
 
 The raw object selectors `sbac`, `sbnk`, and `smpl` remain supported. `prog` is
 an alias for `program`. `sample-bank` always selects an `SBAC` Sample Bank; use
-`sample` or `sbnk` for an `SBNK` Sample. Obsolete pre-release selector names are
-rejected. `--partition`, `--group`, and `--volume` constrain all roots in one
-export command. Repeat `--root` to create a multi-root package. Homogeneous
-roots keep their typed extension; mixed root kinds use `.axkpkg`.
+`sample` or `sbnk` for an `SBNK` Sample, and `sequence` for a `SEQU` object.
+Obsolete pre-release selector names are rejected. `--partition`, `--group`, and
+`--volume` constrain all roots in one export command. Repeat `--root` to create
+a multi-root package. Homogeneous roots keep their typed extension; mixed root
+kinds use `.axkpkg`.
 A selector must resolve exactly once and every required active relationship
 must be known and unambiguous; otherwise no archive is published. Ambiguous
 inactive Program diagnostic rows are not package content.

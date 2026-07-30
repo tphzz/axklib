@@ -129,6 +129,7 @@ add_library(
   src/report.cpp
   src/semantic.cpp
   src/semantic_analysis.cpp
+  src/sequence.cpp
   src/sfs.cpp
   src/sfs_container.cpp
   src/sfs_directory.cpp
@@ -191,11 +192,13 @@ add_library(
   src/alteration.cpp
   src/alteration_manifest.cpp
   src/alteration_manifest_json.cpp
+  src/alteration_manifest_sequence.cpp
   src/alteration_package_flat.cpp
   src/alteration_package_sfs.cpp
   src/alteration_program.cpp
   src/alteration_publication.cpp
   src/alteration_sample.cpp
+  src/alteration_sequence.cpp
   src/alteration_support.cpp
   src/alteration_volume.cpp
   src/deletion.cpp
@@ -467,6 +470,7 @@ if(BUILD_TESTING)
     tests/package_archive_test.cpp
     tests/package_test.cpp
     tests/report_test.cpp
+    tests/sequence_test.cpp
     tests/sfs_test.cpp
     tests/sfs_write_codec_test.cpp
     tests/utf8_test.cpp

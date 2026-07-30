@@ -39,6 +39,7 @@ export interface OpenedImage {
     packageImportAvailable: boolean;
     packageExportAvailable: boolean;
     audioExportAvailable: boolean;
+    sequenceExportAvailable: boolean;
 }
 
 export type CompanionDirectorySelection =
@@ -57,6 +58,13 @@ export interface PartitionMutation {
 }
 
 export type ObjectRenameMutation =
+    | {
+          kind: 'sequence';
+          partitionIndex: number;
+          volumeName: string;
+          sequenceName: string;
+          newSequenceName: string;
+      }
     | {
           kind: 'program';
           partitionIndex: number;
@@ -94,7 +102,7 @@ export interface ObjectDeletionNotice {
 
 export interface ObjectDeletionImpact {
     objectId: string;
-    objectType: 'PROG' | 'SBAC' | 'SBNK' | 'SMPL';
+    objectType: 'PROG' | 'SEQU' | 'SBAC' | 'SBNK' | 'SMPL';
     objectName: string;
     partitionIndex: number | null;
     partitionName: string;
@@ -199,6 +207,14 @@ export interface SamplerObject {
     loopModeLabel?: string;
     loopStartFrame?: number;
     loopLengthFrames?: number;
+    sequence?: {
+        formatVersion: number;
+        ticksPerQuarterNote: number;
+        firstTick: number;
+        endTick: number;
+        eventCount: number;
+        initialBeatsPerMinute?: number;
+    };
 }
 
 export interface PreviewEnvelope {
@@ -290,6 +306,8 @@ export type ImageSessionPackageExportResult = components['schemas']['ImageSessio
 export type ImageSessionAudioExportDestination = components['schemas']['ImageSessionAudioExportDestination'];
 export type ImageSessionAudioExportInspection = components['schemas']['ImageSessionAudioExportInspection'];
 export type ImageSessionAudioExportResult = components['schemas']['ImageSessionAudioExportResult'];
+export type ImageSessionSequenceExportDestination = components['schemas']['ImageSessionAudioExportDestination'];
+export type ImageSessionSequenceExportResult = components['schemas']['ImageSessionSequenceExportResult'];
 export type RetainedDownload = components['schemas']['RetainedDownload'];
 
 export interface InputBinding {
@@ -336,6 +354,16 @@ export interface AudioImportItem {
 }
 
 export interface AudioImportTarget {
+    partitionIndex: number;
+    volumeName: string;
+}
+
+export interface SequenceImportItem {
+    source: InputFileLocation;
+    sequenceName: string;
+}
+
+export interface SequenceImportTarget {
     partitionIndex: number;
     volumeName: string;
 }
@@ -389,6 +417,11 @@ export interface ImageTransport {
     audioImportCapabilities(): Promise<AudioImportCapabilities>;
     inspectAudio(source: InputFileLocation, targetSampleRate?: number): Promise<AudioSourceInfo>;
     startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState>;
+    startSequenceImport(
+        sessionId: number,
+        target: SequenceImportTarget,
+        items: SequenceImportItem[],
+    ): Promise<JobState>;
     downloadFile(source: FileLocation): Promise<ClientDownload>;
     downloadDirectory(source: DirectoryLocation): Promise<ClientDownload>;
     inspectPackage(source: InputFileLocation, verify: boolean): Promise<PackageInspection>;
@@ -424,6 +457,11 @@ export interface ImageTransport {
         roots: ImageSessionExportRoot[],
         format: 'SFZ' | 'WAV',
         destination: ImageSessionAudioExportDestination,
+    ): Promise<JobState>;
+    startImageSequenceExport(
+        sessionId: number,
+        objectIds: string[],
+        destination: ImageSessionSequenceExportDestination,
     ): Promise<JobState>;
     deleteRetainedPackage(download: RetainedDownload): Promise<void>;
     hardDiskCreationProfiles(): Promise<HardDiskCreationProfile[]>;

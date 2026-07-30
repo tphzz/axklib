@@ -14,6 +14,7 @@ import type {
     ProgramAssignmentRow,
     SampleStructureItem,
     SampleWaveformPreview,
+    SequenceItem,
     WaveDataItem,
     WorkspaceView,
 } from '../../lib/types';
@@ -30,12 +31,14 @@ interface CatalogWorkflowDependencies {
 
 export class CatalogWorkflow {
     programs = $state<Program[]>([]);
+    sequences = $state<SequenceItem[]>([]);
     sampleBanks = $state<SampleStructureItem[]>([]);
     samples = $state<SampleStructureItem[]>([]);
     waveData = $state<WaveDataItem[]>([]);
     relationships = $state<SamplerRelationship[]>([]);
     objectsById = $state(new Map<string, SamplerObject>());
     selectedProgramId = $state('');
+    selectedSequenceId = $state('');
     selectedBankId = $state('');
     selectedBankMemberId = $state('');
     selectedSampleId = $state('');
@@ -45,6 +48,7 @@ export class CatalogWorkflow {
     inspectorObjectId = $state('');
     editorObjectIds = $state<Record<WorkspaceView, string>>({
         programs: '',
+        sequences: '',
         'sample-banks': '',
         samples: '',
         'wave-data': '',
@@ -144,6 +148,8 @@ export class CatalogWorkflow {
                 preview: this.sampleWaveformPreview(sample),
             };
         }
+        const sequence = this.sequences.find((item) => item.objectId === objectId);
+        if (sequence) return { kind: 'sequence', sequence };
         const waveform = this.waveData.find((item) => item.objectKey === objectId);
         return waveform ? { kind: 'wave-data', waveData: waveform } : null;
     }
@@ -168,6 +174,7 @@ export class CatalogWorkflow {
             this.relationships = scopedRelationships;
             this.objectsById = new Map(objects.map((object) => [object.key, object]));
             this.programs = programItems(objects, names);
+            this.sequences = sequenceItems(objects, names);
             const bankObjects = objects.filter((object) => object.objectType === 'SBAC');
             this.sampleBanks = bankItems(bankObjects, scopedRelationships, names);
             this.samples = sampleItems(objects, bankObjects, scopedRelationships, names);
@@ -189,6 +196,7 @@ export class CatalogWorkflow {
         this.dependencies.resetPreviews();
         ++this.loadGeneration;
         this.programs = [];
+        this.sequences = [];
         this.sampleBanks = [];
         this.samples = [];
         this.waveData = [];
@@ -202,13 +210,14 @@ export class CatalogWorkflow {
     private clearSelections(): void {
         this.inspectorObjectId = '';
         this.selectedProgramId = '';
+        this.selectedSequenceId = '';
         this.selectedBankId = '';
         this.selectedBankMemberId = '';
         this.selectedSampleId = '';
         this.selectedBankWaveDataId = '';
         this.selectedSampleWaveDataId = '';
         this.selectedWaveDataId = '';
-        this.editorObjectIds = { programs: '', 'sample-banks': '', samples: '', 'wave-data': '' };
+        this.editorObjectIds = { programs: '', sequences: '', 'sample-banks': '', samples: '', 'wave-data': '' };
     }
 
     private setWaveDataObjects(objects: SamplerObject[], names: Map<string, string>): void {
@@ -301,6 +310,17 @@ function programItems(objects: SamplerObject[], names: Map<string, string>): Pro
                 name: match?.[2] || name,
             };
         });
+}
+
+function sequenceItems(objects: SamplerObject[], names: Map<string, string>): SequenceItem[] {
+    return objects
+        .filter((object) => object.objectType === 'SEQU')
+        .map((object) => ({
+            id: object.key,
+            objectId: object.key,
+            name: objectPresentationName(object, names),
+            object,
+        }));
 }
 
 function bankItems(

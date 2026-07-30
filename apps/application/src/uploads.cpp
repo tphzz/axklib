@@ -49,10 +49,14 @@ bool valid_digest(const std::optional<std::string> &digest) {
 bool admitted_extension(axk::app::UploadKind kind, const std::filesystem::path &path) {
     const auto extension = lowercase(axk::text::path_to_utf8(path.extension()));
     constexpr std::array audio_extensions{".wav", ".wave", ".flac", ".aif", ".aiff"};
-    constexpr std::array package_extensions{".axkpkg", ".axkvol", ".axkprg", ".axksbac", ".axksbnk", ".axksmpl"};
+    constexpr std::array package_extensions{
+        ".axkpkg", ".axkvol", ".axkprg", ".axksbac", ".axksbnk", ".axksmpl", ".axkseq",
+    };
     switch (kind) {
     case axk::app::UploadKind::audio:
         return std::ranges::find(audio_extensions, extension) != audio_extensions.end();
+    case axk::app::UploadKind::midi:
+        return extension == ".mid" || extension == ".midi";
     case axk::app::UploadKind::package:
         return std::ranges::find(package_extensions, extension) != package_extensions.end();
     case axk::app::UploadKind::manifest:
@@ -66,6 +70,9 @@ bool valid_media_type(axk::app::UploadKind kind, std::string_view value) {
     case axk::app::UploadKind::audio:
         return value == "audio/wav" || value == "audio/x-wav" || value == "audio/flac" || value == "audio/aiff" ||
                value == "audio/x-aiff" || value == "application/octet-stream";
+    case axk::app::UploadKind::midi:
+        return value == "audio/midi" || value == "audio/x-midi" || value == "application/x-midi" ||
+               value == "application/octet-stream";
     case axk::app::UploadKind::package:
         return value == "application/vnd.axklib.package" || value == "application/octet-stream";
     case axk::app::UploadKind::manifest:
@@ -78,6 +85,8 @@ std::string_view disallowed_upload_message(axk::app::UploadKind kind) {
     switch (kind) {
     case axk::app::UploadKind::audio:
         return "audio uploads require a WAV, FLAC, or AIFF file";
+    case axk::app::UploadKind::midi:
+        return "MIDI uploads require a Standard MIDI File";
     case axk::app::UploadKind::package:
         return "package uploads require an axklib package file";
     case axk::app::UploadKind::manifest:
@@ -581,6 +590,8 @@ std::string_view axk::app::upload_kind_name(UploadKind kind) noexcept {
     switch (kind) {
     case UploadKind::audio:
         return "AUDIO";
+    case UploadKind::midi:
+        return "MIDI";
     case UploadKind::package:
         return "PACKAGE";
     case UploadKind::manifest:

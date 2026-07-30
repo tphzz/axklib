@@ -120,6 +120,14 @@ export function objectRenameOperation(mutation: ObjectRenameMutation): Record<st
             new_sample_name: mutation.newSampleName,
         };
     }
+    if (mutation.kind === 'sequence') {
+        return {
+            ...common,
+            type: 'rename_sequence',
+            sequence_name: mutation.sequenceName,
+            new_sequence_name: mutation.newSequenceName,
+        };
+    }
     return {
         ...common,
         type: 'rename_waveform',

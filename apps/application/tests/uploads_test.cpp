@@ -129,6 +129,30 @@ TEST_F(UploadStoreTest, RejectsDiskImagesWrongOwnersOffsetsAndOversizedChunks) {
                                          .declared_size = 1U,
                                          .sha256 = std::nullopt});
     ASSERT_TRUE(wave_data) << wave_data.error().message;
+    ASSERT_TRUE(value.remove(wave_data->reference, "owner"));
+    const auto sequence_package = value.create({.owner_id = "owner",
+                                                .filename = "sequence.axkseq",
+                                                .kind = axk::app::UploadKind::package,
+                                                .media_type = "application/vnd.axklib.package",
+                                                .declared_size = 1U,
+                                                .sha256 = std::nullopt});
+    ASSERT_TRUE(sequence_package) << sequence_package.error().message;
+    ASSERT_TRUE(value.remove(sequence_package->reference, "owner"));
+    const auto sequence_midi = value.create({.owner_id = "owner",
+                                             .filename = "sequence.mid",
+                                             .kind = axk::app::UploadKind::midi,
+                                             .media_type = "audio/midi",
+                                             .declared_size = 1U,
+                                             .sha256 = std::nullopt});
+    ASSERT_TRUE(sequence_midi) << sequence_midi.error().message;
+    const auto mislabeled_midi = value.create({.owner_id = "owner",
+                                               .filename = "sequence.mid",
+                                               .kind = axk::app::UploadKind::audio,
+                                               .media_type = "audio/midi",
+                                               .declared_size = 1U,
+                                               .sha256 = std::nullopt});
+    ASSERT_FALSE(mislabeled_midi);
+    EXPECT_EQ(mislabeled_midi.error().code, "upload_type_not_allowed");
     EXPECT_FALSE(value.inspect(created->reference, "other"));
     EXPECT_FALSE(value.append(created->reference, "owner", 1U, bytes("a")));
     EXPECT_FALSE(value.append(created->reference, "owner", 0U, bytes("abcde")));

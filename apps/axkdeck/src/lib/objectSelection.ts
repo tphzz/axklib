@@ -16,9 +16,10 @@ export interface PackageExportSelectionUpdate {
 
 const kindOrder: Record<PackageExportObject['kind'], number> = {
     PROGRAM: 0,
-    SBAC: 1,
-    SBNK: 2,
-    SMPL: 3,
+    SEQU: 1,
+    SBAC: 2,
+    SBNK: 3,
+    SMPL: 4,
 };
 
 function compareText(left: string, right: string): number {

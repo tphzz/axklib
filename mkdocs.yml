@@ -87,6 +87,7 @@ nav:
       - FAT12 Floppy Images: axklib/floppy.md
       - CD-ROM Images: axklib/cdrom.md
       - Sampler Data Structures: axklib/sampler-data.md
+      - Sequence Data And MIDI: axklib/sequences.md
   - Output Contracts:
       - Current Contract Index: axklib/current-contracts.md
       - Names, Paths, And Exports: axklib/names-and-paths.md

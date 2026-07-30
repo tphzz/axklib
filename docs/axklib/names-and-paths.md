@@ -276,6 +276,14 @@ Rules:
 | `volume.axklib.json` | Per-volume object and relationship graph written by both WAV and SFZ extraction. |
 | `Unresolved Wave Data/unresolved.axklib.json` | Partition-scoped graph for decodable physical `SMPL` objects without one authoritative volume placement. It records missing or ambiguous placement, every candidate, the resolution basis, and the exact WAV reference. |
 
+The `_samples` directories belong to the complete selection, not to individual
+volumes. Identical WAV bytes shared across selected volumes reuse one
+content-addressed path. A single selected logical volume from flat media
+(`fat12_floppy`, `standalone_object`, or `axk_object_directory`) is flattened
+into the export destination rather than rendered as synthetic
+`objects/FAT root` or `objects/Object directory` path components. Containers
+with real partition/group and volume hierarchy keep those components.
+
 Physical WAV names come from `SMPL` storage names plus a short content hash so
 several selections can share one pool without collisions. They stay
 storage-facing even when that produces a filesystem-safe numeric suffix from a

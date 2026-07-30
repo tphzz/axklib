@@ -67,6 +67,9 @@ class UnavailableTransport implements ImageTransport {
     startAudioImport(): Promise<never> {
         return this.unavailable();
     }
+    startSequenceImport(): Promise<never> {
+        return this.unavailable();
+    }
     downloadFile(): Promise<ClientDownload> {
         return this.unavailable();
     }
@@ -98,6 +101,9 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startImageAudioExport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    startImageSequenceExport(): Promise<JobState> {
         return this.unavailable();
     }
     deleteRetainedPackage(_download: RetainedDownload): Promise<void> {

@@ -2,7 +2,13 @@ import type { DirectoryLocation, DirectoryRef, FileLocation, ImageLocation } fro
 
 export type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source';
 export type PickerParentDialog =
-    'audio-import' | 'companion-disks' | 'package-import' | 'package-export' | 'audio-export';
+    | 'audio-import'
+    | 'companion-disks'
+    | 'package-import'
+    | 'package-export'
+    | 'audio-export'
+    | 'sequence-export'
+    | 'sequence-import';
 export type PickerSelection = ImageLocation | DirectoryLocation | FileLocation[];
 
 export interface PickerNavigation {

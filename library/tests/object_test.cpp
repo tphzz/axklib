@@ -201,11 +201,22 @@ TEST(CurrentSummary, RetainsSequenceAndProfilePayloads) {
              std::pair{"SEQU", axk::ObjectType::sequ},
              std::pair{"PRF3", axk::ObjectType::prf3},
          }) {
-        std::vector<std::byte> payload(0x80);
+        std::vector<std::byte> payload(expected == axk::ObjectType::sequ ? 0x90U : 0x80U);
         axk::ByteWriter writer{payload};
         ASSERT_TRUE(writer.write_ascii_field(0, 12, "FSFSDEV3SPLX", std::byte{}));
         ASSERT_TRUE(writer.write_ascii_field(0x0c, 4, type, std::byte{}));
         ASSERT_TRUE(writer.write_ascii_field(0x32, 16, "summary", std::byte{}));
+        if (expected == axk::ObjectType::sequ) {
+            ASSERT_TRUE(writer.write_be16(0x7cU, 1U));
+            ASSERT_TRUE(writer.write_be16(0x7eU, 96U));
+            ASSERT_TRUE(writer.write_be32(0x80U, 0U));
+            ASSERT_TRUE(writer.write_be32(0x84U, 0U));
+            ASSERT_TRUE(writer.write_be16(0x88U, 1U));
+            ASSERT_TRUE(writer.write_u8(0x8aU, 0xffU));
+            ASSERT_TRUE(writer.write_u8(0x8bU, 0x2fU));
+            ASSERT_TRUE(writer.write_u8(0x8cU, 0U));
+            ASSERT_TRUE(writer.write_u8(0x8dU, 0xfdU));
+        }
         const auto decoded = axk::decode_object(payload);
         ASSERT_TRUE(decoded);
         EXPECT_EQ(decoded->header.type, expected);

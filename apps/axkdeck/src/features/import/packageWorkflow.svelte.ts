@@ -8,7 +8,7 @@ import { reportError } from '../../lib/diagnostics';
 import type { PickerController } from '../dialogs/picker';
 import type { JobController } from '../jobs/actions';
 
-const packageExtensions = ['axkvol', 'axkprg', 'axksbac', 'axksbnk', 'axksmpl', 'axkpkg'];
+const packageExtensions = ['axkvol', 'axkprg', 'axksbac', 'axksbnk', 'axksmpl', 'axkseq', 'axkpkg'];
 const packageExtensionSet = new Set(packageExtensions);
 
 export interface PackageImportRequest {

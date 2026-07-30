@@ -7,6 +7,7 @@
 #include "axklib/bytes.hpp"
 #include "axklib/generated/current_sbnk_fields.hpp"
 #include "axklib/lookups.hpp"
+#include "axklib/sequence.hpp"
 
 namespace axk {
 namespace {
@@ -439,7 +440,10 @@ Result<DecodedObject> decode_object(std::span<const std::byte> payload) {
         return DecodedObject{*header, ObjectFormat::current, *decoded};
     }
     if (header->type == ObjectType::sequ) {
-        return DecodedObject{*header, ObjectFormat::current, CurrentSequence{{payload.begin(), payload.end()}}};
+        const auto decoded = decode_current_sequence(payload);
+        if (!decoded)
+            return std::unexpected{decoded.error()};
+        return DecodedObject{*header, ObjectFormat::current, *decoded};
     }
     if (header->type == ObjectType::prf3) {
         return DecodedObject{*header, ObjectFormat::current, CurrentProfile{{payload.begin(), payload.end()}}};

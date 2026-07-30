@@ -27,6 +27,7 @@
 #include "axklib/audio.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package.hpp"
+#include "axklib/sequence.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 #include "axklib/wav_stream.hpp"
@@ -67,6 +68,23 @@ std::map<std::string, std::string> read_artifact_tree(const std::filesystem::pat
             result.emplace(entry.path().lexically_relative(root).generic_string(), read_bytes(entry.path()));
     }
     return result;
+}
+
+void write_sequence_object(const std::filesystem::path &path, std::string_view name) {
+    const std::array smf{
+        std::byte{'M'}, std::byte{'T'},  std::byte{'h'},  std::byte{'d'},  std::byte{0},   std::byte{0},
+        std::byte{0},   std::byte{6},    std::byte{0},    std::byte{0},    std::byte{0},   std::byte{1},
+        std::byte{0},   std::byte{96},   std::byte{'M'},  std::byte{'T'},  std::byte{'r'}, std::byte{'k'},
+        std::byte{0},   std::byte{0},    std::byte{0},    std::byte{12},   std::byte{0},   std::byte{0x90},
+        std::byte{60},  std::byte{100},  std::byte{96},   std::byte{0x80}, std::byte{60},  std::byte{0},
+        std::byte{0},   std::byte{0xff}, std::byte{0x2f}, std::byte{0},
+    };
+    const auto sequence = axk::smf0_to_current_sequence(smf, name);
+    ASSERT_TRUE(sequence) << sequence.error().message;
+    std::ofstream output{path, std::ios::binary};
+    ASSERT_TRUE(output);
+    output.write(reinterpret_cast<const char *>(sequence->data()), static_cast<std::streamsize>(sequence->size()));
+    ASSERT_TRUE(output);
 }
 
 class CurrentPathGuard {
@@ -230,25 +248,30 @@ TEST(Cli11Adapter, ExposesCompletePortablePackageCommandFamily) {
         EXPECT_NE(output.find(command), std::string::npos) << command;
 }
 
-TEST(Cli11Adapter, HidesUnavailablePortablePackageChoices) {
+TEST(Cli11Adapter, ExposesSequencePackageRootsAndHidesUnavailableReuseScope) {
     testing::internal::CaptureStdout();
     EXPECT_EQ(run_cli({"axklib", "package", "export", "--help"}), 0);
     const auto export_help = testing::internal::GetCapturedStdout();
-    EXPECT_EQ(export_help.find("sequence"), std::string::npos);
+    EXPECT_NE(export_help.find("sequence"), std::string::npos);
 
     testing::internal::CaptureStdout();
     EXPECT_EQ(run_cli({"axklib", "package", "plan-import", "--help"}), 0);
     const auto import_help = testing::internal::GetCapturedStdout();
     EXPECT_EQ(import_help.find("--reuse-scope"), std::string::npos);
 
-    const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images" /
-                         "sampler-authored/HD00_512_single_sbnk_authored.hds";
-    testing::internal::CaptureStderr();
-    EXPECT_NE(run_cli({"axklib", "package", "export", fixture.string(), "--root", "sequence=001", "--partition", "0",
-                       "--group", "New Partition", "--volume", "New Volume", "-o", "unused.axkseq"}),
+    const auto root = std::filesystem::temp_directory_path() / "axklib-cli-sequence-package";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    write_sequence_object(root / "sequence.bin", "Sequence");
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(run_cli({"axklib", "package", "export", (root / "sequence.bin").string(), "--root", "sequence=Sequence",
+                       "-o", (root / "sequence").string(), "--format", "json"}),
               0);
-    const auto error = testing::internal::GetCapturedStderr();
-    EXPECT_NE(error.find("package root kind must be"), std::string::npos);
+    const auto result = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(result.at("package_kind"), "sequence");
+    EXPECT_TRUE(std::filesystem::exists(root / "sequence.axkseq"));
+    std::filesystem::remove_all(root, error);
 }
 
 TEST(Cli11Adapter, UsesCanonicalSampleBankSampleAndWaveDataPackageSelectors) {

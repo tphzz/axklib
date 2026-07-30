@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <ranges>
+#include <span>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -25,6 +27,23 @@ axk::Waveform test_waveform() {
     result.pcm = {std::byte{0},    std::byte{0},    std::byte{0xe8}, std::byte{3},
                   std::byte{0x18}, std::byte{0xfc}, std::byte{0},    std::byte{0}};
     return result;
+}
+
+std::vector<std::byte> test_midi() {
+    return {
+        std::byte{'M'}, std::byte{'T'}, std::byte{'h'}, std::byte{'d'},  std::byte{0},    std::byte{0},
+        std::byte{0},   std::byte{6},   std::byte{0},   std::byte{0},    std::byte{0},    std::byte{1},
+        std::byte{0},   std::byte{96},  std::byte{'M'}, std::byte{'T'},  std::byte{'r'},  std::byte{'k'},
+        std::byte{0},   std::byte{0},   std::byte{0},   std::byte{8},    std::byte{0},    std::byte{0x90},
+        std::byte{60},  std::byte{100}, std::byte{0},   std::byte{0xff}, std::byte{0x2f}, std::byte{0},
+    };
+}
+
+void write_bytes(const std::filesystem::path &path, std::span<const std::byte> content) {
+    std::ofstream output{path, std::ios::binary};
+    ASSERT_TRUE(output);
+    output.write(reinterpret_cast<const char *>(content.data()), static_cast<std::streamsize>(content.size()));
+    ASSERT_TRUE(output);
 }
 
 axk::HdsBuildManifest deletion_manifest(const std::filesystem::path &audio_path) {
@@ -106,6 +125,44 @@ const axk::ObjectSnapshot &object(const Fixture &fixture, axk::ObjectType type) 
 }
 
 } // namespace
+
+TEST(ObjectDeletion, PlansStandaloneSequenceDeletion) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-deletion-planner-sequence";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    const auto audio = root / "tone.wav";
+    const auto midi = root / "sequence.mid";
+    const auto source = root / "source.hds";
+    const auto inserted = root / "inserted.hds";
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    write_bytes(midi, test_midi());
+    ASSERT_TRUE(axk::write_hds_image(deletion_manifest(audio), source));
+    const axk::AlterationManifest manifest{
+        "1.0",
+        {{"insert-sequence", axk::InsertSequenceOperation{axk::PartitionIndex{0U}, "Deletion", {"Sequence", midi}}}},
+    };
+    ASSERT_TRUE(axk::alter_hds(source, manifest, inserted));
+    auto container = axk::open_image(inserted);
+    ASSERT_TRUE(container) << container.error().message;
+    auto catalog = axk::build_object_catalog(*container);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    auto graph = axk::build_relationship_graph(*catalog);
+    const auto sequence = std::ranges::find(catalog->objects, axk::ObjectType::sequ,
+                                            [](const auto &object) { return object.object.header.type; });
+    ASSERT_NE(sequence, catalog->objects.end());
+
+    const auto inspected =
+        axk::inspect_object_deletion(*container, *catalog, graph, {.target_keys = {sequence->key}, .cleanup_keys = {}});
+
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_TRUE(inspected->can_apply);
+    ASSERT_EQ(inspected->impacts.size(), 1U);
+    EXPECT_EQ(inspected->impacts.front().object_type, axk::ObjectType::sequ);
+    ASSERT_EQ(inspected->manifest.operations.size(), 1U);
+    EXPECT_TRUE(std::holds_alternative<axk::DeleteSequenceOperation>(inspected->manifest.operations.front().data));
+    std::filesystem::remove_all(root, error);
+}
 
 TEST(ObjectDeletion, KeepsDependenciesExplicitAndUncheckedByDefault) {
     const auto fixture = make_fixture();

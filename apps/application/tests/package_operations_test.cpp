@@ -22,8 +22,10 @@
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/package_operations.hpp"
 #include "axklib/application/session_audio_export_operations.hpp"
+#include "axklib/application/session_sequence_operations.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/package.hpp"
+#include "axklib/sequence.hpp"
 #include "axklib/writer.hpp"
 
 namespace {
@@ -47,6 +49,23 @@ void write_empty_target(const std::filesystem::path &path, std::string_view part
     ASSERT_TRUE(manifest) << manifest.error().message;
     const auto written = axk::write_hds_image(*manifest, path);
     ASSERT_TRUE(written) << written.error().message;
+}
+
+void write_sequence_object(const std::filesystem::path &path, std::string_view name) {
+    const std::array smf{
+        std::byte{'M'}, std::byte{'T'},  std::byte{'h'},  std::byte{'d'},  std::byte{0},   std::byte{0},
+        std::byte{0},   std::byte{6},    std::byte{0},    std::byte{0},    std::byte{0},   std::byte{1},
+        std::byte{0},   std::byte{96},   std::byte{'M'},  std::byte{'T'},  std::byte{'r'}, std::byte{'k'},
+        std::byte{0},   std::byte{0},    std::byte{0},    std::byte{12},   std::byte{0},   std::byte{0x90},
+        std::byte{60},  std::byte{100},  std::byte{96},   std::byte{0x80}, std::byte{60},  std::byte{0},
+        std::byte{0},   std::byte{0xff}, std::byte{0x2f}, std::byte{0},
+    };
+    const auto sequence = axk::smf0_to_current_sequence(smf, name);
+    ASSERT_TRUE(sequence) << sequence.error().message;
+    std::ofstream output{path, std::ios::binary};
+    ASSERT_TRUE(output);
+    output.write(reinterpret_cast<const char *>(sequence->data()), static_cast<std::streamsize>(sequence->size()));
+    ASSERT_TRUE(output);
 }
 
 void write_mixed_root_source(const std::filesystem::path &path) {
@@ -156,6 +175,7 @@ class PackageOperationsTest : public testing::Test {
         std::filesystem::remove_all(root_, error);
         std::filesystem::create_directories(root_);
         std::filesystem::copy_file(fixture_path(), root_ / "fixture.hds");
+        write_sequence_object(root_ / "sequence.bin", "Sequence");
         write_empty_target(root_ / "target.hds");
         write_mixed_root_source(root_ / "mixed-roots.hds");
         write_object_directory(root_ / "fixture.hds", root_ / "objects");
@@ -178,6 +198,7 @@ class PackageOperationsTest : public testing::Test {
         ASSERT_TRUE(axk::app::bind_session_package_operations(registry_, *sandbox_, *uploads_, *images_, *journals_,
                                                               *downloads_));
         ASSERT_TRUE(axk::app::bind_session_audio_export_operations(registry_, *sandbox_, *images_, *downloads_));
+        ASSERT_TRUE(axk::app::bind_session_sequence_operations(registry_, *sandbox_, *images_, *downloads_));
     }
 
     void TearDown() override {
@@ -538,6 +559,49 @@ TEST_F(PackageOperationsTest, SessionInspectsAndExportsSfzToWorkspaceOrRetainedT
     EXPECT_GT(content->snapshot.entry_count, 1U);
 }
 
+TEST_F(PackageOperationsTest, SessionExportsSequencesAsMidiToWorkspaceOrRetainedTar) {
+    const auto opened = images_->open({"workspace", "sequence.bin", axk::app::ImageSourceKind::file}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(objects) << objects.error().message;
+    const auto sequence = std::ranges::find(objects->items, "SEQU", &axk::app::ImageObjectItem::type);
+    ASSERT_NE(sequence, objects->items.end());
+    ASSERT_TRUE(sequence->sequence);
+    EXPECT_EQ(sequence->sequence->ticks_per_quarter_note, 96U);
+    EXPECT_GT(sequence->sequence->event_count, 0U);
+
+    const nlohmann::json base{
+        {"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"objectIds", {sequence->id}}};
+    auto workspace_request = base;
+    workspace_request["destination"] = {
+        {"kind", "WORKSPACE"},
+        {"output", {{"rootId", "workspace"}, {"relativePath", "midi-workspace"}}},
+    };
+    const auto workspace = registry_.invoke("images.sequence_export", workspace_request, context());
+    ASSERT_TRUE(workspace) << workspace.error().message;
+    EXPECT_EQ(workspace->at("destination"), "WORKSPACE");
+    EXPECT_EQ(workspace->at("sequenceCount"), 1U);
+    const auto midi_path = root_ / "midi-workspace" / "Sequence.mid";
+    ASSERT_TRUE(std::filesystem::is_regular_file(midi_path));
+    const auto encoded = axk::smf0_to_current_sequence(read_bytes(midi_path), "Roundtrip");
+    ASSERT_TRUE(encoded) << encoded.error().message;
+    const auto decoded = axk::decode_current_sequence(*encoded);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    EXPECT_EQ(decoded->event_count, sequence->sequence->event_count);
+
+    auto download_request = base;
+    download_request["destination"] = {{"kind", "DOWNLOAD"}, {"directoryName", "Local MIDI"}};
+    const auto download = registry_.invoke("images.sequence_export", download_request, context());
+    ASSERT_TRUE(download) << download.error().message;
+    ASSERT_EQ(download->at("destination"), "DOWNLOAD");
+    const auto &retained = download->at("download");
+    ASSERT_EQ(retained.at("filename"), "Local MIDI.tar");
+    const auto content = downloads_->open({retained.at("archiveId").get<std::string>()}, "owner");
+    ASSERT_TRUE(content) << content.error().message;
+    EXPECT_EQ(content->snapshot.media_type, "application/x-tar");
+    EXPECT_EQ(content->snapshot.entry_count, 1U);
+}
+
 TEST_F(PackageOperationsTest, SessionExportsAnAxkObjectDirectoryAsAVolumePackage) {
     const auto opened =
         images_->open({"workspace", "objects", axk::app::ImageSourceKind::axk_object_directory}, "owner");
@@ -572,6 +636,37 @@ TEST_F(PackageOperationsTest, SessionExportsAnAxkObjectDirectoryAsAVolumePackage
     ASSERT_EQ(package->roots.size(), 1U);
     EXPECT_EQ(package->roots.front().display_name, "Object directory");
     EXPECT_EQ(package->nodes.size(), opened->object_count);
+}
+
+TEST_F(PackageOperationsTest, SessionExportsFlatMediaAudioIntoOneSharedPoolWithoutSyntheticHierarchy) {
+    const auto opened =
+        images_->open({"workspace", "objects", axk::app::ImageSourceKind::axk_object_directory}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto content = images_->content(opened->image_id, "owner", 64U);
+    ASSERT_TRUE(content) << content.error().message;
+    ASSERT_EQ(content->items.size(), 1U);
+    const auto &volume = content->items.front();
+    ASSERT_EQ(volume.kind, "volume");
+    ASSERT_TRUE(volume.partition_index);
+
+    const auto exported = registry_.invoke(
+        "images.audio_export",
+        {{"imageId", opened->image_id},
+         {"expectedRevision", opened->revision},
+         {"roots", {{{"kind", "VOLUME"}, {"partitionIndex", *volume.partition_index}, {"volumeName", volume.name}}}},
+         {"format", "WAV"},
+         {"destination",
+          {{"kind", "WORKSPACE"}, {"output", {{"rootId", "workspace"}, {"relativePath", "object-directory-audio"}}}}}},
+        context());
+    ASSERT_TRUE(exported) << exported.error().message;
+
+    const auto output = root_ / "object-directory-audio";
+    EXPECT_TRUE(std::filesystem::is_directory(output / "_samples" / "physical"));
+    for (const auto &entry : std::filesystem::recursive_directory_iterator{output}) {
+        const auto relative = std::filesystem::relative(entry.path(), output);
+        EXPECT_NE(relative.begin()->string(), "objects");
+        EXPECT_NE(relative.begin()->string(), "Object directory");
+    }
 }
 
 TEST_F(PackageOperationsTest, SessionExportRequestsCompanionDisksAndSucceedsAfterExplicitAttachment) {
@@ -684,14 +779,15 @@ TEST_F(PackageOperationsTest, SessionExportCombinesEveryPortableObjectRootKindWi
     EXPECT_EQ(std::ranges::count(package->nodes, std::string{"SMPL"}, &axk::PackageNode::object_type), 1);
 }
 
-TEST_F(PackageOperationsTest, RejectsSequenceRootsAndUploadOwnershipMismatch) {
+TEST_F(PackageOperationsTest, ExportsSequenceRootsAndRejectsUploadOwnershipMismatch) {
     const auto sequence = registry_.invoke("package.export",
-                                           {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}},
+                                           {{"source", {{"rootId", "workspace"}, {"relativePath", "sequence.bin"}}},
                                             {"output", {{"rootId", "workspace"}, {"relativePath", "sequence.axkseq"}}},
                                             {"roots", {{{"kind", "sequence"}, {"objectName", "Sequence"}}}}},
                                            context());
-    ASSERT_FALSE(sequence);
-    EXPECT_EQ(sequence.error().code, "unsupported_package_root");
+    ASSERT_TRUE(sequence) << sequence.error().message;
+    EXPECT_EQ(sequence->at("packageKind"), "sequence");
+    EXPECT_EQ(sequence->at("requiredExtension"), ".axkseq");
 
     auto upload = uploads_->create({.owner_id = "owner",
                                     .filename = "private.axkvol",

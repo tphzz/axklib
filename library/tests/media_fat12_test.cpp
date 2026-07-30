@@ -27,7 +27,7 @@ TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
     auto plan = axk::build_export_plan(media, *catalog, graph);
     ASSERT_TRUE(plan);
     ASSERT_EQ(plan->volumes.size(), 1U);
-    EXPECT_EQ(plan->volumes[0].relative_root.generic_string(), "objects/FAT root");
+    EXPECT_EQ(plan->volumes[0].relative_root.generic_string(), "FAT root");
     ASSERT_EQ(plan->volumes[0].waveforms.size(), 1U);
     const auto output = std::filesystem::temp_directory_path() / "axklib-media-export-test";
     std::error_code error;

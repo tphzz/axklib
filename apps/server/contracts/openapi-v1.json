@@ -182,6 +182,9 @@
               "DELETE_PROGRAM",
               "INSERT_PROGRAM",
               "RENAME_PROGRAM",
+              "DELETE_SEQUENCE",
+              "INSERT_SEQUENCE",
+              "RENAME_SEQUENCE",
               "RENAME_VOLUME",
               "RENAME_PARTITION"
             ],
@@ -189,17 +192,20 @@
               "DELETE_PROGRAM": "delete_program",
               "DELETE_SBAC": "delete_sbac",
               "DELETE_SBNK": "delete_sbnk",
+              "DELETE_SEQUENCE": "delete_sequence",
               "DELETE_VOLUME": "delete_volume",
               "DELETE_WAVEFORM": "delete_waveform",
               "INSERT_PROGRAM": "insert_program",
               "INSERT_SBAC": "insert_sbac",
               "INSERT_SBNK": "insert_sbnk",
+              "INSERT_SEQUENCE": "insert_sequence",
               "INSERT_VOLUME": "insert_volume",
               "INSERT_WAVEFORM": "insert_waveform",
               "RENAME_PARTITION": "rename_partition",
               "RENAME_PROGRAM": "rename_program",
               "RENAME_SBAC": "rename_sbac",
               "RENAME_SBNK": "rename_sbnk",
+              "RENAME_SEQUENCE": "rename_sequence",
               "RENAME_VOLUME": "rename_volume",
               "RENAME_WAVEFORM": "rename_waveform"
             }
@@ -2371,7 +2377,8 @@
               "PROG",
               "SBAC",
               "SBNK",
-              "SMPL"
+              "SMPL",
+              "SEQU"
             ]
           },
           "partitionIndex": {
@@ -2777,6 +2784,16 @@
           "partitionName": {
             "type": "string"
           },
+          "sequence": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SequenceMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sizeBytes": {
             "description": "Complete stored object file or record size, including object metadata and stored payload bytes.",
             "minimum": 0,
@@ -2812,7 +2829,8 @@
           "categoryName",
           "entryName",
           "sizeBytes",
-          "waveform"
+          "waveform",
+          "sequence"
         ],
         "type": "object"
       },
@@ -3517,7 +3535,8 @@
                   "PROGRAM",
                   "SBAC",
                   "SBNK",
-                  "SMPL"
+                  "SMPL",
+                  "SEQU"
                 ]
               },
               "objectId": {
@@ -3663,6 +3682,7 @@
               "SBAC",
               "SBNK",
               "SMPL",
+              "SEQUENCE",
               "BUNDLE"
             ],
             "x-axklib-application-enum": {
@@ -3670,6 +3690,7 @@
               "PROGRAM": "program",
               "SBAC": "sbac",
               "SBNK": "sbnk",
+              "SEQUENCE": "sequence",
               "SMPL": "smpl",
               "VOLUME": "volume"
             }
@@ -3988,6 +4009,96 @@
         "required": [
           "data",
           "meta"
+        ],
+        "type": "object"
+      },
+      "ImageSessionSequenceExportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/ImageSessionAudioExportDestination"
+          },
+          "expectedRevision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "objectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "imageId",
+          "expectedRevision",
+          "objectIds",
+          "destination"
+        ],
+        "type": "object"
+      },
+      "ImageSessionSequenceExportResult": {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "enum": [
+              "WORKSPACE",
+              "DOWNLOAD"
+            ]
+          },
+          "download": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RetainedDownload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fileCount": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "output": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DirectoryRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sequenceCount": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "imageId",
+          "revision",
+          "sequenceCount",
+          "fileCount",
+          "destination",
+          "output",
+          "download"
         ],
         "type": "object"
       },
@@ -5351,6 +5462,7 @@
               "SBAC",
               "SBNK",
               "SMPL",
+              "SEQUENCE",
               "BUNDLE"
             ],
             "x-axklib-application-enum": {
@@ -5358,6 +5470,7 @@
               "PROGRAM": "program",
               "SBAC": "sbac",
               "SBNK": "sbnk",
+              "SEQUENCE": "sequence",
               "SMPL": "smpl",
               "VOLUME": "volume"
             }
@@ -5800,6 +5913,7 @@
               "SBAC",
               "SBNK",
               "SMPL",
+              "SEQUENCE",
               "BUNDLE"
             ],
             "x-axklib-application-enum": {
@@ -5807,6 +5921,7 @@
               "PROGRAM": "program",
               "SBAC": "sbac",
               "SBNK": "sbnk",
+              "SEQUENCE": "sequence",
               "SMPL": "smpl",
               "VOLUME": "volume"
             }
@@ -6009,12 +6124,14 @@
               "PROGRAM",
               "SBAC",
               "SBNK",
-              "SMPL"
+              "SMPL",
+              "SEQU"
             ],
             "x-axklib-application-enum": {
               "PROGRAM": "prog",
               "SBAC": "sbac",
               "SBNK": "sbnk",
+              "SEQU": "sequ",
               "SMPL": "smpl",
               "VOLUME": "volume"
             }
@@ -6045,12 +6162,14 @@
               "PROGRAM",
               "SBAC",
               "SBNK",
-              "SMPL"
+              "SMPL",
+              "SEQU"
             ],
             "x-axklib-application-enum": {
               "PROGRAM": "prog",
               "SBAC": "sbac",
               "SBNK": "sbnk",
+              "SEQU": "sequ",
               "SMPL": "smpl",
               "VOLUME": "volume"
             }
@@ -6522,6 +6641,52 @@
         ],
         "type": "object"
       },
+      "SequenceMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "endTick": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "eventCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "firstTick": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "formatVersion": {
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tempoBpm": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ticksPerQuarterNote": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "formatVersion",
+          "ticksPerQuarterNote",
+          "firstTick",
+          "endTick",
+          "eventCount",
+          "tempoBpm"
+        ],
+        "type": "object"
+      },
       "Upload": {
         "additionalProperties": false,
         "properties": {
@@ -6540,6 +6705,7 @@
           "kind": {
             "enum": [
               "AUDIO",
+              "MIDI",
               "PACKAGE",
               "MANIFEST"
             ]
@@ -6585,6 +6751,7 @@
           "kind": {
             "enum": [
               "AUDIO",
+              "MIDI",
               "PACKAGE",
               "MANIFEST"
             ]
@@ -16353,6 +16520,375 @@
         ],
         "x-axklib-operation-ids": [
           "images.package_import"
+        ]
+      }
+    },
+    "/image-session-sequence-exports": {
+      "post": {
+        "operationId": "images.sequence_export",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "destination": {
+                      "kind": "WORKSPACE",
+                      "output": {
+                        "relativePath": "x",
+                        "rootId": "x"
+                      }
+                    },
+                    "expectedRevision": 1,
+                    "imageId": "x",
+                    "objectIds": [
+                      "x"
+                    ]
+                  }
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ImageSessionSequenceExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1"
+                      }
+                    }
+                  },
+                  "warning": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1",
+                        "warnings": [
+                          {
+                            "code": "example_warning",
+                            "context": {},
+                            "message": "operation completed with a warning"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Job accepted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed or schema-invalid request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authenticated caller is not authorized",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Referenced resource does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request conflicts with current state",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Configured request limit exceeded",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported or invalid domain request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Transient server capacity exhausted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Contained internal failure",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "x-axklib-operation-descriptors": [
+          {
+            "cliCommand": null,
+            "cliParity": false,
+            "id": "images.sequence_export",
+            "mode": "job",
+            "operationClass": "write",
+            "requestSchema": "ImageSessionSequenceExportRequest",
+            "requiresIdempotency": true,
+            "resultSchema": "ImageSessionSequenceExportResult",
+            "variant": null
+          }
+        ],
+        "x-axklib-operation-ids": [
+          "images.sequence_export"
         ]
       }
     },

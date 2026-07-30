@@ -186,9 +186,11 @@ axk::app::Result<axk::PackageRootKind> parse_root_kind(std::string_view value) {
         return axk::PackageRootKind::sbnk;
     if (value == "smpl" || value == "wave-data")
         return axk::PackageRootKind::smpl;
+    if (value == "sequence" || value == "sequ")
+        return axk::PackageRootKind::sequ;
     return std::unexpected(operation_error("unsupported_package_root",
                                            "package root kind must be volume, program, sample-bank, sample, "
-                                           "wave-data, sbac, sbnk, or smpl"));
+                                           "wave-data, sequence, sbac, sbnk, smpl, or sequ"));
 }
 
 axk::app::Result<std::vector<axk::PackageRootSelector>> parse_roots(const Json &input) {
@@ -260,6 +262,8 @@ parse_session_export_roots(const Json &input, const std::unordered_map<std::stri
                     root.kind = axk::PackageRootKind::sbnk;
                 else if (kind == "SMPL")
                     root.kind = axk::PackageRootKind::smpl;
+                else if (kind == "SEQU")
+                    root.kind = axk::PackageRootKind::sequ;
                 else
                     return std::unexpected(operation_error("invalid_request", "package root kind is unsupported"));
                 const auto object_id = value.at("objectId").get<std::string>();

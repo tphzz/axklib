@@ -297,6 +297,22 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     if (operation.program_number == 0U || operation.program_number > 128U)
                         return std::unexpected{manifest_error("program_number must be between 1 and 128")};
                     return require_program_name(operation.new_program_name, "new_program_name");
+                } else if constexpr (std::same_as<T, DeleteSequenceOperation>) {
+                    return require_object_name(operation.sequence_name, "sequence_name");
+                } else if constexpr (std::same_as<T, InsertSequenceOperation>) {
+                    if (auto valid = require_object_name(operation.sequence.name, "sequence.name"); !valid)
+                        return valid;
+                    if (operation.sequence.midi_path.empty())
+                        return std::unexpected{manifest_error("sequence.midi_path must be a non-empty path")};
+                    return {};
+                } else if constexpr (std::same_as<T, RenameSequenceOperation>) {
+                    if (auto valid = require_object_name(operation.sequence_name, "sequence_name"); !valid)
+                        return valid;
+                    if (auto valid = require_object_name(operation.new_sequence_name, "new_sequence_name"); !valid)
+                        return valid;
+                    if (operation.sequence_name == operation.new_sequence_name)
+                        return std::unexpected{manifest_error("new_sequence_name must differ")};
+                    return {};
                 } else {
                     return validate_program(operation.program);
                 }

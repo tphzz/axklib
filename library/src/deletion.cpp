@@ -30,7 +30,7 @@ axk::Error deletion_error(std::string message) {
 
 bool supported_type(axk::ObjectType type) {
     return type == axk::ObjectType::prog || type == axk::ObjectType::sbac || type == axk::ObjectType::sbnk ||
-           type == axk::ObjectType::smpl;
+           type == axk::ObjectType::smpl || type == axk::ObjectType::sequ;
 }
 
 std::string_view object_type_label(axk::ObjectType type) {
@@ -43,6 +43,8 @@ std::string_view object_type_label(axk::ObjectType type) {
         return "Sample";
     case axk::ObjectType::smpl:
         return "Wave Data";
+    case axk::ObjectType::sequ:
+        return "Sequence";
     default:
         return "Object";
     }
@@ -58,8 +60,10 @@ int object_type_order(axk::ObjectType type) {
         return 2;
     case axk::ObjectType::smpl:
         return 3;
-    default:
+    case axk::ObjectType::sequ:
         return 4;
+    default:
+        return 5;
     }
 }
 
@@ -486,7 +490,7 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
             return std::unexpected(deletion_error("deletion target does not exist"));
         if (!supported_type(object->object.header.type))
             return std::unexpected(
-                deletion_error("only Program, Sample Bank, Sample, and Wave Data objects can be deleted"));
+                deletion_error("only Program, Sample Bank, Sample, Wave Data, and Sequence objects can be deleted"));
         if (!requested_targets.insert(key).second)
             return std::unexpected(deletion_error("deletion targets must be unique"));
     }
@@ -626,6 +630,7 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
     std::size_t bank_index{};
     std::size_t sample_index{};
     std::size_t wave_index{};
+    std::size_t sequence_index{};
     for (const auto *impact : ordered) {
         const auto partition = std::ranges::find(container.partitions(), impact->partition, &Partition::index);
         if (partition == container.partitions().end())
@@ -658,10 +663,14 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
             result.manifest.operations.push_back(
                 {std::format("delete-sample-{}", ++sample_index),
                  DeleteSampleOperation{impact->partition, impact->volume_name, object->object.header.name}});
-        } else {
+        } else if (impact->object_type == ObjectType::smpl) {
             result.manifest.operations.push_back(
                 {std::format("delete-wave-data-{}", ++wave_index),
                  DeleteWaveformOperation{impact->partition, impact->volume_name, object->object.header.name}});
+        } else {
+            result.manifest.operations.push_back(
+                {std::format("delete-sequence-{}", ++sequence_index),
+                 DeleteSequenceOperation{impact->partition, impact->volume_name, object->object.header.name}});
         }
     }
     return result;

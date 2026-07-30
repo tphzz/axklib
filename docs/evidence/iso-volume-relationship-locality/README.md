@@ -2,7 +2,8 @@
 
 ## Source
 
-- Image: `sample-images/Sample CDROMs/A3000 Factory CDROM/A3000 ProSnd Lib.iso`
+- Image: `A3000 Factory CDROM/A3000 ProSnd Lib.iso` beneath a user-supplied
+  external corpus root
 - Size: `66,789,376` bytes
 - SHA-256: `dd4e8544f84bbd0d8ed22d70f05873465c0581b10d060b9c99f85ce1cc1921d1`
 - Checked: 2026-07-27
@@ -30,9 +31,10 @@ by axkdeck.
 ## Reproduction
 
 ```sh
+AXK_CORPUS_ROOT=/path/to/yamaha-sample-cdroms
 build/native/release/apps/cli/axklib info \
   --format json \
-  "sample-images/Sample CDROMs/A3000 Factory CDROM/A3000 ProSnd Lib.iso" \
+  "$AXK_CORPUS_ROOT/A3000 Factory CDROM/A3000 ProSnd Lib.iso" \
   > build/reports/00034_a3000_prosnd_iso_locality/info.json
 ```
 

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct DesktopPreferences {
     last_package_export_directory: Option<PathBuf>,
-    last_sfz_export_directory: Option<PathBuf>,
+    last_directory_export_directory: Option<PathBuf>,
 }
 
 pub struct DesktopPreferencesStore {
@@ -59,22 +59,22 @@ impl DesktopPreferencesStore {
         self.persist()
     }
 
-    pub fn sfz_export_directory(&self) -> Option<PathBuf> {
+    pub fn directory_export_directory(&self) -> Option<PathBuf> {
         self.preferences
-            .last_sfz_export_directory
+            .last_directory_export_directory
             .as_ref()
             .filter(|directory| directory.is_dir())
             .cloned()
     }
 
-    pub fn remember_sfz_export_directory(&mut self, directory: &Path) -> Result<(), String> {
+    pub fn remember_directory_export_directory(&mut self, directory: &Path) -> Result<(), String> {
         let directory = directory
             .canonicalize()
-            .map_err(|error| format!("resolve SFZ export directory: {error}"))?;
+            .map_err(|error| format!("resolve directory export location: {error}"))?;
         if !directory.is_dir() {
-            return Err("the SFZ export location is not a directory".to_owned());
+            return Err("the directory export location is not a directory".to_owned());
         }
-        self.preferences.last_sfz_export_directory = Some(directory);
+        self.preferences.last_directory_export_directory = Some(directory);
         self.persist()
     }
 
@@ -188,12 +188,12 @@ mod tests {
     }
 
     #[test]
-    fn sfz_export_directory_is_remembered_separately() {
-        let root = temporary_directory("sfz-reload");
+    fn directory_export_location_is_remembered_separately() {
+        let root = temporary_directory("directory-reload");
         let package_directory = root.join("packages");
-        let sfz_directory = root.join("sfz");
+        let directory_export = root.join("directory-exports");
         fs::create_dir(&package_directory).expect("create package directory");
-        fs::create_dir(&sfz_directory).expect("create SFZ directory");
+        fs::create_dir(&directory_export).expect("create directory export location");
         let document = root.join("desktop-preferences.json");
 
         let mut store =
@@ -202,8 +202,8 @@ mod tests {
             .remember_package_export_directory(&package_directory)
             .expect("remember package directory");
         store
-            .remember_sfz_export_directory(&sfz_directory)
-            .expect("remember SFZ directory");
+            .remember_directory_export_directory(&directory_export)
+            .expect("remember directory export location");
 
         let reloaded = DesktopPreferencesStore::load(document).expect("reload preferences");
         assert_eq!(
@@ -215,11 +215,11 @@ mod tests {
             )
         );
         assert_eq!(
-            reloaded.sfz_export_directory(),
+            reloaded.directory_export_directory(),
             Some(
-                sfz_directory
+                directory_export
                     .canonicalize()
-                    .expect("canonical SFZ directory")
+                    .expect("canonical directory export location")
             )
         );
         fs::remove_dir_all(root).expect("remove temporary directory");

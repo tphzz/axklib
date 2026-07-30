@@ -14,13 +14,15 @@
     const heading = $derived(
         selection?.kind === 'program'
             ? 'Program details'
-            : selection?.kind === 'sample-bank'
-              ? 'Sample Bank details'
-              : selection?.kind === 'sample'
-                ? 'Sample details'
-                : selection?.kind === 'wave-data'
-                  ? 'Wave Data details'
-                  : 'Object details',
+            : selection?.kind === 'sequence'
+              ? 'Sequence details'
+              : selection?.kind === 'sample-bank'
+                ? 'Sample Bank details'
+                : selection?.kind === 'sample'
+                  ? 'Sample details'
+                  : selection?.kind === 'wave-data'
+                    ? 'Wave Data details'
+                    : 'Object details',
     );
 </script>
 
@@ -54,6 +56,53 @@
                 <div>
                     <dt>Stored size</dt>
                     <dd>{formatStoredSize(selection.program.object.storedSizeBytes)}</dd>
+                </div>
+            </dl>
+        </div>
+    {:else if selection?.kind === 'sequence'}
+        {@const item = selection.sequence}
+        {@const metadata = item.object.sequence}
+        <div class="inspector-content">
+            <div class="inspector-title">
+                <span>Sequence</span>
+                <h3>{item.name}</h3>
+            </div>
+            <dl class="metadata-list">
+                <div>
+                    <dt>Events</dt>
+                    <dd>{metadata?.eventCount.toLocaleString() ?? 'Unknown'}</dd>
+                </div>
+                <div>
+                    <dt>Timing</dt>
+                    <dd>{metadata?.ticksPerQuarterNote ?? 'Unknown'}</dd>
+                </div>
+                <div>
+                    <dt>Initial tempo</dt>
+                    <dd>
+                        {metadata?.initialBeatsPerMinute === undefined
+                            ? 'Unknown'
+                            : `${metadata.initialBeatsPerMinute.toLocaleString()} BPM`}
+                    </dd>
+                </div>
+                <div>
+                    <dt>First tick</dt>
+                    <dd>{metadata?.firstTick.toLocaleString() ?? 'Unknown'}</dd>
+                </div>
+                <div>
+                    <dt>End tick</dt>
+                    <dd>{metadata?.endTick.toLocaleString() ?? 'Unknown'}</dd>
+                </div>
+                <div>
+                    <dt>Partition</dt>
+                    <dd>{item.object.partitionName || 'Unknown'}</dd>
+                </div>
+                <div>
+                    <dt>Volume</dt>
+                    <dd>{item.object.volumeName || 'Unknown'}</dd>
+                </div>
+                <div>
+                    <dt>Stored size</dt>
+                    <dd>{formatStoredSize(item.object.storedSizeBytes)}</dd>
                 </div>
             </dl>
         </div>

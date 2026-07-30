@@ -226,6 +226,8 @@ std::optional<std::uint64_t> parse_unsigned(std::string_view value) {
 std::optional<axk::app::UploadKind> parse_upload_kind(std::string_view value) {
     if (value == "AUDIO")
         return axk::app::UploadKind::audio;
+    if (value == "MIDI")
+        return axk::app::UploadKind::midi;
     if (value == "PACKAGE")
         return axk::app::UploadKind::package;
     if (value == "MANIFEST")

@@ -115,6 +115,30 @@ struct RenameProgramOperation {
     std::string new_program_name;
 };
 
+struct SequenceSpec {
+    std::string name;
+    std::filesystem::path midi_path;
+};
+
+struct DeleteSequenceOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sequence_name;
+};
+
+struct InsertSequenceOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    SequenceSpec sequence;
+};
+
+struct RenameSequenceOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sequence_name;
+    std::string new_sequence_name;
+};
+
 struct RenameVolumeOperation {
     PartitionSelector partition;
     std::string volume_name;
@@ -131,8 +155,8 @@ using AlterationOperationData =
     std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
                  InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleOperation,
                  DeleteSampleBankOperation, InsertSampleBankOperation, RenameSampleBankOperation,
-                 DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation, RenameVolumeOperation,
-                 RenamePartitionOperation>;
+                 DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation, DeleteSequenceOperation,
+                 InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation, RenamePartitionOperation>;
 
 struct AlterationOperation {
     std::string id;

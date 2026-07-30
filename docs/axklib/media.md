@@ -89,9 +89,11 @@ The public format pages divide the byte contracts by layer:
 This documentation is exact about structures that axklib reads or writes. A
 file being visible to the container reader does not imply that its inner format
 is decoded. Floppy support files such as `YAMAHA.SYM` and model-specific system
-files remain opaque, as do type-specific fields in `SEQU` and `PRF3`. Transfer
-mode copies only recognized Yamaha object payloads; it does not silently claim
-support for opaque support-file formats.
+files remain opaque, as do type-specific fields in `PRF3`. The admitted current
+`SEQU` timeline is documented in
+[Sequence Data And MIDI Conversion](sequences.md). Transfer mode copies only
+recognized Yamaha object payloads; it does not silently claim support for
+opaque support-file formats.
 
 ## Yamaha object layer
 

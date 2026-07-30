@@ -6,11 +6,12 @@
         count: number;
         onexportpackage?: () => void;
         onexportsfz?: () => void;
+        onexportmidi?: () => void;
         ondelete?: () => void;
         onclear: () => void;
     }
 
-    let { count, onexportpackage, onexportsfz, ondelete, onclear }: Props = $props();
+    let { count, onexportpackage, onexportsfz, onexportmidi, ondelete, onclear }: Props = $props();
     let exportMenuOpen = $state(false);
     let exportMenu = $state<HTMLDivElement>();
 
@@ -28,19 +29,25 @@
 
 <div class="package-selection-controls" aria-label="Object selection">
     <span role="status">{count} selected</span>
-    {#if onexportpackage || onexportsfz}
+    {#if onexportpackage || onexportsfz || onexportmidi}
         <div class="package-selection-export-menu" bind:this={exportMenu}>
             <button
                 class="package-selection-action package-selection-export"
                 type="button"
                 aria-label={`Export ${count} selected ${count === 1 ? 'object' : 'objects'}`}
-                aria-haspopup={onexportpackage && onexportsfz ? 'menu' : undefined}
-                aria-expanded={onexportpackage && onexportsfz ? exportMenuOpen : undefined}
+                aria-haspopup={[onexportpackage, onexportsfz, onexportmidi].filter(Boolean).length > 1
+                    ? 'menu'
+                    : undefined}
+                aria-expanded={[onexportpackage, onexportsfz, onexportmidi].filter(Boolean).length > 1
+                    ? exportMenuOpen
+                    : undefined}
                 title="Export selected objects"
                 onclick={() => {
-                    if (onexportpackage && onexportsfz) exportMenuOpen = !exportMenuOpen;
+                    if ([onexportpackage, onexportsfz, onexportmidi].filter(Boolean).length > 1)
+                        exportMenuOpen = !exportMenuOpen;
                     else if (onexportpackage) onexportpackage();
-                    else onexportsfz?.();
+                    else if (onexportsfz) onexportsfz();
+                    else onexportmidi?.();
                 }}
             >
                 <Icon name="archive" size={14} /><span>Export</span>
@@ -65,6 +72,16 @@
                                 exportMenuOpen = false;
                                 onexportsfz?.();
                             }}>Export SFZ…</button
+                        >
+                    {/if}
+                    {#if onexportmidi}
+                        <button
+                            type="button"
+                            role="menuitem"
+                            onclick={() => {
+                                exportMenuOpen = false;
+                                onexportmidi?.();
+                            }}>Export MIDI…</button
                         >
                     {/if}
                 </div>

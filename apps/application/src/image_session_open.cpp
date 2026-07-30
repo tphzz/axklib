@@ -199,6 +199,14 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
                                  .loop_start_frame = waveform->loop_start_frame.value,
                                  .loop_length_frames = waveform->loop_length_frames.value};
         }
+        if (const auto *sequence = std::get_if<axk::CurrentSequence>(&object.object.payload)) {
+            item.sequence = SequenceMetadata{.format_version = sequence->format_version,
+                                             .ticks_per_quarter_note = sequence->ticks_per_quarter_note,
+                                             .first_tick = sequence->first_tick,
+                                             .end_tick = sequence->end_tick,
+                                             .event_count = sequence->event_count,
+                                             .tempo_bpm = sequence->tempo_bpm};
+        }
         session->object_indices_by_id[item.id] = session->objects.size();
         session->object_indices_by_type[item.type].push_back(session->objects.size());
         session->objects.push_back(std::move(item));

@@ -809,7 +809,7 @@
         "required": ["filename", "kind", "mediaType", "size"],
         "properties": {
           "filename": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["AUDIO", "PACKAGE", "MANIFEST"]},
+          "kind": {"enum": ["AUDIO", "MIDI", "PACKAGE", "MANIFEST"]},
           "mediaType": {"type": "string", "minLength": 1},
           "size": {"type": "integer", "minimum": 0},
           "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
@@ -822,7 +822,7 @@
         "properties": {
           "uploadId": {"type": "string", "minLength": 1},
           "filename": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["AUDIO", "PACKAGE", "MANIFEST"]},
+          "kind": {"enum": ["AUDIO", "MIDI", "PACKAGE", "MANIFEST"]},
           "mediaType": {"type": "string", "minLength": 1},
           "declaredSize": {"type": "integer", "minimum": 0},
           "receivedSize": {"type": "integer", "minimum": 0},
@@ -1027,10 +1027,23 @@
           "loopLengthFrames": {"type": "integer", "minimum": 0, "maximum": 4294967295}
         }
       },
+      "SequenceMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["formatVersion", "ticksPerQuarterNote", "firstTick", "endTick", "eventCount", "tempoBpm"],
+        "properties": {
+          "formatVersion": {"type": "integer", "minimum": 0, "maximum": 65535},
+          "ticksPerQuarterNote": {"type": "integer", "minimum": 1, "maximum": 65535},
+          "firstTick": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "endTick": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "eventCount": {"type": "integer", "minimum": 0},
+          "tempoBpm": {"type": ["integer", "null"], "minimum": 1, "maximum": 65535}
+        }
+      },
       "ImageObjectItem": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "name", "format", "partitionIndex", "partitionName", "volumeName", "categoryName", "entryName", "sizeBytes", "waveform"],
+        "required": ["id", "type", "name", "format", "partitionIndex", "partitionName", "volumeName", "categoryName", "entryName", "sizeBytes", "waveform", "sequence"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "type": {"type": "string", "minLength": 1, "maxLength": 16},
@@ -1042,7 +1055,8 @@
           "categoryName": {"type": "string"},
           "entryName": {"type": "string"},
           "sizeBytes": {"type": "integer", "minimum": 0, "description": "Complete stored object file or record size, including object metadata and stored payload bytes."},
-          "waveform": {"oneOf": [{"$ref": "#/components/schemas/WaveDataMetadata"}, {"type": "null"}]}
+          "waveform": {"oneOf": [{"$ref": "#/components/schemas/WaveDataMetadata"}, {"type": "null"}]},
+          "sequence": {"oneOf": [{"$ref": "#/components/schemas/SequenceMetadata"}, {"type": "null"}]}
         }
       },
       "ImageObjectPage": {
@@ -1678,8 +1692,8 @@
         "required": ["kind"],
         "properties": {
           "kind": {
-            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL"],
-            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "prog", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl"}
+            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "SEQU"],
+            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "prog", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "SEQU": "sequ"}
           },
           "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
           "groupName": {"type": "string"},
@@ -1710,8 +1724,8 @@
         "required": ["kind", "displayName", "nodeIds"],
         "properties": {
           "kind": {
-            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL"],
-            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "prog", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl"}
+            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "SEQU"],
+            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "prog", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "SEQU": "sequ"}
           },
           "displayName": {"type": "string"},
           "nodeIds": {"type": "array", "items": {"type": "string"}}
@@ -1753,8 +1767,8 @@
           "packageId": {"type": "string", "minLength": 1},
           "packageKind": {
             "description": "Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.",
-            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "BUNDLE"],
-            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "BUNDLE": "bundle"}
+            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "SEQUENCE", "BUNDLE"],
+            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "SEQUENCE": "sequence", "BUNDLE": "bundle"}
           },
           "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
           "sourceMediaKind": {
@@ -1781,8 +1795,8 @@
           "packageId": {"type": "string", "minLength": 1},
           "packageKind": {
             "description": "Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.",
-            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "BUNDLE"],
-            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "BUNDLE": "bundle"}
+            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "SEQUENCE", "BUNDLE"],
+            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "SEQUENCE": "sequence", "BUNDLE": "bundle"}
           },
           "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
           "sourceMediaKind": {
@@ -2084,7 +2098,7 @@
             "additionalProperties": false,
             "required": ["kind", "objectId"],
             "properties": {
-              "kind": {"enum": ["PROGRAM", "SBAC", "SBNK", "SMPL"]},
+              "kind": {"enum": ["PROGRAM", "SBAC", "SBNK", "SMPL", "SEQU"]},
               "objectId": {"type": "string", "minLength": 1}
             }
           }
@@ -2116,8 +2130,8 @@
           "packageId": {"type": "string", "minLength": 1},
           "packageKind": {
             "description": "Derived from the selected root kind when every root is homogeneous; BUNDLE is used only when root kinds differ.",
-            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "BUNDLE"],
-            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "BUNDLE": "bundle"}
+            "enum": ["VOLUME", "PROGRAM", "SBAC", "SBNK", "SMPL", "SEQUENCE", "BUNDLE"],
+            "x-axklib-application-enum": {"VOLUME": "volume", "PROGRAM": "program", "SBAC": "sbac", "SBNK": "sbnk", "SMPL": "smpl", "SEQUENCE": "sequence", "BUNDLE": "bundle"}
           },
           "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
           "sourceMediaKind": {
@@ -2232,6 +2246,47 @@
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 1},
           "format": {"enum": ["SFZ", "WAV"]},
+          "fileCount": {"type": "integer", "minimum": 1},
+          "destination": {"enum": ["WORKSPACE", "DOWNLOAD"]},
+          "output": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/DirectoryRef"},
+              {"type": "null"}
+            ]
+          },
+          "download": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/RetainedDownload"},
+              {"type": "null"}
+            ]
+          }
+        }
+      },
+      "ImageSessionSequenceExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "objectIds", "destination"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "objectIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1024,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "destination": {"$ref": "#/components/schemas/ImageSessionAudioExportDestination"}
+        }
+      },
+      "ImageSessionSequenceExportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "sequenceCount", "fileCount", "destination", "output", "download"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "sequenceCount": {"type": "integer", "minimum": 1},
           "fileCount": {"type": "integer", "minimum": 1},
           "destination": {"enum": ["WORKSPACE", "DOWNLOAD"]},
           "output": {
@@ -2473,7 +2528,7 @@
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "type": {
-            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "RENAME_VOLUME", "RENAME_PARTITION"],
+            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "DELETE_SEQUENCE", "INSERT_SEQUENCE", "RENAME_SEQUENCE", "RENAME_VOLUME", "RENAME_PARTITION"],
             "x-axklib-application-enum": {
               "DELETE_VOLUME": "delete_volume",
               "INSERT_VOLUME": "insert_volume",
@@ -2489,6 +2544,9 @@
               "DELETE_PROGRAM": "delete_program",
               "INSERT_PROGRAM": "insert_program",
               "RENAME_PROGRAM": "rename_program",
+              "DELETE_SEQUENCE": "delete_sequence",
+              "INSERT_SEQUENCE": "insert_sequence",
+              "RENAME_SEQUENCE": "rename_sequence",
               "RENAME_VOLUME": "rename_volume",
               "RENAME_PARTITION": "rename_partition"
             }
@@ -2626,7 +2684,7 @@
         "required": ["objectId", "objectType", "objectName", "partitionIndex", "partitionName", "volumeName", "role", "status", "selected", "storedSizeBytes", "freedClusters", "prerequisiteObjectIds", "reason"],
         "properties": {
           "objectId": {"type": "string", "minLength": 1},
-          "objectType": {"enum": ["PROG", "SBAC", "SBNK", "SMPL"]},
+          "objectType": {"enum": ["PROG", "SBAC", "SBNK", "SMPL", "SEQU"]},
           "objectName": {"type": "string"},
           "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
           "partitionName": {"type": "string"},

@@ -172,6 +172,15 @@ Result<OperationReport> insert_program(TransactionState &state, OperationContext
                                        const InsertProgramOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> rename_program(TransactionState &state, OperationContext context,
                                        const RenameProgramOperation &operation, const CancellationToken &cancellation);
+Result<OperationReport> delete_sequence(TransactionState &state, OperationContext context,
+                                        const DeleteSequenceOperation &operation,
+                                        const CancellationToken &cancellation);
+Result<OperationReport> insert_sequence(TransactionState &state, OperationContext context,
+                                        const InsertSequenceOperation &operation,
+                                        const CancellationToken &cancellation);
+Result<OperationReport> rename_sequence(TransactionState &state, OperationContext context,
+                                        const RenameSequenceOperation &operation,
+                                        const CancellationToken &cancellation);
 Result<OperationReport> delete_sbac(TransactionState &state, OperationContext context,
                                     const DeleteSampleBankOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> insert_sbac(TransactionState &state, OperationContext context,

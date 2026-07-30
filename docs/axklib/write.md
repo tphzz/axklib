@@ -400,11 +400,14 @@ host but must remain nonzero, and the object limit cannot exceed the aggregate
 payload limit.
 
 Physical Yamaha hardware has enumerated the generated group and volume, loaded
-the transferred Program, Sample Banks, and Samples and resolved their transferred Wave Data
-relationships, and produced audible playback. The transferred Sequence was
-also visible. This promotes the exact whole-floppy Yamaha-object transfer
-profile through loading and audition, while retaining the boundary above:
-non-object files and FAT filesystem metadata are not transferred.
+the transferred Program, Sample Banks, and Samples, resolved their transferred
+Wave Data relationships, and produced audible playback. A byte-preserved
+transferred Sequence has also loaded and played successfully on an A4000. This
+promotes exact whole-floppy Yamaha-object transfer for the admitted Program,
+Sample Bank, Sample, Wave Data, and Sequence profiles. MIDI-authored Sequence
+creation and Sequence rename/save-back remain bounded by their current hardware
+writer profile. Non-object files and FAT filesystem metadata are not
+transferred.
 
 ## Transfer Selected Saved Objects
 

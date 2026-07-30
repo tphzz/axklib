@@ -21,6 +21,7 @@ import type {
     ImageSessionExportRoot,
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
+    ImageSessionSequenceExportDestination,
     ImageSessionPackageImportPlan,
     ImageSessionPackageRename,
     InputBinding,
@@ -39,6 +40,8 @@ import type {
     PreviewEnvelope,
     RelationshipPage,
     RelationshipPageFilter,
+    SequenceImportItem,
+    SequenceImportTarget,
     VolumeMutation,
 } from './transport';
 
@@ -58,6 +61,7 @@ import {
 import type { ClientUploadSource } from './clientUploadSource';
 import { downloadServerFile, readDirectoryArchive } from './httpDownloads';
 import { HttpImageSessions } from './httpImageSessions';
+import { audioImportRequest, sequenceImportRequest } from './httpImportOperations';
 import { HttpJobController } from './httpJobController';
 import { HttpPackageOperations } from './httpPackageOperations';
 import type {
@@ -161,52 +165,24 @@ export class HttpImageTransport implements ImageTransport {
 
     async startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
-        const operations: Record<string, unknown>[] = [];
-        const inputBindings: Record<string, unknown>[] = [];
-        items.forEach((item, index) => {
-            const logicalPath = `audio/import-${index}`;
-            operations.push({
-                id: `wave-${index}`,
-                type: 'insert_waveform',
-                partition_index: target.partitionIndex,
-                volume_name: target.volumeName,
-                audio: {
-                    path: logicalPath,
-                    waveform_names: item.waveformNames,
-                    root_key: item.rootKey,
-                    target_sample_rate: item.targetSampleRate,
-                },
-            });
-            operations.push({
-                id: `sample-${index}`,
-                type: 'insert_sbnk',
-                partition_index: target.partitionIndex,
-                volume_name: target.volumeName,
-                sample: {
-                    name: item.sampleName,
-                    waveform_name: item.waveformNames[0],
-                    ...(item.waveformNames[1] ? { right_waveform_name: item.waveformNames[1] } : {}),
-                    root_key: item.rootKey,
-                    key_low: 0,
-                    key_high: 127,
-                    level: 100,
-                },
-            });
-            inputBindings.push({ manifestPath: logicalPath, input: serverInput(item.source) });
-        });
         const job = await this.client.invoke<never>(
             'images.alter',
-            {
-                imageId: session.remoteId,
-                expectedRevision: session.revision,
-                manifest: {
-                    inline: {
-                        schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,
-                        operations,
-                    },
-                },
-                inputBindings,
-            },
+            audioImportRequest(session.remoteId, session.revision, target, items),
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.alter did not return a job');
+        return this.jobs.map(job);
+    }
+
+    async startSequenceImport(
+        sessionId: number,
+        target: SequenceImportTarget,
+        items: SequenceImportItem[],
+    ): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.alter',
+            sequenceImportRequest(session.remoteId, session.revision, target, items),
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.jobs.isJob(job)) throw new Error('images.alter did not return a job');
@@ -304,6 +280,14 @@ export class HttpImageTransport implements ImageTransport {
         destination: ImageSessionAudioExportDestination,
     ): Promise<JobState> {
         return this.packages.startAudioExport(sessionId, roots, format, destination);
+    }
+
+    startImageSequenceExport(
+        sessionId: number,
+        objectIds: string[],
+        destination: ImageSessionSequenceExportDestination,
+    ): Promise<JobState> {
+        return this.packages.startSequenceExport(sessionId, objectIds, destination);
     }
 
     deleteRetainedPackage(download: components['schemas']['RetainedDownload']): Promise<void> {

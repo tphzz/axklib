@@ -226,7 +226,8 @@ Json deletion_manifest_json(const axk::AlterationManifest &manifest) {
                 if constexpr (std::same_as<T, axk::DeleteSampleBankOperation> ||
                               std::same_as<T, axk::DeleteSampleOperation> ||
                               std::same_as<T, axk::DeleteWaveformOperation> ||
-                              std::same_as<T, axk::DeleteProgramOperation>) {
+                              std::same_as<T, axk::DeleteProgramOperation> ||
+                              std::same_as<T, axk::DeleteSequenceOperation>) {
                     const auto *partition = std::get_if<axk::PartitionIndex>(&data.partition);
                     if (partition == nullptr)
                         return Json::object();
@@ -240,6 +241,8 @@ Json deletion_manifest_json(const axk::AlterationManifest &manifest) {
                         result["sample_name"] = data.sample_name;
                     else if constexpr (std::same_as<T, axk::DeleteProgramOperation>)
                         result["program_number"] = data.program_number;
+                    else if constexpr (std::same_as<T, axk::DeleteSequenceOperation>)
+                        result["sequence_name"] = data.sequence_name;
                     else
                         result["waveform_name"] = data.waveform_name;
                     return result;

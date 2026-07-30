@@ -14,7 +14,7 @@ bool session_operation(std::string_view id) {
            id == "images.deletion.inspect" || id == "images.deletion.orphans.inspect" || id == "images.delete" ||
            id == "images.package_import.plan" || id == "images.package_import.release" ||
            id == "images.package_import" || id == "images.package_export" || id == "images.audio_export.inspect" ||
-           id == "images.audio_export";
+           id == "images.audio_export" || id == "images.sequence_export";
 }
 
 class TemporaryDirectory {

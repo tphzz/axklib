@@ -1,7 +1,7 @@
 mod desktop_preferences;
 mod file_publication;
+mod local_directory_exports;
 mod local_packages;
-mod local_sfz_exports;
 mod local_workspaces;
 mod remote_settings;
 mod retained_download;
@@ -14,12 +14,13 @@ use tauri::{Manager, State, WebviewWindow};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use desktop_preferences::DesktopPreferencesStore;
+use local_directory_exports::{
+    DirectorySaveCandidateStore, save_retained_directory_export,
+    select_local_directory_export_destination,
+};
 use local_packages::{
     PackageSaveCandidateStore, save_retained_package, select_local_package,
     select_local_package_destination,
-};
-use local_sfz_exports::{
-    SfzSaveCandidateStore, save_retained_sfz_export, select_local_sfz_destination,
 };
 use local_workspaces::{WorkspaceCandidateStore, commit_local_workspace, select_local_workspace};
 
@@ -90,8 +91,10 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{current_build_info, parse_log_level};
+    use crate::local_directory_exports::{
+        checked_tar_path, extract_directory_tar, normalize_directory_destination,
+    };
     use crate::local_packages::{normalize_package_destination, valid_retained_content_path};
-    use crate::local_sfz_exports::{checked_tar_path, extract_sfz_tar, normalize_sfz_destination};
 
     #[test]
     fn log_level_parser_accepts_supported_values_and_defaults_to_info() {
@@ -167,26 +170,31 @@ mod tests {
     }
 
     #[test]
-    fn sfz_destination_must_be_new_but_uses_an_existing_parent() {
-        let root =
-            std::env::temp_dir().join(format!("axkdeck-sfz-destination-{}", std::process::id()));
+    fn directory_destination_must_be_new_but_uses_an_existing_parent() {
+        let root = std::env::temp_dir().join(format!(
+            "axkdeck-directory-destination-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir(&root).expect("create test root");
         assert_eq!(
-            normalize_sfz_destination(root.join("Instrument")).expect("normalize destination"),
+            normalize_directory_destination(root.join("Instrument"))
+                .expect("normalize destination"),
             root.canonicalize()
                 .expect("canonical root")
                 .join("Instrument")
         );
         std::fs::create_dir(root.join("Existing")).expect("create existing destination");
-        assert!(normalize_sfz_destination(root.join("Existing")).is_err());
+        assert!(normalize_directory_destination(root.join("Existing")).is_err());
         std::fs::remove_dir_all(root).expect("remove test root");
     }
 
     #[test]
-    fn sfz_tar_extraction_rejects_traversal_and_publishes_a_new_folder() {
-        let root =
-            std::env::temp_dir().join(format!("axkdeck-sfz-extraction-{}", std::process::id()));
+    fn directory_tar_extraction_rejects_traversal_and_publishes_a_new_folder() {
+        let root = std::env::temp_dir().join(format!(
+            "axkdeck-directory-extraction-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir(&root).expect("create test root");
         let archive_path = root.join("export.tar");
@@ -201,7 +209,8 @@ mod tests {
         std::io::Write::write_all(&mut archive, b"<region>\n").expect("write payload");
         std::io::Write::write_all(&mut archive, &[0_u8; 503]).expect("write padding");
         std::io::Write::write_all(&mut archive, &[0_u8; 1024]).expect("write end blocks");
-        extract_sfz_tar(&mut archive, &root.join("Instrument")).expect("extract SFZ archive");
+        extract_directory_tar(&mut archive, &root.join("Instrument"))
+            .expect("extract directory archive");
         assert_eq!(
             std::fs::read_to_string(root.join("Instrument/Instrument.sfz"))
                 .expect("read extracted SFZ"),
@@ -329,7 +338,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(Mutex::new(WorkspaceCandidateStore::default()))
         .manage(Mutex::new(PackageSaveCandidateStore::default()))
-        .manage(Mutex::new(SfzSaveCandidateStore::default()))
+        .manage(Mutex::new(DirectorySaveCandidateStore::default()))
         .setup(|app| {
             let log_directory = app
                 .path()
@@ -378,8 +387,8 @@ pub fn run() {
             select_local_package,
             select_local_package_destination,
             save_retained_package,
-            select_local_sfz_destination,
-            save_retained_sfz_export,
+            select_local_directory_export_destination,
+            save_retained_directory_export,
             open_developer_tools,
             diagnostic_log_level,
             desktop_build_info
