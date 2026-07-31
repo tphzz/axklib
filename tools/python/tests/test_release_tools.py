@@ -595,15 +595,17 @@ def test_release_assets_reject_share_content(tmp_path: Path) -> None:
         release_metadata.verify_release_assets(tmp_path)
 
 
-def test_native_workflow_creates_only_release_drafts() -> None:
+def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
     assert 'VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg/archives' in workflow
     assert workflow.count("path: ${{ runner.temp }}/vcpkg/archives") == 2
     assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}" not in workflow
     assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.." not in workflow
-    assert "  pull_request:" in workflow
-    assert "  push:" in workflow
+    assert "  workflow_dispatch:" in workflow
+    assert "  pull_request:" not in workflow
+    assert "  push:" not in workflow
+    assert "  schedule:" not in workflow
     assert "draft-release:" in workflow
     assert "if: ${{ github.event_name == 'workflow_dispatch' && !inputs.debug }}" in workflow
     assert "macos-universal:\n    name: macOS universal\n    if: github.event_name == 'workflow_dispatch'" in workflow
