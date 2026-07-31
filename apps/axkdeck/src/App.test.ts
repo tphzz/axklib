@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
     waitForJob: vi.fn(),
     deleteSandboxEntry: vi.fn(),
     hardDiskCreationProfiles: vi.fn(),
-    listenForNativeAudioDrops: vi.fn(),
+    listenForNativeMediaDrops: vi.fn(),
     audioImportCapabilities: vi.fn(),
     inspectAudio: vi.fn(),
     uploadClientFile: vi.fn(),
@@ -62,8 +62,8 @@ vi.mock('./lib/createTransport', () => ({
     }),
 }));
 
-vi.mock('./lib/nativeAudioDrop', () => ({
-    listenForNativeAudioDrops: mocks.listenForNativeAudioDrops,
+vi.mock('./lib/nativeMediaDrop', () => ({
+    listenForNativeMediaDrops: mocks.listenForNativeMediaDrops,
 }));
 
 import App from './App.svelte';
@@ -139,7 +139,7 @@ describe('App panel layout', () => {
         mocks.startObjectRename.mockReset();
         mocks.waitForJob.mockReset();
         mocks.deleteSandboxEntry.mockReset().mockResolvedValue(undefined);
-        mocks.listenForNativeAudioDrops.mockReset().mockResolvedValue(() => undefined);
+        mocks.listenForNativeMediaDrops.mockReset().mockResolvedValue(() => undefined);
         mocks.audioImportCapabilities.mockReset().mockResolvedValue({
             supportedSampleRates: [44_100],
             defaultUnsupportedSampleRate: 44_100,
@@ -1246,12 +1246,165 @@ describe('App panel layout', () => {
         runtime.__TAURI_INTERNALS__ = {};
         render(App);
 
-        await vi.waitFor(() => expect(mocks.listenForNativeAudioDrops).toHaveBeenCalledOnce());
-        const callbacks = mocks.listenForNativeAudioDrops.mock.calls[0][0];
+        await vi.waitFor(() => expect(mocks.listenForNativeMediaDrops).toHaveBeenCalledOnce());
+        const callbacks = mocks.listenForNativeMediaDrops.mock.calls[0][0];
         callbacks.onDrop([new File(['audio'], 'take.wav', { type: 'audio/wav' })], { x: 20, y: 30 }, 1);
 
         expect(await screen.findByText('Select a writable volume first')).toBeTruthy();
         delete runtime.__TAURI_INTERNALS__;
+    });
+
+    it('routes browser MIDI drops through the Sequence import review on the Sequences tab', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'My Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce(openedImageWithVolumes([volume], volume));
+        mocks.uploadClientFile.mockResolvedValue({
+            kind: 'client-upload',
+            reference: { uploadId: 'midi-upload' },
+            uploadKind: 'MIDI',
+            displayName: 'intro.mid',
+        });
+        render(App);
+        await chooseNestedImage();
+        await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
+
+        const dataTransfer = {
+            types: ['Files'],
+            files: [new File(['midi'], 'intro.MID', { type: 'audio/midi' })],
+            dropEffect: 'none',
+        } as unknown as DataTransfer;
+        const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+        Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer });
+        window.dispatchEvent(drop);
+
+        const dialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
+        expect(within(dialog).getByText('Volume My Volume')).toBeTruthy();
+        expect(within(dialog).getByDisplayValue('intro')).toBeTruthy();
+        await vi.waitFor(() =>
+            expect(mocks.uploadClientFile).toHaveBeenCalledWith(
+                expect.objectContaining({ name: 'intro.MID', type: 'audio/midi' }),
+                'MIDI',
+                expect.any(Function),
+                expect.any(AbortSignal),
+            ),
+        );
+    });
+
+    it('routes native MIDI drops through the same Sequence import review', async () => {
+        const runtime = window as unknown as { __TAURI_INTERNALS__?: unknown };
+        runtime.__TAURI_INTERNALS__ = {};
+        const volume = {
+            id: 'volume-1',
+            name: 'My Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce(openedImageWithVolumes([volume], volume));
+        mocks.uploadClientFile.mockResolvedValue({
+            kind: 'client-upload',
+            reference: { uploadId: 'midi-upload' },
+            uploadKind: 'MIDI',
+            displayName: 'native.mid',
+        });
+        render(App);
+        await chooseNestedImage();
+        await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
+        await vi.waitFor(() => expect(mocks.listenForNativeMediaDrops).toHaveBeenCalledOnce());
+
+        const callbacks = mocks.listenForNativeMediaDrops.mock.calls[0][0];
+        callbacks.onDrop(
+            [
+                {
+                    name: 'native.mid',
+                    type: 'audio/midi',
+                    size: 4,
+                    readChunk: async () => new Blob(['midi']),
+                },
+            ],
+            { x: 20, y: 30 },
+            1,
+        );
+
+        const dialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
+        expect(within(dialog).getByDisplayValue('native')).toBeTruthy();
+        delete runtime.__TAURI_INTERNALS__;
+    });
+
+    it('requires the Sequences tab for MIDI drops and rejects mixed media drops', async () => {
+        render(App);
+
+        const midiTransfer = {
+            types: ['Files'],
+            files: [new File(['midi'], 'song.mid', { type: 'audio/midi' })],
+            dropEffect: 'none',
+        } as unknown as DataTransfer;
+        const midiDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+        Object.defineProperty(midiDrop, 'dataTransfer', { value: midiTransfer });
+        window.dispatchEvent(midiDrop);
+        expect(await screen.findByText('Open the Sequences tab to import MIDI files')).toBeTruthy();
+        expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
+        const mixedTransfer = {
+            types: ['Files'],
+            files: [
+                new File(['audio'], 'take.wav', { type: 'audio/wav' }),
+                new File(['midi'], 'song.mid', { type: 'audio/midi' }),
+            ],
+            dropEffect: 'none',
+        } as unknown as DataTransfer;
+        const mixedDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+        Object.defineProperty(mixedDrop, 'dataTransfer', { value: mixedTransfer });
+        window.dispatchEvent(mixedDrop);
+        expect(await screen.findByText('Drop audio and MIDI files separately')).toBeTruthy();
+        expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
+        expect(screen.queryByRole('dialog', { name: 'Import audio' })).toBeNull();
+    });
+
+    it('switches to a dropped-on volume before opening MIDI import review', async () => {
+        const firstVolume = {
+            id: 'volume-1',
+            name: 'First Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const secondVolume = {
+            id: 'volume-2',
+            name: 'Second Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce(openedImageWithVolumes([firstVolume, secondVolume], firstVolume));
+        mocks.uploadClientFile.mockResolvedValue({
+            kind: 'client-upload',
+            reference: { uploadId: 'midi-upload' },
+            uploadKind: 'MIDI',
+            displayName: 'target.mid',
+        });
+        render(App);
+        await chooseNestedImage();
+        await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
+
+        const dataTransfer = {
+            types: ['Files'],
+            files: [new File(['midi'], 'target.mid', { type: 'audio/midi' })],
+            dropEffect: 'none',
+        } as unknown as DataTransfer;
+        const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+        Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer });
+        screen.getByText('Second Volume').dispatchEvent(drop);
+
+        const dialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
+        expect(within(dialog).getByText('Volume Second Volume')).toBeTruthy();
+        expect(mocks.objectPage).toHaveBeenCalledWith(17, 0, 256, { scopeId: 'volume-2' });
     });
 
     it('selects several workspace audio files and inspects them without uploading', async () => {
@@ -1436,3 +1589,38 @@ describe('App panel layout', () => {
         expect(dialog.querySelector('output')?.textContent).toBe('Yamaha/images');
     });
 });
+
+function openedImageWithVolumes(
+    volumes: {
+        id: string;
+        name: string;
+        kind: 'volume';
+        childCount: number;
+        partitionIndex: number;
+    }[],
+    initialVolume: (typeof volumes)[number],
+) {
+    return {
+        sessionId: 17,
+        companionDirectories: [],
+        tree: [
+            { id: 'disk-17', name: 'nested.hds', kind: 'disk' as const, childCount: volumes.length, children: volumes },
+        ],
+        validation: {
+            valid: true,
+            issueCount: 0,
+            errorCount: 0,
+            warningCount: 0,
+            objectCount: 0,
+            relationshipCount: 0,
+        },
+        objects: [],
+        objectTotalCount: 0,
+        initialVolume,
+        volumeMutationsAvailable: true,
+        partitionMutationsAvailable: true,
+        objectRenameAvailable: true,
+        objectDeletionAvailable: true,
+        waveDataCleanupAvailable: false,
+    };
+}

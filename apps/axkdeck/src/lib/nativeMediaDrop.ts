@@ -1,7 +1,8 @@
-import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview';
 import type { UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview';
 import { audioExtensions, audioMediaType } from './audioImport';
 import type { ClientUploadSource } from './clientUploadSource';
+import { midiExtensions, midiMediaType } from './midiImport';
 import { nativeExtension, nativeFileSource } from './nativeFileSource';
 
 export interface NativeDropPosition {
@@ -9,8 +10,8 @@ export interface NativeDropPosition {
     y: number;
 }
 
-interface NativeAudioDropCallbacks {
-    onHover: (active: boolean, position?: NativeDropPosition) => void;
+interface NativeMediaDropCallbacks {
+    onHover: (paths: readonly string[], position?: NativeDropPosition) => void;
     onDrop: (
         files: ClientUploadSource[],
         position: NativeDropPosition,
@@ -19,12 +20,12 @@ interface NativeAudioDropCallbacks {
     onError: (reason: unknown) => void;
 }
 
-const supportedExtensions = new Set<string>(audioExtensions);
+const supportedExtensions = new Set<string>([...audioExtensions, ...midiExtensions]);
 const maximumNativeDropFileBytes = 4 * 1024 * 1024 * 1024;
 const maximumNativeDropTotalBytes = 8 * 1024 * 1024 * 1024;
 
 function mediaType(path: string): string {
-    return audioMediaType(path) ?? 'application/octet-stream';
+    return audioMediaType(path) ?? midiMediaType(path) ?? 'application/octet-stream';
 }
 
 function supported(path: string): boolean {
@@ -48,27 +49,27 @@ async function admittedFiles(paths: readonly string[]): Promise<ClientUploadSour
     return result;
 }
 
-export async function listenForNativeAudioDrops(callbacks: NativeAudioDropCallbacks): Promise<UnlistenFn> {
-    let hoveringSupportedFiles = false;
+export async function listenForNativeMediaDrops(callbacks: NativeMediaDropCallbacks): Promise<UnlistenFn> {
+    let hoveringPaths: readonly string[] = [];
     return getCurrentWebview().onDragDropEvent((event) => {
         const payload: DragDropEvent = event.payload;
         if (payload.type === 'enter') {
-            hoveringSupportedFiles = payload.paths.some(supported);
-            callbacks.onHover(hoveringSupportedFiles, payload.position);
+            hoveringPaths = payload.paths.filter(supported);
+            callbacks.onHover(hoveringPaths, payload.position);
             return;
         }
         if (payload.type === 'over') {
-            callbacks.onHover(hoveringSupportedFiles, payload.position);
+            callbacks.onHover(hoveringPaths, payload.position);
             return;
         }
         if (payload.type === 'leave') {
-            hoveringSupportedFiles = false;
-            callbacks.onHover(false);
+            hoveringPaths = [];
+            callbacks.onHover([]);
             return;
         }
 
-        hoveringSupportedFiles = false;
-        callbacks.onHover(false, payload.position);
+        hoveringPaths = [];
+        callbacks.onHover([], payload.position);
         void admittedFiles(payload.paths)
             .then((files) => callbacks.onDrop(files, payload.position, payload.paths.length))
             .catch(callbacks.onError);

@@ -14,6 +14,9 @@ use crate::desktop_preferences::DesktopPreferencesStore;
 use crate::{file_publication, remote_settings, retained_download, server_sidecar};
 
 const MAX_RETAINED_PACKAGE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const SUPPORTED_PACKAGE_EXTENSIONS: [&str; 7] = [
+    "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
+];
 
 #[derive(Default)]
 pub(crate) struct PackageSaveCandidateStore {
@@ -61,6 +64,14 @@ pub(crate) fn normalize_package_destination(
     Ok(path)
 }
 
+pub(crate) fn supported_package_extension(filename: &str) -> Option<&'static str> {
+    let extension = Path::new(filename).extension()?.to_str()?;
+    SUPPORTED_PACKAGE_EXTENSIONS
+        .iter()
+        .copied()
+        .find(|supported| extension.eq_ignore_ascii_case(supported))
+}
+
 #[tauri::command]
 pub(crate) async fn select_local_package(
     app: AppHandle,
@@ -71,12 +82,7 @@ pub(crate) async fn select_local_package(
         app.dialog()
             .file()
             .set_title("Choose axklib package")
-            .add_filter(
-                "axklib packages",
-                &[
-                    "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkpkg",
-                ],
-            )
+            .add_filter("axklib packages", &SUPPORTED_PACKAGE_EXTENSIONS)
             .set_parent(&window)
             .blocking_pick_file()
     })
@@ -113,15 +119,7 @@ pub(crate) async fn select_local_package_destination(
     state: State<'_, Mutex<PackageSaveCandidateStore>>,
     preferences: State<'_, Mutex<DesktopPreferencesStore>>,
 ) -> Result<Option<PackageSaveCandidate>, String> {
-    let expected_extension = Path::new(&suggested_name)
-        .extension()
-        .and_then(|value| value.to_str())
-        .filter(|value| {
-            matches!(
-                *value,
-                "axkvol" | "axkprg" | "axksbac" | "axksbnk" | "axksmpl" | "axkpkg"
-            )
-        })
+    let expected_extension = supported_package_extension(&suggested_name)
         .ok_or_else(|| "the suggested package filename has an unsupported extension".to_owned())?
         .to_owned();
     let picker_extension = expected_extension.clone();

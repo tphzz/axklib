@@ -105,6 +105,44 @@ describe('PackageExportDialog', () => {
         expect(screen.getByText('1 Sample Bank · 1 Sample')).toBeTruthy();
     });
 
+    it('summarizes multiple Sequences explicitly', () => {
+        render(PackageExportDialog, {
+            props: {
+                items: [
+                    {
+                        kind: 'SEQU',
+                        objectId: 'sequence-a',
+                        name: 'Intro',
+                        typeLabel: 'Sequence',
+                        partitionIndex: 0,
+                        partitionName: 'Partition 0',
+                        volumeName: 'SONGS',
+                    },
+                    {
+                        kind: 'SEQU',
+                        objectId: 'sequence-b',
+                        name: 'Finale',
+                        typeLabel: 'Sequence',
+                        partitionIndex: 0,
+                        partitionName: 'Partition 0',
+                        volumeName: 'SONGS',
+                    },
+                ],
+                desktop: false,
+                busy: false,
+                progressLabel: '',
+                error: '',
+                onworkspace: vi.fn(),
+                onlocal: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByText('2 Sequences')).toBeTruthy();
+        expect(screen.getByLabelText('Selected objects').textContent).toContain('Intro');
+        expect(screen.getByLabelText('Selected objects').textContent).toContain('Finale');
+    });
+
     it('distinguishes same-named partition and volume groups by partition index', () => {
         render(PackageExportDialog, {
             props: {

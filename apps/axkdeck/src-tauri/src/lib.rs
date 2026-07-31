@@ -94,7 +94,9 @@ mod tests {
     use crate::local_directory_exports::{
         checked_tar_path, extract_directory_tar, normalize_directory_destination,
     };
-    use crate::local_packages::{normalize_package_destination, valid_retained_content_path};
+    use crate::local_packages::{
+        normalize_package_destination, supported_package_extension, valid_retained_content_path,
+    };
 
     #[test]
     fn log_level_parser_accepts_supported_values_and_defaults_to_info() {
@@ -132,6 +134,24 @@ mod tests {
             Path::new("Selection.axkpkg")
         );
         assert!(normalize_package_destination(PathBuf::from("Volume.axkvol"), "axkpkg").is_err());
+    }
+
+    #[test]
+    fn package_picker_accepts_every_current_package_extension() {
+        for extension in [
+            "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
+        ] {
+            assert_eq!(
+                supported_package_extension(&format!("Package.{extension}")),
+                Some(extension)
+            );
+        }
+        assert_eq!(
+            supported_package_extension("Sequence.AXKSEQ"),
+            Some("axkseq")
+        );
+        assert_eq!(supported_package_extension("Sequence.zip"), None);
+        assert_eq!(supported_package_extension("Sequence"), None);
     }
 
     #[test]

@@ -8,6 +8,7 @@
     import AppDialogs from './features/dialogs/AppDialogs.svelte';
     import { ExportWorkflow } from './features/export/workflow.svelte';
     import { AudioImportWorkflow, audioExtensions } from './features/import/audioWorkflow.svelte';
+    import { MediaDropWorkflow } from './features/import/mediaDropWorkflow.svelte';
     import { PackageImportWorkflow } from './features/import/packageWorkflow.svelte';
     import { SequenceImportWorkflow } from './features/import/sequenceWorkflow.svelte';
     import { ImageSessionWorkflow } from './features/image-session/workflow.svelte';
@@ -144,7 +145,6 @@
         transport,
         jobs: jobController,
         picker: pickerController,
-        isDesktop,
         sessionId: () => imageSessionWorkflow.sessionId,
         imageLocation: () => imageSessionWorkflow.location,
         mutationsAvailable: () => mutationWorkflow.volumeAvailable,
@@ -168,13 +168,12 @@
         sessionId: () => imageSessionWorkflow.sessionId,
         imageLocation: () => imageSessionWorkflow.location,
         mutationsAvailable: () => mutationWorkflow.objectRenameAvailable,
-        selectedVolume: () => {
-            const selected = imageSessionWorkflow.selectedSource;
-            return selected.kind === 'volume' && selected.partitionIndex !== undefined
-                ? { partitionIndex: selected.partitionIndex, volumeName: selected.name }
-                : null;
-        },
+        selectedSource: () => imageSessionWorkflow.selectedSource,
+        setSelectedSource: (item) => (imageSessionWorkflow.selectedSource = item),
+        sourceItems: () => imageSessionWorkflow.sourceItems,
+        activeVolumeId: () => catalog.activeVolumeId,
         sequences: () => catalog.sequences,
+        loadVolume: (volumeId) => catalog.loadVolume(volumeId),
         refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
         invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
         selectWorkspace: (view) => auditionWorkflow.selectWorkspaceView(view),
@@ -185,6 +184,13 @@
         },
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
+    });
+    const mediaDropWorkflow = new MediaDropWorkflow({
+        isDesktop,
+        workspaceView: () => workspaceView,
+        audioImport: audioImportWorkflow,
+        sequenceImport: sequenceImportWorkflow,
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
     imageSessionWorkflow.connect({
         catalog,
@@ -214,7 +220,7 @@
     });
 
     onMount(() => {
-        return audioImportWorkflow.mountNativeDrops();
+        return mediaDropWorkflow.mountNativeDrops();
     });
 
     const selectedProgram = $derived(programs.find((item) => item.objectId === catalog.selectedProgramId));
@@ -386,10 +392,10 @@
 <svelte:head><title>axkdeck · A-series disk workspace</title></svelte:head>
 <svelte:window
     oncontextmenu={suppressDesktopContextMenu}
-    ondragenter={(event) => audioImportWorkflow.drag(event)}
-    ondragover={(event) => audioImportWorkflow.drag(event)}
-    ondragleave={(event) => audioImportWorkflow.leave(event)}
-    ondrop={(event) => audioImportWorkflow.drop(event)}
+    ondragenter={(event) => mediaDropWorkflow.drag(event)}
+    ondragover={(event) => mediaDropWorkflow.drag(event)}
+    ondragleave={(event) => mediaDropWorkflow.leave(event)}
+    ondrop={(event) => mediaDropWorkflow.drop(event)}
 />
 
 <input
@@ -488,6 +494,7 @@
     packageImport={packageImportWorkflow}
     exports={exportWorkflow}
     deletion={deletionWorkflow}
+    mediaDrop={mediaDropWorkflow}
     audioImport={audioImportWorkflow}
     {audioFileInput}
     sequenceImport={sequenceImportWorkflow}

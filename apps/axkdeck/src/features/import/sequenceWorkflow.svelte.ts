@@ -2,10 +2,11 @@ import { browserUploadSource, type ClientUploadSource } from '../../lib/clientUp
 import { midiExtensions, midiMediaType } from '../../lib/midiImport';
 import type { DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
 import type { ImageTransport, SequenceImportItem, SequenceImportTarget } from '../../lib/transport';
-import type { SequenceItem, WorkspaceView } from '../../lib/types';
+import type { DiskTreeItem, SequenceItem, WorkspaceView } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { PickerController } from '../dialogs/picker';
 import type { JobController } from '../jobs/actions';
+import { findVolumeSourceItem, sameVolumeTarget } from './volumeTarget';
 
 export interface SequenceImportRequest {
     files: (ClientUploadSource | FileLocation)[];
@@ -19,8 +20,12 @@ interface SequenceImportDependencies {
     sessionId: () => number | null;
     imageLocation: () => ImageLocation | null;
     mutationsAvailable: () => boolean;
-    selectedVolume: () => { partitionIndex: number; volumeName: string } | null;
+    selectedSource: () => DiskTreeItem;
+    setSelectedSource: (item: DiskTreeItem) => void;
+    sourceItems: () => DiskTreeItem[];
+    activeVolumeId: () => string;
     sequences: () => SequenceItem[];
+    loadVolume: (volumeId: string) => Promise<void>;
     refreshSession: (preferred: { partitionIndex: number; volumeName?: string }) => Promise<void>;
     invalidateSession: (sessionId: number) => Promise<void>;
     selectWorkspace: (view: WorkspaceView) => void;
@@ -35,8 +40,17 @@ export class SequenceImportWorkflow {
 
     constructor(private readonly dependencies: SequenceImportDependencies) {}
 
+    dropAvailable(): boolean {
+        return this.dependencies.mutationsAvailable() && this.dependencies.imageLocation() !== null;
+    }
+
     activeTarget(): SequenceImportTarget | null {
-        return this.dependencies.mutationsAvailable() ? this.dependencies.selectedVolume() : null;
+        const selected = this.dependencies.selectedSource();
+        return this.dependencies.mutationsAvailable() &&
+            selected.kind === 'volume' &&
+            selected.partitionIndex !== undefined
+            ? { partitionIndex: selected.partitionIndex, volumeName: selected.name }
+            : null;
     }
 
     chooseFiles(): void {
@@ -50,7 +64,7 @@ export class SequenceImportWorkflow {
 
     filesChosen(event: Event): void {
         const input = event.currentTarget as HTMLInputElement;
-        this.requestFiles(
+        void this.requestDroppedFiles(
             Array.from(input.files ?? []).map(browserUploadSource),
             this.request?.target ?? this.activeTarget(),
         );
@@ -66,7 +80,7 @@ export class SequenceImportWorkflow {
             ondirectorychange: (directory) => (this.lastDirectory = directory),
         });
         if (!selections || !this.request) return;
-        this.requestFiles(selections, request.target);
+        await this.requestDroppedFiles(selections, request.target);
     }
 
     chooseLocal(input: HTMLInputElement): void {
@@ -102,7 +116,10 @@ export class SequenceImportWorkflow {
         }
     }
 
-    private requestFiles(files: (ClientUploadSource | FileLocation)[], target: SequenceImportTarget | null): void {
+    async requestDroppedFiles(
+        files: (ClientUploadSource | FileLocation)[],
+        target = this.activeTarget(),
+    ): Promise<void> {
         const admitted = files
             .map((source) => {
                 const mediaType = midiMediaType(sourceName(source));
@@ -117,6 +134,19 @@ export class SequenceImportWorkflow {
         if (!target || admitted.length === 0 || !this.dependencies.imageLocation()) {
             this.dependencies.setStatus(target ? 'Choose MIDI files' : 'Select a writable volume first');
             return;
+        }
+        if (!sameVolumeTarget(this.activeTarget(), target)) {
+            const item = findVolumeSourceItem(this.dependencies.sourceItems(), target);
+            if (!item) {
+                this.dependencies.setStatus('MIDI import target is no longer available');
+                return;
+            }
+            this.dependencies.setSelectedSource(item);
+            await this.dependencies.loadVolume(item.id);
+            if (this.dependencies.activeVolumeId() !== item.id) {
+                this.dependencies.setStatus('MIDI import target is no longer available');
+                return;
+            }
         }
         this.request = { files: admitted, target };
     }

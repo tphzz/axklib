@@ -282,7 +282,7 @@
         class:has-audition-bar={auditionAvailable}
         class="main-stage"
         style:--split-position={`${splitRatio * 100}%`}
-        data-audio-drop-main={audioImport.activeTarget() ? 'true' : undefined}
+        data-import-drop-main={audioImport.activeTarget() || sequenceImport.activeTarget() ? 'true' : undefined}
     >
         {#if workspaceView === 'sample-banks' || workspaceView === 'samples'}
             <ContainedObjectWorkspace

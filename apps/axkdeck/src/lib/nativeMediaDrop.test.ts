@@ -22,9 +22,9 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
     SeekMode: { Start: 0 },
 }));
 
-import { listenForNativeAudioDrops } from './nativeAudioDrop';
+import { listenForNativeMediaDrops } from './nativeMediaDrop';
 
-describe('native audio drops', () => {
+describe('native media drops', () => {
     beforeEach(() => {
         mocks.dragHandler = null;
         mocks.lstat.mockReset();
@@ -43,22 +43,22 @@ describe('native audio drops', () => {
         const onDrop = vi.fn();
         const onError = vi.fn();
 
-        const unlisten = await listenForNativeAudioDrops({ onHover, onDrop, onError });
+        const unlisten = await listenForNativeMediaDrops({ onHover, onDrop, onError });
         expect(mocks.dragHandler).not.toBeNull();
 
         mocks.dragHandler!({
             payload: {
                 type: 'enter',
-                paths: ['/samples/take.wav', '/samples/notes.txt', 'C:\\samples\\pad.FLAC'],
+                paths: ['/samples/take.wav', '/samples/notes.txt', '/samples/pad.FLAC'],
                 position: { x: 200, y: 100 },
             },
         });
-        expect(onHover).toHaveBeenLastCalledWith(true, { x: 200, y: 100 });
+        expect(onHover).toHaveBeenLastCalledWith(['/samples/take.wav', '/samples/pad.FLAC'], { x: 200, y: 100 });
 
         mocks.dragHandler!({
             payload: {
                 type: 'drop',
-                paths: ['/samples/take.wav', '/samples/notes.txt', 'C:\\samples\\pad.FLAC'],
+                paths: ['/samples/take.wav', '/samples/notes.txt', '/samples/pad.FLAC'],
                 position: { x: 220, y: 120 },
             },
         });
@@ -75,7 +75,7 @@ describe('native audio drops', () => {
             { name: 'pad.FLAC', type: 'audio/flac', size: 2 },
         ]);
         expect(position).toEqual({ x: 220, y: 120 });
-        expect(onHover).toHaveBeenLastCalledWith(false, { x: 220, y: 120 });
+        expect(onHover).toHaveBeenLastCalledWith([], { x: 220, y: 120 });
         expect(onError).not.toHaveBeenCalled();
 
         unlisten();
@@ -89,13 +89,13 @@ describe('native audio drops', () => {
         const onDrop = vi.fn();
         const onError = vi.fn();
 
-        await listenForNativeAudioDrops({ onHover, onDrop, onError });
+        await listenForNativeMediaDrops({ onHover, onDrop, onError });
         mocks.dragHandler!({
             payload: { type: 'drop', paths: ['/samples/take.aiff'], position: { x: 5, y: 7 } },
         });
 
         await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(failure));
-        expect(onHover).toHaveBeenCalledWith(false, { x: 5, y: 7 });
+        expect(onHover).toHaveBeenCalledWith([], { x: 5, y: 7 });
         expect(onDrop).not.toHaveBeenCalled();
     });
 
@@ -103,12 +103,42 @@ describe('native audio drops', () => {
         mocks.lstat.mockResolvedValue({ isFile: true, isSymlink: false, size: 4 * 1024 * 1024 * 1024 + 1 });
         const onError = vi.fn();
 
-        await listenForNativeAudioDrops({ onHover: vi.fn(), onDrop: vi.fn(), onError });
+        await listenForNativeMediaDrops({ onHover: vi.fn(), onDrop: vi.fn(), onError });
         mocks.dragHandler!({
             payload: { type: 'drop', paths: ['/samples/huge.wav'], position: { x: 5, y: 7 } },
         });
 
         await vi.waitFor(() => expect(onError).toHaveBeenCalledOnce());
         expect(mocks.open).not.toHaveBeenCalled();
+    });
+
+    it('admits Standard MIDI Files with case-insensitive extensions', async () => {
+        const onHover = vi.fn();
+        const onDrop = vi.fn();
+
+        await listenForNativeMediaDrops({ onHover, onDrop, onError: vi.fn() });
+        mocks.dragHandler!({
+            payload: {
+                type: 'enter',
+                paths: ['/sequences/intro.mid', '/sequences/finale.MIDI'],
+                position: { x: 10, y: 20 },
+            },
+        });
+        expect(onHover).toHaveBeenLastCalledWith(['/sequences/intro.mid', '/sequences/finale.MIDI'], { x: 10, y: 20 });
+
+        mocks.dragHandler!({
+            payload: {
+                type: 'drop',
+                paths: ['/sequences/intro.mid', '/sequences/finale.MIDI'],
+                position: { x: 15, y: 25 },
+            },
+        });
+
+        await vi.waitFor(() => expect(onDrop).toHaveBeenCalledOnce());
+        const files = onDrop.mock.calls[0][0] as { name: string; type: string }[];
+        expect(files.map((file) => ({ name: file.name, type: file.type }))).toEqual([
+            { name: 'intro.mid', type: 'audio/midi' },
+            { name: 'finale.MIDI', type: 'audio/midi' },
+        ]);
     });
 });

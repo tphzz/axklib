@@ -3,6 +3,7 @@
     import type { PickerRequest, PickerSelection } from './picker';
     import type { ExportWorkflow } from '../export/workflow.svelte';
     import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
+    import type { MediaDropWorkflow } from '../import/mediaDropWorkflow.svelte';
     import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
     import type { SequenceImportWorkflow } from '../import/sequenceWorkflow.svelte';
     import type { MutationWorkflow } from '../mutation/workflow.svelte';
@@ -57,6 +58,7 @@
         packageImport: PackageImportWorkflow;
         exports: ExportWorkflow;
         deletion: DeletionWorkflow;
+        mediaDrop: MediaDropWorkflow;
         audioImport: AudioImportWorkflow;
         audioFileInput?: HTMLInputElement;
         sequenceImport: SequenceImportWorkflow;
@@ -91,6 +93,7 @@
         packageImport,
         exports,
         deletion,
+        mediaDrop,
         audioImport,
         audioFileInput,
         sequenceImport,
@@ -288,14 +291,26 @@
         oncancel={() => (sequenceImport.request = null)}
     />
 {/if}
-{#if audioImport.dragActive && !audioImport.request}
-    <div class="audio-drop-overlay" aria-hidden="true">
+{#if mediaDrop.dragActive && !audioImport.request && !sequenceImport.request}
+    <div class="media-drop-overlay" aria-hidden="true">
         <Icon name="upload" size={24} />
-        <strong
-            >{audioImport.dragTarget
-                ? `Import audio into ${audioImport.dragTarget.volumeName}`
-                : 'Select a writable volume'}</strong
-        >
-        <span>WAV, FLAC, and AIFF</span>
+        {#if mediaDrop.dragKind === 'mixed'}
+            <strong>Drop audio and MIDI files separately</strong>
+            <span>Use one media type per drop</span>
+        {:else if mediaDrop.dragKind === 'midi'}
+            <strong
+                >{mediaDrop.dragTarget
+                    ? `Import MIDI into ${mediaDrop.dragTarget.volumeName}`
+                    : 'Select a writable volume'}</strong
+            >
+            <span>Standard MIDI Files (.mid, .midi)</span>
+        {:else}
+            <strong
+                >{mediaDrop.dragTarget
+                    ? `Import audio into ${mediaDrop.dragTarget.volumeName}`
+                    : 'Select a writable volume'}</strong
+            >
+            <span>WAV, FLAC, and AIFF</span>
+        {/if}
     </div>
 {/if}

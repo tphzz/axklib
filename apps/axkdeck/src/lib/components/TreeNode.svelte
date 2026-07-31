@@ -119,8 +119,8 @@
         class:selected={selectedId === item.id}
         class="tree-row group"
         style:--tree-depth={depth}
-        data-audio-drop-volume={volumeActionsEnabled && item.kind === 'volume' ? item.name : undefined}
-        data-audio-drop-partition={volumeActionsEnabled && item.kind === 'volume' ? item.partitionIndex : undefined}
+        data-import-drop-volume={item.kind === 'volume' ? item.name : undefined}
+        data-import-drop-partition={item.kind === 'volume' ? item.partitionIndex : undefined}
     >
         {#if hasChildren}
             <button

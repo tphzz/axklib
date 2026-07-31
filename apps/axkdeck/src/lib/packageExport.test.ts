@@ -8,7 +8,15 @@ const object = (kind: PackageExportObjectKind, name: string): PackageExportSelec
     objectId: `${kind}-${name}`,
     name,
     typeLabel:
-        kind === 'PROGRAM' ? 'Program' : kind === 'SBAC' ? 'Sample Bank' : kind === 'SBNK' ? 'Sample' : 'Wave Data',
+        kind === 'PROGRAM'
+            ? 'Program'
+            : kind === 'SEQU'
+              ? 'Sequence'
+              : kind === 'SBAC'
+                ? 'Sample Bank'
+                : kind === 'SBNK'
+                  ? 'Sample'
+                  : 'Wave Data',
     partitionIndex: 0,
     partitionName: 'Partition 0',
     volumeName: 'Volume',
@@ -26,11 +34,16 @@ describe('package export filenames', () => {
     it.each([
         [[volume('Volume A'), volume('Volume B')], 'Volume A and others.axkvol'],
         [[object('PROGRAM', 'Program A'), object('PROGRAM', 'Program B')], 'Program A and others.axkprg'],
+        [[object('SEQU', 'Sequence A'), object('SEQU', 'Sequence B')], 'Sequence A and others.axkseq'],
         [[object('SBAC', 'Bank A'), object('SBAC', 'Bank B')], 'Bank A and others.axksbac'],
         [[object('SBNK', 'Sample A'), object('SBNK', 'Sample B')], 'Sample A and others.axksbnk'],
         [[object('SMPL', 'Wave A'), object('SMPL', 'Wave B')], 'Wave A and others.axksmpl'],
     ])('uses the typed extension for homogeneous roots', (items, expected) => {
         expect(packageExportFilename(items)).toBe(expected);
+    });
+
+    it('uses the sequence extension for a single Sequence', () => {
+        expect(packageExportFilename([object('SEQU', 'Demo Song')])).toBe('Demo Song.axkseq');
     });
 
     it('uses the generic extension only for mixed root kinds', () => {

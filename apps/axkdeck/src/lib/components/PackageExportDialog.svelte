@@ -18,7 +18,7 @@
     let { items, desktop, busy, progressLabel, error, onworkspace, onlocal, oncancel }: Props = $props();
     const singleItem = $derived(items.length === 1 ? items[0] : undefined);
     const typeSummary = $derived.by(() => {
-        const labels = ['Program', 'Sample Bank', 'Sample', 'Wave Data'] as const;
+        const labels = ['Program', 'Sequence', 'Sample Bank', 'Sample', 'Wave Data'] as const;
         return labels
             .map((label) => {
                 const count = items.filter((item) => item.typeLabel === label).length;

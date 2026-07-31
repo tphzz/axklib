@@ -1,13 +1,12 @@
 import { audioExtensions, audioMediaType } from '../../lib/audioImport';
 import { browserUploadSource, type ClientUploadSource } from '../../lib/clientUploadSource';
-import { reportDiagnostic, reportError } from '../../lib/diagnostics';
-import { listenForNativeAudioDrops, type NativeDropPosition } from '../../lib/nativeAudioDrop';
 import type { DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
 import type { AudioImportItem, AudioImportTarget, ImageTransport } from '../../lib/transport';
 import type { DiskTreeItem, SampleStructureItem, WorkspaceView } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { PickerController } from '../dialogs/picker';
 import type { JobController } from '../jobs/actions';
+import { findVolumeSourceItem, sameVolumeTarget } from './volumeTarget';
 
 export interface AudioImportRequest {
     files: (ClientUploadSource | FileLocation)[];
@@ -18,7 +17,6 @@ interface AudioImportDependencies {
     transport: ImageTransport;
     jobs: JobController;
     picker: PickerController;
-    isDesktop: boolean;
     sessionId: () => number | null;
     imageLocation: () => ImageLocation | null;
     mutationsAvailable: () => boolean;
@@ -38,46 +36,12 @@ interface AudioImportDependencies {
 
 export class AudioImportWorkflow {
     request = $state<AudioImportRequest | null>(null);
-    dragActive = $state(false);
-    dragTarget = $state<AudioImportTarget | null>(null);
     private lastDirectory = $state<DirectoryRef | null>(null);
 
     constructor(private readonly dependencies: AudioImportDependencies) {}
 
-    mountNativeDrops(): () => void {
-        if (!this.dependencies.isDesktop) return () => undefined;
-        let disposed = false;
-        let unlisten: (() => void) | null = null;
-        void listenForNativeAudioDrops({
-            onHover: (active, position) => {
-                this.dragActive = active;
-                this.dragTarget = active && position ? this.nativeDroppedTarget(position) : null;
-            },
-            onDrop: (files, position, droppedPathCount) => {
-                reportDiagnostic('native_audio_drop_received', {
-                    droppedPathCount,
-                    admittedFileCount: files.length,
-                });
-                if (droppedPathCount > 0 && files.length === 0) {
-                    this.dependencies.setStatus('No supported audio files were dropped');
-                    return;
-                }
-                void this.requestFiles(files, this.nativeDroppedTarget(position));
-            },
-            onError: (reason) => {
-                this.dependencies.setStatus('Dropped audio files could not be read');
-                reportError('Read dropped audio files failed', reason);
-            },
-        })
-            .then((stop) => {
-                if (disposed) stop();
-                else unlisten = stop;
-            })
-            .catch((reason) => reportError('Initialize native audio drop failed', reason));
-        return () => {
-            disposed = true;
-            unlisten?.();
-        };
+    dropAvailable(): boolean {
+        return this.dependencies.mutationsAvailable() && this.dependencies.imageLocation() !== null;
     }
 
     activeTarget(): AudioImportTarget | null {
@@ -100,7 +64,7 @@ export class AudioImportWorkflow {
 
     filesChosen(event: Event): void {
         const input = event.currentTarget as HTMLInputElement;
-        void this.requestFiles(
+        void this.requestDroppedFiles(
             Array.from(input.files ?? []).map(browserUploadSource),
             this.request?.target ?? this.activeTarget(),
         );
@@ -116,42 +80,12 @@ export class AudioImportWorkflow {
             ondirectorychange: (directory) => (this.lastDirectory = directory),
         });
         if (!selections || !this.request) return;
-        await this.requestFiles(selections, request.target);
+        await this.requestDroppedFiles(selections, request.target);
     }
 
     chooseLocal(input: HTMLInputElement): void {
         if (!this.request || !this.dependencies.transport.supportsClientUploads) return;
         input.click();
-    }
-
-    drag(event: DragEvent): void {
-        const dataTransfer = event.dataTransfer;
-        if (!dataTransfer) return;
-        event.preventDefault();
-        if (!dragMayContainFiles(dataTransfer)) {
-            dataTransfer.dropEffect = 'none';
-            return;
-        }
-        this.dragTarget = this.droppedTarget(event);
-        dataTransfer.dropEffect = this.dragTarget ? 'copy' : 'none';
-        this.dragActive = true;
-    }
-
-    leave(event: DragEvent): void {
-        if (event.relatedTarget !== null) return;
-        this.dragActive = false;
-        this.dragTarget = null;
-    }
-
-    drop(event: DragEvent): void {
-        const dataTransfer = event.dataTransfer;
-        if (!dataTransfer) return;
-        event.preventDefault();
-        this.dragActive = false;
-        const target = this.droppedTarget(event);
-        this.dragTarget = null;
-        const files = Array.from(dataTransfer.files).map(browserUploadSource);
-        if (files.length > 0) void this.requestFiles(files, target);
     }
 
     async commit(items: AudioImportItem[]): Promise<void> {
@@ -182,7 +116,7 @@ export class AudioImportWorkflow {
         }
     }
 
-    private async requestFiles(
+    async requestDroppedFiles(
         files: (ClientUploadSource | FileLocation)[],
         target = this.activeTarget(),
     ): Promise<void> {
@@ -202,57 +136,25 @@ export class AudioImportWorkflow {
             return;
         }
         const active = this.activeTarget();
-        if (active?.partitionIndex !== target.partitionIndex || active.volumeName !== target.volumeName) {
-            const item = findSourceItem(this.dependencies.sourceItems(), target.partitionIndex, target.volumeName);
-            if (!item || item.kind !== 'volume') {
+        if (!sameVolumeTarget(active, target)) {
+            const item = findVolumeSourceItem(this.dependencies.sourceItems(), target);
+            if (!item) {
                 this.dependencies.setStatus('Audio import target is no longer available');
                 return;
             }
             this.dependencies.setSelectedSource(item);
             await this.dependencies.loadVolume(item.id);
-            if (this.dependencies.activeVolumeId() !== item.id) return;
+            if (this.dependencies.activeVolumeId() !== item.id) {
+                this.dependencies.setStatus('Audio import target is no longer available');
+                return;
+            }
         }
         this.request = { files: admitted, target };
-    }
-
-    private targetForElement(target: EventTarget | null): AudioImportTarget | null {
-        const element = target instanceof Element ? target.closest<HTMLElement>('[data-audio-drop-volume]') : null;
-        const partition = element?.dataset.audioDropPartition;
-        if (element?.dataset.audioDropVolume && partition !== undefined) {
-            return { partitionIndex: Number(partition), volumeName: element.dataset.audioDropVolume };
-        }
-        return this.activeTarget();
-    }
-
-    private droppedTarget(event: DragEvent): AudioImportTarget | null {
-        return this.targetForElement(event.target);
-    }
-
-    private nativeDroppedTarget(position: NativeDropPosition): AudioImportTarget | null {
-        const scale = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
-        return this.targetForElement(document.elementFromPoint?.(position.x / scale, position.y / scale) ?? null);
     }
 }
 
 function audioSourceName(source: ClientUploadSource | FileLocation): string {
     return 'kind' in source ? (source.reference.relativePath.split('/').at(-1) ?? source.displayName) : source.name;
-}
-
-function dragMayContainFiles(dataTransfer: DataTransfer): boolean {
-    if (dataTransfer.files.length > 0) return true;
-    if (Array.from(dataTransfer.items ?? []).some((item) => item.kind === 'file')) return true;
-    return Array.from(dataTransfer.types).some((type) =>
-        ['Files', 'text/uri-list', 'application/x-moz-file'].includes(type),
-    );
-}
-
-function findSourceItem(items: DiskTreeItem[], partitionIndex: number, volumeName?: string): DiskTreeItem | null {
-    for (const item of items) {
-        if (item.partitionIndex === partitionIndex && (!volumeName || item.name === volumeName)) return item;
-        const nested = findSourceItem(item.children ?? [], partitionIndex, volumeName);
-        if (nested) return nested;
-    }
-    return null;
 }
 
 export { audioExtensions };
