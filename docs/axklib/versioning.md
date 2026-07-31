@@ -136,7 +136,9 @@ Windows ARM64, and universal macOS into an unpublished GitHub draft release.
 The same draft contains axkdeck DEB and RPM installers for both Linux
 architectures, NSIS installers for both Windows architectures, and one universal
 macOS DMG. `axklib-server` is shipped in those desktop installers rather than as
-a standalone release asset. GitHub displays the digest for each asset, so the
+a standalone release asset. The Windows installers are currently unsigned;
+Native CI does not accept or retain exportable PFX signing credentials. GitHub
+displays the digest for each asset, so the
 workflow does not attach checksum or release-manifest sidecars. Branch
 `features/packages` targets the prerelease draft and generated tag
 `features/packages-preview`; a semantic-version tag build targets an

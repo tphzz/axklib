@@ -617,6 +617,16 @@ def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
     assert '"libaxklib.${project_version}.dylib"' in workflow
 
 
+def test_native_workflow_does_not_retain_legacy_windows_pfx_signing() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+
+    assert "sign_windows_desktop" not in workflow
+    assert "WINDOWS_CERTIFICATE" not in workflow
+    assert "certificateThumbprint" not in workflow
+    assert "Import-PfxCertificate" not in workflow
+
+
 def test_native_workflow_uses_official_dependency_and_incremental_build_caches() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")

@@ -13,11 +13,6 @@ on:
         required: false
         default: false
         type: boolean
-      sign_windows_desktop:
-        description: "Windows: Sign axkdeck NSIS installers"
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -516,25 +511,6 @@ jobs:
         shell: bash
         run: rm -rf apps/axkdeck/src-tauri/target/*/bundle apps/axkdeck/src-tauri/target/*/*/bundle
 
-      - name: Import Windows desktop signing certificate
-        if: runner.os == 'Windows' && inputs.sign_windows_desktop
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or
-              [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
-            throw 'WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD secrets are required'
-          }
-          $pfx = Join-Path $env:RUNNER_TEMP 'axkdeck-signing.pfx'
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $certificate = Import-PfxCertificate -FilePath $pfx `
-            -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Build Linux desktop packages
         if: runner.os == 'Linux'
         working-directory: apps/axkdeck
@@ -543,24 +519,7 @@ jobs:
       - name: Build Windows desktop package
         if: runner.os == 'Windows'
         working-directory: apps/axkdeck
-        shell: pwsh
-        run: |
-          if ('${{ inputs.sign_windows_desktop }}' -eq 'true') {
-            $config = Join-Path $env:RUNNER_TEMP 'tauri-signing.json'
-            @{
-              bundle = @{
-                windows = @{
-                  certificateThumbprint = $env:WINDOWS_CERTIFICATE_THUMBPRINT
-                  digestAlgorithm = 'sha256'
-                  timestampUrl = 'http://timestamp.digicert.com'
-                  tsp = $true
-                }
-              }
-            } | ConvertTo-Json -Depth 4 | Set-Content -Path $config -Encoding utf8
-            pnpm desktop:build -- --config $config
-          } else {
-            pnpm desktop:build
-          }
+        run: pnpm desktop:build
 
       - name: Build macOS desktop slice
         if: runner.os == 'macOS'

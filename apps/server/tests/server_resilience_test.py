@@ -431,8 +431,15 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
     uploads = state / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
     (uploads / "abandoned.upload").write_bytes(b"partial")
+
+    # State recovery is independent of whether the OS can immediately reuse the
+    # listener endpoint after the preceding process exits.
+    restart_port = choose_port()
     with ServerProcess(
-        server, ["--config", str(config_path)], port, root / "restart.log"
+        server,
+        ["--config", str(config_path), "--port", str(restart_port)],
+        restart_port,
+        root / "restart.log",
     ):
         assert not any(uploads.iterdir())
         assert (workspace / "durable-output.bin").read_bytes() == b"published"
