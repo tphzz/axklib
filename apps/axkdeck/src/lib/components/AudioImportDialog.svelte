@@ -1,10 +1,16 @@
 <script lang="ts">
     import { onDestroy, untrack } from 'svelte';
-    import { defaultAudioImportNames, defaultRootKey, validSamplerName } from '../audioImport';
+    import { defaultAudioImportNames, defaultAudioSamplerSettings, validSamplerName } from '../audioImport';
     import { browserUploadSource, type ClientUploadSource } from '../clientUploadSource';
     import { modal } from '../modal';
     import type { FileLocation, InputFileLocation } from '../storageLocations';
-    import type { AudioImportCapabilities, AudioImportItem, AudioImportTarget, ImageTransport } from '../transport';
+    import type {
+        AudioImportCapabilities,
+        AudioImportItem,
+        AudioImportTarget,
+        AudioSourceInfo,
+        ImageTransport,
+    } from '../transport';
     import AudioImportRows from './AudioImportRows.svelte';
     import type { AudioImportRow } from './audioImportDialogTypes';
     import Icon from './Icon.svelte';
@@ -64,7 +70,8 @@
                 fileName,
                 sampleName: '',
                 waveformNames: [],
-                rootKey: defaultRootKey,
+                ...defaultAudioSamplerSettings,
+                settingsExpanded: false,
                 inspectionRevision: 0,
                 progress: 0,
                 status: 'waiting',
@@ -107,12 +114,37 @@
                 replaceRow(id, { source, upload, progress: 1, status: 'checking' });
             }
             const inspection = await transport.inspectAudio(source);
-            replaceRow(id, { inspection, targetSampleRate: inspection.outputSampleRate, status: 'ready' });
+            replaceRow(id, {
+                inspection,
+                targetSampleRate: inspection.outputSampleRate,
+                ...editableSamplerSettings(inspection),
+                status: 'ready',
+            });
         } catch (error) {
             if (!abortController.signal.aborted) {
                 replaceRow(id, { status: 'failed', error: error instanceof Error ? error.message : String(error) });
             }
         }
+    }
+
+    function editableSamplerSettings(inspection: AudioSourceInfo): Partial<AudioImportRow> {
+        const defaults = inspection.samplerDefaults;
+        return {
+            rootKey: defaults.rootKey,
+            fineTuneCents: defaults.fineTuneCents,
+            keyLow: defaults.keyLow,
+            keyHigh: defaults.keyHigh,
+            velocityLow: defaults.velocityLow,
+            velocityHigh: defaults.velocityHigh,
+            loopMode: defaults.loopMode,
+            loopStartFrame: defaults.loopStartFrame,
+            loopLengthFrames: defaults.loopLengthFrames,
+            settingsExpanded:
+                inspection.issues.some((issue) => issue.fatal === false) ||
+                defaults.pitchSource !== 'DEFAULT' ||
+                defaults.rangeSource !== 'DEFAULT' ||
+                defaults.loopSource !== 'DEFAULT',
+        };
     }
 
     async function stageFiles(): Promise<void> {
@@ -178,8 +210,53 @@
                 }
                 waveforms.add(name.toLocaleLowerCase());
             }
-            if (!Number.isInteger(row.rootKey) || row.rootKey < 0 || row.rootKey > 127)
+            if (!Number.isInteger(row.rootKey) || row.rootKey < 0 || row.rootKey > 127) {
                 errors[index] = 'Root key must be between 0 and 127.';
+                return;
+            }
+            if (!Number.isInteger(row.fineTuneCents) || row.fineTuneCents < -63 || row.fineTuneCents > 63) {
+                errors[index] = 'Fine tune must be between -63 and 63 cents.';
+                return;
+            }
+            if (
+                !Number.isInteger(row.keyLow) ||
+                !Number.isInteger(row.keyHigh) ||
+                row.keyLow < 0 ||
+                row.keyHigh > 127 ||
+                row.keyLow > row.keyHigh
+            ) {
+                errors[index] = 'Key range must be an ordered range from 0 to 127.';
+                return;
+            }
+            if (
+                !Number.isInteger(row.velocityLow) ||
+                !Number.isInteger(row.velocityHigh) ||
+                row.velocityLow < 0 ||
+                row.velocityHigh > 127 ||
+                row.velocityLow > row.velocityHigh
+            ) {
+                errors[index] = 'Velocity range must be an ordered range from 0 to 127.';
+                return;
+            }
+            if (![1, 4].includes(row.loopMode)) {
+                errors[index] = 'Loop mode must be forward loop or one-shot.';
+                return;
+            }
+            if (row.loopMode === 4 && (row.loopStartFrame !== 0 || row.loopLengthFrames !== 0)) {
+                errors[index] = 'One-shot imports cannot contain an active loop range.';
+                return;
+            }
+            if (
+                row.loopMode === 1 &&
+                (!Number.isInteger(row.loopStartFrame) ||
+                    !Number.isInteger(row.loopLengthFrames) ||
+                    row.loopStartFrame < 0 ||
+                    row.loopStartFrame > 65_535 ||
+                    row.loopLengthFrames <= 0 ||
+                    row.loopStartFrame + row.loopLengthFrames > row.inspection.projectedOutputFrameCount)
+            ) {
+                errors[index] = 'Forward loop must be non-empty and contained within the converted audio.';
+            }
         });
         return errors;
     }
@@ -193,7 +270,7 @@
             const inspection = await transport.inspectAudio(row.source, targetSampleRate);
             const current = rows.find((candidate) => candidate.id === row.id);
             if (!current || current.inspectionRevision !== revision || disposed) return;
-            replaceRow(row.id, { inspection, status: 'ready' });
+            replaceRow(row.id, { inspection, ...editableSamplerSettings(inspection), status: 'ready' });
         } catch (error) {
             const current = rows.find((candidate) => candidate.id === row.id);
             if (!current || current.inspectionRevision !== revision || disposed) return;
@@ -241,6 +318,14 @@
                     sampleName: row.sampleName,
                     waveformNames: [...row.waveformNames],
                     rootKey: row.rootKey,
+                    fineTuneCents: row.fineTuneCents,
+                    keyLow: row.keyLow,
+                    keyHigh: row.keyHigh,
+                    velocityLow: row.velocityLow,
+                    velocityHigh: row.velocityHigh,
+                    loopMode: row.loopMode,
+                    loopStartFrame: row.loopStartFrame,
+                    loopLengthFrames: row.loopLengthFrames,
                     targetSampleRate: row.targetSampleRate!,
                 })),
             );

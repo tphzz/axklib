@@ -1341,7 +1341,7 @@
       "AudioSourceInfo": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["sourceFormat", "sourceSubtype", "channels", "frameCount", "sourceSampleRate", "outputSampleRate", "sourceSampleWidthBits", "outputSampleWidthBits", "durationSeconds", "resampled", "quantized", "sampleWidthConverted", "ditherAlgorithm", "projectedOutputFrameCount", "projectedOutputBytesPerChannel", "projectedOutputBytesTotal", "maximumOutputFrameCountPerChannel", "maximumOutputBytesPerChannel", "valid", "issues"],
+        "required": ["sourceFormat", "sourceSubtype", "channels", "frameCount", "sourceSampleRate", "outputSampleRate", "sourceSampleWidthBits", "outputSampleWidthBits", "durationSeconds", "resampled", "quantized", "sampleWidthConverted", "ditherAlgorithm", "projectedOutputFrameCount", "projectedOutputBytesPerChannel", "projectedOutputBytesTotal", "maximumOutputFrameCountPerChannel", "maximumOutputBytesPerChannel", "samplerDefaults", "valid", "issues"],
         "properties": {
           "sourceFormat": {"type": "string", "minLength": 1},
           "sourceSubtype": {"type": "string", "minLength": 1},
@@ -1361,8 +1361,28 @@
           "projectedOutputBytesTotal": {"type": "integer", "minimum": 2},
           "maximumOutputFrameCountPerChannel": {"type": "integer", "minimum": 1},
           "maximumOutputBytesPerChannel": {"type": "integer", "minimum": 1},
+          "samplerDefaults": {"$ref": "#/components/schemas/AudioSamplerSettings"},
           "valid": {"type": "boolean"},
           "issues": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}}
+        }
+      },
+      "AudioSamplerSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rootKey", "fineTuneCents", "keyLow", "keyHigh", "velocityLow", "velocityHigh", "loopMode", "loopStartFrame", "loopLengthFrames", "pitchSource", "rangeSource", "loopSource"],
+        "properties": {
+          "rootKey": {"type": "integer", "minimum": 0, "maximum": 127},
+          "fineTuneCents": {"type": "integer", "minimum": -63, "maximum": 63},
+          "keyLow": {"type": "integer", "minimum": 0, "maximum": 127},
+          "keyHigh": {"type": "integer", "minimum": 0, "maximum": 127},
+          "velocityLow": {"type": "integer", "minimum": 0, "maximum": 127},
+          "velocityHigh": {"type": "integer", "minimum": 0, "maximum": 127},
+          "loopMode": {"type": "integer", "enum": [1, 4]},
+          "loopStartFrame": {"type": "integer", "minimum": 0},
+          "loopLengthFrames": {"type": "integer", "minimum": 0},
+          "pitchSource": {"type": "string", "enum": ["DEFAULT", "WAV_SMPL", "WAV_INST"]},
+          "rangeSource": {"type": "string", "enum": ["DEFAULT", "WAV_INST"]},
+          "loopSource": {"type": "string", "enum": ["DEFAULT", "WAV_SMPL"]}
         }
       },
       "ManifestInput": {

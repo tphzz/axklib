@@ -27,6 +27,10 @@ struct InsertWaveformSpec {
     std::vector<std::string> waveform_names;
     std::uint8_t root_key{};
     std::optional<std::uint32_t> target_sample_rate;
+    std::int8_t fine_tune_cents{};
+    AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
+    std::uint32_t loop_start_frame{};
+    std::uint32_t loop_length_frames{};
 };
 
 struct DeleteVolumeOperation {

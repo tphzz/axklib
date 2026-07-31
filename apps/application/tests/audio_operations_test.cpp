@@ -104,6 +104,18 @@ TEST_F(AudioOperationsTest, InspectsOwnedAudioUploadsWithSamplerConversionMetada
     EXPECT_EQ(result->at("projectedOutputBytesTotal"), 2U);
     EXPECT_EQ(result->at("maximumOutputFrameCountPerChannel"), 1U << 24U);
     EXPECT_EQ(result->at("maximumOutputBytesPerChannel"), 32U * 1024U * 1024U);
+    EXPECT_EQ(result->at("samplerDefaults").at("rootKey"), 60U);
+    EXPECT_EQ(result->at("samplerDefaults").at("fineTuneCents"), 0);
+    EXPECT_EQ(result->at("samplerDefaults").at("keyLow"), 0U);
+    EXPECT_EQ(result->at("samplerDefaults").at("keyHigh"), 127U);
+    EXPECT_EQ(result->at("samplerDefaults").at("velocityLow"), 0U);
+    EXPECT_EQ(result->at("samplerDefaults").at("velocityHigh"), 127U);
+    EXPECT_EQ(result->at("samplerDefaults").at("loopMode"), 4U);
+    EXPECT_EQ(result->at("samplerDefaults").at("loopStartFrame"), 0U);
+    EXPECT_EQ(result->at("samplerDefaults").at("loopLengthFrames"), 0U);
+    EXPECT_EQ(result->at("samplerDefaults").at("pitchSource"), "DEFAULT");
+    EXPECT_EQ(result->at("samplerDefaults").at("rangeSource"), "DEFAULT");
+    EXPECT_EQ(result->at("samplerDefaults").at("loopSource"), "DEFAULT");
     EXPECT_TRUE(result->at("valid").get<bool>());
     EXPECT_TRUE(result->at("issues").empty());
 }

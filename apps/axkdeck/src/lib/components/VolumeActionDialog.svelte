@@ -86,6 +86,7 @@
                         <span>{subject} name</span>
                         <input
                             bind:value
+                            data-dialog-initial-focus={action.startsWith('rename-') ? 'select' : 'caret'}
                             disabled={busy}
                             maxlength="16"
                             autocomplete="off"

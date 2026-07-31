@@ -200,14 +200,23 @@ Source decoding is separately bounded to 16,777,216 frames per channel and
 metadata before allocating the decode buffer, including when downsampling would
 produce a much smaller Yamaha Wave Data object.
 
-!!! warning "Current loop policy"
+### WAV Sampler Metadata
 
-    Authored Wave Data entries currently use forward loop mode over the complete
-    logical waveform: start frame `0`, loop length equal to the imported frame
-    count. The manifest does not yet expose one-shot mode or explicit loop
-    points. Use source audio designed for a full-sample loop, or treat the
-    resulting loop behavior as experimental. This limitation applies equally
-    to HDS, floppy, and ISO authored output.
+Audio inspection reports `samplerDefaults` in addition to storage projections.
+For WAV input, axklib maps a usable `smpl` unity note, pitch fraction, and
+forward infinite loop to the A-series root key, fine tune, and forward-loop
+window. Loop endpoints in `smpl` are inclusive; axklib converts them to the
+A-series start/length representation and rescales the boundaries when the
+audio is resampled. A WAV `inst` chunk supplies root key and fine tune only when
+`smpl` does not, and supplies the Sample key and velocity ranges. `smpl` wins a
+pitch conflict. Unsupported multiple, finite, backward, or alternating loops
+are not approximated: inspection reports a non-fatal issue and defaults to the
+hardware-proven forward one-shot mode.
+
+Files without usable sampler metadata also default to forward one-shot. The
+inspection result records `pitchSource`, `rangeSource`, and `loopSource`, so a
+client can distinguish WAV-authored values from A-series defaults before
+writing. Explicit manifest values remain authoritative after inspection.
 
 ## Create A Hand-Authored CD-ROM ISO
 
@@ -489,6 +498,9 @@ Waveform fields:
 | `path` | Required WAV, FLAC, or AIFF source path. Relative paths use the manifest directory. |
 | `root_key` | Required MIDI note `0..127`. |
 | `target_sample_rate` | Optional requested output rate. Omit to preserve supported native rates or use the default conversion policy. |
+| `fine_tune_cents` | Optional signed fine tune `-63..63`; default `0`. |
+| `loop_mode` | Optional A-series mode: `1` forward loop or `4` forward one-shot; default `4`. |
+| `loop_start_frame`, `loop_length_frames` | Optional explicit loop window. Forward loop requires a non-empty contained range. One-shot requires both manifest values to remain zero and serializes the full physical Wave Data span. |
 
 Direct and stereo Sample fields:
 
@@ -498,6 +510,10 @@ Direct and stereo Sample fields:
 | `root_key` | Required MIDI note `0..127`. |
 | `key_low`, `key_high` | Required MIDI limits `0..127`; high must not precede low. |
 | `level` | Optional `0..127`; default `100`. |
+| `fine_tune_cents` | Optional signed fine tune `-63..63`; default `0`. |
+| `velocity_low`, `velocity_high` | Optional MIDI limits `0..127`; defaults `0` and `127`, and high must not precede low. |
+| `loop_mode` | Optional A-series mode: `1` forward loop or `4` forward one-shot; default `4`. |
+| `loop_start_frame`, `loop_length_frames` | Optional Sample playback window. Forward loop requires a non-empty contained range and a start no greater than `65535` in the current proven writer profile. One-shot requires both manifest values to remain zero. |
 | `waveform_id` | Direct left/mono member. Mutually exclusive with `interleaved_audio_path`. |
 | `right_waveform_id` | Optional direct right member; it must differ from `waveform_id`. |
 | `interleaved_audio_path` | Alternative two-channel source that generates linked left/right `SMPL` objects. |
@@ -586,13 +602,16 @@ Supported operation types:
 | `rename_program` | `volume_name`, `program_number`, `new_program_name` |
 
 An `insert_waveform` audio object contains `path`, one or two distinct
-`waveform_names`, and `root_key`; `target_sample_rate` is optional. Relative
-audio paths resolve from the alteration manifest directory.
+`waveform_names`, and `root_key`. Optional fields are `target_sample_rate`,
+`fine_tune_cents`, `loop_mode`, `loop_start_frame`, and
+`loop_length_frames`. Relative audio paths resolve from the alteration manifest
+directory.
 
 An `insert_sbnk` object contains `name`, `waveform_name`, `root_key`, `key_low`,
-and `key_high`. Optional fields are `right_waveform_name` and `level`. The named
-Wave Data entries in the manifest's `waveforms` array must already exist at
-that point in the ordered transaction.
+and `key_high`. Optional fields are `right_waveform_name`, `level`,
+`fine_tune_cents`, `velocity_low`, `velocity_high`, `loop_mode`,
+`loop_start_frame`, and `loop_length_frames`. The named Wave Data entries in
+the evolving transaction must already exist at that point.
 
 An `insert_sbac` object contains `name` and `member_samples`, an array of
 one to three distinct existing Sample names. An `insert_program` object

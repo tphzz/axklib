@@ -33,6 +33,20 @@ function sourceInfo(overrides: Partial<AudioSourceInfo> = {}): AudioSourceInfo {
         projectedOutputBytesTotal: 384_000,
         maximumOutputFrameCountPerChannel: 1 << 24,
         maximumOutputBytesPerChannel: 32 * 1024 * 1024,
+        samplerDefaults: {
+            rootKey: 60,
+            fineTuneCents: 0,
+            keyLow: 0,
+            keyHigh: 127,
+            velocityLow: 0,
+            velocityHigh: 127,
+            loopMode: 4,
+            loopStartFrame: 0,
+            loopLengthFrames: 0,
+            pitchSource: 'DEFAULT',
+            rangeSource: 'DEFAULT',
+            loopSource: 'DEFAULT',
+        },
         valid: true,
         issues: [],
         ...overrides,
@@ -222,6 +236,14 @@ describe('AudioImportDialog', () => {
                     sampleName: 'Stereo piano',
                     waveformNames: ['Stereo piano-L', 'Stereo piano-R'],
                     rootKey: 69,
+                    fineTuneCents: 0,
+                    keyLow: 0,
+                    keyHigh: 127,
+                    velocityLow: 0,
+                    velocityHigh: 127,
+                    loopMode: 4,
+                    loopStartFrame: 0,
+                    loopLengthFrames: 0,
                     targetSampleRate: 48_000,
                 },
             ]),
@@ -230,6 +252,77 @@ describe('AudioImportDialog', () => {
             expect.objectContaining({ reference: { uploadId: 'audio-stereo' } }),
         );
         await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
+    });
+
+    it('reviews WAV sampler metadata and commits the mapped pitch, ranges, and loop', async () => {
+        const imageTransport = transport();
+        imageTransport.inspectAudio = vi.fn().mockResolvedValue(
+            sourceInfo({
+                sourceFormat: 'WAV',
+                sourceSubtype: 'PCM_16',
+                channels: 1,
+                sourceSampleWidthBits: 16,
+                sampleWidthConverted: false,
+                quantized: false,
+                samplerDefaults: {
+                    rootKey: 62,
+                    fineTuneCents: -63,
+                    keyLow: 12,
+                    keyHigh: 96,
+                    velocityLow: 8,
+                    velocityHigh: 110,
+                    loopMode: 1,
+                    loopStartFrame: 1_234,
+                    loopLengthFrames: 4_321,
+                    pitchSource: 'WAV_SMPL',
+                    rangeSource: 'WAV_INST',
+                    loopSource: 'WAV_SMPL',
+                },
+                issues: [
+                    {
+                        code: 'wav_sampler_loop_unsupported',
+                        message: 'An additional WAV sampler loop was ignored.',
+                        fatal: false,
+                    },
+                ],
+            }),
+        );
+        const oncommit = vi.fn().mockResolvedValue(undefined);
+        render(AudioImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [new File([new Uint8Array(128)], 'Mapped.wav', { type: 'audio/wav' })],
+                target: { partitionIndex: 0, volumeName: 'Mapped' },
+                existingSampleNames: [],
+                existingWaveformNames: [],
+                oncommit,
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(await screen.findByLabelText('Sampler settings for Mapped.wav')).toBeTruthy();
+        expect(screen.getByDisplayValue('-63')).toBeTruthy();
+        expect(screen.getByDisplayValue('1234')).toBeTruthy();
+        expect(screen.getByText('Pitch: WAV smpl')).toBeTruthy();
+        expect(screen.getByText('Ranges: WAV inst')).toBeTruthy();
+        expect(screen.getByText('An additional WAV sampler loop was ignored.')).toBeTruthy();
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await waitFor(() =>
+            expect(oncommit).toHaveBeenCalledWith([
+                expect.objectContaining({
+                    rootKey: 62,
+                    fineTuneCents: -63,
+                    keyLow: 12,
+                    keyHigh: 96,
+                    velocityLow: 8,
+                    velocityHigh: 110,
+                    loopMode: 1,
+                    loopStartFrame: 1_234,
+                    loopLengthFrames: 4_321,
+                }),
+            ]),
+        );
     });
 
     it('revalidates one file when its target sample rate changes', async () => {

@@ -50,6 +50,15 @@ function focusableElements(node: HTMLElement): HTMLElement[] {
     );
 }
 
+function initialFocusElement(node: HTMLElement): HTMLElement | null {
+    return node.querySelector<HTMLElement>('[data-dialog-initial-focus]');
+}
+
+function focusInitialElement(element: HTMLElement): void {
+    element.focus();
+    if (element.dataset.dialogInitialFocus === 'select' && element instanceof HTMLInputElement) element.select();
+}
+
 export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
     let options = initialOptions;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -81,8 +90,28 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
         }
     };
     node.addEventListener('keydown', keydown);
+    let userInteracted = false;
+    const markInteraction = (): void => {
+        userInteracted = true;
+    };
+    node.addEventListener('pointerdown', markInteraction);
+    node.addEventListener('input', markInteraction);
+    const observer = new MutationObserver(() => {
+        if (userInteracted) return;
+        const initial = initialFocusElement(node);
+        if (!initial) return;
+        focusInitialElement(initial);
+        observer.disconnect();
+    });
+    observer.observe(node, { childList: true, subtree: true });
     queueMicrotask(() => {
         if (!node.isConnected) return;
+        const initial = initialFocusElement(node);
+        if (initial) {
+            focusInitialElement(initial);
+            observer.disconnect();
+            return;
+        }
         const autofocus = node.querySelector<HTMLElement>('[autofocus]');
         (autofocus ?? focusableElements(node)[0] ?? node).focus();
     });
@@ -93,6 +122,9 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
         },
         destroy() {
             node.removeEventListener('keydown', keydown);
+            node.removeEventListener('pointerdown', markInteraction);
+            node.removeEventListener('input', markInteraction);
+            observer.disconnect();
             background.forEach(releaseInert);
             if (previousFocus?.isConnected) previousFocus.focus();
         },

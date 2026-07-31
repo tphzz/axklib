@@ -119,6 +119,16 @@ Result<std::uint64_t> integer(const Json &value, std::string_view context, std::
     return result;
 }
 
+Result<std::int64_t> signed_integer(const Json &value, std::string_view context, std::int64_t minimum,
+                                    std::int64_t maximum) {
+    if (!value.is_number_integer())
+        return std::unexpected{manifest_error(std::string{context} + " must be an integer")};
+    const auto result = value.get<std::int64_t>();
+    if (result < minimum || result > maximum)
+        return std::unexpected{manifest_error(std::string{context} + " is outside its supported range")};
+    return result;
+}
+
 Result<std::filesystem::path> path(const Json &value, std::string_view context, const std::filesystem::path &base) {
     auto parsed = text(value, context);
     if (!parsed)
@@ -132,7 +142,10 @@ Result<std::filesystem::path> path(const Json &value, std::string_view context, 
 }
 
 Result<WaveformSpec> waveform(const Json &value, std::string context, const std::filesystem::path &base) {
-    if (auto valid = fields(value, context, {"id", "name", "path", "root_key"}, {"target_sample_rate"}); !valid)
+    if (auto valid =
+            fields(value, context, {"id", "name", "path", "root_key"},
+                   {"target_sample_rate", "fine_tune_cents", "loop_mode", "loop_start_frame", "loop_length_frames"});
+        !valid)
         return std::unexpected{valid.error()};
     auto id = text(value["id"], context + ".id");
     auto name = text(value["name"], context + ".name");
@@ -154,13 +167,40 @@ Result<WaveformSpec> waveform(const Json &value, std::string context, const std:
             return std::unexpected{rate.error()};
         result.target_sample_rate = static_cast<std::uint32_t>(*rate);
     }
+    if (value.contains("fine_tune_cents")) {
+        auto fine = signed_integer(value["fine_tune_cents"], context + ".fine_tune_cents", -63, 63);
+        if (!fine)
+            return std::unexpected{fine.error()};
+        result.fine_tune_cents = static_cast<std::int8_t>(*fine);
+    }
+    if (value.contains("loop_mode")) {
+        auto mode = integer(value["loop_mode"], context + ".loop_mode", 1, 4);
+        if (!mode)
+            return std::unexpected{mode.error()};
+        result.loop_mode = static_cast<AudioSamplerLoopMode>(*mode);
+    }
+    if (value.contains("loop_start_frame")) {
+        auto start = integer(value["loop_start_frame"], context + ".loop_start_frame", 0,
+                             std::numeric_limits<std::uint32_t>::max());
+        if (!start)
+            return std::unexpected{start.error()};
+        result.loop_start_frame = static_cast<std::uint32_t>(*start);
+    }
+    if (value.contains("loop_length_frames")) {
+        auto length = integer(value["loop_length_frames"], context + ".loop_length_frames", 0,
+                              std::numeric_limits<std::uint32_t>::max());
+        if (!length)
+            return std::unexpected{length.error()};
+        result.loop_length_frames = static_cast<std::uint32_t>(*length);
+    }
     return result;
 }
 
 Result<SampleSpec> sample(const Json &value, std::string context, const std::filesystem::path &base) {
     if (auto valid = fields(value, context, {"name", "root_key", "key_low", "key_high"},
                             {"level", "waveform_id", "right_waveform_id", "interleaved_audio_path",
-                             "left_waveform_name", "right_waveform_name", "target_sample_rate"});
+                             "left_waveform_name", "right_waveform_name", "target_sample_rate", "fine_tune_cents",
+                             "velocity_low", "velocity_high", "loop_mode", "loop_start_frame", "loop_length_frames"});
         !valid) {
         return std::unexpected{valid.error()};
     }
@@ -232,6 +272,40 @@ Result<SampleSpec> sample(const Json &value, std::string context, const std::fil
         if (!rate)
             return std::unexpected{rate.error()};
         result.target_sample_rate = static_cast<std::uint32_t>(*rate);
+    }
+    if (value.contains("fine_tune_cents")) {
+        auto fine = signed_integer(value["fine_tune_cents"], context + ".fine_tune_cents", -63, 63);
+        if (!fine)
+            return std::unexpected{fine.error()};
+        result.fine_tune_cents = static_cast<std::int8_t>(*fine);
+    }
+    for (const auto field : {std::string_view{"velocity_low"}, std::string_view{"velocity_high"}}) {
+        if (!value.contains(field))
+            continue;
+        auto velocity = integer(value[field], context + "." + std::string{field}, 0, 127);
+        if (!velocity)
+            return std::unexpected{velocity.error()};
+        (field == "velocity_low" ? result.velocity_low : result.velocity_high) = static_cast<std::uint8_t>(*velocity);
+    }
+    if (value.contains("loop_mode")) {
+        auto mode = integer(value["loop_mode"], context + ".loop_mode", 1, 4);
+        if (!mode)
+            return std::unexpected{mode.error()};
+        result.loop_mode = static_cast<AudioSamplerLoopMode>(*mode);
+    }
+    if (value.contains("loop_start_frame")) {
+        auto start = integer(value["loop_start_frame"], context + ".loop_start_frame", 0,
+                             std::numeric_limits<std::uint32_t>::max());
+        if (!start)
+            return std::unexpected{start.error()};
+        result.loop_start_frame = static_cast<std::uint32_t>(*start);
+    }
+    if (value.contains("loop_length_frames")) {
+        auto length = integer(value["loop_length_frames"], context + ".loop_length_frames", 0,
+                              std::numeric_limits<std::uint32_t>::max());
+        if (!length)
+            return std::unexpected{length.error()};
+        result.loop_length_frames = static_cast<std::uint32_t>(*length);
     }
     return result;
 }

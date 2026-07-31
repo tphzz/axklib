@@ -19,14 +19,11 @@
 
 namespace axk {
 namespace {
-
 using Json = nlohmann::json;
 using OrderedJson = nlohmann::ordered_json;
-
 Error transaction_error(std::string message) {
     return make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction, std::move(message));
 }
-
 Result<std::string> required_text(const Json &row, std::string_view field, std::string_view context) {
     if (!row.contains(field) || !row[field].is_string() || row[field].get_ref<const std::string &>().empty()) {
         return std::unexpected{
@@ -34,7 +31,6 @@ Result<std::string> required_text(const Json &row, std::string_view field, std::
     }
     return row[field].get<std::string>();
 }
-
 Result<void> exact_fields(const Json &row, std::initializer_list<std::string_view> expected, std::string_view context) {
     if (!row.is_object() || row.size() != expected.size()) {
         return std::unexpected{transaction_error(std::string{context} + " has invalid fields")};
@@ -46,7 +42,6 @@ Result<void> exact_fields(const Json &row, std::initializer_list<std::string_vie
     }
     return {};
 }
-
 Result<std::uint8_t> midi_value(const Json &row, std::string_view field, std::string_view context,
                                 std::uint8_t default_value, bool required) {
     if (!row.contains(field)) {
@@ -64,6 +59,19 @@ Result<std::uint8_t> midi_value(const Json &row, std::string_view field, std::st
             transaction_error(std::string{context} + "." + std::string{field} + " must be between 0 and 127")};
     }
     return static_cast<std::uint8_t>(value);
+}
+
+Result<std::int64_t> bounded_integer(const Json &row, std::string_view field, std::string_view context,
+                                     std::int64_t minimum, std::int64_t maximum, std::int64_t default_value) {
+    if (!row.contains(field))
+        return default_value;
+    if (!row[field].is_number_integer())
+        return std::unexpected{
+            transaction_error(std::string{context} + "." + std::string{field} + " must be an integer")};
+    const auto value = row[field].get<std::int64_t>();
+    if (value < minimum || value > maximum)
+        return std::unexpected{transaction_error(std::string{context} + "." + std::string{field} + " is out of range")};
+    return value;
 }
 
 Result<std::uint8_t> program_value(const Json &row, std::string_view field, std::string_view context) {
@@ -317,7 +325,9 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{transaction_error(context + ".sample must be an object")};
                 }
                 const std::set<std::string> required{"name", "waveform_name", "root_key", "key_low", "key_high"};
-                const std::set<std::string> optional{"right_waveform_name", "level"};
+                const std::set<std::string> optional{
+                    "right_waveform_name", "level",     "fine_tune_cents",  "velocity_low",
+                    "velocity_high",       "loop_mode", "loop_start_frame", "loop_length_frames"};
                 for (const auto &field : required) {
                     if (!sample.contains(field)) {
                         return std::unexpected{transaction_error(context + ".sample is missing field " + field)};
@@ -336,6 +346,14 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 auto key_low = midi_value(sample, "key_low", sample_context, 0U, true);
                 auto key_high = midi_value(sample, "key_high", sample_context, 0U, true);
                 auto level = midi_value(sample, "level", sample_context, 100U, false);
+                auto fine = bounded_integer(sample, "fine_tune_cents", sample_context, -63, 63, 0);
+                auto velocity_low = midi_value(sample, "velocity_low", sample_context, 0U, false);
+                auto velocity_high = midi_value(sample, "velocity_high", sample_context, 127U, false);
+                auto loop_mode = bounded_integer(sample, "loop_mode", sample_context, 1, 4, 4);
+                auto loop_start = bounded_integer(sample, "loop_start_frame", sample_context, 0,
+                                                  maximum_wave_data_frames_per_channel, 0);
+                auto loop_length = bounded_integer(sample, "loop_length_frames", sample_context, 0,
+                                                   maximum_wave_data_frames_per_channel, 0);
                 if (!name)
                     return std::unexpected{name.error()};
                 if (!waveform)
@@ -348,6 +366,18 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{key_high.error()};
                 if (!level)
                     return std::unexpected{level.error()};
+                if (!fine)
+                    return std::unexpected{fine.error()};
+                if (!velocity_low)
+                    return std::unexpected{velocity_low.error()};
+                if (!velocity_high)
+                    return std::unexpected{velocity_high.error()};
+                if (!loop_mode)
+                    return std::unexpected{loop_mode.error()};
+                if (!loop_start)
+                    return std::unexpected{loop_start.error()};
+                if (!loop_length)
+                    return std::unexpected{loop_length.error()};
                 if (*key_high < *key_low) {
                     return std::unexpected{transaction_error(sample_context + ".key_high must not be below key_low")};
                 }
@@ -364,6 +394,12 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 spec.key_low = *key_low;
                 spec.key_high = *key_high;
                 spec.level = *level;
+                spec.fine_tune_cents = static_cast<std::int8_t>(*fine);
+                spec.velocity_low = *velocity_low;
+                spec.velocity_high = *velocity_high;
+                spec.loop_mode = static_cast<AudioSamplerLoopMode>(*loop_mode);
+                spec.loop_start_frame = static_cast<std::uint32_t>(*loop_start);
+                spec.loop_length_frames = static_cast<std::uint32_t>(*loop_length);
                 data = InsertSampleOperation{std::move(selector), std::move(*volume), std::move(spec)};
             } else if (*type == "rename_waveform") {
                 if (auto valid = exact_fields(
@@ -566,7 +602,8 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{transaction_error(context + ".audio must be an object")};
                 }
                 const std::set<std::string> required{"path", "waveform_names", "root_key"};
-                const std::set<std::string> optional{"target_sample_rate"};
+                const std::set<std::string> optional{"target_sample_rate", "fine_tune_cents", "loop_mode",
+                                                     "loop_start_frame", "loop_length_frames"};
                 for (const auto &field : required) {
                     if (!audio.contains(field)) {
                         return std::unexpected{transaction_error(context + ".audio is missing field " + field)};
@@ -597,10 +634,24 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 }
                 auto path = required_text(audio, "path", context + ".audio");
                 auto root_key = midi_value(audio, "root_key", context + ".audio", 0U, true);
+                auto fine = bounded_integer(audio, "fine_tune_cents", context + ".audio", -63, 63, 0);
+                auto loop_mode = bounded_integer(audio, "loop_mode", context + ".audio", 1, 4, 4);
+                auto loop_start = bounded_integer(audio, "loop_start_frame", context + ".audio", 0,
+                                                  maximum_wave_data_frames_per_channel, 0);
+                auto loop_length = bounded_integer(audio, "loop_length_frames", context + ".audio", 0,
+                                                   maximum_wave_data_frames_per_channel, 0);
                 if (!path)
                     return std::unexpected{path.error()};
                 if (!root_key)
                     return std::unexpected{root_key.error()};
+                if (!fine)
+                    return std::unexpected{fine.error()};
+                if (!loop_mode)
+                    return std::unexpected{loop_mode.error()};
+                if (!loop_start)
+                    return std::unexpected{loop_start.error()};
+                if (!loop_length)
+                    return std::unexpected{loop_length.error()};
                 auto audio_path = axk::text::path_from_utf8(*path);
                 if (!audio_path)
                     return std::unexpected{transaction_error(context + ".audio.path must be valid UTF-8")};
@@ -608,6 +659,10 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (spec.path.is_relative())
                     spec.path = base_directory / spec.path;
                 spec.root_key = *root_key;
+                spec.fine_tune_cents = static_cast<std::int8_t>(*fine);
+                spec.loop_mode = static_cast<AudioSamplerLoopMode>(*loop_mode);
+                spec.loop_start_frame = static_cast<std::uint32_t>(*loop_start);
+                spec.loop_length_frames = static_cast<std::uint32_t>(*loop_length);
                 if (audio.contains("target_sample_rate")) {
                     if (!audio["target_sample_rate"].is_number_integer()) {
                         return std::unexpected{

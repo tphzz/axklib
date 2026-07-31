@@ -38,6 +38,26 @@ describe('modal', () => {
         dialog.remove();
     });
 
+    it('selects explicitly marked prefilled text without making every dialog input the default', async () => {
+        const dialog = document.createElement('div');
+        const close = document.createElement('button');
+        const input = document.createElement('input');
+        input.value = 'Existing name';
+        input.setAttribute('data-dialog-initial-focus', 'select');
+        dialog.append(close, input);
+        document.body.append(dialog);
+
+        const select = vi.spyOn(input, 'select');
+        const action = modal(dialog);
+        await Promise.resolve();
+
+        expect(document.activeElement).toBe(input);
+        expect(select).toHaveBeenCalledOnce();
+
+        action.destroy();
+        dialog.remove();
+    });
+
     it('suppresses native and WebKit overlay scrollbars in inert modal backgrounds', () => {
         expect(appStyles).toMatch(/:is\(\[inert\], \[inert\] \*\)\s*\{[^}]*scrollbar-width:\s*none;[^}]*\}/);
         expect(appStyles).toMatch(/:is\(\[inert\], \[inert\] \*\)::-webkit-scrollbar\s*\{[^}]*display:\s*none;[^}]*\}/);

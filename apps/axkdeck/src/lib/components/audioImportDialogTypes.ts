@@ -14,6 +14,15 @@ export interface AudioImportRow {
     sampleName: string;
     waveformNames: string[];
     rootKey: number;
+    fineTuneCents: number;
+    keyLow: number;
+    keyHigh: number;
+    velocityLow: number;
+    velocityHigh: number;
+    loopMode: 1 | 4;
+    loopStartFrame: number;
+    loopLengthFrames: number;
+    settingsExpanded: boolean;
     progress: number;
     status: 'waiting' | 'uploading' | 'checking' | 'ready' | 'failed' | 'removing';
     error: string;

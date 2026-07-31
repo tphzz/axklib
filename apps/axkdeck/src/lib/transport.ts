@@ -315,6 +315,8 @@ export interface InputBinding {
     source: InputFileLocation;
 }
 
+export type AudioSamplerSettings = components['schemas']['AudioSamplerSettings'];
+
 export interface AudioSourceInfo {
     sourceFormat: string;
     sourceSubtype: string;
@@ -334,6 +336,7 @@ export interface AudioSourceInfo {
     projectedOutputBytesTotal: number;
     maximumOutputFrameCountPerChannel: number;
     maximumOutputBytesPerChannel: number;
+    samplerDefaults: AudioSamplerSettings;
     valid: boolean;
     issues: { code: string; message: string; fatal?: boolean }[];
 }
@@ -350,6 +353,14 @@ export interface AudioImportItem {
     sampleName: string;
     waveformNames: string[];
     rootKey: number;
+    fineTuneCents: number;
+    keyLow: number;
+    keyHigh: number;
+    velocityLow: number;
+    velocityHigh: number;
+    loopMode: 1 | 4;
+    loopStartFrame: number;
+    loopLengthFrames: number;
     targetSampleRate: number;
 }
 

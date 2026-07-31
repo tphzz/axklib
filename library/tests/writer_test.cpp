@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/audio.hpp"
+#include "axklib/bytes.hpp"
 #include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/sfs.hpp"
@@ -30,8 +31,11 @@ constexpr std::string_view manifest = R"json({
     "name":"P1",
     "volumes":[{
       "name":"V1",
-      "waveforms":[{"id":"tone","name":"Tone","path":"audio/tone.wav","root_key":60}],
-      "samples":[{"name":"Tone Sample","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127}]
+      "waveforms":[{"id":"tone","name":"Tone","path":"audio/tone.wav","root_key":60,
+                    "fine_tune_cents":-17,"loop_mode":1,"loop_start_frame":4,"loop_length_frames":80}],
+      "samples":[{"name":"Tone Sample","waveform_id":"tone","root_key":60,"key_low":12,"key_high":96,
+                  "fine_tune_cents":-17,"velocity_low":8,"velocity_high":110,
+                  "loop_mode":1,"loop_start_frame":4,"loop_length_frames":80}]
     }]
   }]
 })json";
@@ -68,8 +72,13 @@ TEST(HdsManifest, ParsesStrictSchemaAndResolvesRelativeAudioPaths) {
     ASSERT_TRUE(parsed) << parsed.error().message;
     ASSERT_EQ(parsed->partitions.size(), 1U);
     EXPECT_EQ(parsed->partitions[0].volumes[0].waveforms[0].path, "/project/audio/tone.wav");
+    EXPECT_EQ(parsed->partitions[0].volumes[0].waveforms[0].fine_tune_cents, -17);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].waveforms[0].loop_start_frame, 4U);
     EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].level, 100U);
-    const axk::detail::PreparedWaveformMember member{"Tone", 0x100U, 44'100U, 4U};
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].velocity_low, 8U);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].velocity_high, 110U);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].loop_length_frames, 80U);
+    const axk::detail::PreparedWaveformMember member{"Tone", 0x100U, 44'100U, 100U};
     const auto parsed_payload = axk::detail::prepare_sbnk_payload(parsed->partitions[0].volumes[0].samples[0], member);
     ASSERT_TRUE(parsed_payload) << parsed_payload.error().message;
     EXPECT_EQ(std::to_integer<std::uint8_t>((*parsed_payload)[0x116U]), 100U);
@@ -327,6 +336,106 @@ TEST(AudioImport, SmplSerializationRejectsWaveDataPastTheHardwareAddressLimit) {
     const auto oversized_pcm = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
     ASSERT_FALSE(oversized_pcm);
     EXPECT_EQ(oversized_pcm.error().code, axk::ErrorCode::audio_wave_data_too_large);
+}
+
+TEST(AudioImport, SerializesMappedSamplerMetadataIntoWaveDataAndSamplePayloads) {
+    axk::ImportedAudio audio;
+    audio.output_sample_rate = 44'100U;
+    audio.output_sample_width_bits = axk::sampler_output_sample_width_bits;
+    audio.output_frames = 400U;
+    audio.pcm_channels = {std::vector<std::byte>(800U)};
+
+    axk::WaveformSpec waveform;
+    waveform.name = "Mapped Wave";
+    waveform.root_key = 64U;
+    waveform.fine_tune_cents = 25;
+    waveform.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+    waveform.loop_start_frame = 17U;
+    waveform.loop_length_frames = 335U;
+    const auto waveform_payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    ASSERT_TRUE(waveform_payload) << waveform_payload.error().message;
+    const auto decoded_waveform = axk::decode_object(*waveform_payload);
+    ASSERT_TRUE(decoded_waveform) << decoded_waveform.error().message;
+    const auto *smpl = std::get_if<axk::CurrentSmpl>(&decoded_waveform->payload);
+    ASSERT_NE(smpl, nullptr);
+    EXPECT_EQ(smpl->root_key.value, 64U);
+    EXPECT_EQ(smpl->fine_tune_cents.value, 25);
+    EXPECT_EQ(smpl->loop_mode.value, 1U);
+    EXPECT_EQ(smpl->wave_length_frames.value, 400U);
+    EXPECT_EQ(smpl->loop_start_frame.value, 17U);
+    EXPECT_EQ(smpl->loop_length_frames.value, 335U);
+
+    axk::SampleSpec sample;
+    sample.name = "Mapped Sample";
+    sample.root_key = 64U;
+    sample.fine_tune_cents = 25;
+    sample.key_low = 24U;
+    sample.key_high = 96U;
+    sample.velocity_low = 10U;
+    sample.velocity_high = 110U;
+    sample.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+    sample.loop_start_frame = 17U;
+    sample.loop_length_frames = 335U;
+    const axk::detail::PreparedWaveformMember member{"Mapped Wave", 0x100U, 44'100U, 400U};
+    const auto sample_payload = axk::detail::prepare_sbnk_payload(sample, member);
+    ASSERT_TRUE(sample_payload) << sample_payload.error().message;
+    const auto decoded_sample = axk::decode_object(*sample_payload);
+    ASSERT_TRUE(decoded_sample) << decoded_sample.error().message;
+    const auto *sbnk = std::get_if<axk::CurrentSbnk>(&decoded_sample->payload);
+    ASSERT_NE(sbnk, nullptr);
+    EXPECT_EQ(sbnk->left.root_key, 64U);
+    EXPECT_EQ(sbnk->left.fine_tune_cents, 25);
+    EXPECT_EQ(sbnk->key_range_low, 24U);
+    EXPECT_EQ(sbnk->key_range_high, 96U);
+    EXPECT_EQ(sbnk->velocity_range_low, 10U);
+    EXPECT_EQ(sbnk->velocity_range_high, 110U);
+    EXPECT_EQ(sbnk->loop_mode, 1U);
+    EXPECT_EQ(sbnk->left.wave_length_frames, 400U);
+    EXPECT_EQ(sbnk->left.loop_start_frame, 17U);
+    EXPECT_EQ(sbnk->left.loop_length_frames, 335U);
+    const axk::ByteReader sample_bytes{*sample_payload};
+    ASSERT_TRUE(sample_bytes.be16(0xeaU));
+    EXPECT_EQ(*sample_bytes.be16(0xeaU), 17U);
+    ASSERT_TRUE(sample_bytes.be16(0xeeU));
+    EXPECT_EQ(*sample_bytes.be16(0xeeU), 0U);
+}
+
+TEST(AudioImport, SerializesMissingWavLoopAsHardwareProvenForwardOneShot) {
+    axk::ImportedAudio audio;
+    audio.output_sample_rate = 44'100U;
+    audio.output_sample_width_bits = axk::sampler_output_sample_width_bits;
+    audio.output_frames = 400U;
+    audio.pcm_channels = {std::vector<std::byte>(800U)};
+
+    axk::WaveformSpec waveform;
+    waveform.name = "One Shot Wave";
+    const auto waveform_payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    ASSERT_TRUE(waveform_payload) << waveform_payload.error().message;
+    const auto decoded_waveform = axk::decode_object(*waveform_payload);
+    ASSERT_TRUE(decoded_waveform) << decoded_waveform.error().message;
+    const auto *smpl = std::get_if<axk::CurrentSmpl>(&decoded_waveform->payload);
+    ASSERT_NE(smpl, nullptr);
+    EXPECT_EQ(smpl->loop_mode.value, 4U);
+    EXPECT_EQ(smpl->loop_start_frame.value, 0U);
+    EXPECT_EQ(smpl->loop_length_frames.value, 400U);
+
+    axk::SampleSpec sample;
+    sample.name = "One Shot Sample";
+    const axk::detail::PreparedWaveformMember member{"One Shot Wave", 0x100U, 44'100U, 400U};
+    const auto sample_payload = axk::detail::prepare_sbnk_payload(sample, member);
+    ASSERT_TRUE(sample_payload) << sample_payload.error().message;
+    const auto decoded_sample = axk::decode_object(*sample_payload);
+    ASSERT_TRUE(decoded_sample) << decoded_sample.error().message;
+    const auto *sbnk = std::get_if<axk::CurrentSbnk>(&decoded_sample->payload);
+    ASSERT_NE(sbnk, nullptr);
+    EXPECT_EQ(sbnk->loop_mode, 4U);
+    EXPECT_EQ(sbnk->left.loop_start_frame, 0U);
+    EXPECT_EQ(sbnk->left.loop_length_frames, 400U);
+    const axk::ByteReader sample_bytes{*sample_payload};
+    ASSERT_TRUE(sample_bytes.be16(0xeaU));
+    EXPECT_EQ(*sample_bytes.be16(0xeaU), 0U);
+    ASSERT_TRUE(sample_bytes.be16(0xeeU));
+    EXPECT_EQ(*sample_bytes.be16(0xeeU), 0U);
 }
 
 TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {

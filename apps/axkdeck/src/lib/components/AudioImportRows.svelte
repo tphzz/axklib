@@ -3,6 +3,7 @@
     import { formatStoredSize } from '../formatBytes';
     import type { AudioImportCapabilities, AudioSourceInfo } from '../transport';
     import type { AudioImportRow } from './audioImportDialogTypes';
+    import AudioSamplerSettings from './AudioSamplerSettings.svelte';
     import Icon from './Icon.svelte';
 
     interface Props {
@@ -42,7 +43,7 @@
 <p class="audio-import-summary">
     Each file creates one standalone Sample and {rows.some((row) => row.inspection?.channels === 2)
         ? 'mono or stereo'
-        : 'mono'} Wave Data. Imported wave data uses the proven full-waveform forward loop.
+        : 'mono'} Wave Data. WAV sampler metadata is mapped when it can be represented safely.
 </p>
 <div class="audio-import-rows">
     <table class="audio-import-table">
@@ -118,6 +119,7 @@
                         {#if editable}
                             <input
                                 aria-label="Sample name"
+                                data-dialog-initial-focus={index === 0 ? 'select' : undefined}
                                 value={row.sampleName}
                                 maxlength="16"
                                 oninput={(event) =>
@@ -171,6 +173,14 @@
                                 />
                                 <small>{noteName(row.rootKey)}</small></span
                             >
+                            <button
+                                class="settings-toggle"
+                                type="button"
+                                aria-expanded={row.settingsExpanded}
+                                onclick={() => onupdate(row.id, { settingsExpanded: !row.settingsExpanded })}
+                            >
+                                Settings
+                            </button>
                         {:else}
                             <span class="audio-import-unavailable" aria-hidden="true">—</span>
                         {/if}
@@ -211,6 +221,13 @@
                         {/if}
                     </td>
                 </tr>
+                {#if editable && row.settingsExpanded}
+                    <tr class="settings-row">
+                        <td colspan="8">
+                            <AudioSamplerSettings {row} disabled={busy} {onupdate} />
+                        </td>
+                    </tr>
+                {/if}
             {/each}
         </tbody>
     </table>
@@ -340,6 +357,27 @@
         color: var(--color-text-muted);
         font-size: 11px;
         white-space: nowrap;
+    }
+    .settings-toggle {
+        margin-top: 5px;
+        padding: 0;
+        color: var(--color-text-muted);
+        border: 0;
+        background: transparent;
+        font: inherit;
+        font-size: 11px;
+        cursor: pointer;
+    }
+    .settings-toggle:hover,
+    .settings-toggle[aria-expanded='true'] {
+        color: var(--color-text-strong);
+    }
+    .settings-row td {
+        padding: 10px 12px;
+        border: 1px solid var(--color-border);
+        border-top: 0;
+        border-radius: 0 0 5px 5px;
+        background: rgb(255 255 255 / 2.5%);
     }
     .audio-import-unavailable {
         display: flex;

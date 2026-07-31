@@ -56,12 +56,38 @@ Result<std::vector<std::byte>> ascii(std::string_view value, std::size_t size, s
     return result;
 }
 
-std::uint16_t pitch_word(std::uint8_t root_key, std::uint32_t sample_rate) {
+std::uint16_t pitch_word(std::uint8_t root_key, std::int8_t fine_tune_cents, std::uint32_t sample_rate) {
     constexpr std::array<std::uint16_t, 12> fractions{0x000, 0x055, 0x0ab, 0x100, 0x155, 0x1ab,
                                                       0x200, 0x255, 0x2ab, 0x300, 0x355, 0x3ab};
     const auto root = root_key == 0U ? 0x03ab : ((root_key - 1U) / 12U) * 1024U + fractions[(root_key - 1U) % 12U];
     const auto rate = static_cast<int>(std::log(static_cast<double>(sample_rate) / 44'100.0) * 1477.3197);
-    return static_cast<std::uint16_t>(static_cast<int>(root) - rate);
+    return static_cast<std::uint16_t>(static_cast<int>(root) - rate - fine_tune_cents);
+}
+
+struct LoopWindow {
+    std::uint32_t start{};
+    std::uint32_t length{};
+};
+
+Result<LoopWindow> loop_window(AudioSamplerLoopMode mode, std::uint32_t start, std::uint32_t length,
+                               std::uint64_t frame_count) {
+    if (frame_count > std::numeric_limits<std::uint32_t>::max()) {
+        return std::unexpected{make_error(ErrorCode::audio_wave_data_too_large, ErrorCategory::audio,
+                                          "sampler loop window exceeds the encoded frame range")};
+    }
+    if (mode == AudioSamplerLoopMode::forward_one_shot) {
+        if (start != 0U || length != 0U) {
+            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                              "forward one-shot playback cannot specify a loop window")};
+        }
+        return LoopWindow{0U, static_cast<std::uint32_t>(frame_count)};
+    }
+    if (mode != AudioSamplerLoopMode::forward_loop || length == 0U || start >= frame_count ||
+        length > frame_count - start) {
+        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                          "forward loop window must be non-empty and remain inside Wave Data")};
+    }
+    return LoopWindow{start, length};
 }
 
 Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const ImportedAudio &audio,
@@ -83,6 +109,9 @@ Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const Im
         return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
                                           "SMPL reference value is below the encoded relocation base")};
     }
+    auto loop = loop_window(spec.loop_mode, spec.loop_start_frame, spec.loop_length_frames, audio.output_frames);
+    if (!loop)
+        return std::unexpected{loop.error()};
     std::vector<std::byte> stored;
     stored.reserve(audio.pcm_channels[0].size() + 8U);
     for (std::size_t offset = 0; offset < audio.pcm_channels[0].size(); offset += 2U) {
@@ -119,11 +148,12 @@ Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const Im
     writer.be32(0x78, reference_value);
     writer.be16(0x7c, static_cast<std::uint16_t>(audio.output_sample_rate));
     result[0x7e] = static_cast<std::byte>(spec.root_key);
-    writer.be16(0x80, pitch_word(spec.root_key, audio.output_sample_rate));
-    writer.be32(0x84, 0x30010000);
+    result[0x7f] = static_cast<std::byte>(static_cast<std::uint8_t>(spec.fine_tune_cents));
+    writer.be16(0x80, pitch_word(spec.root_key, spec.fine_tune_cents, audio.output_sample_rate));
+    writer.be32(0x84, 0x30000000U | (static_cast<std::uint32_t>(spec.loop_mode) << 16U));
     writer.be32(0x92, static_cast<std::uint32_t>(audio.output_frames));
-    writer.be32(0x96, 0);
-    writer.be32(0x9a, static_cast<std::uint32_t>(audio.output_frames));
+    writer.be32(0x96, loop->start);
+    writer.be32(0x9a, loop->length);
     if (auto written = writer.finish(); !written)
         return std::unexpected{written.error()};
     std::ranges::copy(stored, result.begin() + 512);
@@ -150,6 +180,18 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
                               right->audio.output_sample_rate > std::numeric_limits<std::uint16_t>::max()))) {
         return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
                                           "Sample references an unencodable Wave Data sample rate")};
+    }
+    auto left_loop =
+        loop_window(sample.loop_mode, sample.loop_start_frame, sample.loop_length_frames, left.audio.output_frames);
+    if (!left_loop)
+        return std::unexpected{left_loop.error()};
+    std::optional<LoopWindow> right_loop;
+    if (right != nullptr) {
+        auto checked = loop_window(sample.loop_mode, sample.loop_start_frame, sample.loop_length_frames,
+                                   right->audio.output_frames);
+        if (!checked)
+            return std::unexpected{checked.error()};
+        right_loop = *checked;
     }
     std::vector<std::byte> result(0x188);
     ObjectPayloadWriter writer{result};
@@ -209,32 +251,67 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
         writer.be32(offset, existing | bit);
     }
     result[0xd6] = static_cast<std::byte>(sample.root_key);
+    result[0xdc] = static_cast<std::byte>(static_cast<std::uint8_t>(sample.fine_tune_cents));
     writer.be16(0xd8, static_cast<std::uint16_t>(left.audio.output_sample_rate));
-    writer.be16(0xde, pitch_word(sample.root_key, left.audio.output_sample_rate));
+    writer.be16(0xde, pitch_word(sample.root_key, sample.fine_tune_cents, left.audio.output_sample_rate));
     if (right != nullptr) {
         result[0xd7] = static_cast<std::byte>(sample.root_key);
+        result[0xdd] = static_cast<std::byte>(static_cast<std::uint8_t>(sample.fine_tune_cents));
         writer.be16(0xda, static_cast<std::uint16_t>(right->audio.output_sample_rate));
-        writer.be16(0xe0, pitch_word(sample.root_key, right->audio.output_sample_rate));
+        writer.be16(0xe0, pitch_word(sample.root_key, sample.fine_tune_cents, right->audio.output_sample_rate));
     }
     result[0xe2] = static_cast<std::byte>(sample.key_high);
     result[0xe3] = static_cast<std::byte>(sample.key_low);
     result[0xe4] = std::byte{0x30};
-    result[0xe5] = std::byte{1};
+    result[0xe5] = static_cast<std::byte>(sample.loop_mode);
     writer.be16(0xe6, 9000);
+    if (left_loop->start > std::numeric_limits<std::uint16_t>::max()) {
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "Sample loop start exceeds the proven A-series cache range")};
+    }
+    writer.be16(0xea, static_cast<std::uint16_t>(left_loop->start));
+    if (right == nullptr && sample.loop_mode == AudioSamplerLoopMode::forward_one_shot)
+        writer.be16(0xee, static_cast<std::uint16_t>(left_loop->start));
     writer.be32(0xf0, static_cast<std::uint32_t>(left.audio.output_frames));
-    writer.be32(0xf8, 0);
-    writer.be32(0x100, static_cast<std::uint32_t>(left.audio.output_frames));
+    writer.be32(0xf8, left_loop->start);
+    writer.be32(0x100, left_loop->length);
     if (right != nullptr) {
         writer.be32(0xf4, static_cast<std::uint32_t>(right->audio.output_frames));
-        writer.be32(0xfc, 0);
-        writer.be32(0x104, static_cast<std::uint32_t>(right->audio.output_frames));
+        writer.be32(0xfc, right_loop->start);
+        writer.be32(0x104, right_loop->length);
     }
-    const std::array<std::pair<std::size_t, std::uint8_t>, 32> defaults{
-        {{0x109, 0},   {0x10a, 127}, {0x10b, 4},   {0x10c, 0},   {0x10d, 127}, {0x10e, 0},  {0x10f, 0},
-         {0x110, 0},   {0x111, 0},   {0x112, 0},   {0x113, 0},   {0x114, 63},  {0x115, 0},  {0x116, sample.level},
-         {0x117, 0},   {0x118, 0},   {0x119, 0},   {0x11a, 127}, {0x11b, 0},   {0x11c, 0},  {0x11d, 127},
-         {0x11e, 127}, {0x11f, 127}, {0x120, 0},   {0x121, 0},   {0x122, 26},  {0x123, 64}, {0x124, 10},
-         {0x125, 0},   {0x126, 127}, {0x127, 127}, {0x128, 127}}};
+    const std::array<std::pair<std::size_t, std::uint8_t>, 32> defaults{{{0x109, 0},
+                                                                         {0x10a, 127},
+                                                                         {0x10b, 4},
+                                                                         {0x10c, 0},
+                                                                         {0x10d, 127},
+                                                                         {0x10e, 0},
+                                                                         {0x10f, 0},
+                                                                         {0x110, 0},
+                                                                         {0x111, 0},
+                                                                         {0x112, 0},
+                                                                         {0x113, 0},
+                                                                         {0x114, 63},
+                                                                         {0x115, 0},
+                                                                         {0x116, sample.level},
+                                                                         {0x117, 0},
+                                                                         {0x118, 0},
+                                                                         {0x119, 0},
+                                                                         {0x11a, sample.velocity_high},
+                                                                         {0x11b, sample.velocity_low},
+                                                                         {0x11c, 0},
+                                                                         {0x11d, 127},
+                                                                         {0x11e, 127},
+                                                                         {0x11f, 127},
+                                                                         {0x120, 0},
+                                                                         {0x121, 0},
+                                                                         {0x122, 26},
+                                                                         {0x123, 64},
+                                                                         {0x124, 10},
+                                                                         {0x125, 0},
+                                                                         {0x126, 127},
+                                                                         {0x127, 127},
+                                                                         {0x128, 127}}};
     for (const auto &[offset, value] : defaults)
         result[offset] = static_cast<std::byte>(value);
     result[0x131] = std::byte{127};

@@ -166,7 +166,12 @@
             <label class="create-hds-field">
                 <span>File name</span>
                 <span class="create-hds-name"
-                    ><input aria-label="File name" bind:value={fileName} disabled={busy} /><b>.hds</b></span
+                    ><input
+                        aria-label="File name"
+                        bind:value={fileName}
+                        data-dialog-initial-focus="select"
+                        disabled={busy}
+                    /><b>.hds</b></span
                 >
             </label>
 

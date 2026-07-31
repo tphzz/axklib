@@ -224,6 +224,7 @@
                             <strong title={row.fileName}>{row.fileName}</strong>
                             <input
                                 aria-label={`Sequence name for ${row.fileName}`}
+                                data-dialog-initial-focus={index === 0 ? 'select' : undefined}
                                 value={row.sequenceName}
                                 maxlength="16"
                                 disabled={busy}

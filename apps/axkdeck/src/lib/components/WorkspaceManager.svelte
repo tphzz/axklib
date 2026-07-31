@@ -325,7 +325,13 @@
                 </header>
                 <div class="workspace-form">
                     {#if selectedPath}<p class="selected-path" title={selectedPath}>{selectedPath}</p>{/if}
-                    <label>Location name<input type="text" bind:value={displayName} /></label>
+                    <label
+                        >Location name<input
+                            type="text"
+                            bind:value={displayName}
+                            data-dialog-initial-focus="caret"
+                        /></label
+                    >
                     <label class="workspace-toggle"
                         ><input type="checkbox" bind:checked={writable} /> Allow image creation and changes</label
                     >

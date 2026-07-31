@@ -1,8 +1,22 @@
-import type { AudioSourceInfo } from './transport';
+import type { AudioSamplerSettings, AudioSourceInfo } from './transport';
 
 export const audioExtensions = ['wav', 'wave', 'flac', 'aif', 'aiff'] as const;
 export const maximumSamplerNameBytes = 16;
 export const defaultRootKey = 60;
+export const defaultAudioSamplerSettings: AudioSamplerSettings = {
+    rootKey: defaultRootKey,
+    fineTuneCents: 0,
+    keyLow: 0,
+    keyHigh: 127,
+    velocityLow: 0,
+    velocityHigh: 127,
+    loopMode: 4,
+    loopStartFrame: 0,
+    loopLengthFrames: 0,
+    pitchSource: 'DEFAULT',
+    rangeSource: 'DEFAULT',
+    loopSource: 'DEFAULT',
+};
 
 export interface AudioImportNames {
     sampleName: string;

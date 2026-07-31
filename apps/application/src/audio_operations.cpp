@@ -87,6 +87,19 @@ axk::app::Result<Json> inspect_audio(const Json &input, const axk::app::Operatio
     auto issues = Json::array();
     for (const auto &issue : inspected->issues)
         issues.push_back({{"code", issue.code}, {"message", issue.message}, {"fatal", issue.fatal}});
+    const auto &sampler = inspected->sampler_defaults;
+    const Json sampler_defaults{{"rootKey", sampler.root_key},
+                                {"fineTuneCents", sampler.fine_tune_cents},
+                                {"keyLow", sampler.key_low},
+                                {"keyHigh", sampler.key_high},
+                                {"velocityLow", sampler.velocity_low},
+                                {"velocityHigh", sampler.velocity_high},
+                                {"loopMode", static_cast<std::uint8_t>(sampler.loop_mode)},
+                                {"loopStartFrame", sampler.loop_start_frame},
+                                {"loopLengthFrames", sampler.loop_length_frames},
+                                {"pitchSource", sampler.pitch_source},
+                                {"rangeSource", sampler.range_source},
+                                {"loopSource", sampler.loop_source}};
     return Json{{"sourceFormat", inspected->source_format},
                 {"sourceSubtype", inspected->source_subtype},
                 {"channels", inspected->channels},
@@ -105,6 +118,7 @@ axk::app::Result<Json> inspect_audio(const Json &input, const axk::app::Operatio
                 {"projectedOutputBytesTotal", inspected->projected_output_bytes_total},
                 {"maximumOutputFrameCountPerChannel", inspected->maximum_output_frame_count_per_channel},
                 {"maximumOutputBytesPerChannel", inspected->maximum_output_bytes_per_channel},
+                {"samplerDefaults", sampler_defaults},
                 {"valid", inspected->valid},
                 {"issues", std::move(issues)}};
 }

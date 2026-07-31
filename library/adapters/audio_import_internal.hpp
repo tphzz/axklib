@@ -11,6 +11,7 @@
 
 #include "axklib/error.hpp"
 #include "axklib/io.hpp"
+#include "axklib/writer.hpp"
 
 namespace axk::audio_import_detail {
 
@@ -45,6 +46,14 @@ struct ProjectedAudioSize {
 Result<ProjectedAudioSize> project_sampler_audio_size(std::uint64_t source_frames, std::size_t channels,
                                                       std::uint32_t source_rate, std::uint32_t output_rate,
                                                       std::uint8_t output_sample_width_bytes = 2U);
+
+struct WavSamplerMetadata {
+    AudioSamplerSettings settings;
+    std::vector<AudioImportIssue> issues;
+};
+
+Result<WavSamplerMetadata> inspect_wav_sampler_metadata(const RandomAccessReader &reader, std::uint64_t source_frames,
+                                                        std::uint32_t source_rate, std::uint32_t output_rate);
 
 Result<SourceAudioInfo> inspect_sndfile(const std::filesystem::path &path,
                                         std::optional<std::size_t> expected_channels = {});

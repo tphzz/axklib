@@ -11,6 +11,11 @@ import type { SequenceImportWorkflow } from './sequenceWorkflow.svelte';
 export type MediaDropKind = 'audio' | 'midi' | 'mixed';
 type ClassifiedMedia = MediaDropKind | 'none';
 
+export interface MediaDropNotice {
+    title: string;
+    message: string;
+}
+
 interface MediaDropDependencies {
     isDesktop: boolean;
     workspaceView: () => WorkspaceView;
@@ -23,8 +28,13 @@ export class MediaDropWorkflow {
     dragActive = $state(false);
     dragKind = $state<MediaDropKind | null>(null);
     dragTarget = $state<AudioImportTarget | null>(null);
+    notice = $state<MediaDropNotice | null>(null);
 
     constructor(private readonly dependencies: MediaDropDependencies) {}
+
+    closeNotice(): void {
+        this.notice = null;
+    }
 
     mountNativeDrops(): () => void {
         if (!this.dependencies.isDesktop) return () => undefined;
@@ -105,15 +115,41 @@ export class MediaDropWorkflow {
         const kind = classifyDroppedNames(files.map((file) => file.name));
         if (kind === 'mixed') {
             this.dependencies.setStatus('Drop audio and MIDI files separately');
+            this.notice = { title: 'Import unavailable', message: 'Drop audio and MIDI files separately.' };
             return;
         }
         const selectedKind = kind === 'none' ? this.defaultKind() : kind;
+        if (kind === 'none') {
+            if (selectedKind === 'midi') await this.dependencies.sequenceImport.requestDroppedFiles(files, target);
+            else await this.dependencies.audioImport.requestDroppedFiles(files, target);
+            return;
+        }
         if (selectedKind === 'midi') {
             if (this.dependencies.workspaceView() !== 'sequences') {
                 this.dependencies.setStatus('Open the Sequences tab to import MIDI files');
+                this.notice = {
+                    title: 'MIDI import unavailable',
+                    message: 'Open the Sequences tab, select a writable volume, then drop the MIDI files again.',
+                };
+                return;
+            }
+            if (!target) {
+                this.dependencies.setStatus('Select a writable volume first');
+                this.notice = {
+                    title: 'MIDI import unavailable',
+                    message: 'Select a writable volume in Contents, then drop the MIDI files again.',
+                };
                 return;
             }
             await this.dependencies.sequenceImport.requestDroppedFiles(files, target);
+            return;
+        }
+        if (!target) {
+            this.dependencies.setStatus('Select a writable volume first');
+            this.notice = {
+                title: 'Audio import unavailable',
+                message: 'Select a writable volume in Contents, then drop the audio files again.',
+            };
             return;
         }
         await this.dependencies.audioImport.requestDroppedFiles(files, target);
@@ -156,7 +192,11 @@ export class MediaDropWorkflow {
     }
 
     private importDialogOpen(): boolean {
-        return this.dependencies.audioImport.request !== null || this.dependencies.sequenceImport.request !== null;
+        return (
+            this.notice !== null ||
+            this.dependencies.audioImport.request !== null ||
+            this.dependencies.sequenceImport.request !== null
+        );
     }
 
     private clearHover(): void {

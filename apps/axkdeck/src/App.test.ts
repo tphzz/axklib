@@ -165,6 +165,20 @@ describe('App panel layout', () => {
             projectedOutputBytesTotal: 96_000,
             maximumOutputFrameCountPerChannel: 16_777_216,
             maximumOutputBytesPerChannel: 33_554_432,
+            samplerDefaults: {
+                rootKey: 60,
+                fineTuneCents: 0,
+                keyLow: 0,
+                keyHigh: 127,
+                velocityLow: 0,
+                velocityHigh: 127,
+                loopMode: 4,
+                loopStartFrame: 0,
+                loopLengthFrames: 0,
+                pitchSource: 'DEFAULT',
+                rangeSource: 'DEFAULT',
+                loopSource: 'DEFAULT',
+            },
             valid: true,
             issues: [],
         });
@@ -1238,7 +1252,10 @@ describe('App panel layout', () => {
         Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer });
         window.dispatchEvent(drop);
         expect(drop.defaultPrevented).toBe(true);
-        expect(await screen.findByText('Select a writable volume first')).toBeTruthy();
+        const dialog = await screen.findByRole('dialog', { name: 'Audio import unavailable' });
+        expect(
+            within(dialog).getByText('Select a writable volume in Contents, then drop the audio files again.'),
+        ).toBeTruthy();
     });
 
     it('routes native Tauri file drops through the audio import flow', async () => {
@@ -1250,7 +1267,10 @@ describe('App panel layout', () => {
         const callbacks = mocks.listenForNativeMediaDrops.mock.calls[0][0];
         callbacks.onDrop([new File(['audio'], 'take.wav', { type: 'audio/wav' })], { x: 20, y: 30 }, 1);
 
-        expect(await screen.findByText('Select a writable volume first')).toBeTruthy();
+        const dialog = await screen.findByRole('dialog', { name: 'Audio import unavailable' });
+        expect(
+            within(dialog).getByText('Select a writable volume in Contents, then drop the audio files again.'),
+        ).toBeTruthy();
         delete runtime.__TAURI_INTERNALS__;
     });
 
@@ -1347,8 +1367,14 @@ describe('App panel layout', () => {
         const midiDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
         Object.defineProperty(midiDrop, 'dataTransfer', { value: midiTransfer });
         window.dispatchEvent(midiDrop);
-        expect(await screen.findByText('Open the Sequences tab to import MIDI files')).toBeTruthy();
+        let unavailable = await screen.findByRole('dialog', { name: 'MIDI import unavailable' });
+        expect(
+            within(unavailable).getByText(
+                'Open the Sequences tab, select a writable volume, then drop the MIDI files again.',
+            ),
+        ).toBeTruthy();
         expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
+        await fireEvent.click(within(unavailable).getByRole('button', { name: 'OK' }));
 
         await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
         const mixedTransfer = {
@@ -1362,7 +1388,8 @@ describe('App panel layout', () => {
         const mixedDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
         Object.defineProperty(mixedDrop, 'dataTransfer', { value: mixedTransfer });
         window.dispatchEvent(mixedDrop);
-        expect(await screen.findByText('Drop audio and MIDI files separately')).toBeTruthy();
+        unavailable = await screen.findByRole('dialog', { name: 'Import unavailable' });
+        expect(within(unavailable).getByText('Drop audio and MIDI files separately.')).toBeTruthy();
         expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
         expect(screen.queryByRole('dialog', { name: 'Import audio' })).toBeNull();
     });

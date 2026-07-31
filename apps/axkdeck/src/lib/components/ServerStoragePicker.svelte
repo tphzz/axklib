@@ -660,7 +660,12 @@
             <div class="entry-action-content">
                 <label>
                     <span>Folder name</span>
-                    <input aria-label="Folder name" bind:value={entryActionName} disabled={entryActionBusy} />
+                    <input
+                        aria-label="Folder name"
+                        bind:value={entryActionName}
+                        data-dialog-initial-focus="caret"
+                        disabled={entryActionBusy}
+                    />
                 </label>
                 {#if entryActionError}<p class="storage-picker-error" role="alert">{entryActionError}</p>{/if}
             </div>

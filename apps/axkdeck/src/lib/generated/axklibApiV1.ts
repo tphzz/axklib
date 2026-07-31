@@ -1351,6 +1351,24 @@ export interface components {
             source: components['schemas']['InputRef'];
             targetSampleRate?: number;
         };
+        AudioSamplerSettings: {
+            fineTuneCents: number;
+            keyHigh: number;
+            keyLow: number;
+            loopLengthFrames: number;
+            /** @enum {integer} */
+            loopMode: 1 | 4;
+            /** @enum {string} */
+            loopSource: 'DEFAULT' | 'WAV_SMPL';
+            loopStartFrame: number;
+            /** @enum {string} */
+            pitchSource: 'DEFAULT' | 'WAV_SMPL' | 'WAV_INST';
+            /** @enum {string} */
+            rangeSource: 'DEFAULT' | 'WAV_INST';
+            rootKey: number;
+            velocityHigh: number;
+            velocityLow: number;
+        };
         AudioSourceInfo: {
             channels: number;
             ditherAlgorithm: string;
@@ -1367,6 +1385,7 @@ export interface components {
             projectedOutputFrameCount: number;
             quantized: boolean;
             resampled: boolean;
+            samplerDefaults: components['schemas']['AudioSamplerSettings'];
             sampleWidthConverted: boolean;
             sourceFormat: string;
             sourceSampleRate: number;

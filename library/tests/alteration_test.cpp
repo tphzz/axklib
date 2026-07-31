@@ -465,17 +465,48 @@ TEST(AlterationManifest, ParsesStrictSampleOperations) {
        "volume_name":"Samples","sample_name":"Old Sample"},
       {"id":"insert","type":"insert_sbnk","partition_index":{"operation_ref":"delete"},
        "volume_name":"Samples","sample":{"name":"New Sample","waveform_name":"Wave",
-       "root_key":64,"key_low":10,"key_high":100}}
+       "root_key":64,"fine_tune_cents":-12,"key_low":10,"key_high":100,
+       "velocity_low":20,"velocity_high":110,"loop_mode":1,"loop_start_frame":17,
+       "loop_length_frames":335}}
     ]})");
     ASSERT_TRUE(parsed) << parsed.error().message;
     const auto *insert = std::get_if<axk::InsertSampleOperation>(&parsed->operations[1].data);
     ASSERT_NE(insert, nullptr);
     EXPECT_EQ(insert->sample.level, 100U);
+    EXPECT_EQ(insert->sample.fine_tune_cents, -12);
+    EXPECT_EQ(insert->sample.velocity_low, 20U);
+    EXPECT_EQ(insert->sample.velocity_high, 110U);
+    EXPECT_EQ(insert->sample.loop_mode, axk::AudioSamplerLoopMode::forward_loop);
+    EXPECT_EQ(insert->sample.loop_start_frame, 17U);
+    EXPECT_EQ(insert->sample.loop_length_frames, 335U);
     EXPECT_FALSE(axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
       {"id":"insert","type":"insert_sbnk","partition_index":0,
        "volume_name":"Samples","sample":{"name":"New Sample","waveform_name":"Wave",
        "root_key":64,"key_low":100,"key_high":10}}
+    ]})"));
+}
+
+TEST(AlterationManifest, ParsesStrictWaveformSamplerMetadataAndRejectsInvalidLoopWindows) {
+    const auto parsed = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"wave","type":"insert_waveform","partition_index":0,"volume_name":"Samples",
+       "audio":{"path":"mapped.wav","waveform_names":["Mapped L"],"root_key":64,
+       "fine_tune_cents":25,"loop_mode":1,"loop_start_frame":17,"loop_length_frames":335}}
+    ]})");
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto *insert = std::get_if<axk::InsertWaveformOperation>(&parsed->operations.front().data);
+    ASSERT_NE(insert, nullptr);
+    EXPECT_EQ(insert->waveform.fine_tune_cents, 25);
+    EXPECT_EQ(insert->waveform.loop_mode, axk::AudioSamplerLoopMode::forward_loop);
+    EXPECT_EQ(insert->waveform.loop_start_frame, 17U);
+    EXPECT_EQ(insert->waveform.loop_length_frames, 335U);
+
+    EXPECT_FALSE(axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"wave","type":"insert_waveform","partition_index":0,"volume_name":"Samples",
+       "audio":{"path":"mapped.wav","waveform_names":["Mapped L"],"root_key":64,
+       "fine_tune_cents":25,"loop_mode":1,"loop_start_frame":400,"loop_length_frames":0}}
     ]})"));
 }
 

@@ -31,12 +31,21 @@ inline constexpr std::array<std::uint8_t, 1> supported_sampler_output_sample_wid
     sampler_output_sample_width_bits};
 inline constexpr std::string_view sampler_sample_width_policy = "PRESERVE_PCM16_EXPAND_PCM8";
 
+enum class AudioSamplerLoopMode : std::uint8_t {
+    forward_loop = 1,
+    forward_one_shot = 4,
+};
+
 struct WaveformSpec {
     std::string id;
     std::string name;
     std::filesystem::path path;
     std::uint8_t root_key{};
     std::optional<std::uint32_t> target_sample_rate;
+    std::int8_t fine_tune_cents{};
+    AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
+    std::uint32_t loop_start_frame{};
+    std::uint32_t loop_length_frames{};
 };
 
 struct SampleSpec {
@@ -51,6 +60,12 @@ struct SampleSpec {
     std::uint8_t key_low{};
     std::uint8_t key_high{};
     std::uint8_t level{100};
+    std::int8_t fine_tune_cents{};
+    std::uint8_t velocity_low{};
+    std::uint8_t velocity_high{127};
+    AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
+    std::uint32_t loop_start_frame{};
+    std::uint32_t loop_length_frames{};
 };
 
 struct SampleBankSpec {
@@ -121,6 +136,21 @@ struct AudioImportIssue {
     bool fatal{true};
 };
 
+struct AudioSamplerSettings {
+    std::uint8_t root_key{60};
+    std::int8_t fine_tune_cents{};
+    std::uint8_t key_low{};
+    std::uint8_t key_high{127};
+    std::uint8_t velocity_low{};
+    std::uint8_t velocity_high{127};
+    AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
+    std::uint64_t loop_start_frame{};
+    std::uint64_t loop_length_frames{};
+    std::string pitch_source{"DEFAULT"};
+    std::string range_source{"DEFAULT"};
+    std::string loop_source{"DEFAULT"};
+};
+
 struct AudioSourceInfo {
     std::string source_format;
     std::string source_subtype;
@@ -139,6 +169,7 @@ struct AudioSourceInfo {
     std::uint64_t projected_output_bytes_total{};
     std::uint64_t maximum_output_frame_count_per_channel{maximum_wave_data_frames_per_channel};
     std::uint64_t maximum_output_bytes_per_channel{maximum_wave_data_pcm16_bytes_per_channel};
+    AudioSamplerSettings sampler_defaults;
     bool valid{true};
     std::vector<AudioImportIssue> issues;
 };

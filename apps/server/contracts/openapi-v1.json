@@ -444,6 +444,93 @@
         ],
         "type": "object"
       },
+      "AudioSamplerSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "fineTuneCents": {
+            "maximum": 63,
+            "minimum": -63,
+            "type": "integer"
+          },
+          "keyHigh": {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "keyLow": {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loopLengthFrames": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loopMode": {
+            "enum": [
+              1,
+              4
+            ],
+            "type": "integer"
+          },
+          "loopSource": {
+            "enum": [
+              "DEFAULT",
+              "WAV_SMPL"
+            ],
+            "type": "string"
+          },
+          "loopStartFrame": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pitchSource": {
+            "enum": [
+              "DEFAULT",
+              "WAV_SMPL",
+              "WAV_INST"
+            ],
+            "type": "string"
+          },
+          "rangeSource": {
+            "enum": [
+              "DEFAULT",
+              "WAV_INST"
+            ],
+            "type": "string"
+          },
+          "rootKey": {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "velocityHigh": {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "velocityLow": {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rootKey",
+          "fineTuneCents",
+          "keyLow",
+          "keyHigh",
+          "velocityLow",
+          "velocityHigh",
+          "loopMode",
+          "loopStartFrame",
+          "loopLengthFrames",
+          "pitchSource",
+          "rangeSource",
+          "loopSource"
+        ],
+        "type": "object"
+      },
       "AudioSourceInfo": {
         "additionalProperties": false,
         "properties": {
@@ -508,6 +595,9 @@
           "sampleWidthConverted": {
             "type": "boolean"
           },
+          "samplerDefaults": {
+            "$ref": "#/components/schemas/AudioSamplerSettings"
+          },
           "sourceFormat": {
             "minLength": 1,
             "type": "string"
@@ -553,6 +643,7 @@
           "projectedOutputBytesTotal",
           "maximumOutputFrameCountPerChannel",
           "maximumOutputBytesPerChannel",
+          "samplerDefaults",
           "valid",
           "issues"
         ],
@@ -7696,6 +7787,20 @@
                         "quantized": false,
                         "resampled": false,
                         "sampleWidthConverted": false,
+                        "samplerDefaults": {
+                          "fineTuneCents": -63,
+                          "keyHigh": 0,
+                          "keyLow": 0,
+                          "loopLengthFrames": 0,
+                          "loopMode": 1,
+                          "loopSource": "DEFAULT",
+                          "loopStartFrame": 0,
+                          "pitchSource": "DEFAULT",
+                          "rangeSource": "DEFAULT",
+                          "rootKey": 0,
+                          "velocityHigh": 0,
+                          "velocityLow": 0
+                        },
                         "sourceFormat": "x",
                         "sourceSampleRate": 1,
                         "sourceSampleWidthBits": 8,
@@ -7725,6 +7830,20 @@
                         "quantized": false,
                         "resampled": false,
                         "sampleWidthConverted": false,
+                        "samplerDefaults": {
+                          "fineTuneCents": -63,
+                          "keyHigh": 0,
+                          "keyLow": 0,
+                          "loopLengthFrames": 0,
+                          "loopMode": 1,
+                          "loopSource": "DEFAULT",
+                          "loopStartFrame": 0,
+                          "pitchSource": "DEFAULT",
+                          "rangeSource": "DEFAULT",
+                          "rootKey": 0,
+                          "velocityHigh": 0,
+                          "velocityLow": 0
+                        },
                         "sourceFormat": "x",
                         "sourceSampleRate": 1,
                         "sourceSampleWidthBits": 8,

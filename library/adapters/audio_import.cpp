@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <ranges>
 
@@ -22,6 +23,19 @@ Error wave_data_too_large_error(std::uint64_t bytes_per_channel) {
                     "32 MiB per channel ({} bytes)",
                     static_cast<double>(bytes_per_channel) / bytes_per_mib, bytes_per_channel,
                     maximum_wave_data_pcm16_bytes_per_channel));
+}
+
+void attach_sampler_metadata(AudioSourceInfo &result, const RandomAccessReader &reader) {
+    auto metadata = audio_import_detail::inspect_wav_sampler_metadata(
+        reader, result.frame_count, result.source_sample_rate, result.output_sample_rate);
+    if (!metadata) {
+        result.issues.push_back(
+            {"wav_sampler_metadata_unreadable", "WAV sampler metadata could not be read and was ignored", false});
+        return;
+    }
+    result.sampler_defaults = std::move(metadata->settings);
+    result.issues.insert(result.issues.end(), std::make_move_iterator(metadata->issues.begin()),
+                         std::make_move_iterator(metadata->issues.end()));
 }
 
 } // namespace
@@ -109,9 +123,15 @@ Result<AudioSourceInfo> inspect_sampler_audio(const std::filesystem::path &path,
         .projected_output_bytes_per_channel = projected->bytes_per_channel,
         .projected_output_bytes_total = projected->total_bytes,
         .maximum_output_bytes_per_channel = maximum_wave_data_pcm16_bytes_per_channel,
+        .sampler_defaults = {},
         .valid = projected->valid,
         .issues = {},
     };
+    if (auto reader = FileReader::open(path); reader)
+        attach_sampler_metadata(result, **reader);
+    else
+        result.issues.push_back(
+            {"wav_sampler_metadata_unreadable", "WAV sampler metadata could not be read and was ignored", false});
     if (!projected->valid) {
         const auto error = wave_data_too_large_error(projected->bytes_per_channel);
         result.issues.push_back({"wave_data_channel_too_large", error.message, true});
@@ -150,9 +170,11 @@ Result<AudioSourceInfo> inspect_sampler_audio(const RandomAccessReader &reader,
         .projected_output_bytes_per_channel = projected->bytes_per_channel,
         .projected_output_bytes_total = projected->total_bytes,
         .maximum_output_bytes_per_channel = maximum_wave_data_pcm16_bytes_per_channel,
+        .sampler_defaults = {},
         .valid = projected->valid,
         .issues = {},
     };
+    attach_sampler_metadata(result, reader);
     if (!projected->valid) {
         const auto error = wave_data_too_large_error(projected->bytes_per_channel);
         result.issues.push_back({"wave_data_channel_too_large", error.message, true});

@@ -11,6 +11,7 @@
     import CompanionDiskDialog from '../../lib/components/CompanionDiskDialog.svelte';
     import CreateHardDiskImageDialog from '../../lib/components/CreateHardDiskImageDialog.svelte';
     import Icon from '../../lib/components/Icon.svelte';
+    import ImportUnavailableDialog from '../../lib/components/ImportUnavailableDialog.svelte';
     import ObjectDeletionDialog from '../../lib/components/ObjectDeletionDialog.svelte';
     import ObjectRenameDialog from '../../lib/components/ObjectRenameDialog.svelte';
     import PackageExportDialog from '../../lib/components/PackageExportDialog.svelte';
@@ -289,6 +290,13 @@
             : undefined}
         oncommit={(items) => sequenceImport.commit(items)}
         oncancel={() => (sequenceImport.request = null)}
+    />
+{/if}
+{#if mediaDrop.notice}
+    <ImportUnavailableDialog
+        title={mediaDrop.notice.title}
+        message={mediaDrop.notice.message}
+        onclose={() => mediaDrop.closeNotice()}
     />
 {/if}
 {#if mediaDrop.dragActive && !audioImport.request && !sequenceImport.request}

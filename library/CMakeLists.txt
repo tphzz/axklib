@@ -189,6 +189,7 @@ add_library(
   adapters/audio_import.cpp
   adapters/audio_resample_soxr.cpp
   adapters/pcm16_quantizer.cpp
+  adapters/wav_sampler_metadata.cpp
   src/alteration.cpp
   src/alteration_manifest.cpp
   src/alteration_manifest_json.cpp

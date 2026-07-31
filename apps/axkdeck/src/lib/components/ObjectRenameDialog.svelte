@@ -11,7 +11,6 @@
     }
 
     let { target, busy, error, oncancel, onsubmit }: Props = $props();
-    let input: HTMLInputElement;
     let value = $state('');
     let initialized = false;
 
@@ -37,10 +36,6 @@
         if (initialized) return;
         value = target.name;
         initialized = true;
-        queueMicrotask(() => {
-            input?.focus();
-            input?.select();
-        });
     });
 
     function submit(event: SubmitEvent): void {
@@ -70,8 +65,8 @@
                 <label>
                     <span>{subject} name</span>
                     <input
-                        bind:this={input}
                         bind:value
+                        data-dialog-initial-focus="select"
                         disabled={busy}
                         maxlength={maximumLength}
                         autocomplete="off"

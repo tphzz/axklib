@@ -74,6 +74,7 @@
                 <span>Server URL</span>
                 <input
                     aria-label="Server URL"
+                    data-dialog-initial-focus="select"
                     type="url"
                     bind:value={baseUrl}
                     placeholder="https://sampler.example.net"

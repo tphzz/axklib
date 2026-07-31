@@ -56,10 +56,20 @@ Result<void> require_program_name(std::string_view value, std::string_view field
 Result<void> validate_sample_parameters(const SampleSpec &sample) {
     if (auto valid = require_object_name(sample.name, "sample.name"); !valid)
         return valid;
-    if (sample.root_key > 127U || sample.key_low > 127U || sample.key_high > 127U || sample.level > 127U)
+    if (sample.root_key > 127U || sample.key_low > 127U || sample.key_high > 127U || sample.level > 127U ||
+        sample.velocity_low > 127U || sample.velocity_high > 127U || sample.fine_tune_cents < -63 ||
+        sample.fine_tune_cents > 63)
         return std::unexpected{manifest_error("sample MIDI values must be between 0 and 127")};
-    if (sample.key_high < sample.key_low)
-        return std::unexpected{manifest_error("sample.key_high must not be below key_low")};
+    if (sample.key_high < sample.key_low || sample.velocity_high < sample.velocity_low)
+        return std::unexpected{manifest_error("sample key and velocity ranges must be ordered")};
+    if ((sample.loop_mode == AudioSamplerLoopMode::forward_loop && sample.loop_length_frames == 0U) ||
+        (sample.loop_mode == AudioSamplerLoopMode::forward_one_shot &&
+         (sample.loop_start_frame != 0U || sample.loop_length_frames != 0U)) ||
+        (sample.loop_mode != AudioSamplerLoopMode::forward_loop &&
+         sample.loop_mode != AudioSamplerLoopMode::forward_one_shot))
+        return std::unexpected{manifest_error("sample loop settings are invalid")};
+    if (sample.loop_start_frame > 65'535U)
+        return std::unexpected{manifest_error("sample loop start exceeds the proven cache range")};
     return {};
 }
 
@@ -133,7 +143,13 @@ Result<void> validate_volume(const VolumeSpec &volume) {
             return std::unexpected{manifest_error("volume has duplicate Wave Data names")};
         if (waveform.path.empty())
             return std::unexpected{manifest_error("waveform.path must be a non-empty path")};
-        if (waveform.root_key > 127U || (waveform.target_sample_rate && *waveform.target_sample_rate == 0U))
+        if (waveform.root_key > 127U || waveform.fine_tune_cents < -63 || waveform.fine_tune_cents > 63 ||
+            (waveform.target_sample_rate && *waveform.target_sample_rate == 0U) ||
+            (waveform.loop_mode == AudioSamplerLoopMode::forward_loop && waveform.loop_length_frames == 0U) ||
+            (waveform.loop_mode == AudioSamplerLoopMode::forward_one_shot &&
+             (waveform.loop_start_frame != 0U || waveform.loop_length_frames != 0U)) ||
+            (waveform.loop_mode != AudioSamplerLoopMode::forward_loop &&
+             waveform.loop_mode != AudioSamplerLoopMode::forward_one_shot))
             return std::unexpected{manifest_error("waveform parameters are out of range")};
     }
 
@@ -254,6 +270,14 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     }
                     if (waveform.root_key > 127U)
                         return std::unexpected{manifest_error("audio.root_key must be between 0 and 127")};
+                    if (waveform.fine_tune_cents < -63 || waveform.fine_tune_cents > 63 ||
+                        (waveform.loop_mode == AudioSamplerLoopMode::forward_loop &&
+                         waveform.loop_length_frames == 0U) ||
+                        (waveform.loop_mode == AudioSamplerLoopMode::forward_one_shot &&
+                         (waveform.loop_start_frame != 0U || waveform.loop_length_frames != 0U)) ||
+                        (waveform.loop_mode != AudioSamplerLoopMode::forward_loop &&
+                         waveform.loop_mode != AudioSamplerLoopMode::forward_one_shot))
+                        return std::unexpected{manifest_error("audio sampler settings are invalid")};
                     if (waveform.target_sample_rate && *waveform.target_sample_rate == 0U)
                         return std::unexpected{manifest_error("audio.target_sample_rate is out of range")};
                     return {};
