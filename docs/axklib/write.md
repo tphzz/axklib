@@ -444,12 +444,13 @@ materialize the selected payload set in memory. FAT12 output is bounded by the
 fixed floppy capacity and materializes at most one floppy image during final
 serialization.
 
-The current generated ISO writer has a hardware-promoted one-volume profile.
-Until a multi-volume generated ISO has separate sampler validation, converting
-a partition containing more than one volume is reported as a blocking profile
-issue. Generated floppy output is host-reopened and payload-compared, but fresh
-FAT12 authoring still retains the hardware-validation qualification documented
-above.
+Generated ISO partition conversion has hardware-promoted one-volume and
+multi-volume profiles. A four-volume conversion was enumerated, loaded, and
+auditioned completely on physical A4000 hardware. Multi-volume output
+remains subject to the same exact-placement, Known-relationship, directory,
+path-table, payload, and 700 MB capacity checks reported by inspection.
+Generated floppy output is host-reopened and payload-compared, but fresh FAT12
+authoring still retains the hardware-validation qualification documented above.
 
 ## Transfer Selected Saved Objects
 

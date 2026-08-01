@@ -29,11 +29,11 @@ class MockAudioBuffer {
 class MockAudioParam {
     value = 1;
     cancelScheduledValues = vi.fn();
-    setValueAtTime = vi.fn((value: number) => {
+    setValueAtTime = vi.fn((value: number, _startTime: number) => {
         this.value = value;
         return this;
     });
-    linearRampToValueAtTime = vi.fn((value: number) => {
+    linearRampToValueAtTime = vi.fn((value: number, _endTime: number) => {
         this.value = value;
         return this;
     });
@@ -414,6 +414,41 @@ describe('AuditionController', () => {
 
         expect(MockAudioBufferSourceNode.instances[0]).toMatchObject({ loop: true, loopStart: 0.1, loopEnd: 0.3 });
         expect(MockAudioBufferSourceNode.instances[1]?.start).toHaveBeenCalledWith(1.01, 0.15);
+        await controller.dispose();
+    });
+
+    it('repeats a short forward one-shot for 500 ms with bounded fades', async () => {
+        installAudio();
+        const frameCount = 260;
+        const sampleRate = 44_100;
+        const transport = transportFor(
+            descriptor({ frameCount, sampleRate, wavSizeBytes: 44 + frameCount * 2, loopMode: 0 }),
+        );
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(frameCount, 1, sampleRate)];
+        const diagnostics: Record<string, unknown>[] = [];
+        const controller = new AuditionController(
+            transport,
+            () => undefined,
+            (event) => diagnostics.push(event),
+            () => true,
+        );
+
+        await controller.play(1, 'SMPL-1');
+
+        const source = MockAudioBufferSourceNode.instances[0]!;
+        expect(source).toMatchObject({ loop: true, loopStart: 0, loopEnd: frameCount / sampleRate });
+        expect(source.start).toHaveBeenCalledWith(1.01, 0);
+        expect(source.stop).toHaveBeenCalledWith(1.51);
+        const gain = MockAudioContext.instances[0]!.gains[0]!.gain;
+        expect(gain.setValueAtTime.mock.calls.at(-1)?.[0]).toBe(1);
+        expect(gain.setValueAtTime.mock.calls.at(-1)?.[1]).toBeCloseTo(1.505);
+        expect(gain.linearRampToValueAtTime).toHaveBeenCalledWith(0, 1.51);
+        expect(diagnostics.find((event) => event.event === 'playback_scheduled')).toMatchObject({
+            previewMode: 'short-one-shot-repeat',
+            naturalDurationSeconds: frameCount / sampleRate,
+            scheduledDurationSeconds: 0.5,
+            loop: true,
+        });
         await controller.dispose();
     });
 
@@ -850,6 +885,20 @@ describe('AuditionController', () => {
         expect(MockAudioContext.instances).toHaveLength(1);
         expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
         expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
+        await controller.dispose();
+    });
+
+    it('sizes speculative offline decoding for the complete clip', async () => {
+        installAudio();
+        const frameCount = 7_048;
+        const transport = transportFor(descriptor({ frameCount, wavSizeBytes: 44 + frameCount * 2 }));
+        const controller = new AuditionController(transport, () => undefined);
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(frameCount, 1, 48_000)];
+
+        await controller.prefetch(7, 'SMPL-1');
+
+        expect(MockOfflineAudioContext.instances).toHaveLength(1);
+        expect(MockOfflineAudioContext.instances[0]?.length).toBe(frameCount);
         await controller.dispose();
     });
 });

@@ -144,11 +144,6 @@ void validate_iso_layout(detail::PreparedMediaConversion &prepared) {
     if (volumes.size() > 998U) {
         add_issue(summary, "MEDIA_CONVERSION_ISO_VOLUME_CAPACITY", "CD-ROM output supports at most 998 source volumes");
     }
-    if (volumes.size() > 1U) {
-        add_issue(summary, "MEDIA_CONVERSION_PROFILE_REQUIRES_HARDWARE_VALIDATION",
-                  "Multi-volume partition CD-ROM output requires a successful sampler hardware roundtrip");
-    }
-
     std::size_t directory_count = 2U + volumes.size();
     std::vector<std::uint64_t> file_sizes;
     file_sizes.push_back((volumes.size() + 1U) * 32U);

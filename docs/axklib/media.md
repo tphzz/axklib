@@ -35,8 +35,9 @@ Multi-extent files are rejected. Joliet names, Rock Ridge system-use extensions,
 alternate descriptor trees, and in-place filesystem mutation are not
 interpreted. A hybrid image can still open through a valid primary ISO9660 tree,
 but names or metadata supplied only by those extensions are outside the API
-contract. `axklib create iso` separately creates the deterministic one-group,
-one-volume profile documented in [CD-ROM Images](cdrom.md).
+contract. `axklib create iso` separately creates a deterministic one-group,
+one-volume image. Partition conversion can place several source volumes in one
+generated group; both profiles are documented in [CD-ROM Images](cdrom.md).
 
 ## AXK object directory profile
 

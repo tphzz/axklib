@@ -14,6 +14,7 @@ import type {
     PlaybackDescriptor,
     PlaybackRun,
 } from './auditionTypes';
+import { planDirectPlayback } from './directPlaybackSchedule';
 
 export type {
     AuditionControllerOptions,
@@ -338,34 +339,38 @@ export class AuditionController {
         const source = context.createBufferSource();
         const gain = context.createGain();
         source.buffer = entry.buffer;
-        if (!run.oneShot && isForwardLoop(entry.descriptor)) {
-            source.loop = true;
-            source.loopStart = entry.descriptor.loopStartFrame / entry.descriptor.sampleRate;
-            source.loopEnd =
-                (entry.descriptor.loopStartFrame + entry.descriptor.loopLengthFrames) / entry.descriptor.sampleRate;
-        }
+        const schedule = planDirectPlayback(
+            entry.descriptor,
+            entry.buffer.duration,
+            run.oneShot ? 'forced-one-shot' : 'interactive',
+        );
+        source.loop = schedule.loop;
+        source.loopStart = schedule.loopStartSeconds;
+        source.loopEnd = schedule.loopEndSeconds;
         source.connect(gain);
         gain.connect(context.destination);
         const startTime = context.currentTime + startLeadSeconds;
+        const stopTime = schedule.stopAfterSeconds === null ? null : startTime + schedule.stopAfterSeconds;
         gain.gain.value = 0;
         gain.gain.setValueAtTime(0, context.currentTime);
         gain.gain.setValueAtTime(0, startTime);
         gain.gain.linearRampToValueAtTime(1, startTime + fadeSeconds);
-        const timelineDescriptor =
-            run.oneShot && isForwardLoop(entry.descriptor)
-                ? { ...entry.descriptor, loopMode: 0, loopStartFrame: 0, loopLengthFrames: 0 }
-                : entry.descriptor;
+        if (stopTime !== null) {
+            gain.gain.setValueAtTime(1, stopTime - fadeSeconds);
+            gain.gain.linearRampToValueAtTime(0, stopTime);
+        }
         const active: ActivePlayback = {
             entry,
             source,
             gain,
             startFrame: sourceFrame,
             startTime,
-            timelineDescriptor,
+            timelineDescriptor: schedule.timeline,
         };
         this.active = active;
         source.onended = () => void this.handleEnded(active, run);
         source.start(startTime, playbackOffsetSeconds(entry.descriptor, sourceFrame));
+        if (stopTime !== null) source.stop(stopTime);
         if (run.diagnosticsEnabled) {
             this.emit(run, 'audio_buffer_levels', {
                 ...bufferLevelSummary(entry.buffer),
@@ -380,6 +385,9 @@ export class AuditionController {
             sourceFrame,
             sourceOffsetSeconds: playbackOffsetSeconds(entry.descriptor, sourceFrame),
             loop: source.loop,
+            previewMode: schedule.kind,
+            naturalDurationSeconds: entry.buffer.duration,
+            scheduledDurationSeconds: schedule.stopAfterSeconds ?? (schedule.loop ? null : entry.buffer.duration),
         });
         this.update({ objectId: entry.objectId, status: 'playing', playheadFrame: sourceFrame });
         this.scheduleCursor(active);

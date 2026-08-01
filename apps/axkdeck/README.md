@@ -392,7 +392,10 @@ one complete WAV before playback. The browser decodes that WAV off the audio
 render path, keeps a bounded decoded-audio cache, and schedules a native Web
 Audio buffer source. Playback never depends on network delivery from the
 real-time audio callback. Forward loops use native Web Audio loop points;
-reverse modes use one reversed decoded buffer.
+reverse modes use one reversed decoded buffer. Interactive playback repeats a
+complete forward one-shot at or below 50 ms for 500 ms with bounded fades so
+single-cycle and similarly short audio remains audible. This preview-only
+schedule does not change the Sample or Wave Data loop metadata.
 
 The versioned operation and DTO boundary is documented in
 [`docs/service-boundary.md`](docs/service-boundary.md). The Crow OpenAPI contract

@@ -251,9 +251,9 @@ export class AuditionAssetStore {
                 ...bundle.clips.flatMap((clip) => clip.lanes.map((lane) => lane.sampleRate)),
             );
             const maximumChannels = Math.max(...bundle.clips.map((clip) => clip.lanes.length));
-            const decoder = context ?? new OfflineAudioContext(maximumChannels, 1, maximumSourceRate);
+            const decoderSampleRate = context?.sampleRate ?? maximumSourceRate;
             const estimatedBytes = bundle.clips.reduce(
-                (total, clip) => total + this.estimatedClipBytes(clip, decoder.sampleRate),
+                (total, clip) => total + this.estimatedClipBytes(clip, decoderSampleRate),
                 0,
             );
             const retainedDecodedBytes = workingSetPolicy?.retainedDecodedBytes ?? 0;
@@ -266,6 +266,15 @@ export class AuditionAssetStore {
                 if (run) this.emit(run, 'audio_prefetch_skipped', { estimatedDecodedBytes: estimatedBytes });
                 return new Map();
             }
+            const decoderFrameCount = Math.max(
+                ...bundle.clips.flatMap((clip) =>
+                    clip.lanes.map((lane) => this.resampledFrameCount(lane, decoderSampleRate)),
+                ),
+            );
+            if (!Number.isSafeInteger(decoderFrameCount) || decoderFrameCount <= 0 || decoderFrameCount > 0xffffffff) {
+                throw new Error('Audio requires an unsupported decoded frame count');
+            }
+            const decoder = context ?? new OfflineAudioContext(maximumChannels, decoderFrameCount, decoderSampleRate);
 
             const fetchStarted = monotonicNow();
             const content = await this.transport.readAuditionContent(
@@ -289,6 +298,15 @@ export class AuditionAssetStore {
                         const start = lane.contentOffsetBytes;
                         const end = start + lane.wavSizeBytes;
                         const decoded = await decoder.decodeAudioData(content.slice(start, end));
+                        const minimumFrames = Math.max(
+                            1,
+                            Math.floor((lane.frameCount * decoder.sampleRate) / lane.sampleRate),
+                        );
+                        if (speculative && decoded.length < minimumFrames) {
+                            throw new Error(
+                                `Decoded ${lane.role} Wave Data is truncated (${decoded.length} of ${minimumFrames} frames)`,
+                            );
+                        }
                         if (decoded.numberOfChannels !== 1) {
                             throw new Error(
                                 `Decoded ${lane.role} Wave Data has ${decoded.numberOfChannels} channels; expected 1`,
@@ -409,9 +427,11 @@ export class AuditionAssetStore {
     }
 
     private estimatedClipBytes(clip: AuditionClipDescriptor, outputSampleRate: number): number {
-        const outputFrames = Math.max(
-            ...clip.lanes.map((lane) => Math.ceil((lane.frameCount * outputSampleRate) / lane.sampleRate)),
-        );
+        const outputFrames = Math.max(...clip.lanes.map((lane) => this.resampledFrameCount(lane, outputSampleRate)));
         return outputFrames * clip.lanes.length * Float32Array.BYTES_PER_ELEMENT;
+    }
+
+    private resampledFrameCount(lane: AuditionLaneDescriptor, outputSampleRate: number): number {
+        return Math.ceil((lane.frameCount * outputSampleRate) / lane.sampleRate);
     }
 }

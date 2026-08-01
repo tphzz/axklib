@@ -132,10 +132,11 @@ TEST(MediaConversion, WritesOnePartitionAsIsoAndOneVolumeAsFloppyFromRetainedRea
     std::filesystem::remove_all(root, error);
 }
 
-TEST(MediaConversion, ReportsCapacityAndUnverifiedProfileBeforeWriting) {
+TEST(MediaConversion, WritesMultipleIsoVolumesAndReportsFloppyCapacityBeforeWriting) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-media-conversion-blockers";
     const auto audio_path = root / "source.wav";
     const auto source_path = root / "source.hds";
+    const auto iso_path = root / "partition.iso";
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
@@ -145,10 +146,10 @@ TEST(MediaConversion, ReportsCapacityAndUnverifiedProfileBeforeWriting) {
     waveform.frame_count = 800'000U;
     waveform.pcm.resize(static_cast<std::size_t>(waveform.frame_count) * 2U);
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
-    axk::VolumeSpec empty;
-    empty.name = "Empty Volume";
     const axk::HdsBuildManifest source_manifest{
-        "1.0", 16U * 1024U * 1024U, {{"PARTITION ONE", {source_volume(audio_path), std::move(empty)}}}};
+        "1.0",
+        16U * 1024U * 1024U,
+        {{"PARTITION ONE", {source_volume(audio_path), source_volume(audio_path, "Second Volume")}}}};
     const auto source_written = axk::write_hds_image(source_manifest, source_path);
     ASSERT_TRUE(source_written) << source_written.error().message;
     const auto source_media = axk::open_media(source_path);
@@ -159,11 +160,27 @@ TEST(MediaConversion, ReportsCapacityAndUnverifiedProfileBeforeWriting) {
     iso_request.scope = axk::MediaConversionScope::partition;
     const auto iso_plan = axk::plan_media_conversion(open_reader(source_path), source_path, iso_request);
     ASSERT_TRUE(iso_plan) << iso_plan.error().message;
-    EXPECT_FALSE(iso_plan->can_export);
+    EXPECT_TRUE(iso_plan->can_export);
     EXPECT_EQ(iso_plan->volumes.size(), 2U);
-    EXPECT_NE(std::ranges::find(iso_plan->issues, std::string{"MEDIA_CONVERSION_PROFILE_REQUIRES_HARDWARE_VALIDATION"},
-                                &axk::MediaConversionIssue::code),
-              iso_plan->issues.end());
+    EXPECT_TRUE(iso_plan->issues.empty());
+
+    const auto iso_written = axk::write_media_conversion(open_reader(source_path), source_path, iso_request, iso_path);
+    ASSERT_TRUE(iso_written) << iso_written.error().message;
+    const auto iso_media = axk::open_media(iso_path);
+    ASSERT_TRUE(iso_media) << iso_media.error().message;
+    EXPECT_EQ(payloads(*iso_media), payloads(*source_media));
+    const auto iso_catalog = axk::build_object_catalog(*iso_media);
+    ASSERT_TRUE(iso_catalog) << iso_catalog.error().message;
+    EXPECT_EQ(std::ranges::count_if(iso_catalog->objects,
+                                    [](const auto &object) {
+                                        return object.placement && object.placement->volume_name == "Source Volume";
+                                    }),
+              5U);
+    EXPECT_EQ(std::ranges::count_if(iso_catalog->objects,
+                                    [](const auto &object) {
+                                        return object.placement && object.placement->volume_name == "Second Volume";
+                                    }),
+              5U);
 
     axk::MediaConversionRequest floppy_request;
     floppy_request.format = axk::MediaImageFormat::fat12_floppy;
