@@ -20,7 +20,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/application_op
                                    src/image_session_access.cpp src/image_session_audition.cpp
                                    src/image_session_inspection.cpp src/image_session_open.cpp
                                    src/image_session_support.cpp src/image_sessions.cpp
-                                   src/job_request_resources.cpp src/jobs.cpp
+                                   src/job_request_resources.cpp src/jobs.cpp src/midi_operations.cpp
                                    src/jobs_support.cpp
                                    src/operation_registry.cpp src/package_filename.cpp src/package_operations.cpp
                                    src/package_operations_support.cpp src/session_package_operations.cpp
@@ -72,6 +72,7 @@ if(BUILD_TESTING)
                                        tests/download_archives_test.cpp
                                        tests/extraction_operations_test.cpp tests/file_operations_test.cpp
                                        tests/filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp
+                                       tests/midi_operations_test.cpp
                                        tests/operation_registry_test.cpp tests/package_operations_test.cpp
                                        tests/path_reservations_test.cpp
                                        tests/secure_random_test.cpp tests/uploads_test.cpp

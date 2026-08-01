@@ -5,6 +5,7 @@
 #include "axklib/application/directory_archive_operations.hpp"
 #include "axklib/application/extraction_operations.hpp"
 #include "axklib/application/file_operations.hpp"
+#include "axklib/application/midi_operations.hpp"
 #include "axklib/application/package_operations.hpp"
 #include "axklib/application/session_audio_export_operations.hpp"
 #include "axklib/application/session_sequence_operations.hpp"
@@ -127,7 +128,7 @@ Result<void> bind_standard_path_accesses(axk::app::OperationRegistry &registry) 
         !bound) {
         return bound;
     }
-    for (const auto id : {"package.inspect", "package.verify", "audio.inspect"}) {
+    for (const auto id : {"package.inspect", "package.verify", "audio.inspect", "midi.inspect"}) {
         if (auto bound = bind(id,
                               [](const Json &input, const OperationContext &) -> Result<std::vector<PathAccess>> {
                                   std::vector<PathAccess> result;
@@ -186,6 +187,8 @@ axk::app::Result<void> axk::app::bind_application_operations(OperationRegistry &
     if (auto bound = bind_file_operations(registry, sandbox); !bound)
         return bound;
     if (auto bound = bind_audio_operations(registry, sandbox, uploads); !bound)
+        return bound;
+    if (auto bound = bind_midi_operations(registry, sandbox, uploads); !bound)
         return bound;
     if (auto bound = bind_validation_operations(registry, sandbox); !bound)
         return bound;

@@ -223,12 +223,21 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
             }
             Json sequence;
             if (item.sequence) {
+                Json tempo_events = Json::array();
+                for (const auto &event : item.sequence->tempo_events) {
+                    tempo_events.push_back(
+                        {{"tick", event.tick}, {"microsecondsPerQuarterNote", event.microseconds_per_quarter_note}});
+                }
                 sequence = {{"formatVersion", item.sequence->format_version},
                             {"ticksPerQuarterNote", item.sequence->ticks_per_quarter_note},
                             {"firstTick", item.sequence->first_tick},
                             {"endTick", item.sequence->end_tick},
                             {"eventCount", item.sequence->event_count},
-                            {"tempoBpm", item.sequence->tempo_bpm ? Json(*item.sequence->tempo_bpm) : Json{}}};
+                            {"headerTempoBpm",
+                             item.sequence->header_tempo_bpm ? Json(*item.sequence->header_tempo_bpm) : Json{}},
+                            {"effectiveInitialTempoMicrosecondsPerQuarterNote",
+                             item.sequence->effective_initial_tempo_microseconds_per_quarter_note},
+                            {"tempoEvents", std::move(tempo_events)}};
             }
             return Json{{"id", item.id},
                         {"type", item.type},

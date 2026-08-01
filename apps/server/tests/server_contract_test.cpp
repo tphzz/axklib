@@ -118,6 +118,21 @@ TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
               nlohmann::json::array({"CONTAINED", "REFERENCE"}));
 }
 
+TEST(ServerContract, SequenceMetadataSeparatesHeaderAndTimelineTempo) {
+    const auto document = nlohmann::json::parse(axk::server::embedded_openapi());
+    const auto &schemas = document.at("components").at("schemas");
+    const auto &sequence = schemas.at("SequenceMetadata");
+    EXPECT_TRUE(std::ranges::contains(sequence.at("required"), "headerTempoBpm"));
+    EXPECT_TRUE(std::ranges::contains(sequence.at("required"), "effectiveInitialTempoMicrosecondsPerQuarterNote"));
+    EXPECT_TRUE(std::ranges::contains(sequence.at("required"), "tempoEvents"));
+    EXPECT_FALSE(sequence.at("properties").contains("tempoBpm"));
+    EXPECT_EQ(sequence.at("properties").at("tempoEvents").at("items").at("$ref"),
+              "#/components/schemas/SequenceTempoEvent");
+    const auto &tempo = schemas.at("SequenceTempoEvent");
+    EXPECT_EQ(tempo.at("properties").at("microsecondsPerQuarterNote").at("minimum"), 200'000U);
+    EXPECT_EQ(tempo.at("properties").at("microsecondsPerQuarterNote").at("maximum"), 2'000'000U);
+}
+
 TEST(ServerContract, DirectoryListingsSeparateMediaSourceInspection) {
     const auto document = nlohmann::json::parse(axk::server::embedded_openapi());
     const auto &schemas = document.at("components").at("schemas");
@@ -155,7 +170,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 41U);
+    EXPECT_EQ(entries.size(), 42U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }

@@ -9,6 +9,7 @@
 
 #include "axklib/io.hpp"
 #include "axklib/publication.hpp"
+#include "axklib/sequence.hpp"
 #include "axklib/types.hpp"
 #include "axklib/writer.hpp"
 
@@ -122,6 +123,7 @@ struct RenameProgramOperation {
 struct SequenceSpec {
     std::string name;
     std::filesystem::path midi_path;
+    SequenceSystemExclusivePolicy system_exclusive_policy;
 };
 
 struct DeleteSequenceOperation {

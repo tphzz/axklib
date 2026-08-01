@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { formatSequenceTempo, laterTempoChangeCount } from '../sequenceTempo';
     import { formatStoredSize } from '../formatBytes';
     import type { InspectorSelection } from '../types';
     import SampleWaveformStack from './SampleWaveformStack.svelte';
@@ -79,9 +80,27 @@
                 <div>
                     <dt>Initial tempo</dt>
                     <dd>
-                        {metadata?.initialBeatsPerMinute === undefined
+                        {metadata === undefined
                             ? 'Unknown'
-                            : `${metadata.initialBeatsPerMinute.toLocaleString()} BPM`}
+                            : formatSequenceTempo(metadata.effectiveInitialTempoMicrosecondsPerQuarterNote)}
+                    </dd>
+                </div>
+                {#if metadata?.headerTempoBpm !== undefined}
+                    <div>
+                        <dt>Sampler header tempo</dt>
+                        <dd>{metadata.headerTempoBpm.toLocaleString()} BPM</dd>
+                    </div>
+                {/if}
+                <div>
+                    <dt>Tempo changes</dt>
+                    <dd>
+                        {#if metadata}
+                            {@const count = laterTempoChangeCount(metadata.tempoEvents)}
+                            {count.toLocaleString()}
+                            {count === 1 ? 'change' : 'changes'}
+                        {:else}
+                            Unknown
+                        {/if}
                     </dd>
                 </div>
                 <div>

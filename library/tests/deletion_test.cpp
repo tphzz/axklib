@@ -140,7 +140,9 @@ TEST(ObjectDeletion, PlansStandaloneSequenceDeletion) {
     ASSERT_TRUE(axk::write_hds_image(deletion_manifest(audio), source));
     const axk::AlterationManifest manifest{
         "1.0",
-        {{"insert-sequence", axk::InsertSequenceOperation{axk::PartitionIndex{0U}, "Deletion", {"Sequence", midi}}}},
+        {{"insert-sequence",
+          axk::InsertSequenceOperation{
+              axk::PartitionIndex{0U}, "Deletion", {"Sequence", midi, axk::SequenceSystemExclusivePolicy::reject}}}},
     };
     ASSERT_TRUE(axk::alter_hds(source, manifest, inserted));
     auto container = axk::open_image(inserted);

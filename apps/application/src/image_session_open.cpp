@@ -200,12 +200,21 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
                                  .loop_length_frames = waveform->loop_length_frames.value};
         }
         if (const auto *sequence = std::get_if<axk::CurrentSequence>(&object.object.payload)) {
+            std::vector<SequenceMetadata::TempoEvent> tempo_events;
+            tempo_events.reserve(sequence->tempo_events.size());
+            for (const auto &event : sequence->tempo_events) {
+                tempo_events.push_back(
+                    {.tick = event.tick, .microseconds_per_quarter_note = event.microseconds_per_quarter_note});
+            }
             item.sequence = SequenceMetadata{.format_version = sequence->format_version,
                                              .ticks_per_quarter_note = sequence->ticks_per_quarter_note,
                                              .first_tick = sequence->first_tick,
                                              .end_tick = sequence->end_tick,
                                              .event_count = sequence->event_count,
-                                             .tempo_bpm = sequence->tempo_bpm};
+                                             .header_tempo_bpm = sequence->header_tempo_bpm,
+                                             .effective_initial_tempo_microseconds_per_quarter_note =
+                                                 sequence->effective_initial_tempo_microseconds_per_quarter_note,
+                                             .tempo_events = std::move(tempo_events)};
         }
         session->object_indices_by_id[item.id] = session->objects.size();
         session->object_indices_by_type[item.type].push_back(session->objects.size());

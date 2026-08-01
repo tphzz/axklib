@@ -108,7 +108,10 @@ export function mapObject(item: ApiObjectItem): SamplerObject {
                   firstTick: item.sequence.firstTick,
                   endTick: item.sequence.endTick,
                   eventCount: item.sequence.eventCount,
-                  initialBeatsPerMinute: item.sequence.tempoBpm ?? undefined,
+                  headerTempoBpm: item.sequence.headerTempoBpm ?? undefined,
+                  effectiveInitialTempoMicrosecondsPerQuarterNote:
+                      item.sequence.effectiveInitialTempoMicrosecondsPerQuarterNote,
+                  tempoEvents: item.sequence.tempoEvents,
               }
             : undefined,
     };

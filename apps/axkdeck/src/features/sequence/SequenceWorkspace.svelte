@@ -7,6 +7,7 @@
         type PackageExportSelectionState,
     } from '../../lib/objectSelection';
     import { compareNamedItems } from '../../lib/naturalSort';
+    import { formatSequenceTempo } from '../../lib/sequenceTempo';
     import type { ObjectRenameTarget, PackageExportObject, SequenceItem } from '../../lib/types';
     import CollectionToolbar from '../../lib/components/CollectionToolbar.svelte';
     import ObjectContextMenu from '../../lib/components/ObjectContextMenu.svelte';
@@ -172,8 +173,7 @@
     function metadata(item: SequenceItem): string {
         const sequence = item.object.sequence;
         if (!sequence) return 'Sequence metadata unavailable';
-        const tempo =
-            sequence.initialBeatsPerMinute === undefined ? '' : ` · ${Math.round(sequence.initialBeatsPerMinute)} BPM`;
+        const tempo = ` · ${formatSequenceTempo(sequence.effectiveInitialTempoMicrosecondsPerQuarterNote)}`;
         return `${sequence.eventCount.toLocaleString()} events · ${sequence.ticksPerQuarterNote} PPQN${tempo}`;
     }
 

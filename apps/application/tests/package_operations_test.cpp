@@ -60,7 +60,7 @@ void write_sequence_object(const std::filesystem::path &path, std::string_view n
         std::byte{60},  std::byte{100},  std::byte{96},   std::byte{0x80}, std::byte{60},  std::byte{0},
         std::byte{0},   std::byte{0xff}, std::byte{0x2f}, std::byte{0},
     };
-    const auto sequence = axk::smf0_to_current_sequence(smf, name);
+    const auto sequence = axk::smf0_to_current_sequence(smf, name, axk::SequenceSystemExclusivePolicy::reject);
     ASSERT_TRUE(sequence) << sequence.error().message;
     std::ofstream output{path, std::ios::binary};
     ASSERT_TRUE(output);
@@ -569,6 +569,9 @@ TEST_F(PackageOperationsTest, SessionExportsSequencesAsMidiToWorkspaceOrRetained
     ASSERT_TRUE(sequence->sequence);
     EXPECT_EQ(sequence->sequence->ticks_per_quarter_note, 96U);
     EXPECT_GT(sequence->sequence->event_count, 0U);
+    EXPECT_EQ(sequence->sequence->header_tempo_bpm, 120U);
+    EXPECT_EQ(sequence->sequence->effective_initial_tempo_microseconds_per_quarter_note, 500'000U);
+    EXPECT_TRUE(sequence->sequence->tempo_events.empty());
 
     const nlohmann::json base{
         {"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"objectIds", {sequence->id}}};
@@ -583,11 +586,15 @@ TEST_F(PackageOperationsTest, SessionExportsSequencesAsMidiToWorkspaceOrRetained
     EXPECT_EQ(workspace->at("sequenceCount"), 1U);
     const auto midi_path = root_ / "midi-workspace" / "Sequence.mid";
     ASSERT_TRUE(std::filesystem::is_regular_file(midi_path));
-    const auto encoded = axk::smf0_to_current_sequence(read_bytes(midi_path), "Roundtrip");
+    const auto encoded =
+        axk::smf0_to_current_sequence(read_bytes(midi_path), "Roundtrip", axk::SequenceSystemExclusivePolicy::reject);
     ASSERT_TRUE(encoded) << encoded.error().message;
     const auto decoded = axk::decode_current_sequence(*encoded);
     ASSERT_TRUE(decoded) << decoded.error().message;
-    EXPECT_EQ(decoded->event_count, sequence->sequence->event_count);
+    EXPECT_EQ(decoded->event_count, sequence->sequence->event_count + 1U);
+    ASSERT_EQ(decoded->tempo_events.size(), 1U);
+    EXPECT_EQ(decoded->tempo_events.front().tick, 0U);
+    EXPECT_EQ(decoded->tempo_events.front().microseconds_per_quarter_note, 500'000U);
 
     auto download_request = base;
     download_request["destination"] = {{"kind", "DOWNLOAD"}, {"directoryName", "Local MIDI"}};

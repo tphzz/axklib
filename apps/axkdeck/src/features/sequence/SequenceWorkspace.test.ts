@@ -26,7 +26,12 @@ function sequence(name: string, eventCount: number): SequenceItem {
             firstTick: 0,
             endTick: 384,
             eventCount,
-            initialBeatsPerMinute: 120,
+            headerTempoBpm: 130,
+            effectiveInitialTempoMicrosecondsPerQuarterNote: 460_122,
+            tempoEvents: [
+                { tick: 0, microsecondsPerQuarterNote: 460_122 },
+                { tick: 192, microsecondsPerQuarterNote: 400_000 },
+            ],
         },
     };
     return { id: object.key, objectId: object.key, name, object };
@@ -53,7 +58,7 @@ describe('SequenceWorkspace', () => {
             expect.stringContaining('Song 2'),
             expect.stringContaining('Song 10'),
         ]);
-        expect(screen.getByText('12 events · 96 PPQN · 120 BPM')).toBeTruthy();
+        expect(screen.getByText('12 events · 96 PPQN · 130.4 BPM')).toBeTruthy();
     });
 
     it('offers package, MIDI, rename, and delete actions for one selected Sequence', async () => {

@@ -110,12 +110,19 @@ struct WaveformMetadata {
 };
 
 struct SequenceMetadata {
+    struct TempoEvent {
+        std::uint32_t tick{};
+        std::uint32_t microseconds_per_quarter_note{};
+    };
+
     std::uint16_t format_version{};
     std::uint16_t ticks_per_quarter_note{};
     std::uint32_t first_tick{};
     std::uint32_t end_tick{};
     std::uint64_t event_count{};
-    std::optional<std::uint16_t> tempo_bpm;
+    std::optional<std::uint16_t> header_tempo_bpm;
+    std::uint32_t effective_initial_tempo_microseconds_per_quarter_note{};
+    std::vector<TempoEvent> tempo_events;
 };
 
 struct ImageObjectItem {

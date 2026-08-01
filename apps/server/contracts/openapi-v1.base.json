@@ -1027,17 +1027,28 @@
           "loopLengthFrames": {"type": "integer", "minimum": 0, "maximum": 4294967295}
         }
       },
+      "SequenceTempoEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tick", "microsecondsPerQuarterNote"],
+        "properties": {
+          "tick": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "microsecondsPerQuarterNote": {"type": "integer", "minimum": 200000, "maximum": 2000000}
+        }
+      },
       "SequenceMetadata": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["formatVersion", "ticksPerQuarterNote", "firstTick", "endTick", "eventCount", "tempoBpm"],
+        "required": ["formatVersion", "ticksPerQuarterNote", "firstTick", "endTick", "eventCount", "headerTempoBpm", "effectiveInitialTempoMicrosecondsPerQuarterNote", "tempoEvents"],
         "properties": {
           "formatVersion": {"type": "integer", "minimum": 0, "maximum": 65535},
           "ticksPerQuarterNote": {"type": "integer", "minimum": 1, "maximum": 65535},
           "firstTick": {"type": "integer", "minimum": 0, "maximum": 4294967295},
           "endTick": {"type": "integer", "minimum": 0, "maximum": 4294967295},
           "eventCount": {"type": "integer", "minimum": 0},
-          "tempoBpm": {"type": ["integer", "null"], "minimum": 1, "maximum": 65535}
+          "headerTempoBpm": {"type": ["integer", "null"], "minimum": 30, "maximum": 300},
+          "effectiveInitialTempoMicrosecondsPerQuarterNote": {"type": "integer", "minimum": 200000, "maximum": 2000000},
+          "tempoEvents": {"type": "array", "items": {"$ref": "#/components/schemas/SequenceTempoEvent"}}
         }
       },
       "ImageObjectItem": {
@@ -1336,6 +1347,42 @@
         "properties": {
           "source": {"$ref": "#/components/schemas/InputRef"},
           "targetSampleRate": {"type": "integer", "minimum": 1}
+        }
+      },
+      "MidiInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source"],
+        "properties": {
+          "source": {"$ref": "#/components/schemas/InputRef"}
+        }
+      },
+      "MidiControllerCount": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["controller", "eventCount"],
+        "properties": {
+          "controller": {"type": "integer", "minimum": 0, "maximum": 127},
+          "eventCount": {"type": "integer", "minimum": 1}
+        }
+      },
+      "MidiInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["format", "trackCount", "ticksPerQuarterNote", "endTick", "eventCount", "channelEventCount", "metaEventCount", "systemExclusiveEventCount", "systemExclusiveDataBytes", "controllers", "systemExclusiveManufacturerIds", "systemExclusivePreservationSupported"],
+        "properties": {
+          "format": {"type": "integer", "enum": [0]},
+          "trackCount": {"type": "integer", "enum": [1]},
+          "ticksPerQuarterNote": {"type": "integer", "minimum": 1, "maximum": 32767},
+          "endTick": {"type": "integer", "minimum": 0},
+          "eventCount": {"type": "integer", "minimum": 1},
+          "channelEventCount": {"type": "integer", "minimum": 0},
+          "metaEventCount": {"type": "integer", "minimum": 1},
+          "systemExclusiveEventCount": {"type": "integer", "minimum": 0},
+          "systemExclusiveDataBytes": {"type": "integer", "minimum": 0},
+          "controllers": {"type": "array", "items": {"$ref": "#/components/schemas/MidiControllerCount"}},
+          "systemExclusiveManufacturerIds": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:[0-9A-F]{2}|00-[0-9A-F]{2}-[0-9A-F]{2})$"}},
+          "systemExclusivePreservationSupported": {"type": "boolean"}
         }
       },
       "AudioSourceInfo": {

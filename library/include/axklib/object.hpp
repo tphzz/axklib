@@ -188,6 +188,13 @@ struct SequenceEvent {
     friend bool operator==(const SequenceEvent &, const SequenceEvent &) = default;
 };
 
+struct SequenceTempoEvent {
+    std::uint32_t tick{};
+    std::uint32_t microseconds_per_quarter_note{};
+
+    friend bool operator==(const SequenceTempoEvent &, const SequenceTempoEvent &) = default;
+};
+
 struct CurrentSequence {
     std::vector<std::byte> raw_payload;
     std::uint16_t format_version{};
@@ -195,7 +202,9 @@ struct CurrentSequence {
     std::uint32_t first_tick{};
     std::uint32_t end_tick{};
     std::uint64_t event_count{};
-    std::optional<std::uint16_t> tempo_bpm;
+    std::optional<std::uint16_t> header_tempo_bpm;
+    std::uint32_t effective_initial_tempo_microseconds_per_quarter_note{500'000U};
+    std::vector<SequenceTempoEvent> tempo_events;
     std::vector<SequenceEvent> events;
 };
 

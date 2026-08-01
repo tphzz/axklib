@@ -1,7 +1,12 @@
 import { browserUploadSource, type ClientUploadSource } from '../../lib/clientUploadSource';
 import { midiExtensions, midiMediaType } from '../../lib/midiImport';
 import type { DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
-import type { ImageTransport, SequenceImportItem, SequenceImportTarget } from '../../lib/transport';
+import type {
+    ImageTransport,
+    SequenceImportItem,
+    SequenceImportTarget,
+    SequenceSystemExclusivePolicy,
+} from '../../lib/transport';
 import type { DiskTreeItem, SequenceItem, WorkspaceView } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { PickerController } from '../dialogs/picker';
@@ -88,7 +93,7 @@ export class SequenceImportWorkflow {
         input.click();
     }
 
-    async commit(items: SequenceImportItem[]): Promise<void> {
+    async commit(items: SequenceImportItem[], systemExclusivePolicy: SequenceSystemExclusivePolicy): Promise<void> {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         if (!request || sessionId === null) throw new Error('MIDI import target is no longer available');
@@ -99,7 +104,7 @@ export class SequenceImportWorkflow {
         try {
             await this.dependencies.invalidateSession(sessionId);
             const completed = await this.dependencies.jobs.run(
-                () => this.dependencies.transport.startSequenceImport(sessionId, target, items),
+                () => this.dependencies.transport.startSequenceImport(sessionId, target, items, systemExclusivePolicy),
                 (update) => {
                     if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
                 },

@@ -98,7 +98,7 @@ Result<OperationReport> insert_sequence(TransactionState &state, OperationContex
     auto midi = read_midi(operation.sequence.midi_path, cancellation);
     if (!midi)
         return std::unexpected{midi.error()};
-    auto payload = smf0_to_current_sequence(*midi, operation.sequence.name);
+    auto payload = smf0_to_current_sequence(*midi, operation.sequence.name, operation.sequence.system_exclusive_policy);
     if (!payload)
         return std::unexpected{payload.error()};
     auto allocated = allocate_record(partition, std::move(*payload), PayloadKind::object);

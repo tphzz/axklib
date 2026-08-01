@@ -5188,6 +5188,115 @@
         ],
         "type": "object"
       },
+      "MidiControllerCount": {
+        "additionalProperties": false,
+        "properties": {
+          "controller": {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "eventCount": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "controller",
+          "eventCount"
+        ],
+        "type": "object"
+      },
+      "MidiInspection": {
+        "additionalProperties": false,
+        "properties": {
+          "channelEventCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "controllers": {
+            "items": {
+              "$ref": "#/components/schemas/MidiControllerCount"
+            },
+            "type": "array"
+          },
+          "endTick": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "eventCount": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "format": {
+            "enum": [
+              0
+            ],
+            "type": "integer"
+          },
+          "metaEventCount": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "systemExclusiveDataBytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "systemExclusiveEventCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "systemExclusiveManufacturerIds": {
+            "items": {
+              "pattern": "^(?:[0-9A-F]{2}|00-[0-9A-F]{2}-[0-9A-F]{2})$",
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "systemExclusivePreservationSupported": {
+            "type": "boolean"
+          },
+          "ticksPerQuarterNote": {
+            "maximum": 32767,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "trackCount": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "format",
+          "trackCount",
+          "ticksPerQuarterNote",
+          "endTick",
+          "eventCount",
+          "channelEventCount",
+          "metaEventCount",
+          "systemExclusiveEventCount",
+          "systemExclusiveDataBytes",
+          "controllers",
+          "systemExclusiveManufacturerIds",
+          "systemExclusivePreservationSupported"
+        ],
+        "type": "object"
+      },
+      "MidiInspectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/InputRef"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "type": "object"
+      },
       "ObjectsRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6735,6 +6844,11 @@
       "SequenceMetadata": {
         "additionalProperties": false,
         "properties": {
+          "effectiveInitialTempoMicrosecondsPerQuarterNote": {
+            "maximum": 2000000,
+            "minimum": 200000,
+            "type": "integer"
+          },
           "endTick": {
             "maximum": 4294967295,
             "minimum": 0,
@@ -6754,13 +6868,19 @@
             "minimum": 0,
             "type": "integer"
           },
-          "tempoBpm": {
-            "maximum": 65535,
-            "minimum": 1,
+          "headerTempoBpm": {
+            "maximum": 300,
+            "minimum": 30,
             "type": [
               "integer",
               "null"
             ]
+          },
+          "tempoEvents": {
+            "items": {
+              "$ref": "#/components/schemas/SequenceTempoEvent"
+            },
+            "type": "array"
           },
           "ticksPerQuarterNote": {
             "maximum": 65535,
@@ -6774,7 +6894,29 @@
           "firstTick",
           "endTick",
           "eventCount",
-          "tempoBpm"
+          "headerTempoBpm",
+          "effectiveInitialTempoMicrosecondsPerQuarterNote",
+          "tempoEvents"
+        ],
+        "type": "object"
+      },
+      "SequenceTempoEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "microsecondsPerQuarterNote": {
+            "maximum": 2000000,
+            "minimum": 200000,
+            "type": "integer"
+          },
+          "tick": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tick",
+          "microsecondsPerQuarterNote"
         ],
         "type": "object"
       },
@@ -18741,6 +18883,382 @@
         ],
         "x-axklib-operation-ids": [
           "create.manifest"
+        ]
+      }
+    },
+    "/midi-inspections": {
+      "post": {
+        "operationId": "midi.inspect",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "source": {
+                      "fileRef": {
+                        "relativePath": "x",
+                        "rootId": "x"
+                      }
+                    }
+                  }
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/MidiInspectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "value": {
+                      "data": {
+                        "channelEventCount": 0,
+                        "controllers": [],
+                        "endTick": 0,
+                        "eventCount": 1,
+                        "format": 0,
+                        "metaEventCount": 1,
+                        "systemExclusiveDataBytes": 0,
+                        "systemExclusiveEventCount": 0,
+                        "systemExclusiveManufacturerIds": [],
+                        "systemExclusivePreservationSupported": false,
+                        "ticksPerQuarterNote": 1,
+                        "trackCount": 1
+                      },
+                      "meta": {
+                        "requestId": "request-1"
+                      }
+                    }
+                  },
+                  "warning": {
+                    "value": {
+                      "data": {
+                        "channelEventCount": 0,
+                        "controllers": [],
+                        "endTick": 0,
+                        "eventCount": 1,
+                        "format": 0,
+                        "metaEventCount": 1,
+                        "systemExclusiveDataBytes": 0,
+                        "systemExclusiveEventCount": 0,
+                        "systemExclusiveManufacturerIds": [],
+                        "systemExclusivePreservationSupported": false,
+                        "ticksPerQuarterNote": 1,
+                        "trackCount": 1
+                      },
+                      "meta": {
+                        "requestId": "request-1",
+                        "warnings": [
+                          {
+                            "code": "example_warning",
+                            "context": {},
+                            "message": "operation completed with a warning"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MidiInspection"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Operation completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed or schema-invalid request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authenticated caller is not authorized",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Referenced resource does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request conflicts with current state",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Configured request limit exceeded",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported or invalid domain request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Transient server capacity exhausted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Contained internal failure",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "x-axklib-operation-descriptors": [
+          {
+            "cliCommand": null,
+            "cliParity": false,
+            "id": "midi.inspect",
+            "mode": "request",
+            "operationClass": "read",
+            "requestSchema": "MidiInspectionRequest",
+            "requiresIdempotency": false,
+            "resultSchema": "MidiInspection",
+            "variant": null
+          }
+        ],
+        "x-axklib-operation-ids": [
+          "midi.inspect"
         ]
       }
     },

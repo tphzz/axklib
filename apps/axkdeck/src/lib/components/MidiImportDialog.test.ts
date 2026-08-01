@@ -3,16 +3,35 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ClientUploadSource } from '../clientUploadSource';
 import { clientUploadLocation, serverFileLocation } from '../storageLocations';
-import type { ImageTransport } from '../transport';
+import type { ImageTransport, MidiInspection } from '../transport';
 import MidiImportDialog from './MidiImportDialog.svelte';
 
-function transport(): ImageTransport {
+function inspection(overrides: Partial<MidiInspection> = {}): MidiInspection {
+    return {
+        format: 0,
+        trackCount: 1,
+        ticksPerQuarterNote: 96,
+        endTick: 192,
+        eventCount: 4,
+        channelEventCount: 3,
+        metaEventCount: 1,
+        systemExclusiveEventCount: 0,
+        systemExclusiveDataBytes: 0,
+        controllers: [],
+        systemExclusiveManufacturerIds: [],
+        systemExclusivePreservationSupported: false,
+        ...overrides,
+    };
+}
+
+function transport(midiInspection = inspection()): ImageTransport {
     return {
         uploadClientFile: vi.fn(async (file: ClientUploadSource, kind, onProgress) => {
             onProgress?.(file.size, file.size);
             return clientUploadLocation({ uploadId: 'midi-upload' }, kind, file.name);
         }),
         releaseClientUpload: vi.fn().mockResolvedValue(undefined),
+        inspectMidi: vi.fn().mockResolvedValue(midiInspection),
     } as unknown as ImageTransport;
 }
 
@@ -59,9 +78,11 @@ describe('MidiImportDialog', () => {
         });
 
         expect(await screen.findByDisplayValue('Demo Song 2')).toBeTruthy();
-        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        const importButton = screen.getByRole('button', { name: 'Import 1 file' });
+        await waitFor(() => expect((importButton as HTMLButtonElement).disabled).toBe(false));
+        await fireEvent.click(importButton);
         await waitFor(() =>
-            expect(oncommit).toHaveBeenCalledWith([{ source: workspaceFile, sequenceName: 'Demo Song 2' }]),
+            expect(oncommit).toHaveBeenCalledWith([{ source: workspaceFile, sequenceName: 'Demo Song 2' }], 'exclude'),
         );
         expect(imageTransport.uploadClientFile).not.toHaveBeenCalled();
     });
@@ -98,5 +119,68 @@ describe('MidiImportDialog', () => {
             ),
         );
         await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
+    });
+
+    it('keeps inclusion unavailable when a SysEx event is outside the admitted preservation profile', async () => {
+        const imageTransport = transport(
+            inspection({
+                systemExclusiveEventCount: 2,
+                systemExclusiveDataBytes: 48,
+                systemExclusiveManufacturerIds: ['43'],
+            }),
+        );
+        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const workspaceFile = serverFileLocation(
+            { rootId: 'workspace', relativePath: 'midi/System.mid' },
+            'Yamaha/midi/System.mid',
+        );
+        render(MidiImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [workspaceFile],
+                target: { partitionIndex: 1, volumeName: 'Songs' },
+                existingSequenceNames: [],
+                oncommit,
+                oncancel: vi.fn(),
+            },
+        });
+
+        const include = await screen.findByRole('checkbox', { name: 'Include SysEx events' });
+        expect((include as HTMLInputElement).checked).toBe(false);
+        expect(await screen.findByText(/2 SysEx events will be excluded/i)).toBeTruthy();
+        expect((include as HTMLInputElement).disabled).toBe(true);
+        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await waitFor(() => expect(oncommit).toHaveBeenCalledWith(expect.any(Array), 'exclude'));
+    });
+
+    it('passes preserve only after the server admits SysEx preservation and the user enables it', async () => {
+        const imageTransport = transport(
+            inspection({
+                systemExclusiveEventCount: 1,
+                systemExclusiveDataBytes: 12,
+                systemExclusivePreservationSupported: true,
+            }),
+        );
+        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const workspaceFile = serverFileLocation(
+            { rootId: 'workspace', relativePath: 'midi/System.mid' },
+            'Yamaha/midi/System.mid',
+        );
+        render(MidiImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [workspaceFile],
+                target: { partitionIndex: 1, volumeName: 'Songs' },
+                existingSequenceNames: [],
+                oncommit,
+                oncancel: vi.fn(),
+            },
+        });
+
+        const include = await screen.findByRole('checkbox', { name: 'Include SysEx events' });
+        await waitFor(() => expect((include as HTMLInputElement).disabled).toBe(false));
+        await fireEvent.click(include);
+        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await waitFor(() => expect(oncommit).toHaveBeenCalledWith(expect.any(Array), 'preserve'));
     });
 });

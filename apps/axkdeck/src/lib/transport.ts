@@ -213,7 +213,12 @@ export interface SamplerObject {
         firstTick: number;
         endTick: number;
         eventCount: number;
-        initialBeatsPerMinute?: number;
+        headerTempoBpm?: number;
+        effectiveInitialTempoMicrosecondsPerQuarterNote: number;
+        tempoEvents: readonly {
+            tick: number;
+            microsecondsPerQuarterNote: number;
+        }[];
     };
 }
 
@@ -374,6 +379,9 @@ export interface SequenceImportItem {
     sequenceName: string;
 }
 
+export type MidiInspection = components['schemas']['MidiInspection'];
+export type SequenceSystemExclusivePolicy = 'exclude' | 'preserve';
+
 export interface SequenceImportTarget {
     partitionIndex: number;
     volumeName: string;
@@ -427,11 +435,13 @@ export interface ImageTransport {
     releaseClientUpload(source: ClientUploadLocation): Promise<void>;
     audioImportCapabilities(): Promise<AudioImportCapabilities>;
     inspectAudio(source: InputFileLocation, targetSampleRate?: number): Promise<AudioSourceInfo>;
+    inspectMidi(source: InputFileLocation): Promise<MidiInspection>;
     startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState>;
     startSequenceImport(
         sessionId: number,
         target: SequenceImportTarget,
         items: SequenceImportItem[],
+        systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState>;
     downloadFile(source: FileLocation): Promise<ClientDownload>;
     downloadDirectory(source: DirectoryLocation): Promise<ClientDownload>;

@@ -6,6 +6,7 @@
 #include <map>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <utility>
 
 #include "axklib/bytes.hpp"
@@ -17,6 +18,10 @@ constexpr std::size_t current_header_size = 0x80U;
 constexpr std::uint16_t current_division = 96U;
 constexpr std::size_t maximum_midi_bytes = 16U * 1024U * 1024U;
 constexpr std::size_t maximum_events = 1'000'000U;
+constexpr std::uint32_t maximum_midi_vlq = 0x0fff'ffffU;
+constexpr std::uint32_t default_tempo_microseconds_per_quarter_note = 500'000U;
+constexpr std::uint32_t minimum_tempo_microseconds_per_quarter_note = 200'000U;
+constexpr std::uint32_t maximum_tempo_microseconds_per_quarter_note = 2'000'000U;
 
 Error sequence_error(std::string message, ErrorCode code = ErrorCode::object_malformed) {
     return make_error(code, ErrorCategory::object, std::move(message));
@@ -49,7 +54,9 @@ void append_be32(std::vector<std::byte> &output, std::uint32_t value) {
     output.push_back(static_cast<std::byte>(value));
 }
 
-void append_vlq(std::vector<std::byte> &output, std::uint32_t value) {
+Result<void> append_vlq(std::vector<std::byte> &output, std::uint32_t value) {
+    if (value > maximum_midi_vlq)
+        return std::unexpected{sequence_error("MIDI variable-length quantity exceeds four bytes")};
     std::array<std::byte, 4> encoded{};
     std::size_t count{1U};
     encoded.back() = static_cast<std::byte>(value & 0x7fU);
@@ -58,6 +65,7 @@ void append_vlq(std::vector<std::byte> &output, std::uint32_t value) {
         ++count;
     }
     output.insert(output.end(), encoded.end() - static_cast<std::ptrdiff_t>(count), encoded.end());
+    return {};
 }
 
 std::size_t channel_data_size(std::uint8_t status) {
@@ -79,6 +87,85 @@ Result<std::vector<std::byte>> native_channel_message(std::span<const std::byte>
     if (message.size() != channel_data_size(status) + 1U)
         return std::unexpected{sequence_error("native Sequence channel event has an invalid size")};
     return std::vector<std::byte>{message.begin(), message.end()};
+}
+
+bool is_set_tempo(const SequenceEvent &event) {
+    return event.kind == SequenceEventKind::meta && event.message.size() >= 2U && event.message[0] == std::byte{0xff} &&
+           event.message[1] == std::byte{0x51};
+}
+
+Result<std::uint32_t> set_tempo_value(const SequenceEvent &event) {
+    if (event.message.size() != 5U)
+        return std::unexpected{sequence_error("MIDI Set Tempo event must contain exactly three data bytes")};
+    const auto value = (std::to_integer<std::uint32_t>(event.message[2]) << 16U) |
+                       (std::to_integer<std::uint32_t>(event.message[3]) << 8U) |
+                       std::to_integer<std::uint32_t>(event.message[4]);
+    if (value == 0U)
+        return std::unexpected{sequence_error("MIDI Set Tempo event must have a nonzero value")};
+    if (value < minimum_tempo_microseconds_per_quarter_note || value > maximum_tempo_microseconds_per_quarter_note) {
+        return std::unexpected{sequence_error("MIDI Set Tempo event is outside the admitted 30 to 300 BPM profile",
+                                              ErrorCode::unsupported_profile)};
+    }
+    return value;
+}
+
+struct TempoAnalysis {
+    std::vector<SequenceTempoEvent> events;
+    std::optional<std::uint32_t> tick_zero_value;
+};
+
+Result<TempoAnalysis> analyze_tempos(std::span<const SequenceEvent> events) {
+    TempoAnalysis result;
+    for (const auto &event : events) {
+        if (!is_set_tempo(event))
+            continue;
+        auto value = set_tempo_value(event);
+        if (!value)
+            return std::unexpected{value.error()};
+        result.events.push_back({.tick = event.tick, .microseconds_per_quarter_note = *value});
+        if (event.tick == 0U)
+            result.tick_zero_value = *value;
+    }
+    return result;
+}
+
+Result<std::uint32_t> tempo_value_from_header(std::optional<std::uint16_t> header_tempo_bpm) {
+    if (!header_tempo_bpm)
+        return default_tempo_microseconds_per_quarter_note;
+    if (*header_tempo_bpm < 30U || *header_tempo_bpm > 300U) {
+        return std::unexpected{sequence_error("Sequence header tempo is outside the admitted 30 to 300 BPM profile",
+                                              ErrorCode::unsupported_profile)};
+    }
+    return (60'000'000U + *header_tempo_bpm / 2U) / *header_tempo_bpm;
+}
+
+std::uint16_t rounded_header_tempo(std::uint32_t microseconds_per_quarter_note) {
+    return static_cast<std::uint16_t>((60'000'000U + microseconds_per_quarter_note / 2U) /
+                                      microseconds_per_quarter_note);
+}
+
+SequenceEvent set_tempo_event(std::uint32_t microseconds_per_quarter_note) {
+    return {.tick = 0U,
+            .kind = SequenceEventKind::meta,
+            .message = {std::byte{0xff}, std::byte{0x51}, static_cast<std::byte>(microseconds_per_quarter_note >> 16U),
+                        static_cast<std::byte>(microseconds_per_quarter_note >> 8U),
+                        static_cast<std::byte>(microseconds_per_quarter_note)}};
+}
+
+bool is_preservable_system_exclusive(const SequenceEvent &event) {
+    if (event.kind != SequenceEventKind::system_exclusive || event.message.size() < 2U)
+        return false;
+    const auto status = event.message.front();
+    if (status == std::byte{0xf0}) {
+        if (event.message.back() != std::byte{0xf7})
+            return false;
+        return std::ranges::all_of(event.message.begin() + 1, event.message.end() - 1,
+                                   [](std::byte value) { return std::to_integer<std::uint8_t>(value) < 0x80U; });
+    }
+    if (status != std::byte{0xf7})
+        return false;
+    return std::ranges::all_of(event.message.begin() + 1, event.message.end(),
+                               [](std::byte value) { return std::to_integer<std::uint8_t>(value) < 0x80U; });
 }
 
 Result<SequenceEvent> decode_native_event(std::span<const std::byte> stored, std::uint32_t tick,
@@ -136,8 +223,18 @@ Result<std::vector<std::byte>> encode_smf_event(const SequenceEvent &event) {
     if (event.kind == SequenceEventKind::channel)
         return native_channel_message(event.message);
     if (event.kind == SequenceEventKind::system_exclusive) {
-        return std::unexpected{
-            sequence_error("native Sequence SysEx conversion is not admitted", ErrorCode::unsupported_profile)};
+        if (!is_preservable_system_exclusive(event)) {
+            return std::unexpected{sequence_error("native Sequence SysEx event is outside the admitted profile",
+                                                  ErrorCode::unsupported_profile)};
+        }
+        std::vector<std::byte> result{event.message.front()};
+        const auto data = std::span<const std::byte>{event.message}.subspan(1U);
+        if (data.size() > maximum_midi_vlq)
+            return std::unexpected{sequence_error("native Sequence SysEx payload exceeds the four-byte length range")};
+        if (auto length = append_vlq(result, static_cast<std::uint32_t>(data.size())); !length)
+            return std::unexpected{length.error()};
+        result.insert(result.end(), data.begin(), data.end());
+        return result;
     }
     if (event.message.size() < 2U || event.message[0] != std::byte{0xff})
         return std::unexpected{sequence_error("native Sequence meta event is malformed")};
@@ -149,7 +246,10 @@ Result<std::vector<std::byte>> encode_smf_event(const SequenceEvent &event) {
         result.push_back(std::byte{});
         return result;
     }
-    append_vlq(result, static_cast<std::uint32_t>(data.size()));
+    if (data.size() > maximum_midi_vlq)
+        return std::unexpected{sequence_error("MIDI meta payload exceeds the four-byte length range")};
+    if (auto length = append_vlq(result, static_cast<std::uint32_t>(data.size())); !length)
+        return std::unexpected{length.error()};
     result.insert(result.end(), data.begin(), data.end());
     return result;
 }
@@ -242,7 +342,17 @@ Result<ParsedSmf> parse_smf0(std::span<const std::byte> smf) {
             if (found_end && *length != 0U)
                 return std::unexpected{sequence_error("MIDI end-of-track event must be empty")};
         } else if (status == 0xf0U || status == 0xf7U) {
-            return std::unexpected{sequence_error("MIDI SysEx import is not admitted", ErrorCode::unsupported_profile)};
+            running_status.reset();
+            event.kind = SequenceEventKind::system_exclusive;
+            event.message.push_back(static_cast<std::byte>(status));
+            auto length = read_vlq(track, position);
+            if (!length)
+                return std::unexpected{length.error()};
+            if (*length > track.size() - position)
+                return std::unexpected{sequence_error("MIDI System Exclusive event data is truncated")};
+            event.message.insert(event.message.end(), track.begin() + static_cast<std::ptrdiff_t>(position),
+                                 track.begin() + static_cast<std::ptrdiff_t>(position + *length));
+            position += *length;
         } else {
             return std::unexpected{
                 sequence_error("MIDI system-common events are not admitted", ErrorCode::unsupported_profile)};
@@ -258,6 +368,25 @@ Result<ParsedSmf> parse_smf0(std::span<const std::byte> smf) {
     if (!found_end)
         return std::unexpected{sequence_error("MIDI track has no end-of-track event")};
     return result;
+}
+
+std::string hex_byte(std::uint8_t value) {
+    constexpr std::string_view digits{"0123456789ABCDEF"};
+    return {digits[value >> 4U], digits[value & 0x0fU]};
+}
+
+std::optional<std::string> system_exclusive_manufacturer_id(const SequenceEvent &event) {
+    if (event.kind != SequenceEventKind::system_exclusive || event.message.size() < 2U ||
+        event.message.front() != std::byte{0xf0}) {
+        return std::nullopt;
+    }
+    const auto first = std::to_integer<std::uint8_t>(event.message[1]);
+    if (first != 0U)
+        return hex_byte(first);
+    if (event.message.size() < 4U)
+        return std::nullopt;
+    return hex_byte(first) + "-" + hex_byte(std::to_integer<std::uint8_t>(event.message[2])) + "-" +
+           hex_byte(std::to_integer<std::uint8_t>(event.message[3]));
 }
 
 Result<std::uint32_t> scaled_tick(std::uint32_t tick, std::uint16_t source_division) {
@@ -283,8 +412,16 @@ Result<std::vector<std::byte>> native_event(const SequenceEvent &event, std::opt
         }
         return event.message;
     }
+    if (event.kind == SequenceEventKind::system_exclusive) {
+        running_status.reset();
+        if (!is_preservable_system_exclusive(event)) {
+            return std::unexpected{sequence_error("MIDI SysEx event is outside the admitted native Sequence profile",
+                                                  ErrorCode::unsupported_profile)};
+        }
+        return event.message;
+    }
     if (event.kind != SequenceEventKind::channel)
-        return std::unexpected{sequence_error("MIDI SysEx import is not admitted", ErrorCode::unsupported_profile)};
+        return std::unexpected{sequence_error("MIDI event kind is not admitted", ErrorCode::unsupported_profile)};
     const auto status = std::to_integer<std::uint8_t>(event.message[0]);
     if (status < 0x80U || status >= 0xf0U || event.message.size() != channel_data_size(status) + 1U)
         return std::unexpected{sequence_error("MIDI channel event is malformed")};
@@ -301,21 +438,6 @@ Result<std::vector<std::byte>> native_event(const SequenceEvent &event, std::opt
     }
     running_status = status;
     return result;
-}
-
-std::optional<std::uint16_t> first_tempo_bpm(std::span<const SequenceEvent> events) {
-    const auto found = std::ranges::find_if(events, [](const SequenceEvent &event) {
-        return event.kind == SequenceEventKind::meta && event.message.size() == 5U &&
-               event.message[0] == std::byte{0xff} && event.message[1] == std::byte{0x51};
-    });
-    if (found == events.end())
-        return std::nullopt;
-    const auto micros = (std::to_integer<std::uint32_t>(found->message[2]) << 16U) |
-                        (std::to_integer<std::uint32_t>(found->message[3]) << 8U) |
-                        std::to_integer<std::uint32_t>(found->message[4]);
-    if (micros == 0U)
-        return std::nullopt;
-    return static_cast<std::uint16_t>(std::clamp<std::uint32_t>((60'000'000U + micros / 2U) / micros, 30U, 300U));
 }
 
 } // namespace
@@ -341,7 +463,7 @@ Result<CurrentSequence> decode_current_sequence(std::span<const std::byte> paylo
     result.first_tick = *first_tick;
     const auto tempo = reader.be16(0x6cU);
     if (tempo && *tempo >= 30U && *tempo <= 300U)
-        result.tempo_bpm = *tempo;
+        result.header_tempo_bpm = *tempo;
 
     std::size_t position = 0x84U;
     std::uint32_t tick = *first_tick;
@@ -390,19 +512,46 @@ Result<CurrentSequence> decode_current_sequence(std::span<const std::byte> paylo
             return std::unexpected{sequence_error("current Sequence ticks are not monotonic")};
         tick = *next_tick;
     }
+    auto tempos = analyze_tempos(result.events);
+    if (!tempos)
+        return std::unexpected{tempos.error()};
+    result.tempo_events = std::move(tempos->events);
+    if (tempos->tick_zero_value) {
+        result.effective_initial_tempo_microseconds_per_quarter_note = *tempos->tick_zero_value;
+    } else {
+        auto header_tempo = tempo_value_from_header(result.header_tempo_bpm);
+        if (!header_tempo)
+            return std::unexpected{header_tempo.error()};
+        result.effective_initial_tempo_microseconds_per_quarter_note = *header_tempo;
+    }
     return result;
 }
 
 Result<std::vector<std::byte>> sequence_to_smf0(const CurrentSequence &sequence) {
     if (sequence.ticks_per_quarter_note == 0U || sequence.events.empty())
         return std::unexpected{sequence_error("Sequence has no decoded current timeline")};
+    auto tempos = analyze_tempos(sequence.events);
+    if (!tempos)
+        return std::unexpected{tempos.error()};
     std::vector<std::byte> track;
     std::uint32_t previous_tick{};
     bool found_end{};
+    if (!tempos->tick_zero_value) {
+        auto fallback_tempo = tempo_value_from_header(sequence.header_tempo_bpm);
+        if (!fallback_tempo)
+            return std::unexpected{fallback_tempo.error()};
+        auto encoded = encode_smf_event(set_tempo_event(*fallback_tempo));
+        if (!encoded)
+            return std::unexpected{encoded.error()};
+        if (auto delta = append_vlq(track, 0U); !delta)
+            return std::unexpected{delta.error()};
+        track.insert(track.end(), encoded->begin(), encoded->end());
+    }
     for (const auto &event : sequence.events) {
         if (found_end || event.tick < previous_tick)
             return std::unexpected{sequence_error("Sequence events are not in canonical tick order")};
-        append_vlq(track, event.tick - previous_tick);
+        if (auto delta = append_vlq(track, event.tick - previous_tick); !delta)
+            return std::unexpected{delta.error()};
         auto encoded = encode_smf_event(event);
         if (!encoded)
             return std::unexpected{encoded.error()};
@@ -413,6 +562,8 @@ Result<std::vector<std::byte>> sequence_to_smf0(const CurrentSequence &sequence)
     }
     if (!found_end)
         return std::unexpected{sequence_error("Sequence has no end-of-track event")};
+    if (track.size() > std::numeric_limits<std::uint32_t>::max())
+        return std::unexpected{sequence_error("MIDI track exceeds the 32-bit chunk size")};
     std::vector<std::byte> result;
     result.insert(result.end(), {std::byte{'M'}, std::byte{'T'}, std::byte{'h'}, std::byte{'d'}});
     append_be32(result, 6U);
@@ -425,8 +576,45 @@ Result<std::vector<std::byte>> sequence_to_smf0(const CurrentSequence &sequence)
     return result;
 }
 
-Result<std::vector<std::byte>> smf0_to_current_sequence(std::span<const std::byte> smf,
-                                                        std::string_view sequence_name) {
+Result<SequenceMidiInspection> inspect_smf0(std::span<const std::byte> smf) {
+    auto parsed = parse_smf0(smf);
+    if (!parsed)
+        return std::unexpected{parsed.error()};
+    SequenceMidiInspection result{};
+    result.format = 0U;
+    result.track_count = 1U;
+    result.ticks_per_quarter_note = parsed->division;
+    result.end_tick = parsed->events.empty() ? 0U : parsed->events.back().tick;
+    result.event_count = parsed->events.size();
+    result.system_exclusive_preservation_supported =
+        std::ranges::all_of(parsed->events, [](const SequenceEvent &event) {
+            return event.kind != SequenceEventKind::system_exclusive || is_preservable_system_exclusive(event);
+        });
+    std::map<std::uint8_t, std::uint64_t> controllers;
+    std::set<std::string> manufacturer_ids;
+    for (const auto &event : parsed->events) {
+        if (event.kind == SequenceEventKind::channel) {
+            ++result.channel_event_count;
+            if (event.message.size() == 3U && (std::to_integer<std::uint8_t>(event.message.front()) & 0xf0U) == 0xb0U) {
+                ++controllers[std::to_integer<std::uint8_t>(event.message[1])];
+            }
+        } else if (event.kind == SequenceEventKind::meta) {
+            ++result.meta_event_count;
+        } else {
+            ++result.system_exclusive_event_count;
+            result.system_exclusive_data_bytes += event.message.size() - 1U;
+            if (auto manufacturer_id = system_exclusive_manufacturer_id(event))
+                manufacturer_ids.insert(std::move(*manufacturer_id));
+        }
+    }
+    for (const auto &[controller, event_count] : controllers)
+        result.controllers.push_back({.controller = controller, .event_count = event_count});
+    result.system_exclusive_manufacturer_ids.assign(manufacturer_ids.begin(), manufacturer_ids.end());
+    return result;
+}
+
+Result<std::vector<std::byte>> smf0_to_current_sequence(std::span<const std::byte> smf, std::string_view sequence_name,
+                                                        SequenceSystemExclusivePolicy system_exclusive_policy) {
     if (sequence_name.empty() || sequence_name.size() > 16U ||
         !std::ranges::all_of(sequence_name, [](unsigned char value) { return value >= 0x20U && value < 0x7fU; })) {
         return std::unexpected{
@@ -435,6 +623,28 @@ Result<std::vector<std::byte>> smf0_to_current_sequence(std::span<const std::byt
     auto parsed = parse_smf0(smf);
     if (!parsed)
         return std::unexpected{parsed.error()};
+    const auto has_system_exclusive = std::ranges::any_of(
+        parsed->events, [](const SequenceEvent &event) { return event.kind == SequenceEventKind::system_exclusive; });
+    if (has_system_exclusive && system_exclusive_policy == SequenceSystemExclusivePolicy::reject) {
+        return std::unexpected{
+            sequence_error("MIDI file contains System Exclusive events", ErrorCode::unsupported_profile)};
+    }
+    if (has_system_exclusive && system_exclusive_policy == SequenceSystemExclusivePolicy::preserve &&
+        !std::ranges::all_of(parsed->events, [](const SequenceEvent &event) {
+            return event.kind != SequenceEventKind::system_exclusive || is_preservable_system_exclusive(event);
+        })) {
+        return std::unexpected{sequence_error("MIDI System Exclusive event is outside the admitted native profile",
+                                              ErrorCode::unsupported_profile)};
+    }
+    if (system_exclusive_policy == SequenceSystemExclusivePolicy::exclude) {
+        std::erase_if(parsed->events,
+                      [](const SequenceEvent &event) { return event.kind == SequenceEventKind::system_exclusive; });
+    }
+    auto tempos = analyze_tempos(parsed->events);
+    if (!tempos)
+        return std::unexpected{tempos.error()};
+    const auto header_tempo =
+        rounded_header_tempo(tempos->tick_zero_value.value_or(default_tempo_microseconds_per_quarter_note));
     for (auto &event : parsed->events) {
         auto tick = scaled_tick(event.tick, parsed->division);
         if (!tick)
@@ -473,15 +683,14 @@ Result<std::vector<std::byte>> smf0_to_current_sequence(std::span<const std::byt
     std::vector<std::byte> result(current_header_size, std::byte{});
     result.insert(result.end(), timeline.begin(), timeline.end());
     ByteWriter writer{result};
-    const auto tempo = first_tempo_bpm(parsed->events).value_or(120U);
     if (!writer.write_ascii_field(0U, 12U, "FSFSDEV3SPLX", std::byte{}) ||
         !writer.write_ascii_field(0x0cU, 4U, "SEQU", std::byte{}) || !writer.write_be32(0x14U, 2U) ||
         !writer.write_be32(0x18U, static_cast<std::uint32_t>(result.size() - 0x30U)) ||
         !writer.write_u8(0x30U, 0x13U) || !writer.write_u8(0x31U, 0x0cU) ||
         !writer.write_ascii_field(0x32U, 16U, sequence_name, std::byte{' '}) ||
         !writer.write_ascii_field(0x54U, 16U, sequence_name, std::byte{' '}) || !writer.write_u8(0x64U, 0x30U) ||
-        !writer.write_be16(0x6cU, tempo) || !writer.write_be16(0x78U, tempo) || !writer.write_be16(0x7cU, 1U) ||
-        !writer.write_be16(0x7eU, current_division)) {
+        !writer.write_be16(0x6cU, header_tempo) || !writer.write_be16(0x78U, header_tempo) ||
+        !writer.write_be16(0x7cU, 1U) || !writer.write_be16(0x7eU, current_division)) {
         return std::unexpected{sequence_error("failed to construct the current Sequence header")};
     }
     return result;

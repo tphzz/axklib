@@ -42,6 +42,8 @@ import type {
     RelationshipPageFilter,
     SequenceImportItem,
     SequenceImportTarget,
+    SequenceSystemExclusivePolicy,
+    MidiInspection,
     VolumeMutation,
 } from './transport';
 
@@ -163,6 +165,12 @@ export class HttpImageTransport implements ImageTransport {
         return result;
     }
 
+    async inspectMidi(source: InputFileLocation): Promise<MidiInspection> {
+        const result = await this.client.invoke<MidiInspection>('midi.inspect', { source: serverInput(source) });
+        if (this.jobs.isJob(result)) throw new Error('midi.inspect unexpectedly returned a job');
+        return result;
+    }
+
     async startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
         const job = await this.client.invoke<never>(
@@ -178,11 +186,12 @@ export class HttpImageTransport implements ImageTransport {
         sessionId: number,
         target: SequenceImportTarget,
         items: SequenceImportItem[],
+        systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
         const job = await this.client.invoke<never>(
             'images.alter',
-            sequenceImportRequest(session.remoteId, session.revision, target, items),
+            sequenceImportRequest(session.remoteId, session.revision, target, items, systemExclusivePolicy),
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.jobs.isJob(job)) throw new Error('images.alter did not return a job');

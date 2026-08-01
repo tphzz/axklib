@@ -5,7 +5,13 @@
     import { defaultSequenceName } from '../midiImport';
     import { modal } from '../modal';
     import type { ClientUploadLocation, FileLocation, InputFileLocation } from '../storageLocations';
-    import type { ImageTransport, SequenceImportItem, SequenceImportTarget } from '../transport';
+    import type {
+        ImageTransport,
+        MidiInspection,
+        SequenceImportItem,
+        SequenceImportTarget,
+        SequenceSystemExclusivePolicy,
+    } from '../transport';
     import Icon from './Icon.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
 
@@ -16,7 +22,7 @@
         existingSequenceNames: string[];
         onchooseworkspace?: () => void;
         onchooselocal?: () => void;
-        oncommit: (items: SequenceImportItem[]) => Promise<void>;
+        oncommit: (items: SequenceImportItem[], systemExclusivePolicy: SequenceSystemExclusivePolicy) => Promise<void>;
         oncancel: () => void;
     }
 
@@ -27,8 +33,9 @@
         sequenceName: string;
         source?: InputFileLocation;
         upload?: ClientUploadLocation;
+        inspection?: MidiInspection;
         progress: number;
-        status: 'waiting' | 'uploading' | 'ready' | 'failed' | 'removing';
+        status: 'waiting' | 'uploading' | 'inspecting' | 'ready' | 'failed' | 'removing';
         error: string;
     }
 
@@ -45,6 +52,7 @@
     let rows = $state<Row[]>([]);
     let busy = $state(false);
     let generalError = $state('');
+    let includeSystemExclusive = $state(false);
     let nextRowId = 0;
     let disposed = false;
     let stagingPromise: Promise<void> = Promise.resolve();
@@ -52,9 +60,22 @@
     const validationErrors = $derived(validateRows(rows, existingSequenceNames));
     const ready = $derived(
         rows.length > 0 &&
-            rows.every((row) => row.status === 'ready' && row.source !== undefined) &&
+            rows.every((row) => row.status === 'ready' && row.source !== undefined && row.inspection !== undefined) &&
             validationErrors.every((error) => error === ''),
     );
+    const systemExclusiveEventCount = $derived(
+        rows.reduce((total, row) => total + (row.inspection?.systemExclusiveEventCount ?? 0), 0),
+    );
+    const systemExclusivePreservationSupported = $derived(
+        systemExclusiveEventCount > 0 &&
+            rows
+                .filter((row) => (row.inspection?.systemExclusiveEventCount ?? 0) > 0)
+                .every((row) => row.inspection?.systemExclusivePreservationSupported === true),
+    );
+
+    $effect(() => {
+        if (!systemExclusivePreservationSupported) includeSystemExclusive = false;
+    });
 
     function isWorkspaceFile(candidate: ClientUploadSource | FileLocation): candidate is FileLocation {
         return 'kind' in candidate && candidate.kind === 'server-file';
@@ -102,7 +123,9 @@
         if (!row) return;
         try {
             if (isWorkspaceFile(row.candidate)) {
-                replaceRow(id, { source: row.candidate, progress: 1, status: 'ready' });
+                replaceRow(id, { source: row.candidate, progress: 1, status: 'inspecting' });
+                const inspection = await transport.inspectMidi(row.candidate);
+                if (!disposed) replaceRow(id, { inspection, status: 'ready' });
                 return;
             }
             replaceRow(id, { status: 'uploading' });
@@ -116,7 +139,9 @@
                 await transport.releaseClientUpload(upload).catch(() => undefined);
                 return;
             }
-            replaceRow(id, { source: upload, upload, progress: 1, status: 'ready' });
+            replaceRow(id, { source: upload, upload, progress: 1, status: 'inspecting' });
+            const inspection = await transport.inspectMidi(upload);
+            if (!disposed) replaceRow(id, { inspection, status: 'ready' });
         } catch (error) {
             if (!abortController.signal.aborted) {
                 replaceRow(id, { status: 'failed', error: error instanceof Error ? error.message : String(error) });
@@ -160,7 +185,10 @@
         busy = true;
         generalError = '';
         try {
-            await oncommit(rows.map((row) => ({ source: row.source!, sequenceName: row.sequenceName })));
+            await oncommit(
+                rows.map((row) => ({ source: row.source!, sequenceName: row.sequenceName })),
+                includeSystemExclusive ? 'preserve' : 'exclude',
+            );
             await releaseUploads();
             oncancel();
         } catch (error) {
@@ -179,6 +207,16 @@
             names.add(key);
             return '';
         });
+    }
+
+    function inspectionSummary(row: Row): string {
+        if (!row.inspection) return '';
+        const controllers = row.inspection.controllers.map((entry) => entry.controller);
+        const details = [
+            controllers.length > 0 ? `CC ${controllers.join(', ')}` : '',
+            row.inspection.systemExclusiveEventCount > 0 ? `${row.inspection.systemExclusiveEventCount} SysEx` : '',
+        ].filter(Boolean);
+        return details.length > 0 ? `Ready · ${details.join(' · ')}` : 'Ready';
     }
 </script>
 
@@ -233,8 +271,10 @@
                             <span class:error={validationErrors[index]}>
                                 {#if row.status === 'uploading'}
                                     Uploading {Math.round(row.progress * 100)}%
+                                {:else if row.status === 'inspecting'}
+                                    Inspecting
                                 {:else if row.status === 'ready'}
-                                    Ready
+                                    {inspectionSummary(row)}
                                 {:else if row.status === 'failed'}
                                     {row.error}
                                 {:else}
@@ -256,6 +296,36 @@
                         {/if}
                     {/each}
                 </div>
+                <section class="system-exclusive-options" aria-label="System Exclusive import">
+                    <label>
+                        <input
+                            type="checkbox"
+                            aria-label="Include SysEx events"
+                            checked={includeSystemExclusive}
+                            disabled={busy || systemExclusiveEventCount === 0 || !systemExclusivePreservationSupported}
+                            onchange={(event) => (includeSystemExclusive = event.currentTarget.checked)}
+                        />
+                        <span>Include SysEx events</span>
+                    </label>
+                    {#if systemExclusiveEventCount === 0}
+                        <p>No SysEx events found.</p>
+                    {:else if !systemExclusivePreservationSupported}
+                        <p>
+                            {systemExclusiveEventCount} SysEx {systemExclusiveEventCount === 1 ? 'event' : 'events'}
+                            will be excluded. At least one event is outside the supported preservation profile.
+                        </p>
+                    {:else if includeSystemExclusive}
+                        <p>
+                            {systemExclusiveEventCount} SysEx {systemExclusiveEventCount === 1 ? 'event' : 'events'}
+                            will be included.
+                        </p>
+                    {:else}
+                        <p>
+                            {systemExclusiveEventCount} SysEx {systemExclusiveEventCount === 1 ? 'event' : 'events'}
+                            will be excluded.
+                        </p>
+                    {/if}
+                </section>
             {/if}
             {#if generalError}<p class="dialog-error" role="alert">{generalError}</p>{/if}
         </div>
@@ -343,6 +413,29 @@
     .midi-row-error {
         margin: 0;
         padding: 0 8px 6px;
+        font-size: 9px;
+    }
+    .system-exclusive-options {
+        display: grid;
+        gap: 3px;
+        padding: 8px;
+        border: 1px solid var(--color-border);
+        border-radius: 5px;
+    }
+    .system-exclusive-options label {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 10px;
+    }
+    .system-exclusive-options input {
+        width: 14px;
+        height: 14px;
+        margin: 0;
+    }
+    .system-exclusive-options p {
+        margin: 0 0 0 21px;
+        color: var(--color-text-muted);
         font-size: 9px;
     }
 </style>

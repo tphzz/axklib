@@ -79,7 +79,7 @@ void write_sequence_object(const std::filesystem::path &path, std::string_view n
         std::byte{60},  std::byte{100},  std::byte{96},   std::byte{0x80}, std::byte{60},  std::byte{0},
         std::byte{0},   std::byte{0xff}, std::byte{0x2f}, std::byte{0},
     };
-    const auto sequence = axk::smf0_to_current_sequence(smf, name);
+    const auto sequence = axk::smf0_to_current_sequence(smf, name, axk::SequenceSystemExclusivePolicy::reject);
     ASSERT_TRUE(sequence) << sequence.error().message;
     std::ofstream output{path, std::ios::binary};
     ASSERT_TRUE(output);

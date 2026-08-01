@@ -87,7 +87,12 @@ describe('ObjectInspector', () => {
                 firstTick: 0,
                 endTick: 40_408,
                 eventCount: 6_735,
-                initialBeatsPerMinute: 134.5,
+                headerTempoBpm: 130,
+                effectiveInitialTempoMicrosecondsPerQuarterNote: 460_122,
+                tempoEvents: [
+                    { tick: 0, microsecondsPerQuarterNote: 460_122 },
+                    { tick: 9_600, microsecondsPerQuarterNote: 400_000 },
+                ],
             },
         };
         render(ObjectInspector, {
@@ -108,7 +113,9 @@ describe('ObjectInspector', () => {
         expect(screen.getByText('DJ TSUYOSHI DEMO')).toBeTruthy();
         expect(screen.getByText('6,735')).toBeTruthy();
         expect(screen.getByText('96')).toBeTruthy();
-        expect(screen.getByText('134.5 BPM')).toBeTruthy();
+        expect(screen.getByText('130.4 BPM')).toBeTruthy();
+        expect(screen.getByText('130 BPM')).toBeTruthy();
+        expect(screen.getByText('1 change')).toBeTruthy();
         expect(screen.getByText('40,408')).toBeTruthy();
     });
 

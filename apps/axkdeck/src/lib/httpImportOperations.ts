@@ -1,4 +1,10 @@
-import type { AudioImportItem, AudioImportTarget, SequenceImportItem, SequenceImportTarget } from './transport';
+import type {
+    AudioImportItem,
+    AudioImportTarget,
+    SequenceImportItem,
+    SequenceImportTarget,
+    SequenceSystemExclusivePolicy,
+} from './transport';
 import { serverInput } from './httpTransportWire';
 
 const ALTERATION_MANIFEST_SCHEMA_VERSION = '1.0';
@@ -91,6 +97,7 @@ export function sequenceImportRequest(
     expectedRevision: number,
     target: SequenceImportTarget,
     items: SequenceImportItem[],
+    systemExclusivePolicy: SequenceSystemExclusivePolicy,
 ): ImportAlterationRequest {
     const operations = items.map((item, index) => ({
         id: `sequence-${index}`,
@@ -100,6 +107,7 @@ export function sequenceImportRequest(
         sequence: {
             name: item.sequenceName,
             midi_path: `sequence/import-${index}.mid`,
+            system_exclusive_policy: systemExclusivePolicy,
         },
     }));
     const inputBindings = items.map((item, index) => ({

@@ -102,12 +102,13 @@ axk::Waveform test_waveform() {
 
 std::vector<std::byte> test_midi() {
     return {
-        std::byte{'M'}, std::byte{'T'},  std::byte{'h'},  std::byte{'d'},  std::byte{0},   std::byte{0},
-        std::byte{0},   std::byte{6},    std::byte{0},    std::byte{0},    std::byte{0},   std::byte{1},
-        std::byte{0},   std::byte{96},   std::byte{'M'},  std::byte{'T'},  std::byte{'r'}, std::byte{'k'},
-        std::byte{0},   std::byte{0},    std::byte{0},    std::byte{12},   std::byte{0},   std::byte{0x90},
-        std::byte{60},  std::byte{100},  std::byte{96},   std::byte{0x80}, std::byte{60},  std::byte{0},
-        std::byte{0},   std::byte{0xff}, std::byte{0x2f}, std::byte{0},
+        std::byte{'M'},  std::byte{'T'},  std::byte{'h'},  std::byte{'d'},  std::byte{0},   std::byte{0},
+        std::byte{0},    std::byte{6},    std::byte{0},    std::byte{0},    std::byte{0},   std::byte{1},
+        std::byte{0},    std::byte{96},   std::byte{'M'},  std::byte{'T'},  std::byte{'r'}, std::byte{'k'},
+        std::byte{0},    std::byte{0},    std::byte{0},    std::byte{17},   std::byte{0},   std::byte{0x90},
+        std::byte{60},   std::byte{100},  std::byte{48},   std::byte{0xf0}, std::byte{2},   std::byte{0x7d},
+        std::byte{0xf7}, std::byte{48},   std::byte{0x80}, std::byte{60},   std::byte{0},   std::byte{0},
+        std::byte{0xff}, std::byte{0x2f}, std::byte{0},
     };
 }
 
@@ -337,7 +338,9 @@ TEST(Alteration, InsertsRenamesAndDeletesSequenceObjects) {
 
     const axk::AlterationManifest insert_manifest{
         "1.0",
-        {{"insert-sequence", axk::InsertSequenceOperation{axk::PartitionIndex{0U}, "Retained", {"Original", midi}}}},
+        {{"insert-sequence",
+          axk::InsertSequenceOperation{
+              axk::PartitionIndex{0U}, "Retained", {"Original", midi, axk::SequenceSystemExclusivePolicy::preserve}}}},
     };
     const auto inserted_result = axk::alter_hds(source, insert_manifest, inserted);
     ASSERT_TRUE(inserted_result) << inserted_result.error().message;
@@ -351,7 +354,11 @@ TEST(Alteration, InsertsRenamesAndDeletesSequenceObjects) {
     ASSERT_NE(sequence, inserted_catalog->objects.end());
     const auto *decoded = std::get_if<axk::CurrentSequence>(&sequence->object.payload);
     ASSERT_NE(decoded, nullptr);
-    EXPECT_EQ(decoded->event_count, 3U);
+    EXPECT_EQ(decoded->event_count, 4U);
+    EXPECT_EQ(decoded->events[1].tick, 48U);
+    EXPECT_EQ(decoded->events[1].kind, axk::SequenceEventKind::system_exclusive);
+    EXPECT_EQ(decoded->events[1].message, (std::vector<std::byte>{std::byte{0xf0}, std::byte{0x7d}, std::byte{0xf7}}));
+    EXPECT_EQ(decoded->events[2].tick, 96U);
 
     const axk::AlterationManifest rename_manifest{
         "1.0",
@@ -571,6 +578,29 @@ TEST(AlterationManifest, ParsesStrictProgramRename) {
             name));
         EXPECT_FALSE(rejected) << name;
     }
+}
+
+TEST(AlterationManifest, RequiresAnExplicitSequenceSystemExclusivePolicy) {
+    const auto parsed = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"insert","type":"insert_sequence","partition_index":0,"volume_name":"Songs",
+         "sequence":{"name":"Pattern","midi_path":"pattern.mid","system_exclusive_policy":"exclude"}}
+      ]})");
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto *insert = std::get_if<axk::InsertSequenceOperation>(&parsed->operations.front().data);
+    ASSERT_NE(insert, nullptr);
+    EXPECT_EQ(insert->sequence.system_exclusive_policy, axk::SequenceSystemExclusivePolicy::exclude);
+
+    EXPECT_FALSE(axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"insert","type":"insert_sequence","partition_index":0,"volume_name":"Songs",
+         "sequence":{"name":"Pattern","midi_path":"pattern.mid"}}
+      ]})"));
+    EXPECT_FALSE(axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"insert","type":"insert_sequence","partition_index":0,"volume_name":"Songs",
+         "sequence":{"name":"Pattern","midi_path":"pattern.mid","system_exclusive_policy":"drop"}}
+      ]})"));
 }
 
 TEST(AlterationManifest, ParsesStrictVolumeRename) {

@@ -811,6 +811,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/midi-inspections': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['midi.inspect'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/package-exports': {
         parameters: {
             query?: never;
@@ -2387,6 +2403,29 @@ export interface components {
             };
             meta: components['schemas']['ResponseMeta'];
         };
+        MidiControllerCount: {
+            controller: number;
+            eventCount: number;
+        };
+        MidiInspection: {
+            channelEventCount: number;
+            controllers: components['schemas']['MidiControllerCount'][];
+            endTick: number;
+            eventCount: number;
+            /** @enum {integer} */
+            format: 0;
+            metaEventCount: number;
+            systemExclusiveDataBytes: number;
+            systemExclusiveEventCount: number;
+            systemExclusiveManufacturerIds: string[];
+            systemExclusivePreservationSupported: boolean;
+            ticksPerQuarterNote: number;
+            /** @enum {integer} */
+            trackCount: 1;
+        };
+        MidiInspectionRequest: {
+            source: components['schemas']['InputRef'];
+        };
         ObjectsRequest: {
             destination: components['schemas']['DirectoryRef'];
             /** @default false */
@@ -2728,12 +2767,18 @@ export interface components {
             meta: components['schemas']['ResponseMeta'];
         };
         SequenceMetadata: {
+            effectiveInitialTempoMicrosecondsPerQuarterNote: number;
             endTick: number;
             eventCount: number;
             firstTick: number;
             formatVersion: number;
-            tempoBpm: number | null;
+            headerTempoBpm: number | null;
+            tempoEvents: components['schemas']['SequenceTempoEvent'][];
             ticksPerQuarterNote: number;
+        };
+        SequenceTempoEvent: {
+            microsecondsPerQuarterNote: number;
+            tick: number;
         };
         Upload: {
             declaredSize: number;
@@ -6760,6 +6805,124 @@ export interface operations {
                 content: {
                     'application/json': {
                         data: components['schemas']['ManifestTemplateResult'];
+                        meta: components['schemas']['ResponseMeta'];
+                    };
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'midi.inspect': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['MidiInspectionRequest'];
+            };
+        };
+        responses: {
+            /** @description Operation completed */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': {
+                        data: components['schemas']['MidiInspection'];
                         meta: components['schemas']['ResponseMeta'];
                     };
                 };

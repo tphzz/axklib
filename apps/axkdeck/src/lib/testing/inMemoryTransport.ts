@@ -35,6 +35,8 @@ import type {
     RelationshipPageFilter,
     SequenceImportItem,
     SequenceImportTarget,
+    SequenceSystemExclusivePolicy,
+    MidiInspection,
     VolumeMutation,
     WaveDataOrphanInspection,
 } from '../transport';
@@ -261,6 +263,10 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('inspectAudio', [source, targetSampleRate]);
     }
 
+    inspectMidi(source: InputFileLocation): Promise<MidiInspection> {
+        return this.invoke('inspectMidi', [source]);
+    }
+
     startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState> {
         return this.invoke('startAudioImport', [sessionId, target, items]);
     }
@@ -269,8 +275,9 @@ export class InMemoryImageTransport implements ImageTransport {
         sessionId: number,
         target: SequenceImportTarget,
         items: SequenceImportItem[],
+        systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState> {
-        return this.invoke('startSequenceImport', [sessionId, target, items]);
+        return this.invoke('startSequenceImport', [sessionId, target, items, systemExclusivePolicy]);
     }
 
     startImageSequenceExport(

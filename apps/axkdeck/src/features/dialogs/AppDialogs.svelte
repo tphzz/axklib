@@ -288,7 +288,7 @@
         onchooselocal={transport.supportsClientUploads && sequenceFileInput
             ? () => sequenceImport.chooseLocal(sequenceFileInput)
             : undefined}
-        oncommit={(items) => sequenceImport.commit(items)}
+        oncommit={(items, systemExclusivePolicy) => sequenceImport.commit(items, systemExclusivePolicy)}
         oncancel={() => (sequenceImport.request = null)}
     />
 {/if}

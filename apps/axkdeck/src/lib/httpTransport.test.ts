@@ -1564,10 +1564,15 @@ describe('HttpImageTransport', () => {
         const uploaded = clientUploadLocation({ uploadId: 'upload-midi' }, 'MIDI', 'Intro.mid');
         const workspace = serverFile('midi/Ending.midi');
         const opened = await transport.openImage(serverFile('images/base.hds'));
-        await transport.startSequenceImport(opened.sessionId, { partitionIndex: 2, volumeName: 'Songs' }, [
-            { source: uploaded, sequenceName: 'Intro' },
-            { source: workspace, sequenceName: 'Ending' },
-        ]);
+        await transport.startSequenceImport(
+            opened.sessionId,
+            { partitionIndex: 2, volumeName: 'Songs' },
+            [
+                { source: uploaded, sequenceName: 'Intro' },
+                { source: workspace, sequenceName: 'Ending' },
+            ],
+            'exclude',
+        );
 
         expect(alterationBody).toEqual({
             imageId: 'image-midi',
@@ -1581,14 +1586,22 @@ describe('HttpImageTransport', () => {
                             type: 'insert_sequence',
                             partition_index: 2,
                             volume_name: 'Songs',
-                            sequence: { name: 'Intro', midi_path: 'sequence/import-0.mid' },
+                            sequence: {
+                                name: 'Intro',
+                                midi_path: 'sequence/import-0.mid',
+                                system_exclusive_policy: 'exclude',
+                            },
                         },
                         {
                             id: 'sequence-1',
                             type: 'insert_sequence',
                             partition_index: 2,
                             volume_name: 'Songs',
-                            sequence: { name: 'Ending', midi_path: 'sequence/import-1.mid' },
+                            sequence: {
+                                name: 'Ending',
+                                midi_path: 'sequence/import-1.mid',
+                                system_exclusive_policy: 'exclude',
+                            },
                         },
                     ],
                 },

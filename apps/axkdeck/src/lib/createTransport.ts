@@ -63,6 +63,9 @@ class UnavailableTransport implements ImageTransport {
     inspectAudio(): Promise<never> {
         return this.unavailable();
     }
+    inspectMidi(): Promise<never> {
+        return this.unavailable();
+    }
 
     startAudioImport(): Promise<never> {
         return this.unavailable();

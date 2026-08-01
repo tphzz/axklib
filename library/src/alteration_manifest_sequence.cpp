@@ -45,6 +45,20 @@ Result<std::string> text_field(const nlohmann::json &row, std::string_view field
     return row[field].get<std::string>();
 }
 
+Result<SequenceSystemExclusivePolicy> system_exclusive_policy(const nlohmann::json &row, std::string_view context) {
+    auto value = text_field(row, "system_exclusive_policy", context);
+    if (!value)
+        return std::unexpected{value.error()};
+    if (*value == "reject")
+        return SequenceSystemExclusivePolicy::reject;
+    if (*value == "exclude")
+        return SequenceSystemExclusivePolicy::exclude;
+    if (*value == "preserve")
+        return SequenceSystemExclusivePolicy::preserve;
+    return std::unexpected{
+        manifest_error(std::string{context} + ".system_exclusive_policy must be reject, exclude, or preserve")};
+}
+
 } // namespace
 
 Result<AlterationOperationData> parse_sequence_operation_json(const nlohmann::json &row, std::string_view type,
@@ -84,24 +98,29 @@ Result<AlterationOperationData> parse_sequence_operation_json(const nlohmann::js
         return std::unexpected{valid.error()};
     if (!row["sequence"].is_object())
         return std::unexpected{manifest_error(std::string{context} + ".sequence must be an object")};
-    if (auto valid = exact_fields(row["sequence"], {"midi_path", "name"}, std::string{context} + ".sequence"); !valid)
+    if (auto valid = exact_fields(row["sequence"], {"midi_path", "name", "system_exclusive_policy"},
+                                  std::string{context} + ".sequence");
+        !valid)
         return std::unexpected{valid.error()};
     auto volume = text_field(row, "volume_name", context);
     auto name = object_name(row["sequence"], "name", std::string{context} + ".sequence");
     auto path = text_field(row["sequence"], "midi_path", std::string{context} + ".sequence");
+    auto policy = system_exclusive_policy(row["sequence"], std::string{context} + ".sequence");
     if (!volume)
         return std::unexpected{volume.error()};
     if (!name)
         return std::unexpected{name.error()};
     if (!path)
         return std::unexpected{path.error()};
+    if (!policy)
+        return std::unexpected{policy.error()};
     auto native_path = text::path_from_utf8(*path);
     if (!native_path)
         return std::unexpected{manifest_error(std::string{context} + ".sequence.midi_path must be valid UTF-8")};
     if (native_path->is_relative())
         *native_path = base_directory / *native_path;
     return InsertSequenceOperation{
-        std::move(selector), std::move(*volume), {std::move(*name), std::move(*native_path)}};
+        std::move(selector), std::move(*volume), {std::move(*name), std::move(*native_path), *policy}};
 }
 
 } // namespace axk::detail

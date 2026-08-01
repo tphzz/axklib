@@ -128,6 +128,30 @@ TEST(CliSchema, InfoV1KeepsRecursiveOrderNullCountsAndUtf8Paths) {
     EXPECT_EQ(parsed["load_errors"][0]["error_code"], 100U);
 }
 
+TEST(CliSchema, SequenceTempoSeparatesHeaderEffectiveValueAndTimelineMap) {
+    axk::CurrentSequence sequence;
+    sequence.header_tempo_bpm = 130U;
+    sequence.effective_initial_tempo_microseconds_per_quarter_note = 460'122U;
+    sequence.tempo_events = {{.tick = 0U, .microseconds_per_quarter_note = 460'122U},
+                             {.tick = 384U, .microseconds_per_quarter_note = 400'000U}};
+
+    object_schema::ObjectOutput object;
+    object.header.raw_type = "SEQU";
+    object.decoded.payload = std::move(sequence);
+    object_schema::ObjectsOutput output{
+        .shape = object_schema::ContainerShape::media, .container_kind = "object", .objects = {std::move(object)}};
+
+    const auto serialized = object_schema::serialize(output, false);
+    ASSERT_TRUE(serialized) << serialized.error().message;
+    const auto decoded = nlohmann::json::parse(*serialized)["objects"][0]["decoded"];
+    EXPECT_EQ(decoded["header_tempo_bpm"], 130U);
+    EXPECT_EQ(decoded["effective_initial_tempo_microseconds_per_quarter_note"], 460'122U);
+    ASSERT_EQ(decoded["tempo_events"].size(), 2U);
+    EXPECT_EQ(decoded["tempo_events"][1]["tick"], 384U);
+    EXPECT_EQ(decoded["tempo_events"][1]["microseconds_per_quarter_note"], 400'000U);
+    EXPECT_FALSE(decoded.contains("tempo_bpm"));
+}
+
 TEST(CliSchema, AlterationV1DistinguishesNullEmptyAndPresentValues) {
     schema::AlterationOutput output{
         .source_path_utf8 = "source/\xc3\xa4.hds",

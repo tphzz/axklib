@@ -120,6 +120,11 @@ OrderedJson decoded_json(const DecodedObject &object) {
     }
     if (const auto *sequence = std::get_if<CurrentSequence>(&object.payload)) {
         auto events = OrderedJson::array();
+        auto tempo_events = OrderedJson::array();
+        for (const auto &event : sequence->tempo_events) {
+            tempo_events.push_back(
+                {{"tick", event.tick}, {"microseconds_per_quarter_note", event.microseconds_per_quarter_note}});
+        }
         for (const auto &event : sequence->events) {
             std::string_view kind{"channel"};
             if (event.kind == SequenceEventKind::meta)
@@ -134,7 +139,11 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"first_tick", sequence->first_tick},
                 {"end_tick", sequence->end_tick},
                 {"event_count", sequence->event_count},
-                {"tempo_bpm", sequence->tempo_bpm ? OrderedJson(*sequence->tempo_bpm) : OrderedJson(nullptr)},
+                {"header_tempo_bpm",
+                 sequence->header_tempo_bpm ? OrderedJson(*sequence->header_tempo_bpm) : OrderedJson(nullptr)},
+                {"effective_initial_tempo_microseconds_per_quarter_note",
+                 sequence->effective_initial_tempo_microseconds_per_quarter_note},
+                {"tempo_events", std::move(tempo_events)},
                 {"events", std::move(events)},
                 {"raw_payload_hex", hex(sequence->raw_payload)}};
     }
