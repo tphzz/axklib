@@ -63,11 +63,10 @@ struct IsoNode {
     std::uint32_t sector{};
     std::size_t parent{};
     std::vector<std::byte> owned_data;
-    const std::vector<std::byte> *external_data{};
+    std::shared_ptr<const RandomAccessReader> external_data;
 
-    [[nodiscard]] std::span<const std::byte> data() const noexcept {
-        return external_data == nullptr ? std::span<const std::byte>{owned_data}
-                                        : std::span<const std::byte>{*external_data};
+    [[nodiscard]] std::uint64_t data_size() const noexcept {
+        return external_data == nullptr ? owned_data.size() : external_data->size();
     }
 };
 
@@ -77,7 +76,9 @@ std::vector<std::byte> directory_record(const IsoNode &node, std::span<const std
     result[0] = static_cast<std::byte>(length);
     little32(result, 2, node.sector);
     big32(result, 6, node.sector);
-    const auto data_size = node.directory ? sector_size : node.data().size();
+    const auto data_size = node.directory ? sector_size : node.data_size();
+    if (data_size > std::numeric_limits<std::uint32_t>::max())
+        return {};
     little32(result, 10, static_cast<std::uint32_t>(data_size));
     big32(result, 14, static_cast<std::uint32_t>(data_size));
     const auto time = recording_time();
@@ -291,11 +292,15 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPubli
         nodes.push_back({std::move(name), false, 0, parent, std::move(data), nullptr});
         return {};
     };
-    const auto add_external_file = [&](std::string name, const std::vector<std::byte> &data,
+    const auto add_external_file = [&](std::string name, std::shared_ptr<const RandomAccessReader> data,
                                        std::size_t parent) -> Result<void> {
         if (auto valid = validate_file(name, parent); !valid)
             return valid;
-        nodes.push_back({std::move(name), false, 0, parent, {}, &data});
+        if (data == nullptr) {
+            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                              "ISO9660 file payload reader is missing")};
+        }
+        nodes.push_back({std::move(name), false, 0, parent, {}, std::move(data)});
         return {};
     };
     const auto find_child = [&](std::size_t parent, std::string_view name) -> std::optional<std::size_t> {
@@ -365,10 +370,6 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPubli
             for (const auto &object : volume->objects)
                 categories[category(object.type)].push_back(&object);
             for (auto &[name, objects] : categories) {
-                std::ranges::sort(objects, [](const auto *left, const auto *right) {
-                    return std::tuple{left->name, left->payload.size()} <
-                           std::tuple{right->name, right->payload.size()};
-                });
                 auto category_node = add_directory(name, volume_node);
                 if (!category_node)
                     return std::unexpected{category_node.error()};
@@ -404,7 +405,9 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPubli
         auto parent = ensure_directory(parent_path);
         if (!parent)
             return std::unexpected{parent.error()};
-        if (auto added = add_external_file(std::string{name}, retained.payload, *parent); !added)
+        if (auto added =
+                add_external_file(std::string{name}, std::make_shared<MemoryReader>(retained.payload), *parent);
+            !added)
             return std::unexpected{added.error()};
     }
 
@@ -412,7 +415,7 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPubli
     file_sizes.reserve(nodes.size());
     for (const auto &node : nodes) {
         if (!node.directory)
-            file_sizes.push_back(node.data().size());
+            file_sizes.push_back(node.data_size());
     }
     const auto directory_count = static_cast<std::size_t>(std::ranges::count(nodes, true, &IsoNode::directory));
     const auto sector_count = checked_iso9660_sector_count(directory_count, file_sizes);
@@ -430,8 +433,8 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPubli
         if (node.directory)
             continue;
         node.sector = next_sector;
-        next_sector += static_cast<std::uint32_t>(node.data().size() / sector_size +
-                                                  (node.data().size() % sector_size == 0U ? 0U : 1U));
+        next_sector += static_cast<std::uint32_t>(node.data_size() / sector_size +
+                                                  (node.data_size() % sector_size == 0U ? 0U : 1U));
     }
     if (next_sector != *sector_count) {
         return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
@@ -505,14 +508,23 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPubli
     for (const auto &node : nodes) {
         if (node.directory)
             continue;
-        const auto data = node.data();
-        std::size_t offset{};
-        while (offset < data.size()) {
+        std::uint64_t offset{};
+        std::vector<std::byte> buffer(write_chunk_size);
+        while (offset < node.data_size()) {
             if (const auto check = cancellation.check(); !check)
                 return std::unexpected{check.error()};
-            const auto count = std::min(write_chunk_size, data.size() - offset);
-            if (auto written = publication.write_at(static_cast<std::uint64_t>(node.sector) * sector_size + offset,
-                                                    data.subspan(offset, count));
+            const auto count =
+                static_cast<std::size_t>(std::min<std::uint64_t>(write_chunk_size, node.data_size() - offset));
+            auto chunk = std::span{buffer}.first(count);
+            if (node.external_data != nullptr) {
+                if (auto read = node.external_data->read_exact_at(offset, chunk); !read)
+                    return std::unexpected{read.error()};
+            } else {
+                std::ranges::copy(std::span{node.owned_data}.subspan(static_cast<std::size_t>(offset), count),
+                                  chunk.begin());
+            }
+            if (auto written =
+                    publication.write_at(static_cast<std::uint64_t>(node.sector) * sector_size + offset, chunk);
                 !written) {
                 return written;
             }

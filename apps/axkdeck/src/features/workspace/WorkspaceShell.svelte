@@ -74,6 +74,7 @@
         packageExportAvailable: boolean;
         audioExportAvailable: boolean;
         sequenceExportAvailable: boolean;
+        mediaConversionAvailable: boolean;
         openConnectionSettings: () => void;
         openImage: () => void;
         createImage: () => void;
@@ -128,6 +129,7 @@
         packageExportAvailable,
         audioExportAvailable,
         sequenceExportAvailable,
+        mediaConversionAvailable,
         openConnectionSettings,
         openImage,
         createImage,
@@ -268,6 +270,7 @@
             packageImportEnabled={packageImportAvailable}
             packageExportEnabled={packageExportAvailable}
             audioExportEnabled={audioExportAvailable}
+            mediaConversionEnabled={mediaConversionAvailable}
             onimageaction={imageAction}
             onloadchildren={(parentId, offset, limit) =>
                 sessionId === null

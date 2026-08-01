@@ -25,6 +25,7 @@
         packageImportEnabled?: boolean;
         packageExportEnabled?: boolean;
         audioExportEnabled?: boolean;
+        mediaConversionEnabled?: boolean;
         onimageaction: (item: DiskTreeItem, action: ImageTreeAction) => void;
     }
 
@@ -45,6 +46,7 @@
         packageImportEnabled = false,
         packageExportEnabled = false,
         audioExportEnabled = false,
+        mediaConversionEnabled = false,
         onimageaction,
     }: Props = $props();
     let filter = $state('');
@@ -104,7 +106,7 @@
         treeMenu = {
             item,
             left: Math.max(8, Math.min(x, window.innerWidth - 180)),
-            top: Math.max(8, Math.min(y, window.innerHeight - 112)),
+            top: Math.max(8, Math.min(y, window.innerHeight - 208)),
         };
     }
 
@@ -252,6 +254,7 @@
                         {packageImportEnabled}
                         {packageExportEnabled}
                         {audioExportEnabled}
+                        {mediaConversionEnabled}
                         onrequestmenu={requestTreeMenu}
                     />
                 {:else}
@@ -294,6 +297,14 @@
         onkeydown={(event) => event.stopPropagation()}
     >
         {#if treeMenu.item.kind === 'partition'}
+            {#if mediaConversionEnabled}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-cdrom')}
+                    >Export CD-ROM image…</button
+                >
+                {#if partitionActionsEnabled || volumeActionsEnabled}
+                    <div class="context-menu-separator" role="separator"></div>
+                {/if}
+            {/if}
             {#if partitionActionsEnabled}
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('rename-partition')}
                     >Rename partition</button
@@ -317,8 +328,13 @@
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-sfz')}>Export SFZ…</button
                 >
             {/if}
+            {#if mediaConversionEnabled && treeMenu.item.volumeDirectoryId !== undefined}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-floppy')}
+                    >Export floppy image…</button
+                >
+            {/if}
             {#if volumeActionsEnabled}
-                {#if packageImportEnabled || packageExportEnabled || audioExportEnabled}
+                {#if packageImportEnabled || packageExportEnabled || audioExportEnabled || mediaConversionEnabled}
                     <div class="context-menu-separator" role="separator"></div>
                 {/if}
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('rename-volume')}

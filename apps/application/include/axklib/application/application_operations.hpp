@@ -23,6 +23,7 @@ make_application_registry(const Sandbox &sandbox, UploadStore &uploads,
 [[nodiscard]] Result<void> bind_session_application_operations(OperationRegistry &registry, const Sandbox &sandbox,
                                                                UploadStore &uploads, ImageSessionManager &images,
                                                                AlterationJournalStore &journals,
-                                                               DownloadArchiveStore &downloads);
+                                                               DownloadArchiveStore &downloads,
+                                                               const axk::MediaBuildLimits &media_limits = {});
 
 } // namespace axk::app

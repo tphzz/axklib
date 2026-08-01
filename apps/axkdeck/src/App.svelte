@@ -7,6 +7,7 @@
     import { PickerController, type PickerRequest } from './features/dialogs/picker';
     import AppDialogs from './features/dialogs/AppDialogs.svelte';
     import { ExportWorkflow } from './features/export/workflow.svelte';
+    import { MediaExportWorkflow } from './features/export/mediaWorkflow.svelte';
     import { AudioImportWorkflow, audioExtensions } from './features/import/audioWorkflow.svelte';
     import { MediaDropWorkflow } from './features/import/mediaDropWorkflow.svelte';
     import { PackageImportWorkflow } from './features/import/packageWorkflow.svelte';
@@ -77,6 +78,14 @@
         imageLocation: () => imageSessionWorkflow.location,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         requestCompanionDisks: (retry) => imageSessionWorkflow.requestCompanionDisks(retry),
+    });
+    const mediaExportWorkflow = new MediaExportWorkflow({
+        transport,
+        jobs: jobController,
+        picker: pickerController,
+        isDesktop,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
     const catalogHooks = {
         stopPlayback: () => Promise.resolve(),
@@ -197,6 +206,7 @@
         audition: auditionWorkflow,
         mutation: mutationWorkflow,
         exports: exportWorkflow,
+        mediaExports: mediaExportWorkflow,
         packageImport: packageImportWorkflow,
         deletion: deletionWorkflow,
         clearExportSelection: clearPackageExportSelection,
@@ -209,6 +219,7 @@
 
     onDestroy(() => {
         exportWorkflow.dispose();
+        mediaExportWorkflow.dispose();
         deletionWorkflow.dispose();
         pickerController.dispose();
         void packageImportWorkflow.dispose();
@@ -312,6 +323,12 @@
                     typeLabel: 'Volume',
                 },
             ]);
+            return;
+        }
+        if (action === 'export-cdrom' || action === 'export-floppy') {
+            if (!imageSessionWorkflow.mediaConversionAvailable) return;
+            imageSessionWorkflow.selectedSource = item;
+            void mediaExportWorkflow.open(item);
             return;
         }
         if (mutationWorkflow.requestVolumeAction(item, action)) imageSessionWorkflow.selectedSource = item;
@@ -451,6 +468,7 @@
     packageExportAvailable={imageSessionWorkflow.packageExportAvailable}
     audioExportAvailable={imageSessionWorkflow.audioExportAvailable}
     sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
+    mediaConversionAvailable={imageSessionWorkflow.mediaConversionAvailable}
     openConnectionSettings={() => void openConnectionSettings()}
     openImage={() => void imageSessionWorkflow.chooseAndOpen()}
     createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}
@@ -493,6 +511,7 @@
     mutation={mutationWorkflow}
     packageImport={packageImportWorkflow}
     exports={exportWorkflow}
+    mediaExports={mediaExportWorkflow}
     deletion={deletionWorkflow}
     mediaDrop={mediaDropWorkflow}
     audioImport={audioImportWorkflow}

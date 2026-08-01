@@ -182,6 +182,7 @@ crow::response ServerApplication::image_content_response(const crow::request &re
                         {"parentId", item.parent_id ? Json(*item.parent_id) : Json{}},
                         {"depth", item.depth},
                         {"partitionIndex", item.partition_index ? Json(*item.partition_index) : Json{}},
+                        {"volumeDirectoryId", item.volume_directory_id ? Json(*item.volume_directory_id) : Json{}},
                         {"kind", item.kind},
                         {"name", item.name},
                         {"displayName", item.display_name},

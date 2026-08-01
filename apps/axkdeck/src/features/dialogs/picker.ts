@@ -8,6 +8,7 @@ export type PickerParentDialog =
     | 'package-export'
     | 'audio-export'
     | 'sequence-export'
+    | 'media-export'
     | 'sequence-import';
 export type PickerSelection = ImageLocation | DirectoryLocation | FileLocation[];
 

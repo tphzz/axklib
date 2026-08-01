@@ -84,6 +84,7 @@ struct ImageContentItem {
     std::optional<std::string> parent_id;
     std::size_t depth{};
     std::optional<std::uint8_t> partition_index;
+    std::optional<std::uint32_t> volume_directory_id;
     std::string kind;
     std::string name;
     std::string display_name;

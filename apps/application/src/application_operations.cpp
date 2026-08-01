@@ -8,6 +8,7 @@
 #include "axklib/application/midi_operations.hpp"
 #include "axklib/application/package_operations.hpp"
 #include "axklib/application/session_audio_export_operations.hpp"
+#include "axklib/application/session_media_conversion_operations.hpp"
 #include "axklib/application/session_sequence_operations.hpp"
 #include "axklib/application/validation_operations.hpp"
 #include "axklib/application/write_operations.hpp"
@@ -209,11 +210,9 @@ axk::app::make_application_registry(const Sandbox &sandbox, UploadStore &uploads
     return registry;
 }
 
-axk::app::Result<void> axk::app::bind_session_application_operations(OperationRegistry &registry,
-                                                                     const Sandbox &sandbox, UploadStore &uploads,
-                                                                     ImageSessionManager &images,
-                                                                     AlterationJournalStore &journals,
-                                                                     DownloadArchiveStore &downloads) {
+axk::app::Result<void> axk::app::bind_session_application_operations(
+    OperationRegistry &registry, const Sandbox &sandbox, UploadStore &uploads, ImageSessionManager &images,
+    AlterationJournalStore &journals, DownloadArchiveStore &downloads, const axk::MediaBuildLimits &media_limits) {
     if (auto bound = bind_directory_archive_operations(registry, sandbox, downloads); !bound)
         return bound;
     if (auto bound = bind_audition_operations(registry, images); !bound)
@@ -223,6 +222,9 @@ axk::app::Result<void> axk::app::bind_session_application_operations(OperationRe
     if (auto bound = bind_session_package_operations(registry, sandbox, uploads, images, journals, downloads); !bound)
         return bound;
     if (auto bound = bind_session_audio_export_operations(registry, sandbox, images, downloads); !bound)
+        return bound;
+    if (auto bound = bind_session_media_conversion_operations(registry, sandbox, images, downloads, media_limits);
+        !bound)
         return bound;
     return bind_session_sequence_operations(registry, sandbox, images, downloads);
 }

@@ -77,6 +77,7 @@ export function mapContentItem(item: ApiContentItem, parent?: DiskTreeItem): Dis
         objectType: item.objectType ?? undefined,
         scopeRole: item.scopeRole,
         volumeId,
+        volumeDirectoryId: item.volumeDirectoryId ?? undefined,
         volumeName,
         partitionIndex,
     };

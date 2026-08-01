@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <set>
 #include <span>
@@ -223,7 +224,20 @@ Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublica
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                               "FAT12 object filename space is exhausted")};
         }
-        if (auto written = write_file(filename, image.objects[index].payload); !written) {
+        const auto &object = image.objects[index];
+        if (object.payload == nullptr || object.size() > std::numeric_limits<UINT>::max()) {
+            f_mount(nullptr, "", 0);
+            reset_disk();
+            return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
+                                              "FAT12 object payload reader is missing or too large")};
+        }
+        std::vector<std::byte> payload(static_cast<std::size_t>(object.size()));
+        if (auto read = object.payload->read_exact_at(0U, payload); !read) {
+            f_mount(nullptr, "", 0);
+            reset_disk();
+            return std::unexpected{read.error()};
+        }
+        if (auto written = write_file(filename, payload); !written) {
             f_mount(nullptr, "", 0);
             reset_disk();
             return std::unexpected{written.error()};

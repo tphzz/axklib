@@ -135,6 +135,41 @@ TEST_F(DownloadArchiveStoreTest, RetainsOwnerBoundNonArchiveDownloads) {
     EXPECT_EQ(content->path.extension(), ".download");
 }
 
+TEST_F(DownloadArchiveStoreTest, StreamsOwnerPrivateGeneratedFilesIntoRetainedDownloads) {
+    const auto owned = root_ / "owned-file";
+    std::filesystem::create_directory(owned);
+    std::filesystem::permissions(owned, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+    std::vector<std::byte> expected(2U * 1024U * 1024U + 37U);
+    for (std::size_t index{}; index < expected.size(); ++index)
+        expected[index] = static_cast<std::byte>(index % 251U);
+    {
+        std::ofstream output{owned / "disk.iso", std::ios::binary};
+        output.write(reinterpret_cast<const char *>(expected.data()), static_cast<std::streamsize>(expected.size()));
+    }
+    axk::app::DownloadArchiveStore store{root_ / "owned-file-downloads", 4U * 1024U * 1024U, 4U * 1024U * 1024U, 4U,
+                                         std::chrono::seconds{30}};
+
+    const auto created =
+        store.retain_owned_file("owner", owned / "disk.iso", "Sampler.iso", "application/x-iso9660-image");
+    ASSERT_TRUE(created) << created.error().message;
+    EXPECT_EQ(created->filename, "Sampler.iso");
+    EXPECT_EQ(created->size_bytes, expected.size());
+    const auto content = store.open(created->reference, "owner");
+    ASSERT_TRUE(content) << content.error().message;
+    std::vector<std::byte> actual(expected.size());
+    ASSERT_TRUE(content->reader->read_exact_at(0U, actual));
+    EXPECT_EQ(actual, expected);
+
+#if !defined(_WIN32)
+    std::filesystem::permissions(owned, std::filesystem::perms::owner_all | std::filesystem::perms::group_read,
+                                 std::filesystem::perm_options::replace);
+    const auto public_source =
+        store.retain_owned_file("owner", owned / "disk.iso", "Public.iso", "application/x-iso9660-image");
+    ASSERT_FALSE(public_source);
+    EXPECT_EQ(public_source.error().code, "invalid_archive_request");
+#endif
+}
+
 TEST_F(DownloadArchiveStoreTest, EnforcesEntryByteAndRetentionLimitsWithoutLeavingStagingFiles) {
     auto now = std::chrono::steady_clock::now();
     axk::app::DownloadArchiveStore limited{root_ / "limited",  2048U, 2048U, 1U, std::chrono::seconds{5},

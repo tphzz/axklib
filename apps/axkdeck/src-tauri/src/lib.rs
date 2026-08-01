@@ -19,8 +19,8 @@ use local_directory_exports::{
     select_local_directory_export_destination,
 };
 use local_packages::{
-    PackageSaveCandidateStore, save_retained_package, select_local_package,
-    select_local_package_destination,
+    PackageSaveCandidateStore, save_retained_media, save_retained_package,
+    select_local_media_destination, select_local_package, select_local_package_destination,
 };
 use local_workspaces::{WorkspaceCandidateStore, commit_local_workspace, select_local_workspace};
 
@@ -95,7 +95,8 @@ mod tests {
         checked_tar_path, extract_directory_tar, normalize_directory_destination,
     };
     use crate::local_packages::{
-        normalize_package_destination, supported_package_extension, valid_retained_content_path,
+        normalize_package_destination, supported_media_extension, supported_package_extension,
+        valid_retained_content_path,
     };
 
     #[test]
@@ -134,6 +135,14 @@ mod tests {
             Path::new("Selection.axkpkg")
         );
         assert!(normalize_package_destination(PathBuf::from("Volume.axkvol"), "axkpkg").is_err());
+    }
+
+    #[test]
+    fn media_destination_accepts_only_iso_and_ima_images() {
+        assert_eq!(supported_media_extension("Partition.iso"), Some("iso"));
+        assert_eq!(supported_media_extension("Volume.IMA"), Some("ima"));
+        assert_eq!(supported_media_extension("Package.axkvol"), None);
+        assert_eq!(supported_media_extension("No extension"), None);
     }
 
     #[test]
@@ -407,6 +416,8 @@ pub fn run() {
             select_local_package,
             select_local_package_destination,
             save_retained_package,
+            select_local_media_destination,
+            save_retained_media,
             select_local_directory_export_destination,
             save_retained_directory_export,
             open_developer_tools,

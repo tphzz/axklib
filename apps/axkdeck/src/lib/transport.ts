@@ -40,6 +40,7 @@ export interface OpenedImage {
     packageExportAvailable: boolean;
     audioExportAvailable: boolean;
     sequenceExportAvailable: boolean;
+    mediaConversionAvailable: boolean;
 }
 
 export type CompanionDirectorySelection =
@@ -313,7 +314,14 @@ export type ImageSessionAudioExportInspection = components['schemas']['ImageSess
 export type ImageSessionAudioExportResult = components['schemas']['ImageSessionAudioExportResult'];
 export type ImageSessionSequenceExportDestination = components['schemas']['ImageSessionAudioExportDestination'];
 export type ImageSessionSequenceExportResult = components['schemas']['ImageSessionSequenceExportResult'];
+export type ImageSessionMediaConversionInspection = components['schemas']['ImageSessionMediaConversionInspection'];
+export type ImageSessionMediaConversionDestination = components['schemas']['ImageSessionMediaConversionDestination'];
+export type ImageSessionMediaConversionResult = components['schemas']['ImageSessionMediaConversionResult'];
 export type RetainedDownload = components['schemas']['RetainedDownload'];
+
+export type ImageSessionMediaConversionSelection =
+    | { format: 'ISO9660'; partitionIndex: number; isoVolumeId?: string }
+    | { format: 'FAT12_FLOPPY'; partitionIndex: number; volumeDirectoryId: number };
 
 export interface InputBinding {
     logicalPath: string;
@@ -483,6 +491,15 @@ export interface ImageTransport {
         sessionId: number,
         objectIds: string[],
         destination: ImageSessionSequenceExportDestination,
+    ): Promise<JobState>;
+    inspectImageMediaConversion(
+        sessionId: number,
+        selection: ImageSessionMediaConversionSelection,
+    ): Promise<ImageSessionMediaConversionInspection>;
+    startImageMediaConversion(
+        sessionId: number,
+        selection: ImageSessionMediaConversionSelection,
+        destination: ImageSessionMediaConversionDestination,
     ): Promise<JobState>;
     deleteRetainedPackage(download: RetainedDownload): Promise<void>;
     hardDiskCreationProfiles(): Promise<HardDiskCreationProfile[]>;

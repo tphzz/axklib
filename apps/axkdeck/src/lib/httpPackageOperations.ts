@@ -13,6 +13,9 @@ import type {
     ImageSessionPackageRename,
     JobState,
     ImageSessionSequenceExportDestination,
+    ImageSessionMediaConversionDestination,
+    ImageSessionMediaConversionInspection,
+    ImageSessionMediaConversionSelection,
     PackageImportDestination,
     PackageImportPlan,
     PackageInspection,
@@ -172,6 +175,43 @@ export class HttpPackageOperations {
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.jobs.isJob(job)) throw new Error('images.sequence_export did not return a job');
+        return this.jobs.map(job);
+    }
+
+    async inspectMediaConversion(
+        sessionId: number,
+        selection: ImageSessionMediaConversionSelection,
+    ): Promise<ImageSessionMediaConversionInspection> {
+        const session = this.imageSessions.get(sessionId);
+        const result = await this.client.invoke<ImageSessionMediaConversionInspection>(
+            'images.media_conversion.inspect',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                ...selection,
+            },
+        );
+        if (this.jobs.isJob(result)) throw new Error('images.media_conversion.inspect unexpectedly returned a job');
+        return result;
+    }
+
+    async startMediaConversion(
+        sessionId: number,
+        selection: ImageSessionMediaConversionSelection,
+        destination: ImageSessionMediaConversionDestination,
+    ): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.media_conversion',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                ...selection,
+                destination,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.media_conversion did not return a job');
         return this.jobs.map(job);
     }
 

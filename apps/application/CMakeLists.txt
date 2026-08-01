@@ -26,7 +26,8 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/application_op
                                    src/package_operations_support.cpp src/session_package_operations.cpp
                                    src/package_plan_store.cpp src/path_reservations.cpp
                                    src/private_storage.cpp src/relationship_diagnostic.cpp
-                                   src/session_audio_export_operations.cpp src/session_sequence_operations.cpp
+                                   src/session_audio_export_operations.cpp src/session_media_conversion_operations.cpp
+                                   src/session_sequence_operations.cpp
                                    src/system_service.cpp
                                    src/secure_random.cpp src/uploads.cpp src/validation_allocation.cpp
                                    src/validation_exports.cpp src/validation_operations.cpp
@@ -75,6 +76,7 @@ if(BUILD_TESTING)
                                        tests/midi_operations_test.cpp
                                        tests/operation_registry_test.cpp tests/package_operations_test.cpp
                                        tests/path_reservations_test.cpp
+                                       tests/session_media_conversion_operations_test.cpp
                                        tests/secure_random_test.cpp tests/uploads_test.cpp
                                        tests/write_operations_test.cpp)
   target_compile_features(axk_application_tests PRIVATE cxx_std_23)

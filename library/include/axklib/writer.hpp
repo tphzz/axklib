@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -104,6 +105,7 @@ struct HdsBuildManifest {
 };
 
 enum class MediaImageFormat : std::uint8_t { fat12_floppy, iso9660 };
+enum class MediaConversionScope : std::uint8_t { partition, volume };
 enum class SavedObjectSelection : std::uint8_t { roots, all };
 enum class BuildManifestKind : std::uint8_t { hds, fat12_floppy, iso9660 };
 
@@ -276,6 +278,44 @@ struct MediaBuildLimits {
     std::uint64_t maximum_output_bytes{737'280'000ULL};
 };
 
+struct MediaConversionRequest {
+    MediaImageFormat format{MediaImageFormat::fat12_floppy};
+    MediaConversionScope scope{MediaConversionScope::volume};
+    std::uint32_t partition_index{};
+    std::optional<std::uint32_t> volume_directory_id;
+    std::string iso_volume_id{"AXKLIB"};
+};
+
+struct MediaConversionIssue {
+    std::string code;
+    std::string message;
+    bool blocking{true};
+    std::optional<std::uint64_t> required_bytes;
+    std::optional<std::uint64_t> available_bytes;
+};
+
+struct MediaConversionVolumeSummary {
+    std::uint32_t directory_id{};
+    std::string name;
+    std::string raw_volume;
+    std::size_t object_count{};
+    std::uint64_t payload_bytes{};
+};
+
+struct MediaConversionPlanSummary {
+    MediaImageFormat format{MediaImageFormat::fat12_floppy};
+    MediaConversionScope scope{MediaConversionScope::volume};
+    std::uint32_t partition_index{};
+    std::string partition_name;
+    bool can_export{};
+    std::size_t object_count{};
+    std::uint64_t payload_bytes{};
+    std::uint64_t projected_output_bytes{};
+    std::uint64_t capacity_bytes{};
+    std::vector<MediaConversionVolumeSummary> volumes;
+    std::vector<MediaConversionIssue> issues;
+};
+
 AXK_AUDIO_API Result<HdsBuildManifest> parse_hds_build_manifest(std::string_view json,
                                                                 const std::filesystem::path &base_directory = {});
 AXK_AUDIO_API Result<HdsBuildManifest> load_hds_build_manifest(const std::filesystem::path &path);
@@ -298,6 +338,10 @@ AXK_AUDIO_API Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildMan
 AXK_AUDIO_API Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildManifest &manifest,
                                                              const MediaBuildLimits &limits,
                                                              const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<MediaConversionPlanSummary>
+plan_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader, const std::filesystem::path &source_path,
+                      const MediaConversionRequest &request, const MediaBuildLimits &limits = {},
+                      const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<std::uint32_t> choose_sampler_sample_rate(std::uint32_t source_rate,
                                                                std::optional<std::uint32_t> target_sample_rate = {});
 AXK_AUDIO_API Result<AudioSourceInfo> inspect_sampler_audio(const std::filesystem::path &path,
@@ -320,5 +364,10 @@ AXK_AUDIO_API Result<WrittenMediaImage> write_media_image(const MediaBuildManife
                                                           const std::filesystem::path &output_path, bool overwrite,
                                                           const MediaBuildLimits &limits,
                                                           const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenMediaImage>
+write_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader,
+                       const std::filesystem::path &source_path, const MediaConversionRequest &request,
+                       const std::filesystem::path &output_path, bool overwrite = false,
+                       const MediaBuildLimits &limits = {}, const CancellationToken &cancellation = {});
 
 } // namespace axk

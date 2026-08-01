@@ -231,8 +231,7 @@ Result<PackageImportReport> apply_fat12_package_import(const std::filesystem::pa
         }
     }
     std::ranges::sort(prepared.objects, [](const auto &left, const auto &right) {
-        return std::tuple{left.type, left.name, left.payload.size()} <
-               std::tuple{right.type, right.name, right.payload.size()};
+        return std::tuple{left.type, left.name, left.size()} < std::tuple{right.type, right.name, right.size()};
     });
     std::ranges::sort(prepared.retained_files, {}, &detail::PreparedMediaFile::path);
     const auto validator = [&](const std::filesystem::path &temporary) {
@@ -397,8 +396,7 @@ apply_iso9660_package_import(const std::filesystem::path &target_path, std::span
     });
     for (auto &volume : prepared.iso_volumes) {
         std::ranges::sort(volume.objects, [](const auto &left, const auto &right) {
-            return std::tuple{left.type, left.name, left.payload.size()} <
-                   std::tuple{right.type, right.name, right.payload.size()};
+            return std::tuple{left.type, left.name, left.size()} < std::tuple{right.type, right.name, right.size()};
         });
     }
     std::ranges::sort(prepared.retained_files, {}, &detail::PreparedMediaFile::path);

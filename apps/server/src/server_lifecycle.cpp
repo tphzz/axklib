@@ -368,8 +368,8 @@ axk::app::OperationRegistry ServerApplication::prepare_registry(
     auto prepared = axk::app::make_application_registry(sandbox, uploads, std::move(registry), media_limits);
     if (!prepared)
         std::terminate();
-    if (const auto session_operations =
-            axk::app::bind_session_application_operations(*prepared, sandbox, uploads, images, journals, downloads);
+    if (const auto session_operations = axk::app::bind_session_application_operations(
+            *prepared, sandbox, uploads, images, journals, downloads, media_limits);
         !session_operations) {
         std::terminate();
     }

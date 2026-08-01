@@ -1130,12 +1130,13 @@
       "ImageContentItem": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "parentId", "depth", "partitionIndex", "kind", "displayName", "childCount", "objectId", "objectType", "scopeRole", "quality", "basis", "notes", "details"],
+        "required": ["id", "parentId", "depth", "partitionIndex", "volumeDirectoryId", "kind", "displayName", "childCount", "objectId", "objectType", "scopeRole", "quality", "basis", "notes", "details"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "parentId": {"type": ["string", "null"]},
           "depth": {"type": "integer", "minimum": 0},
           "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
+          "volumeDirectoryId": {"type": ["integer", "null"], "minimum": 0, "maximum": 4294967295},
           "kind": {"type": "string", "minLength": 1},
           "name": {"type": "string"},
           "displayName": {"type": "string"},
@@ -2368,6 +2369,156 @@
               {"type": "null"}
             ]
           }
+        }
+      },
+      "MediaConversionIssue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "blocking", "requiredBytes", "availableBytes"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "blocking": {"type": "boolean"},
+          "requiredBytes": {"type": ["integer", "null"], "minimum": 0},
+          "availableBytes": {"type": ["integer", "null"], "minimum": 0}
+        }
+      },
+      "MediaConversionVolumeSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["volumeDirectoryId", "name", "objectCount", "payloadBytes"],
+        "properties": {
+          "volumeDirectoryId": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "name": {"type": "string"},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "payloadBytes": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ImageSessionMediaConversionInspectionRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["imageId", "expectedRevision", "format", "partitionIndex"],
+            "properties": {
+              "imageId": {"type": "string", "minLength": 1},
+              "expectedRevision": {"type": "integer", "minimum": 1},
+              "format": {"const": "ISO9660"},
+              "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+              "isoVolumeId": {"type": "string", "minLength": 1, "maxLength": 32}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["imageId", "expectedRevision", "format", "partitionIndex", "volumeDirectoryId"],
+            "properties": {
+              "imageId": {"type": "string", "minLength": 1},
+              "expectedRevision": {"type": "integer", "minimum": 1},
+              "format": {"const": "FAT12_FLOPPY"},
+              "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+              "volumeDirectoryId": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+            }
+          }
+        ]
+      },
+      "ImageSessionMediaConversionInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "format", "scope", "partitionIndex", "partitionName", "canExport", "objectCount", "payloadBytes", "projectedOutputBytes", "capacityBytes", "volumes", "issues", "defaultFilename"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "format": {"enum": ["ISO9660", "FAT12_FLOPPY"]},
+          "scope": {"enum": ["PARTITION", "VOLUME"]},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "partitionName": {"type": "string"},
+          "canExport": {"type": "boolean"},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "payloadBytes": {"type": "integer", "minimum": 0},
+          "projectedOutputBytes": {"type": "integer", "minimum": 0},
+          "capacityBytes": {"type": "integer", "minimum": 0},
+          "volumes": {"type": "array", "items": {"$ref": "#/components/schemas/MediaConversionVolumeSummary"}},
+          "issues": {"type": "array", "items": {"$ref": "#/components/schemas/MediaConversionIssue"}},
+          "defaultFilename": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageSessionMediaConversionDestination": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "output"],
+            "properties": {
+              "kind": {"const": "WORKSPACE"},
+              "output": {"$ref": "#/components/schemas/FileRef"},
+              "overwrite": {"type": "boolean", "default": false}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "filename"],
+            "properties": {
+              "kind": {"const": "DOWNLOAD"},
+              "filename": {"type": "string", "minLength": 1}
+            }
+          }
+        ]
+      },
+      "ImageSessionMediaConversionRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["imageId", "expectedRevision", "format", "partitionIndex", "destination"],
+            "properties": {
+              "imageId": {"type": "string", "minLength": 1},
+              "expectedRevision": {"type": "integer", "minimum": 1},
+              "format": {"const": "ISO9660"},
+              "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+              "isoVolumeId": {"type": "string", "minLength": 1, "maxLength": 32},
+              "destination": {"$ref": "#/components/schemas/ImageSessionMediaConversionDestination"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["imageId", "expectedRevision", "format", "partitionIndex", "volumeDirectoryId", "destination"],
+            "properties": {
+              "imageId": {"type": "string", "minLength": 1},
+              "expectedRevision": {"type": "integer", "minimum": 1},
+              "format": {"const": "FAT12_FLOPPY"},
+              "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+              "volumeDirectoryId": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+              "destination": {"$ref": "#/components/schemas/ImageSessionMediaConversionDestination"}
+            }
+          }
+        ]
+      },
+      "ImageSessionMediaConversionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "format", "scope", "partitionIndex", "partitionName", "canExport", "objectCount", "payloadBytes", "projectedOutputBytes", "capacityBytes", "volumes", "issues", "defaultFilename", "sizeBytes", "destination", "output", "download"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "format": {"enum": ["ISO9660", "FAT12_FLOPPY"]},
+          "scope": {"enum": ["PARTITION", "VOLUME"]},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "partitionName": {"type": "string"},
+          "canExport": {"const": true},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "payloadBytes": {"type": "integer", "minimum": 0},
+          "projectedOutputBytes": {"type": "integer", "minimum": 0},
+          "capacityBytes": {"type": "integer", "minimum": 0},
+          "volumes": {"type": "array", "items": {"$ref": "#/components/schemas/MediaConversionVolumeSummary"}},
+          "issues": {"type": "array", "items": {"$ref": "#/components/schemas/MediaConversionIssue"}},
+          "defaultFilename": {"type": "string", "minLength": 1},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "destination": {"enum": ["WORKSPACE", "DOWNLOAD"]},
+          "output": {"oneOf": [{"$ref": "#/components/schemas/FileRef"}, {"type": "null"}]},
+          "download": {"oneOf": [{"$ref": "#/components/schemas/RetainedDownload"}, {"type": "null"}]}
         }
       },
       "ManifestTemplateRequest": {

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -42,9 +43,18 @@ struct PreparedWaveformMember {
 };
 
 struct PreparedMediaObject {
+    PreparedMediaObject() = default;
+    PreparedMediaObject(ObjectType object_type, std::string object_name, std::vector<std::byte> bytes)
+        : type(object_type), name(std::move(object_name)), payload(std::make_shared<MemoryReader>(std::move(bytes))) {}
+    PreparedMediaObject(ObjectType object_type, std::string object_name,
+                        std::shared_ptr<const RandomAccessReader> payload_reader)
+        : type(object_type), name(std::move(object_name)), payload(std::move(payload_reader)) {}
+
     ObjectType type{ObjectType::unknown};
     std::string name;
-    std::vector<std::byte> payload;
+    std::shared_ptr<const RandomAccessReader> payload;
+
+    [[nodiscard]] std::uint64_t size() const noexcept { return payload == nullptr ? 0U : payload->size(); }
 };
 
 struct PreparedMediaFile {
@@ -66,6 +76,11 @@ struct PreparedMediaImage {
     std::vector<PreparedMediaObject> objects;
     std::vector<PreparedMediaFile> retained_files;
     std::vector<PreparedIsoVolume> iso_volumes;
+};
+
+struct PreparedMediaConversion {
+    PreparedMediaImage image;
+    MediaConversionPlanSummary summary;
 };
 
 Result<std::vector<std::byte>> prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
@@ -90,6 +105,11 @@ Result<std::size_t> checked_directory_index_size(std::span<const PreparedRecord>
 
 Result<PreparedMediaImage> prepare_media_image(const MediaBuildManifest &manifest, const MediaBuildLimits &limits,
                                                const CancellationToken &cancellation);
+Result<PreparedMediaConversion> prepare_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader,
+                                                         const std::filesystem::path &source_path,
+                                                         const MediaConversionRequest &request,
+                                                         const MediaBuildLimits &limits,
+                                                         const CancellationToken &cancellation);
 Result<WrittenMediaImage>
 write_prepared_media_image(const PreparedMediaImage &image, const std::filesystem::path &output_path, bool overwrite,
                            const CancellationToken &cancellation,

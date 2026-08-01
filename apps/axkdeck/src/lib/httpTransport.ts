@@ -22,6 +22,9 @@ import type {
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
     ImageSessionSequenceExportDestination,
+    ImageSessionMediaConversionDestination,
+    ImageSessionMediaConversionInspection,
+    ImageSessionMediaConversionSelection,
     ImageSessionPackageImportPlan,
     ImageSessionPackageRename,
     InputBinding,
@@ -297,6 +300,21 @@ export class HttpImageTransport implements ImageTransport {
         destination: ImageSessionSequenceExportDestination,
     ): Promise<JobState> {
         return this.packages.startSequenceExport(sessionId, objectIds, destination);
+    }
+
+    inspectImageMediaConversion(
+        sessionId: number,
+        selection: ImageSessionMediaConversionSelection,
+    ): Promise<ImageSessionMediaConversionInspection> {
+        return this.packages.inspectMediaConversion(sessionId, selection);
+    }
+
+    startImageMediaConversion(
+        sessionId: number,
+        selection: ImageSessionMediaConversionSelection,
+        destination: ImageSessionMediaConversionDestination,
+    ): Promise<JobState> {
+        return this.packages.startMediaConversion(sessionId, selection, destination);
     }
 
     deleteRetainedPackage(download: components['schemas']['RetainedDownload']): Promise<void> {

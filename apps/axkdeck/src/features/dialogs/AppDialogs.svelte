@@ -2,6 +2,7 @@
     import type { DeletionWorkflow } from '../deletion/workflow.svelte';
     import type { PickerRequest, PickerSelection } from './picker';
     import type { ExportWorkflow } from '../export/workflow.svelte';
+    import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
     import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
     import type { MediaDropWorkflow } from '../import/mediaDropWorkflow.svelte';
     import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
@@ -18,6 +19,7 @@
     import PackageImportDialog from '../../lib/components/PackageImportDialog.svelte';
     import MidiExportDialog from '../../lib/components/MidiExportDialog.svelte';
     import MidiImportDialog from '../../lib/components/MidiImportDialog.svelte';
+    import MediaExportDialog from '../../lib/components/MediaExportDialog.svelte';
     import ServerConnectionSettings from '../../lib/components/ServerConnectionSettings.svelte';
     import ServerStoragePicker from '../../lib/components/ServerStoragePicker.svelte';
     import SfzExportDialog from '../../lib/components/SfzExportDialog.svelte';
@@ -58,6 +60,7 @@
         mutation: MutationWorkflow;
         packageImport: PackageImportWorkflow;
         exports: ExportWorkflow;
+        mediaExports: MediaExportWorkflow;
         deletion: DeletionWorkflow;
         mediaDrop: MediaDropWorkflow;
         audioImport: AudioImportWorkflow;
@@ -93,6 +96,7 @@
         mutation,
         packageImport,
         exports,
+        mediaExports,
         deletion,
         mediaDrop,
         audioImport,
@@ -235,6 +239,15 @@
         onworkspace={() => void exports.sequenceToWorkspace()}
         onlocal={() => void exports.sequenceToComputer()}
         oncancel={() => exports.cancelSequence()}
+    />
+{/if}
+{#if mediaExports.request && pickerRequest?.parentDialog !== 'media-export'}
+    <MediaExportDialog
+        request={mediaExports.request}
+        desktop={isDesktop}
+        onworkspace={() => void mediaExports.toWorkspace()}
+        onlocal={() => void mediaExports.toComputer()}
+        oncancel={() => mediaExports.cancel()}
     />
 {/if}
 {#if deletion.objectRequest}

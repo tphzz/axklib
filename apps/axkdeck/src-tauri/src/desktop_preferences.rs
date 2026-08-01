@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 struct DesktopPreferences {
     last_package_export_directory: Option<PathBuf>,
     last_directory_export_directory: Option<PathBuf>,
+    last_media_export_directory: Option<PathBuf>,
 }
 
 pub struct DesktopPreferencesStore {
@@ -75,6 +76,25 @@ impl DesktopPreferencesStore {
             return Err("the directory export location is not a directory".to_owned());
         }
         self.preferences.last_directory_export_directory = Some(directory);
+        self.persist()
+    }
+
+    pub fn media_export_directory(&self) -> Option<PathBuf> {
+        self.preferences
+            .last_media_export_directory
+            .as_ref()
+            .filter(|directory| directory.is_dir())
+            .cloned()
+    }
+
+    pub fn remember_media_export_directory(&mut self, directory: &Path) -> Result<(), String> {
+        let directory = directory
+            .canonicalize()
+            .map_err(|error| format!("resolve media export directory: {error}"))?;
+        if !directory.is_dir() {
+            return Err("the media export location is not a directory".to_owned());
+        }
+        self.preferences.last_media_export_directory = Some(directory);
         self.persist()
     }
 

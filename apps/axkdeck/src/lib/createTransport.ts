@@ -3,6 +3,7 @@ import type {
     ImageTransport,
     ImageSessionPackageImportPlan,
     ImageSessionAudioExportInspection,
+    ImageSessionMediaConversionInspection,
     AudioImportCapabilities,
     AuditionBundleDescriptor,
     ClientDownload,
@@ -107,6 +108,12 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startImageSequenceExport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    inspectImageMediaConversion(): Promise<ImageSessionMediaConversionInspection> {
+        return this.unavailable();
+    }
+    startImageMediaConversion(): Promise<JobState> {
         return this.unavailable();
     }
     deleteRetainedPackage(_download: RetainedDownload): Promise<void> {

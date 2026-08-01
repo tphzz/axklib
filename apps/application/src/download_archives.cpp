@@ -521,6 +521,124 @@ axk::app::DownloadArchiveStore::retain(std::string owner_id, std::string filenam
 }
 
 axk::app::Result<axk::app::DownloadArchiveSnapshot>
+axk::app::DownloadArchiveStore::retain_owned_file(std::string owner_id, const std::filesystem::path &source,
+                                                  std::string filename, std::string media_type,
+                                                  CancellationToken cancellation, ProgressSink *progress) {
+    if (owner_id.empty() || filename.empty() || filename == "." || filename == ".." || media_type.empty() ||
+        filename.find_first_of("/\\") != std::string::npos) {
+        return std::unexpected(archive_error("invalid_archive_request", "retained download metadata is invalid"));
+    }
+    if (!implementation_->storage_ready)
+        return std::unexpected(
+            archive_error("archive_storage_unavailable", "download archive staging directory is not private"));
+
+    std::error_code status_error;
+    const auto source_status = std::filesystem::symlink_status(source, status_error);
+    const auto parent_status = std::filesystem::status(source.parent_path(), status_error);
+    if (status_error || !std::filesystem::is_regular_file(source_status) ||
+        std::filesystem::is_symlink(source_status) || !std::filesystem::is_directory(parent_status)) {
+        return std::unexpected(archive_error("invalid_archive_request", "retained download source is unavailable"));
+    }
+#if !defined(_WIN32)
+    const auto parent_permissions = parent_status.permissions() & std::filesystem::perms::all;
+    if ((parent_permissions & (std::filesystem::perms::group_all | std::filesystem::perms::others_all)) !=
+        std::filesystem::perms::none) {
+        return std::unexpected(archive_error("invalid_archive_request", "retained download source is not private"));
+    }
+#endif
+    auto reader = axk::FileReader::open(source);
+    if (!reader)
+        return std::unexpected(archive_error("invalid_archive_request", reader.error().message));
+    const auto size = (*reader)->size();
+    if (size > implementation_->maximum_archive_bytes)
+        return std::unexpected(
+            archive_error("download_archive_too_large", "retained download exceeds the configured limit"));
+
+    std::string id;
+    std::filesystem::path final_path;
+    {
+        const std::scoped_lock lock{implementation_->mutex};
+        implementation_->cleanup_locked();
+        if (size > implementation_->maximum_total_bytes - implementation_->reserved_bytes) {
+            return std::unexpected(
+                archive_error("download_archive_quota_exceeded", "download archive staging quota is exhausted", true));
+        }
+        do {
+            auto generated = secure_random_hex(32U);
+            if (!generated)
+                return std::unexpected(archive_error("archive_storage_unavailable", generated.error().message));
+            id = std::move(*generated);
+        } while (implementation_->entries.contains(id));
+        final_path = implementation_->staging_directory / (id + ".download");
+        implementation_->reserved_bytes += size;
+    }
+
+    const auto temporary_path = implementation_->staging_directory / (id + ".part");
+    const auto release_reservation = [&] {
+        const std::scoped_lock lock{implementation_->mutex};
+        implementation_->reserved_bytes -= size;
+        std::error_code ignored;
+        std::filesystem::remove(temporary_path, ignored);
+    };
+    if (const auto created = detail::create_private_file(temporary_path); !created) {
+        release_reservation();
+        return std::unexpected(archive_error("archive_storage_unavailable", created.error().message));
+    }
+    std::ofstream output{temporary_path, std::ios::binary | std::ios::trunc};
+    if (!output) {
+        release_reservation();
+        return std::unexpected(archive_error("archive_storage_unavailable", "retained download cannot be created"));
+    }
+    constexpr std::size_t copy_buffer_size = 1024U * 1024U;
+    std::vector<std::byte> buffer(copy_buffer_size);
+    std::uint64_t offset{};
+    while (offset < size) {
+        if (cancellation.is_cancelled()) {
+            output.close();
+            release_reservation();
+            return std::unexpected(archive_error("operation_cancelled", "retained download was cancelled"));
+        }
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), size - offset));
+        if (auto read = (*reader)->read_exact_at(offset, std::span{buffer}.first(count)); !read) {
+            output.close();
+            release_reservation();
+            return std::unexpected(archive_error("archive_storage_unavailable", read.error().message));
+        }
+        output.write(reinterpret_cast<const char *>(buffer.data()), static_cast<std::streamsize>(count));
+        if (!output) {
+            output.close();
+            release_reservation();
+            return std::unexpected(archive_error("archive_storage_unavailable", "retained download cannot be written"));
+        }
+        offset += count;
+        if (progress)
+            progress->report({axk::ProgressPhase::writing, offset, size, "Retaining generated image", std::nullopt});
+    }
+    output.close();
+    if (!output) {
+        release_reservation();
+        return std::unexpected(archive_error("archive_storage_unavailable", "retained download cannot be finalized"));
+    }
+    std::error_code rename_error;
+    std::filesystem::rename(temporary_path, final_path, rename_error);
+    if (rename_error) {
+        release_reservation();
+        return std::unexpected(archive_error("archive_storage_unavailable", "retained download cannot be published"));
+    }
+
+    const std::scoped_lock lock{implementation_->mutex};
+    auto [position, inserted] = implementation_->entries.emplace(
+        id, Implementation::Entry{std::move(owner_id), std::move(filename), std::move(media_type), final_path, size, 0U,
+                                  implementation_->clock() + implementation_->retention, 0U});
+    if (!inserted) {
+        implementation_->reserved_bytes -= size;
+        std::filesystem::remove(final_path, rename_error);
+        return std::unexpected(archive_error("archive_storage_unavailable", "retained download ID collision"));
+    }
+    return implementation_->snapshot(position->first, position->second);
+}
+
+axk::app::Result<axk::app::DownloadArchiveSnapshot>
 axk::app::DownloadArchiveStore::inspect(const DownloadArchiveRef &reference, std::string_view owner_id) {
     const std::scoped_lock lock{implementation_->mutex};
     auto found = implementation_->owned(reference, owner_id);

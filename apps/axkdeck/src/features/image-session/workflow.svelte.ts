@@ -7,6 +7,7 @@ import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { DeletionWorkflow } from '../deletion/workflow.svelte';
 import type { PickerController } from '../dialogs/picker';
 import type { ExportCompanionRetry, ExportWorkflow } from '../export/workflow.svelte';
+import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
 import { ImageSessionController } from './actions';
 import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
@@ -19,6 +20,7 @@ interface SessionCollaborators {
     audition: AuditionWorkflow;
     mutation: MutationWorkflow;
     exports: ExportWorkflow;
+    mediaExports: MediaExportWorkflow;
     packageImport: PackageImportWorkflow;
     deletion: DeletionWorkflow;
     clearExportSelection: () => void;
@@ -50,6 +52,7 @@ export class ImageSessionWorkflow {
     packageExportAvailable = $state(false);
     audioExportAvailable = $state(false);
     sequenceExportAvailable = $state(false);
+    mediaConversionAvailable = $state(false);
 
     private readonly controller: ImageSessionController;
     private collaborators: SessionCollaborators | null = null;
@@ -261,6 +264,7 @@ export class ImageSessionWorkflow {
         this.packageExportAvailable = opened.packageExportAvailable;
         this.audioExportAvailable = opened.audioExportAvailable;
         this.sequenceExportAvailable = opened.sequenceExportAvailable;
+        this.mediaConversionAvailable = opened.mediaConversionAvailable;
         this.sourceItems = opened.tree;
         const preferredItem = preferred
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -293,6 +297,7 @@ export class ImageSessionWorkflow {
         if (this.sessionId === null) return;
         const collaborators = this.requireCollaborators();
         collaborators.exports.dispose();
+        collaborators.mediaExports.dispose();
         this.companionRequest = null;
         await collaborators.packageImport.dispose();
         await this.controller.close();
@@ -305,6 +310,7 @@ export class ImageSessionWorkflow {
         this.packageExportAvailable = false;
         this.audioExportAvailable = false;
         this.sequenceExportAvailable = false;
+        this.mediaConversionAvailable = false;
         collaborators.deletion.dispose();
     }
 }

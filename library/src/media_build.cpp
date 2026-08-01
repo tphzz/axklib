@@ -117,8 +117,7 @@ Result<std::vector<detail::PreparedMediaObject>> prepare_transfer(const SavedObj
         result.push_back({object->decoded.header.type, object->decoded.header.name, std::move(object->raw_payload)});
     }
     std::ranges::sort(result, [](const auto &left, const auto &right) {
-        return std::tuple{left.type, left.name, left.payload.size()} <
-               std::tuple{right.type, right.name, right.payload.size()};
+        return std::tuple{left.type, left.name, left.size()} < std::tuple{right.type, right.name, right.size()};
     });
     return result;
 }
@@ -147,8 +146,7 @@ prepare_authored(const VolumeSpec &volume, const MediaBuildLimits &limits, const
         result.push_back({header->type, std::move(header->name), std::move(record.payload)});
     }
     std::ranges::sort(result, [](const auto &left, const auto &right) {
-        return std::tuple{left.type, left.name, left.payload.size()} <
-               std::tuple{right.type, right.name, right.payload.size()};
+        return std::tuple{left.type, left.name, left.size()} < std::tuple{right.type, right.name, right.size()};
     });
     return result;
 }
@@ -199,13 +197,13 @@ Result<void> validate_prepared_limits(const detail::PreparedMediaImage &prepared
     }
     if (prepared.iso_volumes.empty()) {
         for (const auto &object : prepared.objects) {
-            if (auto admitted = account(object.payload.size(), true); !admitted)
+            if (auto admitted = account(object.size(), true); !admitted)
                 return admitted;
         }
     } else {
         for (const auto &volume : prepared.iso_volumes) {
             for (const auto &object : volume.objects) {
-                if (auto admitted = account(object.payload.size(), true); !admitted)
+                if (auto admitted = account(object.size(), true); !admitted)
                     return admitted;
             }
         }
@@ -241,13 +239,28 @@ Result<void> validate_written_image(const detail::PreparedMediaImage &prepared, 
     using PayloadIdentity = std::pair<std::uint64_t, package_internal::Sha256Digest>;
     std::multiset<PayloadIdentity> expected;
     std::multiset<PayloadIdentity> actual;
+    const auto expect_object = [&](const detail::PreparedMediaObject &object) -> Result<void> {
+        if (object.payload == nullptr) {
+            return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                              "prepared media object has no payload reader")};
+        }
+        auto digest = package_internal::sha256_reader(*object.payload, cancellation);
+        if (!digest)
+            return std::unexpected{digest.error()};
+        expected.emplace(object.size(), *digest);
+        return {};
+    };
     if (prepared.iso_volumes.empty()) {
-        for (const auto &object : prepared.objects)
-            expected.emplace(object.payload.size(), package_internal::sha256(object.payload));
+        for (const auto &object : prepared.objects) {
+            if (auto added = expect_object(object); !added)
+                return added;
+        }
     } else {
         for (const auto &volume : prepared.iso_volumes) {
-            for (const auto &object : volume.objects)
-                expected.emplace(object.payload.size(), package_internal::sha256(object.payload));
+            for (const auto &object : volume.objects) {
+                if (auto added = expect_object(object); !added)
+                    return added;
+            }
         }
     }
     for (const auto &descriptor : inventory->objects) {

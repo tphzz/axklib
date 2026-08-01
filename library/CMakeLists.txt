@@ -204,6 +204,7 @@ add_library(
   src/alteration_volume.cpp
   src/deletion.cpp
   src/media_build.cpp
+  src/media_conversion.cpp
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
   src/object_write_codec.cpp
@@ -466,6 +467,7 @@ if(BUILD_TESTING)
     tests/hardening_test.cpp
     tests/media_fat12_test.cpp
     tests/media_iso9660_test.cpp
+    tests/media_conversion_test.cpp
     tests/media_yamaha_test.cpp
     tests/object_test.cpp
     tests/package_archive_test.cpp

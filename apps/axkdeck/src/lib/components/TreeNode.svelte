@@ -18,6 +18,7 @@
         packageImportEnabled?: boolean;
         packageExportEnabled?: boolean;
         audioExportEnabled?: boolean;
+        mediaConversionEnabled?: boolean;
         onrequestmenu?: (item: DiskTreeItem, x: number, y: number) => void;
     }
 
@@ -32,6 +33,7 @@
         packageImportEnabled = false,
         packageExportEnabled = false,
         audioExportEnabled = false,
+        mediaConversionEnabled = false,
         onrequestmenu = () => undefined,
     }: Props = $props();
     let expanded = $state(false);
@@ -92,9 +94,14 @@
     function canOpenMenu(): boolean {
         return (
             item.partitionIndex !== undefined &&
-            ((item.kind === 'partition' && (volumeActionsEnabled || partitionActionsEnabled)) ||
+            ((item.kind === 'partition' &&
+                (volumeActionsEnabled || partitionActionsEnabled || mediaConversionEnabled)) ||
                 (item.kind === 'volume' &&
-                    (volumeActionsEnabled || packageImportEnabled || packageExportEnabled || audioExportEnabled)))
+                    (volumeActionsEnabled ||
+                        packageImportEnabled ||
+                        packageExportEnabled ||
+                        audioExportEnabled ||
+                        (mediaConversionEnabled && item.volumeDirectoryId !== undefined))))
         );
     }
 
@@ -176,6 +183,7 @@
                     {packageImportEnabled}
                     {packageExportEnabled}
                     {audioExportEnabled}
+                    {mediaConversionEnabled}
                     {onrequestmenu}
                 />
             {/each}

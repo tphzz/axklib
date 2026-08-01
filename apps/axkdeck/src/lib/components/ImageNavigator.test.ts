@@ -261,4 +261,55 @@ describe('ImageNavigator', () => {
             'export-package',
         );
     });
+
+    it('offers CD-ROM conversion for partitions and floppy conversion for addressable volumes', async () => {
+        const onimageaction = vi.fn();
+        render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'disk.hds' }),
+                items: [
+                    {
+                        id: 'disk',
+                        name: 'disk.hds',
+                        kind: 'disk',
+                        childCount: 1,
+                        children: [
+                            {
+                                id: 'partition',
+                                name: 'PARTITION 1',
+                                kind: 'partition',
+                                partitionIndex: 0,
+                                childCount: 1,
+                                children: [
+                                    {
+                                        id: 'volume',
+                                        name: 'DRUMS',
+                                        kind: 'volume',
+                                        partitionIndex: 0,
+                                        volumeDirectoryId: 17,
+                                        childCount: 0,
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+                mediaConversionEnabled: true,
+                onimageaction,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByText('PARTITION 1').closest('button')!);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export CD-ROM image…' }));
+        expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'partition' }), 'export-cdrom');
+
+        await fireEvent.click(screen.getByRole('button', { name: /Expand PARTITION 1/ }));
+        await fireEvent.contextMenu(screen.getByRole('button', { name: /DRUMS/ }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export floppy image…' }));
+        expect(onimageaction).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'volume', volumeDirectoryId: 17 }),
+            'export-floppy',
+        );
+    });
 });

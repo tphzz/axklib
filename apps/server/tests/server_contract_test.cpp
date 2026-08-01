@@ -170,7 +170,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 42U);
+    EXPECT_EQ(entries.size(), 44U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -575,6 +575,46 @@ TEST(ServerContract, WorkspaceCreateRequestRejectsUnknownFields) {
     misspelled.erase("writable");
     misspelled["writeable"] = false;
     EXPECT_FALSE(validator.validate("WorkspaceCreateRequest", misspelled));
+}
+
+TEST(ServerContract, MediaConversionRequestsAndTerminalResultsMatchTheirSchemas) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    axk::server::OpenApiValidator validator{document};
+    const auto inspection_request = nlohmann::json{{"imageId", "image-one"},
+                                                   {"expectedRevision", 3U},
+                                                   {"format", "FAT12_FLOPPY"},
+                                                   {"partitionIndex", 0U},
+                                                   {"volumeDirectoryId", 17U}};
+    EXPECT_TRUE(validator.validate("ImageSessionMediaConversionInspectionRequest", inspection_request));
+    auto invalid_request = inspection_request;
+    invalid_request.erase("volumeDirectoryId");
+    EXPECT_FALSE(validator.validate("ImageSessionMediaConversionInspectionRequest", invalid_request));
+
+    const auto plan = nlohmann::json{
+        {"imageId", "image-one"},
+        {"revision", 3U},
+        {"format", "FAT12_FLOPPY"},
+        {"scope", "VOLUME"},
+        {"partitionIndex", 0U},
+        {"partitionName", "PARTITION 1"},
+        {"canExport", true},
+        {"objectCount", 2U},
+        {"payloadBytes", 1024U},
+        {"projectedOutputBytes", 1474560U},
+        {"capacityBytes", 1457664U},
+        {"volumes", nlohmann::json::array(
+                        {{{"volumeDirectoryId", 17U}, {"name", "KIT"}, {"objectCount", 2U}, {"payloadBytes", 1024U}}})},
+        {"issues", nlohmann::json::array()},
+        {"defaultFilename", "disk_p00_KIT.ima"}};
+    EXPECT_TRUE(validator.validate("ImageSessionMediaConversionInspection", plan));
+
+    auto result = plan;
+    result["sizeBytes"] = 1474560U;
+    result["destination"] = "WORKSPACE";
+    result["output"] = nlohmann::json{{"rootId", "workspace"}, {"relativePath", "exports/KIT.ima"}};
+    result["download"] = nullptr;
+    EXPECT_TRUE(validator.validate("ImageSessionMediaConversionResult", result));
 }
 
 TEST(ServerContract, WireEnumsAreUpperSnakeAndTranslateOnlyAtTheApplicationBoundary) {

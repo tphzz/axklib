@@ -271,6 +271,26 @@ authenticated content path with a short expiry. The client streams that
 content and deletes the retained resource when the save completes; expiry is
 only a fallback.
 
+File-backed SFS sessions also advertise `images.media_conversion`. Use
+`images.media_conversion.inspect` before starting the read job. The inspection
+accepts exactly one of these scopes:
+
+- `ISO9660` with a zero-based `partitionIndex` converts the complete selected
+  partition to one Yamaha CD-ROM image.
+- `FAT12_FLOPPY` with a zero-based `partitionIndex` and the stable
+  `volumeDirectoryId` returned by the content tree converts the complete
+  selected volume to one 1,474,560-byte FAT12 floppy image.
+
+The inspection reports the selected volumes, object and payload counts,
+projected output size, capacity, a suggested filename, and structured blocking
+issues. Conversion never silently splits a selection or drops objects to make
+it fit. The operation rebuilds the destination container while copying every
+admitted Yamaha object payload byte for byte. A `WORKSPACE` destination
+publishes an `.iso` or `.ima` through the sandbox. A `DOWNLOAD` destination
+uses the same private owner-scoped retained-file flow as package export, so the
+desktop can stream the single image directly to the chosen local path without
+an archive wrapper.
+
 Each WebSocket connection has bounded lifetime delivery budgets for both event
 count and serialized bytes. The defaults are 1,024 events and 4 MiB. When
 either budget is exhausted, the server closes the connection with status 1013;

@@ -1,0 +1,460 @@
+#include "axklib/writer_internal.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <format>
+#include <limits>
+#include <map>
+#include <memory>
+#include <set>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+
+#include "axklib/catalog.hpp"
+#include "axklib/media.hpp"
+#include "axklib/relationship.hpp"
+
+namespace axk {
+namespace {
+
+constexpr std::uint64_t floppy_image_bytes = 1'474'560U;
+constexpr std::uint64_t floppy_data_bytes = 2'847U * 512U;
+constexpr std::size_t floppy_root_entries = 224U;
+constexpr std::uint64_t iso_sector_bytes = 2'048U;
+constexpr std::string_view generated_raw_group = "46DEF120";
+
+struct SourceVolume {
+    std::uint32_t directory_id{};
+    std::string name;
+    std::vector<std::uint32_t> object_ids;
+};
+
+class RecordReader final : public RandomAccessReader {
+  public:
+    RecordReader(std::shared_ptr<const Container> container, PartitionIndex partition, SfsId record, std::uint64_t size,
+                 CancellationToken cancellation)
+        : container_(std::move(container)), partition_(partition), record_(record), size_(size),
+          cancellation_(std::move(cancellation)) {}
+
+    [[nodiscard]] std::uint64_t size() const noexcept override { return size_; }
+
+    [[nodiscard]] Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> destination) const override {
+        if (offset > size_ || destination.size() > size_ - offset) {
+            return std::unexpected{
+                make_error(ErrorCode::out_of_bounds, ErrorCategory::io, "media conversion read is out of bounds")};
+        }
+        auto bytes = container_->read_record_range(partition_, record_, offset, destination.size(), cancellation_);
+        if (!bytes)
+            return std::unexpected{bytes.error()};
+        if (bytes->size() != destination.size()) {
+            return std::unexpected{
+                make_error(ErrorCode::io_short_read, ErrorCategory::io, "media conversion read was short")};
+        }
+        std::ranges::copy(*bytes, destination.begin());
+        return {};
+    }
+
+  private:
+    std::shared_ptr<const Container> container_;
+    PartitionIndex partition_;
+    SfsId record_;
+    std::uint64_t size_{};
+    CancellationToken cancellation_;
+};
+
+bool category_name(std::string_view name) {
+    return name == "SMPL" || name == "SBNK" || name == "SBAC" || name == "PROG" || name == "SEQU" || name == "PRF3";
+}
+
+bool supported_object(ObjectType type) {
+    return type == ObjectType::smpl || type == ObjectType::sbnk || type == ObjectType::sbac ||
+           type == ObjectType::prog || type == ObjectType::sequ || type == ObjectType::prf3;
+}
+
+bool dependency_relationship(const Relationship &relationship) {
+    if (relationship.type == "SBNK_LEFT_MEMBER_TO_SMPL" || relationship.type == "SBNK_RIGHT_MEMBER_TO_SMPL" ||
+        relationship.type == "SBAC_SLOT_TO_SBNK") {
+        return true;
+    }
+    return (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" || relationship.type == "PROG_ASSIGNMENT_TO_SBAC") &&
+           (relationship.assignment_state == AssignmentState::active ||
+            relationship.assignment_state == AssignmentState::source_load);
+}
+
+void add_issue(MediaConversionPlanSummary &summary, std::string code, std::string message,
+               std::optional<std::uint64_t> required = {}, std::optional<std::uint64_t> available = {}) {
+    summary.issues.push_back({std::move(code), std::move(message), true, required, available});
+}
+
+Result<std::vector<SourceVolume>> source_volumes(const Partition &partition) {
+    std::unordered_map<std::uint32_t, const IndexRecord *> directories;
+    for (const auto &record : partition.records) {
+        if (record.directory_id)
+            directories.emplace(record.directory_id->value, &record);
+    }
+    const IndexRecord *root{};
+    for (const auto &[id, directory] : directories) {
+        if (directory->parent_directory_id && directory->parent_directory_id->value == id) {
+            root = directory;
+            break;
+        }
+    }
+    if (root == nullptr || !root->directory_id) {
+        return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::object,
+                                          "partition has no unambiguous root directory")};
+    }
+
+    std::vector<SourceVolume> result;
+    for (const auto &entry : root->directory_entries) {
+        const auto found = directories.find(entry.link_id.value);
+        if (entry.name == "." || entry.name == ".." || found == directories.end())
+            continue;
+        const auto &volume = *found->second;
+        if (!volume.parent_directory_id || volume.parent_directory_id->value != root->directory_id->value ||
+            !volume.directory_id) {
+            continue;
+        }
+        SourceVolume item{volume.sfs_id.value, entry.name, {}};
+        for (const auto &category_entry : volume.directory_entries) {
+            if (!category_name(category_entry.name))
+                continue;
+            const auto category_found = directories.find(category_entry.link_id.value);
+            if (category_found == directories.end())
+                continue;
+            const auto &category = *category_found->second;
+            if (!category.parent_directory_id || category.parent_directory_id->value != volume.directory_id->value) {
+                continue;
+            }
+            for (const auto &object_entry : category.directory_entries) {
+                if (object_entry.name != "." && object_entry.name != "..")
+                    item.object_ids.push_back(object_entry.link_id.value);
+            }
+        }
+        result.push_back(std::move(item));
+    }
+    return result;
+}
+
+std::size_t iso_record_size(std::size_t name_size) { return 33U + name_size + (name_size % 2U == 0U ? 1U : 0U); }
+
+void validate_iso_layout(detail::PreparedMediaConversion &prepared) {
+    auto &summary = prepared.summary;
+    const auto &volumes = prepared.image.iso_volumes;
+    if (volumes.size() > 998U) {
+        add_issue(summary, "MEDIA_CONVERSION_ISO_VOLUME_CAPACITY", "CD-ROM output supports at most 998 source volumes");
+    }
+    if (volumes.size() > 1U) {
+        add_issue(summary, "MEDIA_CONVERSION_PROFILE_REQUIRES_HARDWARE_VALIDATION",
+                  "Multi-volume partition CD-ROM output requires a successful sampler hardware roundtrip");
+    }
+
+    std::size_t directory_count = 2U + volumes.size();
+    std::vector<std::uint64_t> file_sizes;
+    file_sizes.push_back((volumes.size() + 1U) * 32U);
+    file_sizes.push_back(16U);
+    std::size_t path_table_bytes = 10U + 8U + generated_raw_group.size();
+    const auto group_directory_bytes = 68U + (volumes.size() + 2U) * iso_record_size(4U);
+    if (group_directory_bytes > iso_sector_bytes) {
+        add_issue(summary, "MEDIA_CONVERSION_ISO_DIRECTORY_CAPACITY",
+                  "The partition has too many volumes for the proven one-sector CD-ROM group directory");
+    }
+
+    for (const auto &volume : volumes) {
+        std::map<ObjectType, std::size_t> categories;
+        for (const auto &object : volume.objects)
+            ++categories[object.type];
+        directory_count += categories.size();
+        path_table_bytes += 12U + categories.size() * 12U;
+        const auto volume_directory_bytes = 68U + categories.size() * iso_record_size(4U);
+        if (volume_directory_bytes > iso_sector_bytes) {
+            add_issue(
+                summary, "MEDIA_CONVERSION_ISO_DIRECTORY_CAPACITY",
+                std::format("Volume '{}' has too many object categories for the CD-ROM profile", volume.volume_name));
+        }
+        for (const auto &[type, count] : categories) {
+            static_cast<void>(type);
+            if (count > 999U) {
+                add_issue(summary, "MEDIA_CONVERSION_ISO_OBJECT_CAPACITY",
+                          std::format("Volume '{}' has more than 999 objects in one category", volume.volume_name));
+            }
+            const auto category_directory_bytes = 68U + (count + 1U) * iso_record_size(4U);
+            if (category_directory_bytes > iso_sector_bytes) {
+                add_issue(summary, "MEDIA_CONVERSION_ISO_DIRECTORY_CAPACITY",
+                          std::format("Volume '{}' has too many objects in one category for the proven "
+                                      "one-sector CD-ROM directory",
+                                      volume.volume_name));
+            }
+            file_sizes.push_back(count * 32U);
+        }
+        for (const auto &object : volume.objects)
+            file_sizes.push_back(object.size());
+    }
+    if (path_table_bytes > iso_sector_bytes) {
+        add_issue(summary, "MEDIA_CONVERSION_ISO_PATH_TABLE_CAPACITY",
+                  "The partition has too many directories for the proven one-sector CD-ROM path table");
+    }
+
+    const auto sectors = detail::checked_iso9660_sector_count(directory_count, file_sizes);
+    if (!sectors) {
+        add_issue(summary, "MEDIA_CONVERSION_ISO_SECTOR_CAPACITY", sectors.error().message);
+        return;
+    }
+    summary.projected_output_bytes = static_cast<std::uint64_t>(*sectors) * iso_sector_bytes;
+    if (summary.projected_output_bytes > summary.capacity_bytes) {
+        add_issue(summary, "MEDIA_CONVERSION_OUTPUT_CAPACITY", "The partition does not fit on a 700 MB CD-ROM image",
+                  summary.projected_output_bytes, summary.capacity_bytes);
+    }
+}
+
+void validate_floppy_layout(detail::PreparedMediaConversion &prepared) {
+    auto &summary = prepared.summary;
+    summary.projected_output_bytes = floppy_image_bytes;
+    if (summary.object_count > floppy_root_entries) {
+        add_issue(summary, "MEDIA_CONVERSION_FLOPPY_DIRECTORY_CAPACITY",
+                  "The volume has too many objects for the FAT12 root directory", summary.object_count,
+                  floppy_root_entries);
+    }
+    std::uint64_t allocated{};
+    for (const auto &object : prepared.image.objects) {
+        const auto clusters = object.size() / 512U + (object.size() % 512U == 0U ? 0U : 1U);
+        if (clusters > std::numeric_limits<std::uint64_t>::max() / 512U ||
+            allocated > std::numeric_limits<std::uint64_t>::max() - clusters * 512U) {
+            add_issue(summary, "MEDIA_CONVERSION_FLOPPY_CAPACITY", "FAT12 allocation size overflowed");
+            return;
+        }
+        allocated += clusters * 512U;
+    }
+    if (allocated > floppy_data_bytes) {
+        add_issue(summary, "MEDIA_CONVERSION_FLOPPY_CAPACITY",
+                  "The volume does not fit in a 1.44 MB Yamaha FAT12 floppy image", allocated, floppy_data_bytes);
+    }
+}
+
+std::string sanitized_iso_id(std::string value) {
+    std::ranges::transform(value, value.begin(), [](unsigned char character) {
+        return std::isalnum(character) != 0 ? static_cast<char>(std::toupper(character)) : '_';
+    });
+    value.resize(std::min<std::size_t>(value.size(), 32U));
+    return value.empty() ? "AXKLIB" : value;
+}
+
+} // namespace
+
+Result<detail::PreparedMediaConversion>
+detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader,
+                                 const std::filesystem::path &source_path, const MediaConversionRequest &request,
+                                 const MediaBuildLimits &limits, const CancellationToken &cancellation) {
+    if (source_reader == nullptr || limits.maximum_object_bytes == 0U ||
+        limits.maximum_object_bytes > std::numeric_limits<std::size_t>::max() ||
+        limits.maximum_aggregate_payload_bytes == 0U || limits.maximum_output_bytes == 0U) {
+        return std::unexpected{
+            make_error(ErrorCode::invalid_argument, ErrorCategory::io, "media conversion request is invalid")};
+    }
+    if ((request.format == MediaImageFormat::iso9660 && request.scope != MediaConversionScope::partition) ||
+        (request.format == MediaImageFormat::fat12_floppy && request.scope != MediaConversionScope::volume) ||
+        (request.scope == MediaConversionScope::volume) != request.volume_directory_id.has_value()) {
+        return std::unexpected{make_error(ErrorCode::invalid_argument, ErrorCategory::io,
+                                          "CD-ROM conversion requires a partition and floppy conversion "
+                                          "requires one volume directory")};
+    }
+
+    auto media = open_media(std::move(source_reader), source_path, cancellation);
+    if (!media)
+        return std::unexpected{media.error()};
+    if (media->kind() != MediaKind::sfs) {
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "media conversion requires an open SFS HDA/HDS source image")};
+    }
+    auto container = std::make_shared<Container>(std::get<Container>(media->storage()));
+    const auto partition = std::ranges::find(container->partitions(), request.partition_index,
+                                             [](const Partition &item) { return item.index.value; });
+    if (partition == container->partitions().end()) {
+        return std::unexpected{
+            make_error(ErrorCode::object_missing, ErrorCategory::object, "source partition does not exist")};
+    }
+    auto volumes = source_volumes(*partition);
+    if (!volumes)
+        return std::unexpected{volumes.error()};
+    if (request.scope == MediaConversionScope::volume &&
+        std::ranges::find(*volumes, *request.volume_directory_id, &SourceVolume::directory_id) == volumes->end()) {
+        return std::unexpected{
+            make_error(ErrorCode::object_missing, ErrorCategory::object, "source volume directory does not exist")};
+    }
+
+    auto inventory = build_media_inventory(*media, MediaObjectReadMode::decoded_metadata,
+                                           static_cast<std::size_t>(limits.maximum_object_bytes), cancellation);
+    if (!inventory)
+        return std::unexpected{inventory.error()};
+    std::unordered_map<std::uint32_t, const ObjectSnapshot *> objects_by_id;
+    for (const auto &object : inventory->catalog.objects) {
+        if (object.partition.value == request.partition_index)
+            objects_by_id.emplace(object.sfs_id.value, &object);
+    }
+    std::unordered_map<std::uint32_t, const IndexRecord *> records_by_id;
+    for (const auto &record : partition->records)
+        records_by_id.emplace(record.sfs_id.value, &record);
+
+    PreparedMediaConversion prepared;
+    prepared.summary.format = request.format;
+    prepared.summary.scope = request.scope;
+    prepared.summary.partition_index = request.partition_index;
+    prepared.summary.partition_name = partition->name;
+    prepared.summary.capacity_bytes =
+        request.format == MediaImageFormat::fat12_floppy ? floppy_image_bytes : limits.maximum_output_bytes;
+    prepared.image.manifest.schema_version = std::string{build_manifest_schema_version};
+    prepared.image.manifest.format = request.format;
+    prepared.image.manifest.iso_volume_id = sanitized_iso_id(request.iso_volume_id);
+    prepared.image.manifest.raw_group = std::string{generated_raw_group};
+    prepared.image.manifest.group_name = partition->name;
+    prepared.image.limits = limits;
+
+    std::set<std::string> selected_keys;
+    std::unordered_map<std::string, std::uint32_t> volume_by_key;
+    std::size_t output_volume_index{};
+    for (const auto &volume : *volumes) {
+        if (request.scope == MediaConversionScope::volume && volume.directory_id != *request.volume_directory_id)
+            continue;
+        ++output_volume_index;
+        PreparedIsoVolume prepared_volume{std::string{generated_raw_group},
+                                          partition->name,
+                                          std::format("F{:03}", output_volume_index),
+                                          volume.name,
+                                          {}};
+        MediaConversionVolumeSummary volume_summary{volume.directory_id, volume.name, prepared_volume.raw_volume};
+        std::set<std::uint32_t> seen_ids;
+        for (const auto object_id : volume.object_ids) {
+            if (!seen_ids.insert(object_id).second) {
+                add_issue(prepared.summary, "MEDIA_CONVERSION_OBJECT_PLACEMENT_DUPLICATE",
+                          std::format("Volume '{}' contains a duplicate object directory link", volume.name));
+                continue;
+            }
+            const auto object_found = objects_by_id.find(object_id);
+            const auto record_found = records_by_id.find(object_id);
+            if (object_found == objects_by_id.end() || record_found == records_by_id.end()) {
+                add_issue(prepared.summary, "MEDIA_CONVERSION_OBJECT_UNREADABLE",
+                          std::format("Volume '{}' contains an unreadable object", volume.name));
+                continue;
+            }
+            const auto &object = *object_found->second;
+            if (!object.placement || object.placement_resolution != PlacementResolution::exact ||
+                object.placement->volume_directory.value != volume.directory_id) {
+                add_issue(prepared.summary, "MEDIA_CONVERSION_OBJECT_PLACEMENT_UNPROVEN",
+                          std::format("Object '{}' has no exact placement in volume '{}'", object.object.header.name,
+                                      volume.name));
+                continue;
+            }
+            if (!supported_object(object.object.header.type)) {
+                add_issue(prepared.summary, "MEDIA_CONVERSION_OBJECT_TYPE_UNSUPPORTED",
+                          std::format("Object '{}' has an unsupported object type", object.object.header.name));
+                continue;
+            }
+            const auto size = static_cast<std::uint64_t>(record_found->second->data_size);
+            if (size > limits.maximum_object_bytes ||
+                size > limits.maximum_aggregate_payload_bytes - prepared.summary.payload_bytes) {
+                add_issue(prepared.summary, "MEDIA_CONVERSION_PAYLOAD_LIMIT",
+                          "Selected object payloads exceed the configured conversion limit");
+                continue;
+            }
+            auto reader =
+                std::make_shared<RecordReader>(container, partition->index, object.sfs_id, size, cancellation);
+            prepared_volume.objects.emplace_back(object.object.header.type, object.object.header.name,
+                                                 std::move(reader));
+            selected_keys.insert(object.key);
+            volume_by_key.emplace(object.key, volume.directory_id);
+            prepared.summary.payload_bytes += size;
+            volume_summary.payload_bytes += size;
+            ++prepared.summary.object_count;
+            ++volume_summary.object_count;
+        }
+        prepared.summary.volumes.push_back(std::move(volume_summary));
+        if (request.format == MediaImageFormat::iso9660) {
+            prepared.image.iso_volumes.push_back(std::move(prepared_volume));
+        } else {
+            prepared.image.objects = std::move(prepared_volume.objects);
+            prepared.image.manifest.raw_volume = prepared_volume.raw_volume;
+            prepared.image.manifest.volume_name = prepared_volume.volume_name;
+        }
+    }
+
+    if (request.scope == MediaConversionScope::partition) {
+        for (const auto &[id, object] : objects_by_id) {
+            static_cast<void>(id);
+            if (!selected_keys.contains(object->key)) {
+                add_issue(prepared.summary, "MEDIA_CONVERSION_PARTITION_OBJECT_UNPLACED",
+                          std::format("Partition object '{}' is not exactly placed in a source volume",
+                                      object->object.header.name));
+            }
+        }
+        for (const auto &issue : inventory->catalog.issues) {
+            if (issue.partition.value == request.partition_index) {
+                add_issue(prepared.summary, issue.code,
+                          std::format("Partition catalog issue prevents exact conversion: {}", issue.message));
+            }
+        }
+    }
+
+    const auto graph = build_relationship_graph(inventory->catalog);
+    for (const auto &relationship : graph.relationships) {
+        if (!selected_keys.contains(relationship.source_key) || !dependency_relationship(relationship))
+            continue;
+        if (relationship.quality != RelationshipQuality::known || !relationship.target_key) {
+            add_issue(prepared.summary, "MEDIA_CONVERSION_RELATIONSHIP_UNCONFIRMED",
+                      std::format("{} dependency is not Known", relationship.type));
+            continue;
+        }
+        if (!selected_keys.contains(*relationship.target_key)) {
+            add_issue(prepared.summary, "MEDIA_CONVERSION_DEPENDENCY_OUTSIDE_SCOPE",
+                      std::format("{} dependency is outside the selected source scope", relationship.type));
+            continue;
+        }
+        if (volume_by_key.at(relationship.source_key) != volume_by_key.at(*relationship.target_key)) {
+            add_issue(prepared.summary, "MEDIA_CONVERSION_CROSS_VOLUME_DEPENDENCY",
+                      std::format("{} crosses source volume boundaries", relationship.type));
+        }
+    }
+
+    if (prepared.summary.volumes.empty()) {
+        add_issue(prepared.summary, "MEDIA_CONVERSION_SCOPE_EMPTY", "The selected source scope has no volume");
+    }
+    if (request.format == MediaImageFormat::iso9660) {
+        validate_iso_layout(prepared);
+    } else {
+        if (prepared.summary.object_count == 0U)
+            add_issue(prepared.summary, "MEDIA_CONVERSION_SCOPE_EMPTY", "A floppy image must contain an object");
+        validate_floppy_layout(prepared);
+    }
+    prepared.summary.can_export = prepared.summary.issues.empty();
+    return prepared;
+}
+
+Result<MediaConversionPlanSummary> plan_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader,
+                                                         const std::filesystem::path &source_path,
+                                                         const MediaConversionRequest &request,
+                                                         const MediaBuildLimits &limits,
+                                                         const CancellationToken &cancellation) {
+    auto prepared =
+        detail::prepare_media_conversion(std::move(source_reader), source_path, request, limits, cancellation);
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    return std::move(prepared->summary);
+}
+
+Result<WrittenMediaImage> write_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader,
+                                                 const std::filesystem::path &source_path,
+                                                 const MediaConversionRequest &request,
+                                                 const std::filesystem::path &output_path, bool overwrite,
+                                                 const MediaBuildLimits &limits,
+                                                 const CancellationToken &cancellation) {
+    auto prepared =
+        detail::prepare_media_conversion(std::move(source_reader), source_path, request, limits, cancellation);
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    if (!prepared->summary.can_export) {
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          prepared->summary.issues.front().message)};
+    }
+    return detail::write_prepared_media_image(prepared->image, output_path, overwrite, cancellation);
+}
+
+} // namespace axk

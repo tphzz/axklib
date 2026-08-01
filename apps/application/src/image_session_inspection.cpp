@@ -21,6 +21,8 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
         "images.validation.issues", "images.preview",      "auditions.prepare",
         "images.package.export",    "images.audio_export", "images.sequence_export",
     };
+    if ((*session)->format == "sfs" && (*session)->source.kind == ImageSourceKind::file)
+        available_operations.emplace_back("images.media_conversion");
     const auto source_metadata =
         implementation_->sandbox.metadata((*session)->source.root_id, (*session)->source.relative_path);
     const auto *mutable_container = (*session)->media ? std::get_if<Container>(&(*session)->media->storage()) : nullptr;

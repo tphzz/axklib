@@ -418,6 +418,39 @@ creation and Sequence rename/save-back remain bounded by their current hardware
 writer profile. Non-object files and FAT filesystem metadata are not
 transferred.
 
+## Convert HDA/HDS Content In axkdeck
+
+Axkdeck exposes container conversion on file-backed SFS images through the
+object tree context menu:
+
+- Right-click a partition and choose **Export CD-ROM image...** to convert the
+  complete partition to an ISO9660 image.
+- Right-click a volume and choose **Export floppy image...** to convert the
+  complete volume to a 1,474,560-byte FAT12 image.
+
+Both workflows first show a bounded inspection with selected object counts,
+payload size, output capacity, and every blocking issue. An oversized volume is
+blocked rather than split, and a partition is never reduced to a subset without
+an explicit future selection contract. The destination chooser matches package
+export: **Storage location** publishes to a configured workspace and **This
+computer** streams the retained result to the desktop file chooser. The
+suggested names are `<source>_pNN_<partition>.iso` and
+`<source>_pNN_<volume>.ima`, where `NN` is the zero-based partition index.
+
+Conversion rebuilds only the destination container. Yamaha Program, Sample
+Bank, Sample, Wave Data, and Sequence payloads are copied byte for byte from the
+selected source scope. The ISO path uses reader-backed streaming and does not
+materialize the selected payload set in memory. FAT12 output is bounded by the
+fixed floppy capacity and materializes at most one floppy image during final
+serialization.
+
+The current generated ISO writer has a hardware-promoted one-volume profile.
+Until a multi-volume generated ISO has separate sampler validation, converting
+a partition containing more than one volume is reported as a blocking profile
+issue. Generated floppy output is host-reopened and payload-compared, but fresh
+FAT12 authoring still retains the hardware-validation qualification documented
+above.
+
 ## Transfer Selected Saved Objects
 
 Root selection copies only requested objects and their known dependency

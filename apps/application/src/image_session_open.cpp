@@ -2,6 +2,8 @@
 
 #include "content_digest.hpp"
 
+#include <charconv>
+
 axk::app::Result<axk::app::ImageSessionSummary>
 axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string owner_id,
                                     const CancellationToken &cancellation) {
@@ -266,10 +268,23 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
             }
             return node.display_name;
         }();
+        const auto volume_directory_id = [&]() -> std::optional<std::uint32_t> {
+            if (node.node_type != "volume")
+                return std::nullopt;
+            const auto separator = node.node_id.rfind(':');
+            if (separator == std::string::npos || separator + 1U == node.node_id.size())
+                return std::nullopt;
+            std::uint32_t result{};
+            const auto first = node.node_id.data() + static_cast<std::ptrdiff_t>(separator + 1U);
+            const auto last = node.node_id.data() + static_cast<std::ptrdiff_t>(node.node_id.size());
+            const auto converted = std::from_chars(first, last, result);
+            return converted.ec == std::errc{} && converted.ptr == last ? std::optional{result} : std::nullopt;
+        }();
         ImageContentItem item{.id = id,
                               .parent_id = parent_id,
                               .depth = depth,
                               .partition_index = partition_index,
+                              .volume_directory_id = volume_directory_id,
                               .kind = node.node_type,
                               .name = canonical_name,
                               .display_name = node.display_name,

@@ -212,6 +212,7 @@ export class HttpImageSessions {
             packageExportAvailable: (summary.availableOperations ?? []).includes('images.package.export'),
             audioExportAvailable: (summary.availableOperations ?? []).includes('images.audio_export'),
             sequenceExportAvailable: (summary.availableOperations ?? []).includes('images.sequence_export'),
+            mediaConversionAvailable: (summary.availableOperations ?? []).includes('images.media_conversion'),
             tree: [disk],
         };
     }

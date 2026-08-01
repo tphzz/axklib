@@ -33,6 +33,7 @@ export interface DiskTreeItem {
     objectType?: string;
     scopeRole?: 'CONTAINED' | 'REFERENCE';
     volumeId?: string;
+    volumeDirectoryId?: number;
     volumeName?: string;
     partitionIndex?: number;
 }
@@ -44,7 +45,9 @@ export type ImageTreeAction =
     | 'rename-partition'
     | 'import-package'
     | 'export-package'
-    | 'export-sfz';
+    | 'export-sfz'
+    | 'export-cdrom'
+    | 'export-floppy';
 
 export interface Program {
     id: string;

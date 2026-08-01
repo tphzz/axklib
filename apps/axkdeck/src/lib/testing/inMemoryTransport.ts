@@ -15,6 +15,9 @@ import type {
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
     ImageSessionSequenceExportDestination,
+    ImageSessionMediaConversionDestination,
+    ImageSessionMediaConversionInspection,
+    ImageSessionMediaConversionSelection,
     ImageSessionPackageImportPlan,
     ImageSessionPackageRename,
     InputBinding,
@@ -70,6 +73,7 @@ export interface InMemoryImageTransportOptions {
         | 'packageExportAvailable'
         | 'audioExportAvailable'
         | 'sequenceExportAvailable'
+        | 'mediaConversionAvailable'
     > & {
         volumeMutationsAvailable?: boolean;
         partitionMutationsAvailable?: boolean;
@@ -80,6 +84,7 @@ export interface InMemoryImageTransportOptions {
         packageExportAvailable?: boolean;
         audioExportAvailable?: boolean;
         sequenceExportAvailable?: boolean;
+        mediaConversionAvailable?: boolean;
         companionDirectories?: DirectoryRef[];
     };
     preview?: PreviewEnvelope;
@@ -139,6 +144,7 @@ export class InMemoryImageTransport implements ImageTransport {
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
+            mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
         };
     }
 
@@ -159,6 +165,7 @@ export class InMemoryImageTransport implements ImageTransport {
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
+            mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
         };
     }
 
@@ -286,6 +293,21 @@ export class InMemoryImageTransport implements ImageTransport {
         destination: ImageSessionSequenceExportDestination,
     ): Promise<JobState> {
         return this.invoke('startImageSequenceExport', [sessionId, objectIds, destination]);
+    }
+
+    inspectImageMediaConversion(
+        sessionId: number,
+        selection: ImageSessionMediaConversionSelection,
+    ): Promise<ImageSessionMediaConversionInspection> {
+        return this.invoke('inspectImageMediaConversion', [sessionId, selection]);
+    }
+
+    startImageMediaConversion(
+        sessionId: number,
+        selection: ImageSessionMediaConversionSelection,
+        destination: ImageSessionMediaConversionDestination,
+    ): Promise<JobState> {
+        return this.invoke('startImageMediaConversion', [sessionId, selection, destination]);
     }
 
     downloadFile(source: FileLocation): Promise<ClientDownload> {

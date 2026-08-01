@@ -163,12 +163,13 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     EXPECT_EQ(opened->source.root_id, "workspace");
     EXPECT_EQ(opened->source.relative_path, "fixture.hds");
     EXPECT_EQ(opened->format, "sfs");
-    EXPECT_EQ(opened->available_operations,
-              (std::vector<std::string>{"images.content", "images.objects", "images.relationships",
-                                        "images.validation.issues", "images.preview", "auditions.prepare",
-                                        "images.package.export", "images.audio_export", "images.sequence_export",
-                                        "images.alter.volumes", "images.alter.partitions", "images.alter.objects",
-                                        "images.package.import", "images.deletion.orphans.inspect"}));
+    EXPECT_EQ(
+        opened->available_operations,
+        (std::vector<std::string>{"images.content", "images.objects", "images.relationships",
+                                  "images.validation.issues", "images.preview", "auditions.prepare",
+                                  "images.package.export", "images.audio_export", "images.sequence_export",
+                                  "images.media_conversion", "images.alter.volumes", "images.alter.partitions",
+                                  "images.alter.objects", "images.package.import", "images.deletion.orphans.inspect"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
