@@ -239,6 +239,9 @@ target_link_libraries(
   PUBLIC axklib::core
   PRIVATE SndFile::sndfile SOXR::soxr FatFs::FatFs
 )
+if(WIN32)
+  target_compile_definitions(axk_audio PRIVATE NOMINMAX)
+endif()
 axk_set_project_warnings(axk_audio)
 axk_enable_sanitizers(axk_audio)
 axk_enable_coverage(axk_audio)
