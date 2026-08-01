@@ -68,8 +68,6 @@ Result<void> validate_sample_parameters(const SampleSpec &sample) {
         (sample.loop_mode != AudioSamplerLoopMode::forward_loop &&
          sample.loop_mode != AudioSamplerLoopMode::forward_one_shot))
         return std::unexpected{manifest_error("sample loop settings are invalid")};
-    if (sample.loop_start_frame > 65'535U)
-        return std::unexpected{manifest_error("sample loop start exceeds the proven cache range")};
     return {};
 }
 

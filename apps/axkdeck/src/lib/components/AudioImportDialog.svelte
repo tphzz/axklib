@@ -251,7 +251,6 @@
                 (!Number.isInteger(row.loopStartFrame) ||
                     !Number.isInteger(row.loopLengthFrames) ||
                     row.loopStartFrame < 0 ||
-                    row.loopStartFrame > 65_535 ||
                     row.loopLengthFrames <= 0 ||
                     row.loopStartFrame + row.loopLengthFrames > row.inspection.projectedOutputFrameCount)
             ) {

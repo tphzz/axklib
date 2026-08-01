@@ -265,13 +265,8 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     result[0xe4] = std::byte{0x30};
     result[0xe5] = static_cast<std::byte>(sample.loop_mode);
     writer.be16(0xe6, 9000);
-    if (left_loop->start > std::numeric_limits<std::uint16_t>::max()) {
-        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Sample loop start exceeds the proven A-series cache range")};
-    }
-    writer.be16(0xea, static_cast<std::uint16_t>(left_loop->start));
-    if (right == nullptr && sample.loop_mode == AudioSamplerLoopMode::forward_one_shot)
-        writer.be16(0xee, static_cast<std::uint16_t>(left_loop->start));
+    writer.be32(0xe8, 0U);
+    writer.be32(0xec, 0U);
     writer.be32(0xf0, static_cast<std::uint32_t>(left.audio.output_frames));
     writer.be32(0xf8, left_loop->start);
     writer.be32(0x100, left_loop->length);

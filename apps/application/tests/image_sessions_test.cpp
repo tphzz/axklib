@@ -1035,6 +1035,48 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
 }
 
+TEST_F(ImageSessionTest, PreviewsAndAuditionsAuthoredLoopedSampleFromItsFullWaveDataWindow) {
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 400U;
+    waveform.pcm.resize(800U);
+    const auto audio_path = root_ / "looped.wav";
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
+
+    axk::VolumeSpec volume;
+    volume.name = "Looped";
+    volume.waveforms.push_back(
+        {"looped", "Looped Wave", audio_path, 60U, {}, 0, axk::AudioSamplerLoopMode::forward_loop, 17U, 335U});
+    axk::SampleSpec sample;
+    sample.name = "Looped Sample";
+    sample.waveform_id = "looped";
+    sample.root_key = 60U;
+    sample.key_high = 127U;
+    sample.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+    sample.loop_start_frame = 17U;
+    sample.loop_length_frames = 335U;
+    volume.samples.push_back(std::move(sample));
+    const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
+    ASSERT_TRUE(axk::write_hds_image(manifest, root_ / "looped.hds"));
+
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "looped.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(samples) << samples.error().message;
+    ASSERT_EQ(samples->items.size(), 1U);
+
+    const auto preview = sessions.preview(opened->image_id, "owner-a", samples->items.front().id, 32U);
+    ASSERT_TRUE(preview) << preview.error().message;
+    EXPECT_EQ(preview->frame_count, 400U);
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {samples->items.front().id});
+    ASSERT_TRUE(audition) << audition.error().message;
+    ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
+    EXPECT_EQ(audition->clips.front().lanes.front().frame_count, 400U);
+    EXPECT_EQ(audition->clips.front().lanes.front().loop_start_frame, 17U);
+    EXPECT_EQ(audition->clips.front().lanes.front().loop_length_frames, 335U);
+}
+
 TEST_F(ImageSessionTest, InvokesAuditionPreparationThroughTheApplicationRegistryWithoutCrow) {
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
     const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");

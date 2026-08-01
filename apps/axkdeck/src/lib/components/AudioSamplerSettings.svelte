@@ -126,7 +126,7 @@
                     aria-label={`Loop start for ${row.fileName}`}
                     type="number"
                     min="0"
-                    max="65535"
+                    max="4294967295"
                     value={row.loopStartFrame}
                     {disabled}
                     oninput={(event) => onupdate(row.id, { loopStartFrame: numberValue(event) })}

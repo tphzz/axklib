@@ -15,7 +15,6 @@
 #include <gtest/gtest.h>
 
 #include "axklib/audio.hpp"
-#include "axklib/bytes.hpp"
 #include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/sfs.hpp"
@@ -390,14 +389,10 @@ TEST(AudioImport, SerializesMappedSamplerMetadataIntoWaveDataAndSamplePayloads) 
     EXPECT_EQ(sbnk->velocity_range_low, 10U);
     EXPECT_EQ(sbnk->velocity_range_high, 110U);
     EXPECT_EQ(sbnk->loop_mode, 1U);
+    EXPECT_EQ(sbnk->left.wave_start_frame, 0U);
     EXPECT_EQ(sbnk->left.wave_length_frames, 400U);
     EXPECT_EQ(sbnk->left.loop_start_frame, 17U);
     EXPECT_EQ(sbnk->left.loop_length_frames, 335U);
-    const axk::ByteReader sample_bytes{*sample_payload};
-    ASSERT_TRUE(sample_bytes.be16(0xeaU));
-    EXPECT_EQ(*sample_bytes.be16(0xeaU), 17U);
-    ASSERT_TRUE(sample_bytes.be16(0xeeU));
-    EXPECT_EQ(*sample_bytes.be16(0xeeU), 0U);
 }
 
 TEST(AudioImport, SerializesMissingWavLoopAsHardwareProvenForwardOneShot) {
@@ -429,13 +424,9 @@ TEST(AudioImport, SerializesMissingWavLoopAsHardwareProvenForwardOneShot) {
     const auto *sbnk = std::get_if<axk::CurrentSbnk>(&decoded_sample->payload);
     ASSERT_NE(sbnk, nullptr);
     EXPECT_EQ(sbnk->loop_mode, 4U);
+    EXPECT_EQ(sbnk->left.wave_start_frame, 0U);
     EXPECT_EQ(sbnk->left.loop_start_frame, 0U);
     EXPECT_EQ(sbnk->left.loop_length_frames, 400U);
-    const axk::ByteReader sample_bytes{*sample_payload};
-    ASSERT_TRUE(sample_bytes.be16(0xeaU));
-    EXPECT_EQ(*sample_bytes.be16(0xeaU), 0U);
-    ASSERT_TRUE(sample_bytes.be16(0xeeU));
-    EXPECT_EQ(*sample_bytes.be16(0xeeU), 0U);
 }
 
 TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {

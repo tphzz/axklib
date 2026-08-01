@@ -546,7 +546,7 @@ Direct and stereo Sample fields:
 | `fine_tune_cents` | Optional signed fine tune `-63..63`; default `0`. |
 | `velocity_low`, `velocity_high` | Optional MIDI limits `0..127`; defaults `0` and `127`, and high must not precede low. |
 | `loop_mode` | Optional A-series mode: `1` forward loop or `4` forward one-shot; default `4`. |
-| `loop_start_frame`, `loop_length_frames` | Optional Sample playback window. Forward loop requires a non-empty contained range and a start no greater than `65535` in the current proven writer profile. One-shot requires both manifest values to remain zero. |
+| `loop_start_frame`, `loop_length_frames` | Optional Sample loop window within the full linked Wave Data playback span. Forward loop requires a non-empty contained range. One-shot requires both manifest values to remain zero. |
 | `waveform_id` | Direct left/mono member. Mutually exclusive with `interleaved_audio_path`. |
 | `right_waveform_id` | Optional direct right member; it must differ from `waveform_id`. |
 | `interleaved_audio_path` | Alternative two-channel source that generates linked left/right `SMPL` objects. |

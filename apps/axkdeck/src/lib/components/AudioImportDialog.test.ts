@@ -272,8 +272,8 @@ describe('AudioImportDialog', () => {
                     velocityLow: 8,
                     velocityHigh: 110,
                     loopMode: 1,
-                    loopStartFrame: 1_234,
-                    loopLengthFrames: 4_321,
+                    loopStartFrame: 70_000,
+                    loopLengthFrames: 10_000,
                     pitchSource: 'WAV_SMPL',
                     rangeSource: 'WAV_INST',
                     loopSource: 'WAV_SMPL',
@@ -302,7 +302,7 @@ describe('AudioImportDialog', () => {
 
         expect(await screen.findByLabelText('Sampler settings for Mapped.wav')).toBeTruthy();
         expect(screen.getByDisplayValue('-63')).toBeTruthy();
-        expect(screen.getByDisplayValue('1234')).toBeTruthy();
+        expect(screen.getByDisplayValue('70000')).toBeTruthy();
         expect(screen.getByText('Pitch: WAV smpl')).toBeTruthy();
         expect(screen.getByText('Ranges: WAV inst')).toBeTruthy();
         expect(screen.getByText('An additional WAV sampler loop was ignored.')).toBeTruthy();
@@ -318,8 +318,8 @@ describe('AudioImportDialog', () => {
                     velocityLow: 8,
                     velocityHigh: 110,
                     loopMode: 1,
-                    loopStartFrame: 1_234,
-                    loopLengthFrames: 4_321,
+                    loopStartFrame: 70_000,
+                    loopLengthFrames: 10_000,
                 }),
             ]),
         );
