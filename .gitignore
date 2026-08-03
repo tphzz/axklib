@@ -22,3 +22,6 @@ node_modules/
 # Local editor/OS noise
 .DS_Store
 Thumbs.db
+apps/axkdeck/src-tauri/target/
+apps/axkdeck/src-tauri/binaries/
+apps/axkdeck/src-tauri/gen/
