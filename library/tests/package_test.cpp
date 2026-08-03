@@ -2799,6 +2799,159 @@ TEST(PackageImportApply, ImportsACompleteProgramSampleBankSampleAndWaveDataGraph
     std::filesystem::remove_all(output_root, error);
 }
 
+TEST(PackageImportApply, RoundTripsSamplerAuthoredDuplicateFamiliesWithSharedWaveData) {
+    const auto output_root = publication_root("axklib-package-import-duplicate-families");
+    const auto target_path = output_root / "target.hds";
+    const auto imported_path = output_root / "imported.hds";
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+
+    auto source = axk::open_media(fixture("HD00_512_multi_sbnk_authored.hds"));
+    ASSERT_TRUE(source) << source.error().message;
+    const std::vector roots{root(axk::PackageRootKind::volume, "New Volume")};
+    const auto built = axk::build_portable_package(*source, roots);
+    ASSERT_TRUE(built) << built.error().message;
+    EXPECT_EQ(built->package.kind, axk::PackageKind::volume);
+    EXPECT_EQ(built->package.nodes.size(), 32U);
+    EXPECT_EQ(built->package.relationships.size(), 30U);
+    EXPECT_TRUE(axk::verify_portable_package(built->package));
+
+    const auto names_of_type = [](const std::vector<axk::PackageNode> &nodes, std::string_view type) {
+        std::set<std::string, std::less<>> names;
+        for (const auto &node : nodes) {
+            if (node.object_type == type)
+                names.emplace(node.name);
+        }
+        return names;
+    };
+    const std::set<std::string, std::less<>> expected_sample_names{
+        "JS01",
+        "JS02           *",
+        "JS10          **",
+        "JS09         ***",
+        "JS08        ****",
+        "JS07       *****",
+        "JS06      ******",
+        "JS05     *******",
+        "JS04    ********",
+        "JS03   *********",
+        "S01",
+        "S10            *",
+        "S02           **",
+        "S05          ***",
+        "S06         ****",
+        "S03        *****",
+        "S07       ******",
+        "S08      *******",
+        "S09     ********",
+        "S04   **********",
+    };
+    const std::set<std::string, std::less<>> expected_sample_bank_names{
+        "SB01",
+        "SB10           *",
+        "SB02          **",
+        "SB05         ***",
+        "SB06        ****",
+        "SB03       *****",
+        "SB07      ******",
+        "SB08     *******",
+        "SB09    ********",
+        "SB04  **********",
+    };
+    EXPECT_EQ(names_of_type(built->package.nodes, "SBNK"), expected_sample_names);
+    EXPECT_EQ(names_of_type(built->package.nodes, "SBAC"), expected_sample_bank_names);
+    EXPECT_EQ(names_of_type(built->package.nodes, "SMPL"),
+              (std::set<std::string, std::less<>>{"SMP 252511", "pulse 1"}));
+
+    std::map<std::string, std::string, std::less<>> node_names;
+    for (const auto &node : built->package.nodes)
+        node_names.emplace(node.node_id, node.name);
+    std::map<std::string, std::string, std::less<>> sample_wave_data;
+    std::map<std::string, std::string, std::less<>> sample_bank_members;
+    std::set<std::string, std::less<>> shared_wave_data_targets;
+    std::size_t sample_to_wave_data_edges{};
+    std::size_t sample_bank_member_edges{};
+    for (const auto &relationship : built->package.relationships) {
+        if (relationship.role == "SBNK_LEFT_MEMBER_TO_SMPL") {
+            ++sample_to_wave_data_edges;
+            shared_wave_data_targets.emplace(relationship.target_node_id);
+            sample_wave_data.emplace(node_names.at(relationship.source_node_id),
+                                     node_names.at(relationship.target_node_id));
+        } else if (relationship.role == "SBAC_SLOT_TO_SBNK") {
+            ++sample_bank_member_edges;
+            sample_bank_members.emplace(node_names.at(relationship.source_node_id),
+                                        node_names.at(relationship.target_node_id));
+        }
+    }
+    EXPECT_EQ(sample_to_wave_data_edges, 20U);
+    EXPECT_EQ(sample_bank_member_edges, 10U);
+    EXPECT_EQ(shared_wave_data_targets.size(), 2U);
+    for (const auto &[sample, wave_data] : sample_wave_data) {
+        EXPECT_EQ(wave_data, sample.starts_with("JS") ? "pulse 1" : "SMP 252511") << sample;
+    }
+    const std::map<std::string, std::string, std::less<>> expected_sample_bank_members{
+        {"SB01", "S01"},
+        {"SB10           *", "S10            *"},
+        {"SB02          **", "S02           **"},
+        {"SB05         ***", "S05          ***"},
+        {"SB06        ****", "S06         ****"},
+        {"SB03       *****", "S03        *****"},
+        {"SB07      ******", "S07       ******"},
+        {"SB08     *******", "S08      *******"},
+        {"SB09    ********", "S09     ********"},
+        {"SB04  **********", "S04   **********"},
+    };
+    EXPECT_EQ(sample_bank_members, expected_sample_bank_members);
+
+    axk::VolumeSpec target_volume;
+    target_volume.name = "Target";
+    axk::HdsBuildManifest target_manifest{"1.0", 4U * 1024U * 1024U, {}};
+    target_manifest.partitions.push_back({"P1", {std::move(target_volume)}});
+    ASSERT_TRUE(axk::write_hds_image(target_manifest, target_path));
+
+    const std::vector packages{built->package};
+    axk::PackageImportRequest request;
+    request.root_destinations.push_back(destination(0U, "Target"));
+    const auto plan = axk::plan_package_import(target_path, packages, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_TRUE(plan->valid()) << conflict_summary(*plan);
+    ASSERT_EQ(plan->objects.size(), 32U);
+    EXPECT_TRUE(std::ranges::all_of(plan->objects, [](const auto &object) {
+        return std::ranges::contains(object.actions, axk::PackageImportObjectAction::insert);
+    }));
+    ASSERT_TRUE(axk::apply_package_import(target_path, packages, *plan, imported_path));
+
+    auto imported = axk::open_media(imported_path);
+    ASSERT_TRUE(imported) << imported.error().message;
+    EXPECT_TRUE(imported->validation_issues().empty());
+    const auto imported_catalog = axk::build_object_catalog(*imported);
+    ASSERT_TRUE(imported_catalog) << imported_catalog.error().message;
+    const auto in_target_volume = [](const auto &object) {
+        return object.placement && object.placement->volume_name == "Target";
+    };
+    EXPECT_EQ(std::ranges::count_if(imported_catalog->objects, in_target_volume), 32);
+
+    const std::vector imported_roots{root(axk::PackageRootKind::volume, "Target")};
+    const auto reexported = axk::build_portable_package(*imported, imported_roots);
+    ASSERT_TRUE(reexported) << reexported.error().message;
+    EXPECT_EQ(reexported->package.relationships, built->package.relationships);
+    EXPECT_EQ(names_of_type(reexported->package.nodes, "SBNK"), expected_sample_names);
+    EXPECT_EQ(names_of_type(reexported->package.nodes, "SBAC"), expected_sample_bank_names);
+    EXPECT_EQ(names_of_type(reexported->package.nodes, "SMPL"),
+              (std::set<std::string, std::less<>>{"SMP 252511", "pulse 1"}));
+    for (const auto &source_node : built->package.nodes) {
+        const auto imported_node = std::ranges::find_if(reexported->package.nodes, [&](const auto &candidate) {
+            return candidate.object_type == source_node.object_type && candidate.name == source_node.name;
+        });
+        ASSERT_NE(imported_node, reexported->package.nodes.end());
+        EXPECT_EQ(imported_node->normalized_sha256, source_node.normalized_sha256)
+            << source_node.object_type << ' ' << source_node.name;
+    }
+
+    std::filesystem::remove_all(output_root, error);
+}
+
 TEST(PackageImportApply, CancellationAtEveryGraphBoundaryPublishesNothing) {
     const auto output_root = publication_root("axklib-package-import-cancellation-boundaries");
     const auto audio_path = output_root / "tone.wav";
