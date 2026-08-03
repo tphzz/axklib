@@ -2189,19 +2189,6 @@ TEST(PackageImportPlanner, ReportsIsoDirectoryCapacityBeforeApply) {
     std::filesystem::remove_all(output_root, error);
 }
 
-TEST(MediaWriter, RejectsIsoSectorCountOverflowWithoutAllocatingAnImage) {
-    constexpr auto maximum = std::numeric_limits<std::uint32_t>::max();
-    const std::array<std::uint64_t, 1> boundary{(static_cast<std::uint64_t>(maximum) - 21U) * 2048U};
-    const auto accepted = axk::detail::checked_iso9660_sector_count(1U, boundary);
-    ASSERT_TRUE(accepted) << accepted.error().message;
-    EXPECT_EQ(*accepted, maximum);
-
-    const std::array<std::uint64_t, 1> overflow{(static_cast<std::uint64_t>(maximum) - 20U) * 2048U};
-    const auto rejected = axk::detail::checked_iso9660_sector_count(1U, overflow);
-    ASSERT_FALSE(rejected);
-    EXPECT_EQ(rejected.error().code, axk::ErrorCode::unsupported_profile);
-}
-
 TEST(PackageImportPlanner, ReportsMissingDestinationMappings) {
     auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "fixture.ima");
     ASSERT_TRUE(image) << image.error().message;

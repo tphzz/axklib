@@ -601,7 +601,7 @@ still uses the exact stored target name; neither package closure nor validation
 infers unresolved, off, or duplicate state from the suffix alone.
 
 The retained sampler-authored multi-slot fixture provides Strong supporting
-evidence for the saved-object model: successive starred Sample families keep
+support for the saved-object model: successive starred Sample families keep
 identical decoded parameters and Known links to shared Wave Data, and paired
 Sample Bank/Sample families carry matching star generations. Its original
 button-by-button authoring transcript was not retained, so it does not prove an

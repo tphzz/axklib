@@ -126,6 +126,7 @@ add_library(
   src/package_relocation.cpp
   src/package_support.cpp
   src/relationship.cpp
+  src/relationship_policy.cpp
   src/report.cpp
   src/semantic.cpp
   src/semantic_analysis.cpp
@@ -205,6 +206,7 @@ add_library(
   src/deletion.cpp
   src/media_build.cpp
   src/media_conversion.cpp
+  src/media_iso9660_layout.cpp
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
   src/object_write_codec.cpp

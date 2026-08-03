@@ -78,6 +78,31 @@ struct PreparedMediaImage {
     std::vector<PreparedIsoVolume> iso_volumes;
 };
 
+struct Iso9660LayoutNode {
+    std::string name;
+    bool directory{};
+    std::uint32_t sector{};
+    std::uint32_t extent_size{};
+    std::size_t parent{};
+    std::vector<std::byte> owned_data;
+    std::shared_ptr<const RandomAccessReader> external_data;
+
+    [[nodiscard]] std::uint64_t payload_size() const noexcept {
+        return external_data == nullptr ? owned_data.size() : external_data->size();
+    }
+};
+
+struct Iso9660Layout {
+    std::vector<Iso9660LayoutNode> nodes;
+    std::vector<std::size_t> directory_indices;
+    std::vector<std::byte> little_path_table;
+    std::vector<std::byte> big_path_table;
+    std::uint32_t little_path_sector{};
+    std::uint32_t big_path_sector{};
+    std::uint32_t sector_count{};
+    std::uint64_t output_bytes{};
+};
+
 struct PreparedMediaConversion {
     PreparedMediaImage image;
     MediaConversionPlanSummary summary;
@@ -116,8 +141,7 @@ write_prepared_media_image(const PreparedMediaImage &image, const std::filesyste
                            const std::function<Result<void>(const std::filesystem::path &)> &validator = {});
 Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublication &publication,
                                const CancellationToken &cancellation);
-Result<std::uint32_t> checked_iso9660_sector_count(std::size_t directory_count,
-                                                   std::span<const std::uint64_t> file_sizes);
+Result<Iso9660Layout> plan_iso9660_layout(const PreparedMediaImage &image);
 Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPublication &publication,
                                  const CancellationToken &cancellation);
 

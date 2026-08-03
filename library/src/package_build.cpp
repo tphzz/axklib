@@ -27,6 +27,7 @@
 
 #include "package_internal.hpp"
 #include "package_manifest_internal.hpp"
+#include "relationship_policy.hpp"
 
 namespace axk {
 
@@ -221,18 +222,10 @@ required_relationships(const ObjectSnapshot &object, const RelationshipGraph &gr
                 return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                   "active Program assignment has an unsupported target "
                                                   "kind")};
-            const auto exact_named_target = [&](const Relationship *row) {
-                const auto exact_key = [&](std::string_view key) {
-                    const auto found = objects.find(key);
-                    return found != objects.end() && found->second->object.header.name == assignment.name;
-                };
-                return (row->target_key && exact_key(*row->target_key)) ||
-                       std::ranges::any_of(row->candidate_keys, exact_key);
-            };
             const auto unresolved = std::ranges::find_if(candidates, [&](const Relationship *row) {
                 return row->type == role && row->assignment_index == index &&
                        row->assignment_state == AssignmentState::active && row->quality != RelationshipQuality::known &&
-                       !exact_named_target(row);
+                       !detail::relationship_has_exact_named_program_target(*row, objects);
             });
             if (allow_unresolved_program_assignments && unresolved != candidates.end())
                 continue;

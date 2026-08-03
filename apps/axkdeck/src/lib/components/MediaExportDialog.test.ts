@@ -103,4 +103,60 @@ describe('MediaExportDialog', () => {
         expect((screen.getByRole('button', { name: /Storage location/ }) as HTMLButtonElement).disabled).toBe(true);
         expect((screen.getByRole('button', { name: /This computer/ }) as HTMLButtonElement).disabled).toBe(true);
     });
+
+    it('shows retained Program rows as a nonblocking warning', () => {
+        render(MediaExportDialog, {
+            props: {
+                request: {
+                    item,
+                    selection: { format: 'ISO9660', partitionIndex: 0 },
+                    inspection: {
+                        imageId: 'image-one',
+                        revision: 4,
+                        format: 'ISO9660',
+                        scope: 'PARTITION',
+                        partitionIndex: 0,
+                        partitionName: 'Don Solaris',
+                        canExport: true,
+                        objectCount: 335,
+                        payloadBytes: 268_000,
+                        projectedOutputBytes: 900_000,
+                        capacityBytes: 700_000_000,
+                        volumes: [
+                            {
+                                volumeDirectoryId: 17,
+                                name: 'Analog Update',
+                                objectCount: 335,
+                                payloadBytes: 268_000,
+                            },
+                        ],
+                        issues: [
+                            {
+                                code: 'MEDIA_CONVERSION_RETAINED_DISABLED_PROGRAM_ROWS',
+                                message: 'Retained 5 disabled Program assignment rows without inventing targets.',
+                                blocking: false,
+                                requiredBytes: null,
+                                availableBytes: null,
+                            },
+                        ],
+                        defaultFilename: 'disk_p00_Don_Solaris.iso',
+                    },
+                    loading: false,
+                    busy: false,
+                    jobId: null,
+                    progressLabel: '',
+                    error: '',
+                },
+                desktop: true,
+                onworkspace: vi.fn(),
+                onlocal: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByText(/Retained 5 disabled Program assignment rows/)).toBeTruthy();
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect((screen.getByRole('button', { name: /Storage location/ }) as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole('button', { name: /This computer/ }) as HTMLButtonElement).disabled).toBe(false);
+    });
 });

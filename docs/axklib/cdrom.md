@@ -33,9 +33,10 @@ the supported contract.
 Fresh ISO creation uses a deterministic narrow writer for the same primary-tree
 profile. A libarchive writer was evaluated, but its release build provides no
 supported way to override the image creation timestamp, so it could not satisfy
-the byte-reproducibility contract. The narrow writer emits path tables, bounded
-single-sector directories, Yamaha group/volume menu records, and single-extent
-object files. It reopens the image with the production reader before publishing
+the byte-reproducibility contract. The narrow writer emits deterministic path
+tables, sector-aligned directory extents, Yamaha group/volume menu records, and
+single-extent object files. Directory records and path tables may occupy
+multiple sectors; files remain single-extent. It reopens the image with the production reader before publishing
 it. Physical Yamaha hardware has enumerated, loaded, and played the minimal
 generated profile containing one mono `SMPL` and one direct single-member
 `SBNK`. A second generated profile has also loaded and played one complete
@@ -160,13 +161,13 @@ is file `F002`. The complete generated ordering is deterministic:
 | `0..15` | Zero-filled ISO system area. |
 | `16` | One Primary Volume Descriptor. |
 | `17` | Volume Descriptor Set Terminator. |
-| `18` | Little-endian Type-L path table. |
-| `19` | Big-endian Type-M path table. |
-| `20...` | Root, group, volume, and populated category directories; one 2048-byte sector each. |
+| `18...` | Little-endian Type-L path table, padded to complete 2048-byte sectors. |
+| following sectors | Big-endian Type-M path table, padded to complete 2048-byte sectors. |
+| following sectors | Root, group, volume, and populated category directory extents. |
 | following sectors | Group catalog, group label, category catalogs, then object payloads in deterministic tree order. |
 
-The writer uses 2048-byte logical blocks, one extent per file, one sector per
-directory, and both-endian ISO9660 numeric fields. It sets the PVD System
+The writer uses 2048-byte logical blocks, one extent per file, one or more
+whole sectors per directory, and both-endian ISO9660 numeric fields. It sets the PVD System
 Identifier to:
 
 ```text
@@ -196,7 +197,7 @@ fields. Unlisted optional text fields remain space-filled or zero-filled:
 | `0x80` | 4 | Logical Block Size `2048`, both-endian u16. |
 | `0x84` | 8 | Path-table byte count, both-endian u32. |
 | `0x8c` | 4 | Type-L path-table sector `18`, u32le. |
-| `0x94` | 4 | Type-M path-table sector `19`, u32be. |
+| `0x94` | 4 | Type-M path-table sector immediately following the padded Type-L table, u32be. |
 | `0x9c` | 34 | Root directory record. |
 | `0xbe` | 128 | Volume Set Identifier from `iso.volume_id`, space-padded. |
 | `0x13e`, `0x1be`, `0x23e` | 128 each | Publisher, preparer, and application identifiers: `AXKLIB`. |
@@ -205,9 +206,13 @@ fields. Unlisted optional text fields remain space-filled or zero-filled:
 
 The Type-L and Type-M path tables contain the same directory sequence in their
 respective byte order. Directory records contain `.` and `..` followed by
-children in deterministic insertion order. If all records do not fit in one
-sector, creation fails with an unsupported-profile error rather than extending
-the directory using an unverified layout.
+children in deterministic insertion order. A record never crosses a logical
+sector boundary: the remaining bytes in that sector are zero-filled and the
+record begins in the next sector. Each directory extent is padded to a complete
+logical sector. Type-L and Type-M tables use the same deterministic directory
+order and each receives the number of whole sectors required by its byte size.
+The planner and serializer share this allocation result, so inspection reports
+the same projected image size that publication writes.
 
 Each generated path-table record has this shape; a zero pad byte follows an odd
 identifier length so the next record starts on an even boundary:

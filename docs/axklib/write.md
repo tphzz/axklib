@@ -446,9 +446,25 @@ serialization.
 
 Generated ISO partition conversion has hardware-promoted one-volume and
 multi-volume profiles. A four-volume conversion was enumerated, loaded, and
-auditioned completely on physical A4000 hardware. Multi-volume output
-remains subject to the same exact-placement, Known-relationship, directory,
-path-table, payload, and 700 MB capacity checks reported by inspection.
+auditioned completely on physical A4000 hardware. Directory extents and both
+path tables are planned and emitted across as many complete 2048-byte sectors
+as their deterministic records require. Multi-sector output has host reopen,
+external-tool, and exact-payload coverage; its object-heavy hardware profile is
+documented separately until that physical verification is complete.
+
+Dependency closure remains Known-only. One bounded whole-partition exception
+does not create a dependency: an active-form Program assignment row whose exact
+named Sample or Sample Bank target is absent from the complete source partition
+is copied byte for byte and reported as a nonblocking retained-disabled-row
+warning. This preserves sampler-saved Program bytes without redirecting the row
+to a similarly named object. An exact candidate with non-Known quality,
+source-load row, out-of-scope target, or cross-volume target remains blocking.
+Inspection admits conversion only when no blocking issue remains; nonblocking
+retention warnings stay visible in the destination dialog.
+
+Multi-volume output remains subject to exact placement, the relationship rules
+above, object identifier counts, payload limits, and the 700 MB capacity check
+reported by inspection.
 Generated floppy output is host-reopened and payload-compared, but fresh FAT12
 authoring still retains the hardware-validation qualification documented above.
 

@@ -20,11 +20,10 @@ fixtures when practical.
   trailing stars and share one Wave Data object; ten Sample Bank/Sample pairs
   span zero through eight and ten trailing stars and share a second Wave Data
   object. Within each family the decoded Sample parameters are identical.
-- Evidence confidence: this structure, the Yamaha manual, later hardware edits
-  and saves, and operator recollection are Strong evidence of repeated
-  Duplicate operations. The missing original authoring transcript prevents a
-  Confirmed claim about the exact command sequence or any unidentified raw
-  Duplicate field.
+- Verification status: this structure, the Yamaha manual, later hardware edits
+  and saves, and operator recollection support repeated Duplicate operations.
+  The missing original authoring transcript prevents a definitive claim about
+  the exact command sequence or any unidentified raw Duplicate field.
 - Audio limitation: grouped `Sxx` members reference `SMP 252511`, whose exact
   PCM has near-zero amplitude. Use this fixture for structure and parameter
   tests, not as an audible grouped-bank control. Standalone `JSxx` rows

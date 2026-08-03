@@ -15,13 +15,14 @@
 #include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
 
+#include "relationship_policy.hpp"
+
 namespace axk {
 namespace {
 
 constexpr std::uint64_t floppy_image_bytes = 1'474'560U;
 constexpr std::uint64_t floppy_data_bytes = 2'847U * 512U;
 constexpr std::size_t floppy_root_entries = 224U;
-constexpr std::uint64_t iso_sector_bytes = 2'048U;
 constexpr std::string_view generated_raw_group = "46DEF120";
 
 struct SourceVolume {
@@ -83,8 +84,19 @@ bool dependency_relationship(const Relationship &relationship) {
 }
 
 void add_issue(MediaConversionPlanSummary &summary, std::string code, std::string message,
-               std::optional<std::uint64_t> required = {}, std::optional<std::uint64_t> available = {}) {
-    summary.issues.push_back({std::move(code), std::move(message), true, required, available});
+               std::optional<std::uint64_t> required = {}, std::optional<std::uint64_t> available = {},
+               bool blocking = true) {
+    summary.issues.push_back({std::move(code), std::move(message), blocking, required, available});
+}
+
+bool retained_disabled_program_row(const Relationship &relationship,
+                                   const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects_by_key,
+                                   const MediaConversionRequest &request) {
+    return request.format == MediaImageFormat::iso9660 && request.scope == MediaConversionScope::partition &&
+           relationship.assignment_state == AssignmentState::active && !relationship.assignment_name.empty() &&
+           (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" || relationship.type == "PROG_ASSIGNMENT_TO_SBAC") &&
+           relationship.quality != RelationshipQuality::known &&
+           !detail::relationship_has_exact_named_program_target(relationship, objects_by_key);
 }
 
 Result<std::vector<SourceVolume>> source_volumes(const Partition &partition) {
@@ -136,66 +148,36 @@ Result<std::vector<SourceVolume>> source_volumes(const Partition &partition) {
     return result;
 }
 
-std::size_t iso_record_size(std::size_t name_size) { return 33U + name_size + (name_size % 2U == 0U ? 1U : 0U); }
-
 void validate_iso_layout(detail::PreparedMediaConversion &prepared) {
     auto &summary = prepared.summary;
     const auto &volumes = prepared.image.iso_volumes;
+    bool shape_supported = true;
     if (volumes.size() > 998U) {
         add_issue(summary, "MEDIA_CONVERSION_ISO_VOLUME_CAPACITY", "CD-ROM output supports at most 998 source volumes");
+        shape_supported = false;
     }
-    std::size_t directory_count = 2U + volumes.size();
-    std::vector<std::uint64_t> file_sizes;
-    file_sizes.push_back((volumes.size() + 1U) * 32U);
-    file_sizes.push_back(16U);
-    std::size_t path_table_bytes = 10U + 8U + generated_raw_group.size();
-    const auto group_directory_bytes = 68U + (volumes.size() + 2U) * iso_record_size(4U);
-    if (group_directory_bytes > iso_sector_bytes) {
-        add_issue(summary, "MEDIA_CONVERSION_ISO_DIRECTORY_CAPACITY",
-                  "The partition has too many volumes for the proven one-sector CD-ROM group directory");
-    }
-
     for (const auto &volume : volumes) {
         std::map<ObjectType, std::size_t> categories;
         for (const auto &object : volume.objects)
             ++categories[object.type];
-        directory_count += categories.size();
-        path_table_bytes += 12U + categories.size() * 12U;
-        const auto volume_directory_bytes = 68U + categories.size() * iso_record_size(4U);
-        if (volume_directory_bytes > iso_sector_bytes) {
-            add_issue(
-                summary, "MEDIA_CONVERSION_ISO_DIRECTORY_CAPACITY",
-                std::format("Volume '{}' has too many object categories for the CD-ROM profile", volume.volume_name));
-        }
         for (const auto &[type, count] : categories) {
             static_cast<void>(type);
             if (count > 999U) {
                 add_issue(summary, "MEDIA_CONVERSION_ISO_OBJECT_CAPACITY",
                           std::format("Volume '{}' has more than 999 objects in one category", volume.volume_name));
+                shape_supported = false;
             }
-            const auto category_directory_bytes = 68U + (count + 1U) * iso_record_size(4U);
-            if (category_directory_bytes > iso_sector_bytes) {
-                add_issue(summary, "MEDIA_CONVERSION_ISO_DIRECTORY_CAPACITY",
-                          std::format("Volume '{}' has too many objects in one category for the proven "
-                                      "one-sector CD-ROM directory",
-                                      volume.volume_name));
-            }
-            file_sizes.push_back(count * 32U);
         }
-        for (const auto &object : volume.objects)
-            file_sizes.push_back(object.size());
     }
-    if (path_table_bytes > iso_sector_bytes) {
-        add_issue(summary, "MEDIA_CONVERSION_ISO_PATH_TABLE_CAPACITY",
-                  "The partition has too many directories for the proven one-sector CD-ROM path table");
-    }
+    if (!shape_supported)
+        return;
 
-    const auto sectors = detail::checked_iso9660_sector_count(directory_count, file_sizes);
-    if (!sectors) {
-        add_issue(summary, "MEDIA_CONVERSION_ISO_SECTOR_CAPACITY", sectors.error().message);
+    const auto layout = detail::plan_iso9660_layout(prepared.image);
+    if (!layout) {
+        add_issue(summary, "MEDIA_CONVERSION_ISO_LAYOUT_UNSUPPORTED", layout.error().message);
         return;
     }
-    summary.projected_output_bytes = static_cast<std::uint64_t>(*sectors) * iso_sector_bytes;
+    summary.projected_output_bytes = layout->output_bytes;
     if (summary.projected_output_bytes > summary.capacity_bytes) {
         add_issue(summary, "MEDIA_CONVERSION_OUTPUT_CAPACITY", "The partition does not fit on a 700 MB CD-ROM image",
                   summary.projected_output_bytes, summary.capacity_bytes);
@@ -282,7 +264,9 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
     if (!inventory)
         return std::unexpected{inventory.error()};
     std::unordered_map<std::uint32_t, const ObjectSnapshot *> objects_by_id;
+    std::map<std::string, const ObjectSnapshot *, std::less<>> objects_by_key;
     for (const auto &object : inventory->catalog.objects) {
+        objects_by_key.emplace(object.key, &object);
         if (object.partition.value == request.partition_index)
             objects_by_id.emplace(object.sfs_id.value, &object);
     }
@@ -390,10 +374,20 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
     }
 
     const auto graph = build_relationship_graph(inventory->catalog);
+    std::size_t retained_program_row_count{};
+    std::vector<std::string> retained_program_row_names;
     for (const auto &relationship : graph.relationships) {
         if (!selected_keys.contains(relationship.source_key) || !dependency_relationship(relationship))
             continue;
         if (relationship.quality != RelationshipQuality::known || !relationship.target_key) {
+            if (retained_disabled_program_row(relationship, objects_by_key, request)) {
+                ++retained_program_row_count;
+                if (retained_program_row_names.size() < 5U &&
+                    !std::ranges::contains(retained_program_row_names, relationship.assignment_name)) {
+                    retained_program_row_names.push_back(relationship.assignment_name);
+                }
+                continue;
+            }
             add_issue(prepared.summary, "MEDIA_CONVERSION_RELATIONSHIP_UNCONFIRMED",
                       std::format("{} dependency is not Known", relationship.type));
             continue;
@@ -408,6 +402,19 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
                       std::format("{} crosses source volume boundaries", relationship.type));
         }
     }
+    if (retained_program_row_count != 0U) {
+        std::string names;
+        for (const auto &name : retained_program_row_names) {
+            if (!names.empty())
+                names += ", ";
+            names += name;
+        }
+        add_issue(prepared.summary, "MEDIA_CONVERSION_RETAINED_DISABLED_PROGRAM_ROWS",
+                  std::format("Retained {} disabled Program assignment row{} without inventing target objects{}{}",
+                              retained_program_row_count, retained_program_row_count == 1U ? "" : "s",
+                              names.empty() ? "" : ": ", names),
+                  {}, {}, false);
+    }
 
     if (prepared.summary.volumes.empty()) {
         add_issue(prepared.summary, "MEDIA_CONVERSION_SCOPE_EMPTY", "The selected source scope has no volume");
@@ -419,7 +426,7 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
             add_issue(prepared.summary, "MEDIA_CONVERSION_SCOPE_EMPTY", "A floppy image must contain an object");
         validate_floppy_layout(prepared);
     }
-    prepared.summary.can_export = prepared.summary.issues.empty();
+    prepared.summary.can_export = std::ranges::none_of(prepared.summary.issues, &MediaConversionIssue::blocking);
     return prepared;
 }
 
