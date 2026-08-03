@@ -549,6 +549,65 @@ describe('AuditionController', () => {
         await controller.dispose();
     });
 
+    it('holds mixed short one-shot and declared-loop Sample Bank members for 500 ms', async () => {
+        installAudio();
+        const sampleRate = 48_000;
+        const frameCounts = [260, 320, 380, 440, 500, 560, 620];
+        const objectIds = frameCounts.map((_, index) => `SBNK-${index + 1}`);
+        const value = descriptor({
+            frameCount: frameCounts[0],
+            sampleRate,
+            wavSizeBytes: 44 + frameCounts[0]! * 2,
+        });
+        const transport = transportFor(value);
+        const bundle = auditionBundle(value, objectIds);
+        bundle.clips.forEach((clip, index) => {
+            const frameCount = frameCounts[index]!;
+            clip.lanes[0]!.frameCount = frameCount;
+            clip.lanes[0]!.wavSizeBytes = 44 + frameCount * 2;
+            clip.lanes[0]!.contentOffsetBytes = bundle.clips
+                .slice(0, index)
+                .reduce((total, candidate) => total + candidate.lanes[0]!.wavSizeBytes, 0);
+            if (index === bundle.clips.length - 1) {
+                clip.loopMode = 1;
+                clip.loopModeLabel = 'forward';
+                clip.lanes[0]!.loopStartFrame = 10;
+                clip.lanes[0]!.loopLengthFrames = 100;
+            }
+        });
+        bundle.contentSizeBytes = bundle.clips.reduce((total, clip) => total + clip.lanes[0]!.wavSizeBytes, 0);
+        vi.mocked(transport.prepareAuditionBundle).mockResolvedValueOnce(bundle);
+        MockAudioContext.nextBuffers = frameCounts.map((frameCount) => new MockAudioBuffer(frameCount, 1, sampleRate));
+        const diagnostics: Record<string, unknown>[] = [];
+        const controller = new AuditionController(
+            transport,
+            () => undefined,
+            (event) => diagnostics.push(event),
+            () => true,
+        );
+
+        controller.playSequence(1, objectIds);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(frameCounts.length));
+
+        for (const [index, source] of MockAudioBufferSourceNode.instances.entries()) {
+            const startTime = 1.01 + index * 0.5;
+            expect(source.loop).toBe(true);
+            expect(source.loopStart).toBeCloseTo((index === frameCounts.length - 1 ? 10 : 0) / sampleRate);
+            expect(source.loopEnd).toBeCloseTo(
+                (index === frameCounts.length - 1 ? 110 : frameCounts[index]!) / sampleRate,
+            );
+            expect(source.start).toHaveBeenCalledWith(startTime);
+            expect(source.stop.mock.calls[0]?.[0]).toBeCloseTo(startTime + 0.5);
+        }
+        expect(diagnostics.find((event) => event.event === 'sequence_scheduled')).toMatchObject({
+            memberCount: 7,
+            scheduledDurationSeconds: 3.5,
+            loopedMemberCount: 7,
+            extendedMemberCount: 7,
+        });
+        await controller.dispose();
+    });
+
     it('keeps the natural duration of forward-loop Sample Bank members longer than 500 ms', async () => {
         installAudio();
         const transport = transportFor(

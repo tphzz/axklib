@@ -3,7 +3,7 @@ import { AxklibApiError } from '../httpApiClient';
 import type { ImageTransport } from '../transport';
 import { userFacingMessage } from '../userFacingMessage';
 import { AuditionAssetStore, isAbortError } from './auditionAssetStore';
-import { initialPlaybackFrame, isForwardLoop, playbackFrameAtTime, playbackOffsetSeconds } from './playbackTimeline';
+import { initialPlaybackFrame, playbackFrameAtTime, playbackOffsetSeconds } from './playbackTimeline';
 import type {
     AuditionControllerOptions,
     AuditionDiagnosticEvent,
@@ -420,20 +420,19 @@ export class AuditionController {
             }
             const source = context.createBufferSource();
             source.buffer = entry.buffer;
-            const looped = isForwardLoop(entry.descriptor);
-            if (looped) {
-                source.loop = true;
-                source.loopStart = entry.descriptor.loopStartFrame / entry.descriptor.sampleRate;
-                source.loopEnd =
-                    (entry.descriptor.loopStartFrame + entry.descriptor.loopLengthFrames) / entry.descriptor.sampleRate;
-            }
+            const schedule = planDirectPlayback(entry.descriptor, entry.buffer.duration, 'interactive');
+            source.loop = schedule.loop;
+            source.loopStart = schedule.loopStartSeconds;
+            source.loopEnd = schedule.loopEndSeconds;
             source.connect(gain);
             const startFrame = initialPlaybackFrame(entry.descriptor);
-            const durationSeconds = looped
-                ? Math.max(entry.buffer.duration, minimumForwardLoopSequenceSeconds)
-                : entry.buffer.duration;
+            const durationSeconds =
+                schedule.stopAfterSeconds ??
+                (schedule.loop
+                    ? Math.max(entry.buffer.duration, minimumForwardLoopSequenceSeconds)
+                    : entry.buffer.duration);
             naturalDurationSeconds += entry.buffer.duration;
-            if (looped) loopedMemberCount += 1;
+            if (schedule.loop) loopedMemberCount += 1;
             if (durationSeconds > entry.buffer.duration) extendedMemberCount += 1;
             const segment: ScheduledSequenceSegment = {
                 entry,
@@ -441,7 +440,7 @@ export class AuditionController {
                 startTime: memberStart,
                 endTime: memberStart + durationSeconds,
                 startFrame,
-                timelineDescriptor: entry.descriptor,
+                timelineDescriptor: schedule.timeline,
             };
             memberStart = segment.endTime;
             return segment;
