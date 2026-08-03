@@ -332,7 +332,7 @@ export class AuditionAssetStore {
                     sampleRate: firstLane.sampleRate,
                     channels: laneBuffers.length,
                     sampleWidthBytes: Math.max(...clip.lanes.map((lane) => lane.sampleWidthBytes)),
-                    frameCount: Math.round(buffer.duration * firstLane.sampleRate),
+                    frameCount: firstLane.frameCount,
                     wavSizeBytes: clip.lanes.reduce((total, lane) => total + lane.wavSizeBytes, 0),
                     loopMode: clip.loopMode,
                     loopModeLabel: clip.loopModeLabel,

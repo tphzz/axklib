@@ -40,11 +40,15 @@ export function planDirectPlayback<T extends PlaybackTimeline>(
         });
     }
     if (isForwardLoop(timeline)) {
+        const loopStartSeconds = timeline.loopStartFrame / timeline.sampleRate;
+        const declaredLoopEndSeconds = (timeline.loopStartFrame + timeline.loopLengthFrames) / timeline.sampleRate;
+        const loopEndSeconds = Math.min(declaredLoopEndSeconds, decodedDurationSeconds);
+        if (loopEndSeconds <= loopStartSeconds) return oneShotSchedule('natural-one-shot', timeline);
         return {
             kind: 'declared-loop',
             loop: true,
-            loopStartSeconds: timeline.loopStartFrame / timeline.sampleRate,
-            loopEndSeconds: (timeline.loopStartFrame + timeline.loopLengthFrames) / timeline.sampleRate,
+            loopStartSeconds,
+            loopEndSeconds,
             stopAfterSeconds: null,
             timeline,
         };

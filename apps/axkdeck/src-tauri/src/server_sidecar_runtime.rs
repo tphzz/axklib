@@ -1,5 +1,7 @@
 use std::fmt::Write as _;
+#[cfg(unix)]
 use std::fs::File;
+#[cfg(unix)]
 use std::io::Read;
 use std::path::{Path, PathBuf};
 

@@ -489,21 +489,39 @@ describe('AuditionController', () => {
         await controller.dispose();
     });
 
-    it('holds short forward-loop Sample Bank members for 500 ms and preserves their loop timelines', async () => {
+    it('holds floor-resampled short forward-loop Sample Bank members for 500 ms', async () => {
         installAudio();
-        const sampleRate = 50_000;
-        const frameCounts = [577, 285, 141, 139, 34, 17];
-        const transport = transportFor(
-            descriptor({
-                frameCount: frameCounts[0],
-                sampleRate,
-                wavSizeBytes: 1_198,
-                loopMode: 1,
-                loopStartFrame: 0,
-                loopLengthFrames: 17,
-            }),
+        const sourceSampleRate = 44_100;
+        const outputSampleRate = 48_000;
+        const frameCounts = [1_800, 900, 450, 225, 225, 225, 225];
+        const objectIds = frameCounts.map((_, index) => `SBNK-${index + 1}`);
+        const value = descriptor({
+            frameCount: frameCounts[0],
+            sampleRate: sourceSampleRate,
+            wavSizeBytes: 44 + frameCounts[0]! * 2,
+            loopMode: 1,
+            loopStartFrame: 0,
+            loopLengthFrames: frameCounts[0],
+        });
+        const transport = transportFor(value);
+        const bundle = auditionBundle(value, objectIds);
+        bundle.clips.forEach((clip, index) => {
+            const frameCount = frameCounts[index]!;
+            clip.lanes[0]!.frameCount = frameCount;
+            clip.lanes[0]!.loopLengthFrames = frameCount;
+            clip.lanes[0]!.wavSizeBytes = 44 + frameCount * 2;
+            clip.lanes[0]!.contentOffsetBytes = bundle.clips
+                .slice(0, index)
+                .reduce((total, candidate) => total + candidate.lanes[0]!.wavSizeBytes, 0);
+        });
+        bundle.contentSizeBytes = bundle.clips.reduce((total, clip) => total + clip.lanes[0]!.wavSizeBytes, 0);
+        vi.mocked(transport.prepareAuditionBundle).mockResolvedValueOnce(bundle);
+        const decodedFrameCounts = frameCounts.map((frameCount) =>
+            Math.floor((frameCount * outputSampleRate) / sourceSampleRate),
         );
-        MockAudioContext.nextBuffers = frameCounts.map((frameCount) => new MockAudioBuffer(frameCount, 1, sampleRate));
+        MockAudioContext.nextBuffers = decodedFrameCounts.map(
+            (frameCount) => new MockAudioBuffer(frameCount, 1, outputSampleRate),
+        );
         const updates: AuditionState[] = [];
         const diagnostics: Record<string, unknown>[] = [];
         const controller = new AuditionController(
@@ -513,17 +531,14 @@ describe('AuditionController', () => {
             () => true,
         );
 
-        controller.playSequence(
-            1,
-            frameCounts.map((_, index) => `SBNK-${index + 1}`),
-        );
+        controller.playSequence(1, objectIds);
         await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(frameCounts.length));
 
         for (const [index, source] of MockAudioBufferSourceNode.instances.entries()) {
             const startTime = 1.01 + index * 0.5;
             expect(source.loop).toBe(true);
             expect(source.loopStart).toBe(0);
-            expect(source.loopEnd).toBeCloseTo(17 / sampleRate);
+            expect(source.loopEnd).toBeCloseTo(decodedFrameCounts[index]! / outputSampleRate);
             expect(source.start).toHaveBeenCalledWith(startTime);
             expect(source.stop).toHaveBeenCalledTimes(1);
             expect(source.stop.mock.calls[0]?.[0]).toBeCloseTo(startTime + 0.5);
@@ -532,19 +547,21 @@ describe('AuditionController', () => {
         MockAudioContext.instances[0]!.currentTime = 1.26;
         animationCallbacks.at(-1)?.(0);
         expect(updates.at(-1)).toMatchObject({ objectId: 'SBNK-1', status: 'playing' });
-        expect(updates.at(-1)?.playheadFrame).toBeLessThan(17);
+        expect(updates.at(-1)?.playheadFrame).toBeLessThan(frameCounts[0]!);
 
         MockAudioContext.instances[0]!.currentTime = 1.76;
         animationCallbacks.at(-1)?.(0);
         expect(updates.at(-1)).toMatchObject({ objectId: 'SBNK-2', status: 'playing' });
-        expect(updates.at(-1)?.playheadFrame).toBeLessThan(17);
+        expect(updates.at(-1)?.playheadFrame).toBeLessThan(frameCounts[1]!);
 
         expect(diagnostics.find((event) => event.event === 'sequence_scheduled')).toMatchObject({
-            memberCount: 6,
-            naturalDurationSeconds: expect.closeTo(frameCounts.reduce((total, value) => total + value, 0) / sampleRate),
-            scheduledDurationSeconds: 3,
-            loopedMemberCount: 6,
-            extendedMemberCount: 6,
+            memberCount: 7,
+            naturalDurationSeconds: expect.closeTo(
+                decodedFrameCounts.reduce((total, value) => total + value, 0) / outputSampleRate,
+            ),
+            scheduledDurationSeconds: 3.5,
+            loopedMemberCount: 7,
+            extendedMemberCount: 7,
         });
         await controller.dispose();
     });
