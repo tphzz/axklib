@@ -188,6 +188,35 @@ void patch_sample_cached_reference(const std::filesystem::path &path, std::uint3
     ASSERT_TRUE(image);
 }
 
+void make_program_assignment_target_missing_with_same_type_context(const std::filesystem::path &path,
+                                                                   std::size_t assignment_index) {
+    const auto media = axk::open_media(path);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto &partition = sfs->partitions().front();
+    const auto program =
+        std::ranges::find_if(partition.records, [](const auto &record) { return record.object_type == "PROG"; });
+    ASSERT_NE(program, partition.records.end());
+    ASSERT_EQ(program->extents.size(), 1U);
+    const auto row_offset =
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(program->extents.front().cluster_offset) * partition.sectors_per_cluster) *
+            512U +
+        0x120U + assignment_index * 0x38U;
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    image.seekp(static_cast<std::streamoff>(row_offset + 0x0fU));
+    image.put('*');
+    const auto context_offset = row_offset + 0x38U;
+    image.seekp(static_cast<std::streamoff>(context_offset));
+    image.write("Graph Bank      ", 16);
+    image.seekp(static_cast<std::streamoff>(context_offset + 0x14U));
+    image.put(static_cast<char>(0x11));
+    ASSERT_TRUE(image);
+}
+
 axk::Result<std::vector<axk::PortablePackage>> mixed_source_packages(const std::filesystem::path &root_path) {
     const auto graph_audio = root_path / "graph.wav";
     const auto iso_audio = root_path / "iso.wav";
@@ -513,6 +542,114 @@ TEST(PortablePackage, IgnoresAmbiguousInactiveProgramDiagnosticsButKeepsExactRow
     relationship.quality = axk::RelationshipQuality::known;
     relationship.target_key = "target";
     EXPECT_TRUE(axk::package_internal::portable_inactive_program_relationship(relationship));
+}
+
+TEST(PortablePackage, PreservesUnresolvedProgramRowInVolumeWithoutInventingADependency) {
+    const auto output_root = publication_root("axklib-package-unresolved-program-row");
+    const auto audio_path = output_root / "tone.wav";
+    const auto source_path = output_root / "source.hds";
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1000)));
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
+    ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
+    make_program_assignment_target_missing_with_same_type_context(source_path, 0U);
+
+    const auto source = axk::open_media(source_path);
+    ASSERT_TRUE(source) << source.error().message;
+    const std::vector program_root{root(axk::PackageRootKind::prog, "Graph Volume", "001")};
+    const auto rejected = axk::build_portable_package(*source, program_root);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, axk::ErrorCode::relationship_unresolved);
+
+    const std::vector volume_root{root(axk::PackageRootKind::volume, "Graph Volume")};
+    const auto built = axk::build_portable_package(*source, volume_root);
+    ASSERT_TRUE(built) << built.error().message;
+    EXPECT_EQ(built->package.nodes.size(), 5U);
+    EXPECT_EQ(built->package.relationships.size(), 4U);
+    EXPECT_TRUE(axk::verify_portable_package(built->package));
+
+    const auto program_node =
+        std::ranges::find(built->package.nodes, std::string{"PROG"}, &axk::PackageNode::object_type);
+    ASSERT_NE(program_node, built->package.nodes.end());
+    ASSERT_EQ(program_node->relocations.size(), 2U);
+    EXPECT_TRUE(program_node->relocations[0].edge_ids.empty());
+    ASSERT_EQ(program_node->relocations[1].edge_ids.size(), 1U);
+    const auto decoded = axk::decode_object(program_node->raw_payload);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto profile = axk::package_internal::build_relocation_profile(*decoded, program_node->raw_payload);
+    ASSERT_TRUE(profile) << profile.error().message;
+    const auto normalized = axk::decode_object(profile->normalized_payload);
+    ASSERT_TRUE(normalized) << normalized.error().message;
+    const auto *program = std::get_if<axk::CurrentProg>(&normalized->payload);
+    ASSERT_NE(program, nullptr);
+    ASSERT_GE(program->assignments.size(), 2U);
+    EXPECT_EQ(program->assignments[0].name, "Graph Bank     *");
+    EXPECT_EQ(program->assignments[0].raw_handle, 0U);
+    EXPECT_EQ(program->assignments[1].name, "Graph Bank");
+    EXPECT_EQ(program->assignments[1].raw_handle, 0U);
+    std::filesystem::remove_all(output_root, error);
+}
+
+TEST(PortablePackage, RejectsAmbiguousExactProgramTargetEvenForVolume) {
+    const auto output_root = publication_root("axklib-package-ambiguous-program-row");
+    const auto audio_path = output_root / "tone.wav";
+    const auto source_path = output_root / "source.hds";
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1000)));
+    auto volume = graph_volume(audio_path);
+    axk::SampleSpec other_member;
+    other_member.name = "Other Member";
+    other_member.waveform_id = "wave";
+    other_member.root_key = 60U;
+    other_member.key_high = 127U;
+    volume.samples.push_back(std::move(other_member));
+    axk::SampleSpec other_direct;
+    other_direct.name = "Other Direct";
+    other_direct.waveform_id = "wave";
+    other_direct.root_key = 60U;
+    other_direct.key_high = 127U;
+    volume.samples.push_back(std::move(other_direct));
+    volume.sample_banks.push_back({"Other Bank", {"Other Member"}});
+    volume.programs.push_back({2U, {{"SBAC", "Other Bank", 1U}, {"SBNK", "Other Direct", 2U}}});
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    manifest.partitions.push_back({"P1", {std::move(volume)}});
+    ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
+    std::uint64_t name_offset{};
+    {
+        const auto written = axk::open_media(source_path);
+        ASSERT_TRUE(written) << written.error().message;
+        const auto *sfs = std::get_if<axk::Container>(&written->storage());
+        ASSERT_NE(sfs, nullptr);
+        const auto &partition = sfs->partitions().front();
+        const auto other =
+            std::ranges::find(partition.records, std::string{"Other Bank"}, &axk::IndexRecord::object_name);
+        ASSERT_NE(other, partition.records.end());
+        ASSERT_EQ(other->extents.size(), 1U);
+        name_offset =
+            (static_cast<std::uint64_t>(partition.start_sector) +
+             static_cast<std::uint64_t>(other->extents.front().cluster_offset) * partition.sectors_per_cluster) *
+                512U +
+            0x32U;
+    }
+    std::fstream image{source_path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    image.seekp(static_cast<std::streamoff>(name_offset));
+    image.write("Graph Bank      ", 16);
+    ASSERT_TRUE(image);
+    image.close();
+
+    const auto source = axk::open_media(source_path);
+    ASSERT_TRUE(source) << source.error().message;
+    const std::vector volume_root{root(axk::PackageRootKind::volume, "Graph Volume")};
+    const auto rejected = axk::build_portable_package(*source, volume_root);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, axk::ErrorCode::relationship_unresolved);
+    std::filesystem::remove_all(output_root, error);
 }
 
 TEST(PortablePackage, ExportsACompleteSupportedVolumeWithOnePayloadPerDigest) {

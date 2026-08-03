@@ -10,11 +10,21 @@ fixtures when practical.
 - Bytes: 1048576
 - SHA-256: `733b25eb1b9da4b155ec543f48e0c0f3ab5480dbba587ee80fea5df40dfa0d7d`
 - Purpose: multi-slot current SBNK fixture for active public tests
-- Origin: curated public test fixture
+- Origin: sampler-authored A-series image retained from the pre-public
+  multi-slot hardware campaign; the exact authoring transcript is not retained
 - Quality: known small test dependency
 - Retention reason: required by active automated tests; replace with a smaller synthetic/minimal fixture when practical
 - Expected object count: see `MANIFEST.json`
 - Regeneration note: see `MANIFEST.json`
+- Duplicate-family structure: ten standalone Samples span zero through nine
+  trailing stars and share one Wave Data object; ten Sample Bank/Sample pairs
+  span zero through eight and ten trailing stars and share a second Wave Data
+  object. Within each family the decoded Sample parameters are identical.
+- Evidence confidence: this structure, the Yamaha manual, later hardware edits
+  and saves, and operator recollection are Strong evidence of repeated
+  Duplicate operations. The missing original authoring transcript prevents a
+  Confirmed claim about the exact command sequence or any unidentified raw
+  Duplicate field.
 - Audio limitation: grouped `Sxx` members reference `SMP 252511`, whose exact
   PCM has near-zero amplitude. Use this fixture for structure and parameter
   tests, not as an audible grouped-bank control. Standalone `JSxx` rows

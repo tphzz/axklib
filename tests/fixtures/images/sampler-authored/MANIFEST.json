@@ -4,7 +4,7 @@
     "bytes": 1048576,
     "sha256": "733b25eb1b9da4b155ec543f48e0c0f3ab5480dbba587ee80fea5df40dfa0d7d",
     "purpose": "multi-slot current SBNK fixture for active public tests",
-    "origin": "curated public test fixture",
+    "origin": "Sampler-authored A-series image retained from the pre-public multi-slot hardware campaign; the exact authoring transcript is not retained.",
     "quality": "Known small test dependency",
     "retention_reason": "Required by active automated tests; replace with a smaller synthetic/minimal fixture when practical.",
     "expected_object_count": 32,
@@ -13,7 +13,7 @@
       "SBNK": 20,
       "SBAC": 10
     },
-    "regeneration_note": "Regenerate only by creating equivalent visible objects and updating this manifest hash/count record."
+    "regeneration_note": "Regenerate only with two shared Wave Data families, standalone Sample star generations 0 through 9, paired Sample Bank/Sample star generations 0 through 8 and 10, and equivalent visible objects; update this manifest hash/count record."
   },
   {
     "name": "HD00_512_single_sbnk_authored.hds",

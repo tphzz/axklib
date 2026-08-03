@@ -335,13 +335,14 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                     if (row.name.empty())
                         continue;
                     const auto type = expected_type(row.kind);
+                    const auto decoded_state = assignment_state(row);
                     auto match = match_named_target(
                         *item, row.name, type, scope_index,
                         type == ObjectType::unknown ? "assignment-name-unique"
                                                     : std::format("assignment-kind-0x{:02x}+name", row.kind),
                         type == ObjectType::unknown ? "assignment-name-ambiguous"
                                                     : std::format("assignment-kind-0x{:02x}+name-ambiguous", row.kind),
-                        assignment_state(row) == AssignmentState::active || item->scope_key.starts_with("iso:"));
+                        decoded_state == AssignmentState::active || item->scope_key.starts_with("iso:"));
                     if (match.target != nullptr && match.basis.ends_with("+same-folder") &&
                         type != ObjectType::unknown) {
                         match.quality = RelationshipQuality::known;
@@ -362,9 +363,7 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                                      "match the assignment name"};
                         }
                     }
-                    const auto decoded_state = assignment_state(row);
-                    if (match.quality == RelationshipQuality::unknown &&
-                        (row.raw_handle == 0U || decoded_state == AssignmentState::unknown))
+                    if (match.quality == RelationshipQuality::unknown && decoded_state == AssignmentState::unknown)
                         continue;
                     const auto rel_type = type == ObjectType::sbac   ? "PROG_ASSIGNMENT_TO_SBAC"
                                           : type == ObjectType::sbnk ? "PROG_ASSIGNMENT_TO_SBNK"
@@ -457,7 +456,8 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                     if (relationship.quality != RelationshipQuality::unknown)
                         continue;
                     if (relationship.assignment_state == AssignmentState::active &&
-                        relationship.type == "PROG_ASSIGNMENT_TO_SBNK") {
+                        (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" ||
+                         relationship.type == "PROG_ASSIGNMENT_TO_SBAC")) {
                         relationship.basis = "assignment-active-missing-local-target";
                     } else if (relationship.assignment_state == AssignmentState::visible_off &&
                                relationship.type == "PROG_ASSIGNMENT_TO_SBAC") {

@@ -330,6 +330,18 @@ load the named assignment. Ambiguous visible-off diagnostics, duplicate
 inactive rows, unresolved targets, and ambiguous targets remain outside the
 portable closure.
 
+A volume package may also preserve a stored active Program row whose exact
+same-volume target is absent. The complete row remains identity-significant,
+its source-local `PROG_ASSIGNMENT_HANDLE` is cleared, and it has no relationship
+edge. This records source state without inventing a dependency; hardware
+lookup disables such a row when its exact target cannot be found. A Program-root
+package still rejects the same row because a single-Program package promises a
+complete dependency closure. Package closure does not use a trailing `*` alone
+as a relationship-state signal: when an exact target including the suffix
+exists, that exact object is the dependency. This rule does not define Yamaha
+Duplicate state. Yamaha uses `*` when naming duplicated Samples, but the name
+alone is not a portable relationship-state flag.
+
 ## SDK Surface
 
 Include `axklib/sdk.hpp`. `portable_package::export_from` exports and atomically

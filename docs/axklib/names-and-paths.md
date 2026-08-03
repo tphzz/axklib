@@ -196,7 +196,7 @@ children:
 |   `-- TS-FX 7 [SAMPLE (SBNK)] - Rch Assign: =SMP
 ```
 
-Visible/off rows and duplicate-not-active rows are not printed as active Program
+Visible/off and duplicate-not-active rows are not printed as active Program
 children. They remain in relationship CSV/JSON reports.
 
 When `--show-unresolved` is used, active missing local targets appear as Unknown

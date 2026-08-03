@@ -144,8 +144,10 @@ bool portable_program_assignment(AssignmentState state) {
            state == AssignmentState::visible_off;
 }
 
-Result<std::vector<const Relationship *>> required_relationships(const ObjectSnapshot &object,
-                                                                 const RelationshipGraph &graph) {
+Result<std::vector<const Relationship *>>
+required_relationships(const ObjectSnapshot &object, const RelationshipGraph &graph,
+                       bool allow_unresolved_program_assignments,
+                       const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects) {
     std::vector<const Relationship *> candidates;
     for (const auto *relationship : graph.children(object.key)) {
         if (!closure_relationship(relationship->type))
@@ -219,6 +221,21 @@ Result<std::vector<const Relationship *>> required_relationships(const ObjectSna
                 return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                   "active Program assignment has an unsupported target "
                                                   "kind")};
+            const auto exact_named_target = [&](const Relationship *row) {
+                const auto exact_key = [&](std::string_view key) {
+                    const auto found = objects.find(key);
+                    return found != objects.end() && found->second->object.header.name == assignment.name;
+                };
+                return (row->target_key && exact_key(*row->target_key)) ||
+                       std::ranges::any_of(row->candidate_keys, exact_key);
+            };
+            const auto unresolved = std::ranges::find_if(candidates, [&](const Relationship *row) {
+                return row->type == role && row->assignment_index == index &&
+                       row->assignment_state == AssignmentState::active && row->quality != RelationshipQuality::known &&
+                       !exact_named_target(row);
+            });
+            if (allow_unresolved_program_assignments && unresolved != candidates.end())
+                continue;
             auto row = require_one(role, index);
             if (!row)
                 return std::unexpected{row.error()};
@@ -294,6 +311,8 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
     if (!selected)
         return std::unexpected{selected.error()};
     const auto graph = build_relationship_graph(*catalog);
+    const auto allow_unresolved_program_assignments =
+        std::ranges::any_of(*selected, [](const SelectedRoot &root) { return root.kind == PackageRootKind::volume; });
     std::map<std::string, const ObjectSnapshot *, std::less<>> objects;
     for (const auto &object : catalog->objects)
         objects.emplace(object.key, &object);
@@ -314,7 +333,7 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
         const auto profile = package_internal::build_relocation_profile(object->object, object->raw_payload);
         if (!profile)
             return std::unexpected{profile.error()};
-        auto required = required_relationships(*object, graph);
+        auto required = required_relationships(*object, graph, allow_unresolved_program_assignments, objects);
         if (!required)
             return std::unexpected{required.error()};
         std::map<std::string, std::uint32_t, std::less<>> role_ordinals;

@@ -587,6 +587,27 @@ Active assignment state is separate from target matching:
 | `source-load-assignment` | CD-ROM source-load row matched to a target object. |
 | `unknown` | State is not classified beyond diagnostics. |
 
+Assignment target matching preserves the complete 16-byte sampler name. An
+exact target whose stored name ends in `*` can be active and playable, so the
+suffix alone does not classify a row as unresolved or off. If the exact target
+is absent, keep the row unresolved rather than redirecting it to a similar
+unstarred object.
+
+In the sampler UI, `*` is not merely arbitrary punctuation: Yamaha's Duplicate
+command creates a Sample named from the original name plus `*`. The new Sample
+initially has the same parameters and shares the same Wave Data. The right-side
+`E` indicator is transient edited-but-not-saved state. Relationship matching
+still uses the exact stored target name; neither package closure nor validation
+infers unresolved, off, or duplicate state from the suffix alone.
+
+The retained sampler-authored multi-slot fixture provides Strong supporting
+evidence for the saved-object model: successive starred Sample families keep
+identical decoded parameters and Known links to shared Wave Data, and paired
+Sample Bank/Sample families carry matching star generations. Its original
+button-by-button authoring transcript was not retained, so it does not prove an
+additional raw Duplicate flag. Starred objects use the same relationship and
+orphan rules as other exact object names.
+
 Normal `info` output shows active Program children and CD-ROM source-load
 children that are suitable for user-facing display. CSV and JSON relationship
 reports keep all decoded rows, raw selector values, and inactive rows.

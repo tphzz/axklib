@@ -152,6 +152,8 @@ Result<void> validate_manifest_graph(const PortablePackage &package) {
 }
 
 Result<void> validate_package_closure(const PortablePackage &package) {
+    const auto allow_unresolved_program_assignments = std::ranges::any_of(
+        package.roots, [](const PackageRoot &root) { return root.kind == PackageRootKind::volume; });
     for (const auto &root : package.roots) {
         if (root.kind != PackageRootKind::volume && root.node_ids.size() != 1U)
             return std::unexpected{package_error("single-object package root must contain one node")};
@@ -235,6 +237,13 @@ Result<void> validate_package_closure(const PortablePackage &package) {
                 if (role.empty())
                     return std::unexpected{package_error("package Program contains an unsupported "
                                                          "active assignment")};
+                auto edges = package_children(package, node.node_id, role);
+                std::erase_if(edges, [&](const PackageRelationship *edge) { return edge->ordinal != index; });
+                const auto exact_target_present = std::ranges::any_of(package.nodes, [&](const PackageNode &target) {
+                    return target.object_type == object_type_name(type) && target.name == assignment.name;
+                });
+                if (allow_unresolved_program_assignments && edges.empty() && !exact_target_present)
+                    continue;
                 if (auto valid = require_edge(role, assignment.name, type, static_cast<std::uint32_t>(index)); !valid) {
                     return valid;
                 }

@@ -576,12 +576,12 @@ TEST(ProgramRelationships, IgnoresUnclassifiedUnmatchedTailRows) {
     EXPECT_TRUE(axk::build_relationship_graph(catalog).relationships.empty());
 }
 
-TEST(ProgramRelationships, ClassifiesActiveMissingSampleTargets) {
+TEST(ProgramRelationships, ClassifiesZeroHandleActiveMissingSampleTargets) {
     axk::ObjectCatalog catalog;
     axk::CurrentProg current_program;
     axk::ProgAssignment assignment;
     assignment.name = "Missing Sample";
-    assignment.raw_handle = 1U;
+    assignment.raw_handle = 0U;
     assignment.kind = 0x10U;
     assignment.raw_row[0x28] = std::byte{0xff};
     current_program.assignments.push_back(assignment);
@@ -860,6 +860,39 @@ TEST(ProgramRelationships, MarksVisibleOffRepeatOfActiveTargetAsDuplicate) {
     ASSERT_EQ(graph.relationships.size(), 2U);
     EXPECT_EQ(graph.relationships[0].assignment_state, axk::AssignmentState::active);
     EXPECT_EQ(graph.relationships[1].assignment_state, axk::AssignmentState::duplicate_not_active);
+}
+
+TEST(ProgramRelationships, ResolvesAnExactTargetWhoseStoredNameEndsInStar) {
+    axk::ObjectCatalog catalog;
+    axk::DecodedObject sample;
+    sample.header.type = axk::ObjectType::sbnk;
+    sample.header.name = "STAR SAMPLE    *";
+    sample.payload = axk::CurrentSbnk{};
+    catalog.objects.push_back({"sample", axk::PartitionIndex{0}, axk::SfsId{1}, "partition:0", std::move(sample), {}});
+
+    axk::ProgAssignment active;
+    active.name = "STAR SAMPLE    *";
+    active.raw_handle = 0U;
+    active.kind = 0x10U;
+    active.flags = 1U;
+    active.raw_row[0x0f] = std::byte{0x2a};
+    active.raw_row[0x28] = std::byte{0xff};
+    axk::CurrentProg current_program;
+    current_program.assignments = {active};
+    axk::DecodedObject program;
+    program.header.type = axk::ObjectType::prog;
+    program.header.name = "001";
+    program.payload = std::move(current_program);
+    catalog.objects.push_back(
+        {"program", axk::PartitionIndex{0}, axk::SfsId{2}, "partition:0", std::move(program), {}});
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    EXPECT_EQ(graph.relationships.front().assignment_state, axk::AssignmentState::active);
+    EXPECT_EQ(graph.relationships.front().target_key, "sample");
+    EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::known);
+    EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x10+name");
+    EXPECT_EQ(graph.relationships.front().receive_channel_display, "02");
 }
 
 TEST(WaveformOrphans, AllowsOnlyCompleteExactUnreferencedClassification) {

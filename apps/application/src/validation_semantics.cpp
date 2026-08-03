@@ -185,9 +185,10 @@ std::string tentative_relationship_code(const axk::Relationship &row) {
 
 std::pair<std::string, std::string> missing_relationship_message(const axk::Relationship &row) {
     if (row.assignment_state == axk::AssignmentState::active)
-        return {"Active Program assignment references a missing local target.",
-                "Inspect the Program assignment and source object group; user-facing info may show an unresolved "
-                "placeholder instead of a normal Program child."};
+        return {"Stored active-form Program row references a missing exact local target; sampler lookup disables "
+                "the row when that target cannot be found.",
+                "Preserve the unresolved row data and do not redirect it to a similar name. A volume package "
+                "may retain it without a dependency edge."};
     if (row.assignment_state == axk::AssignmentState::visible_off) {
         const auto expected = row.type == "PROG_ASSIGNMENT_TO_SBAC" ? "Sample Bank (SBAC)" : "Sample (SBNK)";
         return {std::format("Visible/off Program assignment row names a missing local {} target; this is decoded "
