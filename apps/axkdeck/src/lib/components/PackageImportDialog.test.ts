@@ -98,6 +98,7 @@ function plan(valid = true): ImageSessionPackageImportPlan {
                 targetWaveDataReferenceValue: null,
             },
         ],
+        programAssignmentAdjustments: [],
         allocation: [
             {
                 partitionIndex: 0,
@@ -208,6 +209,50 @@ describe('PackageImportDialog', () => {
         expect(screen.getByText(/30\.0 MiB/)).toBeTruthy();
         expect(screen.getByText('Image space')).toBeTruthy();
         expect(screen.getByText('2 KiB')).toBeTruthy();
+    });
+
+    it('shows nonblocking Program assignment adjustments before import', () => {
+        const adjusted = plan();
+        adjusted.programAssignmentAdjustments = [
+            {
+                adjustmentId: 'adjustment-1',
+                origin: 'EXISTING_PROGRAM',
+                packageIndex: null,
+                actionId: null,
+                existingObjectKey: 'p0:sfs42',
+                programSlot: '001',
+                programName: 'Voyager',
+                assignmentOrdinal: 0,
+                targetObjectType: 'SBAC',
+                targetName: 'BPF Sweep B',
+                partitionIndex: 0,
+                groupName: '',
+                volumeName: 'TARGET',
+                rawGroup: '',
+                rawVolume: '',
+                reasonCode: 'UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION',
+                disposition: 'CLEAR_ASSIGNMENT',
+            },
+        ];
+        render(PackageImportDialog, {
+            props: {
+                targetName: 'TARGET',
+                desktop: true,
+                sourceName: 'programs.axkprg',
+                inspection,
+                plan: adjusted,
+                renames: {},
+                status: 'ready',
+                progress: 1,
+                error: '',
+                ...callbacks,
+            },
+        });
+
+        expect(screen.getByText('1 unresolved Program assignment will be cleared')).toBeTruthy();
+        expect(screen.getByText('Voyager')).toBeTruthy();
+        expect(screen.getByText(/Sample Bank “BPF Sweep B” · existing Program/)).toBeTruthy();
+        expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(false);
     });
 
     it('renders a shared dependency once in every owning branch without duplicate keys', () => {

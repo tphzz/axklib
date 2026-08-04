@@ -43,6 +43,12 @@ relocation_context(const PortablePackage &package, const PackageImportPlan &plan
     context.wave_data_reference_value = owner.target_wave_data_reference_value;
     context.linked_program_numbers = owner.target_program_numbers;
     context.sample_bank_member = owner.target_sample_bank_member;
+    for (const auto &adjustment : plan.program_assignment_adjustments) {
+        if (adjustment.origin == PackageProgramAssignmentOrigin::imported_program && adjustment.action_id &&
+            *adjustment.action_id == owner.action_id) {
+            context.cleared_program_assignment_ordinals.push_back(adjustment.assignment_ordinal);
+        }
+    }
     for (const auto &edge : package.relationships) {
         if (edge.source_node_id != owner.node_id)
             continue;
@@ -75,6 +81,70 @@ std::optional<std::pair<std::string, std::string>> package_iso_raw_scope(const O
     if (separator == std::string::npos || path.find('/', separator + 1U) != std::string::npos)
         return std::nullopt;
     return std::pair{path.substr(0, separator), path.substr(separator + 1U)};
+}
+
+template <typename Replace>
+Result<void> apply_existing_flat_program_assignment_adjustments(std::span<const MediaObject> objects,
+                                                                const PackageImportPlan &plan, Replace replace,
+                                                                const CancellationToken &cancellation) {
+    std::map<std::string, std::vector<const PackageProgramAssignmentAdjustment *>, std::less<>> grouped;
+    for (const auto &adjustment : plan.program_assignment_adjustments) {
+        if (adjustment.origin == PackageProgramAssignmentOrigin::existing_program)
+            grouped[*adjustment.existing_object_key].push_back(&adjustment);
+    }
+    for (const auto &[object_key, adjustments] : grouped) {
+        if (const auto checked = cancellation.check(); !checked)
+            return std::unexpected{checked.error()};
+        const auto object = std::ranges::find(objects, object_key, &MediaObject::key);
+        if (object == objects.end())
+            return std::unexpected{transaction_error("planned existing Program adjustment owner is unavailable")};
+        auto cleared = clear_program_assignment_adjustments(object->raw_payload, adjustments);
+        if (!cleared)
+            return std::unexpected{cleared.error()};
+        if (auto replaced = replace(*object, std::move(*cleared)); !replaced)
+            return std::unexpected{replaced.error()};
+    }
+    return {};
+}
+
+Result<void> validate_flat_program_assignment_adjustments(
+    const ObjectCatalog &catalog, const PackageImportPlan &plan,
+    const std::map<std::string, const ObjectSnapshot *, std::less<>> &actual_by_action) {
+    std::map<std::string, std::vector<const PackageProgramAssignmentAdjustment *>, std::less<>> grouped;
+    for (const auto &adjustment : plan.program_assignment_adjustments) {
+        const auto owner = adjustment.origin == PackageProgramAssignmentOrigin::imported_program
+                               ? "action:" + *adjustment.action_id
+                               : "existing:" + *adjustment.existing_object_key;
+        grouped[owner].push_back(&adjustment);
+    }
+    for (const auto &[owner, adjustments] : grouped) {
+        const ObjectSnapshot *snapshot{};
+        if (owner.starts_with("action:")) {
+            const auto found = actual_by_action.find(owner.substr(7U));
+            if (found != actual_by_action.end())
+                snapshot = found->second;
+        } else {
+            std::vector<const ObjectSnapshot *> matches;
+            const auto &expected = *adjustments.front();
+            for (const auto &candidate : catalog.objects) {
+                const auto scope = package_iso_raw_scope(candidate);
+                const auto scope_matches =
+                    plan.target_kind != MediaKind::iso9660 ||
+                    (scope && scope->first == expected.raw_group && scope->second == expected.raw_volume);
+                if (candidate.object.header.raw_type == "PROG" &&
+                    candidate.object.header.name == expected.program_slot && scope_matches) {
+                    matches.push_back(&candidate);
+                }
+            }
+            if (matches.size() == 1U)
+                snapshot = matches.front();
+        }
+        if (snapshot == nullptr)
+            return std::unexpected{transaction_error("adjusted Program is not unique in the rebuilt media")};
+        if (auto validated = validate_cleared_program_assignment_adjustments(*snapshot, adjustments); !validated)
+            return std::unexpected{validated.error()};
+    }
+    return {};
 }
 
 Result<void> validate_flat_package_result(const std::filesystem::path &temporary,
@@ -128,6 +198,8 @@ Result<void> validate_flat_package_result(const std::filesystem::path &temporary
         }
         actual_by_action.emplace(object.action_id, matches.front());
     }
+    if (auto adjusted = validate_flat_program_assignment_adjustments(*catalog, plan, actual_by_action); !adjusted)
+        return std::unexpected{adjusted.error()};
     for (const auto &owner : plan.objects) {
         const auto &package = packages[owner.package_index];
         for (const auto &edge : package.relationships) {
@@ -187,6 +259,20 @@ Result<PackageImportReport> apply_fat12_package_import(const std::filesystem::pa
         if (!payload)
             return std::unexpected{payload.error()};
         prepared.retained_files.push_back({file.path, std::move(*payload)});
+    }
+    if (auto adjusted = apply_existing_flat_program_assignment_adjustments(
+            *media_objects, plan,
+            [&](const MediaObject &object, std::vector<std::byte> payload) -> Result<void> {
+                const auto existing = object_indices.find(object.key);
+                if (existing == object_indices.end())
+                    return std::unexpected{transaction_error("planned FAT12 Program adjustment owner is absent")};
+                prepared.objects[existing->second] = {object.decoded.header.type, object.decoded.header.name,
+                                                      std::move(payload)};
+                return {};
+            },
+            cancellation);
+        !adjusted) {
+        return std::unexpected{adjusted.error()};
     }
 
     std::set<std::string, std::less<>> updated_physical_objects;
@@ -253,6 +339,7 @@ Result<PackageImportReport> apply_fat12_package_import(const std::filesystem::pa
                                package_internal::hex_digest(*digest),
                                true,
                                plan.objects,
+                               plan.program_assignment_adjustments,
                                plan.allocation,
                                std::move(written->publication)};
 }
@@ -343,6 +430,21 @@ apply_iso9660_package_import(const std::filesystem::path &target_path, std::span
         if (!payload)
             return std::unexpected{payload.error()};
         prepared.retained_files.push_back({file.path, std::move(*payload)});
+    }
+    if (auto adjusted = apply_existing_flat_program_assignment_adjustments(
+            *media_objects, plan,
+            [&](const MediaObject &object, std::vector<std::byte> payload) -> Result<void> {
+                const auto existing = object_indices.find(object.key);
+                if (existing == object_indices.end())
+                    return std::unexpected{transaction_error("planned ISO9660 Program adjustment owner is absent")};
+                const auto [volume_index, object_index] = existing->second;
+                prepared.iso_volumes[volume_index].objects[object_index] = {
+                    object.decoded.header.type, object.decoded.header.name, std::move(payload)};
+                return {};
+            },
+            cancellation);
+        !adjusted) {
+        return std::unexpected{adjusted.error()};
     }
 
     std::set<std::string, std::less<>> updated_physical_objects;
@@ -435,6 +537,7 @@ apply_iso9660_package_import(const std::filesystem::path &target_path, std::span
                                package_internal::hex_digest(*digest),
                                true,
                                plan.objects,
+                               plan.program_assignment_adjustments,
                                plan.allocation,
                                std::move(written->publication)};
 }

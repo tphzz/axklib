@@ -106,6 +106,29 @@ package_action_info public_package_action(const PlannedPackageObject &object) {
     return result_value;
 }
 
+package_program_assignment_adjustment_info
+public_program_assignment_adjustment(const PackageProgramAssignmentAdjustment &adjustment) {
+    return {
+        adjustment.adjustment_id,
+        std::string{package_program_assignment_origin_name(adjustment.origin)},
+        adjustment.package_index,
+        adjustment.action_id,
+        adjustment.existing_object_key,
+        adjustment.program_slot,
+        adjustment.program_name,
+        adjustment.assignment_ordinal,
+        adjustment.target_object_type,
+        adjustment.target_name,
+        adjustment.partition_index,
+        adjustment.group_name,
+        adjustment.volume_name,
+        adjustment.raw_group,
+        adjustment.raw_volume,
+        adjustment.reason_code,
+        std::string{package_program_assignment_disposition_name(adjustment.disposition)},
+    };
+}
+
 package_allocation_info public_package_allocation(const PackageAllocationDelta &allocation) {
     return {
         allocation.partition_index,
@@ -324,6 +347,7 @@ result<package_import_summary> package_import_plan::summary() const {
             impl_->plan.package_ids.size(),
             impl_->plan.destinations.size(),
             impl_->plan.objects.size(),
+            impl_->plan.program_assignment_adjustments.size(),
             impl_->plan.conflicts.size(),
             impl_->plan.warnings.size(),
             impl_->plan.valid(),
@@ -378,6 +402,19 @@ result<std::vector<package_action_info>> package_import_plan::actions() const {
     });
 }
 
+result<std::vector<package_program_assignment_adjustment_info>> package_import_plan::adjustments() const {
+    return protect<std::vector<package_program_assignment_adjustment_info>>(
+        [&]() -> result<std::vector<package_program_assignment_adjustment_info>> {
+            if (!impl_)
+                return invalid_argument("package import plan is not initialized");
+            std::vector<package_program_assignment_adjustment_info> result_value;
+            result_value.reserve(impl_->plan.program_assignment_adjustments.size());
+            std::ranges::transform(impl_->plan.program_assignment_adjustments, std::back_inserter(result_value),
+                                   public_program_assignment_adjustment);
+            return result_value;
+        });
+}
+
 result<std::vector<package_allocation_info>> package_import_plan::allocation() const {
     return protect<std::vector<package_allocation_info>>([&]() -> result<std::vector<package_allocation_info>> {
         if (!impl_)
@@ -412,6 +449,7 @@ result<package_import_result> package_import_plan::apply(const std::string &utf8
             applied->source_snapshot_id,
             applied->output_snapshot_id,
             applied->objects.size(),
+            applied->program_assignment_adjustments.size(),
             applied->applied,
         };
     });

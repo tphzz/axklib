@@ -248,6 +248,8 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
                                  {"output", file_ref_json(record->output)},
                                  {"sourceSnapshotId", report->source_snapshot_id},
                                  {"outputSnapshotId", report->output_snapshot_id},
+                                 {"programAssignmentAdjustments",
+                                  program_assignment_adjustments_json(report->program_assignment_adjustments)},
                                  {"applied", report->applied}}};
         });
         if (!bound)

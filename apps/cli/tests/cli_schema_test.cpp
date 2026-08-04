@@ -249,6 +249,9 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
                      std::nullopt,
                      std::nullopt,
                      std::nullopt}},
+        .program_assignment_adjustments = {{"adjustment", "existing-program", std::nullopt, std::nullopt, "PROG:001",
+                                            "001", "Program One", 2U, "SBAC", "Bank", 0U, "", "Volume", "", "",
+                                            "UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION", "clear-assignment"}},
         .allocation = {{0U, "Group", "Volume", "Raw Group", "Raw Volume", 1U,  2U,  3U,  4U,  5U,
                         6U, 7U,      8U,       9U,          10U,          11U, 12U, 13U, 14U, 15U}},
         .result = std::nullopt,
@@ -260,6 +263,10 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
     EXPECT_TRUE(plan_json["conflicts"][0]["partition_index"].is_null());
     EXPECT_TRUE(plan_json["objects"][0]["canonical_action_id"].is_null());
     EXPECT_TRUE(plan_json["objects"][0]["target_sfs_id"].is_null());
+    EXPECT_EQ(plan_json["program_assignment_adjustments"][0]["origin"], "existing-program");
+    EXPECT_TRUE(plan_json["program_assignment_adjustments"][0]["package_index"].is_null());
+    EXPECT_EQ(plan_json["program_assignment_adjustments"][0]["assignment_ordinal"], 2U);
+    EXPECT_EQ(plan_json["program_assignment_adjustments"][0]["disposition"], "clear-assignment");
     EXPECT_EQ(plan_json["allocation"][0]["blocked_object_count"], 3U);
     EXPECT_EQ(plan_json["allocation"][0]["directory_growth_clusters"], 8U);
     EXPECT_EQ(plan_json["allocation"][0]["directory_continuation_clusters"], 9U);

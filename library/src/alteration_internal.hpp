@@ -209,6 +209,14 @@ const PlannedPackageObject *planned_node(const PackageImportPlan &plan, const Pl
                                          std::string_view node_id);
 Result<package_internal::PackageNodeRelocationContext>
 relocation_context(const PortablePackage &package, const PackageImportPlan &plan, const PlannedPackageObject &owner);
+Result<std::vector<std::byte>>
+clear_program_assignment_adjustments(std::span<const std::byte> payload,
+                                     std::span<const PackageProgramAssignmentAdjustment *const> adjustments);
+Result<void>
+validate_cleared_program_assignment_adjustments(const ObjectSnapshot &snapshot,
+                                                std::span<const PackageProgramAssignmentAdjustment *const> adjustments);
+Result<void> apply_existing_sfs_program_assignment_adjustments(TransactionState &state, const PackageImportPlan &plan,
+                                                               const CancellationToken &cancellation);
 Result<std::string> normalized_payload_digest(std::span<const std::byte> payload);
 Result<PackageImportReport> apply_fat12_package_import(const std::filesystem::path &target_path,
                                                        std::span<const PortablePackage> packages,

@@ -150,6 +150,7 @@ Result<std::vector<axk::PackageRootSelector>>
 parse_session_export_roots(const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id);
 Result<axk::PackageImportRequest> parse_import_request(const Json &input);
 std::string target_kind_name(axk::MediaKind kind);
+Json program_assignment_adjustments_json(std::span<const axk::PackageProgramAssignmentAdjustment> adjustments);
 Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::uint64_t expires_in_seconds);
 void cleanup_session_plans(SessionPackageOperationState &state, Clock::time_point now);
 Result<std::uint64_t> retained_package_bytes(const axk::PortablePackage &package);

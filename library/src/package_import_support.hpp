@@ -43,6 +43,8 @@ struct Candidate {
     const PackageRootDestination *destination{};
     std::string destination_name;
     std::string projected_normalized_sha256;
+    std::string unadjusted_normalized_sha256;
+    std::vector<std::uint32_t> cleared_program_assignment_ordinals;
 };
 
 struct PartitionCapacity {
@@ -83,6 +85,10 @@ void add_conflict(PackageImportPlan &plan, std::string code, std::string message
                   const PackageNode *node = nullptr);
 Result<std::string> projected_normalized_sha256(const PortablePackage &package, const PackageNode &node,
                                                 const std::map<std::string, std::string, std::less<>> &names);
+Result<std::string> projected_normalized_sha256(const PortablePackage &package, const PackageNode &node,
+                                                const package_internal::PackageNodeRelocationContext &context);
+Result<void> plan_program_assignment_adjustments(std::vector<Candidate> &candidates,
+                                                 std::span<const ExistingObject> existing, PackageImportPlan &plan);
 PartitionCapacity partition_capacity(const Partition &partition, const ObjectCatalog &catalog);
 PartitionCapacity partition_capacity(const Partition &partition,
                                      std::span<const ObjectSnapshot *const> catalog_objects);

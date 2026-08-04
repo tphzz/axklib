@@ -176,9 +176,11 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
             auto normalized = projected_normalized_sha256(package, *node, destination_names);
             if (!normalized)
                 return std::unexpected{normalized.error()};
-            candidates.push_back({&package, node, destination, std::move(name), std::move(*normalized)});
+            candidates.push_back({&package, node, destination, std::move(name), std::move(*normalized), {}, {}});
         }
     }
+    if (auto adjusted = plan_program_assignment_adjustments(candidates, existing, plan); !adjusted)
+        return std::unexpected{adjusted.error()};
 
     std::map<std::pair<std::uint8_t, std::uint32_t>, ClusterReservation> infrastructure_layouts;
     std::map<std::uint8_t, std::size_t> new_volume_counts;
@@ -295,7 +297,10 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
                     match, container, retained_session ? retained_session->stats : nullptr, cancellation);
                 !loaded)
                 return std::unexpected{loaded.error()};
-            if (match.normalized_sha256 == candidate.projected_normalized_sha256) {
+            const auto adjusted_program_reuse = candidate.node->object_type == "PROG" &&
+                                                !candidate.cleared_program_assignment_ordinals.empty() &&
+                                                match.normalized_sha256 == candidate.unadjusted_normalized_sha256;
+            if (match.normalized_sha256 == candidate.projected_normalized_sha256 || adjusted_program_reuse) {
                 object.actions.push_back(PackageImportObjectAction::reuse);
                 object.existing_object_key = match.snapshot->key;
                 object.target_sfs_id = match.snapshot->sfs_id.value;
@@ -612,7 +617,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
                 return std::unexpected{loaded.error()};
             if (std::ranges::equal(*relocated, existing_payload(existing_object)))
                 continue;
-            if (object.object_type != "SBNK") {
+            if (object.object_type != "SBNK" && object.object_type != "PROG") {
                 return std::unexpected{planner_error("existing package object relocation fields "
                                                      "do not match the projected target")};
             }

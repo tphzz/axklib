@@ -119,6 +119,7 @@ add_library(
   src/package_import_fat12.cpp
   src/package_import_iso9660.cpp
   src/package_import_plan.cpp
+  src/package_program_adjustment.cpp
   src/package_import_sfs.cpp
   src/package_import_support.cpp
   src/package_manifest.cpp
@@ -195,8 +196,9 @@ add_library(
   src/alteration_manifest.cpp
   src/alteration_manifest_json.cpp
   src/alteration_manifest_sequence.cpp
-  src/alteration_package_flat.cpp
-  src/alteration_package_sfs.cpp
+    src/alteration_package_flat.cpp
+    src/alteration_package_adjustment.cpp
+    src/alteration_package_sfs.cpp
   src/alteration_program.cpp
   src/alteration_publication.cpp
   src/alteration_sample.cpp

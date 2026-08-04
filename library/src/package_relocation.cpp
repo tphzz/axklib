@@ -103,6 +103,34 @@ bool contains(std::span<const ByteRange> ranges, std::size_t offset) {
         ranges, [=](const ByteRange &range) { return offset >= range.offset && offset - range.offset < range.size; });
 }
 
+Result<void> clear_program_assignment_rows_in_place(std::vector<std::byte> &payload, const CurrentProg &program,
+                                                    std::span<const std::uint32_t> ordinals,
+                                                    std::vector<ByteRange> *changed_ranges) {
+    std::set<std::uint32_t> unique;
+    for (const auto ordinal : ordinals) {
+        if (ordinal >= program.assignments.size() || !unique.emplace(ordinal).second) {
+            return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
+                                              "Program assignment adjustment ordinal is invalid or duplicated")};
+        }
+        const auto &assignment = program.assignments[ordinal];
+        if (assignment.name.empty() || (assignment.kind != 0x10U && assignment.kind != 0x11U) ||
+            std::to_integer<std::uint8_t>(assignment.raw_row[0x28U]) != 0xffU) {
+            return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
+                                              "Program assignment adjustment does not name an active row")};
+        }
+        const auto offset = 0x120U + static_cast<std::size_t>(ordinal) * 0x38U;
+        if (offset > payload.size() || 0x38U > payload.size() - offset) {
+            return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
+                                              "Program assignment adjustment row is out of bounds")};
+        }
+        std::fill(payload.begin() + static_cast<std::ptrdiff_t>(offset),
+                  payload.begin() + static_cast<std::ptrdiff_t>(offset + 0x38U), std::byte{});
+        if (changed_ranges != nullptr)
+            changed_ranges->push_back({offset, 0x38U});
+    }
+    return {};
+}
+
 Result<std::vector<std::byte>> patch_names(const PortablePackage &package, const PackageNode &node,
                                            const PackageNodeRelocationContext &context,
                                            std::vector<ByteRange> *changed_ranges) {
@@ -114,6 +142,17 @@ Result<std::vector<std::byte>> patch_names(const PortablePackage &package, const
         if (auto patched = put_name(result, 0x32U, context.destination_name); !patched)
             return std::unexpected{patched.error()};
         changed_ranges->push_back({0x32U, 16U});
+    }
+    if (!context.cleared_program_assignment_ordinals.empty()) {
+        const auto *program = std::get_if<CurrentProg>(&decoded->payload);
+        if (program == nullptr) {
+            return std::unexpected{relocation_error(node, "Program assignment adjustment source is not a Program")};
+        }
+        if (auto cleared = clear_program_assignment_rows_in_place(
+                result, *program, context.cleared_program_assignment_ordinals, changed_ranges);
+            !cleared) {
+            return std::unexpected{cleared.error()};
+        }
     }
 
     for (const auto &edge : package.relationships) {
@@ -162,6 +201,36 @@ Result<std::vector<std::byte>> patch_names(const PortablePackage &package, const
 }
 
 } // namespace
+
+Result<std::vector<std::byte>> clear_program_assignment_rows(std::span<const std::byte> payload,
+                                                             std::span<const std::uint32_t> ordinals) {
+    auto decoded = decode_object(payload);
+    if (!decoded)
+        return std::unexpected{decoded.error()};
+    const auto *program = std::get_if<CurrentProg>(&decoded->payload);
+    if (program == nullptr) {
+        return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
+                                          "Program assignment adjustment payload is not a Program")};
+    }
+    std::vector<std::byte> result(payload.begin(), payload.end());
+    if (auto cleared = clear_program_assignment_rows_in_place(result, *program, ordinals, nullptr); !cleared)
+        return std::unexpected{cleared.error()};
+    auto verified = decode_object(result);
+    if (!verified)
+        return std::unexpected{verified.error()};
+    const auto *verified_program = std::get_if<CurrentProg>(&verified->payload);
+    if (verified_program == nullptr) {
+        return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
+                                          "adjusted Program payload did not decode as a Program")};
+    }
+    for (const auto ordinal : ordinals) {
+        if (verified_program->assignments[ordinal].raw_row != std::array<std::byte, 0x38>{}) {
+            return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
+                                              "adjusted Program row did not decode as empty")};
+        }
+    }
+    return result;
+}
 
 Result<RelocationProfile> build_relocation_profile(const DecodedObject &object,
                                                    std::span<const std::byte> raw_payload) {

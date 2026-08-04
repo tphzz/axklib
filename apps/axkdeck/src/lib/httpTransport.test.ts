@@ -1877,6 +1877,7 @@ describe('HttpImageTransport', () => {
                         warnings: [],
                         conflicts: [],
                         actions: [],
+                        programAssignmentAdjustments: [],
                         allocation: [],
                     });
                 }
@@ -2046,6 +2047,7 @@ describe('HttpImageTransport', () => {
                         warnings: [],
                         conflicts: [],
                         actions: [],
+                        programAssignmentAdjustments: [],
                         allocation: [],
                     });
                 }

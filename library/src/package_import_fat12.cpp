@@ -108,7 +108,7 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
             auto normalized = projected_normalized_sha256(package, *node, names);
             if (!normalized)
                 return std::unexpected{normalized.error()};
-            candidates.push_back({&package, node, destination, name, std::move(*normalized)});
+            candidates.push_back({&package, node, destination, name, std::move(*normalized), {}, {}});
         }
     }
 
@@ -132,6 +132,8 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
     });
 
     const auto existing = existing_objects(*catalog);
+    if (auto adjusted = plan_program_assignment_adjustments(candidates, existing, plan); !adjusted)
+        return std::unexpected{adjusted.error()};
     std::set<std::uint32_t> used_wave_data_reference_values;
     for (const auto &item : existing) {
         if (item.wave_data_reference_value)
@@ -169,7 +171,10 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
                          "type and name",
                          candidate.destination, candidate.package, candidate.node);
         } else if (matches.size() == 1U) {
-            if (matches.front()->normalized_sha256 == object.normalized_sha256) {
+            const auto adjusted_program_reuse =
+                candidate.node->object_type == "PROG" && !candidate.cleared_program_assignment_ordinals.empty() &&
+                matches.front()->normalized_sha256 == candidate.unadjusted_normalized_sha256;
+            if (matches.front()->normalized_sha256 == object.normalized_sha256 || adjusted_program_reuse) {
                 object.actions.push_back(PackageImportObjectAction::reuse);
                 object.existing_object_key = matches.front()->snapshot->key;
                 object.target_wave_data_reference_value = matches.front()->wave_data_reference_value;
@@ -331,7 +336,7 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
             if (found == existing.end())
                 return std::unexpected{planner_error("planned FAT12 existing object is missing")};
             if (*relocated != found->snapshot->raw_payload) {
-                if (object.object_type != "SBNK") {
+                if (object.object_type != "SBNK" && object.object_type != "PROG") {
                     return std::unexpected{planner_error("existing FAT12 object relocation fields "
                                                          "differ from the target")};
                 }

@@ -147,7 +147,6 @@ bool portable_program_assignment(AssignmentState state) {
 
 Result<std::vector<const Relationship *>>
 required_relationships(const ObjectSnapshot &object, const RelationshipGraph &graph,
-                       bool allow_unresolved_program_assignments,
                        const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects) {
     std::vector<const Relationship *> candidates;
     for (const auto *relationship : graph.children(object.key)) {
@@ -227,7 +226,7 @@ required_relationships(const ObjectSnapshot &object, const RelationshipGraph &gr
                        row->assignment_state == AssignmentState::active && row->quality != RelationshipQuality::known &&
                        !detail::relationship_has_exact_named_program_target(*row, objects);
             });
-            if (allow_unresolved_program_assignments && unresolved != candidates.end())
+            if (unresolved != candidates.end())
                 continue;
             auto row = require_one(role, index);
             if (!row)
@@ -304,8 +303,6 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
     if (!selected)
         return std::unexpected{selected.error()};
     const auto graph = build_relationship_graph(*catalog);
-    const auto allow_unresolved_program_assignments =
-        std::ranges::any_of(*selected, [](const SelectedRoot &root) { return root.kind == PackageRootKind::volume; });
     std::map<std::string, const ObjectSnapshot *, std::less<>> objects;
     for (const auto &object : catalog->objects)
         objects.emplace(object.key, &object);
@@ -326,7 +323,7 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
         const auto profile = package_internal::build_relocation_profile(object->object, object->raw_payload);
         if (!profile)
             return std::unexpected{profile.error()};
-        auto required = required_relationships(*object, graph, allow_unresolved_program_assignments, objects);
+        auto required = required_relationships(*object, graph, objects);
         if (!required)
             return std::unexpected{required.error()};
         std::map<std::string, std::uint32_t, std::less<>> role_ordinals;

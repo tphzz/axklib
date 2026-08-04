@@ -1970,6 +1970,36 @@
           "targetWaveDataReferenceValue": {"type": ["integer", "null"], "minimum": 0}
         }
       },
+      "PackageProgramAssignmentAdjustment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["adjustmentId", "origin", "packageIndex", "actionId", "existingObjectKey", "programSlot", "programName", "assignmentOrdinal", "targetObjectType", "targetName", "partitionIndex", "groupName", "volumeName", "rawGroup", "rawVolume", "reasonCode", "disposition"],
+        "properties": {
+          "adjustmentId": {"type": "string", "minLength": 1},
+          "origin": {
+            "enum": ["IMPORTED_PROGRAM", "EXISTING_PROGRAM"],
+            "x-axklib-application-enum": {"IMPORTED_PROGRAM": "imported-program", "EXISTING_PROGRAM": "existing-program"}
+          },
+          "packageIndex": {"type": ["integer", "null"], "minimum": 0},
+          "actionId": {"type": ["string", "null"]},
+          "existingObjectKey": {"type": ["string", "null"]},
+          "programSlot": {"type": "string", "minLength": 1},
+          "programName": {"type": "string"},
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 127},
+          "targetObjectType": {"enum": ["SBAC", "SBNK"]},
+          "targetName": {"type": "string", "minLength": 1},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "groupName": {"type": "string"},
+          "volumeName": {"type": "string"},
+          "rawGroup": {"type": "string"},
+          "rawVolume": {"type": "string"},
+          "reasonCode": {"const": "UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION"},
+          "disposition": {
+            "enum": ["CLEAR_ASSIGNMENT"],
+            "x-axklib-application-enum": {"CLEAR_ASSIGNMENT": "clear-assignment"}
+          }
+        }
+      },
       "PackageAllocationEstimate": {
         "type": "object",
         "additionalProperties": false,
@@ -2000,7 +2030,7 @@
       "PackageImportPlan": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "allocation"],
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "programAssignmentAdjustments", "allocation"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planToken": {"type": "string", "minLength": 1},
@@ -2015,6 +2045,7 @@
           "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
           "conflicts": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportConflict"}},
           "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
+          "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}}
         }
       },
@@ -2048,7 +2079,7 @@
       "ImageSessionPackageImportPlan": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "allocation", "imageId", "revision"],
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "programAssignmentAdjustments", "allocation", "imageId", "revision"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planToken": {"type": "string", "minLength": 1},
@@ -2063,6 +2094,7 @@
           "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
           "conflicts": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportConflict"}},
           "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
+          "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}},
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 1}
@@ -2084,20 +2116,21 @@
       "PackageImportResult": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planId", "output", "sourceSnapshotId", "outputSnapshotId", "applied"],
+        "required": ["schemaVersion", "planId", "output", "sourceSnapshotId", "outputSnapshotId", "programAssignmentAdjustments", "applied"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planId": {"type": "string", "minLength": 1},
           "output": {"$ref": "#/components/schemas/FileRef"},
           "sourceSnapshotId": {"type": "string", "minLength": 1},
           "outputSnapshotId": {"type": "string", "minLength": 1},
+          "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
           "applied": {"type": "boolean"}
         }
       },
       "ImageSessionPackageImportResult": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planId", "targetKind", "targetSnapshotId", "actions", "allocation", "imageId", "revision", "objectCount", "applied"],
+        "required": ["schemaVersion", "planId", "targetKind", "targetSnapshotId", "actions", "programAssignmentAdjustments", "allocation", "imageId", "revision", "objectCount", "applied"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planId": {"type": "string", "minLength": 1},
@@ -2107,6 +2140,7 @@
           },
           "targetSnapshotId": {"type": "string", "minLength": 1},
           "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
+          "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}},
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 2},

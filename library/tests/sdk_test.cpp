@@ -375,11 +375,15 @@ TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
     EXPECT_TRUE(import_summary->valid);
     EXPECT_EQ(import_summary->package_count, 1U);
     EXPECT_EQ(import_summary->object_count, 1U);
+    EXPECT_EQ(import_summary->adjustment_count, 0U);
     auto actions = import_plan->actions();
     ASSERT_TRUE(actions) << actions.error().message;
     ASSERT_EQ(actions->size(), 1U);
     EXPECT_NE(std::find(actions->front().actions.begin(), actions->front().actions.end(), "insert"),
               actions->front().actions.end());
+    auto adjustments = import_plan->adjustments();
+    ASSERT_TRUE(adjustments) << adjustments.error().message;
+    EXPECT_TRUE(adjustments->empty());
 
     const std::string invalid_import_path = root.string() + "/invalid-\xc3\x28";
     const auto invalid_apply = import_plan->apply(invalid_import_path, {}, context);
@@ -391,6 +395,7 @@ TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_TRUE(applied->applied);
     EXPECT_EQ(applied->object_count, 1U);
+    EXPECT_EQ(applied->adjustment_count, 0U);
     auto reopened = axk::image::open(imported.string(), context);
     ASSERT_TRUE(reopened) << reopened.error().message;
     auto imported_objects = reopened->objects(0U, 64U, context);

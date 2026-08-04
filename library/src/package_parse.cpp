@@ -152,8 +152,6 @@ Result<void> validate_manifest_graph(const PortablePackage &package) {
 }
 
 Result<void> validate_package_closure(const PortablePackage &package) {
-    const auto allow_unresolved_program_assignments = std::ranges::any_of(
-        package.roots, [](const PackageRoot &root) { return root.kind == PackageRootKind::volume; });
     for (const auto &root : package.roots) {
         if (root.kind != PackageRootKind::volume && root.node_ids.size() != 1U)
             return std::unexpected{package_error("single-object package root must contain one node")};
@@ -162,6 +160,20 @@ Result<void> validate_package_closure(const PortablePackage &package) {
         const auto *node = node_by_id(package, root.node_ids.front());
         if (node == nullptr || node->object_type != object_type_name(root_object_type(root.kind)))
             return std::unexpected{package_error("package root kind does not match its object node")};
+    }
+
+    std::vector<std::set<std::string, std::less<>>> root_closures;
+    std::set<std::string, std::less<>> reachable;
+    for (const auto &root : package.roots) {
+        auto &closure = root_closures.emplace_back();
+        std::vector<std::string> queue(root.node_ids.begin(), root.node_ids.end());
+        for (std::size_t cursor = 0; cursor < queue.size(); ++cursor) {
+            if (!closure.emplace(queue[cursor]).second)
+                continue;
+            reachable.emplace(queue[cursor]);
+            for (const auto *edge : package_children(package, queue[cursor]))
+                queue.push_back(edge->target_node_id);
+        }
     }
 
     for (const auto &node : package.nodes) {
@@ -240,9 +252,13 @@ Result<void> validate_package_closure(const PortablePackage &package) {
                 auto edges = package_children(package, node.node_id, role);
                 std::erase_if(edges, [&](const PackageRelationship *edge) { return edge->ordinal != index; });
                 const auto exact_target_present = std::ranges::any_of(package.nodes, [&](const PackageNode &target) {
-                    return target.object_type == object_type_name(type) && target.name == assignment.name;
+                    if (target.object_type != object_type_name(type) || target.name != assignment.name)
+                        return false;
+                    return std::ranges::any_of(root_closures, [&](const auto &closure) {
+                        return closure.contains(node.node_id) && closure.contains(target.node_id);
+                    });
                 });
-                if (allow_unresolved_program_assignments && edges.empty() && !exact_target_present)
+                if (edges.empty() && !exact_target_present)
                     continue;
                 if (auto valid = require_edge(role, assignment.name, type, static_cast<std::uint32_t>(index)); !valid) {
                     return valid;
@@ -251,16 +267,6 @@ Result<void> validate_package_closure(const PortablePackage &package) {
         }
     }
 
-    std::set<std::string, std::less<>> reachable;
-    std::vector<std::string> queue;
-    for (const auto &root : package.roots)
-        queue.insert(queue.end(), root.node_ids.begin(), root.node_ids.end());
-    for (std::size_t cursor = 0; cursor < queue.size(); ++cursor) {
-        if (!reachable.emplace(queue[cursor]).second)
-            continue;
-        for (const auto *edge : package_children(package, queue[cursor]))
-            queue.push_back(edge->target_node_id);
-    }
     if (reachable.size() != package.nodes.size())
         return std::unexpected{package_error("package contains an object unreachable from every root")};
     return {};

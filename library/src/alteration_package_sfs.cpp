@@ -111,6 +111,8 @@ Result<TransactionState> prepare_sfs_package_import_state(std::shared_ptr<const 
     }
     if (auto grown = grow_package_category_directories(state, plan, cancellation); !grown)
         return std::unexpected{grown.error()};
+    if (auto adjusted = apply_existing_sfs_program_assignment_adjustments(state, plan, cancellation); !adjusted)
+        return std::unexpected{adjusted.error()};
     std::set<std::pair<std::uint8_t, std::uint32_t>> updated_reused_objects;
     for (const auto &object : plan.objects) {
         if (const auto checked = cancellation.check(); !checked)
@@ -118,8 +120,9 @@ Result<TransactionState> prepare_sfs_package_import_state(std::shared_ptr<const 
         if (!has_action(object, PackageImportObjectAction::insert)) {
             if (has_action(object, PackageImportObjectAction::reuse) &&
                 has_action(object, PackageImportObjectAction::relocate)) {
-                if (!object.target_sfs_id || object.object_type != "SBNK") {
-                    return std::unexpected{transaction_error("planned reused relocation is not a fixed SBNK object")};
+                if (!object.target_sfs_id || (object.object_type != "SBNK" && object.object_type != "PROG")) {
+                    return std::unexpected{
+                        transaction_error("planned reused relocation is not a supported fixed object")};
                 }
                 const auto physical_key = std::pair{object.partition_index, *object.target_sfs_id};
                 if (updated_reused_objects.emplace(physical_key).second) {
@@ -170,8 +173,11 @@ Result<TransactionState> prepare_sfs_package_import_state(std::shared_ptr<const 
         auto normalized = normalized_payload_digest(*payload);
         if (!normalized)
             return std::unexpected{normalized.error()};
-        if (*normalized != object.normalized_sha256)
-            return std::unexpected{transaction_error("relocated package node differs from its planned identity")};
+        if (*normalized != object.normalized_sha256) {
+            return std::unexpected{transaction_error(
+                std::format("relocated package node {} '{}' differs from its planned identity (planned {}, actual {})",
+                            object.object_type, object.destination_name, object.normalized_sha256, *normalized))};
+        }
         const auto partition = state.partitions.find(object.partition_index);
         if (partition == state.partitions.end() || !object.target_sfs_id)
             return std::unexpected{transaction_error("package import partition or SFS ID is invalid")};
@@ -319,6 +325,30 @@ Result<void> validate_package_result(std::shared_ptr<const RandomAccessReader> r
             }
         }
         actual_by_action.emplace(object.action_id, matches.front());
+    }
+
+    std::map<std::string, std::vector<const PackageProgramAssignmentAdjustment *>, std::less<>> adjustments_by_owner;
+    for (const auto &adjustment : plan.program_assignment_adjustments) {
+        const auto owner = adjustment.origin == PackageProgramAssignmentOrigin::imported_program
+                               ? "action:" + *adjustment.action_id
+                               : "existing:" + *adjustment.existing_object_key;
+        adjustments_by_owner[owner].push_back(&adjustment);
+    }
+    for (const auto &[owner, adjustments] : adjustments_by_owner) {
+        const ObjectSnapshot *snapshot{};
+        if (owner.starts_with("action:")) {
+            const auto found = actual_by_action.find(owner.substr(7U));
+            if (found != actual_by_action.end())
+                snapshot = found->second;
+        } else {
+            const auto found = std::ranges::find(catalog->objects, owner.substr(9U), &ObjectSnapshot::key);
+            if (found != catalog->objects.end())
+                snapshot = &*found;
+        }
+        if (snapshot == nullptr)
+            return std::unexpected{transaction_error("adjusted Program is absent after package import")};
+        if (auto validated = validate_cleared_program_assignment_adjustments(*snapshot, adjustments); !validated)
+            return std::unexpected{validated.error()};
     }
 
     for (const auto &owner : plan.objects) {

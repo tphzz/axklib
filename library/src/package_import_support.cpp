@@ -99,6 +99,12 @@ relocation_context(const PortablePackage &package, const PackageImportPlan &plan
     context.wave_data_reference_value = owner.target_wave_data_reference_value;
     context.linked_program_numbers = owner.target_program_numbers;
     context.sample_bank_member = owner.target_sample_bank_member;
+    for (const auto &adjustment : plan.program_assignment_adjustments) {
+        if (adjustment.origin == PackageProgramAssignmentOrigin::imported_program && adjustment.action_id &&
+            *adjustment.action_id == owner.action_id) {
+            context.cleared_program_assignment_ordinals.push_back(adjustment.assignment_ordinal);
+        }
+    }
     for (const auto &edge : package.relationships) {
         if (edge.source_node_id != owner.node_id)
             continue;
@@ -281,6 +287,11 @@ Result<std::string> projected_normalized_sha256(const PortablePackage &package, 
         }
         context.edge_target_names.emplace(edge.edge_id, target->second);
     }
+    return projected_normalized_sha256(package, node, context);
+}
+
+Result<std::string> projected_normalized_sha256(const PortablePackage &package, const PackageNode &node,
+                                                const package_internal::PackageNodeRelocationContext &context) {
     auto projected = package_internal::project_package_node_names(package, node, context);
     if (!projected)
         return std::unexpected{projected.error()};

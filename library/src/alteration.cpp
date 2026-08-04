@@ -293,6 +293,8 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
         }
         if (auto grown = grow_package_category_directories(state, plan, cancellation); !grown)
             return std::unexpected{grown.error()};
+        if (auto adjusted = apply_existing_sfs_program_assignment_adjustments(state, plan, cancellation); !adjusted)
+            return std::unexpected{adjusted.error()};
         std::set<std::pair<std::uint8_t, std::uint32_t>> updated_reused_objects;
         for (const auto &object : plan.objects) {
             if (const auto checked = cancellation.check(); !checked)
@@ -300,9 +302,9 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
             if (!has_action(object, PackageImportObjectAction::insert)) {
                 if (has_action(object, PackageImportObjectAction::reuse) &&
                     has_action(object, PackageImportObjectAction::relocate)) {
-                    if (!object.target_sfs_id || object.object_type != "SBNK") {
-                        return std::unexpected{transaction_error("planned reused relocation is "
-                                                                 "not a fixed SBNK object")};
+                    if (!object.target_sfs_id || (object.object_type != "SBNK" && object.object_type != "PROG")) {
+                        return std::unexpected{
+                            transaction_error("planned reused relocation is not a supported fixed object")};
                     }
                     const auto physical_key = std::pair{object.partition_index, *object.target_sfs_id};
                     if (updated_reused_objects.emplace(physical_key).second) {
@@ -356,8 +358,9 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
             if (!normalized)
                 return std::unexpected{normalized.error()};
             if (*normalized != object.normalized_sha256) {
-                return std::unexpected{transaction_error("relocated package node differs from its "
-                                                         "planned identity")};
+                return std::unexpected{transaction_error(std::format(
+                    "relocated package node {} '{}' differs from its planned identity (planned {}, actual {})",
+                    object.object_type, object.destination_name, object.normalized_sha256, *normalized))};
             }
             const auto partition = state.partitions.find(object.partition_index);
             if (partition == state.partitions.end() || !object.target_sfs_id)
@@ -426,9 +429,16 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
         auto output_snapshot = file_snapshot_id(output_path, cancellation);
         if (!output_snapshot)
             return std::unexpected{output_snapshot.error()};
-        return PackageImportReport{
-            target_path, output_path,  plan.plan_id,    plan.target_snapshot_id, std::move(*output_snapshot),
-            true,        plan.objects, plan.allocation, std::move(*published)};
+        return PackageImportReport{target_path,
+                                   output_path,
+                                   plan.plan_id,
+                                   plan.target_snapshot_id,
+                                   std::move(*output_snapshot),
+                                   true,
+                                   plan.objects,
+                                   plan.program_assignment_adjustments,
+                                   plan.allocation,
+                                   std::move(*published)};
     } catch (const std::exception &error) {
         return std::unexpected{transaction_error(std::string{"package import callback failed: "} + error.what())};
     } catch (...) {

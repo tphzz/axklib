@@ -4310,6 +4310,12 @@
             "minLength": 1,
             "type": "string"
           },
+          "programAssignmentAdjustments": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"
+            },
+            "type": "array"
+          },
           "revision": {
             "minimum": 1,
             "type": "integer"
@@ -4354,6 +4360,7 @@
           "warnings",
           "conflicts",
           "actions",
+          "programAssignmentAdjustments",
           "allocation",
           "imageId",
           "revision"
@@ -4434,6 +4441,12 @@
             "minLength": 1,
             "type": "string"
           },
+          "programAssignmentAdjustments": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"
+            },
+            "type": "array"
+          },
           "revision": {
             "minimum": 2,
             "type": "integer"
@@ -4464,6 +4477,7 @@
           "targetKind",
           "targetSnapshotId",
           "actions",
+          "programAssignmentAdjustments",
           "allocation",
           "imageId",
           "revision",
@@ -6432,6 +6446,12 @@
             "minLength": 1,
             "type": "string"
           },
+          "programAssignmentAdjustments": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"
+            },
+            "type": "array"
+          },
           "schemaVersion": {
             "const": "1.0"
           },
@@ -6472,6 +6492,7 @@
           "warnings",
           "conflicts",
           "actions",
+          "programAssignmentAdjustments",
           "allocation"
         ],
         "type": "object"
@@ -6538,6 +6559,12 @@
             "minLength": 1,
             "type": "string"
           },
+          "programAssignmentAdjustments": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"
+            },
+            "type": "array"
+          },
           "schemaVersion": {
             "const": "1.0"
           },
@@ -6552,6 +6579,7 @@
           "output",
           "sourceSnapshotId",
           "outputSnapshotId",
+          "programAssignmentAdjustments",
           "applied"
         ],
         "type": "object"
@@ -6711,6 +6739,114 @@
           "normalizedSha256",
           "semanticSha256",
           "audioSha256"
+        ],
+        "type": "object"
+      },
+      "PackageProgramAssignmentAdjustment": {
+        "additionalProperties": false,
+        "properties": {
+          "actionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "adjustmentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "assignmentOrdinal": {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "disposition": {
+            "enum": [
+              "CLEAR_ASSIGNMENT"
+            ],
+            "x-axklib-application-enum": {
+              "CLEAR_ASSIGNMENT": "clear-assignment"
+            }
+          },
+          "existingObjectKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupName": {
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "IMPORTED_PROGRAM",
+              "EXISTING_PROGRAM"
+            ],
+            "x-axklib-application-enum": {
+              "EXISTING_PROGRAM": "existing-program",
+              "IMPORTED_PROGRAM": "imported-program"
+            }
+          },
+          "packageIndex": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "partitionIndex": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "programName": {
+            "type": "string"
+          },
+          "programSlot": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rawGroup": {
+            "type": "string"
+          },
+          "rawVolume": {
+            "type": "string"
+          },
+          "reasonCode": {
+            "const": "UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION"
+          },
+          "targetName": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "targetObjectType": {
+            "enum": [
+              "SBAC",
+              "SBNK"
+            ]
+          },
+          "volumeName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "adjustmentId",
+          "origin",
+          "packageIndex",
+          "actionId",
+          "existingObjectKey",
+          "programSlot",
+          "programName",
+          "assignmentOrdinal",
+          "targetObjectType",
+          "targetName",
+          "partitionIndex",
+          "groupName",
+          "volumeName",
+          "rawGroup",
+          "rawVolume",
+          "reasonCode",
+          "disposition"
         ],
         "type": "object"
       },
@@ -17304,6 +17440,7 @@
                         "imageId": "x",
                         "planId": "x",
                         "planToken": "x",
+                        "programAssignmentAdjustments": [],
                         "revision": 1,
                         "schemaVersion": "1.0",
                         "targetKind": "SFS",
@@ -17326,6 +17463,7 @@
                         "imageId": "x",
                         "planId": "x",
                         "planToken": "x",
+                        "programAssignmentAdjustments": [],
                         "revision": 1,
                         "schemaVersion": "1.0",
                         "targetKind": "SFS",
@@ -21247,6 +21385,7 @@
                         "expiresInSeconds": 1,
                         "planId": "x",
                         "planToken": "x",
+                        "programAssignmentAdjustments": [],
                         "schemaVersion": "1.0",
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",
@@ -21267,6 +21406,7 @@
                         "expiresInSeconds": 1,
                         "planId": "x",
                         "planToken": "x",
+                        "programAssignmentAdjustments": [],
                         "schemaVersion": "1.0",
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",

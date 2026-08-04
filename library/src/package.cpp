@@ -178,6 +178,24 @@ std::string_view package_import_action_name(PackageImportObjectAction action) no
     return "conflict";
 }
 
+std::string_view package_program_assignment_origin_name(PackageProgramAssignmentOrigin origin) noexcept {
+    switch (origin) {
+    case PackageProgramAssignmentOrigin::imported_program:
+        return "imported-program";
+    case PackageProgramAssignmentOrigin::existing_program:
+        return "existing-program";
+    }
+    return "imported-program";
+}
+
+std::string_view package_program_assignment_disposition_name(PackageProgramAssignmentDisposition disposition) noexcept {
+    switch (disposition) {
+    case PackageProgramAssignmentDisposition::clear_assignment:
+        return "clear-assignment";
+    }
+    return "clear-assignment";
+}
+
 Result<PortablePackage> open_portable_package(std::span<const std::byte> archive, std::string_view filename) {
     auto entries = package_internal::read_archive(archive);
     if (!entries)

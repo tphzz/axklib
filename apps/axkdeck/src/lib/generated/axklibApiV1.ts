@@ -2253,6 +2253,7 @@ export interface components {
             imageId: string;
             planId: string;
             planToken: string;
+            programAssignmentAdjustments: components['schemas']['PackageProgramAssignmentAdjustment'][];
             revision: number;
             /** @constant */
             schemaVersion: '1.0';
@@ -2278,6 +2279,7 @@ export interface components {
             imageId: string;
             objectCount: number;
             planId: string;
+            programAssignmentAdjustments: components['schemas']['PackageProgramAssignmentAdjustment'][];
             revision: number;
             /** @constant */
             schemaVersion: '1.0';
@@ -2704,6 +2706,7 @@ export interface components {
             expiresInSeconds: number;
             planId: string;
             planToken: string;
+            programAssignmentAdjustments: components['schemas']['PackageProgramAssignmentAdjustment'][];
             /** @constant */
             schemaVersion: '1.0';
             /** @enum {unknown} */
@@ -2727,6 +2730,7 @@ export interface components {
             output: components['schemas']['FileRef'];
             outputSnapshotId: string;
             planId: string;
+            programAssignmentAdjustments: components['schemas']['PackageProgramAssignmentAdjustment'][];
             /** @constant */
             schemaVersion: '1.0';
             sourceSnapshotId: string;
@@ -2762,6 +2766,29 @@ export interface components {
             payloadSha256: string;
             payloadSizeBytes: number;
             semanticSha256: string | null;
+        };
+        PackageProgramAssignmentAdjustment: {
+            actionId: string | null;
+            adjustmentId: string;
+            assignmentOrdinal: number;
+            /** @enum {unknown} */
+            disposition: 'CLEAR_ASSIGNMENT';
+            existingObjectKey: string | null;
+            groupName: string;
+            /** @enum {unknown} */
+            origin: 'IMPORTED_PROGRAM' | 'EXISTING_PROGRAM';
+            packageIndex: number | null;
+            partitionIndex: number;
+            programName: string;
+            programSlot: string;
+            rawGroup: string;
+            rawVolume: string;
+            /** @constant */
+            reasonCode: 'UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION';
+            targetName: string;
+            /** @enum {unknown} */
+            targetObjectType: 'SBAC' | 'SBNK';
+            volumeName: string;
         };
         PackageReadRequest: {
             package: components['schemas']['InputRef'];

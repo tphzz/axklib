@@ -86,6 +86,26 @@ struct ActionOutput {
     std::optional<std::uint32_t> target_wave_data_reference_value;
 };
 
+struct ProgramAssignmentAdjustmentOutput {
+    std::string adjustment_id;
+    std::string origin;
+    std::optional<std::uint64_t> package_index;
+    std::optional<std::string> action_id;
+    std::optional<std::string> existing_object_key;
+    std::string program_slot;
+    std::string program_name;
+    std::uint64_t assignment_ordinal{};
+    std::string target_object_type;
+    std::string target_name;
+    std::uint32_t partition_index{};
+    std::string group_name;
+    std::string volume_name;
+    std::string raw_group;
+    std::string raw_volume;
+    std::string reason_code;
+    std::string disposition;
+};
+
 struct AllocationOutput {
     std::uint32_t partition_index{};
     std::string group_name;
@@ -126,6 +146,7 @@ struct PlanOutput {
     std::vector<IssueOutput> warnings;
     std::vector<ConflictOutput> conflicts;
     std::vector<ActionOutput> objects;
+    std::vector<ProgramAssignmentAdjustmentOutput> program_assignment_adjustments;
     std::vector<AllocationOutput> allocation;
     std::optional<ImportResultOutput> result;
 };

@@ -85,6 +85,25 @@ std::string plan_identity(const PackageImportPlan &plan) {
         append_integer(source, object.payload_sectors);
         append_integer(source, object.continuation_clusters);
     }
+    for (const auto &adjustment : plan.program_assignment_adjustments) {
+        append_field(source, adjustment.adjustment_id);
+        append_field(source, package_program_assignment_origin_name(adjustment.origin));
+        append_integer(source, adjustment.package_index.value_or(0U));
+        append_field(source, adjustment.action_id.value_or(""));
+        append_field(source, adjustment.existing_object_key.value_or(""));
+        append_field(source, adjustment.program_slot);
+        append_field(source, adjustment.program_name);
+        append_integer(source, adjustment.assignment_ordinal);
+        append_field(source, adjustment.target_object_type);
+        append_field(source, adjustment.target_name);
+        append_integer(source, adjustment.partition_index);
+        append_field(source, adjustment.group_name);
+        append_field(source, adjustment.volume_name);
+        append_field(source, adjustment.raw_group);
+        append_field(source, adjustment.raw_volume);
+        append_field(source, adjustment.reason_code);
+        append_field(source, package_program_assignment_disposition_name(adjustment.disposition));
+    }
     for (const auto &delta : plan.allocation) {
         append_integer(source, delta.partition_index);
         append_field(source, delta.group_name);
@@ -202,6 +221,38 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
                                                  "incomplete or contradictory")};
         }
         actions.emplace(object.action_id, &object);
+    }
+    std::set<std::string, std::less<>> adjustment_ids;
+    std::set<std::pair<std::string, std::uint32_t>> adjusted_rows;
+    for (const auto &adjustment : plan.program_assignment_adjustments) {
+        const auto imported = adjustment.origin == PackageProgramAssignmentOrigin::imported_program;
+        const auto existing = adjustment.origin == PackageProgramAssignmentOrigin::existing_program;
+        const auto action = adjustment.action_id ? actions.find(*adjustment.action_id) : actions.end();
+        const auto scope_matches_action = action != actions.end() && action->second->object_type == "PROG" &&
+                                          action->second->destination_name == adjustment.program_slot &&
+                                          action->second->partition_index == adjustment.partition_index &&
+                                          action->second->group_name == adjustment.group_name &&
+                                          action->second->volume_name == adjustment.volume_name &&
+                                          action->second->raw_group == adjustment.raw_group &&
+                                          action->second->raw_volume == adjustment.raw_volume;
+        const auto row_owner =
+            imported ? adjustment.action_id.value_or("") : adjustment.existing_object_key.value_or("");
+        if (!valid_digest(adjustment.adjustment_id) ||
+            adjustment.adjustment_id != package_import_internal::program_assignment_adjustment_identity(adjustment) ||
+            !adjustment_ids.emplace(adjustment.adjustment_id).second || row_owner.empty() ||
+            !adjusted_rows.emplace(row_owner, adjustment.assignment_ordinal).second ||
+            adjustment.program_slot.empty() || adjustment.assignment_ordinal >= 128U ||
+            (adjustment.target_object_type != "SBAC" && adjustment.target_object_type != "SBNK") ||
+            adjustment.target_name.empty() || adjustment.reason_code != "UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION" ||
+            adjustment.disposition != PackageProgramAssignmentDisposition::clear_assignment ||
+            (imported && (!adjustment.package_index || *adjustment.package_index >= plan.package_ids.size() ||
+                          !adjustment.action_id || adjustment.existing_object_key || !scope_matches_action ||
+                          action->second->package_index != *adjustment.package_index)) ||
+            (existing && (adjustment.package_index || adjustment.action_id || !adjustment.existing_object_key)) ||
+            (!imported && !existing)) {
+            return std::unexpected{
+                planner_error("package import plan contains an invalid Program assignment adjustment")};
+        }
     }
     for (const auto &object : plan.objects) {
         if (!object.canonical_action_id)

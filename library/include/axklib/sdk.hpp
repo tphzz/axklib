@@ -252,6 +252,26 @@ struct package_action_info {
     std::optional<std::uint32_t> target_wave_data_reference_value;
 };
 
+struct package_program_assignment_adjustment_info {
+    std::string adjustment_id;
+    std::string origin;
+    std::optional<std::uint64_t> package_index;
+    std::optional<std::string> action_id;
+    std::optional<std::string> existing_object_key;
+    std::string program_slot;
+    std::string program_name;
+    std::uint32_t assignment_ordinal{};
+    std::string target_object_type;
+    std::string target_name;
+    std::uint32_t partition_index{};
+    std::string group_name;
+    std::string volume_name;
+    std::string raw_group;
+    std::string raw_volume;
+    std::string reason_code;
+    std::string disposition;
+};
+
 struct package_allocation_info {
     std::uint32_t partition_index{};
     std::string group_name;
@@ -283,6 +303,7 @@ struct package_import_summary {
     std::uint64_t package_count{};
     std::uint64_t destination_count{};
     std::uint64_t object_count{};
+    std::uint64_t adjustment_count{};
     std::uint64_t conflict_count{};
     std::uint64_t warning_count{};
     bool valid{};
@@ -294,6 +315,7 @@ struct package_import_result {
     std::string source_snapshot_id;
     std::string output_snapshot_id;
     std::uint64_t object_count{};
+    std::uint64_t adjustment_count{};
     bool applied{};
 };
 
@@ -372,6 +394,7 @@ class AXK_SDK_API package_import_plan final {
     result<std::vector<package_issue_info>> warnings() const;
     result<std::vector<package_conflict_info>> conflicts() const;
     result<std::vector<package_action_info>> actions() const;
+    result<std::vector<package_program_assignment_adjustment_info>> adjustments() const;
     result<std::vector<package_allocation_info>> allocation() const;
     result<package_import_result> apply(const std::string &utf8_output_path, const write_options &options,
                                         operation_context &context);

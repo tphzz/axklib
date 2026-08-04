@@ -428,6 +428,83 @@ TEST(ServerContract, RelationshipDiagnosticsValidateForInspectionAndTerminalExtr
     EXPECT_FALSE(validator.validate("ImageSessionAudioExportInspection", invalid));
 }
 
+TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResults) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    axk::server::OpenApiValidator validator{document};
+    const auto adjustment = nlohmann::json{
+        {"adjustmentId", "adjustment-1"},
+        {"origin", "existing-program"},
+        {"packageIndex", nullptr},
+        {"actionId", nullptr},
+        {"existingObjectKey", "sfs:0:17"},
+        {"programSlot", "001"},
+        {"programName", "Program One"},
+        {"assignmentOrdinal", 2U},
+        {"targetObjectType", "SBAC"},
+        {"targetName", "Imported Bank"},
+        {"partitionIndex", 0U},
+        {"groupName", ""},
+        {"volumeName", "Imported"},
+        {"rawGroup", ""},
+        {"rawVolume", ""},
+        {"reasonCode", "UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION"},
+        {"disposition", "clear-assignment"},
+    };
+    const auto adjustments = nlohmann::json::array({adjustment});
+    const auto application_plan = nlohmann::json{
+        {"schemaVersion", "1.0"},
+        {"planToken", "plan-token"},
+        {"expiresInSeconds", 600U},
+        {"planId", "plan-1"},
+        {"targetKind", "sfs"},
+        {"targetSnapshotId", "snapshot-1"},
+        {"valid", true},
+        {"warnings", nlohmann::json::array()},
+        {"conflicts", nlohmann::json::array()},
+        {"actions", nlohmann::json::array()},
+        {"programAssignmentAdjustments", adjustments},
+        {"allocation", nlohmann::json::array()},
+    };
+    const auto wire_plan = validator.wire_value("PackageImportPlan", application_plan);
+    ASSERT_TRUE(validator.validate("PackageImportPlan", wire_plan));
+    EXPECT_EQ(wire_plan.at("programAssignmentAdjustments").at(0).at("origin"), "EXISTING_PROGRAM");
+    EXPECT_EQ(wire_plan.at("programAssignmentAdjustments").at(0).at("disposition"), "CLEAR_ASSIGNMENT");
+
+    const auto application_result = nlohmann::json{
+        {"schemaVersion", "1.0"},
+        {"planId", "plan-1"},
+        {"output", file_ref("imported.hds")},
+        {"sourceSnapshotId", "snapshot-1"},
+        {"outputSnapshotId", "snapshot-2"},
+        {"programAssignmentAdjustments", adjustments},
+        {"applied", true},
+    };
+    const auto wire_result = validator.wire_value("PackageImportResult", application_result);
+    EXPECT_TRUE(validator.validate("PackageImportResult", wire_result));
+
+    const auto application_session_result = nlohmann::json{
+        {"schemaVersion", "1.0"},
+        {"planId", "plan-1"},
+        {"targetKind", "sfs"},
+        {"targetSnapshotId", "snapshot-1"},
+        {"actions", nlohmann::json::array()},
+        {"programAssignmentAdjustments", adjustments},
+        {"allocation", nlohmann::json::array()},
+        {"imageId", "image-1"},
+        {"revision", 2U},
+        {"objectCount", 4U},
+        {"applied", true},
+    };
+    const auto wire_session_result =
+        validator.wire_value("ImageSessionPackageImportResult", application_session_result);
+    EXPECT_TRUE(validator.validate("ImageSessionPackageImportResult", wire_session_result));
+
+    auto invalid_result = wire_result;
+    invalid_result.at("programAssignmentAdjustments").at(0)["unexpected"] = true;
+    EXPECT_FALSE(validator.validate("PackageImportResult", invalid_result));
+}
+
 TEST(ServerContract, CanonicalReportRequestSchemasMatchApplicationInputs) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());

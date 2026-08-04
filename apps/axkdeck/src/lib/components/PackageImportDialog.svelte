@@ -257,6 +257,31 @@
                                         <Icon name="check" size={14} /> Ready to import
                                     </p>
                                 {/if}
+                                {#if plan.programAssignmentAdjustments.length > 0}
+                                    <div class="package-adjustments" aria-label="Program assignment adjustments">
+                                        <strong
+                                            >{plan.programAssignmentAdjustments.length} unresolved Program assignment{plan
+                                                .programAssignmentAdjustments.length === 1
+                                                ? ''
+                                                : 's'} will be cleared</strong
+                                        >
+                                        {#each plan.programAssignmentAdjustments as adjustment (adjustment.adjustmentId)}
+                                            <p>
+                                                <span
+                                                    >{adjustment.programName ||
+                                                        `Program ${adjustment.programSlot}`}</span
+                                                >
+                                                <small
+                                                    >{adjustment.targetObjectType === 'SBAC' ? 'Sample Bank' : 'Sample'}
+                                                    “{adjustment.targetName}” ·
+                                                    {adjustment.origin === 'EXISTING_PROGRAM'
+                                                        ? 'existing Program'
+                                                        : 'imported Program'}</small
+                                                >
+                                            </p>
+                                        {/each}
+                                    </div>
+                                {/if}
                                 {#each plan.warnings as warning}
                                     <p class="package-warning">{warning.message}</p>
                                 {/each}

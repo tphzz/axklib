@@ -126,6 +126,15 @@ enum class PackageImportObjectAction : std::uint8_t {
     conflict,
 };
 
+enum class PackageProgramAssignmentOrigin : std::uint8_t {
+    imported_program,
+    existing_program,
+};
+
+enum class PackageProgramAssignmentDisposition : std::uint8_t {
+    clear_assignment,
+};
+
 struct PackageRootDestination {
     std::size_t package_index{};
     std::size_t root_index{};
@@ -174,6 +183,29 @@ struct PackageImportConflict {
     std::string raw_volume;
 
     friend bool operator==(const PackageImportConflict &, const PackageImportConflict &) = default;
+};
+
+struct PackageProgramAssignmentAdjustment {
+    std::string adjustment_id;
+    PackageProgramAssignmentOrigin origin{PackageProgramAssignmentOrigin::imported_program};
+    std::optional<std::size_t> package_index;
+    std::optional<std::string> action_id;
+    std::optional<std::string> existing_object_key;
+    std::string program_slot;
+    std::string program_name;
+    std::uint32_t assignment_ordinal{};
+    std::string target_object_type;
+    std::string target_name;
+    std::uint8_t partition_index{};
+    std::string group_name;
+    std::string volume_name;
+    std::string raw_group;
+    std::string raw_volume;
+    std::string reason_code;
+    PackageProgramAssignmentDisposition disposition{PackageProgramAssignmentDisposition::clear_assignment};
+
+    friend bool operator==(const PackageProgramAssignmentAdjustment &,
+                           const PackageProgramAssignmentAdjustment &) = default;
 };
 
 struct PlannedPackageObject {
@@ -254,6 +286,7 @@ struct PackageImportPlan {
     std::vector<PackageIssue> warnings;
     std::vector<PlannedPackageDestination> destinations;
     std::vector<PlannedPackageObject> objects;
+    std::vector<PackageProgramAssignmentAdjustment> program_assignment_adjustments;
     std::vector<PackageAllocationDelta> allocation;
     std::vector<PackageImportConflict> conflicts;
 
@@ -268,6 +301,7 @@ struct PackageImportReport {
     std::string output_snapshot_id;
     bool applied{};
     std::vector<PlannedPackageObject> objects;
+    std::vector<PackageProgramAssignmentAdjustment> program_assignment_adjustments;
     std::vector<PackageAllocationDelta> allocation;
     PublicationOutcome publication;
 };
@@ -276,6 +310,9 @@ AXK_API std::string_view package_root_kind_name(PackageRootKind kind) noexcept;
 AXK_API std::string_view package_kind_name(PackageKind kind) noexcept;
 AXK_API std::string_view required_package_extension(PackageKind kind) noexcept;
 AXK_API std::string_view package_import_action_name(PackageImportObjectAction action) noexcept;
+AXK_API std::string_view package_program_assignment_origin_name(PackageProgramAssignmentOrigin origin) noexcept;
+AXK_API std::string_view
+package_program_assignment_disposition_name(PackageProgramAssignmentDisposition disposition) noexcept;
 
 AXK_API Result<void> verify_portable_package(const PortablePackage &package);
 AXK_API Result<void> verify_package_import_plan(const PackageImportPlan &plan);

@@ -114,6 +114,14 @@ target-format infrastructure. It is the authoritative space estimate shown by
 axkdeck. Category directories grow during a valid SFS import; physical cluster
 or object-ID exhaustion remains a blocking conflict.
 
+Plans also report `program_assignment_adjustments` in CLI JSON and
+`programAssignmentAdjustments` through the server contract. These are
+nonblocking, row-specific decisions for unresolved Program assignments that
+would otherwise acquire an exact type-and-name target in the destination. Each
+entry identifies the imported or existing Program, assignment ordinal, target
+type and name, destination scope, reason, and `clear-assignment` disposition.
+Axkdeck shows these decisions before enabling import.
+
 Apply the exact plan through the same request:
 
 ```bash
@@ -326,21 +334,33 @@ identity-significant.
 Program closure retains Known target rows classified as active, source-load,
 or visible-off. The visible-off case is required because an imported zero
 destination handle re-parses in that state even though the sampler can still
-load the named assignment. Ambiguous visible-off diagnostics, duplicate
-inactive rows, unresolved targets, and ambiguous targets remain outside the
-portable closure.
+load the named assignment. Known Program edges remain required dependencies.
+Ambiguous visible-off diagnostics, duplicate inactive rows, unresolved targets,
+and ambiguous targets do not become dependency edges.
 
-A volume package may also preserve a stored active Program row whose exact
-same-volume target is absent. The complete row remains identity-significant,
-its source-local `PROG_ASSIGNMENT_HANDLE` is cleared, and it has no relationship
-edge. This records source state without inventing a dependency; hardware
-lookup disables such a row when its exact target cannot be found. A Program-root
-package still rejects the same row because a single-Program package promises a
-complete dependency closure. Package closure does not use a trailing `*` alone
-as a relationship-state signal: when an exact target including the suffix
-exists, that exact object is the dependency. This rule does not define Yamaha
-Duplicate state. Yamaha uses `*` when naming duplicated Samples, but the name
-alone is not a portable relationship-state flag.
+Any package containing a Program may preserve a stored active assignment row
+whose exact same-volume target is absent. The complete row remains
+identity-significant, its source-local `PROG_ASSIGNMENT_HANDLE` is normalized to
+zero, and it has no relationship edge. This records source state without
+inventing a dependency. It does not prevent exporting one Program, a partial
+Program selection, every Program in a volume, or a complete volume.
+
+Import never promotes that edge-less row merely because an exact type-and-name
+target exists or is introduced in the destination. Instead, the plan emits one
+`UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION` adjustment and atomically clears the
+complete 0x38-byte assignment row. This applies both to a Program arriving in
+the package and to a zero-handle unresolved row in an existing destination
+Program when the import introduces the matching lower-level object. The Sample
+Bank, Sample, and Wave Data import remains valid and is not blocked by the
+higher-level inconsistency. Other Program rows are unchanged. Apply verifies
+the cleared row before publication or in-place journal commit on SFS/HDS,
+FAT12, and ISO9660 targets.
+
+Package closure does not use a trailing `*` alone as a relationship-state
+signal: when an exact target including the suffix exists, that exact object is
+the dependency. This rule does not define Yamaha Duplicate state. Yamaha uses
+`*` when naming duplicated Samples, but the name alone is not a portable
+relationship-state flag.
 
 ## SDK Surface
 
@@ -348,8 +368,12 @@ Include `axklib/sdk.hpp`. `portable_package::export_from` exports and atomically
 publishes one package. `portable_package::open` performs bounded manifest
 inspection; call `verify` before treating payloads as trusted.
 `package_import_plan::create` fully verifies every package and returns owned
-warnings, conflicts, actions, allocation deltas, and a stable plan ID. `apply`
-rejects invalid or stale plans and publishes a separate output image.
+warnings, conflicts, actions, Program-assignment adjustments, allocation
+deltas, and a stable plan ID. `apply` rejects invalid or stale plans and
+publishes a separate output image. `package_import_summary::adjustment_count`,
+`package_import_plan::adjustments()`, and
+`package_import_result::adjustment_count` expose the same decisions without
+requiring JSON.
 
 The installed SDK uses owned C++17 values and PIMPL handles. It does not expose
 CLI11, JSON, ZIP, Yamaha parser, or allocation-engine types. Package handles and

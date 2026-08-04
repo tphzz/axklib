@@ -1030,6 +1030,7 @@ describe('App panel layout', () => {
             warnings: [],
             conflicts: [],
             actions: [],
+            programAssignmentAdjustments: [],
             allocation: [],
         });
         render(App);

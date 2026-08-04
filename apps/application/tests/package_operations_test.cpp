@@ -306,6 +306,7 @@ TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegis
     const auto planned = registry_.invoke("package.plan_import", import_request, context());
     ASSERT_TRUE(planned) << planned.error().message;
     ASSERT_TRUE(planned->at("valid").get<bool>());
+    EXPECT_TRUE(planned->at("programAssignmentAdjustments").empty());
     ASSERT_FALSE(planned->at("allocation").empty());
     EXPECT_GT(planned->at("allocation").front().at("additionalAllocatedBytes").get<std::uint64_t>(), 0U);
     EXPECT_EQ(planned->at("allocation").front().at("blockedObjectCount"), 0U);
@@ -346,6 +347,7 @@ TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegis
         registry_.invoke("package.import", {{"planToken", planned->at("planToken").get<std::string>()}}, context());
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_TRUE(applied->at("applied").get<bool>());
+    EXPECT_TRUE(applied->at("programAssignmentAdjustments").empty());
     ASSERT_TRUE(registry_.invoke("package.plan_import.release",
                                  {{"planToken", replanned_released->at("planToken").get<std::string>()}}, context()));
     EXPECT_TRUE(uploads_->remove(upload->reference, "owner"));
@@ -392,6 +394,7 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
     EXPECT_EQ(planned->at("imageId"), opened->image_id);
     EXPECT_EQ(planned->at("revision"), 1U);
     EXPECT_TRUE(planned->at("valid").get<bool>());
+    EXPECT_TRUE(planned->at("programAssignmentAdjustments").empty());
     ASSERT_FALSE(planned->at("actions").empty());
     auto replacement_request = request;
     replacement_request["replacePlanToken"] = planned->at("planToken");
@@ -413,6 +416,7 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
     EXPECT_EQ(applied->at("imageId"), opened->image_id);
     EXPECT_EQ(applied->at("revision"), 2U);
     EXPECT_TRUE(applied->at("applied").get<bool>());
+    EXPECT_TRUE(applied->at("programAssignmentAdjustments").empty());
     const auto refreshed = images_->inspect(opened->image_id, "owner");
     ASSERT_TRUE(refreshed) << refreshed.error().message;
     EXPECT_EQ(refreshed->revision, 2U);

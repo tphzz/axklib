@@ -158,6 +158,28 @@ PlanOutput project_plan(const std::filesystem::path &target, const std::vector<s
             [](PackageImportObjectAction action) { return std::string{package_import_action_name(action)}; });
         result.objects.push_back(std::move(projected));
     }
+    result.program_assignment_adjustments.reserve(plan.program_assignment_adjustments.size());
+    for (const auto &adjustment : plan.program_assignment_adjustments) {
+        result.program_assignment_adjustments.push_back({
+            adjustment.adjustment_id,
+            std::string{package_program_assignment_origin_name(adjustment.origin)},
+            adjustment.package_index,
+            adjustment.action_id,
+            adjustment.existing_object_key,
+            adjustment.program_slot,
+            adjustment.program_name,
+            adjustment.assignment_ordinal,
+            adjustment.target_object_type,
+            adjustment.target_name,
+            adjustment.partition_index,
+            adjustment.group_name,
+            adjustment.volume_name,
+            adjustment.raw_group,
+            adjustment.raw_volume,
+            adjustment.reason_code,
+            std::string{package_program_assignment_disposition_name(adjustment.disposition)},
+        });
+    }
     result.allocation.reserve(plan.allocation.size());
     for (const auto &allocation : plan.allocation) {
         result.allocation.push_back({
@@ -247,6 +269,27 @@ Result<PlanOutput> project_plan(const std::filesystem::path &target,
                 optional_value<std::string>(object.at("canonicalActionId")),
                 optional_value<std::uint32_t>(object.at("targetSfsId")),
                 optional_value<std::uint32_t>(object.at("targetWaveDataReferenceValue")),
+            });
+        }
+        for (const auto &adjustment : service_plan.at("programAssignmentAdjustments")) {
+            result.program_assignment_adjustments.push_back({
+                adjustment.at("adjustmentId").get<std::string>(),
+                adjustment.at("origin").get<std::string>(),
+                optional_value<std::uint64_t>(adjustment.at("packageIndex")),
+                optional_value<std::string>(adjustment.at("actionId")),
+                optional_value<std::string>(adjustment.at("existingObjectKey")),
+                adjustment.at("programSlot").get<std::string>(),
+                adjustment.at("programName").get<std::string>(),
+                adjustment.at("assignmentOrdinal").get<std::uint64_t>(),
+                adjustment.at("targetObjectType").get<std::string>(),
+                adjustment.at("targetName").get<std::string>(),
+                adjustment.at("partitionIndex").get<std::uint32_t>(),
+                adjustment.at("groupName").get<std::string>(),
+                adjustment.at("volumeName").get<std::string>(),
+                adjustment.at("rawGroup").get<std::string>(),
+                adjustment.at("rawVolume").get<std::string>(),
+                adjustment.at("reasonCode").get<std::string>(),
+                adjustment.at("disposition").get<std::string>(),
             });
         }
         for (const auto &allocation : service_plan.at("allocation")) {
@@ -397,6 +440,28 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
                 {"projected_image_size_bytes", item.projected_image_size_bytes},
             });
         }
+        auto program_assignment_adjustments = OrderedJson::array();
+        for (const auto &adjustment : output.program_assignment_adjustments) {
+            program_assignment_adjustments.push_back({
+                {"adjustment_id", adjustment.adjustment_id},
+                {"origin", adjustment.origin},
+                {"package_index", optional_number(adjustment.package_index)},
+                {"action_id", optional_string(adjustment.action_id)},
+                {"existing_object_key", optional_string(adjustment.existing_object_key)},
+                {"program_slot", adjustment.program_slot},
+                {"program_name", adjustment.program_name},
+                {"assignment_ordinal", adjustment.assignment_ordinal},
+                {"target_object_type", adjustment.target_object_type},
+                {"target_name", adjustment.target_name},
+                {"partition_index", adjustment.partition_index},
+                {"group_name", adjustment.group_name},
+                {"volume_name", adjustment.volume_name},
+                {"raw_group", adjustment.raw_group},
+                {"raw_volume", adjustment.raw_volume},
+                {"reason_code", adjustment.reason_code},
+                {"disposition", adjustment.disposition},
+            });
+        }
         const auto result = output.result ? OrderedJson{{"output_path", output.result->output_path_utf8},
                                                         {"source_snapshot_id", output.result->source_snapshot_id},
                                                         {"output_snapshot_id", output.result->output_snapshot_id},
@@ -413,6 +478,7 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
             {"warnings", std::move(warnings)},
             {"conflicts", std::move(conflicts)},
             {"objects", std::move(objects)},
+            {"program_assignment_adjustments", std::move(program_assignment_adjustments)},
             {"allocation", std::move(allocation)},
             {"result", result},
         }

@@ -340,6 +340,31 @@ std::string target_kind_name(axk::MediaKind kind) {
     return "unknown";
 }
 
+Json program_assignment_adjustments_json(std::span<const axk::PackageProgramAssignmentAdjustment> adjustments) {
+    auto result = Json::array();
+    for (const auto &adjustment : adjustments) {
+        result.push_back(
+            {{"adjustmentId", adjustment.adjustment_id},
+             {"origin", std::string{axk::package_program_assignment_origin_name(adjustment.origin)}},
+             {"packageIndex", adjustment.package_index ? Json(*adjustment.package_index) : Json{}},
+             {"actionId", adjustment.action_id ? Json(*adjustment.action_id) : Json{}},
+             {"existingObjectKey", adjustment.existing_object_key ? Json(*adjustment.existing_object_key) : Json{}},
+             {"programSlot", adjustment.program_slot},
+             {"programName", adjustment.program_name},
+             {"assignmentOrdinal", adjustment.assignment_ordinal},
+             {"targetObjectType", adjustment.target_object_type},
+             {"targetName", adjustment.target_name},
+             {"partitionIndex", adjustment.partition_index},
+             {"groupName", adjustment.group_name},
+             {"volumeName", adjustment.volume_name},
+             {"rawGroup", adjustment.raw_group},
+             {"rawVolume", adjustment.raw_volume},
+             {"reasonCode", adjustment.reason_code},
+             {"disposition", std::string{axk::package_program_assignment_disposition_name(adjustment.disposition)}}});
+    }
+    return result;
+}
+
 Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::uint64_t expires_in_seconds) {
     auto warnings = Json::array();
     for (const auto &warning : plan.warnings)
@@ -416,6 +441,7 @@ Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::
             {"warnings", std::move(warnings)},
             {"conflicts", std::move(conflicts)},
             {"actions", std::move(actions)},
+            {"programAssignmentAdjustments", program_assignment_adjustments_json(plan.program_assignment_adjustments)},
             {"allocation", std::move(allocation)}};
 }
 

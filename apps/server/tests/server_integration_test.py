@@ -319,6 +319,13 @@ def canonical_package_plan(value: dict[str, Any]) -> dict[str, Any]:
         "warnings": value["warnings"],
         "conflicts": [normalized_item(item) for item in value["conflicts"]],
         "actions": [normalized_item(item) for item in actions],
+        "programAssignmentAdjustments": [
+            normalized_item(item)
+            for item in value.get(
+                "programAssignmentAdjustments",
+                value.get("program_assignment_adjustments", []),
+            )
+        ],
         "allocation": [normalized_item(item) for item in value["allocation"]],
     }
 
