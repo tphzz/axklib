@@ -342,7 +342,9 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                                                     : std::format("assignment-kind-0x{:02x}+name", row.kind),
                         type == ObjectType::unknown ? "assignment-name-ambiguous"
                                                     : std::format("assignment-kind-0x{:02x}+name-ambiguous", row.kind),
-                        decoded_state == AssignmentState::active || item->scope_key.starts_with("iso:"));
+                        decoded_state == AssignmentState::active ||
+                            (decoded_state == AssignmentState::visible_off && type != ObjectType::unknown) ||
+                            item->scope_key.starts_with("iso:"));
                     if (match.target != nullptr && match.basis.ends_with("+same-folder") &&
                         type != ObjectType::unknown) {
                         match.quality = RelationshipQuality::known;

@@ -616,8 +616,11 @@ reports keep all decoded rows, raw selector values, and inactive rows.
 Portable-package closure has a separate preservation rule: Known named
 kind-`0x10` and kind-`0x11` targets in `confirmed-visible-off` state are retained
 because imported zero-handle assignments re-parse in that state and remain
-loadable on hardware. `confirmed-duplicate-not-active`, unresolved, and
-ambiguous rows remain diagnostic-only.
+loadable on hardware. For SFS media, a target remains Known when exactly one
+matching object is in the Program's volume, even when other volumes contain the
+same type and name. Multiple same-volume candidates, cross-volume-only matches,
+`confirmed-duplicate-not-active`, unresolved rows, and ambiguous rows remain
+diagnostic-only.
 
 Relationship target matching is reported separately from active/off state. Rows
 that are useful for diagnostics but should not become normal Program children use

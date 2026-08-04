@@ -220,6 +220,30 @@ void make_program_assignment_target_missing_with_same_type_context(const std::fi
     ASSERT_TRUE(image);
 }
 
+void set_program_assignments_visible_off(const std::filesystem::path &path, std::size_t assignment_count) {
+    const auto media = axk::open_media(path);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto &partition = sfs->partitions().front();
+    const auto program =
+        std::ranges::find_if(partition.records, [](const auto &record) { return record.object_type == "PROG"; });
+    ASSERT_NE(program, partition.records.end());
+    ASSERT_EQ(program->extents.size(), 1U);
+    const auto payload_offset =
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(program->extents.front().cluster_offset) * partition.sectors_per_cluster) *
+        512U;
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    for (std::size_t index = 0; index < assignment_count; ++index) {
+        image.seekp(static_cast<std::streamoff>(payload_offset + 0x148U + index * 0x38U));
+        image.put(0);
+    }
+    ASSERT_TRUE(image);
+}
+
 axk::Result<std::vector<axk::PortablePackage>> mixed_source_packages(const std::filesystem::path &root_path) {
     const auto graph_audio = root_path / "graph.wav";
     const auto iso_audio = root_path / "iso.wav";
@@ -3068,6 +3092,105 @@ TEST(PackageImportApply, ImportsACompleteProgramSampleBankSampleAndWaveDataGraph
     for (const auto &relocation : reexported_program->relocations) {
         EXPECT_EQ(relocation.role, "PROG_ASSIGNMENT_HANDLE");
         EXPECT_EQ(relocation.edge_ids.size(), 1U);
+    }
+    std::filesystem::remove_all(output_root, error);
+}
+
+TEST(PackageImportApply, ImportsTheSameVisibleOffVolumeGraphIntoTwoSfsVolumes) {
+    const auto output_root = publication_root("axklib-package-import-visible-off-duplicate-volumes");
+    const auto audio_path = output_root / "tone.wav";
+    const auto source_path = output_root / "source.hds";
+    const auto target_path = output_root / "target.hds";
+    const auto first_output_path = output_root / "first.hds";
+    const auto second_output_path = output_root / "second.hds";
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1000)));
+
+    axk::HdsBuildManifest source_manifest{"1.0", 4U * 1024U * 1024U, {}};
+    source_manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
+    ASSERT_TRUE(axk::write_hds_image(source_manifest, source_path));
+    set_program_assignments_visible_off(source_path, 2U);
+    auto source = axk::open_media(source_path);
+    ASSERT_TRUE(source) << source.error().message;
+    const std::vector volume_root{root(axk::PackageRootKind::volume, "Graph Volume")};
+    const auto built = axk::build_portable_package(*source, volume_root);
+    ASSERT_TRUE(built) << built.error().message;
+    EXPECT_EQ(built->package.kind, axk::PackageKind::volume);
+    EXPECT_EQ(built->required_extension, ".axkvol");
+    EXPECT_EQ(built->package.nodes.size(), 5U);
+    EXPECT_EQ(built->package.relationships.size(), 5U);
+    const std::vector packages{built->package};
+
+    axk::VolumeSpec base_volume;
+    base_volume.name = "Base";
+    axk::HdsBuildManifest target_manifest{"1.0", 4U * 1024U * 1024U, {}};
+    target_manifest.partitions.push_back({"P1", {std::move(base_volume)}});
+    ASSERT_TRUE(axk::write_hds_image(target_manifest, target_path));
+
+    axk::PackageImportRequest first_request;
+    auto first_destination = destination(0U, "First Import");
+    first_destination.create_destination = true;
+    first_request.root_destinations.push_back(std::move(first_destination));
+    const auto first_plan = axk::plan_package_import(target_path, packages, first_request);
+    ASSERT_TRUE(first_plan) << first_plan.error().message;
+    ASSERT_TRUE(first_plan->valid()) << conflict_summary(*first_plan);
+    const auto first_import = axk::apply_package_import(target_path, packages, *first_plan, first_output_path, false);
+    ASSERT_TRUE(first_import) << first_import.error().message;
+
+    axk::PackageImportRequest second_request;
+    auto second_destination = destination(0U, "Second Import");
+    second_destination.create_destination = true;
+    second_request.root_destinations.push_back(std::move(second_destination));
+    const auto second_plan = axk::plan_package_import(first_output_path, packages, second_request);
+    ASSERT_TRUE(second_plan) << second_plan.error().message;
+    ASSERT_TRUE(second_plan->valid()) << conflict_summary(*second_plan);
+    const auto second_import =
+        axk::apply_package_import(first_output_path, packages, *second_plan, second_output_path, false);
+    ASSERT_TRUE(second_import) << second_import.error().message;
+
+    const auto reopened = axk::open_media(second_output_path);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    EXPECT_TRUE(reopened->validation_issues().empty());
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    const auto graph = axk::build_relationship_graph(*catalog);
+    for (const auto volume_name : {std::string_view{"First Import"}, std::string_view{"Second Import"}}) {
+        const auto program = std::ranges::find_if(catalog->objects, [&](const auto &object) {
+            return object.placement && object.placement->volume_name == volume_name &&
+                   object.object.header.type == axk::ObjectType::prog && object.object.header.name == "001";
+        });
+        ASSERT_NE(program, catalog->objects.end()) << volume_name;
+        const auto *decoded = std::get_if<axk::CurrentProg>(&program->object.payload);
+        ASSERT_NE(decoded, nullptr);
+        ASSERT_GE(decoded->assignments.size(), 2U);
+        EXPECT_EQ(decoded->assignments[0].raw_handle, 0U);
+        EXPECT_EQ(decoded->assignments[1].raw_handle, 0U);
+        const auto children = graph.children(program->key);
+        ASSERT_EQ(children.size(), 2U) << volume_name;
+        for (const auto *edge : children) {
+            ASSERT_TRUE(edge->target_key) << edge->type;
+            EXPECT_EQ(edge->quality, axk::RelationshipQuality::known) << edge->type;
+            EXPECT_EQ(edge->assignment_state, axk::AssignmentState::visible_off) << edge->type;
+            EXPECT_TRUE(edge->basis.ends_with("+same-volume")) << edge->basis;
+            const auto target = std::ranges::find(catalog->objects, *edge->target_key, &axk::ObjectSnapshot::key);
+            ASSERT_NE(target, catalog->objects.end()) << edge->type;
+            ASSERT_TRUE(target->placement) << edge->type;
+            EXPECT_EQ(target->placement->volume_name, volume_name) << edge->type;
+        }
+    }
+
+    const std::vector second_volume_root{root(axk::PackageRootKind::volume, "Second Import")};
+    const auto reexported = axk::build_portable_package(*reopened, second_volume_root);
+    ASSERT_TRUE(reexported) << reexported.error().message;
+    EXPECT_EQ(reexported->package.relationships, built->package.relationships);
+    for (const auto &source_node : built->package.nodes) {
+        const auto imported_node = std::ranges::find_if(reexported->package.nodes, [&](const auto &candidate) {
+            return candidate.object_type == source_node.object_type && candidate.name == source_node.name;
+        });
+        ASSERT_NE(imported_node, reexported->package.nodes.end());
+        EXPECT_EQ(imported_node->normalized_sha256, source_node.normalized_sha256);
     }
     std::filesystem::remove_all(output_root, error);
 }

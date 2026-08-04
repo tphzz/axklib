@@ -335,6 +335,10 @@ Program closure retains Known target rows classified as active, source-load,
 or visible-off. The visible-off case is required because an imported zero
 destination handle re-parses in that state even though the sampler can still
 load the named assignment. Known Program edges remain required dependencies.
+On SFS, duplicate type-and-name targets in other volumes do not make that edge
+ambiguous when exactly one candidate shares the Program's volume. Multiple
+same-volume candidates and cross-volume-only matches remain non-portable
+diagnostics rather than invented dependencies.
 Ambiguous visible-off diagnostics, duplicate inactive rows, unresolved targets,
 and ambiguous targets do not become dependency edges.
 

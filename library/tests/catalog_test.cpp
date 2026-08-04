@@ -797,17 +797,70 @@ TEST(RelationshipGraph, ResolvesActiveSfsSampleBankMemberWithinItsOwningVolume) 
     EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
 }
 
-TEST(ProgramRelationships, IdentifiesOneSameVolumeVisibleOffDiagnosticCandidate) {
+TEST(ProgramRelationships, ResolvesUniqueSameVolumeVisibleOffTargets) {
     axk::ObjectCatalog catalog;
     for (const auto &[key, volume] : {std::pair{"sample_bank-a", 1U}, std::pair{"sample_bank-b", 2U}}) {
         axk::DecodedObject sample_bank;
         sample_bank.header.type = axk::ObjectType::sbac;
         sample_bank.header.name = "Duplicate Bank";
         sample_bank.payload = axk::CurrentSbac{};
-        catalog.objects.push_back({key, axk::PartitionIndex{0}, axk::SfsId{volume}, "partition:0",
-                                   std::move(sample_bank),
-                                   axk::ObjectPlacement{axk::PartitionIndex{0}, "Disk", axk::SfsId{volume}, "Volume",
-                                                        "SBAC", "Duplicate Bank", "Disk/Volume/SBAC"}});
+        catalog.objects.push_back(
+            {key, axk::PartitionIndex{0}, axk::SfsId{volume}, "partition:0", std::move(sample_bank),
+             axk::ObjectPlacement{
+                 axk::PartitionIndex{0}, "Disk", axk::SfsId{volume}, "Volume", "SBAC", "Duplicate Bank", {}}});
+    }
+    for (const auto &[key, volume] : {std::pair{"sample-a", 1U}, std::pair{"sample-b", 2U}}) {
+        axk::DecodedObject sample;
+        sample.header.type = axk::ObjectType::sbnk;
+        sample.header.name = "Duplicate Sample";
+        sample.payload = axk::CurrentSbnk{};
+        catalog.objects.push_back(
+            {key, axk::PartitionIndex{0}, axk::SfsId{volume + 2U}, "partition:0", std::move(sample),
+             axk::ObjectPlacement{
+                 axk::PartitionIndex{0}, "Disk", axk::SfsId{volume}, "Volume", "SBNK", "Duplicate Sample", {}}});
+    }
+
+    axk::CurrentProg current_program;
+    axk::ProgAssignment sample_bank_assignment;
+    sample_bank_assignment.name = "Duplicate Bank";
+    sample_bank_assignment.raw_handle = 1U;
+    sample_bank_assignment.kind = 0x11U;
+    axk::ProgAssignment sample_assignment;
+    sample_assignment.name = "Duplicate Sample";
+    sample_assignment.raw_handle = 1U;
+    sample_assignment.kind = 0x10U;
+    current_program.assignments = {sample_bank_assignment, sample_assignment};
+    axk::DecodedObject program;
+    program.header.type = axk::ObjectType::prog;
+    program.header.name = "001";
+    program.payload = std::move(current_program);
+    catalog.objects.push_back(
+        {"program", axk::PartitionIndex{0}, axk::SfsId{5}, "partition:0", std::move(program),
+         axk::ObjectPlacement{axk::PartitionIndex{0}, "Disk", axk::SfsId{1}, "Volume", "PROG", "001", {}}});
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 2U);
+    ASSERT_EQ(graph.relationships[0].target_key, "sample_bank-a");
+    EXPECT_EQ(graph.relationships[0].candidate_keys.size(), 2U);
+    EXPECT_EQ(graph.relationships[0].quality, axk::RelationshipQuality::known);
+    EXPECT_EQ(graph.relationships[0].basis, "assignment-kind-0x11+name+same-volume");
+    ASSERT_EQ(graph.relationships[1].target_key, "sample-a");
+    EXPECT_EQ(graph.relationships[1].candidate_keys.size(), 2U);
+    EXPECT_EQ(graph.relationships[1].quality, axk::RelationshipQuality::known);
+    EXPECT_EQ(graph.relationships[1].basis, "assignment-kind-0x10+name+same-volume");
+}
+
+TEST(ProgramRelationships, KeepsMultipleSameVolumeVisibleOffTargetsAmbiguous) {
+    axk::ObjectCatalog catalog;
+    for (const auto &[key, id] : {std::pair{"sample_bank-a", 1U}, std::pair{"sample_bank-b", 2U}}) {
+        axk::DecodedObject sample_bank;
+        sample_bank.header.type = axk::ObjectType::sbac;
+        sample_bank.header.name = "Duplicate Bank";
+        sample_bank.payload = axk::CurrentSbac{};
+        catalog.objects.push_back(
+            {key, axk::PartitionIndex{0}, axk::SfsId{id}, "partition:0", std::move(sample_bank),
+             axk::ObjectPlacement{
+                 axk::PartitionIndex{0}, "Disk", axk::SfsId{1}, "Volume", "SBAC", "Duplicate Bank", {}}});
     }
 
     axk::CurrentProg current_program;
@@ -820,16 +873,49 @@ TEST(ProgramRelationships, IdentifiesOneSameVolumeVisibleOffDiagnosticCandidate)
     program.header.type = axk::ObjectType::prog;
     program.header.name = "001";
     program.payload = std::move(current_program);
-    catalog.objects.push_back({"program", axk::PartitionIndex{0}, axk::SfsId{3}, "partition:0", std::move(program),
-                               axk::ObjectPlacement{axk::PartitionIndex{0}, "Disk", axk::SfsId{1}, "Volume", "PROG",
-                                                    "001", "Disk/Volume/PROG"}});
+    catalog.objects.push_back(
+        {"program", axk::PartitionIndex{0}, axk::SfsId{3}, "partition:0", std::move(program),
+         axk::ObjectPlacement{axk::PartitionIndex{0}, "Disk", axk::SfsId{1}, "Volume", "PROG", "001", {}}});
 
     const auto graph = axk::build_relationship_graph(catalog);
     ASSERT_EQ(graph.relationships.size(), 1U);
     EXPECT_FALSE(graph.relationships.front().target_key);
     EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
     EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::tentative);
-    EXPECT_EQ(graph.relationships.front().basis, "assignment-visible-off-same-volume-sbac-diagnostic");
+    EXPECT_EQ(graph.relationships.front().basis, "assignment-visible-off-name-ambiguous-sbac");
+}
+
+TEST(ProgramRelationships, DoesNotResolveVisibleOffTargetFromAnotherSfsVolume) {
+    axk::ObjectCatalog catalog;
+    axk::DecodedObject sample_bank;
+    sample_bank.header.type = axk::ObjectType::sbac;
+    sample_bank.header.name = "Remote Bank";
+    sample_bank.payload = axk::CurrentSbac{};
+    catalog.objects.push_back(
+        {"sample_bank", axk::PartitionIndex{0}, axk::SfsId{1}, "partition:0", std::move(sample_bank),
+         axk::ObjectPlacement{
+             axk::PartitionIndex{0}, "Disk", axk::SfsId{2}, "Remote Volume", "SBAC", "Remote Bank", {}}});
+
+    axk::CurrentProg current_program;
+    axk::ProgAssignment assignment;
+    assignment.name = "Remote Bank";
+    assignment.raw_handle = 1U;
+    assignment.kind = 0x11U;
+    current_program.assignments.push_back(assignment);
+    axk::DecodedObject program;
+    program.header.type = axk::ObjectType::prog;
+    program.header.name = "001";
+    program.payload = std::move(current_program);
+    catalog.objects.push_back(
+        {"program", axk::PartitionIndex{0}, axk::SfsId{2}, "partition:0", std::move(program),
+         axk::ObjectPlacement{axk::PartitionIndex{0}, "Disk", axk::SfsId{1}, "Local Volume", "PROG", "001", {}}});
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    EXPECT_FALSE(graph.relationships.front().target_key);
+    EXPECT_EQ(graph.relationships.front().candidate_keys, std::vector<std::string>{"sample_bank"});
+    EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::tentative);
+    EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x11+name-nonlocal");
 }
 
 TEST(ProgramRelationships, MarksVisibleOffRepeatOfActiveTargetAsDuplicate) {
