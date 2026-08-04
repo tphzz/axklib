@@ -1,5 +1,5 @@
 import type { components } from './generated/axklibApiV1';
-import type { DirectoryRef, ImageLocation } from './storageLocations';
+import type { ImageLocation } from './storageLocations';
 import type {
     PlanSummary,
     RelationshipQuality,
@@ -13,7 +13,8 @@ export interface ApiImageSummary {
     imageId: string;
     revision: number;
     source: components['schemas']['ImageSourceRef'];
-    companionDirectories?: DirectoryRef[];
+    companionSources: components['schemas']['ImageSourceRef'][];
+    floppySet: components['schemas']['ImageFloppySet'] | null;
     format: string;
     rootCount: number;
     objectCount: number;

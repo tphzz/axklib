@@ -355,7 +355,7 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     const auto incomplete =
         sessions.open({"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
     ASSERT_TRUE(incomplete) << incomplete.error().message;
-    EXPECT_TRUE(incomplete->companion_directories.empty());
+    EXPECT_TRUE(incomplete->companion_sources.empty());
     const auto sibling_objects = sessions.objects(incomplete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(sibling_objects) << sibling_objects.error().message;
     ASSERT_EQ(sibling_objects->items.size(), 1U);
@@ -367,22 +367,26 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     EXPECT_TRUE(reservations.try_acquire(
         axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
 
-    const auto no_match = sessions.attach_companion_directories(
+    const auto no_match = sessions.attach_companions(
         incomplete->image_id, "owner-a", incomplete->revision,
-        {axk::app::CompanionDirectorySelectionKind::directories, {{"workspace", "disk-set/DISK2"}}});
+        {axk::app::CompanionSelectionKind::sources,
+         {{"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}}});
     ASSERT_FALSE(no_match);
     EXPECT_EQ(no_match.error().code, "companion_segment_not_found");
     const auto unchanged = sessions.inspect(incomplete->image_id, "owner-a");
     ASSERT_TRUE(unchanged) << unchanged.error().message;
     EXPECT_EQ(unchanged->revision, incomplete->revision);
 
-    const auto attached = sessions.attach_companion_directories(
+    const auto attached = sessions.attach_companions(
         incomplete->image_id, "owner-a", incomplete->revision,
-        {axk::app::CompanionDirectorySelectionKind::directories, {{"workspace", "disk-set/DISK1"}}});
+        {axk::app::CompanionSelectionKind::sources,
+         {{"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}}});
     ASSERT_TRUE(attached) << attached.error().message;
     EXPECT_EQ(attached->image_id, incomplete->image_id);
     EXPECT_EQ(attached->revision, incomplete->revision + 1U);
-    EXPECT_EQ(attached->companion_directories, (std::vector<axk::app::DirectoryRef>{{"workspace", "disk-set/DISK1"}}));
+    EXPECT_EQ(attached->companion_sources,
+              (std::vector<axk::app::ImageSourceRef>{
+                  {"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}}));
     const auto refreshed_objects = sessions.objects(attached->image_id, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(refreshed_objects) << refreshed_objects.error().message;
     ASSERT_EQ(refreshed_objects->items.size(), 1U);
@@ -393,9 +397,8 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     EXPECT_GT(sibling_audition->content_size_bytes, 44U);
     EXPECT_FALSE(reservations.try_acquire(
         axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
-    const auto stale =
-        sessions.attach_companion_directories(attached->image_id, "owner-a", incomplete->revision,
-                                              {axk::app::CompanionDirectorySelectionKind::immediate_siblings, {}});
+    const auto stale = sessions.attach_companions(attached->image_id, "owner-a", incomplete->revision,
+                                                  {axk::app::CompanionSelectionKind::immediate_siblings, {}});
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
     ASSERT_TRUE(sessions.close(attached->image_id, "owner-a"));
@@ -405,12 +408,12 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     const auto nearby =
         sessions.open({"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
     ASSERT_TRUE(nearby) << nearby.error().message;
-    const auto nearby_attached =
-        sessions.attach_companion_directories(nearby->image_id, "owner-a", nearby->revision,
-                                              {axk::app::CompanionDirectorySelectionKind::immediate_siblings, {}});
+    const auto nearby_attached = sessions.attach_companions(nearby->image_id, "owner-a", nearby->revision,
+                                                            {axk::app::CompanionSelectionKind::immediate_siblings, {}});
     ASSERT_TRUE(nearby_attached) << nearby_attached.error().message;
-    EXPECT_EQ(nearby_attached->companion_directories,
-              (std::vector<axk::app::DirectoryRef>{{"workspace", "disk-set/DISK1"}}));
+    EXPECT_EQ(nearby_attached->companion_sources,
+              (std::vector<axk::app::ImageSourceRef>{
+                  {"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}}));
 }
 
 TEST_F(ImageSessionTest, AttachesACompleteMissingStereoLaneAlongsideContinuationSegments) {
@@ -499,9 +502,10 @@ TEST_F(ImageSessionTest, AttachesACompleteMissingStereoLaneAlongsideContinuation
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "companion_disks_required");
 
-    const auto attached = sessions.attach_companion_directories(
+    const auto attached = sessions.attach_companions(
         opened->image_id, "owner-a", opened->revision,
-        {axk::app::CompanionDirectorySelectionKind::directories, {{"workspace", "stereo-disk-set/DISK2"}}});
+        {axk::app::CompanionSelectionKind::sources,
+         {{"workspace", "stereo-disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}}});
     ASSERT_TRUE(attached) << attached.error().message;
     const auto attached_wave_data = sessions.objects(attached->image_id, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(attached_wave_data) << attached_wave_data.error().message;

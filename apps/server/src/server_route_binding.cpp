@@ -67,9 +67,9 @@ void ServerApplication::register_infrastructure_routes() {
          .create_image = [this](const crow::request &request) { return create_image_response(request); },
          .image = [this](const crow::request &request,
                          const std::string &image_id) { return image_response(request, image_id); },
-         .attach_companion_directories =
+         .attach_companions =
              [this](const crow::request &request, const std::string &image_id) {
-                 return attach_companion_directories_response(request, image_id);
+                 return attach_companions_response(request, image_id);
              },
          .image_content = [this](const crow::request &request,
                                  const std::string &image_id) { return image_content_response(request, image_id); },

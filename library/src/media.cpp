@@ -150,6 +150,8 @@ MediaKind MediaContainer::kind() const noexcept {
         return MediaKind::sfs;
     if (std::holds_alternative<FatImage>(storage_))
         return MediaKind::fat12_floppy;
+    if (std::holds_alternative<FloppyDiskSet>(storage_))
+        return MediaKind::fat12_floppy_set;
     if (std::holds_alternative<IsoImage>(storage_))
         return MediaKind::iso9660;
     if (std::holds_alternative<StandaloneObject>(storage_))
@@ -162,6 +164,8 @@ std::filesystem::path MediaContainer::source_path() const {
         return sfs->source_path();
     if (const auto *fat = std::get_if<FatImage>(&storage_))
         return fat->source_name();
+    if (const auto *set = std::get_if<FloppyDiskSet>(&storage_))
+        return set->source_name();
     if (const auto *iso = std::get_if<IsoImage>(&storage_))
         return iso->source_name();
     if (const auto *standalone = std::get_if<StandaloneObject>(&storage_))
@@ -172,6 +176,10 @@ std::filesystem::path MediaContainer::source_path() const {
 const MediaStorage &MediaContainer::storage() const noexcept { return storage_; }
 
 std::span<const MediaValidationIssue> MediaContainer::validation_issues() const noexcept {
+    if (const auto *fat = variant_ptr<FatImage>(storage_))
+        return fat->validation_issues();
+    if (const auto *set = variant_ptr<FloppyDiskSet>(storage_))
+        return set->validation_issues();
     if (const auto *iso = variant_ptr<IsoImage>(storage_))
         return iso->validation_issues();
     return {};
@@ -186,6 +194,8 @@ Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mod
                                                          const CancellationToken &cancellation) const {
     if (const auto *fat = variant_ptr<FatImage>(storage_))
         return fat->objects(mode, maximum_object_bytes, cancellation);
+    if (const auto *set = variant_ptr<FloppyDiskSet>(storage_))
+        return set->objects(mode, maximum_object_bytes, cancellation);
     if (const auto *iso = variant_ptr<IsoImage>(storage_))
         return iso->objects(mode, maximum_object_bytes, cancellation);
     if (const auto *standalone = variant_ptr<StandaloneObject>(storage_))
@@ -251,6 +261,13 @@ Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> read
         if (!object)
             return std::unexpected{object.error()};
         return MediaContainer{std::move(*object)};
+    }
+    if (prefix->size() >= 4U && (*prefix)[0] == std::byte{'P'} && (*prefix)[1] == std::byte{'K'} &&
+        (*prefix)[2] == std::byte{0x03} && (*prefix)[3] == std::byte{0x04}) {
+        auto set = FloppyDiskSet::open_archive(std::move(reader), text::path_to_utf8(source_path), cancellation);
+        if (!set)
+            return std::unexpected{set.error()};
+        return MediaContainer{std::move(*set)};
     }
     if (prefix->size() >= detail::iso_pvd_sector * detail::iso_sector_size + 6U &&
         std::to_integer<std::uint8_t>((*prefix)[detail::iso_pvd_sector * detail::iso_sector_size]) == 1U &&

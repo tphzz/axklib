@@ -142,6 +142,18 @@ Result<MediaObject> load_media_object(const MediaContainer &container, const Med
                            found->object,           std::move(*bytes),       std::nullopt};
     }
 
+    if (const auto *set = std::get_if<FloppyDiskSet>(&container.storage())) {
+        auto objects = set->objects(MediaObjectReadMode::complete, maximum_object_bytes, cancellation);
+        if (!objects)
+            return std::unexpected{objects.error()};
+        const auto found = std::ranges::find(*objects, descriptor.key, &MediaObject::key);
+        if (found == objects->end()) {
+            return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                              "media object is not present in the floppy disk set")};
+        }
+        return *found;
+    }
+
     std::vector<std::byte> bytes;
     if (const auto *fat = std::get_if<FatImage>(&container.storage())) {
         const auto file = std::ranges::find(fat->files(), descriptor.logical_path, &FatFile::path);

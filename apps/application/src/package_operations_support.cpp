@@ -330,6 +330,8 @@ std::string target_kind_name(axk::MediaKind kind) {
         return "sfs";
     case axk::MediaKind::fat12_floppy:
         return "fat12-floppy";
+    case axk::MediaKind::fat12_floppy_set:
+        return "fat12-floppy-set";
     case axk::MediaKind::iso9660:
         return "iso9660";
     case axk::MediaKind::standalone_object:

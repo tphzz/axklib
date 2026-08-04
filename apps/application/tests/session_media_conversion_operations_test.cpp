@@ -212,6 +212,54 @@ TEST_F(SessionMediaConversionOperationsTest, ExportsAnOversizedVolumeAsATypedMul
     ASSERT_TRUE(archive) << archive.error().message;
     ASSERT_EQ(archive->size(), 3U);
     EXPECT_EQ(archive->front().path, "manifest.json");
+
+    axk::MemoryReader first_disk{archive->at(1U).bytes};
+    axk::MemoryReader second_disk{archive->at(2U).bytes};
+    ASSERT_TRUE(sandbox_->publish_file({"workspace", "disk01.ima"}, false, first_disk));
+    ASSERT_TRUE(sandbox_->publish_file({"workspace", "disk02.ima"}, false, second_disk));
+
+    const auto final_member_opened =
+        images_->open({"workspace", "disk02.ima", axk::app::ImageSourceKind::file}, "owner");
+    ASSERT_TRUE(final_member_opened) << final_member_opened.error().message;
+    ASSERT_TRUE(final_member_opened->floppy_set);
+    EXPECT_EQ(final_member_opened->floppy_set->status, axk::app::ImageFloppySetStatus::incomplete);
+    EXPECT_FALSE(final_member_opened->floppy_set->next_required_index);
+    ASSERT_TRUE(images_->close(final_member_opened->image_id, "owner"));
+
+    const auto first_opened = images_->open({"workspace", "disk01.ima", axk::app::ImageSourceKind::file}, "owner");
+    ASSERT_TRUE(first_opened) << first_opened.error().message;
+    ASSERT_TRUE(first_opened->floppy_set);
+    EXPECT_EQ(first_opened->floppy_set->status, axk::app::ImageFloppySetStatus::incomplete);
+    EXPECT_EQ(first_opened->floppy_set->next_required_index, 2U);
+    EXPECT_TRUE(first_opened->companion_sources.empty());
+
+    const auto rejected = images_->attach_companions(
+        first_opened->image_id, "owner", first_opened->revision,
+        {axk::app::CompanionSelectionKind::sources, {{"workspace", "source.hds", axk::app::ImageSourceKind::file}}});
+    ASSERT_FALSE(rejected);
+    const auto unchanged = images_->inspect(first_opened->image_id, "owner");
+    ASSERT_TRUE(unchanged) << unchanged.error().message;
+    EXPECT_EQ(unchanged->revision, first_opened->revision);
+    EXPECT_TRUE(unchanged->companion_sources.empty());
+
+    const auto completed = images_->attach_companions(first_opened->image_id, "owner", first_opened->revision,
+                                                      {axk::app::CompanionSelectionKind::immediate_siblings, {}});
+    ASSERT_TRUE(completed) << completed.error().message;
+    EXPECT_EQ(completed->format, "fat12-set");
+    ASSERT_TRUE(completed->floppy_set);
+    EXPECT_EQ(completed->floppy_set->status, axk::app::ImageFloppySetStatus::complete);
+    EXPECT_FALSE(completed->floppy_set->next_required_index);
+    ASSERT_EQ(completed->companion_sources.size(), 1U);
+    EXPECT_EQ(completed->companion_sources.front(),
+              (axk::app::ImageSourceRef{"workspace", "disk02.ima", axk::app::ImageSourceKind::file}));
+    const auto completed_wave_data = images_->objects(completed->image_id, "owner", 32U, std::nullopt, "SMPL");
+    ASSERT_TRUE(completed_wave_data) << completed_wave_data.error().message;
+    ASSERT_EQ(completed_wave_data->items.size(), 1U);
+    const auto completed_audition =
+        images_->prepare_audition(completed->image_id, "owner", {completed_wave_data->items.front().id});
+    ASSERT_TRUE(completed_audition) << completed_audition.error().message;
+    EXPECT_GT(completed_audition->content_size_bytes, 44U);
+
     if (const auto *artifact_output = std::getenv("AXK_MULTIFLOPPY_ARTIFACT_OUTPUT");
         artifact_output != nullptr && *artifact_output != '\0') {
         const std::filesystem::path artifact_path{artifact_output};

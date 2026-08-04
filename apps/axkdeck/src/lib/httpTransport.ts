@@ -13,7 +13,7 @@ import type {
     ContentPage,
     AuditionBundleDescriptor,
     ClientDownload,
-    CompanionDirectorySelection,
+    CompanionSelection,
     HardDiskCreationProfile,
     HardDiskCreationProfileId,
     ImageTransport,
@@ -329,8 +329,8 @@ export class HttpImageTransport implements ImageTransport {
         return this.imageSessions.refresh(sessionId);
     }
 
-    attachCompanionDirectories(sessionId: number, selection: CompanionDirectorySelection): Promise<OpenedImage> {
-        return this.imageSessions.attachCompanionDirectories(sessionId, selection);
+    attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage> {
+        return this.imageSessions.attachCompanions(sessionId, selection);
     }
 
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage> {

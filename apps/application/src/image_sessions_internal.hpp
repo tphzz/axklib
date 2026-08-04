@@ -37,15 +37,17 @@ Error core_error(const axk::Error &error, const ImageSourceRef &source);
 Result<std::string> random_identifier(std::string_view prefix);
 std::string media_kind_name(axk::MediaKind kind);
 std::string fold_ascii(std::string_view value);
+Result<std::vector<DirectoryEntry>> list_bounded_directory(const Sandbox &sandbox, const DirectoryRef &reference,
+                                                           std::size_t maximum_entries);
 
 struct CompanionSegments {
-    std::vector<DirectoryRef> directories;
+    std::vector<ImageSourceRef> sources;
     std::vector<FileRef> files;
 };
 
 Result<CompanionSegments> append_required_companion_wave_data(const Sandbox &sandbox, const ImageSourceRef &source,
                                                               const axk::AxkObjectDirectory &primary,
-                                                              const std::vector<DirectoryRef> &companion_directories,
+                                                              const std::vector<ImageSourceRef> &companion_sources,
                                                               std::vector<axk::AxkObjectDirectoryEntry> &entries,
                                                               std::vector<std::function<Result<void>()>> &verifiers);
 Result<std::vector<DirectoryRef>> immediate_sibling_directories(const Sandbox &sandbox, const ImageSourceRef &source);
@@ -113,7 +115,8 @@ struct axk::app::ImageSessionManager::Implementation {
         std::string image_id;
         std::string owner_id;
         ImageSourceRef source;
-        std::vector<DirectoryRef> companion_directories;
+        std::vector<ImageSourceRef> companion_sources;
+        std::optional<ImageFloppySetSummary> floppy_set;
         std::string format;
         std::vector<ImageContentItem> content;
         std::unordered_map<std::string, std::vector<std::size_t>> content_children;
@@ -325,7 +328,8 @@ struct axk::app::ImageSessionManager::Implementation {
 
     static void adopt_refreshed_state(Session &current, Session &fresh) {
         current.source = std::move(fresh.source);
-        current.companion_directories = std::move(fresh.companion_directories);
+        current.companion_sources = std::move(fresh.companion_sources);
+        current.floppy_set = std::move(fresh.floppy_set);
         current.format = std::move(fresh.format);
         current.content = std::move(fresh.content);
         current.content_children = std::move(fresh.content_children);

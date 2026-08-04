@@ -1,5 +1,70 @@
 #include "media_test_fixtures.hpp"
 
+#include "axklib/writer_internal.hpp"
+
+namespace {
+
+std::vector<std::byte> catalog_fat_fixture(std::string marker = "A3000F.SYM") {
+    axk::detail::PreparedMediaImage image;
+    image.objects.emplace_back(axk::ObjectType::smpl, "TEST", smpl_object());
+    image.objects.back().fat_filename = "SMPTEST.004";
+    const auto marker_filename = axk::detail::yamaha_floppy_physical_filename(marker, 5U);
+    EXPECT_TRUE(marker_filename) << marker_filename.error().message;
+    image.retained_files.push_back({marker_filename ? *marker_filename : "MARKER.005", {}});
+    image.floppy_catalog = axk::YamahaFloppyCatalog{
+        "CATALOG DISK  01",
+        {{4U, R"(\SMPL\TEST            01)"}, {5U, "\\" + marker}},
+        {R"(\OTHERS)", R"(\SMPL)"},
+    };
+    const auto bytes = axk::detail::build_fat12_image(image, {});
+    EXPECT_TRUE(bytes) << bytes.error().message;
+    return bytes ? *bytes : std::vector<std::byte>{};
+}
+
+} // namespace
+
+TEST(Fat12Reader, ExposesTrustedYamahaCatalogAndContinuationIdentity) {
+    const auto fat =
+        axk::FatImage::open(std::make_shared<axk::MemoryReader>(catalog_fat_fixture()), "catalog-disk01.ima");
+
+    ASSERT_TRUE(fat) << fat.error().message;
+    ASSERT_TRUE(fat->yamaha_catalog());
+    EXPECT_EQ(fat->yamaha_catalog()->disk_name, "CATALOG DISK  01");
+    EXPECT_EQ(fat->disk_identity().label, "CATALOG DISK  01");
+    EXPECT_EQ(fat->disk_identity().set_name, "CATALOG DISK  ");
+    EXPECT_EQ(fat->disk_identity().index, 1U);
+    EXPECT_EQ(fat->disk_identity().marker, axk::FloppySetMarker::continuation);
+    EXPECT_TRUE(fat->disk_identity().trusted_for_disk_set);
+    EXPECT_TRUE(fat->validation_issues().empty());
+}
+
+TEST(Fat12Reader, KeepsMissingAndMalformedCatalogsReadableButUntrusted) {
+    const auto missing = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "missing.ima");
+    ASSERT_TRUE(missing) << missing.error().message;
+    EXPECT_FALSE(missing->yamaha_catalog());
+    EXPECT_FALSE(missing->disk_identity().trusted_for_disk_set);
+    ASSERT_EQ(missing->validation_issues().size(), 1U);
+    EXPECT_EQ(missing->validation_issues().front().code, "FLOPPY_CATALOG_MISSING");
+
+    auto bytes = catalog_fat_fixture("A3000E.SYM");
+    const auto valid = axk::FatImage::open(std::make_shared<axk::MemoryReader>(bytes), "valid.ima");
+    ASSERT_TRUE(valid) << valid.error().message;
+    const auto catalog = std::ranges::find(valid->files(), std::string{"YAMAHA.SYM"}, &axk::FatFile::path);
+    ASSERT_NE(catalog, valid->files().end());
+    bytes[static_cast<std::size_t>(catalog->first_data_offset)] = std::byte{0x7f};
+
+    const auto malformed = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(bytes)), "bad.ima");
+    ASSERT_TRUE(malformed) << malformed.error().message;
+    EXPECT_FALSE(malformed->yamaha_catalog());
+    EXPECT_FALSE(malformed->disk_identity().trusted_for_disk_set);
+    ASSERT_EQ(malformed->validation_issues().size(), 1U);
+    EXPECT_EQ(malformed->validation_issues().front().code, "FLOPPY_CATALOG_INVALID");
+
+    const axk::MediaContainer container{*malformed};
+    ASSERT_EQ(container.validation_issues().size(), 1U);
+    EXPECT_EQ(container.validation_issues().front().code, "FLOPPY_CATALOG_INVALID");
+}
+
 TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
     auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "fixture.ima");
     ASSERT_TRUE(image) << image.error().message;

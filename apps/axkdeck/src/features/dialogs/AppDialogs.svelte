@@ -27,11 +27,14 @@
     import WaveDataCleanupDialog from '../../lib/components/WaveDataCleanupDialog.svelte';
     import WorkspaceManager from '../../lib/components/WorkspaceManager.svelte';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from '../../lib/serverSettings';
-    import type { DirectoryLocation, DirectoryRef, FileLocation } from '../../lib/storageLocations';
-    import type { CompanionDirectorySelection, ImageTransport } from '../../lib/transport';
+    import type { DirectoryLocation, FileLocation, ImageLocation } from '../../lib/storageLocations';
+    import type { CompanionSelection, ImageTransport } from '../../lib/transport';
 
     interface CompanionDialogState {
-        directories: DirectoryRef[];
+        sources: ImageLocation[];
+        sourceKind: 'file' | 'directory';
+        setLabel: string;
+        nextRequiredIndex: number | null;
         busy: boolean;
         error: string;
     }
@@ -44,8 +47,8 @@
         manageLocations: () => void;
         companionRequest: CompanionDialogState | null;
         addCompanion: () => void;
-        removeCompanion: (directory: DirectoryRef) => void;
-        attachCompanions: (selection: CompanionDirectorySelection) => void;
+        removeCompanion: (source: ImageLocation) => void;
+        attachCompanions: (selection: CompanionSelection) => void;
         cancelCompanions: () => void;
         hardDiskDirectory: DirectoryLocation | null;
         finishHardDisk: (file: FileLocation) => void;
@@ -131,13 +134,16 @@
 {/if}
 {#if companionRequest && pickerRequest?.parentDialog !== 'companion-disks'}
     <CompanionDiskDialog
-        directories={companionRequest.directories}
+        sources={companionRequest.sources}
+        sourceKind={companionRequest.sourceKind}
+        setLabel={companionRequest.setLabel}
+        nextRequiredIndex={companionRequest.nextRequiredIndex}
         busy={companionRequest.busy}
         error={companionRequest.error}
         onadd={addCompanion}
         onremove={removeCompanion}
         onnearby={() => attachCompanions({ kind: 'immediate-siblings' })}
-        onconfirm={() => attachCompanions({ kind: 'directories', directories: companionRequest.directories })}
+        onconfirm={() => attachCompanions({ kind: 'sources', sources: companionRequest.sources })}
         oncancel={cancelCompanions}
     />
 {/if}

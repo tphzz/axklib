@@ -23,7 +23,8 @@ const object: SamplerObject = {
 };
 
 const opened: Omit<OpenedImage, 'sessionId'> = {
-    companionDirectories: [],
+    companionSources: [],
+    floppySet: null,
     initialVolume: null,
     volumeMutationsAvailable: false,
     partitionMutationsAvailable: false,
@@ -157,7 +158,12 @@ describe('ImageTransport shared read contract', () => {
                     return json(
                         {
                             imageId: 'image-1',
-                            source: { rootId: 'workspace', relativePath: 'images/fixture.hds' },
+                            source: {
+                                kind: 'FILE',
+                                file: { rootId: 'workspace', relativePath: 'images/fixture.hds' },
+                            },
+                            companionSources: [],
+                            floppySet: null,
                             format: 'SFS',
                             rootCount: 1,
                             objectCount: 1,

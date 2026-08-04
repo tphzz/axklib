@@ -59,7 +59,7 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("paths").contains("/filesystem/directories"));
     EXPECT_TRUE(document.at("paths").contains("/filesystem/entries"));
     EXPECT_TRUE(document.at("paths").contains("/images"));
-    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/companion-directories"));
+    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/companions"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/content"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/objects"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/relationships"));
@@ -81,7 +81,7 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("components").at("schemas").contains("JobEvent"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentItem"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentPageResponse"));
-    EXPECT_TRUE(document.at("components").at("schemas").contains("ImageCompanionDirectoriesRequest"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("ImageCompanionsRequest"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionPrepareRequest"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionBundle"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AudioSourceInfo"));
@@ -250,8 +250,7 @@ TEST(ServerContract, InfrastructureJsonOperationsDeclareConcreteRequestAndRespon
         Expectation{"/images", "post", "ImageOpenRequest", "201", "ImageSessionResponse"},
         Expectation{"/images/{imageId}", "get", "", "200", "ImageSessionResponse"},
         Expectation{"/images/{imageId}", "delete", "", "200", "ImageCloseResponse"},
-        Expectation{"/images/{imageId}/companion-directories", "post", "ImageCompanionDirectoriesRequest", "200",
-                    "ImageSessionResponse"},
+        Expectation{"/images/{imageId}/companions", "post", "ImageCompanionsRequest", "200", "ImageSessionResponse"},
         Expectation{"/images/{imageId}/content", "get", "", "200", "ImageContentPageResponse"},
         Expectation{"/images/{imageId}/objects", "get", "", "200", "ImageObjectPageResponse"},
         Expectation{"/images/{imageId}/relationships", "get", "", "200", "ImageRelationshipPageResponse"},

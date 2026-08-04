@@ -839,27 +839,27 @@
         ],
         "type": "object"
       },
-      "CompanionDirectorySelection": {
+      "CompanionSelection": {
         "oneOf": [
           {
             "additionalProperties": false,
             "properties": {
-              "directories": {
+              "kind": {
+                "const": "SOURCES"
+              },
+              "sources": {
                 "items": {
-                  "$ref": "#/components/schemas/DirectoryRef"
+                  "$ref": "#/components/schemas/ImageSourceRef"
                 },
-                "maxItems": 32,
+                "maxItems": 31,
                 "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
-              },
-              "kind": {
-                "const": "DIRECTORIES"
               }
             },
             "required": [
               "kind",
-              "directories"
+              "sources"
             ],
             "type": "object"
           },
@@ -2293,7 +2293,7 @@
         ],
         "type": "object"
       },
-      "ImageCompanionDirectoriesRequest": {
+      "ImageCompanionsRequest": {
         "additionalProperties": false,
         "properties": {
           "expectedRevision": {
@@ -2301,7 +2301,7 @@
             "type": "integer"
           },
           "selection": {
-            "$ref": "#/components/schemas/CompanionDirectorySelection"
+            "$ref": "#/components/schemas/CompanionSelection"
           }
         },
         "required": [
@@ -2455,6 +2455,72 @@
         "required": [
           "data",
           "meta"
+        ],
+        "type": "object"
+      },
+      "ImageFloppySet": {
+        "additionalProperties": false,
+        "properties": {
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ImageFloppySetMember"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "nextRequiredIndex": {
+            "maximum": 32,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "setLabel": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "SINGLE",
+              "INCOMPLETE",
+              "COMPLETE",
+              "RECOVERY"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "setLabel",
+          "members",
+          "nextRequiredIndex"
+        ],
+        "type": "object"
+      },
+      "ImageFloppySetMember": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "marker": {
+            "enum": [
+              "NONE",
+              "CONTINUATION",
+              "FINAL",
+              "INVALID"
+            ]
+          }
+        },
+        "required": [
+          "index",
+          "label",
+          "marker"
         ],
         "type": "object"
       },
@@ -3212,13 +3278,23 @@
             },
             "type": "array"
           },
-          "companionDirectories": {
+          "companionSources": {
             "items": {
-              "$ref": "#/components/schemas/DirectoryRef"
+              "$ref": "#/components/schemas/ImageSourceRef"
             },
-            "maxItems": 32,
+            "maxItems": 31,
             "type": "array",
             "uniqueItems": true
+          },
+          "floppySet": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ImageFloppySet"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "format": {
             "minLength": 1,
@@ -3279,7 +3355,8 @@
           "imageId",
           "revision",
           "source",
-          "companionDirectories",
+          "companionSources",
+          "floppySet",
           "format",
           "availableOperations",
           "rootCount",
@@ -19102,7 +19179,7 @@
         }
       ]
     },
-    "/images/{imageId}/companion-directories": {
+    "/images/{imageId}/companions": {
       "parameters": [
         {
           "in": "path",
@@ -19114,12 +19191,12 @@
         }
       ],
       "post": {
-        "operationId": "images.companionDirectories.attach",
+        "operationId": "images.companionSources.attach",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ImageCompanionDirectoriesRequest"
+                "$ref": "#/components/schemas/ImageCompanionsRequest"
               }
             }
           },
@@ -19134,7 +19211,7 @@
                 }
               }
             },
-            "description": "Companion disk folders attached to the existing image session",
+            "description": "Companion disk sources attached to the existing image session",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"

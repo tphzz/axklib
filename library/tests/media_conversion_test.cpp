@@ -349,7 +349,7 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
         ASSERT_TRUE(catalog) << catalog.error().message;
         const std::string_view marker = index + 1U == archive->size() ? "\\A3000E.SYM" : "\\A3000F.SYM";
         const auto marker_entry =
-            std::ranges::find(catalog->files, marker, &axk::detail::YamahaFloppyCatalogEntry::logical_path);
+            std::ranges::find(catalog->files, marker, &axk::YamahaFloppyCatalogEntry::logical_path);
         ASSERT_NE(marker_entry, catalog->files.end());
         const auto marker_filename =
             axk::detail::yamaha_floppy_physical_filename(marker.substr(1U), marker_entry->slot);
@@ -367,8 +367,7 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
             if (header && header->type == axk::ObjectType::smpl) {
                 continuation_paths.push_back(file.path);
                 const auto slot = static_cast<std::uint16_t>(std::stoul(file.path.substr(file.path.size() - 3U)));
-                const auto logical =
-                    std::ranges::find(catalog->files, slot, &axk::detail::YamahaFloppyCatalogEntry::slot);
+                const auto logical = std::ranges::find(catalog->files, slot, &axk::YamahaFloppyCatalogEntry::slot);
                 ASSERT_NE(logical, catalog->files.end());
                 continuation_logical_paths.push_back(logical->logical_path);
             }
@@ -379,6 +378,61 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     ASSERT_EQ(continuation_logical_paths.size(), 2U);
     EXPECT_TRUE(continuation_logical_paths.front().ends_with("01"));
     EXPECT_TRUE(continuation_logical_paths.back().ends_with("02"));
+
+    std::vector<axk::FatImage> members;
+    for (std::size_t index = 1U; index < archive->size(); ++index) {
+        auto member =
+            axk::FatImage::open(std::make_shared<axk::MemoryReader>((*archive)[index].bytes), (*archive)[index].path);
+        ASSERT_TRUE(member) << member.error().message;
+        members.push_back(std::move(*member));
+    }
+    auto incomplete = axk::FloppyDiskSet::open({members.front()}, "loose set");
+    ASSERT_TRUE(incomplete) << incomplete.error().message;
+    EXPECT_EQ(incomplete->status(), axk::FloppySetStatus::incomplete);
+    EXPECT_EQ(incomplete->next_required_index(), 2U);
+
+    const auto complete = axk::FloppyDiskSet::open(std::move(members), "loose set");
+    ASSERT_TRUE(complete) << complete.error().message;
+    EXPECT_EQ(complete->status(), axk::FloppySetStatus::complete);
+    EXPECT_FALSE(complete->next_required_index());
+    const auto complete_objects = complete->objects();
+    ASSERT_TRUE(complete_objects) << complete_objects.error().message;
+    ASSERT_EQ(complete_objects->size(), 5U);
+    const auto source_objects = source_media->objects();
+    ASSERT_TRUE(source_objects) << source_objects.error().message;
+    const auto source_wave = std::ranges::find_if(*source_objects, [](const axk::MediaObject &object) {
+        return object.decoded.header.type == axk::ObjectType::smpl;
+    });
+    ASSERT_NE(source_wave, source_objects->end());
+    const auto assembled_wave = std::ranges::find_if(*complete_objects, [](const axk::MediaObject &object) {
+        return object.decoded.header.type == axk::ObjectType::smpl;
+    });
+    ASSERT_NE(assembled_wave, complete_objects->end());
+    EXPECT_EQ(assembled_wave->raw_payload, source_wave->raw_payload);
+    const auto decoded_source_wave = axk::decode_waveform(*source_wave);
+    ASSERT_TRUE(decoded_source_wave) << decoded_source_wave.error().message;
+    const auto decoded_wave = axk::decode_waveform(*assembled_wave);
+    ASSERT_TRUE(decoded_wave) << decoded_wave.error().message;
+    EXPECT_EQ(decoded_wave->frame_count, decoded_source_wave->frame_count);
+
+    const auto metadata_objects = complete->objects(axk::MediaObjectReadMode::decoded_metadata);
+    ASSERT_TRUE(metadata_objects) << metadata_objects.error().message;
+    const auto metadata_wave = std::ranges::find_if(*metadata_objects, [](const axk::MediaObject &object) {
+        return object.decoded.header.type == axk::ObjectType::smpl;
+    });
+    ASSERT_NE(metadata_wave, metadata_objects->end());
+    EXPECT_TRUE(metadata_wave->raw_payload.empty());
+    const auto *metadata_smpl = std::get_if<axk::CurrentSmpl>(&metadata_wave->decoded.payload);
+    ASSERT_NE(metadata_smpl, nullptr);
+    EXPECT_EQ(metadata_smpl->stored_segment_offset, 0U);
+    EXPECT_EQ(metadata_smpl->stored_segment_bytes, metadata_smpl->stored_pcm_bytes);
+
+    const auto archive_media = axk::open_media(floppy_path);
+    ASSERT_TRUE(archive_media) << archive_media.error().message;
+    EXPECT_EQ(archive_media->kind(), axk::MediaKind::fat12_floppy_set);
+    const auto archive_objects = archive_media->objects();
+    ASSERT_TRUE(archive_objects) << archive_objects.error().message;
+    EXPECT_EQ(archive_objects->size(), 5U);
     std::filesystem::remove_all(root, error);
 }
 

@@ -1,5 +1,6 @@
+import { axkObjectDirectoryLocation } from '../../lib/storageLocations';
 import type { DirectoryLocation, DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
-import type { CompanionDirectorySelection, ImageTransport, OpenedImage } from '../../lib/transport';
+import type { CompanionSelection, FloppySetSummary, ImageTransport, OpenedImage } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { AuditionWorkflow } from '../audition/workflow.svelte';
@@ -14,6 +15,8 @@ import type { MutationWorkflow } from '../mutation/workflow.svelte';
 
 export type CompanionRetry =
     { kind: 'audition'; objectId: string } | { kind: 'sample-bank'; bankId: string } | ExportCompanionRetry;
+
+type CompanionSourceKind = 'file' | 'directory';
 
 interface SessionCollaborators {
     catalog: CatalogWorkflow;
@@ -36,13 +39,18 @@ export class ImageSessionWorkflow {
     });
     location = $state<ImageLocation | null>(null);
     sessionId = $state<number | null>(null);
-    companionDirectories = $state<DirectoryRef[]>([]);
+    companionSources = $state<ImageLocation[]>([]);
+    floppySet = $state<FloppySetSummary | null>(null);
     opening = $state(false);
     status = $state('Ready');
     hardDiskDirectory = $state<DirectoryLocation | null>(null);
     companionRequest = $state<{
-        directories: DirectoryRef[];
-        retry: CompanionRetry;
+        requestId: number;
+        sources: ImageLocation[];
+        retry: CompanionRetry | null;
+        sourceKind: CompanionSourceKind;
+        setLabel: string;
+        nextRequiredIndex: number | null;
         busy: boolean;
         error: string;
     } | null>(null);
@@ -56,6 +64,7 @@ export class ImageSessionWorkflow {
 
     private readonly controller: ImageSessionController;
     private collaborators: SessionCollaborators | null = null;
+    private nextCompanionRequestId = 1;
     private lastImageDirectory = $state<DirectoryRef | null>(null);
     private lastCompanionDirectory = $state<DirectoryRef | null>(null);
 
@@ -146,38 +155,45 @@ export class ImageSessionWorkflow {
     }
 
     requestCompanionDisks(retry: CompanionRetry): void {
-        if (this.sessionId === null || this.location?.kind !== 'axk-object-directory') return;
-        this.companionRequest = {
-            directories: [...this.companionDirectories],
-            retry,
-            busy: false,
-            error: '',
-        };
+        if (this.sessionId === null || !this.location) return;
+        this.openCompanionRequest(retry);
     }
 
-    async addCompanionDiskFolder(): Promise<void> {
+    async addCompanionDiskSource(): Promise<void> {
         const request = this.companionRequest;
         if (!request || request.busy) return;
-        const selection = await this.picker.chooseLocation('directory', 'Choose companion disk folder', [], '', {
-            parentDialog: 'companion-disks',
-            initialDirectory: this.lastCompanionDirectory,
-            ondirectorychange: (directory) => (this.lastCompanionDirectory = directory),
-            requireWritableDirectory: false,
-        });
-        if (selection?.kind !== 'server-directory' || this.companionRequest !== request) return;
-        if (request.directories.some((directory) => sameDirectory(directory, selection.reference))) return;
+        const selection = await this.picker.chooseLocation(
+            request.sourceKind === 'file' ? 'file' : 'directory',
+            request.sourceKind === 'file' ? 'Choose companion floppy image' : 'Choose companion disk folder',
+            request.sourceKind === 'file' ? ['ima', 'img'] : [],
+            '',
+            {
+                parentDialog: 'companion-disks',
+                initialDirectory: this.lastCompanionDirectory,
+                ondirectorychange: (directory) => (this.lastCompanionDirectory = directory),
+                requireWritableDirectory: false,
+            },
+        );
+        if (!selection || this.companionRequest?.requestId !== request.requestId) return;
+        const source =
+            request.sourceKind === 'file' && selection.kind === 'server-file'
+                ? selection
+                : request.sourceKind === 'directory' && selection.kind === 'server-directory'
+                  ? axkObjectDirectoryLocation(selection.reference, selection.displayName)
+                  : null;
+        if (!source || request.sources.some((candidate) => sameImageSource(candidate, source))) return;
         this.companionRequest = {
             ...request,
-            directories: [...request.directories, selection.reference],
+            sources: [...request.sources, source],
             error: '',
         };
     }
 
-    removeCompanionDiskFolder(directory: DirectoryRef): void {
+    removeCompanionDiskSource(source: ImageLocation): void {
         if (!this.companionRequest || this.companionRequest.busy) return;
         this.companionRequest = {
             ...this.companionRequest,
-            directories: this.companionRequest.directories.filter((candidate) => !sameDirectory(candidate, directory)),
+            sources: this.companionRequest.sources.filter((candidate) => !sameImageSource(candidate, source)),
             error: '',
         };
     }
@@ -186,24 +202,28 @@ export class ImageSessionWorkflow {
         if (!this.companionRequest?.busy) this.companionRequest = null;
     }
 
-    async attachCompanionDisks(selection: CompanionDirectorySelection): Promise<void> {
+    async attachCompanionDisks(selection: CompanionSelection): Promise<void> {
         const request = this.companionRequest;
         if (!request || request.busy || this.sessionId === null) return;
         const sessionId = this.sessionId;
         const preferred = this.currentSourcePreference();
-        this.companionRequest = { ...request, busy: true, error: '' };
+        const pending = { ...request, busy: true, error: '' };
+        this.companionRequest = pending;
         try {
             const collaborators = this.requireCollaborators();
             await collaborators.audition.invalidateSession(sessionId);
-            const opened = await this.transport.attachCompanionDirectories(sessionId, selection);
-            if (this.sessionId !== sessionId || this.companionRequest?.retry !== request.retry) return;
-            await this.applyOpenedImage(opened, preferred);
+            const opened = await this.transport.attachCompanions(sessionId, selection);
+            if (this.sessionId !== sessionId || this.companionRequest?.requestId !== request.requestId) return;
             this.companionRequest = null;
-            await this.retryCompanionAction(request.retry);
+            await this.applyOpenedImage(opened, preferred);
+            if (request.retry) await this.retryCompanionAction(request.retry);
         } catch (error) {
-            if (this.companionRequest) {
+            if (
+                this.sessionId === sessionId &&
+                (!this.companionRequest || this.companionRequest.requestId === request.requestId)
+            ) {
                 this.companionRequest = {
-                    ...this.companionRequest,
+                    ...request,
                     busy: false,
                     error: userFacingMessage(error),
                 };
@@ -240,7 +260,7 @@ export class ImageSessionWorkflow {
         const selection = await this.picker.chooseLocation(
             'media-source',
             'Open image',
-            ['hds', 'hda', 'ima', 'img', 'iso', 'a3k'],
+            ['hds', 'hda', 'ima', 'img', 'iso', 'a3k', 'zip'],
             '',
             {
                 initialDirectory: this.lastImageDirectory,
@@ -250,13 +270,28 @@ export class ImageSessionWorkflow {
         return selection?.kind === 'server-file' || selection?.kind === 'axk-object-directory' ? selection : null;
     }
 
+    private openCompanionRequest(retry: CompanionRetry | null): void {
+        if (!this.location) return;
+        this.companionRequest = {
+            requestId: this.nextCompanionRequestId++,
+            sources: [...this.companionSources],
+            retry,
+            sourceKind: this.location.kind === 'server-file' ? 'file' : 'directory',
+            setLabel: this.floppySet?.setLabel || this.location.displayName,
+            nextRequiredIndex: this.floppySet?.nextRequiredIndex ?? null,
+            busy: false,
+            error: '',
+        };
+    }
+
     private async applyOpenedImage(
         opened: OpenedImage,
         preferred?: { partitionIndex: number; volumeName?: string },
     ): Promise<void> {
         const { catalog, mutation, clearExportSelection } = this.requireCollaborators();
         clearExportSelection();
-        this.companionDirectories = opened.companionDirectories;
+        this.companionSources = opened.companionSources;
+        this.floppySet = opened.floppySet;
         mutation.setCapabilities(opened);
         this.objectDeletionAvailable = opened.objectDeletionAvailable;
         this.waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
@@ -273,6 +308,7 @@ export class ImageSessionWorkflow {
         if (this.selectedSource.kind === 'volume') await catalog.loadVolume(this.selectedSource.id);
         else catalog.clear();
         this.status = opened.validation.valid ? 'Ready' : `${opened.validation.errorCount} validation errors`;
+        if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(null);
     }
 
     private async retryCompanionAction(retry: CompanionRetry): Promise<void> {
@@ -302,7 +338,8 @@ export class ImageSessionWorkflow {
         await collaborators.packageImport.dispose();
         await this.controller.close();
         collaborators.clearExportSelection();
-        this.companionDirectories = [];
+        this.companionSources = [];
+        this.floppySet = null;
         collaborators.mutation.reset();
         this.objectDeletionAvailable = false;
         this.waveDataCleanupAvailable = false;
@@ -315,8 +352,12 @@ export class ImageSessionWorkflow {
     }
 }
 
-function sameDirectory(left: DirectoryRef, right: DirectoryRef): boolean {
-    return left.rootId === right.rootId && left.relativePath === right.relativePath;
+function sameImageSource(left: ImageLocation, right: ImageLocation): boolean {
+    return (
+        left.kind === right.kind &&
+        left.reference.rootId === right.reference.rootId &&
+        left.reference.relativePath === right.reference.relativePath
+    );
 }
 
 function findSourceItem(items: DiskTreeItem[], partitionIndex: number, volumeName?: string): DiskTreeItem | null {

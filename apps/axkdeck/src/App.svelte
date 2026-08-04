@@ -494,8 +494,8 @@
     finishPicker={(selection) => pickerController.finish(selection)}
     manageLocations={() => (workspaceManagerOpen = true)}
     companionRequest={imageSessionWorkflow.companionRequest}
-    addCompanion={() => void imageSessionWorkflow.addCompanionDiskFolder()}
-    removeCompanion={(directory) => imageSessionWorkflow.removeCompanionDiskFolder(directory)}
+    addCompanion={() => void imageSessionWorkflow.addCompanionDiskSource()}
+    removeCompanion={(source) => imageSessionWorkflow.removeCompanionDiskSource(source)}
     attachCompanions={(selection) => void imageSessionWorkflow.attachCompanionDisks(selection)}
     cancelCompanions={() => imageSessionWorkflow.cancelCompanionDisks()}
     hardDiskDirectory={imageSessionWorkflow.hardDiskDirectory}

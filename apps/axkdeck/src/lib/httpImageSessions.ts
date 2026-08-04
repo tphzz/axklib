@@ -15,7 +15,7 @@ import {
 import { collectPages } from './pagination';
 import type { ImageLocation } from './storageLocations';
 import type {
-    CompanionDirectorySelection,
+    CompanionSelection,
     ContentPage,
     ObjectPage,
     ObjectPageFilter,
@@ -35,10 +35,7 @@ export class HttpImageSessions {
         if (location.kind !== 'server-file' && location.kind !== 'axk-object-directory') {
             throw new Error('Opening images requires a server sandbox file selection or AXK object directory');
         }
-        const wireSource: components['schemas']['ImageSourceRef'] =
-            location.kind === 'server-file'
-                ? { kind: 'FILE', file: location.reference }
-                : { kind: 'AXK_OBJECT_DIRECTORY', directory: location.reference };
+        const wireSource = imageSourceReference(location);
         const summary = await this.client.request<ApiImageSummary>('POST', '/images', {
             source: wireSource,
         });
@@ -70,15 +67,15 @@ export class HttpImageSessions {
         return this.openedImage(sessionId, summary);
     }
 
-    async attachCompanionDirectories(sessionId: number, selection: CompanionDirectorySelection): Promise<OpenedImage> {
+    async attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage> {
         const session = this.get(sessionId);
-        const wireSelection: components['schemas']['CompanionDirectorySelection'] =
-            selection.kind === 'directories'
-                ? { kind: 'DIRECTORIES', directories: selection.directories }
+        const wireSelection: components['schemas']['CompanionSelection'] =
+            selection.kind === 'sources'
+                ? { kind: 'SOURCES', sources: selection.sources.map(imageSourceReference) }
                 : { kind: 'IMMEDIATE_SIBLINGS' };
         const summary = await this.client.request<ApiImageSummary>(
             'POST',
-            `/images/${encodeURIComponent(session.remoteId)}/companion-directories`,
+            `/images/${encodeURIComponent(session.remoteId)}/companions`,
             {
                 expectedRevision: session.revision,
                 selection: wireSelection,
@@ -198,7 +195,8 @@ export class HttpImageSessions {
         const initialVolume = await this.loadVolumeHierarchy(sessionId, roots.items);
         return {
             sessionId,
-            companionDirectories: summary.companionDirectories ?? [],
+            companionSources: summary.companionSources.map(imageLocation),
+            floppySet: summary.floppySet,
             validation: validationSummary(summary),
             objects: [],
             objectTotalCount: 0,
@@ -246,4 +244,25 @@ export class HttpImageSessions {
         session.objectCursors.clear();
         session.relationshipCursors.clear();
     }
+}
+
+function imageSourceReference(location: ImageLocation): components['schemas']['ImageSourceRef'] {
+    return location.kind === 'server-file'
+        ? { kind: 'FILE', file: location.reference }
+        : { kind: 'AXK_OBJECT_DIRECTORY', directory: location.reference };
+}
+
+function imageLocation(source: components['schemas']['ImageSourceRef']): ImageLocation {
+    if (source.kind === 'FILE') {
+        return {
+            kind: 'server-file',
+            reference: source.file,
+            displayName: source.file.relativePath || source.file.rootId,
+        };
+    }
+    return {
+        kind: 'axk-object-directory',
+        reference: source.directory,
+        displayName: source.directory.relativePath || source.directory.rootId,
+    };
 }

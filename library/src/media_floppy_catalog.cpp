@@ -1,5 +1,7 @@
 #include "axklib/writer_internal.hpp"
 
+#include "axklib/floppy_catalog_internal.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>

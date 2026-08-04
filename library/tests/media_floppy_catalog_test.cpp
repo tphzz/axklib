@@ -21,9 +21,9 @@ std::string record_text(std::span<const std::byte> bytes, std::size_t record) {
 
 TEST(YamahaFloppyCatalog, EncodesTheConfirmedFixedRecordContract) {
     const std::vector files{
-        axk::detail::YamahaFloppyCatalogEntry{2U, R"(\PROG\001             )"},
-        axk::detail::YamahaFloppyCatalogEntry{3U, R"(\SMPL\LONG WAVE       01)"},
-        axk::detail::YamahaFloppyCatalogEntry{79U, R"(\A3000F.SYM)"},
+        axk::YamahaFloppyCatalogEntry{2U, R"(\PROG\001             )"},
+        axk::YamahaFloppyCatalogEntry{3U, R"(\SMPL\LONG WAVE       01)"},
+        axk::YamahaFloppyCatalogEntry{79U, R"(\A3000F.SYM)"},
     };
     const std::vector<std::string> categories{R"(\OTHERS)", R"(\PROG)", R"(\SMPL)"};
 
@@ -70,8 +70,8 @@ TEST(YamahaFloppyCatalog, BuildsLogicalPathsAndSlotBasedPhysicalNames) {
 
 TEST(YamahaFloppyCatalog, RejectsDuplicateSlotsAndOversizedFields) {
     const std::vector duplicate_files{
-        axk::detail::YamahaFloppyCatalogEntry{2U, R"(\PROG\001             )"},
-        axk::detail::YamahaFloppyCatalogEntry{2U, R"(\SMPL\WAVE            )"},
+        axk::YamahaFloppyCatalogEntry{2U, R"(\PROG\001             )"},
+        axk::YamahaFloppyCatalogEntry{2U, R"(\SMPL\WAVE            )"},
     };
     const std::vector<std::string> categories{R"(\OTHERS)"};
 

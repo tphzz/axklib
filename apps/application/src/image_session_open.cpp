@@ -1,19 +1,21 @@
+#include "image_session_floppy_set.hpp"
 #include "image_sessions_internal.hpp"
 
 #include "content_digest.hpp"
 
 #include <charconv>
+#include <iterator>
 
 axk::app::Result<axk::app::ImageSessionSummary>
 axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string owner_id,
                                     const CancellationToken &cancellation) {
-    return open_with_companion_directories(source, std::move(owner_id), {}, cancellation);
+    return open_with_companion_sources(source, std::move(owner_id), {}, cancellation);
 }
 
 axk::app::Result<axk::app::ImageSessionSummary>
-axk::app::ImageSessionManager::open_with_companion_directories(const ImageSourceRef &source, std::string owner_id,
-                                                               const std::vector<DirectoryRef> &companion_directories,
-                                                               const CancellationToken &cancellation) {
+axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef &source, std::string owner_id,
+                                                           const std::vector<ImageSourceRef> &companion_sources,
+                                                           const CancellationToken &cancellation) {
     if (owner_id.empty())
         return std::unexpected(session_error("invalid_owner", "image session owner is required"));
     auto admission = implementation_->reserve_session();
@@ -32,7 +34,8 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
     std::function<Result<void>()> verify_source_unchanged;
     std::string target_snapshot_id;
     std::optional<MediaContainer> media;
-    std::vector<DirectoryRef> matched_companion_directories;
+    std::vector<ImageSourceRef> matched_companion_sources;
+    std::optional<ImageFloppySetSummary> floppy_set;
     if (source.kind == ImageSourceKind::file) {
         const auto file = implementation_->sandbox.open_file(path_reference);
         if (!file)
@@ -44,9 +47,27 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
         auto opened_media = axk::open_media(file->reader, std::filesystem::path{file->filename}, cancellation);
         if (!opened_media)
             return std::unexpected(core_error(opened_media.error(), source));
-        media.emplace(std::move(*opened_media));
         source_reader = file->reader;
-        verify_source_unchanged = file->verify_unchanged;
+        if (opened_media->kind() == axk::MediaKind::fat12_floppy ||
+            opened_media->kind() == axk::MediaKind::fat12_floppy_set) {
+            auto opened_floppy =
+                open_floppy_source(implementation_->sandbox, source, *file, std::move(*opened_media), companion_sources,
+                                   implementation_->path_reservations, cancellation);
+            if (!opened_floppy)
+                return std::unexpected(opened_floppy.error());
+            media.emplace(std::move(opened_floppy->media));
+            matched_companion_sources = std::move(opened_floppy->companion_sources);
+            floppy_set = std::move(opened_floppy->summary);
+            verify_source_unchanged = std::move(opened_floppy->verify_unchanged);
+            companion_path_lease = std::move(opened_floppy->companion_path_lease);
+        } else {
+            if (!companion_sources.empty()) {
+                return std::unexpected(session_error("companion_sources_unsupported",
+                                                     "this image format does not accept companion sources"));
+            }
+            media.emplace(std::move(*opened_media));
+            verify_source_unchanged = file->verify_unchanged;
+        }
     } else {
         const DirectoryRef directory_reference{source.root_id, source.relative_path};
         auto tree = implementation_->sandbox.open_tree(
@@ -74,10 +95,10 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
         if (!directory)
             return std::unexpected(core_error(directory.error(), source));
         auto companions = append_required_companion_wave_data(implementation_->sandbox, source, *directory,
-                                                              companion_directories, entries, verifiers);
+                                                              companion_sources, entries, verifiers);
         if (!companions)
             return std::unexpected(companions.error());
-        matched_companion_directories = companions->directories;
+        matched_companion_sources = companions->sources;
         if (!companions->files.empty()) {
             directory = AxkObjectDirectory::open(std::move(entries), source.relative_path, cancellation);
             if (!directory)
@@ -121,9 +142,22 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
         source_reader = std::move(snapshot_reader);
         verify_source_unchanged = []() -> Result<void> { return {}; };
         media.emplace(std::move(*directory));
+        floppy_set = ImageFloppySetSummary{.status = ImageFloppySetStatus::recovery,
+                                           .set_label = source.relative_path,
+                                           .members = {},
+                                           .next_required_index = std::nullopt};
+        floppy_set->members.reserve(matched_companion_sources.size() + 1U);
+        floppy_set->members.push_back({.index = 1U, .label = source.relative_path, .marker = "NONE"});
+        for (std::size_t index = 0U; index < matched_companion_sources.size(); ++index) {
+            floppy_set->members.push_back({.index = static_cast<std::uint16_t>(index + 2U),
+                                           .label = matched_companion_sources[index].relative_path,
+                                           .marker = "NONE"});
+        }
     }
-    auto inventory = axk::build_media_inventory(*media, axk::MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U,
-                                                cancellation);
+    const auto inventory_mode = media->kind() == axk::MediaKind::fat12_floppy_set
+                                    ? axk::MediaObjectReadMode::complete
+                                    : axk::MediaObjectReadMode::decoded_metadata;
+    auto inventory = axk::build_media_inventory(*media, inventory_mode, 64U * 1024U * 1024U, cancellation);
     if (!inventory)
         return std::unexpected(core_error(inventory.error(), source));
     auto graph = axk::build_relationship_graph(inventory->catalog);
@@ -138,7 +172,8 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
     auto session = std::make_shared<Implementation::Session>();
     session->owner_id = std::move(owner_id);
     session->source = source;
-    session->companion_directories = std::move(matched_companion_directories);
+    session->companion_sources = std::move(matched_companion_sources);
+    session->floppy_set = std::move(floppy_set);
     session->source_reader = std::move(source_reader);
     session->verify_source_unchanged = std::move(verify_source_unchanged);
     session->target_snapshot_id = std::move(target_snapshot_id);
@@ -391,16 +426,19 @@ axk::app::ImageSessionManager::open_with_companion_directories(const ImageSource
     return inspect(session->image_id, session->owner_id);
 }
 
-axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::attach_companion_directories(
-    std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
-    const CompanionDirectorySelection &selection, const CancellationToken &cancellation) {
-    constexpr std::size_t maximum_selected_directories = 32U;
+axk::app::Result<axk::app::ImageSessionSummary>
+axk::app::ImageSessionManager::attach_companions(std::string_view image_id, std::string_view owner_id,
+                                                 std::uint64_t expected_revision, const CompanionSelection &selection,
+                                                 const CancellationToken &cancellation) {
+    constexpr std::size_t maximum_selected_sources = axk::FloppyDiskSet::maximum_members - 1U;
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
 
     ImageSourceRef source;
-    std::vector<DirectoryRef> current_directories;
+    std::vector<ImageSourceRef> current_sources;
+    std::optional<ImageFloppySetSummary> current_floppy_set;
+    std::string format;
     {
         const std::scoped_lock access{(*session)->access_mutex};
         if ((*session)->revision != expected_revision)
@@ -408,35 +446,51 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::a
         if ((*session)->mutating)
             return std::unexpected(
                 session_error("image_mutation_in_progress", "image session is being modified", true));
-        if ((*session)->format != "axk-object-directory" ||
-            (*session)->source.kind != ImageSourceKind::axk_object_directory) {
+        const auto directory_recovery = (*session)->format == "axk-object-directory" &&
+                                        (*session)->source.kind == ImageSourceKind::axk_object_directory;
+        const auto incomplete_floppy = (*session)->source.kind == ImageSourceKind::file && (*session)->floppy_set &&
+                                       (*session)->floppy_set->status == ImageFloppySetStatus::incomplete;
+        if (!directory_recovery && !incomplete_floppy) {
             return std::unexpected(
-                session_error("companion_directories_unsupported",
-                              "companion disk folders can only be attached to an AXK object directory session"));
+                session_error("companion_sources_unsupported",
+                              "companion sources require an incomplete floppy set or extracted-object recovery"));
         }
         source = (*session)->source;
-        current_directories = (*session)->companion_directories;
+        current_sources = (*session)->companion_sources;
+        current_floppy_set = (*session)->floppy_set;
+        format = (*session)->format;
     }
 
-    std::vector<DirectoryRef> candidates;
-    if (selection.kind == CompanionDirectorySelectionKind::immediate_siblings) {
-        if (!selection.directories.empty())
-            return std::unexpected(
-                session_error("invalid_companion_directories",
-                              "immediate sibling search does not accept explicit companion directory references"));
-        auto siblings = immediate_sibling_directories(implementation_->sandbox, source);
-        if (!siblings)
-            return std::unexpected(siblings.error());
-        candidates = std::move(*siblings);
-    } else {
-        if (selection.directories.empty() || selection.directories.size() > maximum_selected_directories) {
-            return std::unexpected(
-                session_error("invalid_companion_directories", "select between one and 32 companion disk folders"));
+    std::vector<ImageSourceRef> candidates;
+    if (selection.kind == CompanionSelectionKind::immediate_siblings) {
+        if (!selection.sources.empty())
+            return std::unexpected(session_error(
+                "invalid_companion_sources", "immediate sibling search does not accept explicit companion sources"));
+        if (format == "axk-object-directory") {
+            auto siblings = immediate_sibling_directories(implementation_->sandbox, source);
+            if (!siblings)
+                return std::unexpected(siblings.error());
+            candidates.reserve(siblings->size());
+            std::ranges::transform(*siblings, std::back_inserter(candidates), [](const DirectoryRef &directory) {
+                return ImageSourceRef{directory.root_id, directory.relative_path,
+                                      ImageSourceKind::axk_object_directory};
+            });
+        } else {
+            auto siblings = immediate_sibling_floppy_sources(implementation_->sandbox, source,
+                                                             current_floppy_set->set_label, cancellation);
+            if (!siblings)
+                return std::unexpected(siblings.error());
+            candidates = std::move(*siblings);
         }
-        candidates = selection.directories;
+    } else {
+        if (selection.sources.empty() || selection.sources.size() > maximum_selected_sources) {
+            return std::unexpected(
+                session_error("invalid_companion_sources", "select between one and 31 companion disk sources"));
+        }
+        candidates = selection.sources;
     }
-    std::vector<DirectoryRef> unique_candidates;
-    unique_candidates.reserve(candidates.size());
+    std::vector<ImageSourceRef> unique_candidates = current_sources;
+    unique_candidates.reserve(current_sources.size() + candidates.size());
     for (const auto &candidate : candidates) {
         if (candidate.root_id.empty() ||
             (candidate.root_id == source.root_id && candidate.relative_path == source.relative_path) ||
@@ -445,9 +499,9 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::a
         }
         unique_candidates.push_back(candidate);
     }
-    if (unique_candidates.empty())
+    if (unique_candidates.empty() || unique_candidates == current_sources)
         return std::unexpected(
-            session_error("companion_segment_not_found", "No selected folder contains matching Wave Data segments"));
+            session_error("companion_segment_not_found", "No selected source adds the required companion disk"));
 
     ImageSessionManager refreshed{implementation_->sandbox,
                                   1U,
@@ -455,15 +509,14 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::a
                                   implementation_->idle_retention,
                                   implementation_->clock,
                                   implementation_->path_reservations};
-    auto opened =
-        refreshed.open_with_companion_directories(source, std::string{owner_id}, unique_candidates, cancellation);
+    auto opened = refreshed.open_with_companion_sources(source, std::string{owner_id}, unique_candidates, cancellation);
     if (!opened)
         return std::unexpected(opened.error());
-    if (opened->companion_directories.empty()) {
+    if (opened->companion_sources.empty()) {
         return std::unexpected(
-            session_error("companion_segment_not_found", "No selected folder contains matching Wave Data segments"));
+            session_error("companion_segment_not_found", "No selected source adds the required companion disk"));
     }
-    if (opened->companion_directories == current_directories)
+    if (opened->companion_sources == current_sources)
         return inspect(image_id, owner_id);
 
     std::shared_ptr<Implementation::Session> fresh;

@@ -15,22 +15,69 @@
 #include "server_support.hpp"
 
 namespace axk::server::detail {
+namespace {
+
+Json image_source_json(const axk::app::ImageSourceRef &source) {
+    if (source.kind == axk::app::ImageSourceKind::file) {
+        return {{"kind", "FILE"}, {"file", {{"rootId", source.root_id}, {"relativePath", source.relative_path}}}};
+    }
+    return {{"kind", "AXK_OBJECT_DIRECTORY"},
+            {"directory", {{"rootId", source.root_id}, {"relativePath", source.relative_path}}}};
+}
+
+std::string_view floppy_set_status_name(axk::app::ImageFloppySetStatus status) {
+    switch (status) {
+    case axk::app::ImageFloppySetStatus::single:
+        return "SINGLE";
+    case axk::app::ImageFloppySetStatus::incomplete:
+        return "INCOMPLETE";
+    case axk::app::ImageFloppySetStatus::complete:
+        return "COMPLETE";
+    case axk::app::ImageFloppySetStatus::recovery:
+        return "RECOVERY";
+    }
+    return "SINGLE";
+}
+
+axk::app::ImageSourceRef parse_image_source(const Json &reference) {
+    const auto kind = reference.at("kind").get<std::string>();
+    if (kind == "FILE") {
+        const auto &file = reference.at("file");
+        return {file.at("rootId").get<std::string>(), file.at("relativePath").get<std::string>(),
+                axk::app::ImageSourceKind::file};
+    }
+    if (kind == "AXK_OBJECT_DIRECTORY") {
+        const auto &directory = reference.at("directory");
+        return {directory.at("rootId").get<std::string>(), directory.at("relativePath").get<std::string>(),
+                axk::app::ImageSourceKind::axk_object_directory};
+    }
+    throw Json::type_error::create(302, "unsupported image source kind", &reference);
+}
+
+} // namespace
 
 Json ServerApplication::image_summary_json(const axk::app::ImageSessionSummary &summary) const {
-    const auto source =
-        summary.source.kind == axk::app::ImageSourceKind::file
-            ? Json{{"kind", "FILE"},
-                   {"file", {{"rootId", summary.source.root_id}, {"relativePath", summary.source.relative_path}}}}
-            : Json{{"kind", "AXK_OBJECT_DIRECTORY"},
-                   {"directory", {{"rootId", summary.source.root_id}, {"relativePath", summary.source.relative_path}}}};
-    Json companion_directories = Json::array();
-    for (const auto &directory : summary.companion_directories) {
-        companion_directories.push_back({{"rootId", directory.root_id}, {"relativePath", directory.relative_path}});
+    Json companion_sources = Json::array();
+    for (const auto &source : summary.companion_sources)
+        companion_sources.push_back(image_source_json(source));
+    Json floppy_set;
+    if (summary.floppy_set) {
+        Json members = Json::array();
+        for (const auto &member : summary.floppy_set->members) {
+            members.push_back({{"index", member.index}, {"label", member.label}, {"marker", member.marker}});
+        }
+        floppy_set = {{"status", floppy_set_status_name(summary.floppy_set->status)},
+                      {"setLabel", summary.floppy_set->set_label},
+                      {"members", std::move(members)},
+                      {"nextRequiredIndex", summary.floppy_set->next_required_index
+                                                ? Json(*summary.floppy_set->next_required_index)
+                                                : Json{}}};
     }
     return {{"imageId", summary.image_id},
             {"revision", summary.revision},
-            {"source", source},
-            {"companionDirectories", std::move(companion_directories)},
+            {"source", image_source_json(summary.source)},
+            {"companionSources", std::move(companion_sources)},
+            {"floppySet", std::move(floppy_set)},
             {"format", summary.format},
             {"availableOperations", summary.available_operations},
             {"rootCount", summary.root_count},
@@ -80,39 +127,36 @@ crow::response ServerApplication::create_image_response(const crow::request &req
     return response;
 }
 
-crow::response ServerApplication::attach_companion_directories_response(const crow::request &request,
-                                                                        const std::string &image_id) {
+crow::response ServerApplication::attach_companions_response(const crow::request &request,
+                                                             const std::string &image_id) {
     const auto id = request_id(request);
     if (auto denied = guard(request, id))
         return std::move(*denied);
-    const auto parsed = parse_validated_json_body(request, "ImageCompanionDirectoriesRequest");
+    const auto parsed = parse_validated_json_body(request, "ImageCompanionsRequest");
     if (!parsed)
         return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
 
     std::uint64_t expected_revision{};
-    axk::app::CompanionDirectorySelection selection;
+    axk::app::CompanionSelection selection;
     try {
         expected_revision = parsed->at("expectedRevision").get<std::uint64_t>();
         const auto &wire_selection = parsed->at("selection");
         const auto kind = wire_selection.at("kind").get<std::string>();
-        if (kind == "DIRECTORIES") {
-            selection.kind = axk::app::CompanionDirectorySelectionKind::directories;
-            for (const auto &directory : wire_selection.at("directories")) {
-                selection.directories.push_back(
-                    {directory.at("rootId").get<std::string>(), directory.at("relativePath").get<std::string>()});
-            }
+        if (kind == "SOURCES") {
+            selection.kind = axk::app::CompanionSelectionKind::sources;
+            for (const auto &source : wire_selection.at("sources"))
+                selection.sources.push_back(parse_image_source(source));
         } else if (kind == "IMMEDIATE_SIBLINGS") {
-            selection.kind = axk::app::CompanionDirectorySelectionKind::immediate_siblings;
+            selection.kind = axk::app::CompanionSelectionKind::immediate_siblings;
         } else {
-            return error_response(400, {"invalid_request", "companion directory selection kind is unsupported"}, id);
+            return error_response(400, {"invalid_request", "companion source selection kind is unsupported"}, id);
         }
     } catch (const Json::exception &) {
         return error_response(
-            400, {"invalid_request", "expectedRevision and a valid companion directory selection are required"}, id);
+            400, {"invalid_request", "expectedRevision and a valid companion source selection are required"}, id);
     }
 
-    const auto summary =
-        images_.attach_companion_directories(image_id, request_owner(request), expected_revision, selection);
+    const auto summary = images_.attach_companions(image_id, request_owner(request), expected_revision, selection);
     if (!summary)
         return error_response(status_for_error(summary.error()), summary.error(), id);
     return json_response(200, {{"data", image_summary_json(*summary)}, {"meta", {{"requestId", id}}}}, id);

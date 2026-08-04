@@ -19,9 +19,39 @@
 
 namespace axk {
 
-enum class MediaKind : std::uint8_t { sfs, fat12_floppy, iso9660, standalone_object, axk_object_directory };
+enum class MediaKind : std::uint8_t {
+    sfs,
+    fat12_floppy,
+    fat12_floppy_set,
+    iso9660,
+    standalone_object,
+    axk_object_directory
+};
 enum class LabelStatus : std::uint8_t { confirmed, navigation_aid, raw_identifier };
 enum class MediaObjectReadMode : std::uint8_t { complete, decoded_metadata };
+enum class FloppySetMarker : std::uint8_t { none, continuation, final, invalid };
+enum class FloppySetStatus : std::uint8_t { incomplete, complete };
+
+struct YamahaFloppyCatalogEntry {
+    std::uint16_t slot{};
+    std::string logical_path;
+
+    bool operator==(const YamahaFloppyCatalogEntry &) const = default;
+};
+
+struct YamahaFloppyCatalog {
+    std::string disk_name;
+    std::vector<YamahaFloppyCatalogEntry> files;
+    std::vector<std::string> categories;
+};
+
+struct FloppyDiskIdentity {
+    std::string label;
+    std::string set_name;
+    std::uint16_t index{};
+    FloppySetMarker marker{FloppySetMarker::none};
+    bool trusted_for_disk_set{};
+};
 
 struct FatGeometry {
     std::uint16_t bytes_per_sector{};
@@ -129,6 +159,9 @@ class AXK_API FatImage {
     [[nodiscard]] const FatGeometry &geometry() const noexcept;
     [[nodiscard]] const std::string &source_name() const noexcept;
     [[nodiscard]] const std::vector<FatFile> &files() const noexcept;
+    [[nodiscard]] const std::optional<YamahaFloppyCatalog> &yamaha_catalog() const noexcept;
+    [[nodiscard]] const FloppyDiskIdentity &disk_identity() const noexcept;
+    [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
     [[nodiscard]] Result<std::vector<std::byte>> read_file(const FatFile &file,
                                                            const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::vector<std::byte>> read_file_prefix(const FatFile &file, std::size_t maximum_bytes,
@@ -147,6 +180,9 @@ class AXK_API FatImage {
     std::string source_name_;
     FatGeometry geometry_;
     std::vector<FatFile> files_;
+    std::optional<YamahaFloppyCatalog> yamaha_catalog_;
+    FloppyDiskIdentity disk_identity_;
+    std::vector<MediaValidationIssue> validation_issues_;
 };
 
 // Read-only primary ISO9660 profile for Yamaha A-series CD-ROM media. Joliet
@@ -186,6 +222,33 @@ class AXK_API IsoImage {
     std::vector<IsoFile> files_;
     std::vector<std::pair<std::string, std::string>> group_labels_;
     std::vector<std::pair<std::string, std::string>> volume_labels_;
+    std::vector<MediaValidationIssue> validation_issues_;
+};
+
+class AXK_API FloppyDiskSet {
+  public:
+    static constexpr std::size_t maximum_members = 32U;
+
+    [[nodiscard]] static Result<FloppyDiskSet> open(std::vector<FatImage> members, std::string source_name = {},
+                                                    const CancellationToken &cancellation = {});
+    [[nodiscard]] static Result<FloppyDiskSet> open_archive(std::shared_ptr<const RandomAccessReader> reader,
+                                                            std::string source_name = {},
+                                                            const CancellationToken &cancellation = {});
+
+    [[nodiscard]] const std::string &source_name() const noexcept;
+    [[nodiscard]] const std::vector<FatImage> &members() const noexcept;
+    [[nodiscard]] FloppySetStatus status() const noexcept;
+    [[nodiscard]] std::optional<std::uint16_t> next_required_index() const noexcept;
+    [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
+    [[nodiscard]] Result<std::vector<MediaObject>> objects(MediaObjectReadMode mode = MediaObjectReadMode::complete,
+                                                           std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
+                                                           const CancellationToken &cancellation = {}) const;
+
+  private:
+    std::string source_name_;
+    std::vector<FatImage> members_;
+    FloppySetStatus status_{FloppySetStatus::incomplete};
+    std::optional<std::uint16_t> next_required_index_;
     std::vector<MediaValidationIssue> validation_issues_;
 };
 
@@ -233,7 +296,7 @@ class AXK_API AxkObjectDirectory {
     std::vector<MediaObject> objects_;
 };
 
-using MediaStorage = std::variant<Container, FatImage, IsoImage, StandaloneObject, AxkObjectDirectory>;
+using MediaStorage = std::variant<Container, FatImage, FloppyDiskSet, IsoImage, StandaloneObject, AxkObjectDirectory>;
 
 class AXK_API MediaContainer {
   public:

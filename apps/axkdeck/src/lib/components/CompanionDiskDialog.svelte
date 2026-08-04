@@ -1,20 +1,35 @@
 <script lang="ts">
-    import type { DirectoryRef } from '../storageLocations';
+    import type { ImageLocation } from '../storageLocations';
     import { modal } from '../modal';
     import Icon from './Icon.svelte';
 
     interface Props {
-        directories: DirectoryRef[];
+        sources: ImageLocation[];
+        sourceKind: 'file' | 'directory';
+        setLabel: string;
+        nextRequiredIndex: number | null;
         busy: boolean;
         error: string;
         onadd: () => void;
-        onremove: (directory: DirectoryRef) => void;
+        onremove: (source: ImageLocation) => void;
         onnearby: () => void;
         onconfirm: () => void;
         oncancel: () => void;
     }
 
-    let { directories, busy, error, onadd, onremove, onnearby, onconfirm, oncancel }: Props = $props();
+    let {
+        sources,
+        sourceKind,
+        setLabel,
+        nextRequiredIndex,
+        busy,
+        error,
+        onadd,
+        onremove,
+        onnearby,
+        onconfirm,
+        oncancel,
+    }: Props = $props();
 </script>
 
 <div class="dialog-backdrop" role="presentation">
@@ -35,37 +50,47 @@
         </header>
 
         <div class="companion-disk-content">
-            <p>Wave Data continues on another sampler disk. Add the folders that belong to this disk set.</p>
+            {#if sourceKind === 'file'}
+                <p>
+                    Floppy set <strong>{setLabel}</strong>{nextRequiredIndex === null
+                        ? ' is incomplete.'
+                        : ` requires disk ${nextRequiredIndex}.`}
+                </p>
+            {:else}
+                <p>Wave Data continues in another extracted sampler-disk folder.</p>
+            {/if}
             <div class="companion-disk-actions">
                 <button class="secondary-button" type="button" disabled={busy} onclick={onadd}>
-                    <Icon name="folder-plus" size={15} />
-                    Add folder
+                    <Icon name={sourceKind === 'file' ? 'file-plus' : 'folder-plus'} size={15} />
+                    {sourceKind === 'file' ? 'Add floppy image' : 'Add folder'}
                 </button>
                 <button class="secondary-button" type="button" disabled={busy} onclick={onnearby}>
                     <Icon name="search" size={15} />
-                    Search nearby folders and retry
+                    {sourceKind === 'file' ? 'Search nearby images and retry' : 'Search nearby folders and retry'}
                 </button>
             </div>
 
-            <section aria-label="Companion disk folders">
-                <h3>Selected folders</h3>
-                {#if directories.length === 0}
-                    <p class="companion-disk-empty">No companion folders selected</p>
+            <section aria-label="Companion disk sources">
+                <h3>Selected {sourceKind === 'file' ? 'images' : 'folders'}</h3>
+                {#if sources.length === 0}
+                    <p class="companion-disk-empty">
+                        No companion {sourceKind === 'file' ? 'images' : 'folders'} selected
+                    </p>
                 {:else}
                     <div class="companion-disk-list">
-                        {#each directories as directory (`${directory.rootId}:${directory.relativePath}`)}
+                        {#each sources as source (`${source.kind}:${source.reference.rootId}:${source.reference.relativePath}`)}
                             <div class="companion-disk-row">
-                                <Icon name="folder" size={15} />
+                                <Icon name={source.kind === 'server-file' ? 'archive' : 'folder'} size={15} />
                                 <span>
-                                    <strong>{directory.relativePath || directory.rootId}</strong>
-                                    {#if directory.relativePath}<small>{directory.rootId}</small>{/if}
+                                    <strong>{source.reference.relativePath || source.reference.rootId}</strong>
+                                    {#if source.reference.relativePath}<small>{source.reference.rootId}</small>{/if}
                                 </span>
                                 <button
                                     class="icon-button"
                                     type="button"
-                                    aria-label={`Remove ${directory.relativePath || directory.rootId}`}
+                                    aria-label={`Remove ${source.reference.relativePath || source.reference.rootId}`}
                                     disabled={busy}
-                                    onclick={() => onremove(directory)}
+                                    onclick={() => onremove(source)}
                                 >
                                     <Icon name="close" size={14} />
                                 </button>
@@ -79,13 +104,8 @@
 
         <footer class="dialog-footer">
             <button class="secondary-button" type="button" disabled={busy} onclick={oncancel}>Cancel</button>
-            <button
-                class="primary-button"
-                type="button"
-                disabled={busy || directories.length === 0}
-                onclick={onconfirm}
-            >
-                {busy ? 'Adding folders' : 'Add and retry'}
+            <button class="primary-button" type="button" disabled={busy || sources.length === 0} onclick={onconfirm}>
+                {busy ? 'Adding companions' : 'Add and retry'}
             </button>
         </footer>
     </div>

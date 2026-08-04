@@ -18,7 +18,8 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/application_op
                                    src/filesystem_native_publication.cpp src/filesystem_paths.cpp
                                    src/filesystem_roots.cpp src/filesystem_support.cpp src/filesystem_tree.cpp
                                    src/image_session_access.cpp src/image_session_audition.cpp
-                                   src/image_session_inspection.cpp src/image_session_open.cpp
+                                   src/image_session_floppy_set.cpp src/image_session_inspection.cpp
+                                   src/image_session_open.cpp
                                    src/image_session_support.cpp src/image_sessions.cpp
                                    src/job_request_resources.cpp src/jobs.cpp src/midi_operations.cpp
                                    src/jobs_support.cpp

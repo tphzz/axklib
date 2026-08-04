@@ -305,6 +305,10 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
     result.source_name_ = std::move(source_name);
     result.geometry_ = geometry;
     result.files_ = std::move(files);
+    auto catalog = detail::inspect_yamaha_floppy_catalog(result, cancellation);
+    result.yamaha_catalog_ = std::move(catalog.catalog);
+    result.disk_identity_ = std::move(catalog.identity);
+    result.validation_issues_ = std::move(catalog.issues);
     return result;
 }
 
@@ -318,6 +322,9 @@ Result<FatImage> FatImage::open(const std::filesystem::path &path, const Cancell
 const FatGeometry &FatImage::geometry() const noexcept { return geometry_; }
 const std::string &FatImage::source_name() const noexcept { return source_name_; }
 const std::vector<FatFile> &FatImage::files() const noexcept { return files_; }
+const std::optional<YamahaFloppyCatalog> &FatImage::yamaha_catalog() const noexcept { return yamaha_catalog_; }
+const FloppyDiskIdentity &FatImage::disk_identity() const noexcept { return disk_identity_; }
+std::span<const MediaValidationIssue> FatImage::validation_issues() const noexcept { return validation_issues_; }
 
 Result<std::vector<std::byte>> FatImage::read_file(const FatFile &file, const CancellationToken &cancellation) const {
     return read_file_prefix(file, file.size, cancellation);

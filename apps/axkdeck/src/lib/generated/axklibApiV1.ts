@@ -654,7 +654,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    '/images/{imageId}/companion-directories': {
+    '/images/{imageId}/companions': {
         parameters: {
             query?: never;
             header?: never;
@@ -665,7 +665,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations['images.companionDirectories.attach'];
+        post: operations['images.companionSources.attach'];
         delete?: never;
         options?: never;
         head?: never;
@@ -1481,11 +1481,11 @@ export interface components {
             data: components['schemas']['Capabilities'];
             meta: components['schemas']['ResponseMeta'];
         };
-        CompanionDirectorySelection:
+        CompanionSelection:
             | {
-                  directories: components['schemas']['DirectoryRef'][];
                   /** @constant */
-                  kind: 'DIRECTORIES';
+                  kind: 'SOURCES';
+                  sources: components['schemas']['ImageSourceRef'][];
               }
             | {
                   /** @constant */
@@ -1828,9 +1828,9 @@ export interface components {
             };
             meta: components['schemas']['ResponseMeta'];
         };
-        ImageCompanionDirectoriesRequest: {
+        ImageCompanionsRequest: {
             expectedRevision: number;
-            selection: components['schemas']['CompanionDirectorySelection'];
+            selection: components['schemas']['CompanionSelection'];
         };
         ImageContentItem: {
             basis: string;
@@ -1862,6 +1862,19 @@ export interface components {
         ImageContentPageResponse: {
             data: components['schemas']['ImageContentPage'];
             meta: components['schemas']['ResponseMeta'];
+        };
+        ImageFloppySet: {
+            members: components['schemas']['ImageFloppySetMember'][];
+            nextRequiredIndex: number | null;
+            setLabel: string;
+            /** @enum {unknown} */
+            status: 'SINGLE' | 'INCOMPLETE' | 'COMPLETE' | 'RECOVERY';
+        };
+        ImageFloppySetMember: {
+            index: number;
+            label: string;
+            /** @enum {unknown} */
+            marker: 'NONE' | 'CONTINUATION' | 'FINAL' | 'INVALID';
         };
         ImageObjectDeletionImpact: {
             freedClusters: number;
@@ -2011,7 +2024,8 @@ export interface components {
         };
         ImageSession: {
             availableOperations: string[];
-            companionDirectories: components['schemas']['DirectoryRef'][];
+            companionSources: components['schemas']['ImageSourceRef'][];
+            floppySet: components['schemas']['ImageFloppySet'] | null;
             format: string;
             imageId: string;
             objectCount: number;
@@ -6805,7 +6819,7 @@ export interface operations {
             };
         };
     };
-    'images.companionDirectories.attach': {
+    'images.companionSources.attach': {
         parameters: {
             query?: never;
             header?: never;
@@ -6816,11 +6830,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                'application/json': components['schemas']['ImageCompanionDirectoriesRequest'];
+                'application/json': components['schemas']['ImageCompanionsRequest'];
             };
         };
         responses: {
-            /** @description Companion disk folders attached to the existing image session */
+            /** @description Companion disk sources attached to the existing image session */
             200: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];

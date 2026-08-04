@@ -36,6 +36,8 @@ std::string media_kind_name(MediaKind kind) {
         return "sfs";
     case MediaKind::fat12_floppy:
         return "fat12-floppy";
+    case MediaKind::fat12_floppy_set:
+        return "fat12-floppy-set";
     case MediaKind::iso9660:
         return "iso9660";
     case MediaKind::standalone_object:

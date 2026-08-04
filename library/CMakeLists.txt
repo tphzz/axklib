@@ -108,6 +108,9 @@ add_library(
   src/media.cpp
   src/media_catalog.cpp
   src/media_fat12.cpp
+  src/media_fat12_catalog.cpp
+  src/media_floppy_catalog.cpp
+  src/media_floppy_set_reader.cpp
   src/media_iso9660.cpp
   src/media_object_directory.cpp
   src/media_yamaha.cpp
@@ -209,7 +212,6 @@ add_library(
   src/media_build.cpp
   src/media_conversion.cpp
   src/media_floppy_set.cpp
-  src/media_floppy_catalog.cpp
   src/media_iso9660_layout.cpp
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp

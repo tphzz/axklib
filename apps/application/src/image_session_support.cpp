@@ -58,6 +58,8 @@ std::string media_kind_name(axk::MediaKind kind) {
         return "sfs";
     case axk::MediaKind::fat12_floppy:
         return "fat12";
+    case axk::MediaKind::fat12_floppy_set:
+        return "fat12-set";
     case axk::MediaKind::iso9660:
         return "iso9660";
     case axk::MediaKind::standalone_object:
@@ -142,12 +144,10 @@ std::unordered_set<std::string> missing_required_wave_data_names(const axk::AxkO
     return missing_names;
 }
 
-axk::app::Result<CompanionSegments>
-append_required_companion_wave_data(const axk::app::Sandbox &sandbox, const axk::app::ImageSourceRef &source,
-                                    const axk::AxkObjectDirectory &primary,
-                                    const std::vector<axk::app::DirectoryRef> &companion_directories,
-                                    std::vector<axk::AxkObjectDirectoryEntry> &entries,
-                                    std::vector<std::function<axk::app::Result<void>()>> &verifiers) {
+axk::app::Result<CompanionSegments> append_required_companion_wave_data(
+    const axk::app::Sandbox &sandbox, const axk::app::ImageSourceRef &source, const axk::AxkObjectDirectory &primary,
+    const std::vector<axk::app::ImageSourceRef> &companion_sources, std::vector<axk::AxkObjectDirectoryEntry> &entries,
+    std::vector<std::function<axk::app::Result<void>()>> &verifiers) {
     std::unordered_set<std::string> incomplete_identities;
     std::unordered_set<std::size_t> incomplete_identity_sizes;
     for (const auto &object : primary.stored_objects()) {
@@ -162,8 +162,13 @@ append_required_companion_wave_data(const axk::app::Sandbox &sandbox, const axk:
         return CompanionSegments{};
 
     CompanionSegments result;
-    for (std::size_t directory_index = 0U; directory_index < companion_directories.size(); ++directory_index) {
-        const auto &directory = companion_directories[directory_index];
+    for (std::size_t directory_index = 0U; directory_index < companion_sources.size(); ++directory_index) {
+        const auto &companion = companion_sources[directory_index];
+        if (companion.kind != axk::app::ImageSourceKind::axk_object_directory) {
+            return std::unexpected(session_error("invalid_companion_sources",
+                                                 "an extracted-object recovery requires companion directories"));
+        }
+        const axk::app::DirectoryRef directory{companion.root_id, companion.relative_path};
         if (directory.root_id == source.root_id && directory.relative_path == source.relative_path)
             continue;
         auto listing = list_bounded_directory(sandbox, directory, axk::AxkObjectDirectory::maximum_leaf_entries);
@@ -225,7 +230,7 @@ append_required_companion_wave_data(const axk::app::Sandbox &sandbox, const axk:
             matched = true;
         }
         if (matched)
-            result.directories.push_back(directory);
+            result.sources.push_back(companion);
     }
     return result;
 }

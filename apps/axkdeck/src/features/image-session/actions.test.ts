@@ -17,7 +17,8 @@ const secondLocation: ImageLocation = {
 function opened(sessionId: number): OpenedImage {
     return {
         sessionId,
-        companionDirectories: [],
+        companionSources: [],
+        floppySet: null,
         tree: [],
         validation: {
             valid: true,

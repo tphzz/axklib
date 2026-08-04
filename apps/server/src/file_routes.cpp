@@ -20,8 +20,8 @@ void register_file_routes(ServerCrowApp &app, FileRoutes routes) {
     app.route_dynamic("/api/v1/images").methods(crow::HTTPMethod::Post)(std::move(routes.create_image));
     app.route_dynamic("/api/v1/images/<string>")
         .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(std::move(routes.image));
-    app.route_dynamic("/api/v1/images/<string>/companion-directories")
-        .methods(crow::HTTPMethod::Post)(std::move(routes.attach_companion_directories));
+    app.route_dynamic("/api/v1/images/<string>/companions")
+        .methods(crow::HTTPMethod::Post)(std::move(routes.attach_companions));
     app.route_dynamic("/api/v1/images/<string>/content")(std::move(routes.image_content));
     app.route_dynamic("/api/v1/images/<string>/objects")(std::move(routes.image_objects));
     app.route_dynamic("/api/v1/images/<string>/relationships")(std::move(routes.image_relationships));

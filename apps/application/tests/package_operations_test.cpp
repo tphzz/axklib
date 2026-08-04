@@ -706,9 +706,10 @@ TEST_F(PackageOperationsTest, SessionExportRequestsCompanionDisksAndSucceedsAfte
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "companion_disks_required") << rejected.error().message;
 
-    const auto attached = images_->attach_companion_directories(
+    const auto attached = images_->attach_companions(
         opened->image_id, "owner", opened->revision,
-        {axk::app::CompanionDirectorySelectionKind::directories, {{"workspace", "disk-set/DISK1"}}});
+        {axk::app::CompanionSelectionKind::sources,
+         {{"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}}});
     ASSERT_TRUE(attached) << attached.error().message;
     const auto exported = registry_.invoke("images.package_export",
                                            {{"imageId", attached->image_id},

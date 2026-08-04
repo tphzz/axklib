@@ -116,6 +116,8 @@ describe('HttpImageTransport', () => {
                                 kind: 'FILE',
                                 file: { rootId: 'workspace', relativePath: 'images/test.hds' },
                             },
+                            companionSources: [],
+                            floppySet: null,
                             format: 'sfs',
                             rootCount: 1,
                             objectCount: 2,
@@ -260,6 +262,8 @@ describe('HttpImageTransport', () => {
                                 kind: 'AXK_OBJECT_DIRECTORY',
                                 directory: { rootId: 'workspace', relativePath: 'unpacked/volume' },
                             },
+                            companionSources: [],
+                            floppySet: null,
                             format: 'axk-object-directory',
                             availableOperations: ['images.content', 'images.objects', 'images.package.export'],
                             rootCount: 0,
@@ -283,7 +287,8 @@ describe('HttpImageTransport', () => {
         );
         expect(opened).toMatchObject({
             sessionId: 1,
-            companionDirectories: [],
+            companionSources: [],
+            floppySet: null,
             packageImportAvailable: false,
             packageExportAvailable: true,
         });
@@ -304,7 +309,8 @@ describe('HttpImageTransport', () => {
                                 kind: 'AXK_OBJECT_DIRECTORY',
                                 directory: { rootId: 'workspace', relativePath: 'set/DISK2' },
                             },
-                            companionDirectories: [],
+                            companionSources: [],
+                            floppySet: null,
                             format: 'axk-object-directory',
                             availableOperations: ['images.content'],
                             rootCount: 0,
@@ -315,7 +321,7 @@ describe('HttpImageTransport', () => {
                         201,
                     );
                 }
-                if (url.pathname.endsWith('/images/directory-image/companion-directories')) {
+                if (url.pathname.endsWith('/images/directory-image/companions')) {
                     requests.push({ path: url.pathname, body: JSON.parse(String(init?.body)) });
                     return json({
                         imageId: 'directory-image',
@@ -324,7 +330,13 @@ describe('HttpImageTransport', () => {
                             kind: 'AXK_OBJECT_DIRECTORY',
                             directory: { rootId: 'workspace', relativePath: 'set/DISK2' },
                         },
-                        companionDirectories: [{ rootId: 'workspace', relativePath: 'set/DISK1' }],
+                        companionSources: [
+                            {
+                                kind: 'AXK_OBJECT_DIRECTORY',
+                                directory: { rootId: 'workspace', relativePath: 'set/DISK1' },
+                            },
+                        ],
+                        floppySet: null,
                         format: 'axk-object-directory',
                         availableOperations: ['images.content'],
                         rootCount: 0,
@@ -344,23 +356,35 @@ describe('HttpImageTransport', () => {
         const opened = await transport.openImage(
             axkObjectDirectoryLocation({ rootId: 'workspace', relativePath: 'set/DISK2' }),
         );
-        const attached = await transport.attachCompanionDirectories(opened.sessionId, {
-            kind: 'directories',
-            directories: [{ rootId: 'workspace', relativePath: 'set/DISK1' }],
+        const attached = await transport.attachCompanions(opened.sessionId, {
+            kind: 'sources',
+            sources: [axkObjectDirectoryLocation({ rootId: 'workspace', relativePath: 'set/DISK1' })],
         });
 
         expect(attached).toMatchObject({
             sessionId: opened.sessionId,
-            companionDirectories: [{ rootId: 'workspace', relativePath: 'set/DISK1' }],
+            companionSources: [
+                {
+                    kind: 'axk-object-directory',
+                    reference: { rootId: 'workspace', relativePath: 'set/DISK1' },
+                    displayName: 'set/DISK1',
+                },
+            ],
+            floppySet: null,
         });
         expect(requests).toEqual([
             {
-                path: '/api/v1/images/directory-image/companion-directories',
+                path: '/api/v1/images/directory-image/companions',
                 body: {
                     expectedRevision: 1,
                     selection: {
-                        kind: 'DIRECTORIES',
-                        directories: [{ rootId: 'workspace', relativePath: 'set/DISK1' }],
+                        kind: 'SOURCES',
+                        sources: [
+                            {
+                                kind: 'AXK_OBJECT_DIRECTORY',
+                                directory: { rootId: 'workspace', relativePath: 'set/DISK1' },
+                            },
+                        ],
                     },
                 },
             },
@@ -798,7 +822,12 @@ describe('HttpImageTransport', () => {
                     return json({
                         imageId: 'image-retained',
                         revision: 1,
-                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
                         format: 'sfs',
                         rootCount: 0,
                         objectCount: 0,
@@ -815,7 +844,12 @@ describe('HttpImageTransport', () => {
                     return json({
                         imageId: 'image-retained',
                         revision: 2,
-                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
                         format: 'sfs',
                         rootCount: 0,
                         objectCount: 0,
@@ -1109,7 +1143,12 @@ describe('HttpImageTransport', () => {
                     return json({
                         imageId: 'image-delete',
                         revision: 7,
-                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
                         format: 'sfs',
                         rootCount: 0,
                         objectCount: 3,
@@ -1243,7 +1282,12 @@ describe('HttpImageTransport', () => {
                     return json({
                         imageId: 'image-cleanup',
                         revision: 11,
-                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
                         format: 'sfs',
                         rootCount: 0,
                         objectCount: 1,
@@ -1331,7 +1375,12 @@ describe('HttpImageTransport', () => {
                     return json({
                         imageId: 'image-audio',
                         revision: 1,
-                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
                         format: 'sfs',
                         rootCount: 0,
                         objectCount: 0,
@@ -1526,7 +1575,12 @@ describe('HttpImageTransport', () => {
                     return json({
                         imageId: 'image-midi',
                         revision: 4,
-                        source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
                         format: 'sfs',
                         rootCount: 0,
                         objectCount: 0,
@@ -2015,7 +2069,12 @@ describe('HttpImageTransport', () => {
                         {
                             imageId: 'image-package',
                             revision: 7,
-                            source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                            source: {
+                                kind: 'FILE',
+                                file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                            },
+                            companionSources: [],
+                            floppySet: null,
                             format: 'sfs',
                             rootCount: 1,
                             objectCount: 2,
@@ -2214,7 +2273,12 @@ describe('HttpImageTransport', () => {
                     return json(
                         {
                             imageId: 'image-remote',
-                            source: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                            source: {
+                                kind: 'FILE',
+                                file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                            },
+                            companionSources: [],
+                            floppySet: null,
                             format: 'sfs',
                             rootCount: 1,
                             objectCount: 1,

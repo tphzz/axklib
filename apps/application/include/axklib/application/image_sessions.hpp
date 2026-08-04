@@ -28,11 +28,27 @@ struct ImageValidationSummary {
     [[nodiscard]] bool valid() const noexcept { return error_count == 0U; }
 };
 
+enum class ImageFloppySetStatus : std::uint8_t { single, incomplete, complete, recovery };
+
+struct ImageFloppySetMember {
+    std::uint16_t index{};
+    std::string label;
+    std::string marker;
+};
+
+struct ImageFloppySetSummary {
+    ImageFloppySetStatus status{ImageFloppySetStatus::single};
+    std::string set_label;
+    std::vector<ImageFloppySetMember> members;
+    std::optional<std::uint16_t> next_required_index;
+};
+
 struct ImageSessionSummary {
     std::string image_id;
     std::uint64_t revision{};
     ImageSourceRef source;
-    std::vector<DirectoryRef> companion_directories;
+    std::vector<ImageSourceRef> companion_sources;
+    std::optional<ImageFloppySetSummary> floppy_set;
     std::string format;
     std::vector<std::string> available_operations;
     std::size_t root_count{};
@@ -41,11 +57,11 @@ struct ImageSessionSummary {
     ImageValidationSummary validation;
 };
 
-enum class CompanionDirectorySelectionKind : std::uint8_t { directories, immediate_siblings };
+enum class CompanionSelectionKind : std::uint8_t { sources, immediate_siblings };
 
-struct CompanionDirectorySelection {
-    CompanionDirectorySelectionKind kind{CompanionDirectorySelectionKind::directories};
-    std::vector<DirectoryRef> directories;
+struct CompanionSelection {
+    CompanionSelectionKind kind{CompanionSelectionKind::sources};
+    std::vector<ImageSourceRef> sources;
 };
 
 struct ImageSessionMutation {
@@ -318,11 +334,10 @@ class ImageSessionManager {
 
     [[nodiscard]] Result<ImageSessionSummary> open(const ImageSourceRef &source, std::string owner_id,
                                                    const CancellationToken &cancellation = {});
-    [[nodiscard]] Result<ImageSessionSummary> attach_companion_directories(std::string_view image_id,
-                                                                           std::string_view owner_id,
-                                                                           std::uint64_t expected_revision,
-                                                                           const CompanionDirectorySelection &selection,
-                                                                           const CancellationToken &cancellation = {});
+    [[nodiscard]] Result<ImageSessionSummary> attach_companions(std::string_view image_id, std::string_view owner_id,
+                                                                std::uint64_t expected_revision,
+                                                                const CompanionSelection &selection,
+                                                                const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageSessionSummary> inspect(std::string_view image_id, std::string_view owner_id);
     [[nodiscard]] Result<ImageObjectDeletionPlan> plan_deletion(std::string_view image_id, std::string_view owner_id,
                                                                 std::uint64_t expected_revision,
@@ -373,9 +388,9 @@ class ImageSessionManager {
 
   private:
     [[nodiscard]] Result<ImageSessionSummary>
-    open_with_companion_directories(const ImageSourceRef &source, std::string owner_id,
-                                    const std::vector<DirectoryRef> &companion_directories,
-                                    const CancellationToken &cancellation);
+    open_with_companion_sources(const ImageSourceRef &source, std::string owner_id,
+                                const std::vector<ImageSourceRef> &companion_sources,
+                                const CancellationToken &cancellation);
     struct Implementation;
     std::unique_ptr<Implementation> implementation_;
 };

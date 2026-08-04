@@ -5,7 +5,7 @@ import type {
     AudioImportCapabilities,
     AuditionBundleDescriptor,
     ClientDownload,
-    CompanionDirectorySelection,
+    CompanionSelection,
     ContentPage,
     HardDiskCreationProfile,
     HardDiskCreationProfileId,
@@ -63,7 +63,8 @@ export interface InMemoryImageTransportOptions {
     opened: Omit<
         OpenedImage,
         | 'sessionId'
-        | 'companionDirectories'
+        | 'companionSources'
+        | 'floppySet'
         | 'volumeMutationsAvailable'
         | 'partitionMutationsAvailable'
         | 'objectRenameAvailable'
@@ -85,7 +86,8 @@ export interface InMemoryImageTransportOptions {
         audioExportAvailable?: boolean;
         sequenceExportAvailable?: boolean;
         mediaConversionAvailable?: boolean;
-        companionDirectories?: DirectoryRef[];
+        companionSources?: ImageLocation[];
+        floppySet?: OpenedImage['floppySet'];
     };
     preview?: PreviewEnvelope;
     onClose?: (sessionId: number) => void;
@@ -134,7 +136,8 @@ export class InMemoryImageTransport implements ImageTransport {
         return {
             ...this.options.opened,
             sessionId: this.nextSessionId++,
-            companionDirectories: this.options.opened.companionDirectories ?? [],
+            companionSources: this.options.opened.companionSources ?? [],
+            floppySet: this.options.opened.floppySet ?? null,
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
             objectRenameAvailable: this.options.opened.objectRenameAvailable ?? false,
@@ -155,7 +158,8 @@ export class InMemoryImageTransport implements ImageTransport {
         return {
             ...this.options.opened,
             sessionId,
-            companionDirectories: this.options.opened.companionDirectories ?? [],
+            companionSources: this.options.opened.companionSources ?? [],
+            floppySet: this.options.opened.floppySet ?? null,
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
             partitionMutationsAvailable: this.options.opened.partitionMutationsAvailable ?? false,
             objectRenameAvailable: this.options.opened.objectRenameAvailable ?? false,
@@ -169,8 +173,8 @@ export class InMemoryImageTransport implements ImageTransport {
         };
     }
 
-    attachCompanionDirectories(sessionId: number, selection: CompanionDirectorySelection): Promise<OpenedImage> {
-        return this.invoke('attachCompanionDirectories', [sessionId, selection]);
+    attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage> {
+        return this.invoke('attachCompanions', [sessionId, selection]);
     }
 
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage> {

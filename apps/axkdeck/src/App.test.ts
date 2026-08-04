@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
     inspectSandboxMediaSource: vi.fn(),
     openImage: vi.fn(),
     refreshImage: vi.fn(),
-    attachCompanionDirectories: vi.fn(),
+    attachCompanions: vi.fn(),
     closeImage: vi.fn(),
     contentChildren: vi.fn(),
     objectPage: vi.fn(),
@@ -39,7 +39,7 @@ vi.mock('./lib/createTransport', () => ({
         inspectSandboxMediaSource: mocks.inspectSandboxMediaSource,
         openImage: mocks.openImage,
         refreshImage: mocks.refreshImage,
-        attachCompanionDirectories: mocks.attachCompanionDirectories,
+        attachCompanions: mocks.attachCompanions,
         closeImage: mocks.closeImage,
         contentChildren: mocks.contentChildren,
         objectPage: mocks.objectPage,
@@ -103,7 +103,8 @@ describe('App panel layout', () => {
         ]);
         mocks.openImage.mockReset().mockResolvedValue({
             sessionId: 17,
-            companionDirectories: [],
+            companionSources: [],
+            floppySet: null,
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 0 }],
             validation: {
                 valid: true,
@@ -123,7 +124,7 @@ describe('App panel layout', () => {
             waveDataCleanupAvailable: false,
         });
         mocks.refreshImage.mockReset();
-        mocks.attachCompanionDirectories.mockReset();
+        mocks.attachCompanions.mockReset();
         mocks.closeImage.mockReset().mockResolvedValue(undefined);
         mocks.contentChildren.mockReset().mockResolvedValue({ items: [], totalCount: 0 });
         mocks.objectPage.mockReset().mockResolvedValue({ objects: [], totalCount: 0 });
@@ -421,7 +422,8 @@ describe('App panel layout', () => {
         ];
         const opened = {
             sessionId: 17,
-            companionDirectories: [],
+            companionSources: [],
+            floppySet: null,
             tree: [{ id: 'disk-17', name: 'DISK2', kind: 'disk' as const, childCount: 1, children: [volume] }],
             validation: {
                 valid: true,
@@ -458,9 +460,21 @@ describe('App panel layout', () => {
             totalCount: 3,
         });
         mocks.relationshipPage.mockResolvedValue({ relationships, totalCount: relationships.length });
-        mocks.attachCompanionDirectories.mockResolvedValue({
+        mocks.attachCompanions.mockResolvedValue({
             ...opened,
-            companionDirectories: [{ rootId: 'workspace', relativePath: 'DISK1' }],
+            companionSources: [
+                {
+                    kind: 'axk-object-directory',
+                    reference: { rootId: 'workspace', relativePath: 'DISK1' },
+                    displayName: 'DISK1',
+                },
+            ],
+            floppySet: {
+                status: 'RECOVERY',
+                setLabel: 'DISK2',
+                members: [],
+                nextRequiredIndex: null,
+            },
         });
         let sequenceCompletion: ((result: unknown) => void) | undefined;
         const playSequence = vi
@@ -491,7 +505,7 @@ describe('App panel layout', () => {
             const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' });
             await fireEvent.click(within(dialog).getByRole('button', { name: 'Search nearby folders and retry' }));
             await vi.waitFor(() =>
-                expect(mocks.attachCompanionDirectories).toHaveBeenCalledWith(17, {
+                expect(mocks.attachCompanions).toHaveBeenCalledWith(17, {
                     kind: 'immediate-siblings',
                 }),
             );
@@ -500,6 +514,58 @@ describe('App panel layout', () => {
         } finally {
             playSequence.mockRestore();
         }
+    });
+
+    it('requests the next raw floppy image as soon as an incomplete disk set opens', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'Long Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const opened = {
+            ...openedImageWithVolumes([volume], volume),
+            floppySet: {
+                status: 'INCOMPLETE' as const,
+                setLabel: 'LONG VOLUME',
+                members: [{ index: 1, label: 'LONG VOLUME  01', marker: 'CONTINUATION' as const }],
+                nextRequiredIndex: 2,
+            },
+        };
+        mocks.sandboxDirectory.mockImplementation(async (directory) => ({
+            directory,
+            entries:
+                directory.relativePath === ''
+                    ? [{ name: 'disk01.ima', relativePath: 'disk01.ima', kind: 'FILE', size: 1_474_560 }]
+                    : [],
+            truncated: false,
+            nextCursor: null,
+        }));
+        mocks.openImage.mockResolvedValueOnce(opened);
+        mocks.attachCompanions.mockResolvedValue({
+            ...opened,
+            floppySet: { ...opened.floppySet, status: 'COMPLETE', nextRequiredIndex: null },
+        });
+
+        render(App);
+        await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
+        const picker = await screen.findByRole('dialog', { name: 'Open image' });
+        await fireEvent.click(await within(picker).findByText('Yamaha'));
+        await fireEvent.click(await within(picker).findByText('disk01.ima'));
+        await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
+        await mocks.openImage.mock.results[0].value;
+
+        const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' });
+        expect(
+            within(dialog).getByText(
+                (_, element) =>
+                    element?.tagName === 'P' && (element.textContent?.includes('requires disk 2.') ?? false),
+            ),
+        ).toBeTruthy();
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'Search nearby images and retry' }));
+        await vi.waitFor(() => expect(mocks.attachCompanions).toHaveBeenCalledWith(17, { kind: 'immediate-siblings' }));
+        await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add companion disks' })).toBeNull());
     });
 
     it('defaults the object browser to two-thirds of the middle workspace', () => {
@@ -1630,7 +1696,8 @@ function openedImageWithVolumes(
 ) {
     return {
         sessionId: 17,
-        companionDirectories: [],
+        companionSources: [],
+        floppySet: null,
         tree: [
             { id: 'disk-17', name: 'nested.hds', kind: 'disk' as const, childCount: volumes.length, children: volumes },
         ],
