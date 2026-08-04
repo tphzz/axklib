@@ -20,6 +20,12 @@
         oncancel: () => void;
     }
 
+    interface DisplayIssue {
+        key: string;
+        message: string;
+        fatal: boolean;
+    }
+
     let {
         items,
         inspection,
@@ -48,6 +54,36 @@
             .filter(([count]) => count > 0)
             .map(([count, label]) => `${count} ${label === 'Wave Data' || count === 1 ? label : `${label}s`}`)
             .join(' · ');
+    });
+    const displayIssues = $derived.by(() => {
+        const groups = new Map<string, DisplayIssue & { count: number }>();
+        for (const issue of inspection?.issues ?? []) {
+            const fatal = issue.fatal === true;
+            const programAssignment =
+                issue.code === 'unconfirmed_relationship_excluded' &&
+                'relationshipType' in issue &&
+                issue.relationshipType.startsWith('PROG_ASSIGNMENT_TO_');
+            const key = programAssignment
+                ? `program-assignment:${fatal}`
+                : JSON.stringify([fatal, issue.code, issue.message]);
+            const existing = groups.get(key);
+            if (existing) {
+                existing.count += 1;
+            } else {
+                groups.set(key, { key, message: issue.message, fatal, count: 1 });
+            }
+        }
+        return [...groups.values()].map(({ count, ...issue }) => {
+            if (issue.key.startsWith('program-assignment:')) {
+                issue.message =
+                    count === 1
+                        ? '1 unconfirmed Program assignment was excluded from SFZ export.'
+                        : `${count} unconfirmed Program assignments were excluded from SFZ export.`;
+            } else if (count > 1) {
+                issue.message = `${issue.message} (${count} occurrences)`;
+            }
+            return issue;
+        });
     });
 </script>
 
@@ -105,7 +141,7 @@
                             instead.
                         </p>
                     {/if}
-                    {#each inspection.issues as issue (`${issue.code}:${issue.message}`)}
+                    {#each displayIssues as issue (issue.key)}
                         <p class:dialog-error={issue.fatal} class="audio-export-issue">{issue.message}</p>
                     {/each}
                     <ExportDestinationChooser {desktop} {busy} {onworkspace} {onlocal} />

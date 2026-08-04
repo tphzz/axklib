@@ -44,7 +44,10 @@ struct AudioExportSelection {
     std::string default_directory_name;
     std::size_t sfz_file_count{};
 
-    [[nodiscard]] bool sfz_eligible() const noexcept { return sfz_file_count != 0U && issues.empty(); }
+    [[nodiscard]] bool sfz_eligible() const noexcept {
+        return sfz_file_count != 0U &&
+               std::ranges::none_of(issues, [](const Json &issue) { return issue.value("fatal", false); });
+    }
 };
 
 class TemporaryDirectoryCleanup {

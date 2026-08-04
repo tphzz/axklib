@@ -16,6 +16,13 @@ Sample Bank membership, and Sample-to-Wave-Data membership must all remain
 confirmed through the complete selected dependency closure. Unconfirmed rows
 remain diagnostics instead of being assigned to arbitrary Wave Data.
 
+Interactive/session export may still produce the confirmed SFZ subset when at
+least one instrument has a complete `Known` dependency path and every remaining
+issue is nonfatal. Unconfirmed Program assignments are omitted and reported as
+warnings; they are not guessed from names or local context. A fatal issue, or a
+selection with no confirmed instrument, makes SFZ unavailable while preserving
+WAV-only export for resolved Wave Data.
+
 Each region uses the active Sample (`SBNK`) member playback window. The SFZ
 `offset` and `end` opcodes restrict the physical Wave Data WAV, while loop mode
 and loop positions come from the Sample rather than from the underlying Wave

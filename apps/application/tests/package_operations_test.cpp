@@ -103,6 +103,59 @@ void write_mixed_root_source(const std::filesystem::path &path) {
     ASSERT_TRUE(written) << written.error().message;
 }
 
+void write_audio_source_with_orphan_wave_data(const std::filesystem::path &path) {
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 2U;
+    waveform.pcm = {std::byte{0}, std::byte{0}, std::byte{0xe8}, std::byte{3}};
+    const auto audio_path = path.parent_path() / "orphan-source.wav";
+    const auto written_audio = axk::write_wav_atomic(audio_path, waveform);
+    ASSERT_TRUE(written_audio) << written_audio.error().message;
+
+    axk::VolumeSpec volume;
+    volume.name = "Fatal";
+    volume.waveforms.push_back({"linked-wave", "Linked Wave", audio_path, 60U, {}});
+    volume.waveforms.push_back({"orphan-wave", "Orphan Wave", audio_path, 60U, {}});
+    axk::SampleSpec sample;
+    sample.name = "Linked Sample";
+    sample.waveform_id = "linked-wave";
+    sample.root_key = 60U;
+    sample.key_high = 127U;
+    volume.samples.push_back(std::move(sample));
+
+    const axk::HdsBuildManifest manifest{"1.0", 2U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
+    const auto written = axk::write_hds_image(manifest, path);
+    ASSERT_TRUE(written) << written.error().message;
+}
+
+void make_first_program_assignment_context_only(const std::filesystem::path &path) {
+    const auto media = axk::open_media(path);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto &partition = sfs->partitions().front();
+    const auto program =
+        std::ranges::find_if(partition.records, [](const auto &record) { return record.object_type == "PROG"; });
+    ASSERT_NE(program, partition.records.end());
+    ASSERT_EQ(program->extents.size(), 1U);
+    const auto row_offset =
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(program->extents.front().cluster_offset) * partition.sectors_per_cluster) *
+            512U +
+        0x120U;
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    image.seekp(static_cast<std::streamoff>(row_offset + 0x0fU));
+    image.put('*');
+    const auto context_offset = row_offset + 0x38U;
+    image.seekp(static_cast<std::streamoff>(context_offset));
+    image.write("Bank            ", 16);
+    image.seekp(static_cast<std::streamoff>(context_offset + 0x14U));
+    image.put(static_cast<char>(0x11));
+    ASSERT_TRUE(image);
+}
+
 void write_object_directory(const std::filesystem::path &source, const std::filesystem::path &destination) {
     const auto media = axk::open_media(source);
     ASSERT_TRUE(media) << media.error().message;
@@ -561,6 +614,71 @@ TEST_F(PackageOperationsTest, SessionInspectsAndExportsSfzToWorkspaceOrRetainedT
     ASSERT_TRUE(content) << content.error().message;
     EXPECT_EQ(content->snapshot.media_type, "application/x-tar");
     EXPECT_GT(content->snapshot.entry_count, 1U);
+}
+
+TEST_F(PackageOperationsTest, SessionExportsConfirmedSfzSubsetWhenRelationshipWarningsAreNonfatal) {
+    const auto source_path = root_ / "warned-audio.hds";
+    std::filesystem::copy_file(root_ / "mixed-roots.hds", source_path);
+    make_first_program_assignment_context_only(source_path);
+    const auto opened = images_->open({"workspace", "warned-audio.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const nlohmann::json roots{{{"kind", "VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Mixed"}}};
+    const auto base =
+        nlohmann::json{{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"roots", roots}};
+
+    const auto inspected = registry_.invoke("images.audio_export.inspect", base, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_GT(inspected->at("sfzFileCount").get<std::size_t>(), 0U);
+    ASSERT_EQ(inspected->at("issues").size(), 1U);
+    EXPECT_EQ(inspected->at("issues").at(0).at("code"), "unconfirmed_relationship_excluded");
+    EXPECT_FALSE(inspected->at("issues").at(0).at("fatal").get<bool>());
+    EXPECT_TRUE(inspected->at("sfzEligible").get<bool>());
+
+    auto request = base;
+    request["format"] = "SFZ";
+    request["destination"] = {
+        {"kind", "WORKSPACE"},
+        {"output", {{"rootId", "workspace"}, {"relativePath", "warned-sfz"}}},
+    };
+    const auto exported = registry_.invoke("images.audio_export", request, context());
+    ASSERT_TRUE(exported) << exported.error().message;
+    EXPECT_EQ(exported->at("format"), "SFZ");
+    EXPECT_GT(exported->at("fileCount").get<std::size_t>(), 0U);
+}
+
+TEST_F(PackageOperationsTest, SessionRejectsSfzWhenAnySelectionIssueIsFatal) {
+    write_audio_source_with_orphan_wave_data(root_ / "fatal-audio.hds");
+    const auto opened = images_->open({"workspace", "fatal-audio.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(objects) << objects.error().message;
+    const auto object_id = [&](std::string_view type, std::string_view name) {
+        const auto found = std::ranges::find_if(
+            objects->items, [&](const auto &object) { return object.type == type && object.name == name; });
+        EXPECT_NE(found, objects->items.end());
+        return found == objects->items.end() ? std::string{} : found->id;
+    };
+    const nlohmann::json roots{
+        {{"kind", "SBNK"}, {"objectId", object_id("SBNK", "Linked Sample")}},
+        {{"kind", "SMPL"}, {"objectId", object_id("SMPL", "Orphan Wave")}},
+    };
+    const auto base =
+        nlohmann::json{{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"roots", roots}};
+
+    const auto inspected = registry_.invoke("images.audio_export.inspect", base, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_GT(inspected->at("sfzFileCount").get<std::size_t>(), 0U);
+    ASSERT_EQ(inspected->at("issues").size(), 1U);
+    EXPECT_EQ(inspected->at("issues").at(0).at("code"), "wave_data_has_no_confirmed_sample");
+    EXPECT_TRUE(inspected->at("issues").at(0).at("fatal").get<bool>());
+    EXPECT_FALSE(inspected->at("sfzEligible").get<bool>());
+
+    auto request = base;
+    request["format"] = "SFZ";
+    request["destination"] = {{"kind", "DOWNLOAD"}, {"directoryName", "Rejected SFZ"}};
+    const auto exported = registry_.invoke("images.audio_export", request, context());
+    ASSERT_FALSE(exported);
+    EXPECT_EQ(exported.error().code, "sfz_semantics_unavailable");
 }
 
 TEST_F(PackageOperationsTest, SessionExportsSequencesAsMidiToWorkspaceOrRetainedTar) {

@@ -96,4 +96,62 @@ describe('SfzExportDialog', () => {
         await fireEvent.click(screen.getByRole('button', { name: 'WAV files' }));
         expect(onformatchange).toHaveBeenCalledWith('WAV');
     });
+
+    it('groups repeated unconfirmed Program assignments without duplicate Svelte keys', () => {
+        const relationshipIssue = {
+            code: 'unconfirmed_relationship_excluded' as const,
+            message: 'Unconfirmed relationship excluded from exact export',
+            fatal: false as const,
+            relationshipType: 'PROG_ASSIGNMENT_TO_SBAC',
+            relationshipQuality: 'LIKELY' as const,
+            reason: 'exact export requires a Known relationship',
+            sourceObjectKey: 'program-002',
+            targetObjectKey: 'bank-sqr2b',
+            candidateObjectKeys: ['bank-sqr2b'],
+            basis: 'assignment-kind-0x11+program-local-target-context',
+            assignmentState: 'CONFIRMED_ACTIVE' as const,
+        };
+
+        render(SfzExportDialog, {
+            props: {
+                items: [sample],
+                inspection: {
+                    imageId: 'image-one',
+                    revision: 3,
+                    rootCount: 1,
+                    programCount: 2,
+                    sampleBankCount: 1,
+                    sampleCount: 1,
+                    waveDataCount: 1,
+                    sfzFileCount: 1,
+                    sfzEligible: true,
+                    defaultDirectoryName: 'Analog Update',
+                    issues: [
+                        relationshipIssue,
+                        {
+                            ...relationshipIssue,
+                            relationshipType: 'PROG_ASSIGNMENT_TO_SBNK',
+                            sourceObjectKey: 'program-005',
+                            targetObjectKey: 'sample-astro',
+                        },
+                    ],
+                },
+                desktop: true,
+                loading: false,
+                busy: false,
+                progressLabel: '',
+                error: '',
+                format: 'SFZ',
+                onformatchange: vi.fn(),
+                onworkspace: vi.fn(),
+                onlocal: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByText('2 unconfirmed Program assignments were excluded from SFZ export.')).toBeTruthy();
+        expect(screen.getAllByText(/unconfirmed Program assignments/)).toHaveLength(1);
+        expect((screen.getByRole('button', { name: 'SFZ + WAV' }) as HTMLButtonElement).disabled).toBe(false);
+        expect(screen.getByRole('button', { name: /Storage location/ })).toBeTruthy();
+    });
 });
