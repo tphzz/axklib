@@ -166,8 +166,10 @@ Result<void> scan_fat_directory(std::vector<FatFile> &files, std::deque<PendingF
             pending.push_back({path, std::move(child), fat_cluster_offset(geometry, first_cluster)});
             continue;
         }
-        if (size == 0U)
+        if (size == 0U) {
+            files.push_back({path, name, directory_offset + offset, first_cluster, size, {}, 0U});
             continue;
+        }
         const auto chain = fat_chain(fat, geometry, first_cluster, size, path, source);
         if (!chain)
             return std::unexpected{chain.error()};

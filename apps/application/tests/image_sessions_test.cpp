@@ -363,7 +363,7 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     const auto rejected = sessions.prepare_audition(incomplete->image_id, "owner-a", {object_id});
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "companion_disks_required");
-    EXPECT_NE(rejected.error().message.find("Add companion disk folders"), std::string::npos);
+    EXPECT_NE(rejected.error().message.find("Add extracted companion disk folders"), std::string::npos);
     EXPECT_TRUE(reservations.try_acquire(
         axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
 

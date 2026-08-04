@@ -6,6 +6,8 @@
 #include <set>
 #include <tuple>
 
+#include "axklib/writer_internal.hpp"
+
 namespace axk::package_import_internal {
 
 Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_reader,
@@ -353,7 +355,7 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
         media_object_paths.insert(object.logical_path);
     std::size_t retained_files{};
     for (const auto &file : fat.files()) {
-        if (!media_object_paths.contains(file.path))
+        if (!media_object_paths.contains(file.path) && !detail::is_yamaha_floppy_catalog_path(file.path))
             ++retained_files;
     }
     std::uint64_t inserted_objects{};
@@ -363,13 +365,15 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
             ++inserted_objects;
         }
     }
-    const auto final_entries = catalog->objects.size() + retained_files + inserted_objects;
+    const auto final_entries = catalog->objects.size() + retained_files + inserted_objects + 1U;
     if (final_entries > fat.geometry().root_entry_count)
         add_conflict(plan, "FAT12_ROOT_ENTRY_EXHAUSTED", "FAT12 root directory cannot contain the planned import");
     const auto cluster_size = fat.geometry().cluster_size();
-    std::uint64_t used_clusters{};
-    for (const auto &file : fat.files())
-        used_clusters += (file.size + cluster_size - 1U) / cluster_size;
+    std::uint64_t used_clusters = (detail::yamaha_floppy_catalog_bytes + cluster_size - 1U) / cluster_size;
+    for (const auto &file : fat.files()) {
+        if (!detail::is_yamaha_floppy_catalog_path(file.path))
+            used_clusters += (file.size + cluster_size - 1U) / cluster_size;
+    }
     for (auto &object : plan.objects) {
         if (!std::ranges::contains(object.actions, PackageImportObjectAction::insert) ||
             std::ranges::contains(object.actions, PackageImportObjectAction::conflict)) {

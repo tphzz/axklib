@@ -277,6 +277,8 @@ Result<void> validate_written_image(const detail::PreparedMediaImage &prepared, 
     if (prepared.manifest.format == MediaImageFormat::fat12_floppy) {
         const auto &fat = std::get<FatImage>(media->storage());
         for (const auto &retained : prepared.retained_files) {
+            if (detail::is_yamaha_floppy_catalog_path(retained.path))
+                continue;
             const auto found = std::ranges::find(fat.files(), retained.path, &FatFile::path);
             if (found == fat.files().end()) {
                 return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
@@ -293,6 +295,16 @@ Result<void> validate_written_image(const detail::PreparedMediaImage &prepared, 
                                                   "retained FAT12 file changed during rebuild")};
             }
         }
+        const auto catalog = std::ranges::find(fat.files(), std::string{"YAMAHA.SYM"}, &FatFile::path);
+        if (catalog == fat.files().end() || catalog->size != detail::yamaha_floppy_catalog_bytes) {
+            return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                              "written FAT12 image has no exact Yamaha catalog")};
+        }
+        auto catalog_bytes = fat.read_file(*catalog, cancellation);
+        if (!catalog_bytes)
+            return std::unexpected{catalog_bytes.error()};
+        if (auto decoded = detail::decode_yamaha_floppy_catalog(*catalog_bytes); !decoded)
+            return std::unexpected{decoded.error()};
     } else {
         const auto &iso = std::get<IsoImage>(media->storage());
         for (const auto &retained : prepared.retained_files) {
@@ -339,7 +351,7 @@ Result<detail::PreparedMediaImage> detail::prepare_media_image(const MediaBuildM
         return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                           "media image must contain at least one Yamaha object")};
     }
-    return PreparedMediaImage{manifest, limits, std::move(*objects), {}, {}};
+    return PreparedMediaImage{manifest, limits, std::move(*objects), {}, {}, {}};
 }
 
 Result<WrittenMediaImage>

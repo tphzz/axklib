@@ -369,10 +369,10 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                 auto plan = axk::build_export_plan(*session->media, catalog, graph, context.cancellation);
                 if (!plan && plan.error().code == axk::ErrorCode::object_missing &&
                     session->source.kind == ImageSourceKind::axk_object_directory) {
-                    return std::unexpected(operation_error(
-                        "companion_disks_required",
-                        "Wave Data continues on another sampler disk. Add companion disk folders to export it.",
-                        session->source.relative_path));
+                    return std::unexpected(operation_error("companion_disks_required",
+                                                           "Wave Data continues on another sampler disk. Add extracted "
+                                                           "companion disk folders to export it.",
+                                                           session->source.relative_path));
                 }
                 if (!plan)
                     return std::unexpected(core_error(plan.error(), session->source.relative_path));

@@ -23,11 +23,10 @@ int main() {
     axk::MediaBuildManifest manifest;
     manifest.schema_version = "1.0";
     manifest.format = axk::MediaImageFormat::iso9660;
-    axk::detail::PreparedMediaImage prepared{manifest,
-                                             axk::MediaBuildLimits{64U * mebibyte, 64U * mebibyte, 64U * mebibyte},
-                                             {},
-                                             {{"PAYLOAD", std::vector<std::byte>(payload_size, std::byte{0x5a})}},
-                                             {}};
+    axk::detail::PreparedMediaImage prepared{
+        manifest, axk::MediaBuildLimits{64U * mebibyte, 64U * mebibyte, 64U * mebibyte},
+        {},       {{"PAYLOAD", std::vector<std::byte>(payload_size, std::byte{0x5a})}},
+        {},       {}};
 
     const auto path =
         std::filesystem::temp_directory_path() / ("axklib-large-media-memory-" + std::to_string(::getpid()) + ".iso");

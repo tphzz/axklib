@@ -433,7 +433,7 @@ struct axk::app::ImageSessionManager::Implementation {
         if (smpl->stored_segment_offset != 0U || smpl->stored_segment_bytes != smpl->stored_pcm_bytes) {
             return std::unexpected(session_error(
                 "companion_disks_required",
-                "Wave Data continues on another sampler disk. Add companion disk folders to audition it."));
+                "Wave Data continues on another sampler disk. Add extracted companion disk folders to audition it."));
         }
         if (smpl->sample_rate.value == 0U || smpl->stored_pcm_bytes == 0U)
             return std::unexpected(session_error("audition_unsupported", "Wave Data contains no playable PCM"));
@@ -512,9 +512,9 @@ struct axk::app::ImageSessionManager::Implementation {
                     }
                 }
                 if (!resolved_id && session.source.kind == ImageSourceKind::axk_object_directory) {
-                    return std::unexpected(session_error(
-                        "companion_disks_required",
-                        "Wave Data continues on another sampler disk. Add companion disk folders to audition it."));
+                    return std::unexpected(session_error("companion_disks_required",
+                                                         "Wave Data continues on another sampler disk. Add "
+                                                         "extracted companion disk folders to audition it."));
                 }
                 if (!resolved_id)
                     return std::unexpected(session_error(

@@ -1,6 +1,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -211,6 +212,15 @@ TEST_F(SessionMediaConversionOperationsTest, ExportsAnOversizedVolumeAsATypedMul
     ASSERT_TRUE(archive) << archive.error().message;
     ASSERT_EQ(archive->size(), 3U);
     EXPECT_EQ(archive->front().path, "manifest.json");
+    if (const auto *artifact_output = std::getenv("AXK_MULTIFLOPPY_ARTIFACT_OUTPUT");
+        artifact_output != nullptr && *artifact_output != '\0') {
+        const std::filesystem::path artifact_path{artifact_output};
+        std::filesystem::create_directories(artifact_path.parent_path());
+        std::error_code error;
+        ASSERT_TRUE(std::filesystem::copy_file(retained->path, artifact_path,
+                                               std::filesystem::copy_options::overwrite_existing, error))
+            << error.message();
+    }
 }
 
 } // namespace

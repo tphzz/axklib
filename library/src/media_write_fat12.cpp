@@ -132,8 +132,10 @@ extern "C" DRESULT disk_ioctl(BYTE drive, BYTE command, void *buffer) {
 namespace axk::detail {
 
 Result<std::vector<std::string>> plan_fat12_object_filenames(const PreparedMediaImage &image) {
-    std::set<std::string> filenames;
+    std::set<std::string> filenames{"YAMAHA.SYM"};
     for (const auto &retained : image.retained_files) {
+        if (is_yamaha_floppy_catalog_path(retained.path))
+            continue;
         if (retained.path.empty() || retained.path.size() > 12U ||
             retained.path.find_first_of("/\\") != std::string::npos || !filenames.insert(retained.path).second) {
             return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
@@ -141,7 +143,6 @@ Result<std::vector<std::string>> plan_fat12_object_filenames(const PreparedMedia
         }
     }
 
-    std::set<std::string> stems;
     std::vector<std::string> result;
     result.reserve(image.objects.size());
     for (std::size_t index = 0U; index < image.objects.size(); ++index) {
@@ -155,21 +156,17 @@ Result<std::vector<std::string>> plan_fat12_object_filenames(const PreparedMedia
             result.push_back(object.fat_filename);
             continue;
         }
-        auto stem = fat_stem(object.name);
-        if (!stems.insert(stem).second) {
-            const auto suffix = std::to_string(index + 1U);
-            stem.resize(std::min<std::size_t>(stem.size(), 8U - std::min<std::size_t>(suffix.size(), 7U)));
-            stem += suffix;
-            if (!stems.insert(stem).second) {
-                return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
-                                                  "FAT12 object names cannot be made unique")};
-            }
+        if (index >= 222U) {
+            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                              "Yamaha floppy catalogs support at most 222 generated objects")};
         }
-        auto suffix_index = index + 1U;
-        auto filename = stem + "." + std::to_string(1000U + static_cast<unsigned int>(suffix_index)).substr(1);
-        while (filenames.contains(filename) && suffix_index < 999U) {
-            ++suffix_index;
-            filename = stem + "." + std::to_string(1000U + static_cast<unsigned int>(suffix_index)).substr(1);
+        auto stem = fat_stem(object.name);
+        const auto slot = static_cast<std::uint16_t>(index + 2U);
+        auto filename = *yamaha_floppy_physical_filename(stem, slot);
+        for (std::size_t disambiguator = 1U; filenames.contains(filename) && disambiguator < 100U; ++disambiguator) {
+            const auto suffix = std::to_string(disambiguator);
+            stem.resize(std::min<std::size_t>(stem.size(), 8U - suffix.size()));
+            filename = *yamaha_floppy_physical_filename(stem + suffix, slot);
         }
         if (!filenames.insert(filename).second) {
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
@@ -182,7 +179,9 @@ Result<std::vector<std::string>> plan_fat12_object_filenames(const PreparedMedia
 
 Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image,
                                                  const CancellationToken &cancellation) {
-    if (image.objects.size() + image.retained_files.size() > 224U) {
+    const auto retained_count = static_cast<std::size_t>(std::ranges::count_if(
+        image.retained_files, [](const PreparedMediaFile &file) { return !is_yamaha_floppy_catalog_path(file.path); }));
+    if (image.objects.size() + retained_count + 1U > 224U) {
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "FAT12 floppy profile supports at "
                                           "most 224 root-directory objects")};
@@ -190,6 +189,39 @@ Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image
     auto object_filenames = plan_fat12_object_filenames(image);
     if (!object_filenames)
         return std::unexpected{object_filenames.error()};
+    YamahaFloppyCatalog catalog;
+    if (image.floppy_catalog) {
+        catalog = *image.floppy_catalog;
+    } else {
+        for (const auto &retained : image.retained_files) {
+            if (!is_yamaha_floppy_catalog_path(retained.path))
+                continue;
+            if (auto retained_catalog = decode_yamaha_floppy_catalog(retained.payload); retained_catalog)
+                catalog.disk_name = std::move(retained_catalog->disk_name);
+            break;
+        }
+        if (catalog.disk_name.empty()) {
+            auto disk_name = yamaha_floppy_disk_name(image.manifest.volume_name, 1U);
+            if (!disk_name)
+                return std::unexpected{disk_name.error()};
+            catalog.disk_name = std::move(*disk_name);
+        }
+        catalog.categories = yamaha_floppy_categories(image.objects);
+        catalog.files.reserve(image.objects.size());
+        for (std::size_t index = 0U; index < image.objects.size(); ++index) {
+            const auto slot = yamaha_floppy_filename_slot((*object_filenames)[index]);
+            if (!slot) {
+                return std::unexpected{slot.error()};
+            }
+            auto path = yamaha_floppy_object_path(image.objects[index].type, image.objects[index].name);
+            if (!path)
+                return std::unexpected{path.error()};
+            catalog.files.push_back({*slot, std::move(*path)});
+        }
+    }
+    auto catalog_bytes = encode_yamaha_floppy_catalog(catalog.disk_name, catalog.files, catalog.categories);
+    if (!catalog_bytes)
+        return std::unexpected{catalog_bytes.error()};
 
     std::scoped_lock lock{fatfs_mutex};
     FatDisk disk{std::vector<std::byte>(sector_count * sector_size)};
@@ -226,25 +258,37 @@ Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image
             return std::unexpected{fatfs_error("could not write FAT12 file", write_status)};
         return {};
     };
-    for (const auto &retained : image.retained_files) {
-        if (const auto check = cancellation.check(); !check) {
-            f_mount(nullptr, "", 0);
-            reset_disk();
-            return std::unexpected{check.error()};
-        }
-        if (auto written = write_file(retained.path, retained.payload); !written) {
-            f_mount(nullptr, "", 0);
-            reset_disk();
-            return std::unexpected{written.error()};
-        }
+    enum class FileSource : std::uint8_t { retained, object };
+    struct PlannedFile {
+        std::string path;
+        FileSource source{};
+        std::size_t index{};
+    };
+    std::vector<PlannedFile> files;
+    files.reserve(retained_count + image.objects.size());
+    for (std::size_t index = 0U; index < image.retained_files.size(); ++index) {
+        if (!is_yamaha_floppy_catalog_path(image.retained_files[index].path))
+            files.push_back({image.retained_files[index].path, FileSource::retained, index});
     }
-    for (std::size_t index = 0; index < image.objects.size(); ++index) {
+    for (std::size_t index = 0U; index < image.objects.size(); ++index)
+        files.push_back({(*object_filenames)[index], FileSource::object, index});
+    std::ranges::sort(files, {}, &PlannedFile::path);
+
+    for (const auto &file : files) {
         if (const auto check = cancellation.check(); !check) {
             f_mount(nullptr, "", 0);
             reset_disk();
             return std::unexpected{check.error()};
         }
-        const auto &object = image.objects[index];
+        if (file.source == FileSource::retained) {
+            if (auto written = write_file(file.path, image.retained_files[file.index].payload); !written) {
+                f_mount(nullptr, "", 0);
+                reset_disk();
+                return std::unexpected{written.error()};
+            }
+            continue;
+        }
+        const auto &object = image.objects[file.index];
         if (object.payload == nullptr || object.size() > std::numeric_limits<UINT>::max()) {
             f_mount(nullptr, "", 0);
             reset_disk();
@@ -257,11 +301,16 @@ Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image
             reset_disk();
             return std::unexpected{read.error()};
         }
-        if (auto written = write_file((*object_filenames)[index], payload); !written) {
+        if (auto written = write_file(file.path, payload); !written) {
             f_mount(nullptr, "", 0);
             reset_disk();
             return std::unexpected{written.error()};
         }
+    }
+    if (auto written = write_file("YAMAHA.SYM", *catalog_bytes); !written) {
+        f_mount(nullptr, "", 0);
+        reset_disk();
+        return std::unexpected{written.error()};
     }
     f_mount(nullptr, "", 0);
     reset_disk();

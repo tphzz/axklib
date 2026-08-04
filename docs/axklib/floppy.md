@@ -36,9 +36,10 @@ directory ordering, labels, support files, and deleted entries cannot be
 reconstructed from the object set. Higher collection directories remain browser
 or CLI navigation scopes. Opening one flat disk folder does not inspect its
 siblings. If an explicit preview, audition, or package export needs a missing
-Wave Data segment, an application can attach selected companion disk folders to
-the current image session or explicitly request a bounded immediate-sibling
-search. Companion matching admits exact continuation segments with a normalized
+Wave Data segment, an application can attach selected extracted companion disk
+folders to the current image session or explicitly request a bounded
+immediate-sibling search. Direct attachment of another raw `.ima` image is not
+part of this session API. Companion matching admits exact continuation segments with a normalized
 Yamaha header identity, even when Yamaha changes the host filename between
 disks, plus Wave Data objects whose embedded names exactly satisfy active
 unresolved Sample member lanes. It neither merges other sibling objects nor
@@ -204,7 +205,7 @@ Supported Yamaha floppy images commonly contain these root-file classes:
 | File class | Typical name | Contents and handling |
 | --- | --- | --- |
 | Sampler object | `SINE____.003`, `SMP_2555.004` | Complete `FSFSDEV3SPLX<type>` payload. The embedded type and name are authoritative. |
-| Symbol/support metadata | `YAMAHA.SYM` | Non-object Yamaha support data. It is preserved by the source image but ignored by normal object inventory. |
+| Symbol/support metadata | `YAMAHA.SYM` | A 9,766-byte disk/file/category catalog. Readers exclude it from object inventory; writers synthesize it from the output image. |
 | Model/system metadata | names such as `A3000_SY.002` | Non-object support data observed on some media. Its payload is not part of the public object decoder. |
 | Other DOS file | any valid DOS 8.3 name | Readable through the FAT layer, but ignored by object inventory unless it begins with a supported object signature. |
 
@@ -222,8 +223,17 @@ from filename or FAT allocation length.
 ## Generated Floppy File Layout
 
 `axklib create floppy` writes exactly one root-directory file for each prepared
-Yamaha object. It does not create `YAMAHA.SYM`, model-specific system metadata,
-subdirectories, a root-directory FAT volume-label entry, or long filenames.
+Yamaha object and one synthesized `YAMAHA.SYM`. It does not create unrelated
+model-specific system metadata, subdirectories, a root-directory FAT
+volume-label entry, or long filenames.
+
+`YAMAHA.SYM` is exactly 257 records of 38 bytes: one disk-name record, 224
+physical-file slot records, and 32 category records. A live record begins with
+`0x00`, stores a NUL-terminated logical path, and has a zero-filled tail. An
+unused record begins with `0xff`. Generated object slots begin at 2; slots 0 and
+1 remain reserved. The catalog is written last in deterministic root-directory
+order. Rebuilding an existing image preserves a valid catalog's disk-name
+record while regenerating its file and category records from the output.
 
 Objects are sorted deterministically by object type, embedded name, and payload
 size. Known types sort as `SMPL`, `SBNK`, `SBAC`, `PROG`, `SEQU`, then `PRF3`.
@@ -238,21 +248,22 @@ stem:
   use OBJECT if no character remains
 
 extension:
-  one-based position in the complete sorted object list
-  formatted as three decimal digits: 001, 002, ... 224
+  Yamaha catalog slot in the complete sorted object list
+  formatted as three decimal digits: 002, 003, ... 223
 ```
 
-If two stems collide, the later stem is shortened and its one-based global
+If two stems collide, the later stem is shortened and its catalog slot
 position is appended. If that still collides, image creation fails rather than
-silently replacing a file. The writer supports at most 224 objects because the
-fixed root directory has 224 entries.
+silently replacing a file. The writer supports at most 222 generated objects:
+the Yamaha file catalog reserves slots 0 and 1, and `YAMAHA.SYM` itself occupies
+one of the 224 FAT root entries.
 
 For example, freshly authored Wave Data and a Sample both named
 `Authored Tone` are sorted as `SMPL` then `SBNK` and become:
 
 ```text
-AUTHORED.001   FSFSDEV3SPLXSMPL...
-AUTHORE2.002   FSFSDEV3SPLXSBNK...
+AUTHORED.002   FSFSDEV3SPLXSMPL...
+AUTHORE2.003   FSFSDEV3SPLXSBNK...
 ```
 
 The filename algorithm is a generated-container convention. Transferring an
@@ -261,9 +272,10 @@ filenames; it does not preserve the source directory entry or cluster chain.
 
 ## Multi-Floppy Conversion Sets
 
-Media conversion distributes complete Yamaha objects in deterministic source
-order. A complete object moves to the next disk when the current FAT data area
-or root directory is full. Only Wave Data (`SMPL`) may span disks. Each physical
+Media conversion keeps the complete Program (`PROG`), Sample Bank (`SBAC`),
+Sample (`SBNK`), Sequence (`SEQU`), and `PRF3` foundation on disk 1. Export is
+blocked if that foundation does not fit there. Only Wave Data (`SMPL`) moves to
+later disks or spans disks. Each physical
 Wave Data segment repeats the source header and retains the complete logical
 payload size at `0x1c`; `0x20` is rewritten to the local segment size and
 `0x24` to its contiguous logical payload offset. Other object types are never
@@ -271,10 +283,13 @@ split. Every segment of one continued Wave Data object keeps the same generated
 DOS 8.3 filename on each disk; its local directory position never renumbers the
 continuation.
 
-Each multi-disk member contains an `A3000F.SYM` presence marker. Axklib does not
-synthesize the opaque `YAMAHA.SYM` payload used by Yamaha software for display
-metadata. The ZIP manifest therefore carries the deterministic logical disk
-names and exact member order:
+Every member contains its own exact synthesized `YAMAHA.SYM`. Nonfinal members
+catalog a zero-length `A3000F.SYM` continuation marker; the final member catalogs
+a zero-length `A3000E.SYM` end marker. Physical object slots are local to each
+disk and may be reused on later members. Segments of one continued Wave Data
+object deliberately retain one slot and physical filename across members. The
+ZIP manifest carries the deterministic logical disk names and exact member
+order:
 
 ```text
 manifest.json
@@ -284,13 +299,13 @@ payloads/disk02.ima
 ```
 
 The manifest schema is `axklib.floppy-disk-set.v1`. It records the disk count,
-logical name, member path, fixed image size, SHA-256 digest, marker name, and
-hardware-validation state. ZIP is a host transport container only: extract the
+logical name, member path, fixed image size, image and `YAMAHA.SYM` SHA-256
+digests, continuation marker, and hardware-validation state. ZIP is a host transport container only: extract the
 `.ima` members and present them to the sampler in manifest order, beginning
 with disk 1.
 
 Before publication, the writer reopens every FAT12 member, compares its exact
-object payloads, reassembles every split Wave Data object byte for byte, reopens
+object payloads and catalog, reassembles every split Wave Data object byte for byte, reopens
 the ZIP, and checks its inspected size. More than 32 required images is a
 blocking conversion issue. The profile deliberately remains marked
 `PENDING` until a physical A-series sampler loads, prompts through, and plays a

@@ -829,6 +829,24 @@ TEST(PortablePackage, ClearsCollidingExistingProgramRowsWhenImportingLowerObject
     const auto fat_imported = axk::apply_package_import(fat_path, packages, *fat_plan, fat_output);
     ASSERT_TRUE(fat_imported) << fat_imported.error().message;
     verify_result(fat_output);
+    const auto source_fat = axk::FatImage::open(fat_path);
+    const auto imported_fat = axk::FatImage::open(fat_output);
+    ASSERT_TRUE(source_fat) << source_fat.error().message;
+    ASSERT_TRUE(imported_fat) << imported_fat.error().message;
+    const auto source_symbol = std::ranges::find(source_fat->files(), std::string{"YAMAHA.SYM"}, &axk::FatFile::path);
+    const auto imported_symbol =
+        std::ranges::find(imported_fat->files(), std::string{"YAMAHA.SYM"}, &axk::FatFile::path);
+    ASSERT_NE(source_symbol, source_fat->files().end());
+    ASSERT_NE(imported_symbol, imported_fat->files().end());
+    const auto source_symbol_bytes = source_fat->read_file(*source_symbol);
+    const auto imported_symbol_bytes = imported_fat->read_file(*imported_symbol);
+    ASSERT_TRUE(source_symbol_bytes) << source_symbol_bytes.error().message;
+    ASSERT_TRUE(imported_symbol_bytes) << imported_symbol_bytes.error().message;
+    const auto source_catalog = axk::detail::decode_yamaha_floppy_catalog(*source_symbol_bytes);
+    const auto imported_catalog = axk::detail::decode_yamaha_floppy_catalog(*imported_symbol_bytes);
+    ASSERT_TRUE(source_catalog) << source_catalog.error().message;
+    ASSERT_TRUE(imported_catalog) << imported_catalog.error().message;
+    EXPECT_EQ(imported_catalog->disk_name, source_catalog->disk_name);
 
     axk::detail::PreparedMediaImage iso_target;
     iso_target.manifest.schema_version = "1.0";
@@ -2356,7 +2374,7 @@ TEST(PackageImportPlanner, RejectsFat12RootExhaustionAndInvalidExistingChains) {
     axk::detail::PreparedMediaImage full;
     full.manifest.schema_version = "1.0";
     full.manifest.format = axk::MediaImageFormat::fat12_floppy;
-    for (std::size_t index = 0U; index < 224U; ++index)
+    for (std::size_t index = 0U; index < 223U; ++index)
         full.retained_files.push_back({std::format("R{:07}.DAT", index), {static_cast<std::byte>(index)}});
     auto full_publication = axk::detail::TemporaryPublication::create(full_target);
     ASSERT_TRUE(full_publication) << full_publication.error().message;

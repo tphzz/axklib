@@ -324,10 +324,10 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 auto built = axk::build_portable_package(*session->media, *roots, context.cancellation);
                 if (!built && built.error().code == axk::ErrorCode::object_missing &&
                     session->source.kind == ImageSourceKind::axk_object_directory) {
-                    return std::unexpected(operation_error(
-                        "companion_disks_required",
-                        "Wave Data continues on another sampler disk. Add companion disk folders to export it.",
-                        session->source.relative_path));
+                    return std::unexpected(operation_error("companion_disks_required",
+                                                           "Wave Data continues on another sampler disk. Add extracted "
+                                                           "companion disk folders to export it.",
+                                                           session->source.relative_path));
                 }
                 if (!built)
                     return std::unexpected(core_error(built.error(), session->source.relative_path));

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
@@ -207,6 +208,29 @@ TEST(MediaConversion, WritesOnePartitionAsIsoAndOneVolumeAsFloppyFromRetainedRea
     const auto floppy_media = axk::open_media(floppy_path);
     ASSERT_TRUE(floppy_media) << floppy_media.error().message;
     EXPECT_EQ(payloads(*floppy_media), source_payloads);
+    const auto fat = axk::FatImage::open(floppy_path);
+    ASSERT_TRUE(fat) << fat.error().message;
+    const auto yamaha = std::ranges::find(fat->files(), std::string{"YAMAHA.SYM"}, &axk::FatFile::path);
+    ASSERT_NE(yamaha, fat->files().end());
+    EXPECT_EQ(yamaha->size, 9'766U);
+    const auto catalog_bytes = fat->read_file(*yamaha);
+    ASSERT_TRUE(catalog_bytes) << catalog_bytes.error().message;
+    const auto catalog = axk::detail::decode_yamaha_floppy_catalog(*catalog_bytes);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    EXPECT_EQ(catalog->disk_name, "SOURCE VOLUME 01");
+    ASSERT_EQ(catalog->files.size(), source_payloads.size());
+    for (std::size_t index = 0U; index < catalog->files.size(); ++index)
+        EXPECT_EQ(catalog->files[index].slot, index + 2U);
+    EXPECT_TRUE(std::ranges::contains(catalog->categories, "\\OTHERS"));
+    EXPECT_TRUE(std::ranges::contains(catalog->categories, "\\PROG"));
+    EXPECT_TRUE(std::ranges::contains(catalog->categories, "\\SBAC"));
+    EXPECT_TRUE(std::ranges::contains(catalog->categories, "\\SBNK"));
+    EXPECT_TRUE(std::ranges::contains(catalog->categories, "\\SMPL"));
+    EXPECT_EQ(std::ranges::count_if(fat->files(),
+                                    [](const axk::FatFile &file) {
+                                        return file.path.starts_with("A3000F") || file.path.starts_with("A3000E");
+                                    }),
+              0U);
     std::filesystem::remove_all(root, error);
 }
 
@@ -295,25 +319,66 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     ASSERT_TRUE(archive) << archive.error().message;
     ASSERT_EQ(archive->size(), 3U);
     EXPECT_EQ(archive->front().path, "manifest.json");
+    const auto manifest_text =
+        std::string(reinterpret_cast<const char *>(archive->front().bytes.data()), archive->front().bytes.size());
+    const auto disk_set_manifest = nlohmann::json::parse(manifest_text);
+    EXPECT_EQ(disk_set_manifest.at("yamahaSymbolMetadata"), "SYNTHESIZED");
+    EXPECT_FALSE(disk_set_manifest.contains("setMarker"));
+    ASSERT_EQ(disk_set_manifest.at("disks").size(), 2U);
+    EXPECT_EQ(disk_set_manifest.at("disks").at(0).at("continuationMarker"), "A3000F.SYM");
+    EXPECT_EQ(disk_set_manifest.at("disks").at(1).at("continuationMarker"), "A3000E.SYM");
+    EXPECT_EQ(disk_set_manifest.at("disks").at(0).at("yamahaSymbolSha256").get<std::string>().size(), 64U);
     std::vector<std::string> continuation_paths;
+    std::vector<std::string> continuation_logical_paths;
     for (std::size_t index = 1U; index < archive->size(); ++index) {
         EXPECT_EQ((*archive)[index].path, std::format("payloads/disk{:02}.ima", index));
         EXPECT_EQ((*archive)[index].bytes.size(), 1'474'560U);
         const auto disk =
             axk::FatImage::open(std::make_shared<axk::MemoryReader>((*archive)[index].bytes), (*archive)[index].path);
         ASSERT_TRUE(disk) << disk.error().message;
+        ASSERT_FALSE(disk->files().empty());
+        EXPECT_EQ(disk->files().back().path, "YAMAHA.SYM");
+        EXPECT_TRUE(
+            std::ranges::is_sorted(std::span{disk->files()}.first(disk->files().size() - 1U), {}, &axk::FatFile::path));
+        const auto yamaha = std::ranges::find(disk->files(), std::string{"YAMAHA.SYM"}, &axk::FatFile::path);
+        ASSERT_NE(yamaha, disk->files().end());
+        EXPECT_EQ(yamaha->size, 9'766U);
+        const auto catalog_bytes = disk->read_file(*yamaha);
+        ASSERT_TRUE(catalog_bytes) << catalog_bytes.error().message;
+        const auto catalog = axk::detail::decode_yamaha_floppy_catalog(*catalog_bytes);
+        ASSERT_TRUE(catalog) << catalog.error().message;
+        const std::string_view marker = index + 1U == archive->size() ? "\\A3000E.SYM" : "\\A3000F.SYM";
+        const auto marker_entry =
+            std::ranges::find(catalog->files, marker, &axk::detail::YamahaFloppyCatalogEntry::logical_path);
+        ASSERT_NE(marker_entry, catalog->files.end());
+        const auto marker_filename =
+            axk::detail::yamaha_floppy_physical_filename(marker.substr(1U), marker_entry->slot);
+        ASSERT_TRUE(marker_filename) << marker_filename.error().message;
+        EXPECT_TRUE(std::ranges::contains(disk->files(), *marker_filename, &axk::FatFile::path));
         for (const auto &file : disk->files()) {
             if (file.size < 0x42U)
                 continue;
             const auto prefix = disk->read_file_prefix(file, 0x42U);
             ASSERT_TRUE(prefix) << prefix.error().message;
             const auto header = axk::decode_object_header(*prefix);
-            if (header && header->type == axk::ObjectType::smpl)
+            if (header && index > 1U) {
+                EXPECT_EQ(header->type, axk::ObjectType::smpl);
+            }
+            if (header && header->type == axk::ObjectType::smpl) {
                 continuation_paths.push_back(file.path);
+                const auto slot = static_cast<std::uint16_t>(std::stoul(file.path.substr(file.path.size() - 3U)));
+                const auto logical =
+                    std::ranges::find(catalog->files, slot, &axk::detail::YamahaFloppyCatalogEntry::slot);
+                ASSERT_NE(logical, catalog->files.end());
+                continuation_logical_paths.push_back(logical->logical_path);
+            }
         }
     }
     ASSERT_EQ(continuation_paths.size(), 2U);
     EXPECT_EQ(continuation_paths.front(), continuation_paths.back());
+    ASSERT_EQ(continuation_logical_paths.size(), 2U);
+    EXPECT_TRUE(continuation_logical_paths.front().ends_with("01"));
+    EXPECT_TRUE(continuation_logical_paths.back().ends_with("02"));
     std::filesystem::remove_all(root, error);
 }
 
@@ -416,10 +481,10 @@ TEST(MediaConversion, WritesMultiSectorProgramAndSampleDirectories) {
     floppy_request.volume_directory_id = only_volume_directory(*source_media);
     const auto floppy_plan = axk::plan_media_conversion(open_reader(source_path), source_path, floppy_request);
     ASSERT_TRUE(floppy_plan) << floppy_plan.error().message;
-    EXPECT_TRUE(floppy_plan->can_export);
-    EXPECT_EQ(floppy_plan->artifact_kind, axk::MediaConversionArtifactKind::floppy_disk_set);
-    EXPECT_EQ(floppy_plan->floppy_image_count, 2U);
-    EXPECT_EQ(floppy_plan->output_extension, ".zip");
+    EXPECT_FALSE(floppy_plan->can_export);
+    EXPECT_TRUE(std::ranges::any_of(floppy_plan->issues, [](const auto &issue) {
+        return issue.blocking && issue.message.find("complete Program/Sample Bank/Sample graph") != std::string::npos;
+    }));
 
     const auto written = axk::write_media_conversion(open_reader(source_path), source_path, request, iso_path);
     ASSERT_TRUE(written) << written.error().message;
@@ -548,13 +613,27 @@ TEST(MediaConversion, PlansEveryRequiredFloppyBeforeTheThirtyTwoImageAdmissionLi
     axk::detail::PreparedMediaImage image;
     const auto payload = std::make_shared<SparseReader>(1'000'000U);
     for (std::size_t index = 1U; index <= 33U; ++index)
-        image.objects.emplace_back(axk::ObjectType::prog, std::format("Program {:02}", index), payload);
+        image.objects.emplace_back(axk::ObjectType::smpl, std::format("Wave {:02}", index), payload);
 
     const auto plan = axk::detail::plan_floppy_disk_set(image, "Disk set", {});
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_EQ(plan->disks.size(), 33U);
     EXPECT_EQ(plan->disks.front().name, "DISK SET      01");
     EXPECT_EQ(plan->disks.back().name, "DISK SET      33");
+}
+
+TEST(MediaConversion, UsesContinuationMarkersUntilTheFinalMemberOfAThreeDiskSet) {
+    axk::detail::PreparedMediaImage image;
+    const auto payload = std::make_shared<SparseReader>(1'000'000U);
+    for (std::size_t index = 1U; index <= 3U; ++index)
+        image.objects.emplace_back(axk::ObjectType::smpl, std::format("Wave {:02}", index), payload);
+
+    const auto plan = axk::detail::plan_floppy_disk_set(image, "Three disk", {});
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->disks.size(), 3U);
+    EXPECT_EQ(plan->disks[0].marker_name, "A3000F.SYM");
+    EXPECT_EQ(plan->disks[1].marker_name, "A3000F.SYM");
+    EXPECT_EQ(plan->disks[2].marker_name, "A3000E.SYM");
 }
 
 TEST(MediaConversion, PropagatesCancellationWhilePlanningAFloppyDiskSet) {

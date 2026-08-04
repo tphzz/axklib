@@ -1,7 +1,7 @@
 #include "axklib/writer_internal.hpp"
 
 #include <algorithm>
-#include <cctype>
+#include <array>
 #include <filesystem>
 #include <format>
 #include <limits>
@@ -25,15 +25,16 @@ namespace {
 constexpr std::uint64_t floppy_image_bytes = 1'474'560U;
 constexpr std::uint64_t floppy_data_clusters = 2'847U;
 constexpr std::uint64_t cluster_bytes = 512U;
-constexpr std::size_t floppy_root_entries = 224U;
-constexpr std::size_t set_marker_entries = 1U;
+constexpr std::uint64_t yamaha_catalog_clusters = 20U;
+constexpr std::size_t maximum_single_objects = 222U;
+constexpr std::size_t maximum_member_segments = 221U;
 constexpr std::size_t maximum_floppy_images = 32U;
-constexpr std::string_view set_marker_name = "A3000F.SYM";
+constexpr std::string_view continuation_marker_name = "A3000F.SYM";
+constexpr std::string_view final_marker_name = "A3000E.SYM";
 
 struct DiskState {
     FloppyDiskLayout layout;
-    std::uint64_t used_clusters{};
-    std::size_t used_entries{set_marker_entries};
+    std::uint64_t used_clusters{yamaha_catalog_clusters};
 };
 
 Error floppy_error(std::string message) {
@@ -44,26 +45,6 @@ Result<std::uint64_t> allocated_clusters(std::uint64_t bytes) {
     if (bytes > std::numeric_limits<std::uint64_t>::max() - (cluster_bytes - 1U))
         return std::unexpected{floppy_error("FAT12 allocation size overflowed")};
     return (bytes + cluster_bytes - 1U) / cluster_bytes;
-}
-
-std::string disk_name(std::string_view volume_name, std::size_t index) {
-    std::string base;
-    for (const auto character : volume_name) {
-        const auto byte = static_cast<unsigned char>(character);
-        if (std::isalnum(byte) != 0) {
-            base.push_back(static_cast<char>(std::toupper(byte)));
-        } else if (character == ' ' || character == '_') {
-            base.push_back(character);
-        } else {
-            base.push_back('_');
-        }
-        if (base.size() == 14U)
-            break;
-    }
-    if (base.empty())
-        base = "AXKLIB";
-    base.resize(14U, ' ');
-    return base + std::format("{:02}", index);
 }
 
 std::string disk_path(std::size_t index) { return std::format("payloads/disk{:02}.ima", index); }
@@ -89,28 +70,44 @@ Result<void> validate_complete_smpl(const PreparedMediaObject &object, const Obj
     return {};
 }
 
-void add_whole_object(DiskState &disk, std::size_t object_index, std::uint64_t size, std::uint64_t clusters) {
-    disk.layout.segments.push_back({object_index, 0U, size, 0U, false});
-    disk.used_clusters += clusters;
-    ++disk.used_entries;
+Result<std::uint16_t> allocate_catalog_slot(const DiskState &disk, std::optional<std::uint16_t> preferred = {}) {
+    const auto used = [&](std::uint16_t slot) {
+        return std::ranges::any_of(disk.layout.segments,
+                                   [slot](const auto &segment) { return segment.catalog_slot == slot; });
+    };
+    if (preferred && *preferred >= 2U && *preferred < 224U && !used(*preferred))
+        return *preferred;
+    for (std::uint16_t slot = 2U; slot < 224U; ++slot) {
+        if (!used(slot))
+            return slot;
+    }
+    return std::unexpected{floppy_error("Yamaha floppy member has no free object-catalog slot")};
 }
 
-nlohmann::ordered_json disk_set_manifest(const FloppyDiskSetPlan &plan, std::span<const std::string> digests) {
+Result<void> add_whole_object(DiskState &disk, std::size_t object_index, std::uint64_t size, std::uint64_t clusters) {
+    auto slot = allocate_catalog_slot(disk);
+    if (!slot)
+        return std::unexpected{slot.error()};
+    disk.layout.segments.push_back({object_index, *slot, 0U, size, 0U, false});
+    disk.used_clusters += clusters;
+    return {};
+}
+
+nlohmann::ordered_json disk_set_manifest(const FloppyDiskSetPlan &plan, std::span<const std::string> digests,
+                                         std::span<const std::string> catalog_digests) {
     nlohmann::ordered_json disks = nlohmann::ordered_json::array();
     for (std::size_t index = 0U; index < plan.disks.size(); ++index) {
         disks.push_back({{"index", index + 1U},
                          {"logicalName", plan.disks[index].name},
+                         {"continuationMarker", plan.disks[index].marker_name},
                          {"path", disk_path(index + 1U)},
                          {"sizeBytes", floppy_image_bytes},
-                         {"sha256", digests[index]}});
+                         {"sha256", digests[index]},
+                         {"yamahaSymbolSha256", catalog_digests[index]}});
     }
-    return {{"schema", "axklib.floppy-disk-set.v1"},
-            {"format", "YAMAHA_A_SERIES_MULTI_FLOPPY"},
-            {"diskCount", plan.disks.size()},
-            {"hardwareValidation", "PENDING"},
-            {"setMarker", set_marker_name},
-            {"yamahaSymbolMetadata", "NOT_SYNTHESIZED"},
-            {"disks", std::move(disks)}};
+    return {{"schema", "axklib.floppy-disk-set.v1"}, {"format", "YAMAHA_A_SERIES_MULTI_FLOPPY"},
+            {"diskCount", plan.disks.size()},        {"hardwareValidation", "PENDING"},
+            {"yamahaSymbolMetadata", "SYNTHESIZED"}, {"disks", std::move(disks)}};
 }
 
 std::vector<std::byte> json_bytes(const nlohmann::ordered_json &json) {
@@ -122,7 +119,7 @@ std::vector<std::byte> json_bytes(const nlohmann::ordered_json &json) {
 
 Result<std::uint64_t> projected_archive_bytes(const FloppyDiskSetPlan &plan) {
     std::vector<std::string> placeholders(plan.disks.size(), std::string(64U, '0'));
-    const auto manifest = json_bytes(disk_set_manifest(plan, placeholders));
+    const auto manifest = json_bytes(disk_set_manifest(plan, placeholders, placeholders));
     std::uint64_t result = 22U;
     const auto account = [&](std::string_view path, std::uint64_t bytes) -> Result<void> {
         const auto overhead = 76U + 2U * path.size();
@@ -205,19 +202,36 @@ Result<void> validate_disk(const PreparedMediaImage &prepared, std::span<const s
     if (expected != actual)
         return std::unexpected{floppy_error("generated floppy member failed exact object reopen validation")};
 
-    const auto root = fat->geometry().root_offset;
-    const auto root_bytes = std::span{bytes}.subspan(static_cast<std::size_t>(root), floppy_root_entries * 32U);
-    bool marker_found{};
-    for (std::size_t offset = 0U; offset < root_bytes.size(); offset += 32U) {
-        const auto entry = root_bytes.subspan(offset, 32U);
-        if (entry[0] == std::byte{} || entry[0] == std::byte{0xe5})
-            continue;
-        const std::string stem(reinterpret_cast<const char *>(entry.data()), 8U);
-        const std::string extension(reinterpret_cast<const char *>(entry.data() + 8U), 3U);
-        marker_found = marker_found || (stem == "A3000F  " && extension == "SYM");
+    if (!prepared.floppy_catalog)
+        return std::unexpected{floppy_error("generated floppy member has no expected Yamaha catalog")};
+    const auto yamaha = std::ranges::find(fat->files(), std::string{"YAMAHA.SYM"}, &FatFile::path);
+    if (yamaha == fat->files().end())
+        return std::unexpected{floppy_error("generated floppy member is missing YAMAHA.SYM")};
+    auto actual_catalog = fat->read_file(*yamaha, cancellation);
+    if (!actual_catalog)
+        return std::unexpected{actual_catalog.error()};
+    auto expected_catalog = encode_yamaha_floppy_catalog(
+        prepared.floppy_catalog->disk_name, prepared.floppy_catalog->files, prepared.floppy_catalog->categories);
+    if (!expected_catalog)
+        return std::unexpected{expected_catalog.error()};
+    if (*actual_catalog != *expected_catalog)
+        return std::unexpected{floppy_error("generated floppy member Yamaha catalog differs from its plan")};
+    const auto marker = std::ranges::find_if(prepared.floppy_catalog->files, [](const auto &file) {
+        return file.logical_path == "\\A3000F.SYM" || file.logical_path == "\\A3000E.SYM";
+    });
+    if (marker == prepared.floppy_catalog->files.end())
+        return std::unexpected{floppy_error("generated floppy member catalog has no continuation marker")};
+    auto marker_filename = yamaha_floppy_physical_filename(marker->logical_path.substr(1U), marker->slot);
+    if (!marker_filename)
+        return std::unexpected{marker_filename.error()};
+    if (!std::ranges::contains(fat->files(), *marker_filename, &FatFile::path)) {
+        std::string actual;
+        for (const auto &file : fat->files())
+            actual += (actual.empty() ? "" : ", ") + file.path;
+        return std::unexpected{
+            floppy_error(std::format("generated floppy member is missing physical continuation marker '{}' (root: {})",
+                                     *marker_filename, actual))};
     }
-    if (!marker_found)
-        return std::unexpected{floppy_error("generated floppy member is missing A3000F.SYM")};
     return {};
 }
 
@@ -267,9 +281,8 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
                                                const CancellationToken &cancellation) {
     if (image.objects.empty())
         return std::unexpected{floppy_error("a floppy disk set must contain at least one Yamaha object")};
-
-    std::uint64_t single_clusters{};
-    bool fits_single = image.objects.size() <= floppy_root_entries;
+    std::uint64_t single_clusters{yamaha_catalog_clusters};
+    bool fits_single = image.objects.size() <= maximum_single_objects;
     for (const auto &object : image.objects) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
@@ -282,21 +295,64 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
     }
     if (fits_single) {
         FloppyDiskSetPlan result;
-        result.disks.push_back({disk_name(volume_name, 1U), {}});
-        for (std::size_t index = 0U; index < image.objects.size(); ++index)
-            result.disks.front().segments.push_back({index, 0U, image.objects[index].size(), 0U, false});
+        auto name = yamaha_floppy_disk_name(volume_name, 1U);
+        if (!name)
+            return std::unexpected{name.error()};
+        result.disks.push_back({std::move(*name), {}, 0U, {}});
+        for (std::size_t index = 0U; index < image.objects.size(); ++index) {
+            result.disks.front().segments.push_back(
+                {index, static_cast<std::uint16_t>(index + 2U), 0U, image.objects[index].size(), 0U, false});
+        }
         result.projected_archive_bytes = floppy_image_bytes;
         return result;
     }
 
     std::vector<DiskState> disks;
-    const auto add_disk = [&]() -> DiskState & {
+    const auto add_disk = [&]() -> Result<DiskState *> {
         const auto index = disks.size() + 1U;
-        disks.push_back({{disk_name(volume_name, index), {}}, 0U, set_marker_entries});
-        return disks.back();
+        auto name = yamaha_floppy_disk_name(volume_name, index);
+        if (!name)
+            return std::unexpected{name.error()};
+        disks.push_back({{std::move(*name), {}, 0U, {}}, yamaha_catalog_clusters});
+        return &disks.back();
     };
-    add_disk();
-    for (std::size_t object_index = 0U; object_index < image.objects.size(); ++object_index) {
+    auto first_disk = add_disk();
+    if (!first_disk)
+        return std::unexpected{first_disk.error()};
+    const auto fits = [](const DiskState &disk, std::uint64_t clusters) {
+        return disk.layout.segments.size() < maximum_member_segments &&
+               clusters <= floppy_data_clusters - disk.used_clusters;
+    };
+
+    std::vector<std::size_t> foundational_objects;
+    std::vector<std::size_t> wave_data_objects;
+    for (std::size_t index = 0U; index < image.objects.size(); ++index) {
+        if (image.objects[index].type == ObjectType::smpl)
+            wave_data_objects.push_back(index);
+        else
+            foundational_objects.push_back(index);
+    }
+    constexpr std::array foundational_order{ObjectType::prog, ObjectType::sbac, ObjectType::sbnk, ObjectType::sequ,
+                                            ObjectType::prf3};
+    std::ranges::stable_sort(foundational_objects, {}, [&](std::size_t index) {
+        const auto found = std::ranges::find(foundational_order, image.objects[index].type);
+        return static_cast<std::size_t>(found - foundational_order.begin());
+    });
+    for (const auto object_index : foundational_objects) {
+        auto clusters = allocated_clusters(image.objects[object_index].size());
+        if (!clusters)
+            return std::unexpected{clusters.error()};
+        if (!fits(**first_disk, *clusters)) {
+            return std::unexpected{
+                floppy_error("the complete Program/Sample Bank/Sample graph does not fit on the first Yamaha floppy")};
+        }
+        if (auto added = add_whole_object(**first_disk, object_index, image.objects[object_index].size(), *clusters);
+            !added) {
+            return std::unexpected{added.error()};
+        }
+    }
+
+    for (const auto object_index : wave_data_objects) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
         const auto &object = image.objects[object_index];
@@ -304,21 +360,19 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
         if (!whole_clusters)
             return std::unexpected{whole_clusters.error()};
         auto *disk = &disks.back();
-        const auto fits_current = [&]() {
-            return disk->used_entries < floppy_root_entries &&
-                   *whole_clusters <= floppy_data_clusters - disk->used_clusters;
-        };
-        if (fits_current()) {
-            add_whole_object(*disk, object_index, object.size(), *whole_clusters);
+        if (fits(*disk, *whole_clusters)) {
+            if (auto added = add_whole_object(*disk, object_index, object.size(), *whole_clusters); !added)
+                return std::unexpected{added.error()};
             continue;
         }
-        if (*whole_clusters <= floppy_data_clusters) {
-            disk = &add_disk();
-            add_whole_object(*disk, object_index, object.size(), *whole_clusters);
+        if (*whole_clusters <= floppy_data_clusters - yamaha_catalog_clusters) {
+            auto next = add_disk();
+            if (!next)
+                return std::unexpected{next.error()};
+            disk = *next;
+            if (auto added = add_whole_object(*disk, object_index, object.size(), *whole_clusters); !added)
+                return std::unexpected{added.error()};
             continue;
-        }
-        if (object.type != ObjectType::smpl) {
-            return std::unexpected{floppy_error("only Wave Data objects may span multiple Yamaha floppy images")};
         }
         auto header = read_object_header(object, cancellation);
         if (!header)
@@ -326,12 +380,16 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
         if (auto valid = validate_complete_smpl(object, *header); !valid)
             return std::unexpected{valid.error()};
         std::uint64_t offset{};
+        std::optional<std::uint16_t> continuation_slot;
         while (offset < header->payload_bytes_0x1c) {
             disk = &disks.back();
             const auto available_clusters = floppy_data_clusters - disk->used_clusters;
             const auto available_bytes = available_clusters * cluster_bytes;
-            if (disk->used_entries >= floppy_root_entries || available_bytes <= header->header_size) {
-                disk = &add_disk();
+            if (disk->layout.segments.size() >= maximum_member_segments || available_bytes <= header->header_size) {
+                auto next = add_disk();
+                if (!next)
+                    return std::unexpected{next.error()};
+                disk = *next;
                 continue;
             }
             const auto remaining = static_cast<std::uint64_t>(header->payload_bytes_0x1c) - offset;
@@ -341,17 +399,37 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
             auto segment_clusters = allocated_clusters(header->header_size + local_bytes);
             if (!segment_clusters)
                 return std::unexpected{segment_clusters.error()};
-            disk->layout.segments.push_back({object_index, offset, local_bytes, header->header_size, true});
+            auto slot = allocate_catalog_slot(*disk, continuation_slot);
+            if (!slot)
+                return std::unexpected{slot.error()};
+            continuation_slot = *slot;
+            disk->layout.segments.push_back({object_index, *slot, offset, local_bytes, header->header_size, true});
             disk->used_clusters += *segment_clusters;
-            ++disk->used_entries;
             offset += local_bytes;
         }
     }
 
     FloppyDiskSetPlan result;
     result.disks.reserve(disks.size());
-    for (auto &disk : disks)
+    for (std::size_t index = 0U; index < disks.size(); ++index) {
+        auto &disk = disks[index];
+        std::set<std::uint16_t> used_slots;
+        for (const auto &segment : disk.layout.segments)
+            used_slots.insert(segment.catalog_slot);
+        std::optional<std::uint16_t> marker_slot;
+        for (std::uint16_t slot = 2U; slot < 224U; ++slot) {
+            if (!used_slots.contains(slot)) {
+                marker_slot = slot;
+                break;
+            }
+        }
+        if (!marker_slot)
+            return std::unexpected{floppy_error("Yamaha floppy member has no free continuation-marker slot")};
+        disk.layout.marker_name =
+            std::string{index + 1U == disks.size() ? final_marker_name : continuation_marker_name};
+        disk.layout.marker_slot = *marker_slot;
         result.disks.push_back(std::move(disk.layout));
+    }
     auto projection = projected_archive_bytes(result);
     if (!projection)
         return std::unexpected{projection.error()};
@@ -366,19 +444,23 @@ Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image,
         return std::unexpected{floppy_error("multi-floppy output requires between 2 and 32 images")};
     std::vector<package_internal::ArchiveEntry> entries;
     std::vector<std::string> digests;
+    std::vector<std::string> catalog_digests;
     std::map<std::size_t, std::vector<std::vector<std::byte>>> split_segments;
-    auto object_filenames = plan_fat12_object_filenames(image);
-    if (!object_filenames)
-        return std::unexpected{object_filenames.error()};
     entries.reserve(plan.disks.size() + 1U);
     digests.reserve(plan.disks.size());
+    catalog_digests.reserve(plan.disks.size());
     for (std::size_t disk_index = 0U; disk_index < plan.disks.size(); ++disk_index) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
         PreparedMediaImage disk = image;
         disk.objects.clear();
         disk.iso_volumes.clear();
-        disk.retained_files = {{std::string{set_marker_name}, {}}};
+        disk.floppy_catalog = YamahaFloppyCatalog{plan.disks[disk_index].name, {}, {}};
+        const auto marker_filename =
+            yamaha_floppy_physical_filename(plan.disks[disk_index].marker_name, plan.disks[disk_index].marker_slot);
+        if (!marker_filename)
+            return std::unexpected{marker_filename.error()};
+        disk.retained_files = {{*marker_filename, {}}};
         for (const auto &segment : plan.disks[disk_index].segments) {
             auto bytes = materialize_segment(image.objects[segment.object_index], segment, cancellation);
             if (!bytes)
@@ -387,8 +469,26 @@ Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image,
                 split_segments[segment.object_index].push_back(*bytes);
             disk.objects.emplace_back(image.objects[segment.object_index].type,
                                       image.objects[segment.object_index].name, std::move(*bytes));
-            disk.objects.back().fat_filename = (*object_filenames)[segment.object_index];
+            auto physical_filename =
+                yamaha_floppy_physical_filename(image.objects[segment.object_index].name, segment.catalog_slot);
+            if (!physical_filename)
+                return std::unexpected{physical_filename.error()};
+            disk.objects.back().fat_filename = std::move(*physical_filename);
+            auto logical_path = yamaha_floppy_object_path(
+                image.objects[segment.object_index].type, image.objects[segment.object_index].name,
+                segment.split ? std::optional<std::size_t>{disk_index + 1U} : std::nullopt);
+            if (!logical_path)
+                return std::unexpected{logical_path.error()};
+            disk.floppy_catalog->files.push_back({segment.catalog_slot, std::move(*logical_path)});
         }
+        disk.floppy_catalog->files.push_back(
+            {plan.disks[disk_index].marker_slot, "\\" + plan.disks[disk_index].marker_name});
+        disk.floppy_catalog->categories = yamaha_floppy_categories(disk.objects);
+        auto catalog_bytes = encode_yamaha_floppy_catalog(disk.floppy_catalog->disk_name, disk.floppy_catalog->files,
+                                                          disk.floppy_catalog->categories);
+        if (!catalog_bytes)
+            return std::unexpected{catalog_bytes.error()};
+        catalog_digests.push_back(package_internal::hex_digest(package_internal::sha256(*catalog_bytes)));
         auto image_bytes = build_fat12_image(disk, cancellation);
         if (!image_bytes)
             return std::unexpected{image_bytes.error()};
@@ -399,7 +499,7 @@ Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image,
     }
     if (auto validated = validate_reassembly(image, split_segments, cancellation); !validated)
         return std::unexpected{validated.error()};
-    entries.push_back({"manifest.json", json_bytes(disk_set_manifest(plan, digests))});
+    entries.push_back({"manifest.json", json_bytes(disk_set_manifest(plan, digests, catalog_digests))});
     auto archive = package_internal::write_archive(std::move(entries));
     if (!archive)
         return std::unexpected{archive.error()};

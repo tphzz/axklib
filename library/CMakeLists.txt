@@ -209,6 +209,7 @@ add_library(
   src/media_build.cpp
   src/media_conversion.cpp
   src/media_floppy_set.cpp
+  src/media_floppy_catalog.cpp
   src/media_iso9660_layout.cpp
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
@@ -476,6 +477,7 @@ if(BUILD_TESTING)
     tests/media_fat12_test.cpp
     tests/media_iso9660_test.cpp
     tests/media_conversion_test.cpp
+    tests/media_floppy_catalog_test.cpp
     tests/media_yamaha_test.cpp
     tests/object_test.cpp
     tests/package_archive_test.cpp

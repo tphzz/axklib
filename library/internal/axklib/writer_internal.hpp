@@ -71,12 +71,28 @@ struct PreparedIsoVolume {
     std::vector<PreparedMediaObject> objects;
 };
 
+struct YamahaFloppyCatalogEntry {
+    std::uint16_t slot{};
+    std::string logical_path;
+
+    bool operator==(const YamahaFloppyCatalogEntry &) const = default;
+};
+
+struct YamahaFloppyCatalog {
+    std::string disk_name;
+    std::vector<YamahaFloppyCatalogEntry> files;
+    std::vector<std::string> categories;
+};
+
+inline constexpr std::size_t yamaha_floppy_catalog_bytes = 257U * 38U;
+
 struct PreparedMediaImage {
     MediaBuildManifest manifest;
     MediaBuildLimits limits{};
     std::vector<PreparedMediaObject> objects;
     std::vector<PreparedMediaFile> retained_files;
     std::vector<PreparedIsoVolume> iso_volumes;
+    std::optional<YamahaFloppyCatalog> floppy_catalog;
 };
 
 struct Iso9660LayoutNode {
@@ -111,6 +127,7 @@ struct PreparedMediaConversion {
 
 struct FloppyObjectSegment {
     std::size_t object_index{};
+    std::uint16_t catalog_slot{};
     std::uint64_t payload_offset{};
     std::uint64_t payload_bytes{};
     std::uint32_t header_bytes{};
@@ -119,6 +136,8 @@ struct FloppyObjectSegment {
 
 struct FloppyDiskLayout {
     std::string name;
+    std::string marker_name;
+    std::uint16_t marker_slot{};
     std::vector<FloppyObjectSegment> segments;
 };
 
@@ -163,6 +182,17 @@ Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublica
 Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image,
                                                  const CancellationToken &cancellation);
 Result<std::vector<std::string>> plan_fat12_object_filenames(const PreparedMediaImage &image);
+Result<std::vector<std::byte>> encode_yamaha_floppy_catalog(std::string_view disk_name,
+                                                            std::span<const YamahaFloppyCatalogEntry> files,
+                                                            std::span<const std::string> categories);
+Result<YamahaFloppyCatalog> decode_yamaha_floppy_catalog(std::span<const std::byte> bytes);
+bool is_yamaha_floppy_catalog_path(std::string_view path);
+Result<std::string> yamaha_floppy_disk_name(std::string_view volume_name, std::size_t disk_index);
+std::vector<std::string> yamaha_floppy_categories(std::span<const PreparedMediaObject> objects);
+Result<std::string> yamaha_floppy_object_path(ObjectType type, std::string_view name,
+                                              std::optional<std::size_t> disk_index = {});
+Result<std::string> yamaha_floppy_physical_filename(std::string_view logical_name, std::uint16_t slot);
+Result<std::uint16_t> yamaha_floppy_filename_slot(std::string_view filename);
 Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, std::string_view volume_name,
                                                const CancellationToken &cancellation);
 Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image, const FloppyDiskSetPlan &plan,
