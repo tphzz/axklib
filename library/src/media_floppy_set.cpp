@@ -225,12 +225,12 @@ Result<void> validate_disk(const PreparedMediaImage &prepared, std::span<const s
     if (!marker_filename)
         return std::unexpected{marker_filename.error()};
     if (!std::ranges::contains(fat->files(), *marker_filename, &FatFile::path)) {
-        std::string actual;
+        std::string root_paths;
         for (const auto &file : fat->files())
-            actual += (actual.empty() ? "" : ", ") + file.path;
+            root_paths += (root_paths.empty() ? "" : ", ") + file.path;
         return std::unexpected{
             floppy_error(std::format("generated floppy member is missing physical continuation marker '{}' (root: {})",
-                                     *marker_filename, actual))};
+                                     *marker_filename, root_paths))};
     }
     return {};
 }
