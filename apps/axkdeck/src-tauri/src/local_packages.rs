@@ -17,7 +17,7 @@ const MAX_RETAINED_PACKAGE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const SUPPORTED_PACKAGE_EXTENSIONS: [&str; 7] = [
     "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
 ];
-const SUPPORTED_MEDIA_EXTENSIONS: [&str; 2] = ["iso", "ima"];
+const SUPPORTED_MEDIA_EXTENSIONS: [&str; 3] = ["iso", "ima", "zip"];
 
 #[derive(Default)]
 pub(crate) struct PackageSaveCandidateStore {
@@ -219,8 +219,8 @@ pub(crate) async fn select_local_media_destination(
         let mut dialog = app
             .dialog()
             .file()
-            .set_title("Save sampler media image")
-            .add_filter("sampler media image", &[picker_extension.as_str()])
+            .set_title("Save sampler media export")
+            .add_filter("sampler media export", &[picker_extension.as_str()])
             .set_file_name(suggested_name)
             .set_parent(&window);
         if let Some(directory) = starting_directory {

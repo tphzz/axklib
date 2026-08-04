@@ -225,12 +225,16 @@ struct WrittenImageLayout {
     PublicationOutcome publication;
 };
 
+enum class MediaConversionArtifactKind : std::uint8_t { image, floppy_disk_set };
+
 struct WrittenMediaImage {
     std::filesystem::path path;
     MediaImageFormat format{MediaImageFormat::fat12_floppy};
     std::uint64_t size_bytes{};
     std::size_t object_count{};
     PublicationOutcome publication;
+    MediaConversionArtifactKind artifact_kind{MediaConversionArtifactKind::image};
+    std::size_t floppy_image_count{};
 };
 
 struct HdsBuildPlanSummary {
@@ -286,12 +290,23 @@ struct MediaConversionRequest {
     std::string iso_volume_id{"AXKLIB"};
 };
 
+enum class MediaConversionIssueUnit {
+    bytes,
+    directory_entries,
+    floppy_images,
+};
+
+struct MediaConversionIssueMeasurement {
+    std::uint64_t required{};
+    std::uint64_t available{};
+    MediaConversionIssueUnit unit{MediaConversionIssueUnit::bytes};
+};
+
 struct MediaConversionIssue {
     std::string code;
     std::string message;
     bool blocking{true};
-    std::optional<std::uint64_t> required_bytes;
-    std::optional<std::uint64_t> available_bytes;
+    std::optional<MediaConversionIssueMeasurement> measurement;
 };
 
 struct MediaConversionVolumeSummary {
@@ -312,6 +327,9 @@ struct MediaConversionPlanSummary {
     std::uint64_t payload_bytes{};
     std::uint64_t projected_output_bytes{};
     std::uint64_t capacity_bytes{};
+    MediaConversionArtifactKind artifact_kind{MediaConversionArtifactKind::image};
+    std::string output_extension;
+    std::size_t floppy_image_count{};
     std::vector<MediaConversionVolumeSummary> volumes;
     std::vector<MediaConversionIssue> issues;
 };

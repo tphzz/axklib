@@ -21,8 +21,7 @@ namespace axk {
 namespace {
 
 constexpr std::uint64_t floppy_image_bytes = 1'474'560U;
-constexpr std::uint64_t floppy_data_bytes = 2'847U * 512U;
-constexpr std::size_t floppy_root_entries = 224U;
+constexpr std::size_t maximum_floppy_images = 32U;
 constexpr std::string_view generated_raw_group = "46DEF120";
 
 struct SourceVolume {
@@ -84,16 +83,13 @@ bool dependency_relationship(const Relationship &relationship) {
 }
 
 void add_issue(MediaConversionPlanSummary &summary, std::string code, std::string message,
-               std::optional<std::uint64_t> required = {}, std::optional<std::uint64_t> available = {},
-               bool blocking = true) {
-    summary.issues.push_back({std::move(code), std::move(message), blocking, required, available});
+               std::optional<MediaConversionIssueMeasurement> measurement = {}, bool blocking = true) {
+    summary.issues.push_back({std::move(code), std::move(message), blocking, measurement});
 }
 
 bool retained_disabled_program_row(const Relationship &relationship,
-                                   const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects_by_key,
-                                   const MediaConversionRequest &request) {
-    return request.format == MediaImageFormat::iso9660 && request.scope == MediaConversionScope::partition &&
-           relationship.assignment_state == AssignmentState::active && !relationship.assignment_name.empty() &&
+                                   const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects_by_key) {
+    return relationship.assignment_state == AssignmentState::active && !relationship.assignment_name.empty() &&
            (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" || relationship.type == "PROG_ASSIGNMENT_TO_SBAC") &&
            relationship.quality != RelationshipQuality::known &&
            !detail::relationship_has_exact_named_program_target(relationship, objects_by_key);
@@ -180,32 +176,54 @@ void validate_iso_layout(detail::PreparedMediaConversion &prepared) {
     summary.projected_output_bytes = layout->output_bytes;
     if (summary.projected_output_bytes > summary.capacity_bytes) {
         add_issue(summary, "MEDIA_CONVERSION_OUTPUT_CAPACITY", "The partition does not fit on a 700 MB CD-ROM image",
-                  summary.projected_output_bytes, summary.capacity_bytes);
+                  MediaConversionIssueMeasurement{summary.projected_output_bytes, summary.capacity_bytes,
+                                                  MediaConversionIssueUnit::bytes});
     }
 }
 
-void validate_floppy_layout(detail::PreparedMediaConversion &prepared) {
+Result<void> validate_floppy_layout(detail::PreparedMediaConversion &prepared, const CancellationToken &cancellation) {
     auto &summary = prepared.summary;
-    summary.projected_output_bytes = floppy_image_bytes;
-    if (summary.object_count > floppy_root_entries) {
-        add_issue(summary, "MEDIA_CONVERSION_FLOPPY_DIRECTORY_CAPACITY",
-                  "The volume has too many objects for the FAT12 root directory", summary.object_count,
-                  floppy_root_entries);
+    const auto volume_name = summary.volumes.empty() ? std::string_view{"AXKLIB"} : summary.volumes.front().name;
+    auto plan = detail::plan_floppy_disk_set(prepared.image, volume_name, cancellation);
+    if (!plan) {
+        if (plan.error().code == ErrorCode::operation_cancelled)
+            return std::unexpected{plan.error()};
+        add_issue(summary, "MEDIA_CONVERSION_FLOPPY_LAYOUT_UNSUPPORTED", plan.error().message);
+        return {};
     }
-    std::uint64_t allocated{};
-    for (const auto &object : prepared.image.objects) {
-        const auto clusters = object.size() / 512U + (object.size() % 512U == 0U ? 0U : 1U);
-        if (clusters > std::numeric_limits<std::uint64_t>::max() / 512U ||
-            allocated > std::numeric_limits<std::uint64_t>::max() - clusters * 512U) {
-            add_issue(summary, "MEDIA_CONVERSION_FLOPPY_CAPACITY", "FAT12 allocation size overflowed");
-            return;
-        }
-        allocated += clusters * 512U;
+    summary.floppy_image_count = plan->disks.size();
+    if (plan->disks.size() == 1U) {
+        summary.artifact_kind = MediaConversionArtifactKind::image;
+        summary.output_extension = ".ima";
+        summary.projected_output_bytes = floppy_image_bytes;
+        summary.capacity_bytes = floppy_image_bytes;
+        return {};
     }
-    if (allocated > floppy_data_bytes) {
-        add_issue(summary, "MEDIA_CONVERSION_FLOPPY_CAPACITY",
-                  "The volume does not fit in a 1.44 MB Yamaha FAT12 floppy image", allocated, floppy_data_bytes);
+
+    summary.artifact_kind = MediaConversionArtifactKind::floppy_disk_set;
+    summary.output_extension = ".zip";
+    summary.projected_output_bytes = plan->projected_archive_bytes;
+    summary.capacity_bytes = maximum_floppy_images * floppy_image_bytes;
+    if (plan->disks.size() > maximum_floppy_images) {
+        add_issue(summary, "MEDIA_CONVERSION_FLOPPY_DISK_SET_CAPACITY",
+                  "The volume requires more than 32 Yamaha floppy images",
+                  MediaConversionIssueMeasurement{plan->disks.size(), maximum_floppy_images,
+                                                  MediaConversionIssueUnit::floppy_images});
+        return {};
     }
+    if (summary.projected_output_bytes > prepared.image.limits.maximum_output_bytes) {
+        add_issue(
+            summary, "MEDIA_CONVERSION_OUTPUT_CAPACITY", "The multi-floppy archive exceeds the configured output limit",
+            MediaConversionIssueMeasurement{summary.projected_output_bytes, prepared.image.limits.maximum_output_bytes,
+                                            MediaConversionIssueUnit::bytes});
+        return {};
+    }
+    add_issue(summary, "MEDIA_CONVERSION_MULTI_FLOPPY_HARDWARE_VALIDATION_PENDING",
+              "Multi-floppy continuation layout is host-verified but still requires sampler hardware validation",
+              MediaConversionIssueMeasurement{plan->disks.size(), maximum_floppy_images,
+                                              MediaConversionIssueUnit::floppy_images},
+              false);
+    return {};
 }
 
 std::string sanitized_iso_id(std::string value) {
@@ -287,6 +305,8 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
     prepared.image.manifest.raw_group = std::string{generated_raw_group};
     prepared.image.manifest.group_name = partition->name;
     prepared.image.limits = limits;
+    prepared.summary.output_extension = request.format == MediaImageFormat::iso9660 ? ".iso" : ".ima";
+    prepared.summary.floppy_image_count = request.format == MediaImageFormat::fat12_floppy ? 1U : 0U;
 
     std::set<std::string> selected_keys;
     std::unordered_map<std::string, std::uint32_t> volume_by_key;
@@ -380,7 +400,7 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
         if (!selected_keys.contains(relationship.source_key) || !dependency_relationship(relationship))
             continue;
         if (relationship.quality != RelationshipQuality::known || !relationship.target_key) {
-            if (retained_disabled_program_row(relationship, objects_by_key, request)) {
+            if (retained_disabled_program_row(relationship, objects_by_key)) {
                 ++retained_program_row_count;
                 if (retained_program_row_names.size() < 5U &&
                     !std::ranges::contains(retained_program_row_names, relationship.assignment_name)) {
@@ -413,7 +433,7 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
                   std::format("Retained {} disabled Program assignment row{} without inventing target objects{}{}",
                               retained_program_row_count, retained_program_row_count == 1U ? "" : "s",
                               names.empty() ? "" : ": ", names),
-                  {}, {}, false);
+                  {}, false);
     }
 
     if (prepared.summary.volumes.empty()) {
@@ -424,7 +444,8 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
     } else {
         if (prepared.summary.object_count == 0U)
             add_issue(prepared.summary, "MEDIA_CONVERSION_SCOPE_EMPTY", "A floppy image must contain an object");
-        validate_floppy_layout(prepared);
+        if (auto validated = validate_floppy_layout(prepared, cancellation); !validated)
+            return std::unexpected{validated.error()};
     }
     prepared.summary.can_export = std::ranges::none_of(prepared.summary.issues, &MediaConversionIssue::blocking);
     return prepared;
@@ -455,6 +476,15 @@ Result<WrittenMediaImage> write_media_conversion(std::shared_ptr<const RandomAcc
     if (!prepared->summary.can_export) {
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           prepared->summary.issues.front().message)};
+    }
+    if (request.format == MediaImageFormat::fat12_floppy) {
+        const auto volume_name =
+            prepared->summary.volumes.empty() ? std::string_view{"AXKLIB"} : prepared->summary.volumes.front().name;
+        auto plan = detail::plan_floppy_disk_set(prepared->image, volume_name, cancellation);
+        if (!plan)
+            return std::unexpected{plan.error()};
+        if (plan->disks.size() > 1U)
+            return detail::write_floppy_disk_set(prepared->image, *plan, output_path, overwrite, cancellation);
     }
     return detail::write_prepared_media_image(prepared->image, output_path, overwrite, cancellation);
 }

@@ -673,23 +673,30 @@ TEST(ServerContract, MediaConversionRequestsAndTerminalResultsMatchTheirSchemas)
         {"revision", 3U},
         {"format", "FAT12_FLOPPY"},
         {"scope", "VOLUME"},
+        {"artifactKind", "FLOPPY_DISK_SET"},
+        {"outputExtension", ".zip"},
+        {"floppyImageCount", 2U},
         {"partitionIndex", 0U},
         {"partitionName", "PARTITION 1"},
         {"canExport", true},
         {"objectCount", 2U},
         {"payloadBytes", 1024U},
-        {"projectedOutputBytes", 1474560U},
-        {"capacityBytes", 1457664U},
+        {"projectedOutputBytes", 2950000U},
+        {"capacityBytes", 47185920U},
         {"volumes", nlohmann::json::array(
                         {{{"volumeDirectoryId", 17U}, {"name", "KIT"}, {"objectCount", 2U}, {"payloadBytes", 1024U}}})},
-        {"issues", nlohmann::json::array()},
-        {"defaultFilename", "disk_p00_KIT.ima"}};
+        {"issues",
+         nlohmann::json::array({{{"code", "MEDIA_CONVERSION_MULTI_FLOPPY_HARDWARE_VALIDATION_PENDING"},
+                                 {"message", "Sampler hardware validation is pending"},
+                                 {"blocking", false},
+                                 {"measurement", {{"required", 2U}, {"available", 32U}, {"unit", "FLOPPY_IMAGES"}}}}})},
+        {"defaultFilename", "disk_p00_KIT.zip"}};
     EXPECT_TRUE(validator.validate("ImageSessionMediaConversionInspection", plan));
 
     auto result = plan;
-    result["sizeBytes"] = 1474560U;
+    result["sizeBytes"] = 2950000U;
     result["destination"] = "WORKSPACE";
-    result["output"] = nlohmann::json{{"rootId", "workspace"}, {"relativePath", "exports/KIT.ima"}};
+    result["output"] = nlohmann::json{{"rootId", "workspace"}, {"relativePath", "exports/KIT.zip"}};
     result["download"] = nullptr;
     EXPECT_TRUE(validator.validate("ImageSessionMediaConversionResult", result));
 }

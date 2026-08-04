@@ -170,10 +170,11 @@ Yamaha changes the host filename between disks, plus a Wave Data object whose
 embedded name exactly satisfies an active but unresolved Sample member lane.
 Unrelated sibling objects remain outside the session.
 
-This segment interpretation is **Strong**: it is repeated across independent
-multi-disk object-directory sets and the segment ranges join exactly to
-`payload_bytes_0x1c`; the corresponding primary implementation path has not yet
-been fully traced.
+This segment interpretation is **Confirmed**. Independent multi-disk object
+sets join exactly to `payload_bytes_0x1c`, and the primary sampler load/save
+paths use `0x20` as the physical segment size and `0x24` as the logical payload
+offset. Axklib's multi-floppy writer uses only this exact contiguous form and
+validates byte-identical reassembly before publication.
 
 Generated images may store a short compatibility tail after the logical waveform
 frames. In that case the complete logical byte count includes the tail, while

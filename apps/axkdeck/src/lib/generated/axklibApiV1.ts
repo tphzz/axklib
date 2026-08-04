@@ -2120,14 +2120,19 @@ export interface components {
                   kind: 'DOWNLOAD';
               };
         ImageSessionMediaConversionInspection: {
+            /** @enum {unknown} */
+            artifactKind: 'IMAGE' | 'FLOPPY_DISK_SET';
             canExport: boolean;
             capacityBytes: number;
             defaultFilename: string;
+            floppyImageCount: number;
             /** @enum {unknown} */
             format: 'ISO9660' | 'FAT12_FLOPPY';
             imageId: string;
             issues: components['schemas']['MediaConversionIssue'][];
             objectCount: number;
+            /** @example .iso */
+            outputExtension: string;
             partitionIndex: number;
             partitionName: string;
             payloadBytes: number;
@@ -2174,6 +2179,8 @@ export interface components {
                   volumeDirectoryId: number;
               };
         ImageSessionMediaConversionResult: {
+            /** @enum {unknown} */
+            artifactKind: 'IMAGE' | 'FLOPPY_DISK_SET';
             /** @constant */
             canExport: true;
             capacityBytes: number;
@@ -2181,12 +2188,15 @@ export interface components {
             /** @enum {unknown} */
             destination: 'WORKSPACE' | 'DOWNLOAD';
             download: components['schemas']['RetainedDownload'] | null;
+            floppyImageCount: number;
             /** @enum {unknown} */
             format: 'ISO9660' | 'FAT12_FLOPPY';
             imageId: string;
             issues: components['schemas']['MediaConversionIssue'][];
             objectCount: number;
             output: components['schemas']['FileRef'] | null;
+            /** @example .iso */
+            outputExtension: string;
             partitionIndex: number;
             partitionName: string;
             payloadBytes: number;
@@ -2487,11 +2497,16 @@ export interface components {
             meta: components['schemas']['ResponseMeta'];
         };
         MediaConversionIssue: {
-            availableBytes: number | null;
             blocking: boolean;
             code: string;
+            measurement: components['schemas']['MediaConversionIssueMeasurement'] | null;
             message: string;
-            requiredBytes: number | null;
+        };
+        MediaConversionIssueMeasurement: {
+            available: number;
+            required: number;
+            /** @enum {string} */
+            unit: 'BYTES' | 'DIRECTORY_ENTRIES' | 'FLOPPY_IMAGES';
         };
         MediaConversionVolumeSummary: {
             name: string;

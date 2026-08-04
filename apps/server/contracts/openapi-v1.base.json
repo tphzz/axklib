@@ -2408,13 +2408,27 @@
       "MediaConversionIssue": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["code", "message", "blocking", "requiredBytes", "availableBytes"],
+        "required": ["code", "message", "blocking", "measurement"],
         "properties": {
           "code": {"type": "string", "minLength": 1},
           "message": {"type": "string", "minLength": 1},
           "blocking": {"type": "boolean"},
-          "requiredBytes": {"type": ["integer", "null"], "minimum": 0},
-          "availableBytes": {"type": ["integer", "null"], "minimum": 0}
+          "measurement": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/MediaConversionIssueMeasurement"},
+              {"type": "null"}
+            ]
+          }
+        }
+      },
+      "MediaConversionIssueMeasurement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["required", "available", "unit"],
+        "properties": {
+          "required": {"type": "integer", "minimum": 0},
+          "available": {"type": "integer", "minimum": 0},
+          "unit": {"type": "string", "enum": ["BYTES", "DIRECTORY_ENTRIES", "FLOPPY_IMAGES"]}
         }
       },
       "MediaConversionVolumeSummary": {
@@ -2459,12 +2473,15 @@
       "ImageSessionMediaConversionInspection": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["imageId", "revision", "format", "scope", "partitionIndex", "partitionName", "canExport", "objectCount", "payloadBytes", "projectedOutputBytes", "capacityBytes", "volumes", "issues", "defaultFilename"],
+        "required": ["imageId", "revision", "format", "scope", "artifactKind", "outputExtension", "floppyImageCount", "partitionIndex", "partitionName", "canExport", "objectCount", "payloadBytes", "projectedOutputBytes", "capacityBytes", "volumes", "issues", "defaultFilename"],
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 1},
           "format": {"enum": ["ISO9660", "FAT12_FLOPPY"]},
           "scope": {"enum": ["PARTITION", "VOLUME"]},
+          "artifactKind": {"enum": ["IMAGE", "FLOPPY_DISK_SET"]},
+          "outputExtension": {"type": "string", "minLength": 4, "maxLength": 4, "pattern": "^\\.(iso|ima|zip)$", "example": ".iso"},
+          "floppyImageCount": {"type": "integer", "minimum": 0},
           "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
           "partitionName": {"type": "string"},
           "canExport": {"type": "boolean"},
@@ -2533,12 +2550,15 @@
       "ImageSessionMediaConversionResult": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["imageId", "revision", "format", "scope", "partitionIndex", "partitionName", "canExport", "objectCount", "payloadBytes", "projectedOutputBytes", "capacityBytes", "volumes", "issues", "defaultFilename", "sizeBytes", "destination", "output", "download"],
+        "required": ["imageId", "revision", "format", "scope", "artifactKind", "outputExtension", "floppyImageCount", "partitionIndex", "partitionName", "canExport", "objectCount", "payloadBytes", "projectedOutputBytes", "capacityBytes", "volumes", "issues", "defaultFilename", "sizeBytes", "destination", "output", "download"],
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 1},
           "format": {"enum": ["ISO9660", "FAT12_FLOPPY"]},
           "scope": {"enum": ["PARTITION", "VOLUME"]},
+          "artifactKind": {"enum": ["IMAGE", "FLOPPY_DISK_SET"]},
+          "outputExtension": {"type": "string", "minLength": 4, "maxLength": 4, "pattern": "^\\.(iso|ima|zip)$", "example": ".iso"},
+          "floppyImageCount": {"type": "integer", "minimum": 0},
           "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
           "partitionName": {"type": "string"},
           "canExport": {"const": true},

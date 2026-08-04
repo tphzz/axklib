@@ -37,7 +37,8 @@ axk::app::Error core_error(const axk::Error &error) {
     context.volume_name = error.context.volume_name;
     context.object_type = error.context.object_type;
     context.object_name = error.context.object_name;
-    return {"media_conversion_failed", error.message, std::move(context)};
+    return {error.code == axk::ErrorCode::operation_cancelled ? "operation_cancelled" : "media_conversion_failed",
+            error.message, std::move(context)};
 }
 
 axk::app::Result<std::pair<std::string, std::uint64_t>> parse_session_identity(const Json &input) {
@@ -108,12 +109,15 @@ std::string scope_name(axk::MediaConversionScope scope) {
     return scope == axk::MediaConversionScope::partition ? "PARTITION" : "VOLUME";
 }
 
-std::string extension(axk::MediaImageFormat format) {
-    return format == axk::MediaImageFormat::iso9660 ? ".iso" : ".ima";
+std::string artifact_name(axk::MediaConversionArtifactKind kind) {
+    return kind == axk::MediaConversionArtifactKind::floppy_disk_set ? "FLOPPY_DISK_SET" : "IMAGE";
 }
 
-std::string media_type(axk::MediaImageFormat format) {
-    return format == axk::MediaImageFormat::iso9660 ? "application/x-iso9660-image" : "application/octet-stream";
+std::string media_type(const axk::MediaConversionPlanSummary &summary) {
+    if (summary.artifact_kind == axk::MediaConversionArtifactKind::floppy_disk_set)
+        return "application/zip";
+    return summary.format == axk::MediaImageFormat::iso9660 ? "application/x-iso9660-image"
+                                                            : "application/octet-stream";
 }
 
 std::string default_filename(std::string_view source, const axk::MediaConversionPlanSummary &summary) {
@@ -122,15 +126,31 @@ std::string default_filename(std::string_view source, const axk::MediaConversion
                            : summary.volumes.front().name;
     return std::format("{}_p{:02}_{}{}", safe_stem(source, "Sampler"), summary.partition_index,
                        safe_stem(scope, summary.scope == axk::MediaConversionScope::partition ? "Partition" : "Volume"),
-                       extension(summary.format));
+                       summary.output_extension);
 }
 
 Json issue_json(const axk::MediaConversionIssue &issue) {
+    Json measurement;
+    if (issue.measurement) {
+        std::string_view unit;
+        switch (issue.measurement->unit) {
+        case axk::MediaConversionIssueUnit::bytes:
+            unit = "BYTES";
+            break;
+        case axk::MediaConversionIssueUnit::directory_entries:
+            unit = "DIRECTORY_ENTRIES";
+            break;
+        case axk::MediaConversionIssueUnit::floppy_images:
+            unit = "FLOPPY_IMAGES";
+            break;
+        }
+        measurement = {
+            {"required", issue.measurement->required}, {"available", issue.measurement->available}, {"unit", unit}};
+    }
     return {{"code", issue.code},
             {"message", issue.message},
             {"blocking", issue.blocking},
-            {"requiredBytes", issue.required_bytes ? Json(*issue.required_bytes) : Json{}},
-            {"availableBytes", issue.available_bytes ? Json(*issue.available_bytes) : Json{}}};
+            {"measurement", std::move(measurement)}};
 }
 
 Json plan_json(std::string_view image_id, std::uint64_t revision, std::string_view source,
@@ -149,6 +169,9 @@ Json plan_json(std::string_view image_id, std::uint64_t revision, std::string_vi
             {"revision", revision},
             {"format", format_name(summary.format)},
             {"scope", scope_name(summary.scope)},
+            {"artifactKind", artifact_name(summary.artifact_kind)},
+            {"outputExtension", summary.output_extension},
+            {"floppyImageCount", summary.floppy_image_count},
             {"partitionIndex", summary.partition_index},
             {"partitionName", summary.partition_name},
             {"canExport", summary.can_export},
@@ -255,8 +278,8 @@ axk::app::Result<void> axk::app::bind_session_media_conversion_operations(Operat
                 if (!staging)
                     return std::unexpected(staging.error());
                 TemporaryDirectoryCleanup cleanup{*staging};
-                const auto staged_file = *staging / ("converted" + extension(request->format));
-                report_progress(context, axk::ProgressPhase::writing, 1U, 3U, "Creating sampler media image");
+                const auto staged_file = *staging / ("converted" + plan->output_extension);
+                report_progress(context, axk::ProgressPhase::writing, 1U, 3U, "Creating sampler media export");
                 auto written = axk::write_media_conversion(session->reader, session->source.relative_path, *request,
                                                            staged_file, false, media_limits, context.cancellation);
                 if (!written)
@@ -271,7 +294,7 @@ axk::app::Result<void> axk::app::bind_session_media_conversion_operations(Operat
                 }
                 auto result = plan_json(identity->first, identity->second, source, *plan);
                 result["sizeBytes"] = written->size_bytes;
-                report_progress(context, axk::ProgressPhase::publishing, 2U, 3U, "Publishing sampler media image");
+                report_progress(context, axk::ProgressPhase::publishing, 2U, 3U, "Publishing sampler media export");
                 const auto kind = destination.value("kind", std::string{});
                 if (kind == "WORKSPACE") {
                     auto output = parse_output(destination);
@@ -280,11 +303,11 @@ axk::app::Result<void> axk::app::bind_session_media_conversion_operations(Operat
                     const auto output_path = axk::text::path_from_utf8(output->relative_path);
                     if (!output_path)
                         return std::unexpected(operation_error("invalid_request", "output path is not valid UTF-8"));
-                    if (!output_path->extension().empty() && output_path->extension() != extension(request->format))
+                    if (!output_path->extension().empty() && output_path->extension() != plan->output_extension)
                         return std::unexpected(
                             operation_error("invalid_request", "output filename has an unsupported extension"));
                     if (output_path->extension().empty())
-                        output->relative_path += extension(request->format);
+                        output->relative_path += plan->output_extension;
                     auto reader = axk::FileReader::open(staged_file);
                     if (!reader)
                         return std::unexpected(core_error(reader.error()));
@@ -297,12 +320,12 @@ axk::app::Result<void> axk::app::bind_session_media_conversion_operations(Operat
                     result["download"] = nullptr;
                 } else if (kind == "DOWNLOAD") {
                     auto filename = resolved_filename(destination.value("filename", result.at("defaultFilename")),
-                                                      extension(request->format));
+                                                      plan->output_extension);
                     if (!filename)
                         return std::unexpected(filename.error());
-                    auto retained = downloads.retain_owned_file(context.owner_id, staged_file, *filename,
-                                                                media_type(request->format), context.cancellation,
-                                                                context.progress);
+                    auto retained =
+                        downloads.retain_owned_file(context.owner_id, staged_file, *filename, media_type(*plan),
+                                                    context.cancellation, context.progress);
                     if (!retained)
                         return std::unexpected(retained.error());
                     result["destination"] = "DOWNLOAD";
@@ -317,7 +340,7 @@ axk::app::Result<void> axk::app::bind_session_media_conversion_operations(Operat
                     return std::unexpected(
                         operation_error("invalid_request", "destination kind must be WORKSPACE or DOWNLOAD"));
                 }
-                report_progress(context, axk::ProgressPhase::publishing, 3U, 3U, "Sampler media image ready");
+                report_progress(context, axk::ProgressPhase::publishing, 3U, 3U, "Sampler media export ready");
                 return result;
             });
         if (!bound)

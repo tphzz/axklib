@@ -14,12 +14,27 @@
     }
 
     let { request, desktop, onworkspace, onlocal, oncancel }: Props = $props();
-    const title = $derived(request.selection.format === 'ISO9660' ? 'Export CD-ROM image' : 'Export floppy image');
-    const description = $derived(
-        request.selection.format === 'ISO9660'
-            ? 'The complete partition will be written as a Yamaha-compatible CD-ROM image.'
-            : 'The complete volume will be written as a Yamaha-compatible 1.44 MB floppy image.',
+    const multiFloppy = $derived(request.inspection?.artifactKind === 'FLOPPY_DISK_SET');
+    const title = $derived(
+        multiFloppy
+            ? 'Export floppy disk set'
+            : request.selection.format === 'ISO9660'
+              ? 'Export CD-ROM image'
+              : 'Export floppy image',
     );
+    const description = $derived(
+        multiFloppy && request.inspection
+            ? `The complete volume will be written as ${request.inspection.floppyImageCount} ordered Yamaha-compatible 1.44 MB floppy images in a ZIP archive.`
+            : request.selection.format === 'ISO9660'
+              ? 'The complete partition will be written as a Yamaha-compatible CD-ROM image.'
+              : 'The complete volume will be written as a Yamaha-compatible 1.44 MB floppy image.',
+    );
+
+    function formatMeasurement(value: number, unit: 'BYTES' | 'DIRECTORY_ENTRIES' | 'FLOPPY_IMAGES'): string {
+        if (unit === 'BYTES') return formatStoredSize(value);
+        if (unit === 'DIRECTORY_ENTRIES') return `${value} ${value === 1 ? 'entry' : 'entries'}`;
+        return `${value} ${value === 1 ? 'floppy image' : 'floppy images'}`;
+    }
 </script>
 
 <div class="dialog-backdrop" role="presentation">
@@ -52,7 +67,8 @@
                         {request.inspection.objectCount}
                         {request.inspection.objectCount === 1 ? 'object' : 'objects'} ·
                         {formatStoredSize(request.inspection.payloadBytes)} payload ·
-                        {formatStoredSize(request.inspection.projectedOutputBytes)} image
+                        {formatStoredSize(request.inspection.projectedOutputBytes)}
+                        {request.inspection.artifactKind === 'FLOPPY_DISK_SET' ? 'archive' : 'image'}
                     </p>
                     {#if request.inspection.volumes.length > 1}
                         <p>{request.inspection.volumes.length} volumes from {request.inspection.partitionName}</p>
@@ -64,10 +80,10 @@
                             role={issue.blocking ? 'alert' : undefined}
                         >
                             <p>{issue.message}</p>
-                            {#if issue.requiredBytes !== null && issue.availableBytes !== null}
+                            {#if issue.measurement}
                                 <small>
-                                    Required {formatStoredSize(issue.requiredBytes)} · Available
-                                    {formatStoredSize(issue.availableBytes)}
+                                    Required {formatMeasurement(issue.measurement.required, issue.measurement.unit)} · Available
+                                    {formatMeasurement(issue.measurement.available, issue.measurement.unit)}
                                 </small>
                             {/if}
                         </div>
@@ -80,7 +96,7 @@
                     />
                 {/if}
                 {#if request.busy}
-                    <p class="dialog-progress" role="status">{request.progressLabel || 'Exporting media image…'}</p>
+                    <p class="dialog-progress" role="status">{request.progressLabel || 'Exporting sampler media…'}</p>
                 {/if}
                 {#if request.error}<p class="dialog-error" role="alert">{request.error}</p>{/if}
             </section>

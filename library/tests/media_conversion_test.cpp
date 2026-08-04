@@ -16,6 +16,7 @@
 #include "axklib/catalog.hpp"
 #include "axklib/io.hpp"
 #include "axklib/media.hpp"
+#include "axklib/package_archive.hpp"
 #include "axklib/writer.hpp"
 #include "axklib/writer_internal.hpp"
 
@@ -209,11 +210,12 @@ TEST(MediaConversion, WritesOnePartitionAsIsoAndOneVolumeAsFloppyFromRetainedRea
     std::filesystem::remove_all(root, error);
 }
 
-TEST(MediaConversion, WritesMultipleIsoVolumesAndReportsFloppyCapacityBeforeWriting) {
+TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFloppyDiskSet) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-media-conversion-blockers";
     const auto audio_path = root / "source.wav";
     const auto source_path = root / "source.hds";
     const auto iso_path = root / "partition.iso";
+    const auto floppy_path = root / "volume.zip";
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
@@ -265,13 +267,117 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndReportsFloppyCapacityBeforeWrit
     floppy_request.volume_directory_id = only_volume_directory(*source_media);
     const auto floppy_plan = axk::plan_media_conversion(open_reader(source_path), source_path, floppy_request);
     ASSERT_TRUE(floppy_plan) << floppy_plan.error().message;
-    EXPECT_FALSE(floppy_plan->can_export);
-    const auto capacity = std::ranges::find(floppy_plan->issues, std::string{"MEDIA_CONVERSION_FLOPPY_CAPACITY"},
-                                            &axk::MediaConversionIssue::code);
-    ASSERT_NE(capacity, floppy_plan->issues.end());
-    ASSERT_TRUE(capacity->required_bytes);
-    ASSERT_TRUE(capacity->available_bytes);
-    EXPECT_GT(*capacity->required_bytes, *capacity->available_bytes);
+    EXPECT_TRUE(floppy_plan->can_export);
+    EXPECT_EQ(floppy_plan->artifact_kind, axk::MediaConversionArtifactKind::floppy_disk_set);
+    EXPECT_EQ(floppy_plan->output_extension, ".zip");
+    EXPECT_EQ(floppy_plan->floppy_image_count, 2U);
+    EXPECT_GT(floppy_plan->projected_output_bytes, 2U * 1'474'560U);
+    const auto pending =
+        std::ranges::find(floppy_plan->issues, std::string{"MEDIA_CONVERSION_MULTI_FLOPPY_HARDWARE_VALIDATION_PENDING"},
+                          &axk::MediaConversionIssue::code);
+    ASSERT_NE(pending, floppy_plan->issues.end());
+    EXPECT_FALSE(pending->blocking);
+    ASSERT_TRUE(pending->measurement);
+    EXPECT_EQ(pending->measurement->required, 2U);
+    EXPECT_EQ(pending->measurement->available, 32U);
+    EXPECT_EQ(pending->measurement->unit, axk::MediaConversionIssueUnit::floppy_images);
+
+    const auto floppy_written =
+        axk::write_media_conversion(open_reader(source_path), source_path, floppy_request, floppy_path);
+    ASSERT_TRUE(floppy_written) << floppy_written.error().message;
+    EXPECT_EQ(floppy_written->artifact_kind, axk::MediaConversionArtifactKind::floppy_disk_set);
+    EXPECT_EQ(floppy_written->floppy_image_count, 2U);
+    auto archive_reader = axk::FileReader::open(floppy_path);
+    ASSERT_TRUE(archive_reader) << archive_reader.error().message;
+    std::vector<std::byte> archive_bytes(static_cast<std::size_t>((*archive_reader)->size()));
+    ASSERT_TRUE((*archive_reader)->read_exact_at(0U, archive_bytes));
+    const auto archive = axk::package_internal::read_archive(archive_bytes);
+    ASSERT_TRUE(archive) << archive.error().message;
+    ASSERT_EQ(archive->size(), 3U);
+    EXPECT_EQ(archive->front().path, "manifest.json");
+    std::vector<std::string> continuation_paths;
+    for (std::size_t index = 1U; index < archive->size(); ++index) {
+        EXPECT_EQ((*archive)[index].path, std::format("payloads/disk{:02}.ima", index));
+        EXPECT_EQ((*archive)[index].bytes.size(), 1'474'560U);
+        const auto disk =
+            axk::FatImage::open(std::make_shared<axk::MemoryReader>((*archive)[index].bytes), (*archive)[index].path);
+        ASSERT_TRUE(disk) << disk.error().message;
+        for (const auto &file : disk->files()) {
+            if (file.size < 0x42U)
+                continue;
+            const auto prefix = disk->read_file_prefix(file, 0x42U);
+            ASSERT_TRUE(prefix) << prefix.error().message;
+            const auto header = axk::decode_object_header(*prefix);
+            if (header && header->type == axk::ObjectType::smpl)
+                continuation_paths.push_back(file.path);
+        }
+    }
+    ASSERT_EQ(continuation_paths.size(), 2U);
+    EXPECT_EQ(continuation_paths.front(), continuation_paths.back());
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(MediaConversion, PreservesTheWaveDataFilenameAcrossContinuationDisks) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-media-conversion-continuation-name";
+    const auto audio_path = root / "source.wav";
+    const auto source_path = root / "source.hds";
+    const auto output_path = root / "volume.zip";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 800'000U;
+    waveform.pcm.resize(static_cast<std::size_t>(waveform.frame_count) * 2U);
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
+    const axk::HdsBuildManifest source_manifest{
+        "1.0", 8U * 1024U * 1024U, {{"PARTITION ONE", {source_volume(audio_path)}}}};
+    ASSERT_TRUE(axk::write_hds_image(source_manifest, source_path));
+    const auto source = axk::open_media(source_path);
+    ASSERT_TRUE(source) << source.error().message;
+    const auto objects = source->objects();
+    ASSERT_TRUE(objects) << objects.error().message;
+    const auto program = std::ranges::find_if(
+        *objects, [](const axk::MediaObject &object) { return object.decoded.header.type == axk::ObjectType::prog; });
+    const auto wave_data = std::ranges::find_if(
+        *objects, [](const axk::MediaObject &object) { return object.decoded.header.type == axk::ObjectType::smpl; });
+    ASSERT_NE(program, objects->end());
+    ASSERT_NE(wave_data, objects->end());
+
+    axk::detail::PreparedMediaImage image;
+    image.manifest.format = axk::MediaImageFormat::fat12_floppy;
+    image.objects.emplace_back(program->decoded.header.type, program->decoded.header.name, program->raw_payload);
+    image.objects.emplace_back(wave_data->decoded.header.type, wave_data->decoded.header.name, wave_data->raw_payload);
+    const auto plan = axk::detail::plan_floppy_disk_set(image, "Continuation", {});
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->disks.size(), 2U);
+    const auto written = axk::detail::write_floppy_disk_set(image, *plan, output_path, false, {});
+    ASSERT_TRUE(written) << written.error().message;
+
+    const auto archive_reader = axk::FileReader::open(output_path);
+    ASSERT_TRUE(archive_reader) << archive_reader.error().message;
+    std::vector<std::byte> archive_bytes(static_cast<std::size_t>((*archive_reader)->size()));
+    ASSERT_TRUE((*archive_reader)->read_exact_at(0U, archive_bytes));
+    const auto archive = axk::package_internal::read_archive(archive_bytes);
+    ASSERT_TRUE(archive) << archive.error().message;
+    std::vector<std::string> continuation_paths;
+    for (std::size_t index = 1U; index < archive->size(); ++index) {
+        const auto disk =
+            axk::FatImage::open(std::make_shared<axk::MemoryReader>((*archive)[index].bytes), (*archive)[index].path);
+        ASSERT_TRUE(disk) << disk.error().message;
+        for (const auto &file : disk->files()) {
+            if (file.size < 0x42U)
+                continue;
+            const auto prefix = disk->read_file_prefix(file, 0x42U);
+            ASSERT_TRUE(prefix) << prefix.error().message;
+            const auto header = axk::decode_object_header(*prefix);
+            if (header && header->type == axk::ObjectType::smpl)
+                continuation_paths.push_back(file.path);
+        }
+    }
+    ASSERT_EQ(continuation_paths.size(), 2U);
+    EXPECT_EQ(continuation_paths.front(), continuation_paths.back());
     std::filesystem::remove_all(root, error);
 }
 
@@ -304,6 +410,17 @@ TEST(MediaConversion, WritesMultiSectorProgramAndSampleDirectories) {
     EXPECT_TRUE(plan->can_export);
     EXPECT_TRUE(plan->issues.empty());
 
+    auto floppy_request = request;
+    floppy_request.format = axk::MediaImageFormat::fat12_floppy;
+    floppy_request.scope = axk::MediaConversionScope::volume;
+    floppy_request.volume_directory_id = only_volume_directory(*source_media);
+    const auto floppy_plan = axk::plan_media_conversion(open_reader(source_path), source_path, floppy_request);
+    ASSERT_TRUE(floppy_plan) << floppy_plan.error().message;
+    EXPECT_TRUE(floppy_plan->can_export);
+    EXPECT_EQ(floppy_plan->artifact_kind, axk::MediaConversionArtifactKind::floppy_disk_set);
+    EXPECT_EQ(floppy_plan->floppy_image_count, 2U);
+    EXPECT_EQ(floppy_plan->output_extension, ".zip");
+
     const auto written = axk::write_media_conversion(open_reader(source_path), source_path, request, iso_path);
     ASSERT_TRUE(written) << written.error().message;
     EXPECT_EQ(std::filesystem::file_size(iso_path), plan->projected_output_bytes);
@@ -325,11 +442,12 @@ TEST(MediaConversion, WritesMultiSectorProgramAndSampleDirectories) {
     std::filesystem::remove_all(root, error);
 }
 
-TEST(MediaConversion, RetainsExactMissingProgramRowsAsOneNonblockingPartitionWarning) {
+TEST(MediaConversion, RetainsExactMissingProgramRowsAsOneNonblockingMediaWarning) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-media-conversion-disabled-program-row";
     const auto audio_path = root / "source.wav";
     const auto source_path = root / "source.hds";
     const auto iso_path = root / "partition.iso";
+    const auto floppy_path = root / "volume.ima";
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
@@ -361,6 +479,23 @@ TEST(MediaConversion, RetainsExactMissingProgramRowsAsOneNonblockingPartitionWar
     const auto iso_media = axk::open_media(iso_path);
     ASSERT_TRUE(iso_media) << iso_media.error().message;
     EXPECT_EQ(payloads(*iso_media), payloads(*source_media));
+
+    request.format = axk::MediaImageFormat::fat12_floppy;
+    request.scope = axk::MediaConversionScope::volume;
+    request.volume_directory_id = only_volume_directory(*source_media);
+    const auto floppy_plan = axk::plan_media_conversion(open_reader(source_path), source_path, request);
+    ASSERT_TRUE(floppy_plan) << floppy_plan.error().message;
+    EXPECT_TRUE(floppy_plan->can_export);
+    ASSERT_EQ(floppy_plan->issues.size(), 1U);
+    EXPECT_EQ(floppy_plan->issues.front().code, "MEDIA_CONVERSION_RETAINED_DISABLED_PROGRAM_ROWS");
+    EXPECT_FALSE(floppy_plan->issues.front().blocking);
+
+    const auto floppy_written =
+        axk::write_media_conversion(open_reader(source_path), source_path, request, floppy_path);
+    ASSERT_TRUE(floppy_written) << floppy_written.error().message;
+    const auto floppy_media = axk::open_media(floppy_path);
+    ASSERT_TRUE(floppy_media) << floppy_media.error().message;
+    EXPECT_EQ(payloads(*floppy_media), payloads(*source_media));
     std::filesystem::remove_all(root, error);
 }
 
@@ -407,4 +542,28 @@ TEST(MediaConversion, RejectsAggregateIsoSectorOverflowWithoutAllocatingPayloads
     ASSERT_FALSE(layout);
     EXPECT_EQ(layout.error().code, axk::ErrorCode::unsupported_profile);
     EXPECT_EQ(layout.error().message, "ISO9660 sector count exceeds the 32-bit extent profile");
+}
+
+TEST(MediaConversion, PlansEveryRequiredFloppyBeforeTheThirtyTwoImageAdmissionLimitIsApplied) {
+    axk::detail::PreparedMediaImage image;
+    const auto payload = std::make_shared<SparseReader>(1'000'000U);
+    for (std::size_t index = 1U; index <= 33U; ++index)
+        image.objects.emplace_back(axk::ObjectType::prog, std::format("Program {:02}", index), payload);
+
+    const auto plan = axk::detail::plan_floppy_disk_set(image, "Disk set", {});
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->disks.size(), 33U);
+    EXPECT_EQ(plan->disks.front().name, "DISK SET      01");
+    EXPECT_EQ(plan->disks.back().name, "DISK SET      33");
+}
+
+TEST(MediaConversion, PropagatesCancellationWhilePlanningAFloppyDiskSet) {
+    axk::detail::PreparedMediaImage image;
+    image.objects.emplace_back(axk::ObjectType::prog, "Program", std::vector<std::byte>(512U));
+    axk::CancellationSource cancellation;
+    cancellation.cancel();
+
+    const auto plan = axk::detail::plan_floppy_disk_set(image, "Disk set", cancellation.token());
+    ASSERT_FALSE(plan);
+    EXPECT_EQ(plan.error().code, axk::ErrorCode::operation_cancelled);
 }

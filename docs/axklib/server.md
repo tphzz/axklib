@@ -279,17 +279,19 @@ accepts exactly one of these scopes:
   partition to one Yamaha CD-ROM image.
 - `FAT12_FLOPPY` with a zero-based `partitionIndex` and the stable
   `volumeDirectoryId` returned by the content tree converts the complete
-  selected volume to one 1,474,560-byte FAT12 floppy image.
+  selected volume to Yamaha FAT12 media. A volume that fits produces one
+  1,474,560-byte `.ima`; a larger admitted volume produces an ordered
+  multi-floppy `.zip` containing two through 32 images and a manifest.
 
 The inspection reports the selected volumes, object and payload counts,
-projected output size, capacity, a suggested filename, and structured blocking
-issues. Conversion never silently splits a selection or drops objects to make
-it fit. The operation rebuilds the destination container while copying every
-admitted Yamaha object payload byte for byte. A `WORKSPACE` destination
-publishes an `.iso` or `.ima` through the sandbox. A `DOWNLOAD` destination
-uses the same private owner-scoped retained-file flow as package export, so the
-desktop can stream the single image directly to the chosen local path without
-an archive wrapper.
+projected output size, capacity, `artifactKind`, `outputExtension`,
+`floppyImageCount`, a suggested filename, and structured issues. Conversion
+never drops objects to make a selection fit. Complete objects remain byte
+identical; only oversized Wave Data is divided into exact Yamaha continuation
+segments. A `WORKSPACE` destination publishes the inspected `.iso`, `.ima`, or
+`.zip` through the sandbox. A `DOWNLOAD` destination uses the same private
+owner-scoped retained-file flow as package export. Multi-floppy inspection also
+reports that physical sampler validation remains pending.
 
 Each WebSocket connection has bounded lifetime delivery budgets for both event
 count and serialized bytes. The defaults are 1,024 events and 4 MiB. When

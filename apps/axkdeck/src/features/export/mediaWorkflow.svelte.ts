@@ -75,10 +75,10 @@ export class MediaExportWorkflow {
         const request = this.request;
         if (!request?.inspection?.canExport || request.busy) return;
         const generation = this.generation;
-        const extension = extensionFor(request.selection);
+        const extension = extensionFor(request.inspection);
         const selection = await this.dependencies.picker.chooseLocation(
             'save-file',
-            pickerTitle(request.selection),
+            pickerTitle(request.inspection),
             [extension],
             request.inspection.defaultFilename,
             {
@@ -136,7 +136,7 @@ export class MediaExportWorkflow {
         const sessionId = this.dependencies.sessionId();
         if (!request?.inspection?.canExport || sessionId === null || request.busy) return;
         const generation = this.generation;
-        const label = mediaLabel(request.selection);
+        const label = mediaLabel(request.inspection);
         this.request = {
             ...request,
             busy: true,
@@ -200,14 +200,25 @@ function selectionFor(item: DiskTreeItem): ImageSessionMediaConversionSelection 
     return null;
 }
 
-function extensionFor(selection: ImageSessionMediaConversionSelection): 'iso' | 'ima' {
-    return selection.format === 'ISO9660' ? 'iso' : 'ima';
+function extensionFor(inspection: ImageSessionMediaConversionInspection): 'iso' | 'ima' | 'zip' {
+    switch (inspection.outputExtension) {
+        case '.iso':
+            return 'iso';
+        case '.ima':
+            return 'ima';
+        case '.zip':
+            return 'zip';
+        default:
+            throw new Error(`Unsupported media export extension: ${inspection.outputExtension}`);
+    }
 }
 
-function pickerTitle(selection: ImageSessionMediaConversionSelection): string {
-    return selection.format === 'ISO9660' ? 'Export CD-ROM image' : 'Export floppy image';
+function pickerTitle(inspection: ImageSessionMediaConversionInspection): string {
+    if (inspection.artifactKind === 'FLOPPY_DISK_SET') return 'Export floppy disk set';
+    return inspection.format === 'ISO9660' ? 'Export CD-ROM image' : 'Export floppy image';
 }
 
-function mediaLabel(selection: ImageSessionMediaConversionSelection): string {
-    return selection.format === 'ISO9660' ? 'CD-ROM image' : 'floppy image';
+function mediaLabel(inspection: ImageSessionMediaConversionInspection): string {
+    if (inspection.artifactKind === 'FLOPPY_DISK_SET') return 'floppy disk set';
+    return inspection.format === 'ISO9660' ? 'CD-ROM image' : 'floppy image';
 }

@@ -208,6 +208,7 @@ add_library(
   src/deletion.cpp
   src/media_build.cpp
   src/media_conversion.cpp
+  src/media_floppy_set.cpp
   src/media_iso9660_layout.cpp
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp

@@ -131,13 +131,66 @@ extern "C" DRESULT disk_ioctl(BYTE drive, BYTE command, void *buffer) {
 
 namespace axk::detail {
 
-Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublication &publication,
-                               const CancellationToken &cancellation) {
+Result<std::vector<std::string>> plan_fat12_object_filenames(const PreparedMediaImage &image) {
+    std::set<std::string> filenames;
+    for (const auto &retained : image.retained_files) {
+        if (retained.path.empty() || retained.path.size() > 12U ||
+            retained.path.find_first_of("/\\") != std::string::npos || !filenames.insert(retained.path).second) {
+            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                              "retained FAT12 files must be unique root-level 8.3 names")};
+        }
+    }
+
+    std::set<std::string> stems;
+    std::vector<std::string> result;
+    result.reserve(image.objects.size());
+    for (std::size_t index = 0U; index < image.objects.size(); ++index) {
+        const auto &object = image.objects[index];
+        if (!object.fat_filename.empty()) {
+            if (object.fat_filename.size() > 12U || object.fat_filename.find_first_of("/\\") != std::string::npos ||
+                !filenames.insert(object.fat_filename).second) {
+                return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                                  "prepared FAT12 object filenames must be unique 8.3 names")};
+            }
+            result.push_back(object.fat_filename);
+            continue;
+        }
+        auto stem = fat_stem(object.name);
+        if (!stems.insert(stem).second) {
+            const auto suffix = std::to_string(index + 1U);
+            stem.resize(std::min<std::size_t>(stem.size(), 8U - std::min<std::size_t>(suffix.size(), 7U)));
+            stem += suffix;
+            if (!stems.insert(stem).second) {
+                return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                                  "FAT12 object names cannot be made unique")};
+            }
+        }
+        auto suffix_index = index + 1U;
+        auto filename = stem + "." + std::to_string(1000U + static_cast<unsigned int>(suffix_index)).substr(1);
+        while (filenames.contains(filename) && suffix_index < 999U) {
+            ++suffix_index;
+            filename = stem + "." + std::to_string(1000U + static_cast<unsigned int>(suffix_index)).substr(1);
+        }
+        if (!filenames.insert(filename).second) {
+            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                              "FAT12 object filename space is exhausted")};
+        }
+        result.push_back(std::move(filename));
+    }
+    return result;
+}
+
+Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image,
+                                                 const CancellationToken &cancellation) {
     if (image.objects.size() + image.retained_files.size() > 224U) {
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "FAT12 floppy profile supports at "
                                           "most 224 root-directory objects")};
     }
+    auto object_filenames = plan_fat12_object_filenames(image);
+    if (!object_filenames)
+        return std::unexpected{object_filenames.error()};
+
     std::scoped_lock lock{fatfs_mutex};
     FatDisk disk{std::vector<std::byte>(sector_count * sector_size)};
     active_disk = &disk;
@@ -157,7 +210,6 @@ Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublica
         return std::unexpected{fatfs_error("could not mount formatted FAT12 image", status)};
     }
 
-    std::set<std::string> filenames;
     const auto write_file = [&](std::string_view filename, std::span<const std::byte> payload) -> Result<void> {
         FIL file{};
         auto write_status = f_open(&file, std::string{filename}.c_str(), FA_CREATE_NEW | FA_WRITE);
@@ -180,49 +232,17 @@ Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublica
             reset_disk();
             return std::unexpected{check.error()};
         }
-        if (retained.path.empty() || retained.path.size() > 12U ||
-            retained.path.find_first_of("/\\") != std::string::npos || !filenames.insert(retained.path).second) {
-            f_mount(nullptr, "", 0);
-            reset_disk();
-            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                              "retained FAT12 files must be unique root-level 8.3 names")};
-        }
         if (auto written = write_file(retained.path, retained.payload); !written) {
             f_mount(nullptr, "", 0);
             reset_disk();
             return std::unexpected{written.error()};
         }
     }
-    std::set<std::string> stems;
     for (std::size_t index = 0; index < image.objects.size(); ++index) {
         if (const auto check = cancellation.check(); !check) {
             f_mount(nullptr, "", 0);
             reset_disk();
             return std::unexpected{check.error()};
-        }
-        auto stem = fat_stem(image.objects[index].name);
-        if (!stems.insert(stem).second) {
-            const auto suffix = std::to_string(index + 1U);
-            stem.resize(std::min<std::size_t>(stem.size(), 8U - std::min<std::size_t>(suffix.size(), 7U)));
-            stem += suffix;
-            if (!stems.insert(stem).second) {
-                f_mount(nullptr, "", 0);
-                reset_disk();
-                return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
-                                                  "FAT12 object names cannot be made unique")};
-            }
-        }
-        auto suffix_index = index + 1U;
-        auto filename = stem + "." + std::to_string(1000U + static_cast<unsigned int>(suffix_index)).substr(1);
-        while (filenames.contains(filename) && suffix_index < 999U) {
-            ++suffix_index;
-            filename = stem + "." + std::to_string(1000U + static_cast<unsigned int>(suffix_index)).substr(1);
-        }
-        if (!filenames.insert(filename).second) {
-            f_mount(nullptr, "", 0);
-            reset_disk();
-            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
-                                              "FAT12 object filename space is exhausted")};
         }
         const auto &object = image.objects[index];
         if (object.payload == nullptr || object.size() > std::numeric_limits<UINT>::max()) {
@@ -237,7 +257,7 @@ Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublica
             reset_disk();
             return std::unexpected{read.error()};
         }
-        if (auto written = write_file(filename, payload); !written) {
+        if (auto written = write_file((*object_filenames)[index], payload); !written) {
             f_mount(nullptr, "", 0);
             reset_disk();
             return std::unexpected{written.error()};
@@ -246,9 +266,17 @@ Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublica
     f_mount(nullptr, "", 0);
     reset_disk();
 
-    if (auto resized = publication.resize(disk.bytes.size()); !resized)
+    return disk.bytes;
+}
+
+Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublication &publication,
+                               const CancellationToken &cancellation) {
+    auto bytes = build_fat12_image(image, cancellation);
+    if (!bytes)
+        return std::unexpected{bytes.error()};
+    if (auto resized = publication.resize(bytes->size()); !resized)
         return resized;
-    return publication.write_at(0U, disk.bytes);
+    return publication.write_at(0U, *bytes);
 }
 
 } // namespace axk::detail

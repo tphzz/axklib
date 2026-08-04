@@ -3696,6 +3696,12 @@
       "ImageSessionMediaConversionInspection": {
         "additionalProperties": false,
         "properties": {
+          "artifactKind": {
+            "enum": [
+              "IMAGE",
+              "FLOPPY_DISK_SET"
+            ]
+          },
           "canExport": {
             "type": "boolean"
           },
@@ -3706,6 +3712,10 @@
           "defaultFilename": {
             "minLength": 1,
             "type": "string"
+          },
+          "floppyImageCount": {
+            "minimum": 0,
+            "type": "integer"
           },
           "format": {
             "enum": [
@@ -3726,6 +3736,13 @@
           "objectCount": {
             "minimum": 0,
             "type": "integer"
+          },
+          "outputExtension": {
+            "example": ".iso",
+            "maxLength": 4,
+            "minLength": 4,
+            "pattern": "^\\.(iso|ima|zip)$",
+            "type": "string"
           },
           "partitionIndex": {
             "maximum": 255,
@@ -3765,6 +3782,9 @@
           "revision",
           "format",
           "scope",
+          "artifactKind",
+          "outputExtension",
+          "floppyImageCount",
           "partitionIndex",
           "partitionName",
           "canExport",
@@ -3931,6 +3951,12 @@
       "ImageSessionMediaConversionResult": {
         "additionalProperties": false,
         "properties": {
+          "artifactKind": {
+            "enum": [
+              "IMAGE",
+              "FLOPPY_DISK_SET"
+            ]
+          },
           "canExport": {
             "const": true
           },
@@ -3957,6 +3983,10 @@
                 "type": "null"
               }
             ]
+          },
+          "floppyImageCount": {
+            "minimum": 0,
+            "type": "integer"
           },
           "format": {
             "enum": [
@@ -3987,6 +4017,13 @@
                 "type": "null"
               }
             ]
+          },
+          "outputExtension": {
+            "example": ".iso",
+            "maxLength": 4,
+            "minLength": 4,
+            "pattern": "^\\.(iso|ima|zip)$",
+            "type": "string"
           },
           "partitionIndex": {
             "maximum": 255,
@@ -4030,6 +4067,9 @@
           "revision",
           "format",
           "scope",
+          "artifactKind",
+          "outputExtension",
+          "floppyImageCount",
           "partitionIndex",
           "partitionName",
           "canExport",
@@ -5409,13 +5449,6 @@
       "MediaConversionIssue": {
         "additionalProperties": false,
         "properties": {
-          "availableBytes": {
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
           "blocking": {
             "type": "boolean"
           },
@@ -5423,24 +5456,53 @@
             "minLength": 1,
             "type": "string"
           },
+          "measurement": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MediaConversionIssueMeasurement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "message": {
             "minLength": 1,
             "type": "string"
-          },
-          "requiredBytes": {
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
           }
         },
         "required": [
           "code",
           "message",
           "blocking",
-          "requiredBytes",
-          "availableBytes"
+          "measurement"
+        ],
+        "type": "object"
+      },
+      "MediaConversionIssueMeasurement": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "required": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unit": {
+            "enum": [
+              "BYTES",
+              "DIRECTORY_ENTRIES",
+              "FLOPPY_IMAGES"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "required",
+          "available",
+          "unit"
         ],
         "type": "object"
       },
@@ -15959,13 +16021,16 @@
                   "success": {
                     "value": {
                       "data": {
+                        "artifactKind": "IMAGE",
                         "canExport": false,
                         "capacityBytes": 0,
                         "defaultFilename": "x",
+                        "floppyImageCount": 0,
                         "format": "ISO9660",
                         "imageId": "x",
                         "issues": [],
                         "objectCount": 0,
+                        "outputExtension": ".iso",
                         "partitionIndex": 0,
                         "partitionName": "x",
                         "payloadBytes": 0,
@@ -15982,13 +16047,16 @@
                   "warning": {
                     "value": {
                       "data": {
+                        "artifactKind": "IMAGE",
                         "canExport": false,
                         "capacityBytes": 0,
                         "defaultFilename": "x",
+                        "floppyImageCount": 0,
                         "format": "ISO9660",
                         "imageId": "x",
                         "issues": [],
                         "objectCount": 0,
+                        "outputExtension": ".iso",
                         "partitionIndex": 0,
                         "partitionName": "x",
                         "payloadBytes": 0,

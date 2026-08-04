@@ -59,6 +59,12 @@ root-directory object files. The generated image is reopened by this reader
 before publication. This profile has not yet been promoted by a physical Yamaha
 sampler test, so parser-valid output is not a hardware-compatibility claim.
 
+SFS volume conversion has a separate multi-floppy profile. A volume that fits
+on one disk remains one raw `.ima` file. A larger admitted volume becomes a ZIP
+containing two through 32 ordered `.ima` members plus `manifest.json`. This
+profile is host-verified but not yet hardware-promoted; the inspection result
+includes a nonblocking hardware-validation warning.
+
 ## FAT12 Geometry
 
 Maintained 1.44 MB Yamaha floppies use the values in the `Yamaha profile`
@@ -252,6 +258,43 @@ AUTHORE2.002   FSFSDEV3SPLXSBNK...
 The filename algorithm is a generated-container convention. Transferring an
 existing object preserves every object payload byte but generates new DOS
 filenames; it does not preserve the source directory entry or cluster chain.
+
+## Multi-Floppy Conversion Sets
+
+Media conversion distributes complete Yamaha objects in deterministic source
+order. A complete object moves to the next disk when the current FAT data area
+or root directory is full. Only Wave Data (`SMPL`) may span disks. Each physical
+Wave Data segment repeats the source header and retains the complete logical
+payload size at `0x1c`; `0x20` is rewritten to the local segment size and
+`0x24` to its contiguous logical payload offset. Other object types are never
+split. Every segment of one continued Wave Data object keeps the same generated
+DOS 8.3 filename on each disk; its local directory position never renumbers the
+continuation.
+
+Each multi-disk member contains an `A3000F.SYM` presence marker. Axklib does not
+synthesize the opaque `YAMAHA.SYM` payload used by Yamaha software for display
+metadata. The ZIP manifest therefore carries the deterministic logical disk
+names and exact member order:
+
+```text
+manifest.json
+payloads/disk01.ima
+payloads/disk02.ima
+...
+```
+
+The manifest schema is `axklib.floppy-disk-set.v1`. It records the disk count,
+logical name, member path, fixed image size, SHA-256 digest, marker name, and
+hardware-validation state. ZIP is a host transport container only: extract the
+`.ima` members and present them to the sampler in manifest order, beginning
+with disk 1.
+
+Before publication, the writer reopens every FAT12 member, compares its exact
+object payloads, reassembles every split Wave Data object byte for byte, reopens
+the ZIP, and checks its inspected size. More than 32 required images is a
+blocking conversion issue. The profile deliberately remains marked
+`PENDING` until a physical A-series sampler loads, prompts through, and plays a
+generated multi-disk set.
 
 ## Reading File Bytes
 

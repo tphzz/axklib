@@ -53,6 +53,7 @@ struct PreparedMediaObject {
     ObjectType type{ObjectType::unknown};
     std::string name;
     std::shared_ptr<const RandomAccessReader> payload;
+    std::string fat_filename;
 
     [[nodiscard]] std::uint64_t size() const noexcept { return payload == nullptr ? 0U : payload->size(); }
 };
@@ -108,6 +109,24 @@ struct PreparedMediaConversion {
     MediaConversionPlanSummary summary;
 };
 
+struct FloppyObjectSegment {
+    std::size_t object_index{};
+    std::uint64_t payload_offset{};
+    std::uint64_t payload_bytes{};
+    std::uint32_t header_bytes{};
+    bool split{};
+};
+
+struct FloppyDiskLayout {
+    std::string name;
+    std::vector<FloppyObjectSegment> segments;
+};
+
+struct FloppyDiskSetPlan {
+    std::vector<FloppyDiskLayout> disks;
+    std::uint64_t projected_archive_bytes{};
+};
+
 Result<std::vector<std::byte>> prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
                                                     std::uint32_t reference_value);
 Result<std::vector<std::byte>> prepare_sbnk_payload(const SampleSpec &spec, const PreparedWaveformMember &left,
@@ -141,6 +160,14 @@ write_prepared_media_image(const PreparedMediaImage &image, const std::filesyste
                            const std::function<Result<void>(const std::filesystem::path &)> &validator = {});
 Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublication &publication,
                                const CancellationToken &cancellation);
+Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image,
+                                                 const CancellationToken &cancellation);
+Result<std::vector<std::string>> plan_fat12_object_filenames(const PreparedMediaImage &image);
+Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, std::string_view volume_name,
+                                               const CancellationToken &cancellation);
+Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image, const FloppyDiskSetPlan &plan,
+                                                const std::filesystem::path &output_path, bool overwrite,
+                                                const CancellationToken &cancellation);
 Result<Iso9660Layout> plan_iso9660_layout(const PreparedMediaImage &image);
 Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPublication &publication,
                                  const CancellationToken &cancellation);

@@ -24,6 +24,9 @@ describe('MediaExportDialog', () => {
                         revision: 4,
                         format: 'ISO9660',
                         scope: 'PARTITION',
+                        artifactKind: 'IMAGE',
+                        outputExtension: '.iso',
+                        floppyImageCount: 0,
                         partitionIndex: 0,
                         partitionName: 'DRUMS',
                         canExport: true,
@@ -66,6 +69,9 @@ describe('MediaExportDialog', () => {
                         revision: 4,
                         format: 'FAT12_FLOPPY',
                         scope: 'VOLUME',
+                        artifactKind: 'IMAGE',
+                        outputExtension: '.ima',
+                        floppyImageCount: 1,
                         partitionIndex: 0,
                         partitionName: 'DRUMS',
                         canExport: false,
@@ -79,8 +85,7 @@ describe('MediaExportDialog', () => {
                                 code: 'floppy_capacity_exceeded',
                                 message: 'The volume does not fit on one floppy disk.',
                                 blocking: true,
-                                requiredBytes: 2_000_000,
-                                availableBytes: 1_457_664,
+                                measurement: { required: 2_000_000, available: 1_457_664, unit: 'BYTES' },
                             },
                         ],
                         defaultFilename: 'disk_p00_KIT.ima',
@@ -104,6 +109,66 @@ describe('MediaExportDialog', () => {
         expect((screen.getByRole('button', { name: /This computer/ }) as HTMLButtonElement).disabled).toBe(true);
     });
 
+    it('describes an admitted multi-floppy ZIP and its hardware-pending warning', () => {
+        render(MediaExportDialog, {
+            props: {
+                request: {
+                    item: { ...item, kind: 'volume', volumeDirectoryId: 17 },
+                    selection: { format: 'FAT12_FLOPPY', partitionIndex: 0, volumeDirectoryId: 17 },
+                    inspection: {
+                        imageId: 'image-one',
+                        revision: 4,
+                        format: 'FAT12_FLOPPY',
+                        scope: 'VOLUME',
+                        artifactKind: 'FLOPPY_DISK_SET',
+                        outputExtension: '.zip',
+                        floppyImageCount: 2,
+                        partitionIndex: 0,
+                        partitionName: 'Don Solaris',
+                        canExport: true,
+                        objectCount: 335,
+                        payloadBytes: 268_000,
+                        projectedOutputBytes: 2_950_000,
+                        capacityBytes: 47_185_920,
+                        volumes: [
+                            {
+                                volumeDirectoryId: 17,
+                                name: 'Analog Update',
+                                objectCount: 335,
+                                payloadBytes: 268_000,
+                            },
+                        ],
+                        issues: [
+                            {
+                                code: 'MEDIA_CONVERSION_MULTI_FLOPPY_HARDWARE_VALIDATION_PENDING',
+                                message: 'Sampler hardware validation is pending.',
+                                blocking: false,
+                                measurement: { required: 2, available: 32, unit: 'FLOPPY_IMAGES' },
+                            },
+                        ],
+                        defaultFilename: 'disk_p00_Analog_Update.zip',
+                    },
+                    loading: false,
+                    busy: false,
+                    jobId: null,
+                    progressLabel: '',
+                    error: '',
+                },
+                desktop: true,
+                onworkspace: vi.fn(),
+                onlocal: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByRole('dialog', { name: 'Export floppy disk set' })).toBeTruthy();
+        expect(screen.getByText(/2 ordered Yamaha-compatible 1.44 MB floppy images/)).toBeTruthy();
+        expect(screen.getByText(/Required 2 floppy images/)).toBeTruthy();
+        expect(screen.getByText(/Available 32 floppy images/)).toBeTruthy();
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect((screen.getByRole('button', { name: /Storage location/ }) as HTMLButtonElement).disabled).toBe(false);
+    });
+
     it('shows retained Program rows as a nonblocking warning', () => {
         render(MediaExportDialog, {
             props: {
@@ -115,6 +180,9 @@ describe('MediaExportDialog', () => {
                         revision: 4,
                         format: 'ISO9660',
                         scope: 'PARTITION',
+                        artifactKind: 'IMAGE',
+                        outputExtension: '.iso',
+                        floppyImageCount: 0,
                         partitionIndex: 0,
                         partitionName: 'Don Solaris',
                         canExport: true,
@@ -135,8 +203,7 @@ describe('MediaExportDialog', () => {
                                 code: 'MEDIA_CONVERSION_RETAINED_DISABLED_PROGRAM_ROWS',
                                 message: 'Retained 5 disabled Program assignment rows without inventing targets.',
                                 blocking: false,
-                                requiredBytes: null,
-                                availableBytes: null,
+                                measurement: null,
                             },
                         ],
                         defaultFilename: 'disk_p00_Don_Solaris.iso',

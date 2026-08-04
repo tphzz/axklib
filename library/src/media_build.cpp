@@ -390,8 +390,13 @@ detail::write_prepared_media_image(const PreparedMediaImage &prepared, const std
     auto published = publication->publish(mode);
     if (!published)
         return std::unexpected{published.error()};
-    return WrittenMediaImage{output_path, prepared.manifest.format, size, prepared_object_count(prepared),
-                             std::move(*published)};
+    return WrittenMediaImage{output_path,
+                             prepared.manifest.format,
+                             size,
+                             prepared_object_count(prepared),
+                             std::move(*published),
+                             MediaConversionArtifactKind::image,
+                             prepared.manifest.format == MediaImageFormat::fat12_floppy ? 1U : 0U};
 }
 
 Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,

@@ -1,8 +1,12 @@
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <ranges>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -10,7 +14,10 @@
 #include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/session_media_conversion_operations.hpp"
+#include "axklib/audio.hpp"
 #include "axklib/media.hpp"
+#include "axklib/package_archive.hpp"
+#include "axklib/writer.hpp"
 
 namespace {
 
@@ -84,6 +91,9 @@ TEST_F(SessionMediaConversionOperationsTest, InspectsAndExportsPartitionAndVolum
     ASSERT_TRUE(iso_inspection) << iso_inspection.error().message;
     EXPECT_TRUE(iso_inspection->at("canExport"));
     EXPECT_EQ(iso_inspection->at("scope"), "PARTITION");
+    EXPECT_EQ(iso_inspection->at("artifactKind"), "IMAGE");
+    EXPECT_EQ(iso_inspection->at("outputExtension"), ".iso");
+    EXPECT_EQ(iso_inspection->at("floppyImageCount"), 0U);
     EXPECT_EQ(iso_inspection->at("volumes").size(), 1U);
     EXPECT_EQ(iso_inspection->at("defaultFilename"), "source_p00_New_Partition.iso");
 
@@ -107,6 +117,9 @@ TEST_F(SessionMediaConversionOperationsTest, InspectsAndExportsPartitionAndVolum
     ASSERT_TRUE(floppy_inspection) << floppy_inspection.error().message;
     EXPECT_TRUE(floppy_inspection->at("canExport"));
     EXPECT_EQ(floppy_inspection->at("scope"), "VOLUME");
+    EXPECT_EQ(floppy_inspection->at("artifactKind"), "IMAGE");
+    EXPECT_EQ(floppy_inspection->at("outputExtension"), ".ima");
+    EXPECT_EQ(floppy_inspection->at("floppyImageCount"), 1U);
     EXPECT_EQ(floppy_inspection->at("projectedOutputBytes"), 1'474'560U);
 
     auto floppy_request = floppy_base;
@@ -120,6 +133,84 @@ TEST_F(SessionMediaConversionOperationsTest, InspectsAndExportsPartitionAndVolum
     const auto floppy = axk::open_media(retained->reader, "Local disk.ima");
     ASSERT_TRUE(floppy) << floppy.error().message;
     EXPECT_EQ(floppy->kind(), axk::MediaKind::fat12_floppy);
+}
+
+TEST_F(SessionMediaConversionOperationsTest, ExportsAnOversizedVolumeAsATypedMultiFloppyZip) {
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 800'000U;
+    waveform.pcm.resize(static_cast<std::size_t>(waveform.frame_count) * 2U);
+    for (std::uint64_t frame = 0U; frame < waveform.frame_count; ++frame) {
+        const auto phase = static_cast<std::int32_t>(frame % 100U);
+        const auto value = static_cast<std::int16_t>(phase < 50 ? -12'000 + phase * 480 : 12'000 - (phase - 50) * 480);
+        const auto bits = static_cast<std::uint16_t>(value);
+        waveform.pcm[static_cast<std::size_t>(frame) * 2U] = static_cast<std::byte>(bits & 0xffU);
+        waveform.pcm[static_cast<std::size_t>(frame) * 2U + 1U] = static_cast<std::byte>(bits >> 8U);
+    }
+    ASSERT_TRUE(axk::write_wav_atomic(root_ / "long.wav", waveform));
+
+    axk::VolumeSpec volume;
+    volume.name = "Long Volume";
+    volume.waveforms.push_back({"long", "Long Wave", root_ / "long.wav", 60U, {}});
+    axk::SampleSpec sample;
+    sample.name = "Bank Sample";
+    sample.waveform_id = "long";
+    sample.root_key = 60U;
+    sample.key_high = 127U;
+    volume.samples.push_back(std::move(sample));
+    axk::SampleSpec direct_sample;
+    direct_sample.name = "Direct Sample";
+    direct_sample.waveform_id = "long";
+    direct_sample.root_key = 60U;
+    direct_sample.key_high = 127U;
+    volume.samples.push_back(std::move(direct_sample));
+    volume.sample_banks.push_back({"Long Bank", {"Bank Sample"}});
+    volume.programs.push_back({1U, {{"SBAC", "Long Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    const axk::HdsBuildManifest manifest{"1.0", 8U * 1024U * 1024U, {{"PARTITION ONE", {std::move(volume)}}}};
+    const auto written = axk::write_hds_image(manifest, root_ / "long.hds");
+    ASSERT_TRUE(written) << written.error().message;
+
+    const auto opened = images_->open({"workspace", "long.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = images_->content(opened->image_id, "owner", 32U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    const auto partition = std::ranges::find(roots->items, "partition", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(partition, roots->items.end());
+    const auto children = images_->content(opened->image_id, "owner", 32U, {}, partition->id);
+    ASSERT_TRUE(children) << children.error().message;
+    const auto selected_volume = std::ranges::find(children->items, "volume", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(selected_volume, children->items.end());
+    ASSERT_TRUE(partition->partition_index);
+    ASSERT_TRUE(selected_volume->volume_directory_id);
+
+    const nlohmann::json base{{"imageId", opened->image_id},
+                              {"expectedRevision", opened->revision},
+                              {"format", "FAT12_FLOPPY"},
+                              {"partitionIndex", *partition->partition_index},
+                              {"volumeDirectoryId", *selected_volume->volume_directory_id}};
+    const auto inspection = registry_.invoke("images.media_conversion.inspect", base, context());
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    EXPECT_TRUE(inspection->at("canExport"));
+    EXPECT_EQ(inspection->at("artifactKind"), "FLOPPY_DISK_SET");
+    EXPECT_EQ(inspection->at("outputExtension"), ".zip");
+    EXPECT_EQ(inspection->at("floppyImageCount"), 2U);
+    EXPECT_EQ(inspection->at("defaultFilename"), "long_p00_Long_Volume.zip");
+
+    auto request = base;
+    request["destination"] = {{"kind", "DOWNLOAD"}, {"filename", "Long volume"}};
+    const auto result = registry_.invoke("images.media_conversion", request, context());
+    ASSERT_TRUE(result) << result.error().message;
+    ASSERT_EQ(result->at("download").at("filename"), "Long volume.zip");
+    const auto retained = downloads_->open({result->at("download").at("archiveId").get<std::string>()}, "owner");
+    ASSERT_TRUE(retained) << retained.error().message;
+    EXPECT_EQ(retained->snapshot.media_type, "application/zip");
+    ASSERT_LE(retained->reader->size(), std::numeric_limits<std::size_t>::max());
+    std::vector<std::byte> archive_bytes(static_cast<std::size_t>(retained->reader->size()));
+    ASSERT_TRUE(retained->reader->read_exact_at(0U, archive_bytes));
+    const auto archive = axk::package_internal::read_archive(archive_bytes);
+    ASSERT_TRUE(archive) << archive.error().message;
+    ASSERT_EQ(archive->size(), 3U);
+    EXPECT_EQ(archive->front().path, "manifest.json");
 }
 
 } // namespace
