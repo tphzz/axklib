@@ -3,11 +3,14 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <span>
 #include <thread>
 #include <vector>
 
 #if defined(_WIN32)
+#include <windows.h>
+
 #include <process.h>
 #else
 #include <unistd.h>
@@ -259,6 +262,41 @@ TEST_F(SandboxTest, ExposesAnOpaqueRevisionThatChangesWithRetainedFileContent) {
     ASSERT_TRUE(second) << second.error().message;
     EXPECT_NE(second->revision, first->revision);
 }
+
+#if defined(_WIN32)
+TEST_F(SandboxTest, PreservesFileContentRevisionAcrossMetadataOnlyChangeTimeUpdates) {
+    const auto value = sandbox();
+    const auto first = value.open_file({"workspace", "images/disk.hds"});
+    ASSERT_TRUE(first) << first.error().message;
+
+    const auto close_handle = [](void *handle) {
+        if (handle != INVALID_HANDLE_VALUE)
+            CloseHandle(handle);
+    };
+    std::unique_ptr<void, decltype(close_handle)> metadata{
+        CreateFileW((root_ / "images" / "disk.hds").c_str(), FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL, nullptr),
+        close_handle};
+    ASSERT_NE(metadata.get(), INVALID_HANDLE_VALUE);
+
+    FILE_BASIC_INFO before{};
+    ASSERT_NE(GetFileInformationByHandleEx(metadata.get(), FileBasicInfo, &before, sizeof(before)), 0);
+    FILE_BASIC_INFO update{};
+    update.ChangeTime.QuadPart = before.ChangeTime.QuadPart + 10'000'000;
+    ASSERT_NE(SetFileInformationByHandle(metadata.get(), FileBasicInfo, &update, sizeof(update)), 0);
+    FILE_BASIC_INFO after{};
+    ASSERT_NE(GetFileInformationByHandleEx(metadata.get(), FileBasicInfo, &after, sizeof(after)), 0);
+    ASSERT_NE(after.ChangeTime.QuadPart, before.ChangeTime.QuadPart);
+    ASSERT_EQ(after.LastWriteTime.QuadPart, before.LastWriteTime.QuadPart);
+    metadata.reset();
+
+    ASSERT_TRUE(first->verify_unchanged());
+    const auto second = value.open_file({"workspace", "images/disk.hds"});
+    ASSERT_TRUE(second) << second.error().message;
+    EXPECT_EQ(second->revision, first->revision);
+}
+#endif
 
 TEST_F(SandboxTest, RejectsOutputsInReadOnlyRootsAndEscapingParents) {
     const auto read_only = axk::app::Sandbox::create({{"workspace", "Workspace", root_, false}});

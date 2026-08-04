@@ -195,7 +195,7 @@ axk::app::Result<axk::app::OpenedSandboxTreeFile> axk::app::SandboxTree::open_fi
     auto file_handle = descriptor_handle(descriptor);
     auto identity = native_identity(*file_handle, entry.relative_path);
 #endif
-    if (!identity || *identity != implementation_->identities[index])
+    if (!identity || !same_file_revision(*identity, implementation_->identities[index]))
         return std::unexpected(entry_error("archive_source_changed", "archive file changed", entry.relative_path));
     auto reader = std::make_shared<NativeFileReader>(std::move(file_handle), entry.size, entry.relative_path);
     const auto expected = implementation_->identities[index];

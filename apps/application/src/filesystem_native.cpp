@@ -271,6 +271,15 @@ int rename_exchange(int parent, const char *first, const char *second) {
 
 #endif
 
+bool same_file_revision(const NativeIdentity &left, const NativeIdentity &right) noexcept {
+#if defined(_WIN32)
+    return left.volume_serial == right.volume_serial && left.file_id == right.file_id && left.size == right.size &&
+           left.last_write_time == right.last_write_time;
+#else
+    return left == right;
+#endif
+}
+
 std::string revision_token(const NativeIdentity &identity) {
     std::ostringstream source;
     source << std::hex << std::setfill('0');
@@ -278,8 +287,7 @@ std::string revision_token(const NativeIdentity &identity) {
     source << std::setw(16) << identity.volume_serial << ':';
     for (const auto value : identity.file_id)
         source << std::setw(2) << std::to_integer<unsigned int>(value);
-    source << ':' << std::setw(16) << identity.size << ':' << std::setw(16) << identity.last_write_time << ':'
-           << std::setw(16) << identity.change_time;
+    source << ':' << std::setw(16) << identity.size << ':' << std::setw(16) << identity.last_write_time;
 #else
     source << std::setw(16) << identity.device << ':' << std::setw(16) << identity.inode << ':' << std::setw(16)
            << identity.size << ':' << std::setw(16) << identity.modification_seconds << ':' << std::setw(16)

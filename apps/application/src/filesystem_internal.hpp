@@ -132,6 +132,7 @@ struct NativeIdentity {
     friend bool operator==(const NativeIdentity &, const NativeIdentity &) = default;
 };
 
+bool same_file_revision(const NativeIdentity &left, const NativeIdentity &right) noexcept;
 std::string revision_token(const NativeIdentity &identity);
 #if defined(_WIN32)
 Result<NativeIdentity> native_identity(HANDLE handle, std::string_view relative_path);
@@ -208,7 +209,7 @@ class NativeFileReader final : public axk::RandomAccessReader {
 #else
         auto current = native_identity(*handle_, source_name_);
 #endif
-        if (!current || *current != expected) {
+        if (!current || !same_file_revision(*current, expected)) {
             return std::unexpected(
                 entry_error("archive_source_changed", "directory entry changed while it was archived", source_name_));
         }
