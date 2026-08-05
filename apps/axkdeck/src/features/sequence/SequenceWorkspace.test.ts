@@ -61,6 +61,49 @@ describe('SequenceWorkspace', () => {
         expect(screen.getByText('12 events · 96 PPQN · 130.4 BPM')).toBeTruthy();
     });
 
+    it('reports export selection independently from the inspected Sequence', async () => {
+        const inspected = sequence('Inspected Song', 4);
+        const selected = sequence('Selected Song', 8);
+        const onselect = vi.fn();
+        const onselectionchange = vi.fn();
+        render(SequenceWorkspace, {
+            props: {
+                ...common,
+                sequences: [inspected, selected],
+                activeObjectId: inspected.objectId,
+                onselect,
+                selection: {
+                    items: [
+                        {
+                            kind: 'SEQU',
+                            objectId: selected.objectId,
+                            name: selected.name,
+                            typeLabel: 'Sequence',
+                            partitionIndex: selected.object.partitionIndex,
+                            partitionName: selected.object.partitionName,
+                            volumeName: selected.object.volumeName,
+                        },
+                    ],
+                    anchors: {},
+                },
+                onselectionchange,
+            },
+        });
+
+        const inspectedButton = screen.getByRole('button', { name: /Inspected Song/ });
+        const selectedButton = screen.getByRole('button', { name: /Selected Song/ });
+        expect(inspectedButton.classList.contains('active')).toBe(true);
+        expect(inspectedButton.classList.contains('selected')).toBe(false);
+        expect(inspectedButton.getAttribute('aria-pressed')).toBe('false');
+        expect(selectedButton.classList.contains('active')).toBe(false);
+        expect(selectedButton.classList.contains('selected')).toBe(true);
+        expect(selectedButton.getAttribute('aria-pressed')).toBe('true');
+
+        await fireEvent.click(selectedButton, { ctrlKey: true });
+        expect(onselect).not.toHaveBeenCalled();
+        expect(onselectionchange.mock.calls.at(-1)?.[0].items).toEqual([]);
+    });
+
     it('offers package, MIDI, rename, and delete actions for one selected Sequence', async () => {
         const item = sequence('Demo Song', 4);
         const onrenameobject = vi.fn();

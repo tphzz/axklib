@@ -708,7 +708,15 @@ input:focus-visible {
   background: #293036;
 }
 
-.program-row.active,
+.program-row.active {
+  border-color: rgb(104 151 187 / 68%);
+  border-radius: 5px;
+}
+
+.program-row.active:not(.selected) {
+  background: rgb(104 151 187 / 10%);
+}
+
 .program-row.selected {
   border-color: rgb(104 151 187 / 68%);
   border-radius: 5px;
@@ -757,7 +765,15 @@ input:focus-visible {
   background: #293036;
 }
 
-.sequence-row.active,
+.sequence-row.active {
+  border-color: rgb(104 151 187 / 68%);
+  border-radius: 5px;
+}
+
+.sequence-row.active:not(.selected) {
+  background: rgb(104 151 187 / 10%);
+}
+
 .sequence-row.selected {
   border-color: rgb(104 151 187 / 68%);
   border-radius: 5px;
@@ -2451,11 +2467,20 @@ input:focus-visible {
 }
 
 .contained-row:hover,
-.contained-row.active,
-.contained-row.selected {
+.contained-row.active {
   border-color: rgb(104 151 187 / 45%);
   border-radius: 5px;
   background: rgb(104 151 187 / 10%);
+}
+
+.contained-row.active:not(.selected) {
+  border-color: rgb(104 151 187 / 68%);
+}
+
+.contained-row.selected {
+  border-color: rgb(104 151 187 / 68%);
+  border-radius: 5px;
+  background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
 }
 
 .contained-identity {

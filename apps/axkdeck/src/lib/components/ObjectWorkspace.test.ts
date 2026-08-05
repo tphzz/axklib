@@ -139,6 +139,59 @@ describe('ObjectWorkspace', () => {
         expect(screen.getByRole('searchbox', { name: 'Search Programs' })).toBeTruthy();
     });
 
+    it('keeps Program inspection fixed while modifier gestures update the exact selection', async () => {
+        const programObjects = ['001', '002', '003', '004'].map((slot) => object('PROG', slot));
+        const programs = programObjects.map((programObject, index) => ({
+            id: `program-${index + 1}`,
+            objectId: programObject.key,
+            slot: programObject.name,
+            name: `Program ${index + 1}`,
+            object: programObject,
+        }));
+        const onprogramselect = vi.fn();
+        const onselectionchange = vi.fn();
+        const baseProps = {
+            ...common,
+            programs,
+            view: 'programs' as const,
+            onprogramselect,
+            onselectionchange,
+        };
+        const rendered = render(ObjectWorkspace, { props: baseProps });
+        const rows = () => screen.getAllByRole('button', { name: /Program \d/ });
+
+        await fireEvent.click(rows()[0]!);
+        expect(onprogramselect).toHaveBeenCalledOnce();
+        let selection = onselectionchange.mock.calls.at(-1)?.[0] as PackageExportSelectionState;
+        await rendered.rerender({ ...baseProps, activeObjectId: programObjects[0]!.key, selection });
+
+        await fireEvent.click(rows()[3]!, { shiftKey: true });
+        selection = onselectionchange.mock.calls.at(-1)?.[0] as PackageExportSelectionState;
+        expect(selection.items.map((item) => item.objectId)).toEqual(programObjects.map((item) => item.key));
+        expect(onprogramselect).toHaveBeenCalledOnce();
+        await rendered.rerender({ ...baseProps, activeObjectId: programObjects[0]!.key, selection });
+        expect(rows()[0]!.classList.contains('active')).toBe(true);
+        expect(rows()[3]!.classList.contains('active')).toBe(false);
+        expect(rows()[3]!.getAttribute('aria-pressed')).toBe('true');
+
+        await fireEvent.click(rows()[1]!, { ctrlKey: true });
+        selection = onselectionchange.mock.calls.at(-1)?.[0] as PackageExportSelectionState;
+        expect(selection.items.map((item) => item.objectId)).toEqual([
+            programObjects[0]!.key,
+            programObjects[2]!.key,
+            programObjects[3]!.key,
+        ]);
+        expect(onprogramselect).toHaveBeenCalledOnce();
+        await rendered.rerender({ ...baseProps, activeObjectId: programObjects[0]!.key, selection });
+        expect(rows()[1]!.classList.contains('selected')).toBe(false);
+        expect(rows()[1]!.getAttribute('aria-pressed')).toBe('false');
+
+        await fireEvent.click(rows()[2]!, { ctrlKey: true });
+        selection = onselectionchange.mock.calls.at(-1)?.[0] as PackageExportSelectionState;
+        expect(selection.items.map((item) => item.objectId)).toEqual([programObjects[0]!.key, programObjects[3]!.key]);
+        expect(onprogramselect).toHaveBeenCalledOnce();
+    });
+
     it('offers Program rename by display name while retaining its numeric slot target', async () => {
         const programObject = object('PROG', '001');
         const onrenameobject = vi.fn();

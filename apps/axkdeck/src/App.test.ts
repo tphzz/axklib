@@ -1141,6 +1141,85 @@ describe('App panel layout', () => {
         expect(screen.queryByText(/Uploading package/)).toBeNull();
     });
 
+    it('updates repeated modifier deselection immediately without moving the inspected object', async () => {
+        const volume = {
+            id: 'volume-programs',
+            name: 'Programs',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const programs = ['001', '002', '003', '004'].map((slot, index) => ({
+            key: `program-${slot}`,
+            objectType: 'PROG',
+            name: `${slot}: Program ${index + 1}`,
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: volume.name,
+            categoryName: 'PROG',
+            sfsId: index + 1,
+            storedSizeBytes: 512,
+        }));
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            tree: [
+                {
+                    id: 'disk-17',
+                    name: 'nested.hds',
+                    kind: 'disk',
+                    childCount: 1,
+                    children: [volume],
+                },
+            ],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: programs.length,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectRenameAvailable: true,
+            objectDeletionAvailable: true,
+            packageImportAvailable: true,
+            packageExportAvailable: true,
+        });
+        mocks.objectPage.mockResolvedValue({ objects: programs, totalCount: programs.length });
+        render(App);
+
+        await chooseNestedImage();
+        const first = await screen.findByRole('button', { name: /Program 1/ });
+        const second = screen.getByRole('button', { name: /Program 2/ });
+        const third = screen.getByRole('button', { name: /Program 3/ });
+        const fourth = screen.getByRole('button', { name: /Program 4/ });
+
+        await fireEvent.click(first);
+        expect(screen.getByRole('status').textContent).toContain('1 selected');
+        await fireEvent.click(fourth, { shiftKey: true });
+        expect(screen.getByRole('status').textContent).toContain('4 selected');
+        expect(first.classList.contains('active')).toBe(true);
+        expect(fourth.classList.contains('active')).toBe(false);
+
+        await fireEvent.click(second, { ctrlKey: true });
+        expect(screen.getByRole('status').textContent).toContain('3 selected');
+        expect(second.classList.contains('selected')).toBe(false);
+        expect(second.classList.contains('active')).toBe(false);
+        expect(second.getAttribute('aria-pressed')).toBe('false');
+
+        await fireEvent.click(third, { ctrlKey: true });
+        expect(screen.getByRole('status').textContent).toContain('2 selected');
+        expect(third.classList.contains('selected')).toBe(false);
+        expect(third.classList.contains('active')).toBe(false);
+        expect(third.getAttribute('aria-pressed')).toBe('false');
+        expect(first.classList.contains('selected')).toBe(true);
+        expect(fourth.classList.contains('selected')).toBe(true);
+    });
+
     it('keeps one mixed package export selection across tabs and volumes', async () => {
         const pianoVolume = {
             id: 'volume-piano',

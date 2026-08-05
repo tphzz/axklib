@@ -84,6 +84,13 @@ describe('ContainedObjectWorkspace', () => {
         expect(rowRule).toContain('border-bottom-color: rgb(61 68 72 / 72%)');
     });
 
+    it('distinguishes inspected rows from export-selected rows in every collection layout', () => {
+        expect(appStyles).toContain('.program-row.active:not(.selected)');
+        expect(appStyles).toContain('.sequence-row.active:not(.selected)');
+        expect(appStyles).toContain('.contained-row.active:not(.selected)');
+        expect(appStyles).toContain('.wave-data-row.active:not(.selected)');
+    });
+
     it('naturally orders every displayed object lane before filtering', () => {
         const bank2 = structure('SBAC', 'Bank 2');
         const bank10 = structure('SBAC', 'Bank 10');
@@ -147,6 +154,69 @@ describe('ContainedObjectWorkspace', () => {
         expect(new Set(rangeSelection.items.map((item) => item.objectId))).toEqual(
             new Set([sample2.objectId, sample3.objectId, sample10.objectId]),
         );
+    });
+
+    it('keeps contained-object inspection fixed during modifier selection gestures', async () => {
+        const bank = structure('SBAC', 'Bank');
+        const sample = structure('SBNK', 'Sample');
+        const waveData = waveform('Wave');
+        const selectedItems: PackageExportObject[] = [bank, sample, waveData].map((item) => ({
+            kind: item.object.objectType as PackageExportObject['kind'],
+            objectId: 'objectId' in item ? item.objectId : item.objectKey,
+            name: item.name,
+            typeLabel:
+                item.object.objectType === 'SBAC'
+                    ? 'Sample Bank'
+                    : item.object.objectType === 'SBNK'
+                      ? 'Sample'
+                      : 'Wave Data',
+            partitionIndex: item.object.partitionIndex,
+            partitionName: item.object.partitionName,
+            volumeName: item.object.volumeName,
+        }));
+        const onsamplebankselect = vi.fn();
+        const onsampleselect = vi.fn();
+        const onwavedataselect = vi.fn();
+        const onselectionchange = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...noAuditionableSamples,
+                view: 'sample-banks',
+                sampleBanks: [bank],
+                samples: [sample],
+                waveData: [waveData],
+                activeSampleBankId: '',
+                activeSampleId: '',
+                activeWaveDataId: '',
+                queries: { primary: '', secondary: '', tertiary: '' },
+                onquerychange: vi.fn(),
+                onsamplebankselect,
+                onsampleselect,
+                onwavedataselect,
+                selection: { items: selectedItems, anchors: {} },
+                onselectionchange,
+            },
+        });
+
+        const bankButton = screen.getByRole('button', { name: 'Inspect Bank' });
+        const sampleButton = screen.getByRole('button', { name: 'Inspect Sample' });
+        const waveDataButton = screen.getByRole('button', { name: 'Inspect Wave' });
+        expect(bankButton.getAttribute('aria-pressed')).toBe('true');
+        expect(sampleButton.getAttribute('aria-pressed')).toBe('true');
+        expect(waveDataButton.getAttribute('aria-pressed')).toBe('true');
+
+        await fireEvent.click(bankButton, { ctrlKey: true });
+        expect(
+            (onselectionchange.mock.calls.at(-1)?.[0] as PackageExportSelectionState).items.some(
+                (item) => item.objectId === bank.objectId,
+            ),
+        ).toBe(false);
+        await fireEvent.click(sampleButton, { shiftKey: true });
+        await fireEvent.click(waveDataButton, { metaKey: true });
+
+        expect(onsamplebankselect).not.toHaveBeenCalled();
+        expect(onsampleselect).not.toHaveBeenCalled();
+        expect(onwavedataselect).not.toHaveBeenCalled();
     });
 
     it('renders the SBAC hierarchy as three simultaneous list lanes', async () => {

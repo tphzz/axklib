@@ -312,10 +312,9 @@
                     class:active={activeObjectId === program.objectId}
                     class:selected={selection.items.some((item) => item.objectId === program.objectId)}
                     class="program-row"
-                    aria-pressed={activeObjectId === program.objectId}
+                    aria-pressed={selection.items.some((item) => item.objectId === program.objectId)}
                     onclick={(event) => {
-                        updateSelection(event, program.objectId);
-                        onprogramselect(program);
+                        if (updateSelection(event, program.objectId) === 'replace') onprogramselect(program);
                     }}
                     oncontextmenu={(event) => openObjectMenu(event, program.object, programRenameTarget(program))}
                     onkeydown={(event) =>

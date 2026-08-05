@@ -3,6 +3,7 @@
     import {
         emptyPackageExportSelection,
         selectionMode,
+        type ObjectSelectionMode,
         updatePackageExportSelection,
         type PackageExportSelectionState,
     } from '../objectSelection';
@@ -157,18 +158,20 @@
         domain: SelectableItem[],
         visible: SelectableItem[],
         target: SelectableItem,
-    ): void {
+    ): ObjectSelectionMode {
         const targetId = objectId(target);
+        const mode = selectionMode(event);
         const result = updatePackageExportSelection(
             selection,
             selectionKey(scope, domain),
             domain.map(exportObject),
             visible.map(exportObject),
             targetId,
-            selectionMode(event),
+            mode,
         );
         if (result.limitExceeded) onselectionlimit();
         else onselectionchange(result.selection);
+        return mode;
     }
 
     function selectAll(
@@ -277,10 +280,14 @@
                             class="contained-identity"
                             type="button"
                             aria-label={`Inspect ${item.name}`}
-                            aria-pressed={activeSampleBankId === item.objectId}
+                            aria-pressed={selection.items.some((selected) => selected.objectId === item.objectId)}
                             onclick={(event) => {
-                                updateSelection(event, 'sample-banks', orderedBanks, filteredBanks, item);
-                                onsamplebankselect(item);
+                                if (
+                                    updateSelection(event, 'sample-banks', orderedBanks, filteredBanks, item) ===
+                                    'replace'
+                                ) {
+                                    onsamplebankselect(item);
+                                }
                             }}
                             oncontextmenu={(event) => openObjectMenu(event, 'sample-banks', orderedBanks, item)}
                             onkeydown={(event) =>
@@ -341,10 +348,13 @@
                         class="contained-identity"
                         type="button"
                         aria-label={`Inspect ${item.name}`}
-                        aria-pressed={activeSampleId === item.objectId}
+                        aria-pressed={selection.items.some((selected) => selected.objectId === item.objectId)}
                         onclick={(event) => {
-                            updateSelection(event, 'samples', orderedSamples, filteredSamples, item);
-                            onsampleselect(item);
+                            if (
+                                updateSelection(event, 'samples', orderedSamples, filteredSamples, item) === 'replace'
+                            ) {
+                                onsampleselect(item);
+                            }
                         }}
                         oncontextmenu={(event) => openObjectMenu(event, 'samples', orderedSamples, item)}
                         onkeydown={(event) =>
@@ -405,10 +415,14 @@
                         class="contained-identity"
                         type="button"
                         aria-label={`Inspect ${item.name}`}
-                        aria-pressed={activeWaveDataId === item.objectKey}
+                        aria-pressed={selection.items.some((selected) => selected.objectId === item.objectKey)}
                         onclick={(event) => {
-                            updateSelection(event, 'wave-data', orderedWaveData, filteredWaveData, item);
-                            onwavedataselect(item);
+                            if (
+                                updateSelection(event, 'wave-data', orderedWaveData, filteredWaveData, item) ===
+                                'replace'
+                            ) {
+                                onwavedataselect(item);
+                            }
                         }}
                         oncontextmenu={(event) => openObjectMenu(event, 'wave-data', orderedWaveData, item)}
                         onkeydown={(event) =>

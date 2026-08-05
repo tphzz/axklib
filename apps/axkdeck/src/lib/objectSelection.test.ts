@@ -127,6 +127,52 @@ describe('object selection', () => {
         expect(all.items.map((item) => item.objectId)).toEqual(['program', 'sample-a', 'sample-b', 'sample-c']);
     });
 
+    it('removes each exact toggle target from an existing range', () => {
+        const samples = [
+            object('sample-a', 'SBNK', 0, 'Volume', 'A'),
+            object('sample-b', 'SBNK', 0, 'Volume', 'B'),
+            object('sample-c', 'SBNK', 0, 'Volume', 'C'),
+            object('sample-d', 'SBNK', 0, 'Volume', 'D'),
+        ];
+        let selection = updatePackageExportSelection(
+            emptyPackageExportSelection(),
+            'samples',
+            samples,
+            samples,
+            samples[0]!.objectId,
+            'replace',
+        ).selection;
+        selection = updatePackageExportSelection(
+            selection,
+            'samples',
+            samples,
+            samples,
+            samples[3]!.objectId,
+            'range',
+        ).selection;
+        selection = updatePackageExportSelection(
+            selection,
+            'samples',
+            samples,
+            samples,
+            samples[1]!.objectId,
+            'toggle',
+        ).selection;
+
+        expect(selection.items.map((item) => item.objectId)).toEqual(['sample-a', 'sample-c', 'sample-d']);
+
+        selection = updatePackageExportSelection(
+            selection,
+            'samples',
+            samples,
+            samples,
+            samples[2]!.objectId,
+            'toggle',
+        ).selection;
+
+        expect(selection.items.map((item) => item.objectId)).toEqual(['sample-a', 'sample-d']);
+    });
+
     it('deduplicates objects exposed through multiple relationship views', () => {
         const sample = object('sample', 'SBNK', 0, 'Volume', 'Sample');
         let selection = updatePackageExportSelection(

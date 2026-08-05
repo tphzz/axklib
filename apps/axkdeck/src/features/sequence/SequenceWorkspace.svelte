@@ -209,7 +209,7 @@
                 class:active={activeObjectId === item.objectId}
                 class:selected={selection.items.some((selected) => selected.objectId === item.objectId)}
                 class="sequence-row"
-                aria-pressed={activeObjectId === item.objectId}
+                aria-pressed={selection.items.some((selected) => selected.objectId === item.objectId)}
                 onclick={(event) => {
                     if (updateSelection(event, item.objectId) === 'replace') onselect(item);
                 }}
