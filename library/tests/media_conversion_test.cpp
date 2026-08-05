@@ -823,6 +823,17 @@ TEST(MediaConversion, UsesOrdinaryMarkersWhenWholeObjectsMoveToTheNextMember) {
     ASSERT_TRUE(reopened) << reopened.error().message;
     EXPECT_EQ(reopened->status(), axk::FloppySetStatus::complete);
     EXPECT_EQ(reopened->members().size(), 3U);
+    const auto &first_member = reopened->members().front();
+    const auto yamaha = std::ranges::find(first_member.files(), std::string{"YAMAHA.SYM"}, &axk::FatFile::path);
+    ASSERT_NE(yamaha, first_member.files().end());
+    const auto catalog_bytes = first_member.read_file(*yamaha);
+    ASSERT_TRUE(catalog_bytes) << catalog_bytes.error().message;
+    const auto catalog = axk::detail::decode_yamaha_floppy_catalog(*catalog_bytes);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    const auto marker =
+        std::ranges::find(catalog->files, R"(\A3000.SYM)", &axk::YamahaFloppyCatalogEntry::logical_path);
+    ASSERT_NE(marker, catalog->files.end());
+    EXPECT_EQ(marker->slot, plan->disks[0].marker_slot);
 }
 
 TEST(MediaConversion, UsesFileContinuationMarkerWhenWaveDataSpansMembers) {
@@ -864,14 +875,14 @@ TEST(MediaConversion, OrdersSamplesWithFirstUseWaveDataBeforeSampleBanks) {
     const auto &left = plan->disks[0].segments.back();
     ASSERT_GE(plan->disks[1].segments.size(), 1U);
     const auto &right = plan->disks[1].segments[0];
-    EXPECT_EQ(left.object_index, 3U);
+    EXPECT_EQ(left.object_index, 5U);
     EXPECT_EQ(right.object_index, 5U);
-    EXPECT_FALSE(left.split);
-    EXPECT_FALSE(right.split);
+    EXPECT_TRUE(left.split);
+    EXPECT_TRUE(right.split);
     EXPECT_TRUE(right.catalog_member_suffix);
 }
 
-TEST(MediaConversion, MovesFirstUseWaveDataWithoutDuplicatingItsSampleAtTheDiskBoundary) {
+TEST(MediaConversion, ContinuesFirstUseWaveDataAfterItsSampleAtTheDiskBoundary) {
     axk::detail::PreparedMediaImage image;
     image.objects.emplace_back(axk::ObjectType::sbnk, "Boundary Sample", std::vector<std::byte>(392U));
     image.objects.emplace_back(axk::ObjectType::smpl, "Boundary Wave", sparse_smpl(200'000U));
@@ -881,13 +892,33 @@ TEST(MediaConversion, MovesFirstUseWaveDataWithoutDuplicatingItsSampleAtTheDiskB
     const auto plan = axk::detail::plan_floppy_disk_set(image, "Boundary", {});
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_EQ(plan->disks.size(), 2U);
-    ASSERT_EQ(plan->disks[0].segments.size(), 2U);
+    ASSERT_EQ(plan->disks[0].segments.size(), 3U);
     ASSERT_EQ(plan->disks[1].segments.size(), 1U);
     EXPECT_EQ(plan->disks[0].segments[0].object_index, 2U);
     EXPECT_EQ(plan->disks[0].segments[1].object_index, 0U);
+    EXPECT_EQ(plan->disks[0].segments[2].object_index, 1U);
+    EXPECT_TRUE(plan->disks[0].segments[2].split);
+    EXPECT_EQ(plan->disks[0].segments[2].payload_offset, 0U);
     EXPECT_EQ(plan->disks[1].segments[0].object_index, 1U);
-    EXPECT_FALSE(plan->disks[1].segments[0].split);
+    EXPECT_TRUE(plan->disks[1].segments[0].split);
+    EXPECT_EQ(plan->disks[1].segments[0].payload_offset, plan->disks[0].segments[2].payload_bytes);
     EXPECT_TRUE(plan->disks[1].segments[0].catalog_member_suffix);
+    EXPECT_EQ(plan->disks[0].marker_name, "A3000F.SYM");
+    EXPECT_EQ(plan->disks[1].marker_name, "A3000E.SYM");
+}
+
+TEST(MediaConversion, RejectsSeparatingASampleWhenNoWaveDataHeaderFitsBesideIt) {
+    axk::detail::PreparedMediaImage image;
+    image.objects.emplace_back(axk::ObjectType::prog, "Foundation", std::make_shared<SparseReader>(1'446'912U));
+    image.objects.emplace_back(axk::ObjectType::sbnk, "Boundary Sample", std::vector<std::byte>(392U));
+    image.objects.emplace_back(axk::ObjectType::smpl, "Boundary Wave", sparse_smpl(200'000U));
+    image.sample_wave_dependencies = {{1U, 2U}};
+
+    const auto plan = axk::detail::plan_floppy_disk_set(image, "Boundary", {});
+    ASSERT_FALSE(plan);
+    EXPECT_EQ(plan.error().code, axk::ErrorCode::unsupported_profile);
+    EXPECT_EQ(plan.error().message,
+              "a Sample and its first-use Wave Data cannot be separated without a continuation segment");
 }
 
 TEST(MediaConversion, DoesNotRepeatAStereoSampleWhenTheBoundaryFallsBetweenItsFirstUseWaveData) {
@@ -900,12 +931,14 @@ TEST(MediaConversion, DoesNotRepeatAStereoSampleWhenTheBoundaryFallsBetweenItsFi
     const auto plan = axk::detail::plan_floppy_disk_set(image, "Stereo boundary", {});
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_EQ(plan->disks.size(), 2U);
-    ASSERT_EQ(plan->disks[0].segments.size(), 2U);
+    ASSERT_EQ(plan->disks[0].segments.size(), 3U);
     ASSERT_EQ(plan->disks[1].segments.size(), 1U);
     EXPECT_EQ(plan->disks[0].segments[0].object_index, 0U);
     EXPECT_EQ(plan->disks[0].segments[1].object_index, 1U);
+    EXPECT_EQ(plan->disks[0].segments[2].object_index, 2U);
+    EXPECT_TRUE(plan->disks[0].segments[2].split);
     EXPECT_EQ(plan->disks[1].segments[0].object_index, 2U);
-    EXPECT_FALSE(plan->disks[1].segments[0].split);
+    EXPECT_TRUE(plan->disks[1].segments[0].split);
     EXPECT_TRUE(plan->disks[1].segments[0].catalog_member_suffix);
 }
 

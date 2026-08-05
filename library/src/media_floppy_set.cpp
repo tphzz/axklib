@@ -435,19 +435,23 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
         if (auto valid = validate_complete_smpl(object, *header); !valid)
             return std::unexpected{valid.error()};
         const WaveDataPlan wave{object_index, std::move(*header)};
-        if (*whole_clusters <= empty_member_clusters) {
-            const auto first_sample = object_order->first_sample_by_wave[object_index];
-            const bool sample_on_previous_member =
-                first_sample &&
-                std::ranges::contains(disks.back().layout.segments, *first_sample, &FloppyObjectSegment::object_index);
+        const auto first_sample = object_order->first_sample_by_wave[object_index];
+        const bool sample_on_current_member =
+            first_sample &&
+            std::ranges::contains(disks.back().layout.segments, *first_sample, &FloppyObjectSegment::object_index);
+        const auto available_bytes = (floppy_data_clusters - disks.back().used_clusters) * cluster_bytes;
+        if (*whole_clusters <= empty_member_clusters && !sample_on_current_member) {
             auto next = add_disk();
             if (!next)
                 return std::unexpected{next.error()};
-            if (auto added =
-                    add_whole_object(**next, object_index, object.size(), *whole_clusters, sample_on_previous_member);
-                !added)
+            if (auto added = add_whole_object(**next, object_index, object.size(), *whole_clusters); !added)
                 return std::unexpected{added.error()};
             continue;
+        }
+        if (sample_on_current_member && (disks.back().layout.segments.size() >= maximum_member_segments ||
+                                         available_bytes <= wave.header.header_size)) {
+            return std::unexpected{floppy_error(
+                "a Sample and its first-use Wave Data cannot be separated without a continuation segment")};
         }
         std::uint64_t offset{};
         while (offset < wave.header.payload_bytes_0x1c) {
