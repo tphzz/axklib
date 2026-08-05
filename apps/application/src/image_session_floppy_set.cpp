@@ -15,6 +15,8 @@ namespace {
 
 std::string marker_name(axk::FloppySetMarker marker) {
     switch (marker) {
+    case axk::FloppySetMarker::ordinary:
+        return "ORDINARY";
     case axk::FloppySetMarker::continuation:
         return "CONTINUATION";
     case axk::FloppySetMarker::final:

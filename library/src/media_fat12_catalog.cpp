@@ -101,6 +101,7 @@ FatCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image, const 
     }
 
     std::set<std::uint16_t> catalog_slots;
+    std::size_t ordinary_markers{};
     std::size_t continuation_markers{};
     std::size_t final_markers{};
     for (const auto &entry : catalog->files) {
@@ -108,6 +109,7 @@ FatCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image, const 
         const bool standalone = entry.logical_path == R"(\A3000.SYM)";
         const bool continuation = entry.logical_path == R"(\A3000F.SYM)";
         const bool final = entry.logical_path == R"(\A3000E.SYM)";
+        ordinary_markers += standalone ? 1U : 0U;
         continuation_markers += continuation ? 1U : 0U;
         final_markers += final ? 1U : 0U;
 
@@ -131,7 +133,7 @@ FatCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image, const 
                 result.issues.push_back(
                     issue("FLOPPY_SET_MARKER_INVALID",
                           std::format("Disk-set marker '{}' is not zero length", entry.logical_path),
-                          entry.logical_path, "Use an exact Yamaha continuation marker"));
+                          entry.logical_path, "Use an exact Yamaha member marker"));
             }
             continue;
         }
@@ -167,25 +169,24 @@ FatCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image, const 
         }
     }
 
-    if (continuation_markers > 0U && final_markers > 0U) {
+    const auto marker_count = ordinary_markers + continuation_markers + final_markers;
+    if (marker_count > 1U) {
         result.identity.marker = FloppySetMarker::invalid;
-        result.issues.push_back(issue("FLOPPY_SET_MARKER_CONFLICT",
-                                      "YAMAHA.SYM contains both continuation and final markers", "\\YAMAHA.SYM",
-                                      "Use an image with exactly one disk-set marker"));
+        result.issues.push_back(issue("FLOPPY_SET_MARKER_CONFLICT", "YAMAHA.SYM contains conflicting member markers",
+                                      "\\YAMAHA.SYM", "Use an image with exactly one Yamaha member marker"));
+    } else if (ordinary_markers == 1U) {
+        result.identity.marker = FloppySetMarker::ordinary;
     } else if (continuation_markers == 1U) {
         result.identity.marker = FloppySetMarker::continuation;
     } else if (final_markers == 1U) {
         result.identity.marker = FloppySetMarker::final;
-    } else if (continuation_markers > 1U || final_markers > 1U) {
-        result.identity.marker = FloppySetMarker::invalid;
-        result.issues.push_back(issue("FLOPPY_SET_MARKER_INVALID", "YAMAHA.SYM contains duplicate disk-set markers",
-                                      "\\YAMAHA.SYM", "Use an image with exactly one disk-set marker"));
     }
 
     result.catalog = std::move(*catalog);
-    result.identity.trusted_for_disk_set = parsed_label.has_value() &&
-                                           result.identity.marker != FloppySetMarker::none &&
-                                           result.identity.marker != FloppySetMarker::invalid && result.issues.empty();
+    result.identity.trusted_for_disk_set =
+        parsed_label.has_value() &&
+        (result.identity.marker == FloppySetMarker::continuation || result.identity.marker == FloppySetMarker::final) &&
+        result.issues.empty();
     return result;
 }
 

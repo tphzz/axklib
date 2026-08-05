@@ -417,8 +417,8 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     EXPECT_EQ(disk_set_manifest.at("yamahaSymbolMetadata"), "SYNTHESIZED");
     EXPECT_FALSE(disk_set_manifest.contains("setMarker"));
     ASSERT_EQ(disk_set_manifest.at("disks").size(), 2U);
-    EXPECT_EQ(disk_set_manifest.at("disks").at(0).at("continuationMarker"), "A3000F.SYM");
-    EXPECT_EQ(disk_set_manifest.at("disks").at(1).at("continuationMarker"), "A3000E.SYM");
+    EXPECT_EQ(disk_set_manifest.at("disks").at(0).at("memberMarker"), "A3000F.SYM");
+    EXPECT_EQ(disk_set_manifest.at("disks").at(1).at("memberMarker"), "A3000E.SYM");
     EXPECT_EQ(disk_set_manifest.at("disks").at(0).at("yamahaSymbolSha256").get<std::string>().size(), 64U);
     std::vector<std::string> continuation_paths;
     std::vector<std::string> continuation_logical_paths;
@@ -798,7 +798,11 @@ TEST(MediaConversion, PlansEveryRequiredFloppyBeforeTheThirtyTwoImageAdmissionLi
     EXPECT_EQ(plan->disks.back().name, "DISK SET      33");
 }
 
-TEST(MediaConversion, UsesContinuationMarkersUntilTheFinalMemberOfAThreeDiskSet) {
+TEST(MediaConversion, UsesOrdinaryMarkersWhenWholeObjectsMoveToTheNextMember) {
+    const auto output_path = std::filesystem::temp_directory_path() / "axklib-media-conversion-ordinary-members.zip";
+    std::error_code error;
+    std::filesystem::remove(output_path, error);
+
     axk::detail::PreparedMediaImage image;
     const auto payload = sparse_smpl(1'000'000U);
     for (std::size_t index = 1U; index <= 3U; ++index)
@@ -807,9 +811,33 @@ TEST(MediaConversion, UsesContinuationMarkersUntilTheFinalMemberOfAThreeDiskSet)
     const auto plan = axk::detail::plan_floppy_disk_set(image, "Three disk", {});
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_EQ(plan->disks.size(), 3U);
-    EXPECT_EQ(plan->disks[0].marker_name, "A3000F.SYM");
-    EXPECT_EQ(plan->disks[1].marker_name, "A3000F.SYM");
+    EXPECT_EQ(plan->disks[0].marker_name, "A3000.SYM");
+    EXPECT_EQ(plan->disks[1].marker_name, "A3000.SYM");
     EXPECT_EQ(plan->disks[2].marker_name, "A3000E.SYM");
+
+    const auto written = axk::detail::write_floppy_disk_set(image, *plan, output_path, false, {});
+    ASSERT_TRUE(written) << written.error().message;
+    const auto archive = axk::FileReader::open(output_path);
+    ASSERT_TRUE(archive) << archive.error().message;
+    const auto reopened = axk::FloppyDiskSet::open_archive(*archive, output_path.string());
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    EXPECT_EQ(reopened->status(), axk::FloppySetStatus::complete);
+    EXPECT_EQ(reopened->members().size(), 3U);
+}
+
+TEST(MediaConversion, UsesFileContinuationMarkerWhenWaveDataSpansMembers) {
+    axk::detail::PreparedMediaImage image;
+    image.objects.emplace_back(axk::ObjectType::smpl, "Split Wave", sparse_smpl(2'000'000U));
+
+    const auto plan = axk::detail::plan_floppy_disk_set(image, "Split wave", {});
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->disks.size(), 2U);
+    ASSERT_FALSE(plan->disks[0].segments.empty());
+    ASSERT_FALSE(plan->disks[1].segments.empty());
+    EXPECT_TRUE(plan->disks[0].segments.back().split);
+    EXPECT_TRUE(plan->disks[1].segments.front().split);
+    EXPECT_EQ(plan->disks[0].marker_name, "A3000F.SYM");
+    EXPECT_EQ(plan->disks[1].marker_name, "A3000E.SYM");
 }
 
 TEST(MediaConversion, OrdersSamplesWithFirstUseWaveDataBeforeSampleBanks) {

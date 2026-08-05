@@ -28,6 +28,7 @@ constexpr std::uint64_t yamaha_catalog_clusters = 20U;
 constexpr std::size_t maximum_single_objects = 222U;
 constexpr std::size_t maximum_member_segments = 221U;
 constexpr std::size_t maximum_floppy_images = 32U;
+constexpr std::string_view ordinary_marker_name = "A3000.SYM";
 constexpr std::string_view continuation_marker_name = "A3000F.SYM";
 constexpr std::string_view final_marker_name = "A3000E.SYM";
 
@@ -123,7 +124,7 @@ nlohmann::ordered_json disk_set_manifest(const FloppyDiskSetPlan &plan, std::spa
     for (std::size_t index = 0U; index < plan.disks.size(); ++index) {
         disks.push_back({{"index", index + 1U},
                          {"logicalName", plan.disks[index].name},
-                         {"continuationMarker", plan.disks[index].marker_name},
+                         {"memberMarker", plan.disks[index].marker_name},
                          {"path", disk_path(index + 1U)},
                          {"sizeBytes", floppy_image_bytes},
                          {"sha256", digests[index]},
@@ -241,10 +242,11 @@ Result<void> validate_disk(const PreparedMediaImage &prepared, std::span<const s
     if (*actual_catalog != *expected_catalog)
         return std::unexpected{floppy_error("generated floppy member Yamaha catalog differs from its plan")};
     const auto marker = std::ranges::find_if(prepared.floppy_catalog->files, [](const auto &file) {
-        return file.logical_path == "\\A3000F.SYM" || file.logical_path == "\\A3000E.SYM";
+        return file.logical_path == "\\A3000.SYM" || file.logical_path == "\\A3000F.SYM" ||
+               file.logical_path == "\\A3000E.SYM";
     });
     if (marker == prepared.floppy_catalog->files.end())
-        return std::unexpected{floppy_error("generated floppy member catalog has no continuation marker")};
+        return std::unexpected{floppy_error("generated floppy member catalog has no member marker")};
     auto marker_filename = yamaha_floppy_physical_filename(marker->logical_path.substr(1U), marker->slot);
     if (!marker_filename)
         return std::unexpected{marker_filename.error()};
@@ -253,7 +255,7 @@ Result<void> validate_disk(const PreparedMediaImage &prepared, std::span<const s
         for (const auto &file : fat->files())
             root_paths += (root_paths.empty() ? "" : ", ") + file.path;
         return std::unexpected{
-            floppy_error(std::format("generated floppy member is missing physical continuation marker '{}' (root: {})",
+            floppy_error(std::format("generated floppy member is missing physical member marker '{}' (root: {})",
                                      *marker_filename, root_paths))};
     }
     return {};
@@ -488,9 +490,17 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
             }
         }
         if (!marker_slot)
-            return std::unexpected{floppy_error("Yamaha floppy member has no free continuation-marker slot")};
-        disk.layout.marker_name =
-            std::string{index + 1U == disks.size() ? final_marker_name : continuation_marker_name};
+            return std::unexpected{floppy_error("Yamaha floppy member has no free member-marker slot")};
+        const auto continues_file =
+            index + 1U < disks.size() && std::ranges::any_of(disk.layout.segments, [&](const auto &segment) {
+                return segment.split &&
+                       std::ranges::any_of(disks[index + 1U].layout.segments, [&](const auto &next_segment) {
+                           return next_segment.split && next_segment.object_index == segment.object_index;
+                       });
+            });
+        disk.layout.marker_name = std::string{index + 1U == disks.size() ? final_marker_name
+                                              : continues_file           ? continuation_marker_name
+                                                                         : ordinary_marker_name};
         disk.layout.marker_slot = *marker_slot;
         result.disks.push_back(std::move(disk.layout));
     }

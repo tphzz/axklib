@@ -292,13 +292,15 @@ header and retains the complete logical payload size at `0x1c`; `0x20` is
 rewritten to the local segment size and `0x24` to its contiguous logical
 payload offset. Other object types are never split.
 
-Every member contains its own exact synthesized `YAMAHA.SYM`. Nonfinal members
-catalog a zero-length `A3000F.SYM` continuation marker; the final member catalogs
-a zero-length `A3000E.SYM` end marker. Physical object slots are local to each
-disk and may be reused on later members. Segments of one continued Wave Data
-object use its logical catalog series path, object name, and normalized header
-as their cross-member identity rather than one physical slot. The ZIP manifest
-carries the deterministic logical disk names and exact member order:
+Every member contains its own exact synthesized `YAMAHA.SYM`. A nonfinal member
+catalogs zero-length `A3000F.SYM` only when the current Wave Data file continues
+on the next disk. A whole-object boundary catalogs zero-length `A3000.SYM`
+instead. The final member catalogs zero-length `A3000E.SYM`. Physical object
+slots are local to each disk and may be reused on later members. Segments of one
+continued Wave Data object use its logical catalog series path, object name, and
+normalized header as their cross-member identity rather than one physical slot.
+The ZIP manifest carries the deterministic logical disk names and exact member
+order:
 
 ```text
 manifest.json
@@ -309,9 +311,9 @@ payloads/disk02.ima
 
 The manifest schema is `axklib.floppy-disk-set.v1`. It records the disk count,
 logical name, member path, fixed image size, image and `YAMAHA.SYM` SHA-256
-digests, continuation marker, and hardware-validation state. ZIP is a host transport container only: extract the
-`.ima` members and present them to the sampler in manifest order, beginning
-with disk 1.
+digests, exact member marker, and hardware-validation state. ZIP is a host
+transport container only: extract the `.ima` members and present them to the
+sampler in manifest order, beginning with disk 1.
 
 Before publication, the writer reopens every FAT12 member, compares its exact
 object payloads and catalog, reassembles every split Wave Data object byte for

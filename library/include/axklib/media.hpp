@@ -29,7 +29,7 @@ enum class MediaKind : std::uint8_t {
 };
 enum class LabelStatus : std::uint8_t { confirmed, navigation_aid, raw_identifier };
 enum class MediaObjectReadMode : std::uint8_t { complete, decoded_metadata };
-enum class FloppySetMarker : std::uint8_t { none, continuation, final, invalid };
+enum class FloppySetMarker : std::uint8_t { none, ordinary, continuation, final, invalid };
 enum class FloppySetStatus : std::uint8_t { incomplete, complete };
 
 struct YamahaFloppyCatalogEntry {
@@ -245,6 +245,10 @@ class AXK_API FloppyDiskSet {
                                                            const CancellationToken &cancellation = {}) const;
 
   private:
+    [[nodiscard]] static Result<FloppyDiskSet> open_members(std::vector<FatImage> members, std::string source_name,
+                                                            bool allow_manifest_verified_ordinary_markers,
+                                                            const CancellationToken &cancellation);
+
     std::string source_name_;
     std::vector<FatImage> members_;
     FloppySetStatus status_{FloppySetStatus::incomplete};

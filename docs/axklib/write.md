@@ -436,8 +436,10 @@ Programs precede Sample/first-use-Wave pairs, remaining Wave Data, Sample Banks,
 and Sequences. A whole first-use Wave Data object that moves to the next member
 does so without repeating its Sample and carries the destination member's
 two-digit suffix in its logical catalog path. Unrelated whole-object rollover
-does not gain that suffix. A partition is never reduced to a subset without an
-explicit future selection contract. The destination chooser
+does not gain that suffix. `A3000F.SYM` marks only a Wave Data file that
+continues across that boundary; ordinary whole-object rollover uses
+`A3000.SYM`, and the final member uses `A3000E.SYM`. A partition is never
+reduced to a subset without an explicit future selection contract. The destination chooser
 matches package export:
 **Storage location** publishes to a configured workspace and **This computer**
 streams the retained result to the desktop file chooser. Suggested names use

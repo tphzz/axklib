@@ -38,6 +38,16 @@ TEST(Fat12Reader, ExposesTrustedYamahaCatalogAndContinuationIdentity) {
     EXPECT_TRUE(fat->validation_issues().empty());
 }
 
+TEST(Fat12Reader, RecognizesOrdinaryMarkerWithoutTrustingItAsDiskSetIdentity) {
+    const auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(catalog_fat_fixture("A3000.SYM")),
+                                         "ordinary-disk01.ima");
+
+    ASSERT_TRUE(fat) << fat.error().message;
+    EXPECT_EQ(fat->disk_identity().marker, axk::FloppySetMarker::ordinary);
+    EXPECT_FALSE(fat->disk_identity().trusted_for_disk_set);
+    EXPECT_TRUE(fat->validation_issues().empty());
+}
+
 TEST(Fat12Reader, KeepsMissingAndMalformedCatalogsReadableButUntrusted) {
     const auto missing = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "missing.ima");
     ASSERT_TRUE(missing) << missing.error().message;

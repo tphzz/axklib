@@ -87,6 +87,16 @@ Result<std::string> catalog_digest(const FatImage &image, const CancellationToke
     return package_internal::hex_digest(package_internal::sha256(*bytes));
 }
 
+std::optional<FloppySetMarker> marker_from_name(std::string_view name) {
+    if (name == "A3000.SYM")
+        return FloppySetMarker::ordinary;
+    if (name == "A3000F.SYM")
+        return FloppySetMarker::continuation;
+    if (name == "A3000E.SYM")
+        return FloppySetMarker::final;
+    return std::nullopt;
+}
+
 struct PendingObject {
     MediaObject object;
     std::uint16_t slot{};
@@ -231,6 +241,12 @@ Result<MediaObject> assemble_smpl(std::vector<PendingObject *> parts, FloppySetS
 
 Result<FloppyDiskSet> FloppyDiskSet::open(std::vector<FatImage> members, std::string source_name,
                                           const CancellationToken &cancellation) {
+    return open_members(std::move(members), std::move(source_name), false, cancellation);
+}
+
+Result<FloppyDiskSet> FloppyDiskSet::open_members(std::vector<FatImage> members, std::string source_name,
+                                                  bool allow_manifest_verified_ordinary_markers,
+                                                  const CancellationToken &cancellation) {
     if (members.empty() || members.size() > maximum_members) {
         return std::unexpected{
             set_error(ErrorCode::invalid_argument, "floppy disk set requires between one and 32 members", source_name)};
@@ -242,13 +258,20 @@ Result<FloppyDiskSet> FloppyDiskSet::open(std::vector<FatImage> members, std::st
             return std::unexpected{check.error()};
         const auto &identity = members[offset].disk_identity();
         const auto expected = static_cast<std::uint16_t>(offset + 1U);
-        if (!identity.trusted_for_disk_set || identity.set_name != set_name || identity.index != expected) {
+        const auto verified_ordinary = allow_manifest_verified_ordinary_markers &&
+                                       identity.marker == FloppySetMarker::ordinary && identity.set_name == set_name &&
+                                       identity.index == expected && members[offset].validation_issues().empty();
+        if ((!identity.trusted_for_disk_set && !verified_ordinary) || identity.set_name != set_name ||
+            identity.index != expected) {
             return std::unexpected{set_error(ErrorCode::container_invalid_geometry,
                                              std::format("floppy member '{}' is not trusted disk {} of this set",
                                                          members[offset].source_name(), expected),
                                              source_name)};
         }
-        if (offset + 1U < members.size() && identity.marker != FloppySetMarker::continuation) {
+        const auto valid_intermediate =
+            identity.marker == FloppySetMarker::continuation ||
+            (allow_manifest_verified_ordinary_markers && identity.marker == FloppySetMarker::ordinary);
+        if (offset + 1U < members.size() && !valid_intermediate) {
             return std::unexpected{set_error(ErrorCode::container_invalid_geometry,
                                              "a final floppy marker appears before the last selected member",
                                              source_name)};
@@ -319,7 +342,7 @@ Result<FloppyDiskSet> FloppyDiskSet::open_archive(std::shared_ptr<const RandomAc
     constexpr std::array disk_keys{
         std::string_view{"index"},
         std::string_view{"logicalName"},
-        std::string_view{"continuationMarker"},
+        std::string_view{"memberMarker"},
         std::string_view{"path"},
         std::string_view{"sizeBytes"},
         std::string_view{"sha256"},
@@ -333,7 +356,7 @@ Result<FloppyDiskSet> FloppyDiskSet::open_archive(std::shared_ptr<const RandomAc
             return std::unexpected{valid.error()};
         const auto index = required_json<std::size_t>(disk, "index", source_name);
         const auto logical_name = required_json<std::string>(disk, "logicalName", source_name);
-        const auto marker = required_json<std::string>(disk, "continuationMarker", source_name);
+        const auto marker = required_json<std::string>(disk, "memberMarker", source_name);
         const auto path = required_json<std::string>(disk, "path", source_name);
         const auto size = required_json<std::uint64_t>(disk, "sizeBytes", source_name);
         const auto digest = required_json<std::string>(disk, "sha256", source_name);
@@ -357,9 +380,13 @@ Result<FloppyDiskSet> FloppyDiskSet::open_archive(std::shared_ptr<const RandomAc
         auto member = FatImage::open(slice, entry.path, cancellation);
         if (!member)
             return std::unexpected{member.error()};
-        const auto expected_marker = offset + 1U == *disk_count ? "A3000E.SYM" : "A3000F.SYM";
+        const auto parsed_marker = marker_from_name(*marker);
+        const auto valid_marker = offset + 1U == *disk_count ? parsed_marker == FloppySetMarker::final
+                                                             : parsed_marker == FloppySetMarker::ordinary ||
+                                                                   parsed_marker == FloppySetMarker::continuation;
         const auto actual_symbol_digest = catalog_digest(*member, cancellation);
-        if (member->disk_identity().label != *logical_name || *marker != expected_marker || !actual_symbol_digest ||
+        if (member->disk_identity().label != *logical_name || !valid_marker ||
+            member->disk_identity().marker != *parsed_marker || !actual_symbol_digest ||
             *actual_symbol_digest != *symbol_digest) {
             return std::unexpected{set_error(ErrorCode::container_backup_mismatch,
                                              std::format("floppy-set member {} metadata mismatch", offset + 1U),
@@ -367,7 +394,7 @@ Result<FloppyDiskSet> FloppyDiskSet::open_archive(std::shared_ptr<const RandomAc
         }
         members.push_back(std::move(*member));
     }
-    return open(std::move(members), std::move(source_name), cancellation);
+    return open_members(std::move(members), std::move(source_name), true, cancellation);
 }
 
 const std::string &FloppyDiskSet::source_name() const noexcept { return source_name_; }
