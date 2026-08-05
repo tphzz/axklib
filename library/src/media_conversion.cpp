@@ -310,6 +310,7 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
 
     std::set<std::string> selected_keys;
     std::unordered_map<std::string, std::uint32_t> volume_by_key;
+    std::map<std::string, std::size_t, std::less<>> floppy_object_index_by_key;
     std::size_t output_volume_index{};
     for (const auto &volume : *volumes) {
         if (request.scope == MediaConversionScope::volume && volume.directory_id != *request.volume_directory_id)
@@ -357,6 +358,8 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
             }
             auto reader =
                 std::make_shared<RecordReader>(container, partition->index, object.sfs_id, size, cancellation);
+            if (request.format == MediaImageFormat::fat12_floppy)
+                floppy_object_index_by_key.emplace(object.key, prepared_volume.objects.size());
             prepared_volume.objects.emplace_back(object.object.header.type, object.object.header.name,
                                                  std::move(reader));
             selected_keys.insert(object.key);
@@ -420,6 +423,20 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
         if (volume_by_key.at(relationship.source_key) != volume_by_key.at(*relationship.target_key)) {
             add_issue(prepared.summary, "MEDIA_CONVERSION_CROSS_VOLUME_DEPENDENCY",
                       std::format("{} crosses source volume boundaries", relationship.type));
+            continue;
+        }
+        if (request.format == MediaImageFormat::fat12_floppy &&
+            (relationship.type == "SBNK_LEFT_MEMBER_TO_SMPL" || relationship.type == "SBNK_RIGHT_MEMBER_TO_SMPL")) {
+            const auto source = floppy_object_index_by_key.find(relationship.source_key);
+            const auto target = floppy_object_index_by_key.find(*relationship.target_key);
+            if (source == floppy_object_index_by_key.end() || target == floppy_object_index_by_key.end()) {
+                add_issue(prepared.summary, "MEDIA_CONVERSION_RELATIONSHIP_UNCONFIRMED",
+                          std::format("{} dependency has no prepared floppy object", relationship.type));
+                continue;
+            }
+            const detail::PreparedMediaImage::SampleWaveDependency dependency{source->second, target->second};
+            if (!std::ranges::contains(prepared.image.sample_wave_dependencies, dependency))
+                prepared.image.sample_wave_dependencies.push_back(dependency);
         }
     }
     if (retained_program_row_count != 0U) {

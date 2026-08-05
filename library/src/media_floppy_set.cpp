@@ -1,15 +1,14 @@
 #include "axklib/writer_internal.hpp"
 
 #include <algorithm>
-#include <array>
 #include <filesystem>
 #include <format>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <span>
 #include <string_view>
-#include <tuple>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -37,6 +36,16 @@ struct DiskState {
     std::uint64_t used_clusters{yamaha_catalog_clusters};
 };
 
+struct WaveDataPlan {
+    std::size_t object_index{};
+    ObjectHeader header;
+};
+
+struct DependencyPlan {
+    std::vector<std::size_t> objects;
+    std::vector<std::optional<std::size_t>> sample_by_wave;
+};
+
 Error floppy_error(std::string message) {
     return make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported, std::move(message));
 }
@@ -62,7 +71,7 @@ Result<ObjectHeader> read_object_header(const PreparedMediaObject &object, const
 
 Result<void> validate_complete_smpl(const PreparedMediaObject &object, const ObjectHeader &header) {
     if (header.type != ObjectType::smpl || header.header_size < 0x42U || header.payload_offset_0x24 != 0U ||
-        header.payload_bytes_0x20 != header.payload_bytes_0x1c ||
+        header.payload_bytes_0x1c == 0U || header.payload_bytes_0x20 != header.payload_bytes_0x1c ||
         static_cast<std::uint64_t>(header.header_size) + header.payload_bytes_0x1c != object.size()) {
         return std::unexpected{floppy_error(
             "multi-floppy export requires a complete Wave Data object with exact header and payload bounds")};
@@ -70,13 +79,11 @@ Result<void> validate_complete_smpl(const PreparedMediaObject &object, const Obj
     return {};
 }
 
-Result<std::uint16_t> allocate_catalog_slot(const DiskState &disk, std::optional<std::uint16_t> preferred = {}) {
+Result<std::uint16_t> allocate_catalog_slot(const DiskState &disk) {
     const auto used = [&](std::uint16_t slot) {
         return std::ranges::any_of(disk.layout.segments,
                                    [slot](const auto &segment) { return segment.catalog_slot == slot; });
     };
-    if (preferred && *preferred >= 2U && *preferred < 224U && !used(*preferred))
-        return *preferred;
     for (std::uint16_t slot = 2U; slot < 224U; ++slot) {
         if (!used(slot))
             return slot;
@@ -90,6 +97,22 @@ Result<void> add_whole_object(DiskState &disk, std::size_t object_index, std::ui
         return std::unexpected{slot.error()};
     disk.layout.segments.push_back({object_index, *slot, 0U, size, 0U, false});
     disk.used_clusters += clusters;
+    return {};
+}
+
+Result<void> add_wave_segment(DiskState &disk, const WaveDataPlan &wave, std::uint64_t offset, std::uint64_t bytes) {
+    auto clusters = allocated_clusters(static_cast<std::uint64_t>(wave.header.header_size) + bytes);
+    if (!clusters)
+        return std::unexpected{clusters.error()};
+    if (bytes == 0U || disk.layout.segments.size() >= maximum_member_segments ||
+        *clusters > floppy_data_clusters - disk.used_clusters) {
+        return std::unexpected{floppy_error("Wave Data continuation segment does not fit its Yamaha floppy")};
+    }
+    auto slot = allocate_catalog_slot(disk);
+    if (!slot)
+        return std::unexpected{slot.error()};
+    disk.layout.segments.push_back({wave.object_index, *slot, offset, bytes, wave.header.header_size, true});
+    disk.used_clusters += *clusters;
     return {};
 }
 
@@ -275,12 +298,67 @@ Result<void> validate_reassembly(const PreparedMediaImage &source,
     return {};
 }
 
+Result<DependencyPlan> dependency_order(const PreparedMediaImage &image, const CancellationToken &cancellation) {
+    std::vector<std::vector<std::size_t>> wave_data_by_sample(image.objects.size());
+    for (const auto &dependency : image.sample_wave_dependencies) {
+        if (dependency.sample_object_index >= image.objects.size() ||
+            dependency.wave_data_object_index >= image.objects.size() ||
+            image.objects[dependency.sample_object_index].type != ObjectType::sbnk ||
+            image.objects[dependency.wave_data_object_index].type != ObjectType::smpl) {
+            return std::unexpected{floppy_error("prepared Sample-to-Wave Data dependency is invalid")};
+        }
+        auto &targets = wave_data_by_sample[dependency.sample_object_index];
+        if (!std::ranges::contains(targets, dependency.wave_data_object_index))
+            targets.push_back(dependency.wave_data_object_index);
+    }
+
+    DependencyPlan result;
+    result.sample_by_wave.resize(image.objects.size());
+    std::vector<bool> emitted(image.objects.size());
+    const auto emit = [&](std::size_t index) {
+        if (!emitted[index]) {
+            emitted[index] = true;
+            result.objects.push_back(index);
+        }
+    };
+    const auto emit_type = [&](ObjectType type) {
+        for (std::size_t index = 0U; index < image.objects.size(); ++index) {
+            if (image.objects[index].type == type)
+                emit(index);
+        }
+    };
+
+    emit_type(ObjectType::prog);
+    for (std::size_t index = 0U; index < image.objects.size(); ++index) {
+        if (const auto check = cancellation.check(); !check)
+            return std::unexpected{check.error()};
+        if (image.objects[index].type != ObjectType::sbnk)
+            continue;
+        emit(index);
+        for (const auto wave_data : wave_data_by_sample[index]) {
+            if (!emitted[wave_data])
+                result.sample_by_wave[wave_data] = index;
+            emit(wave_data);
+        }
+    }
+    emit_type(ObjectType::smpl);
+    emit_type(ObjectType::sbac);
+    emit_type(ObjectType::sequ);
+    emit_type(ObjectType::prf3);
+    for (std::size_t index = 0U; index < image.objects.size(); ++index)
+        emit(index);
+    return result;
+}
+
 } // namespace
 
 Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, std::string_view volume_name,
                                                const CancellationToken &cancellation) {
     if (image.objects.empty())
         return std::unexpected{floppy_error("a floppy disk set must contain at least one Yamaha object")};
+    auto object_order = dependency_order(image, cancellation);
+    if (!object_order)
+        return std::unexpected{object_order.error()};
     std::uint64_t single_clusters{yamaha_catalog_clusters};
     bool fits_single = image.objects.size() <= maximum_single_objects;
     for (const auto &object : image.objects) {
@@ -299,9 +377,10 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
         if (!name)
             return std::unexpected{name.error()};
         result.disks.push_back({std::move(*name), {}, 0U, {}});
-        for (std::size_t index = 0U; index < image.objects.size(); ++index) {
-            result.disks.front().segments.push_back(
-                {index, static_cast<std::uint16_t>(index + 2U), 0U, image.objects[index].size(), 0U, false});
+        for (std::size_t index = 0U; index < object_order->objects.size(); ++index) {
+            const auto object_index = object_order->objects[index];
+            result.disks.front().segments.push_back({object_index, static_cast<std::uint16_t>(index + 2U), 0U,
+                                                     image.objects[object_index].size(), 0U, false});
         }
         result.projected_archive_bytes = floppy_image_bytes;
         return result;
@@ -316,61 +395,34 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
         disks.push_back({{std::move(*name), {}, 0U, {}}, yamaha_catalog_clusters});
         return &disks.back();
     };
-    auto first_disk = add_disk();
-    if (!first_disk)
+    if (auto first_disk = add_disk(); !first_disk)
         return std::unexpected{first_disk.error()};
     const auto fits = [](const DiskState &disk, std::uint64_t clusters) {
         return disk.layout.segments.size() < maximum_member_segments &&
                clusters <= floppy_data_clusters - disk.used_clusters;
     };
 
-    std::vector<std::size_t> foundational_objects;
-    std::vector<std::size_t> wave_data_objects;
-    for (std::size_t index = 0U; index < image.objects.size(); ++index) {
-        if (image.objects[index].type == ObjectType::smpl)
-            wave_data_objects.push_back(index);
-        else
-            foundational_objects.push_back(index);
-    }
-    constexpr std::array foundational_order{ObjectType::prog, ObjectType::sbac, ObjectType::sbnk, ObjectType::sequ,
-                                            ObjectType::prf3};
-    std::ranges::stable_sort(foundational_objects, {}, [&](std::size_t index) {
-        const auto found = std::ranges::find(foundational_order, image.objects[index].type);
-        return static_cast<std::size_t>(found - foundational_order.begin());
-    });
-    for (const auto object_index : foundational_objects) {
-        auto clusters = allocated_clusters(image.objects[object_index].size());
-        if (!clusters)
-            return std::unexpected{clusters.error()};
-        if (!fits(**first_disk, *clusters)) {
-            return std::unexpected{
-                floppy_error("the complete Program/Sample Bank/Sample graph does not fit on the first Yamaha floppy")};
-        }
-        if (auto added = add_whole_object(**first_disk, object_index, image.objects[object_index].size(), *clusters);
-            !added) {
-            return std::unexpected{added.error()};
-        }
-    }
-
-    for (const auto object_index : wave_data_objects) {
+    constexpr auto empty_member_clusters = floppy_data_clusters - yamaha_catalog_clusters;
+    for (std::size_t order_index = 0U; order_index < object_order->objects.size(); ++order_index) {
+        const auto object_index = object_order->objects[order_index];
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
         const auto &object = image.objects[object_index];
         auto whole_clusters = allocated_clusters(object.size());
         if (!whole_clusters)
             return std::unexpected{whole_clusters.error()};
-        auto *disk = &disks.back();
-        if (fits(*disk, *whole_clusters)) {
-            if (auto added = add_whole_object(*disk, object_index, object.size(), *whole_clusters); !added)
+        if (fits(disks.back(), *whole_clusters)) {
+            if (auto added = add_whole_object(disks.back(), object_index, object.size(), *whole_clusters); !added)
                 return std::unexpected{added.error()};
             continue;
         }
-        if (*whole_clusters <= floppy_data_clusters - yamaha_catalog_clusters) {
+        if (object.type != ObjectType::smpl) {
             auto next = add_disk();
             if (!next)
                 return std::unexpected{next.error()};
-            disk = *next;
-            if (auto added = add_whole_object(*disk, object_index, object.size(), *whole_clusters); !added)
+            if (!fits(**next, *whole_clusters))
+                return std::unexpected{floppy_error("prepared Yamaha object does not fit on an empty floppy")};
+            if (auto added = add_whole_object(**next, object_index, object.size(), *whole_clusters); !added)
                 return std::unexpected{added.error()};
             continue;
         }
@@ -379,33 +431,53 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
             return std::unexpected{header.error()};
         if (auto valid = validate_complete_smpl(object, *header); !valid)
             return std::unexpected{valid.error()};
+        const WaveDataPlan wave{object_index, std::move(*header)};
+        if (*whole_clusters <= empty_member_clusters) {
+            auto next = add_disk();
+            if (!next)
+                return std::unexpected{next.error()};
+            if (const auto sample_index = object_order->sample_by_wave[object_index]) {
+                const auto &previous = disks[disks.size() - 2U].layout.segments;
+                if (std::ranges::contains(previous, *sample_index, &FloppyObjectSegment::object_index)) {
+                    const auto &sample = image.objects[*sample_index];
+                    auto sample_clusters = allocated_clusters(sample.size());
+                    if (!sample_clusters)
+                        return std::unexpected{sample_clusters.error()};
+                    if (*sample_clusters > empty_member_clusters - *whole_clusters) {
+                        return std::unexpected{floppy_error(
+                            "a Sample and its first-use Wave Data do not fit together on an empty floppy")};
+                    }
+                    if (auto added = add_whole_object(**next, *sample_index, sample.size(), *sample_clusters); !added)
+                        return std::unexpected{added.error()};
+                }
+            }
+            if (auto added = add_whole_object(**next, object_index, object.size(), *whole_clusters); !added)
+                return std::unexpected{added.error()};
+            continue;
+        }
         std::uint64_t offset{};
-        std::optional<std::uint16_t> continuation_slot;
-        while (offset < header->payload_bytes_0x1c) {
-            disk = &disks.back();
+        while (offset < wave.header.payload_bytes_0x1c) {
+            auto *disk = &disks.back();
             const auto available_clusters = floppy_data_clusters - disk->used_clusters;
             const auto available_bytes = available_clusters * cluster_bytes;
-            if (disk->layout.segments.size() >= maximum_member_segments || available_bytes <= header->header_size) {
+            if (disk->layout.segments.size() >= maximum_member_segments || available_bytes <= wave.header.header_size) {
                 auto next = add_disk();
                 if (!next)
                     return std::unexpected{next.error()};
-                disk = *next;
                 continue;
             }
-            const auto remaining = static_cast<std::uint64_t>(header->payload_bytes_0x1c) - offset;
-            const auto local_bytes = std::min(remaining, available_bytes - header->header_size);
+            const auto remaining = static_cast<std::uint64_t>(wave.header.payload_bytes_0x1c) - offset;
+            const auto local_bytes = std::min(remaining, available_bytes - wave.header.header_size);
             if (local_bytes == 0U || local_bytes > std::numeric_limits<std::uint32_t>::max())
                 return std::unexpected{floppy_error("Wave Data continuation segment size is unsupported")};
-            auto segment_clusters = allocated_clusters(header->header_size + local_bytes);
-            if (!segment_clusters)
-                return std::unexpected{segment_clusters.error()};
-            auto slot = allocate_catalog_slot(*disk, continuation_slot);
-            if (!slot)
-                return std::unexpected{slot.error()};
-            continuation_slot = *slot;
-            disk->layout.segments.push_back({object_index, *slot, offset, local_bytes, header->header_size, true});
-            disk->used_clusters += *segment_clusters;
+            if (auto added = add_wave_segment(*disk, wave, offset, local_bytes); !added)
+                return std::unexpected{added.error()};
             offset += local_bytes;
+            if (offset < wave.header.payload_bytes_0x1c) {
+                auto next = add_disk();
+                if (!next)
+                    return std::unexpected{next.error()};
+            }
         }
     }
 

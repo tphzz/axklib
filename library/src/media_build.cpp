@@ -351,7 +351,7 @@ Result<detail::PreparedMediaImage> detail::prepare_media_image(const MediaBuildM
         return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                           "media image must contain at least one Yamaha object")};
     }
-    return PreparedMediaImage{manifest, limits, std::move(*objects), {}, {}, {}};
+    return PreparedMediaImage{manifest, limits, std::move(*objects), {}, {}, {}, {}};
 }
 
 Result<WrittenMediaImage>

@@ -2398,7 +2398,7 @@ TEST(PackageImportPlanner, RejectsFat12RootExhaustionAndInvalidExistingChains) {
     axk::detail::PreparedMediaImage full;
     full.manifest.schema_version = "1.0";
     full.manifest.format = axk::MediaImageFormat::fat12_floppy;
-    for (std::size_t index = 0U; index < 223U; ++index)
+    for (std::size_t index = 0U; index < 222U; ++index)
         full.retained_files.push_back({std::format("R{:07}.DAT", index), {static_cast<std::byte>(index)}});
     auto full_publication = axk::detail::TemporaryPublication::create(full_target);
     ASSERT_TRUE(full_publication) << full_publication.error().message;

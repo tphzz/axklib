@@ -64,8 +64,24 @@ TEST(YamahaFloppyCatalog, BuildsLogicalPathsAndSlotBasedPhysicalNames) {
     ASSERT_TRUE(marker_filename);
     EXPECT_EQ(*program, R"(\PROG\001             )");
     EXPECT_EQ(*wave, R"(\SMPL\LONG WAVE       01)");
-    EXPECT_EQ(*object_filename, "SOURCEWA.002");
+    EXPECT_EQ(*object_filename, "SOURCE_W.002");
     EXPECT_EQ(*marker_filename, "A3000F_S.079");
+}
+
+TEST(YamahaFloppyCatalog, PreservesEachOfTheFirstEightNamePositions) {
+    const auto program = axk::detail::yamaha_floppy_physical_filename("001", 2U);
+    const auto punctuation = axk::detail::yamaha_floppy_physical_filename("Obi-Wan Br", 3U);
+    const auto exact_width = axk::detail::yamaha_floppy_physical_filename("PROPHET B", 4U);
+    const auto single_marker = axk::detail::yamaha_floppy_physical_filename("A3000.SYM", 1U);
+
+    ASSERT_TRUE(program);
+    ASSERT_TRUE(punctuation);
+    ASSERT_TRUE(exact_width);
+    ASSERT_TRUE(single_marker);
+    EXPECT_EQ(*program, "001_____.002");
+    EXPECT_EQ(*punctuation, "OBI_WAN_.003");
+    EXPECT_EQ(*exact_width, "PROPHET_.004");
+    EXPECT_EQ(*single_marker, "A3000_SY.001");
 }
 
 TEST(YamahaFloppyCatalog, RejectsDuplicateSlotsAndOversizedFields) {

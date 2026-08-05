@@ -80,6 +80,13 @@ struct PreparedMediaImage {
     std::vector<PreparedMediaFile> retained_files;
     std::vector<PreparedIsoVolume> iso_volumes;
     std::optional<YamahaFloppyCatalog> floppy_catalog;
+    struct SampleWaveDependency {
+        std::size_t sample_object_index{};
+        std::size_t wave_data_object_index{};
+
+        bool operator==(const SampleWaveDependency &) const = default;
+    };
+    std::vector<SampleWaveDependency> sample_wave_dependencies;
 };
 
 struct Iso9660LayoutNode {

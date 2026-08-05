@@ -105,6 +105,7 @@ FatCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image, const 
     std::size_t final_markers{};
     for (const auto &entry : catalog->files) {
         catalog_slots.insert(entry.slot);
+        const bool standalone = entry.logical_path == R"(\A3000.SYM)";
         const bool continuation = entry.logical_path == R"(\A3000F.SYM)";
         const bool final = entry.logical_path == R"(\A3000E.SYM)";
         continuation_markers += continuation ? 1U : 0U;
@@ -125,7 +126,7 @@ FatCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image, const 
             continue;
         }
         const auto &file = *physical->second.front();
-        if (continuation || final) {
+        if (standalone || continuation || final) {
             if (file.size != 0U) {
                 result.issues.push_back(
                     issue("FLOPPY_SET_MARKER_INVALID",

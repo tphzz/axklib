@@ -114,7 +114,8 @@ The generated boot sector also has these deterministic fields:
 | `0x36` | 8 | Filesystem text `FAT12` padded with spaces; FAT type still comes from cluster count. |
 | `0x1fe` | 2 | Signature `55 aa`. |
 
-Generated object directory entries use the archive attribute `0x20`. Creation
+Generated root-directory entries use attribute `0x00`, matching the maintained
+Yamaha content-floppy corpus. Creation
 and modification timestamps are fixed to `2026-01-01 00:00:00`; last-access
 dates are zero. This fixed metadata is a reproducibility convention, not a
 sampler-facing object field.
@@ -206,7 +207,8 @@ Supported Yamaha floppy images commonly contain these root-file classes:
 | --- | --- | --- |
 | Sampler object | `SINE____.003`, `SMP_2555.004` | Complete `FSFSDEV3SPLX<type>` payload. The embedded type and name are authoritative. |
 | Symbol/support metadata | `YAMAHA.SYM` | A 9,766-byte disk/file/category catalog. Readers exclude it from object inventory; writers synthesize it from the output image. |
-| Model/system metadata | names such as `A3000_SY.002` | Non-object support data observed on some media. Its payload is not part of the public object decoder. |
+| Standalone-disk marker | `A3000_SY.001` | Zero-length physical file cataloged as `\A3000.SYM` in slot 1. Readers exclude it from object inventory. |
+| Model/system metadata | names such as `A3000_SY.002` | Other non-object support data observed on some media. Its payload is not part of the public object decoder. |
 | Other DOS file | any valid DOS 8.3 name | Readable through the FAT layer, but ignored by object inventory unless it begins with a supported object signature. |
 
 Object stems often resemble an uppercase, DOS-compatible projection of the
@@ -223,17 +225,19 @@ from filename or FAT allocation length.
 ## Generated Floppy File Layout
 
 `axklib create floppy` writes exactly one root-directory file for each prepared
-Yamaha object and one synthesized `YAMAHA.SYM`. It does not create unrelated
-model-specific system metadata, subdirectories, a root-directory FAT
-volume-label entry, or long filenames.
+Yamaha object, one synthesized `YAMAHA.SYM`, and the zero-length physical
+standalone-disk marker `A3000_SY.001`. It does not create unrelated model-specific
+system metadata, subdirectories, a root-directory FAT volume-label entry, or
+long filenames.
 
 `YAMAHA.SYM` is exactly 257 records of 38 bytes: one disk-name record, 224
 physical-file slot records, and 32 category records. A live record begins with
 `0x00`, stores a NUL-terminated logical path, and has a zero-filled tail. An
-unused record begins with `0xff`. Generated object slots begin at 2; slots 0 and
-1 remain reserved. The catalog is written last in deterministic root-directory
-order. Rebuilding an existing image preserves a valid catalog's disk-name
-record while regenerating its file and category records from the output.
+unused record begins with `0xff`. Slot 1 catalogs `\A3000.SYM`; generated object
+slots begin at 2 and slot 0 remains unused. The catalog is written last in
+deterministic root-directory order. Rebuilding an existing image preserves a
+valid catalog's disk-name record while regenerating its file and category
+records from the output.
 
 Objects are sorted deterministically by object type, embedded name, and payload
 size. Known types sort as `SMPL`, `SBNK`, `SBAC`, `PROG`, `SEQU`, then `PRF3`.
@@ -241,29 +245,28 @@ Each DOS filename is generated as follows:
 
 ```text
 stem:
-  scan the embedded object name from left to right
-  keep ASCII letters, digits, and underscore
-  uppercase retained characters
-  stop after 8 characters
-  use OBJECT if no character remains
+  take the first 8 embedded-name byte positions
+  uppercase ASCII letters and preserve digits and underscore
+  replace every other byte position with underscore
+  pad a shorter name to 8 positions with underscore
 
 extension:
   Yamaha catalog slot in the complete sorted object list
   formatted as three decimal digits: 002, 003, ... 223
 ```
 
-If two stems collide, the later stem is shortened and its catalog slot
-position is appended. If that still collides, image creation fails rather than
-silently replacing a file. The writer supports at most 222 generated objects:
-the Yamaha file catalog reserves slots 0 and 1, and `YAMAHA.SYM` itself occupies
-one of the 224 FAT root entries.
+Object stems may repeat because the three-digit catalog-slot extension is unique.
+If a complete physical filename still collides with a retained root file, image
+creation fails rather than silently replacing it. The writer supports at most
+222 generated objects: the Yamaha file catalog reserves slots 0 and 1, while
+`A3000_SY.001` and `YAMAHA.SYM` occupy two of the 224 FAT root entries.
 
 For example, freshly authored Wave Data and a Sample both named
 `Authored Tone` are sorted as `SMPL` then `SBNK` and become:
 
 ```text
 AUTHORED.002   FSFSDEV3SPLXSMPL...
-AUTHORE2.003   FSFSDEV3SPLXSBNK...
+AUTHORED.003   FSFSDEV3SPLXSBNK...
 ```
 
 The filename algorithm is a generated-container convention. Transferring an
@@ -272,24 +275,28 @@ filenames; it does not preserve the source directory entry or cluster chain.
 
 ## Multi-Floppy Conversion Sets
 
-Media conversion keeps the complete Program (`PROG`), Sample Bank (`SBAC`),
-Sample (`SBNK`), Sequence (`SEQU`), and `PRF3` foundation on disk 1. Export is
-blocked if that foundation does not fit there. Only Wave Data (`SMPL`) moves to
-later disks or spans disks. Each physical
-Wave Data segment repeats the source header and retains the complete logical
-payload size at `0x1c`; `0x20` is rewritten to the local segment size and
-`0x24` to its contiguous logical payload offset. Other object types are never
-split. Every segment of one continued Wave Data object keeps the same generated
-DOS 8.3 filename on each disk; its local directory position never renumbers the
-continuation.
+Media conversion follows the dependency order observed in a two-disk save made
+by an A5000 running system software 1.50: Programs first, then each Sample (`SBNK`)
+followed by its not-yet-emitted Known Wave Data dependencies, remaining Wave
+Data, Sample Banks (`SBAC`), then Sequences and `PRF3`. Shared Wave Data is
+written at first use only.
+
+When a Sample fits at the end of one member but its first-use whole Wave Data
+does not, the writer repeats that exact Sample at the beginning of the next
+member before the Wave Data. It does not create an unrelated boundary carrier.
+Whole objects otherwise move to a later member without splitting. Only Wave
+Data larger than an empty member is segmented. Each segment repeats the source
+header and retains the complete logical payload size at `0x1c`; `0x20` is
+rewritten to the local segment size and `0x24` to its contiguous logical
+payload offset. Other object types are never split.
 
 Every member contains its own exact synthesized `YAMAHA.SYM`. Nonfinal members
 catalog a zero-length `A3000F.SYM` continuation marker; the final member catalogs
 a zero-length `A3000E.SYM` end marker. Physical object slots are local to each
 disk and may be reused on later members. Segments of one continued Wave Data
-object deliberately retain one slot and physical filename across members. The
-ZIP manifest carries the deterministic logical disk names and exact member
-order:
+object use its logical catalog series path, object name, and normalized header
+as their cross-member identity rather than one physical slot. The ZIP manifest
+carries the deterministic logical disk names and exact member order:
 
 ```text
 manifest.json
@@ -305,11 +312,12 @@ digests, continuation marker, and hardware-validation state. ZIP is a host trans
 with disk 1.
 
 Before publication, the writer reopens every FAT12 member, compares its exact
-object payloads and catalog, reassembles every split Wave Data object byte for byte, reopens
-the ZIP, and checks its inspected size. More than 32 required images is a
-blocking conversion issue. The profile deliberately remains marked
-`PENDING` until a physical A-series sampler loads, prompts through, and plays a
-generated multi-disk set.
+object payloads and catalog, reassembles every split Wave Data object byte for
+byte, reopens the ZIP, and checks its inspected size. Exact repeated Samples are
+deduplicated when the set is read. More than 32 required images is a blocking
+conversion issue. The profile deliberately remains marked `PENDING` until a
+physical A-series sampler loads, prompts through, and plays the generated
+dependency-ordered real-volume set.
 
 ## Reading File Bytes
 

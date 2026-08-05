@@ -7,7 +7,7 @@ namespace {
 std::vector<std::byte> catalog_fat_fixture(std::string marker = "A3000F.SYM") {
     axk::detail::PreparedMediaImage image;
     image.objects.emplace_back(axk::ObjectType::smpl, "TEST", smpl_object());
-    image.objects.back().fat_filename = "SMPTEST.004";
+    image.objects.back().fat_filename = "TEST____.004";
     const auto marker_filename = axk::detail::yamaha_floppy_physical_filename(marker, 5U);
     EXPECT_TRUE(marker_filename) << marker_filename.error().message;
     image.retained_files.push_back({marker_filename ? *marker_filename : "MARKER.005", {}});

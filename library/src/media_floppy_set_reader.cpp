@@ -90,13 +90,11 @@ Result<std::string> catalog_digest(const FatImage &image, const CancellationToke
 struct PendingObject {
     MediaObject object;
     std::uint16_t slot{};
-    std::string physical_name;
     std::string catalog_path;
 };
 
 struct SmplIdentity {
-    std::uint16_t slot{};
-    std::string physical_name;
+    std::string catalog_series_path;
     std::string object_name;
     std::array<std::byte, 64> normalized_header{};
 
@@ -106,7 +104,16 @@ struct SmplIdentity {
 SmplIdentity smpl_identity(const PendingObject &object) {
     auto header = object.object.decoded.header.raw_prefix;
     std::fill(header.begin() + 0x20, header.begin() + 0x28, std::byte{});
-    return {object.slot, detail::upper_ascii(object.physical_name), object.object.decoded.header.name, header};
+    auto catalog_series_path = detail::upper_ascii(object.catalog_path);
+    const auto &decoded = object.object.decoded.header;
+    const bool continuation =
+        decoded.payload_offset_0x24 != 0U || decoded.payload_bytes_0x20 != decoded.payload_bytes_0x1c;
+    if (continuation && catalog_series_path.size() >= 2U &&
+        std::ranges::all_of(std::string_view{catalog_series_path}.substr(catalog_series_path.size() - 2U),
+                            [](char value) { return value >= '0' && value <= '9'; })) {
+        catalog_series_path.resize(catalog_series_path.size() - 2U);
+    }
+    return {std::move(catalog_series_path), object.object.decoded.header.name, header};
 }
 
 Result<PendingObject> pending_object(const FatImage &member, MediaObject object) {
@@ -126,7 +133,7 @@ Result<PendingObject> pending_object(const FatImage &member, MediaObject object)
     object.raw_volume = member.disk_identity().set_name;
     object.volume_label = {trimmed(member.disk_identity().set_name), LabelStatus::confirmed,
                            "Yamaha floppy disk-set catalog label"};
-    return PendingObject{std::move(object), *slot, file->name, entry->logical_path};
+    return PendingObject{std::move(object), *slot, entry->logical_path};
 }
 
 Result<MediaObject> assemble_smpl(std::vector<PendingObject *> parts, FloppySetStatus status,

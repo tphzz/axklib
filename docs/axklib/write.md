@@ -335,10 +335,10 @@ axklib validate authored.ima --output-dir validation/floppy
 ```
 
 The output is always a deterministic 1,474,560-byte FAT12 superfloppy with two
-FAT copies, a 224-entry root directory, and one DOS 8.3 root file per Yamaha
-object. The `authored_volume.name` value is required by the shared schema but a
-floppy has no ISO-style group or volume menu catalog; axklib displays its scope
-as `FAT root`.
+FAT copies, a 224-entry root directory, one DOS 8.3 root file per Yamaha object,
+one synthesized `YAMAHA.SYM`, and the zero-length standalone-disk marker
+`A3000_SY.001`. The `authored_volume.name` value supplies the Yamaha disk label;
+axklib displays the object scope as `FAT root`.
 
 Host reopen and payload comparison are automated. Fresh floppy output has not
 been verified on physical Yamaha hardware, so a parser-valid IMA is not yet a
@@ -429,20 +429,23 @@ object tree context menu:
   complete volume to a 1,474,560-byte FAT12 image.
 
 Both workflows first show a bounded inspection with selected object counts,
-payload size, output capacity, and every blocking issue. An oversized volume is
-blocked rather than split, and a partition is never reduced to a subset without
-an explicit future selection contract. The destination chooser matches package
-export: **Storage location** publishes to a configured workspace and **This
-computer** streams the retained result to the desktop file chooser. The
-suggested names are `<source>_pNN_<partition>.iso` and
-`<source>_pNN_<volume>.ima`, where `NN` is the zero-based partition index.
+payload size, output capacity, and every blocking issue. A volume that fits one
+floppy produces a raw `.ima`; an admitted larger volume produces an ordered
+`axklib.floppy-disk-set.v1` ZIP. Multi-floppy ordering is dependency-aware:
+Programs precede Sample/first-use-Wave pairs, remaining Wave Data, Sample Banks,
+and Sequences. A Sample whose first-use Wave Data moves to the next member is
+repeated exactly at the start of that member. A partition is never reduced to a
+subset without an explicit future selection contract. The destination chooser
+matches package export:
+**Storage location** publishes to a configured workspace and **This computer**
+streams the retained result to the desktop file chooser. Suggested names use
+the zero-based partition index and the selected partition or volume name.
 
 Conversion rebuilds only the destination container. Yamaha Program, Sample
 Bank, Sample, Wave Data, and Sequence payloads are copied byte for byte from the
 selected source scope. The ISO path uses reader-backed streaming and does not
-materialize the selected payload set in memory. FAT12 output is bounded by the
-fixed floppy capacity and materializes at most one floppy image during final
-serialization.
+materialize the selected payload set in memory. FAT12 members use fixed floppy
+capacity and multi-floppy output is capped at 32 images.
 
 Generated ISO partition conversion has hardware-promoted one-volume and
 multi-volume profiles. A four-volume conversion was enumerated, loaded, and
@@ -467,6 +470,8 @@ above, object identifier counts, payload limits, and the 700 MB capacity check
 reported by inspection.
 Generated floppy output is host-reopened and payload-compared, but fresh FAT12
 authoring still retains the hardware-validation qualification documented above.
+Multi-floppy output also validates dependency-derived boundary Sample
+repetition and byte-exact reassembly of all split Wave Data.
 
 ## Transfer Selected Saved Objects
 

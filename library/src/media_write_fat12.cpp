@@ -4,12 +4,18 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <format>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 // clang-format off
 #include <ff.h>
@@ -23,7 +29,13 @@ constexpr std::size_t sector_count = 2880;
 constexpr std::size_t sectors_per_fat = 9;
 constexpr std::size_t first_fat_offset = sector_size;
 constexpr std::size_t second_fat_offset = first_fat_offset + sectors_per_fat * sector_size;
+constexpr std::size_t root_directory_offset = (1U + 2U * sectors_per_fat) * sector_size;
+constexpr std::size_t root_directory_entries = 224U;
+constexpr std::size_t directory_entry_bytes = 32U;
+constexpr std::size_t directory_attribute_offset = 0x0bU;
 constexpr std::byte floppy_media_descriptor{0xf0};
+constexpr std::string_view single_marker_logical_path{"\\A3000.SYM"};
+constexpr std::string_view single_marker_physical_path{"A3000_SY.001"};
 constexpr std::size_t boot_jump_offset = 0x00;
 constexpr std::size_t oem_name_offset = 0x03;
 constexpr std::size_t media_descriptor_offset = 0x15;
@@ -41,18 +53,6 @@ struct FatDisk {
 
 FatDisk *active_disk{};
 std::mutex fatfs_mutex;
-
-std::string fat_stem(std::string_view value) {
-    std::string result;
-    for (const auto character : value) {
-        const auto byte = static_cast<unsigned char>(character);
-        if (std::isalnum(byte) != 0 || character == '_')
-            result.push_back(static_cast<char>(std::toupper(byte)));
-        if (result.size() == 8U)
-            break;
-    }
-    return result.empty() ? "OBJECT" : result;
-}
 
 axk::Error fatfs_error(std::string message, FRESULT result) {
     return axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
@@ -81,6 +81,17 @@ void apply_yamaha_floppy_profile(std::span<std::byte> bytes) {
                            [](char character) { return static_cast<std::byte>(character); });
     bytes[first_fat_offset] = floppy_media_descriptor;
     bytes[second_fat_offset] = floppy_media_descriptor;
+}
+
+void normalize_yamaha_root_attributes(std::span<std::byte> bytes) {
+    for (std::size_t index = 0U; index < root_directory_entries; ++index) {
+        const auto offset = root_directory_offset + index * directory_entry_bytes;
+        const auto first = std::to_integer<std::uint8_t>(bytes[offset]);
+        if (first == 0U)
+            break;
+        if (first != 0xe5U && std::to_integer<std::uint8_t>(bytes[offset + directory_attribute_offset]) != 0x0fU)
+            bytes[offset + directory_attribute_offset] = std::byte{};
+    }
 }
 
 } // namespace
@@ -131,10 +142,79 @@ extern "C" DRESULT disk_ioctl(BYTE drive, BYTE command, void *buffer) {
 
 namespace axk::detail {
 
+namespace {
+
+bool is_single_marker_physical_path(std::string_view path) { return path == single_marker_physical_path; }
+
+Result<void> validate_yamaha_fat12_profile(std::span<const std::byte> bytes, const YamahaFloppyCatalog &expected,
+                                           const CancellationToken &cancellation) {
+    auto reader = std::make_shared<MemoryReader>(std::vector<std::byte>{bytes.begin(), bytes.end()});
+    auto fat = FatImage::open(std::move(reader), "generated Yamaha FAT12 image", cancellation);
+    if (!fat)
+        return std::unexpected{fat.error()};
+    for (const auto &file : fat->files()) {
+        if (file.directory_offset + directory_attribute_offset >= bytes.size() ||
+            bytes[static_cast<std::size_t>(file.directory_offset) + directory_attribute_offset] != std::byte{}) {
+            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                              "generated Yamaha FAT12 root entry has nonzero attributes")};
+        }
+    }
+
+    const auto yamaha = std::ranges::find(fat->files(), std::string{"YAMAHA.SYM"}, &FatFile::path);
+    if (yamaha == fat->files().end()) {
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "generated Yamaha FAT12 image is missing YAMAHA.SYM")};
+    }
+    auto actual_bytes = fat->read_file(*yamaha, cancellation);
+    if (!actual_bytes)
+        return std::unexpected{actual_bytes.error()};
+    auto actual = decode_yamaha_floppy_catalog(*actual_bytes);
+    if (!actual)
+        return std::unexpected{actual.error()};
+    auto expected_bytes = encode_yamaha_floppy_catalog(expected.disk_name, expected.files, expected.categories);
+    if (!expected_bytes)
+        return std::unexpected{expected_bytes.error()};
+    if (*actual_bytes != *expected_bytes) {
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "generated Yamaha FAT12 catalog differs from its write plan")};
+    }
+
+    for (const auto &entry : expected.files) {
+        const auto separator = entry.logical_path.find_last_of('\\');
+        if (separator == std::string::npos || separator + 1U == entry.logical_path.size()) {
+            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                              "generated Yamaha FAT12 catalog path is invalid")};
+        }
+        auto filename = yamaha_floppy_physical_filename(entry.logical_path.substr(separator + 1U), entry.slot);
+        if (!filename)
+            return std::unexpected{filename.error()};
+        const auto physical = std::ranges::find(fat->files(), *filename, &FatFile::path);
+        if (physical == fat->files().end()) {
+            return std::unexpected{
+                make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                           std::format("generated Yamaha FAT12 catalog path '{}' has no physical file '{}'",
+                                       entry.logical_path, *filename))};
+        }
+        if ((entry.logical_path == single_marker_logical_path || entry.logical_path == "\\A3000F.SYM" ||
+             entry.logical_path == "\\A3000E.SYM") &&
+            physical->size != 0U) {
+            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                              "generated Yamaha FAT12 marker file is not empty")};
+        }
+    }
+    return {};
+}
+
+} // namespace
+
 Result<std::vector<std::string>> plan_fat12_object_filenames(const PreparedMediaImage &image) {
     std::set<std::string> filenames{"YAMAHA.SYM"};
+    if (!image.floppy_catalog)
+        filenames.insert(std::string{single_marker_physical_path});
     for (const auto &retained : image.retained_files) {
         if (is_yamaha_floppy_catalog_path(retained.path))
+            continue;
+        if (!image.floppy_catalog && is_single_marker_physical_path(retained.path))
             continue;
         if (retained.path.empty() || retained.path.size() > 12U ||
             retained.path.find_first_of("/\\") != std::string::npos || !filenames.insert(retained.path).second) {
@@ -160,14 +240,8 @@ Result<std::vector<std::string>> plan_fat12_object_filenames(const PreparedMedia
             return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                               "Yamaha floppy catalogs support at most 222 generated objects")};
         }
-        auto stem = fat_stem(object.name);
         const auto slot = static_cast<std::uint16_t>(index + 2U);
-        auto filename = *yamaha_floppy_physical_filename(stem, slot);
-        for (std::size_t disambiguator = 1U; filenames.contains(filename) && disambiguator < 100U; ++disambiguator) {
-            const auto suffix = std::to_string(disambiguator);
-            stem.resize(std::min<std::size_t>(stem.size(), 8U - suffix.size()));
-            filename = *yamaha_floppy_physical_filename(stem + suffix, slot);
-        }
+        auto filename = *yamaha_floppy_physical_filename(object.name, slot);
         if (!filenames.insert(filename).second) {
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                               "FAT12 object filename space is exhausted")};
@@ -179,9 +253,13 @@ Result<std::vector<std::string>> plan_fat12_object_filenames(const PreparedMedia
 
 Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image,
                                                  const CancellationToken &cancellation) {
-    const auto retained_count = static_cast<std::size_t>(std::ranges::count_if(
-        image.retained_files, [](const PreparedMediaFile &file) { return !is_yamaha_floppy_catalog_path(file.path); }));
-    if (image.objects.size() + retained_count + 1U > 224U) {
+    const auto retained_count =
+        static_cast<std::size_t>(std::ranges::count_if(image.retained_files, [&image](const PreparedMediaFile &file) {
+            return !is_yamaha_floppy_catalog_path(file.path) &&
+                   (image.floppy_catalog || !is_single_marker_physical_path(file.path));
+        }));
+    const auto single_marker_count = image.floppy_catalog ? 0U : 1U;
+    if (image.objects.size() + retained_count + single_marker_count + 1U > root_directory_entries) {
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "FAT12 floppy profile supports at "
                                           "most 224 root-directory objects")};
@@ -207,7 +285,8 @@ Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image
             catalog.disk_name = std::move(*disk_name);
         }
         catalog.categories = yamaha_floppy_categories(image.objects);
-        catalog.files.reserve(image.objects.size());
+        catalog.files.reserve(image.objects.size() + 1U);
+        catalog.files.push_back({1U, std::string{single_marker_logical_path}});
         for (std::size_t index = 0U; index < image.objects.size(); ++index) {
             const auto slot = yamaha_floppy_filename_slot((*object_filenames)[index]);
             if (!slot) {
@@ -258,17 +337,21 @@ Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image
             return std::unexpected{fatfs_error("could not write FAT12 file", write_status)};
         return {};
     };
-    enum class FileSource : std::uint8_t { retained, object };
+    enum class FileSource : std::uint8_t { system, retained, object };
     struct PlannedFile {
         std::string path;
         FileSource source{};
         std::size_t index{};
     };
     std::vector<PlannedFile> files;
-    files.reserve(retained_count + image.objects.size());
+    files.reserve(single_marker_count + retained_count + image.objects.size());
+    if (!image.floppy_catalog)
+        files.push_back({std::string{single_marker_physical_path}, FileSource::system, 0U});
     for (std::size_t index = 0U; index < image.retained_files.size(); ++index) {
-        if (!is_yamaha_floppy_catalog_path(image.retained_files[index].path))
+        if (!is_yamaha_floppy_catalog_path(image.retained_files[index].path) &&
+            (image.floppy_catalog || !is_single_marker_physical_path(image.retained_files[index].path))) {
             files.push_back({image.retained_files[index].path, FileSource::retained, index});
+        }
     }
     for (std::size_t index = 0U; index < image.objects.size(); ++index)
         files.push_back({(*object_filenames)[index], FileSource::object, index});
@@ -279,6 +362,14 @@ Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image
             f_mount(nullptr, "", 0);
             reset_disk();
             return std::unexpected{check.error()};
+        }
+        if (file.source == FileSource::system) {
+            if (auto written = write_file(file.path, {}); !written) {
+                f_mount(nullptr, "", 0);
+                reset_disk();
+                return std::unexpected{written.error()};
+            }
+            continue;
         }
         if (file.source == FileSource::retained) {
             if (auto written = write_file(file.path, image.retained_files[file.index].payload); !written) {
@@ -314,6 +405,10 @@ Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image
     }
     f_mount(nullptr, "", 0);
     reset_disk();
+
+    normalize_yamaha_root_attributes(disk.bytes);
+    if (auto validated = validate_yamaha_fat12_profile(disk.bytes, catalog, cancellation); !validated)
+        return std::unexpected{validated.error()};
 
     return disk.bytes;
 }

@@ -62,14 +62,20 @@ std::string_view object_category(ObjectType type) {
 
 std::string object_stem(std::string_view value) {
     std::string result;
-    for (const auto character : value) {
-        const auto byte = static_cast<unsigned char>(character);
-        if (std::isalnum(byte) != 0 || character == '_')
-            result.push_back(static_cast<char>(std::toupper(byte)));
-        if (result.size() == 8U)
-            break;
+    result.reserve(8U);
+    for (std::size_t index = 0U; index < std::min<std::size_t>(value.size(), 8U); ++index) {
+        const auto character = value[index];
+        if (character >= 'a' && character <= 'z') {
+            result.push_back(static_cast<char>(character - 'a' + 'A'));
+        } else if ((character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') ||
+                   character == '_') {
+            result.push_back(character);
+        } else {
+            result.push_back('_');
+        }
     }
-    return result.empty() ? "OBJECT" : result;
+    result.resize(8U, '_');
+    return result;
 }
 
 } // namespace
