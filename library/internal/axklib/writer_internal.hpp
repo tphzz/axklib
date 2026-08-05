@@ -126,7 +126,7 @@ struct FloppyObjectSegment {
     std::uint64_t payload_bytes{};
     std::uint32_t header_bytes{};
     bool split{};
-    bool catalog_member_suffix{};
+    std::uint16_t catalog_segment_ordinal{};
 };
 
 struct FloppyDiskLayout {

@@ -92,17 +92,17 @@ Result<std::uint16_t> allocate_catalog_slot(const DiskState &disk) {
     return std::unexpected{floppy_error("Yamaha floppy member has no free object-catalog slot")};
 }
 
-Result<void> add_whole_object(DiskState &disk, std::size_t object_index, std::uint64_t size, std::uint64_t clusters,
-                              bool catalog_member_suffix = false) {
+Result<void> add_whole_object(DiskState &disk, std::size_t object_index, std::uint64_t size, std::uint64_t clusters) {
     auto slot = allocate_catalog_slot(disk);
     if (!slot)
         return std::unexpected{slot.error()};
-    disk.layout.segments.push_back({object_index, *slot, 0U, size, 0U, false, catalog_member_suffix});
+    disk.layout.segments.push_back({object_index, *slot, 0U, size, 0U, false, 0U});
     disk.used_clusters += clusters;
     return {};
 }
 
-Result<void> add_wave_segment(DiskState &disk, const WaveDataPlan &wave, std::uint64_t offset, std::uint64_t bytes) {
+Result<void> add_wave_segment(DiskState &disk, const WaveDataPlan &wave, std::uint64_t offset, std::uint64_t bytes,
+                              std::uint16_t segment_ordinal) {
     auto clusters = allocated_clusters(static_cast<std::uint64_t>(wave.header.header_size) + bytes);
     if (!clusters)
         return std::unexpected{clusters.error()};
@@ -113,7 +113,8 @@ Result<void> add_wave_segment(DiskState &disk, const WaveDataPlan &wave, std::ui
     auto slot = allocate_catalog_slot(disk);
     if (!slot)
         return std::unexpected{slot.error()};
-    disk.layout.segments.push_back({wave.object_index, *slot, offset, bytes, wave.header.header_size, true, true});
+    disk.layout.segments.push_back(
+        {wave.object_index, *slot, offset, bytes, wave.header.header_size, true, segment_ordinal});
     disk.used_clusters += *clusters;
     return {};
 }
@@ -454,6 +455,7 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
                 "a Sample and its first-use Wave Data cannot be separated without a continuation segment")};
         }
         std::uint64_t offset{};
+        std::uint16_t segment_ordinal{1U};
         while (offset < wave.header.payload_bytes_0x1c) {
             auto *disk = &disks.back();
             const auto available_clusters = floppy_data_clusters - disk->used_clusters;
@@ -468,9 +470,10 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
             const auto local_bytes = std::min(remaining, available_bytes - wave.header.header_size);
             if (local_bytes == 0U || local_bytes > std::numeric_limits<std::uint32_t>::max())
                 return std::unexpected{floppy_error("Wave Data continuation segment size is unsupported")};
-            if (auto added = add_wave_segment(*disk, wave, offset, local_bytes); !added)
+            if (auto added = add_wave_segment(*disk, wave, offset, local_bytes, segment_ordinal); !added)
                 return std::unexpected{added.error()};
             offset += local_bytes;
+            ++segment_ordinal;
             if (offset < wave.header.payload_bytes_0x1c) {
                 auto next = add_disk();
                 if (!next)
@@ -554,7 +557,8 @@ Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image,
             disk.objects.back().fat_filename = std::move(*physical_filename);
             auto logical_path = yamaha_floppy_object_path(
                 image.objects[segment.object_index].type, image.objects[segment.object_index].name,
-                segment.catalog_member_suffix ? std::optional<std::size_t>{disk_index + 1U} : std::nullopt);
+                segment.catalog_segment_ordinal == 0U ? std::nullopt
+                                                      : std::optional<std::size_t>{segment.catalog_segment_ordinal});
             if (!logical_path)
                 return std::unexpected{logical_path.error()};
             disk.floppy_catalog->files.push_back({segment.catalog_slot, std::move(*logical_path)});

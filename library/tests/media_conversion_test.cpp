@@ -851,6 +851,50 @@ TEST(MediaConversion, UsesFileContinuationMarkerWhenWaveDataSpansMembers) {
     EXPECT_EQ(plan->disks[1].marker_name, "A3000E.SYM");
 }
 
+TEST(MediaConversion, UsesSegmentLocalSuffixesWhenALaterWaveDataSplitStartsOnMemberTwo) {
+    const auto output_path =
+        std::filesystem::temp_directory_path() / "axklib-media-conversion-segment-local-suffixes.zip";
+    std::error_code error;
+    std::filesystem::remove(output_path, error);
+
+    axk::detail::PreparedMediaImage image;
+    image.objects.emplace_back(axk::ObjectType::smpl, "Full Disk", sparse_smpl(1'447'424U, "Full Disk"));
+    image.objects.emplace_back(axk::ObjectType::smpl, "Later Wave", sparse_smpl(2'000'000U, "Later Wave"));
+
+    const auto plan = axk::detail::plan_floppy_disk_set(image, "Three disk", {});
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->disks.size(), 3U);
+    ASSERT_TRUE(std::ranges::any_of(plan->disks[1].segments, [](const auto &segment) {
+        return segment.object_index == 1U && segment.payload_offset == 0U;
+    }));
+    ASSERT_TRUE(std::ranges::any_of(plan->disks[2].segments, [](const auto &segment) {
+        return segment.object_index == 1U && segment.payload_offset != 0U;
+    }));
+    EXPECT_EQ(plan->disks[1].segments.back().catalog_segment_ordinal, 1U);
+    EXPECT_EQ(plan->disks[2].segments.front().catalog_segment_ordinal, 2U);
+
+    const auto written = axk::detail::write_floppy_disk_set(image, *plan, output_path, false, {});
+    ASSERT_TRUE(written) << written.error().message;
+    const auto archive = axk::FileReader::open(output_path);
+    ASSERT_TRUE(archive) << archive.error().message;
+    const auto reopened = axk::FloppyDiskSet::open_archive(*archive, output_path.string());
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    ASSERT_EQ(reopened->members().size(), 3U);
+    const auto first_path = axk::detail::yamaha_floppy_object_path(axk::ObjectType::smpl, "Later Wave", 1U);
+    const auto second_path = axk::detail::yamaha_floppy_object_path(axk::ObjectType::smpl, "Later Wave", 2U);
+    ASSERT_TRUE(first_path) << first_path.error().message;
+    ASSERT_TRUE(second_path) << second_path.error().message;
+    const auto member_two_catalog = reopened->members()[1].yamaha_catalog();
+    const auto member_three_catalog = reopened->members()[2].yamaha_catalog();
+    ASSERT_TRUE(member_two_catalog);
+    ASSERT_TRUE(member_three_catalog);
+    EXPECT_TRUE(
+        std::ranges::contains(member_two_catalog->files, *first_path, &axk::YamahaFloppyCatalogEntry::logical_path));
+    EXPECT_TRUE(
+        std::ranges::contains(member_three_catalog->files, *second_path, &axk::YamahaFloppyCatalogEntry::logical_path));
+    std::filesystem::remove(output_path, error);
+}
+
 TEST(MediaConversion, OrdersSamplesWithFirstUseWaveDataBeforeSampleBanks) {
     axk::detail::PreparedMediaImage image;
     image.objects.emplace_back(axk::ObjectType::prog, "001", std::vector<std::byte>(912U));
@@ -879,7 +923,7 @@ TEST(MediaConversion, OrdersSamplesWithFirstUseWaveDataBeforeSampleBanks) {
     EXPECT_EQ(right.object_index, 5U);
     EXPECT_TRUE(left.split);
     EXPECT_TRUE(right.split);
-    EXPECT_TRUE(right.catalog_member_suffix);
+    EXPECT_EQ(right.catalog_segment_ordinal, 2U);
 }
 
 TEST(MediaConversion, ContinuesFirstUseWaveDataAfterItsSampleAtTheDiskBoundary) {
@@ -902,7 +946,7 @@ TEST(MediaConversion, ContinuesFirstUseWaveDataAfterItsSampleAtTheDiskBoundary) 
     EXPECT_EQ(plan->disks[1].segments[0].object_index, 1U);
     EXPECT_TRUE(plan->disks[1].segments[0].split);
     EXPECT_EQ(plan->disks[1].segments[0].payload_offset, plan->disks[0].segments[2].payload_bytes);
-    EXPECT_TRUE(plan->disks[1].segments[0].catalog_member_suffix);
+    EXPECT_EQ(plan->disks[1].segments[0].catalog_segment_ordinal, 2U);
     EXPECT_EQ(plan->disks[0].marker_name, "A3000F.SYM");
     EXPECT_EQ(plan->disks[1].marker_name, "A3000E.SYM");
 }
@@ -939,7 +983,7 @@ TEST(MediaConversion, DoesNotRepeatAStereoSampleWhenTheBoundaryFallsBetweenItsFi
     EXPECT_TRUE(plan->disks[0].segments[2].split);
     EXPECT_EQ(plan->disks[1].segments[0].object_index, 2U);
     EXPECT_TRUE(plan->disks[1].segments[0].split);
-    EXPECT_TRUE(plan->disks[1].segments[0].catalog_member_suffix);
+    EXPECT_EQ(plan->disks[1].segments[0].catalog_segment_ordinal, 2U);
 }
 
 TEST(MediaConversion, EmitsSharedWaveDataOnlyAtItsFirstSampleUse) {
@@ -982,8 +1026,8 @@ TEST(MediaConversion, DoesNotInventAnUnrelatedWaveDataBoundaryCarrier) {
     EXPECT_EQ(plan->disks[1].segments.front().object_index, 1U);
     EXPECT_FALSE(plan->disks[0].segments.front().split);
     EXPECT_FALSE(plan->disks[1].segments.front().split);
-    EXPECT_FALSE(plan->disks[0].segments.front().catalog_member_suffix);
-    EXPECT_FALSE(plan->disks[1].segments.front().catalog_member_suffix);
+    EXPECT_EQ(plan->disks[0].segments.front().catalog_segment_ordinal, 0U);
+    EXPECT_EQ(plan->disks[1].segments.front().catalog_segment_ordinal, 0U);
 }
 
 TEST(MediaConversion, PlacesNonWaveObjectsOnLaterMembersWhenCapacityRequiresIt) {
