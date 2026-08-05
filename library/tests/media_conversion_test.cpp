@@ -834,18 +834,16 @@ TEST(MediaConversion, OrdersSamplesWithFirstUseWaveDataBeforeSampleBanks) {
     }
     EXPECT_EQ(order, (std::vector<std::size_t>{0U, 2U, 4U, 3U, 5U, 1U}));
     const auto &left = plan->disks[0].segments.back();
-    ASSERT_GE(plan->disks[1].segments.size(), 2U);
-    const auto &carrier = plan->disks[1].segments[0];
-    const auto &right = plan->disks[1].segments[1];
+    ASSERT_GE(plan->disks[1].segments.size(), 1U);
+    const auto &right = plan->disks[1].segments[0];
     EXPECT_EQ(left.object_index, 3U);
-    EXPECT_EQ(carrier.object_index, 3U);
     EXPECT_EQ(right.object_index, 5U);
     EXPECT_FALSE(left.split);
-    EXPECT_FALSE(carrier.split);
     EXPECT_FALSE(right.split);
+    EXPECT_TRUE(right.catalog_member_suffix);
 }
 
-TEST(MediaConversion, DuplicatesOnlyTheSampleWhoseFirstUseWaveDataCrossesTheDiskBoundary) {
+TEST(MediaConversion, MovesFirstUseWaveDataWithoutDuplicatingItsSampleAtTheDiskBoundary) {
     axk::detail::PreparedMediaImage image;
     image.objects.emplace_back(axk::ObjectType::sbnk, "Boundary Sample", std::vector<std::byte>(392U));
     image.objects.emplace_back(axk::ObjectType::smpl, "Boundary Wave", sparse_smpl(200'000U));
@@ -856,15 +854,15 @@ TEST(MediaConversion, DuplicatesOnlyTheSampleWhoseFirstUseWaveDataCrossesTheDisk
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_EQ(plan->disks.size(), 2U);
     ASSERT_EQ(plan->disks[0].segments.size(), 2U);
-    ASSERT_EQ(plan->disks[1].segments.size(), 2U);
+    ASSERT_EQ(plan->disks[1].segments.size(), 1U);
     EXPECT_EQ(plan->disks[0].segments[0].object_index, 2U);
     EXPECT_EQ(plan->disks[0].segments[1].object_index, 0U);
-    EXPECT_EQ(plan->disks[1].segments[0].object_index, 0U);
-    EXPECT_EQ(plan->disks[1].segments[1].object_index, 1U);
-    EXPECT_NE(plan->disks[0].segments[1].catalog_slot, plan->disks[1].segments[0].catalog_slot);
+    EXPECT_EQ(plan->disks[1].segments[0].object_index, 1U);
+    EXPECT_FALSE(plan->disks[1].segments[0].split);
+    EXPECT_TRUE(plan->disks[1].segments[0].catalog_member_suffix);
 }
 
-TEST(MediaConversion, RepeatsAStereoSampleWhenTheBoundaryFallsBetweenItsFirstUseWaveData) {
+TEST(MediaConversion, DoesNotRepeatAStereoSampleWhenTheBoundaryFallsBetweenItsFirstUseWaveData) {
     axk::detail::PreparedMediaImage image;
     image.objects.emplace_back(axk::ObjectType::sbnk, "Stereo Sample", std::vector<std::byte>(392U));
     image.objects.emplace_back(axk::ObjectType::smpl, "Left Wave", sparse_smpl(1'300'000U));
@@ -875,11 +873,12 @@ TEST(MediaConversion, RepeatsAStereoSampleWhenTheBoundaryFallsBetweenItsFirstUse
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_EQ(plan->disks.size(), 2U);
     ASSERT_EQ(plan->disks[0].segments.size(), 2U);
-    ASSERT_EQ(plan->disks[1].segments.size(), 2U);
+    ASSERT_EQ(plan->disks[1].segments.size(), 1U);
     EXPECT_EQ(plan->disks[0].segments[0].object_index, 0U);
     EXPECT_EQ(plan->disks[0].segments[1].object_index, 1U);
-    EXPECT_EQ(plan->disks[1].segments[0].object_index, 0U);
-    EXPECT_EQ(plan->disks[1].segments[1].object_index, 2U);
+    EXPECT_EQ(plan->disks[1].segments[0].object_index, 2U);
+    EXPECT_FALSE(plan->disks[1].segments[0].split);
+    EXPECT_TRUE(plan->disks[1].segments[0].catalog_member_suffix);
 }
 
 TEST(MediaConversion, EmitsSharedWaveDataOnlyAtItsFirstSampleUse) {
@@ -922,6 +921,8 @@ TEST(MediaConversion, DoesNotInventAnUnrelatedWaveDataBoundaryCarrier) {
     EXPECT_EQ(plan->disks[1].segments.front().object_index, 1U);
     EXPECT_FALSE(plan->disks[0].segments.front().split);
     EXPECT_FALSE(plan->disks[1].segments.front().split);
+    EXPECT_FALSE(plan->disks[0].segments.front().catalog_member_suffix);
+    EXPECT_FALSE(plan->disks[1].segments.front().catalog_member_suffix);
 }
 
 TEST(MediaConversion, PlacesNonWaveObjectsOnLaterMembersWhenCapacityRequiresIt) {

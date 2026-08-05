@@ -64,7 +64,10 @@ SFS volume conversion has a separate multi-floppy profile. A volume that fits
 on one disk remains one raw `.ima` file. A larger admitted volume becomes a ZIP
 containing two through 32 ordered `.ima` members plus `manifest.json`. This
 profile is host-verified but not yet hardware-promoted; the inspection result
-includes a nonblocking hardware-validation warning.
+includes a nonblocking hardware-validation warning. When a Sample ends one
+member and its first-use whole Wave Data begins the next, the Wave Data logical
+catalog path carries the destination member's two-digit suffix without
+repeating the Sample. Unrelated whole-object rollover does not add that suffix.
 
 ## FAT12 Geometry
 
@@ -282,8 +285,7 @@ Data, Sample Banks (`SBAC`), then Sequences and `PRF3`. Shared Wave Data is
 written at first use only.
 
 When a Sample fits at the end of one member but its first-use whole Wave Data
-does not, the writer repeats that exact Sample at the beginning of the next
-member before the Wave Data. It does not create an unrelated boundary carrier.
+does not, the Wave Data starts the next member without repeating the Sample.
 Whole objects otherwise move to a later member without splitting. Only Wave
 Data larger than an empty member is segmented. Each segment repeats the source
 header and retains the complete logical payload size at `0x1c`; `0x20` is
@@ -313,11 +315,10 @@ with disk 1.
 
 Before publication, the writer reopens every FAT12 member, compares its exact
 object payloads and catalog, reassembles every split Wave Data object byte for
-byte, reopens the ZIP, and checks its inspected size. Exact repeated Samples are
-deduplicated when the set is read. More than 32 required images is a blocking
-conversion issue. The profile deliberately remains marked `PENDING` until a
-physical A-series sampler loads, prompts through, and plays the generated
-dependency-ordered real-volume set.
+byte, reopens the ZIP, and checks its inspected size. More than 32 required
+images is a blocking conversion issue. The profile deliberately remains marked
+`PENDING` until a physical A-series sampler loads, prompts through, and plays
+the generated dependency-ordered real-volume set.
 
 ## Reading File Bytes
 

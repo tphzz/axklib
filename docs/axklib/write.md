@@ -433,9 +433,11 @@ payload size, output capacity, and every blocking issue. A volume that fits one
 floppy produces a raw `.ima`; an admitted larger volume produces an ordered
 `axklib.floppy-disk-set.v1` ZIP. Multi-floppy ordering is dependency-aware:
 Programs precede Sample/first-use-Wave pairs, remaining Wave Data, Sample Banks,
-and Sequences. A Sample whose first-use Wave Data moves to the next member is
-repeated exactly at the start of that member. A partition is never reduced to a
-subset without an explicit future selection contract. The destination chooser
+and Sequences. A whole first-use Wave Data object that moves to the next member
+does so without repeating its Sample and carries the destination member's
+two-digit suffix in its logical catalog path. Unrelated whole-object rollover
+does not gain that suffix. A partition is never reduced to a subset without an
+explicit future selection contract. The destination chooser
 matches package export:
 **Storage location** publishes to a configured workspace and **This computer**
 streams the retained result to the desktop file chooser. Suggested names use
@@ -470,8 +472,9 @@ above, object identifier counts, payload limits, and the 700 MB capacity check
 reported by inspection.
 Generated floppy output is host-reopened and payload-compared, but fresh FAT12
 authoring still retains the hardware-validation qualification documented above.
-Multi-floppy output also validates dependency-derived boundary Sample
-repetition and byte-exact reassembly of all split Wave Data.
+Multi-floppy output also validates dependency-derived order, absence of
+unintended complete-object duplication, and byte-exact reassembly of all split
+Wave Data.
 
 ## Transfer Selected Saved Objects
 

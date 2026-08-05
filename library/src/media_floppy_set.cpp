@@ -43,7 +43,7 @@ struct WaveDataPlan {
 
 struct DependencyPlan {
     std::vector<std::size_t> objects;
-    std::vector<std::optional<std::size_t>> sample_by_wave;
+    std::vector<std::optional<std::size_t>> first_sample_by_wave;
 };
 
 Error floppy_error(std::string message) {
@@ -91,11 +91,12 @@ Result<std::uint16_t> allocate_catalog_slot(const DiskState &disk) {
     return std::unexpected{floppy_error("Yamaha floppy member has no free object-catalog slot")};
 }
 
-Result<void> add_whole_object(DiskState &disk, std::size_t object_index, std::uint64_t size, std::uint64_t clusters) {
+Result<void> add_whole_object(DiskState &disk, std::size_t object_index, std::uint64_t size, std::uint64_t clusters,
+                              bool catalog_member_suffix = false) {
     auto slot = allocate_catalog_slot(disk);
     if (!slot)
         return std::unexpected{slot.error()};
-    disk.layout.segments.push_back({object_index, *slot, 0U, size, 0U, false});
+    disk.layout.segments.push_back({object_index, *slot, 0U, size, 0U, false, catalog_member_suffix});
     disk.used_clusters += clusters;
     return {};
 }
@@ -111,7 +112,7 @@ Result<void> add_wave_segment(DiskState &disk, const WaveDataPlan &wave, std::ui
     auto slot = allocate_catalog_slot(disk);
     if (!slot)
         return std::unexpected{slot.error()};
-    disk.layout.segments.push_back({wave.object_index, *slot, offset, bytes, wave.header.header_size, true});
+    disk.layout.segments.push_back({wave.object_index, *slot, offset, bytes, wave.header.header_size, true, true});
     disk.used_clusters += *clusters;
     return {};
 }
@@ -313,7 +314,7 @@ Result<DependencyPlan> dependency_order(const PreparedMediaImage &image, const C
     }
 
     DependencyPlan result;
-    result.sample_by_wave.resize(image.objects.size());
+    result.first_sample_by_wave.resize(image.objects.size());
     std::vector<bool> emitted(image.objects.size());
     const auto emit = [&](std::size_t index) {
         if (!emitted[index]) {
@@ -337,7 +338,7 @@ Result<DependencyPlan> dependency_order(const PreparedMediaImage &image, const C
         emit(index);
         for (const auto wave_data : wave_data_by_sample[index]) {
             if (!emitted[wave_data])
-                result.sample_by_wave[wave_data] = index;
+                result.first_sample_by_wave[wave_data] = index;
             emit(wave_data);
         }
     }
@@ -433,25 +434,16 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
             return std::unexpected{valid.error()};
         const WaveDataPlan wave{object_index, std::move(*header)};
         if (*whole_clusters <= empty_member_clusters) {
+            const auto first_sample = object_order->first_sample_by_wave[object_index];
+            const bool sample_on_previous_member =
+                first_sample &&
+                std::ranges::contains(disks.back().layout.segments, *first_sample, &FloppyObjectSegment::object_index);
             auto next = add_disk();
             if (!next)
                 return std::unexpected{next.error()};
-            if (const auto sample_index = object_order->sample_by_wave[object_index]) {
-                const auto &previous = disks[disks.size() - 2U].layout.segments;
-                if (std::ranges::contains(previous, *sample_index, &FloppyObjectSegment::object_index)) {
-                    const auto &sample = image.objects[*sample_index];
-                    auto sample_clusters = allocated_clusters(sample.size());
-                    if (!sample_clusters)
-                        return std::unexpected{sample_clusters.error()};
-                    if (*sample_clusters > empty_member_clusters - *whole_clusters) {
-                        return std::unexpected{floppy_error(
-                            "a Sample and its first-use Wave Data do not fit together on an empty floppy")};
-                    }
-                    if (auto added = add_whole_object(**next, *sample_index, sample.size(), *sample_clusters); !added)
-                        return std::unexpected{added.error()};
-                }
-            }
-            if (auto added = add_whole_object(**next, object_index, object.size(), *whole_clusters); !added)
+            if (auto added =
+                    add_whole_object(**next, object_index, object.size(), *whole_clusters, sample_on_previous_member);
+                !added)
                 return std::unexpected{added.error()};
             continue;
         }
@@ -548,7 +540,7 @@ Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image,
             disk.objects.back().fat_filename = std::move(*physical_filename);
             auto logical_path = yamaha_floppy_object_path(
                 image.objects[segment.object_index].type, image.objects[segment.object_index].name,
-                segment.split ? std::optional<std::size_t>{disk_index + 1U} : std::nullopt);
+                segment.catalog_member_suffix ? std::optional<std::size_t>{disk_index + 1U} : std::nullopt);
             if (!logical_path)
                 return std::unexpected{logical_path.error()};
             disk.floppy_catalog->files.push_back({segment.catalog_slot, std::move(*logical_path)});
