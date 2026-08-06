@@ -115,8 +115,8 @@
                     });
                 }}
             >
-                <option value="4">One-shot</option>
-                <option value="1">Forward loop</option>
+                <option value={4}>One-shot</option>
+                <option value={1}>Forward loop</option>
             </select>
         </label>
         {#if row.loopMode === 1}

@@ -303,6 +303,14 @@ describe('AudioImportDialog', () => {
         expect(await screen.findByLabelText('Sampler settings for Mapped.wav')).toBeTruthy();
         expect(screen.getByDisplayValue('-63')).toBeTruthy();
         expect(screen.getByDisplayValue('70000')).toBeTruthy();
+        const playbackMode = screen.getByRole('combobox', {
+            name: 'Playback mode for Mapped.wav',
+        }) as HTMLSelectElement;
+        expect(playbackMode.value).toBe('1');
+        const forwardLoopOption = within(playbackMode).getByRole('option', {
+            name: 'Forward loop',
+        }) as HTMLOptionElement;
+        expect(forwardLoopOption.selected).toBe(true);
         expect(screen.getByText('Pitch: WAV smpl')).toBeTruthy();
         expect(screen.getByText('Ranges: WAV inst')).toBeTruthy();
         expect(screen.getByText('An additional WAV sampler loop was ignored.')).toBeTruthy();
