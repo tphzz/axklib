@@ -1,7 +1,6 @@
 #include "axklib/writer_internal.hpp"
 
 #include <algorithm>
-#include <filesystem>
 #include <format>
 #include <limits>
 #include <map>
@@ -11,10 +10,7 @@
 #include <string_view>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-
 #include "axklib/bytes.hpp"
-#include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package_archive.hpp"
 
@@ -56,8 +52,6 @@ Result<std::uint64_t> allocated_clusters(std::uint64_t bytes) {
         return std::unexpected{floppy_error("FAT12 allocation size overflowed")};
     return (bytes + cluster_bytes - 1U) / cluster_bytes;
 }
-
-std::string disk_path(std::size_t index) { return std::format("payloads/disk{:02}.ima", index); }
 
 Result<ObjectHeader> read_object_header(const PreparedMediaObject &object, const CancellationToken &cancellation) {
     if (const auto check = cancellation.check(); !check)
@@ -142,52 +136,6 @@ Result<void> validate_continuation_markers(const PreparedMediaImage &image, cons
     if (plan.disks.empty() || plan.disks.back().marker_name != final_marker_name)
         return std::unexpected{floppy_error("generated multi-floppy sets require a final A3000E.SYM marker")};
     return {};
-}
-
-nlohmann::ordered_json disk_set_manifest(const FloppyDiskSetPlan &plan, std::span<const std::string> digests,
-                                         std::span<const std::string> catalog_digests) {
-    nlohmann::ordered_json disks = nlohmann::ordered_json::array();
-    for (std::size_t index = 0U; index < plan.disks.size(); ++index) {
-        disks.push_back({{"index", index + 1U},
-                         {"logicalName", plan.disks[index].name},
-                         {"memberMarker", plan.disks[index].marker_name},
-                         {"path", disk_path(index + 1U)},
-                         {"sizeBytes", floppy_image_bytes},
-                         {"sha256", digests[index]},
-                         {"yamahaSymbolSha256", catalog_digests[index]}});
-    }
-    return {{"schema", "axklib.floppy-disk-set.v1"}, {"format", "YAMAHA_A_SERIES_MULTI_FLOPPY"},
-            {"diskCount", plan.disks.size()},        {"hardwareValidation", "PENDING"},
-            {"yamahaSymbolMetadata", "SYNTHESIZED"}, {"disks", std::move(disks)}};
-}
-
-std::vector<std::byte> json_bytes(const nlohmann::ordered_json &json) {
-    auto text = json.dump(2);
-    text.push_back('\n');
-    const auto bytes = std::as_bytes(std::span{text});
-    return {bytes.begin(), bytes.end()};
-}
-
-Result<std::uint64_t> projected_archive_bytes(const FloppyDiskSetPlan &plan) {
-    std::vector<std::string> placeholders(plan.disks.size(), std::string(64U, '0'));
-    const auto manifest = json_bytes(disk_set_manifest(plan, placeholders, placeholders));
-    std::uint64_t result = 22U;
-    const auto account = [&](std::string_view path, std::uint64_t bytes) -> Result<void> {
-        const auto overhead = 76U + 2U * path.size();
-        if (bytes > std::numeric_limits<std::uint64_t>::max() - overhead ||
-            result > std::numeric_limits<std::uint64_t>::max() - bytes - overhead) {
-            return std::unexpected{floppy_error("multi-floppy archive size overflowed")};
-        }
-        result += bytes + overhead;
-        return {};
-    };
-    if (auto added = account("manifest.json", manifest.size()); !added)
-        return std::unexpected{added.error()};
-    for (std::size_t index = 1U; index <= plan.disks.size(); ++index) {
-        if (auto added = account(disk_path(index), floppy_image_bytes); !added)
-            return std::unexpected{added.error()};
-    }
-    return result;
 }
 
 Result<std::vector<std::byte>> materialize(const PreparedMediaObject &object, const CancellationToken &cancellation) {
@@ -583,27 +531,23 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
         disk.layout.marker_slot = *marker_slot;
         result.disks.push_back(std::move(disk.layout));
     }
-    auto projection = projected_archive_bytes(result);
+    auto projection = projected_floppy_archive_bytes(result);
     if (!projection)
         return std::unexpected{projection.error()};
     result.projected_archive_bytes = *projection;
     return result;
 }
 
-Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image, const FloppyDiskSetPlan &plan,
-                                                const std::filesystem::path &output_path, bool overwrite,
-                                                const CancellationToken &cancellation) {
+Result<std::vector<FloppyDiskMember>> build_floppy_disk_members(const PreparedMediaImage &image,
+                                                                const FloppyDiskSetPlan &plan,
+                                                                const CancellationToken &cancellation) {
     if (plan.disks.size() < 2U || plan.disks.size() > maximum_floppy_images)
         return std::unexpected{floppy_error("multi-floppy output requires between 2 and 32 images")};
     if (auto valid = validate_continuation_markers(image, plan); !valid)
         return std::unexpected{valid.error()};
-    std::vector<package_internal::ArchiveEntry> entries;
-    std::vector<std::string> digests;
-    std::vector<std::string> catalog_digests;
+    std::vector<FloppyDiskMember> members;
     std::map<std::size_t, std::vector<std::vector<std::byte>>> split_segments;
-    entries.reserve(plan.disks.size() + 1U);
-    digests.reserve(plan.disks.size());
-    catalog_digests.reserve(plan.disks.size());
+    members.reserve(plan.disks.size());
     for (std::size_t disk_index = 0U; disk_index < plan.disks.size(); ++disk_index) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
@@ -644,57 +588,18 @@ Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image,
                                                           disk.floppy_catalog->categories);
         if (!catalog_bytes)
             return std::unexpected{catalog_bytes.error()};
-        catalog_digests.push_back(package_internal::hex_digest(package_internal::sha256(*catalog_bytes)));
+        auto catalog_digest = package_internal::hex_digest(package_internal::sha256(*catalog_bytes));
         auto image_bytes = build_fat12_image(disk, cancellation);
         if (!image_bytes)
             return std::unexpected{image_bytes.error()};
         if (auto validated = validate_disk(disk, *image_bytes, cancellation); !validated)
             return std::unexpected{validated.error()};
-        digests.push_back(package_internal::hex_digest(package_internal::sha256(*image_bytes)));
-        entries.push_back({disk_path(disk_index + 1U), std::move(*image_bytes)});
+        auto digest = package_internal::hex_digest(package_internal::sha256(*image_bytes));
+        members.push_back({std::move(*image_bytes), std::move(digest), std::move(catalog_digest)});
     }
     if (auto validated = validate_reassembly(image, split_segments, cancellation); !validated)
         return std::unexpected{validated.error()};
-    entries.push_back({"manifest.json", json_bytes(disk_set_manifest(plan, digests, catalog_digests))});
-    auto archive = package_internal::write_archive(std::move(entries));
-    if (!archive)
-        return std::unexpected{archive.error()};
-    if (archive->size() != plan.projected_archive_bytes)
-        return std::unexpected{floppy_error("multi-floppy archive size differs from its inspected projection")};
-    if (archive->size() > image.limits.maximum_output_bytes)
-        return std::unexpected{floppy_error("multi-floppy archive exceeds the configured output limit")};
-    auto reopened = package_internal::read_archive(*archive);
-    if (!reopened)
-        return std::unexpected{reopened.error()};
-    if (reopened->size() != plan.disks.size() + 1U || reopened->front().path != "manifest.json")
-        return std::unexpected{floppy_error("multi-floppy archive failed deterministic reopen validation")};
-
-    if (!overwrite && std::filesystem::exists(output_path))
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "fresh media output already exists")};
-    std::error_code filesystem_error;
-    if (!output_path.parent_path().empty())
-        std::filesystem::create_directories(output_path.parent_path(), filesystem_error);
-    if (filesystem_error)
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create media output directory")};
-    auto publication = TemporaryPublication::create(output_path);
-    if (!publication)
-        return std::unexpected{publication.error()};
-    if (auto resized = publication->resize(archive->size()); !resized)
-        return std::unexpected{resized.error()};
-    if (auto written = publication->write_at(0U, *archive); !written)
-        return std::unexpected{written.error()};
-    if (auto flushed = publication->flush(); !flushed)
-        return std::unexpected{flushed.error()};
-    const auto mode = overwrite ? PublicationMode::replace_existing : PublicationMode::create_only;
-    auto published = publication->publish(mode);
-    if (!published)
-        return std::unexpected{published.error()};
-    return WrittenMediaImage{output_path,           MediaImageFormat::fat12_floppy,
-                             archive->size(),       image.objects.size(),
-                             std::move(*published), MediaConversionArtifactKind::floppy_disk_set,
-                             plan.disks.size()};
+    return members;
 }
 
 } // namespace axk::detail

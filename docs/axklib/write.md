@@ -431,6 +431,8 @@ object tree context menu:
 
 - Right-click a partition and choose **Export CD-ROM image...** to convert the
   complete partition to an ISO9660 image.
+- Right-click a partition and choose **Export volumes to floppies...** to
+  convert every immediate volume in one batch.
 - Right-click a volume and choose **Export floppy image...** to convert the
   complete volume to a 1,474,560-byte FAT12 image.
 
@@ -456,6 +458,21 @@ Bank, Sample, Wave Data, and Sequence payloads are copied byte for byte from the
 selected source scope. The ISO path uses reader-backed streaming and does not
 materialize the selected payload set in memory. FAT12 members use fixed floppy
 capacity and multi-floppy output is capped at 32 images.
+
+Partition batch export does not define a second floppy format. It plans the
+partition once, then applies the individual volume conversion contract to each
+immediate volume. Each successful volume receives a collision-safe directory
+containing raw `diskNN.ima` files. Thus a single-floppy volume has
+`disk01.ima`, while a multi-floppy volume has `disk01.ima` through its final
+member without an inner ZIP. The root `volume-floppies.axklib.json` report
+records every exported, empty, blocked, or failed volume. Failures are isolated
+per volume and zero-success runs publish no directory or download.
+
+The public native entry points are `plan_volume_floppy_export` and
+`write_volume_floppy_export`. They share one source parse, inventory, catalog,
+and relationship graph across the operation. Multi-floppy members are built by
+the same member builder used by `write_media_conversion`, so corresponding raw
+images are byte-identical rather than merely semantically equivalent.
 
 Generated ISO partition conversion has hardware-promoted one-volume and
 multi-volume profiles. A four-volume conversion was enumerated, loaded, and
@@ -552,7 +569,7 @@ Top-level removable-media fields:
 | `name` | Required non-empty string. Match `iso.volume_name` for clear ISO manifests. |
 | `waveforms` | Required array. Completed FAT12 images must contain at least one generated object. An object-empty ISO volume is accepted only as a package-import staging target; it is not a hardware-promoted standalone profile. |
 | `samples` | Required Sample (`SBNK`) array. |
-| `sample_banks` | Optional Sample Bank (`SBAC`) array; current banks contain 1..3 distinct Sample names. |
+| `sample_banks` | Optional Sample Bank (`SBAC`) array; each bank contains 1..127 distinct Sample names. |
 | `programs` | Optional array; Program numbers are `1..128`. |
 
 Waveform fields:
@@ -591,10 +608,11 @@ Interleaved input is split into two physical mono objects and inherently meets
 that constraint.
 
 The current authored `SBAC`/`PROG` profile is intentionally narrow. Each Sample Bank
-contains 1..3 mono Samples. Each Program has exactly two ordered
+contains 1..127 mono or stereo Samples. Each Program has exactly two ordered
 assignments: one distinct `sample_bank` on receive channel `1`, followed
 by one direct `sample` on receive channel `2`. Every Sample Bank and direct Sample
-used by this profile is assigned once. Sequence (`SEQU`) and profile (`PRF3`)
+used by the Program profile is assigned once, and the direct Program Sample remains
+mono-only. Sequence (`SEQU`) and profile (`PRF3`)
 payload authoring are not exposed; transfer mode can preserve existing objects
 of those known types.
 
@@ -680,7 +698,8 @@ and `key_high`. Optional fields are `right_waveform_name`, `level`,
 the evolving transaction must already exist at that point.
 
 An `insert_sbac` object contains `name` and `member_samples`, an array of
-one to three distinct existing Sample names. An `insert_program` object
+one to 127 distinct existing Sample names. Samples may be mono or stereo, but
+must not already belong to another Sample Bank. An `insert_program` object
 contains a Program `number` and exactly two assignments: a
 `sample_bank` on receive channel 1 followed by a direct `sample` on
 receive channel 2. These limits match the currently supported authored profile.

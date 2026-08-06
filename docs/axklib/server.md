@@ -287,6 +287,28 @@ run with zero successful packages publishes nothing. `WORKSPACE` creates one
 new no-overwrite directory; `DOWNLOAD` returns the same directory as a retained
 TAR for desktop extraction.
 
+File-backed SFS sessions additionally advertise
+`images.volume_floppy_export` on partition content nodes. First call
+`images.volume_floppy_export.inspect` with the image ID, expected revision,
+and exact partition `scopeId`. The inspection resolves every immediate volume
+against one shared catalog and relationship graph. Each item is `READY`,
+`EMPTY`, or `BLOCKED` and reports its object count, projected floppy count and
+raw byte size, collision-safe directory name, and structured issues.
+
+Start `images.volume_floppy_export` with the inspected partition and either a
+`WORKSPACE` or `DOWNLOAD` directory destination. Every successful volume is
+written to its own subdirectory with raw members named `disk01.ima`,
+`disk02.ima`, and so on; the members use the exact same planner and bytes as an
+individual floppy export. `volume-floppies.axklib.json` at the root records
+exported disks and their sizes and SHA-256 digests, skipped empty volumes,
+blocked volumes, and runtime failures. Processing is sequential and partial:
+a failed volume directory is removed while earlier and later successful
+volumes remain. A run with no successful volume publishes nothing.
+
+A `WORKSPACE` destination creates one new no-overwrite directory. A
+`DOWNLOAD` destination retains the same directory as a TAR, which the desktop
+extracts through its directory chooser before deleting the retained resource.
+
 File-backed SFS sessions also advertise `images.media_conversion`. Use
 `images.media_conversion.inspect` before starting the read job. The inspection
 accepts exactly one of these scopes:

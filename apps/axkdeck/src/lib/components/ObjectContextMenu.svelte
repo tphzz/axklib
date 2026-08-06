@@ -7,6 +7,7 @@
         left: number;
         top: number;
         onrename?: () => void;
+        oncreatesamplebank?: () => void;
         onexportpackage?: () => void;
         onexportsfz?: () => void;
         onexportmidi?: () => void;
@@ -20,6 +21,7 @@
         left,
         top,
         onrename,
+        oncreatesamplebank,
         onexportpackage,
         onexportsfz,
         onexportmidi,
@@ -104,6 +106,16 @@
             }}>Rename</button
         >
     {/if}
+    {#if oncreatesamplebank}
+        <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+                oncreatesamplebank?.();
+                onclose();
+            }}>Create Sample Bank from selection…</button
+        >
+    {/if}
     {#if onexportpackage}
         <button
             type="button"
@@ -134,7 +146,7 @@
             }}>Export MIDI…</button
         >
     {/if}
-    {#if (onrename || onexportpackage || onexportsfz || onexportmidi) && ondelete}
+    {#if (onrename || oncreatesamplebank || onexportpackage || onexportsfz || onexportmidi) && ondelete}
         <div class="context-menu-separator" role="separator"></div>
     {/if}
     {#if ondelete}

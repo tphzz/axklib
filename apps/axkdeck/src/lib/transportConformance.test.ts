@@ -34,6 +34,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
     packageImportAvailable: false,
     packageExportAvailable: false,
     volumePackageExportAvailable: false,
+    volumeFloppyExportAvailable: false,
     audioExportAvailable: false,
     sequenceExportAvailable: false,
     mediaConversionAvailable: false,

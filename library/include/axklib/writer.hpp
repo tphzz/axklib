@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -24,6 +25,7 @@ inline constexpr std::uint64_t maximum_audio_source_frames_per_channel = maximum
 inline constexpr std::uint64_t maximum_audio_decoded_source_bytes = 256ULL * 1024ULL * 1024ULL;
 inline constexpr std::uint64_t maximum_wave_data_pcm16_bytes_per_channel =
     maximum_wave_data_frames_per_channel * sizeof(std::int16_t);
+inline constexpr std::size_t maximum_sample_bank_members = 127U;
 inline constexpr std::array<std::uint32_t, 12> supported_sampler_sample_rates{
     4'000U, 5'512U, 6'000U, 8'000U, 11'025U, 12'000U, 16'000U, 22'050U, 24'000U, 32'000U, 44'100U, 48'000U};
 inline constexpr std::uint32_t default_sampler_sample_rate = 44'100U;
@@ -334,6 +336,56 @@ struct MediaConversionPlanSummary {
     std::vector<MediaConversionIssue> issues;
 };
 
+struct VolumeFloppyExportRequest {
+    std::uint32_t partition_index{};
+};
+
+struct VolumeFloppyExportVolumeSummary {
+    std::uint32_t directory_id{};
+    std::string name;
+    bool can_export{};
+    std::size_t object_count{};
+    std::uint64_t payload_bytes{};
+    std::size_t floppy_image_count{};
+    std::uint64_t projected_disk_bytes{};
+    std::vector<MediaConversionIssue> issues;
+};
+
+struct VolumeFloppyExportPlanSummary {
+    std::uint32_t partition_index{};
+    std::string partition_name;
+    std::vector<VolumeFloppyExportVolumeSummary> volumes;
+};
+
+struct VolumeFloppyExportTarget {
+    std::uint32_t directory_id{};
+    std::filesystem::path directory_name;
+};
+
+struct WrittenFloppyDiskImage {
+    std::size_t index{};
+    std::filesystem::path path;
+    std::uint64_t size_bytes{};
+    std::string sha256;
+};
+
+enum class VolumeFloppyExportStatus : std::uint8_t { exported, skipped_empty, blocked, failed };
+
+struct WrittenVolumeFloppyExport {
+    std::uint32_t directory_id{};
+    std::string name;
+    VolumeFloppyExportStatus status{VolumeFloppyExportStatus::failed};
+    std::filesystem::path directory_path;
+    std::uint64_t size_bytes{};
+    std::vector<WrittenFloppyDiskImage> disks;
+    std::optional<Error> error;
+};
+
+struct WrittenVolumeFloppyExportBatch {
+    VolumeFloppyExportPlanSummary plan;
+    std::vector<WrittenVolumeFloppyExport> volumes;
+};
+
 AXK_AUDIO_API Result<HdsBuildManifest> parse_hds_build_manifest(std::string_view json,
                                                                 const std::filesystem::path &base_directory = {});
 AXK_AUDIO_API Result<HdsBuildManifest> load_hds_build_manifest(const std::filesystem::path &path);
@@ -360,6 +412,10 @@ AXK_AUDIO_API Result<MediaConversionPlanSummary>
 plan_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader, const std::filesystem::path &source_path,
                       const MediaConversionRequest &request, const MediaBuildLimits &limits = {},
                       const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<VolumeFloppyExportPlanSummary>
+plan_volume_floppy_export(std::shared_ptr<const RandomAccessReader> source_reader,
+                          const std::filesystem::path &source_path, const VolumeFloppyExportRequest &request,
+                          const MediaBuildLimits &limits = {}, const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<std::uint32_t> choose_sampler_sample_rate(std::uint32_t source_rate,
                                                                std::optional<std::uint32_t> target_sample_rate = {});
 AXK_AUDIO_API Result<AudioSourceInfo> inspect_sampler_audio(const std::filesystem::path &path,
@@ -387,5 +443,10 @@ write_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader,
                        const std::filesystem::path &source_path, const MediaConversionRequest &request,
                        const std::filesystem::path &output_path, bool overwrite = false,
                        const MediaBuildLimits &limits = {}, const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenVolumeFloppyExportBatch>
+write_volume_floppy_export(std::shared_ptr<const RandomAccessReader> source_reader,
+                           const std::filesystem::path &source_path, const VolumeFloppyExportRequest &request,
+                           const std::filesystem::path &output_root, std::span<const VolumeFloppyExportTarget> targets,
+                           const MediaBuildLimits &limits = {}, const CancellationToken &cancellation = {});
 
 } // namespace axk

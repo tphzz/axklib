@@ -96,8 +96,8 @@ Result<void> validate_direct_sample(const SampleSpec &sample) {
 Result<void> validate_sample_bank(const SampleBankSpec &sample_bank) {
     if (auto valid = require_object_name(sample_bank.name, "sample_bank.name"); !valid)
         return valid;
-    if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > 3U)
-        return std::unexpected{manifest_error("member_samples must contain 1..3 names")};
+    if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > maximum_sample_bank_members)
+        return std::unexpected{manifest_error("member_samples must contain 1..127 names")};
     std::set<std::string_view> members;
     for (const auto &member : sample_bank.member_samples) {
         if (auto valid = require_object_name(member, "sample_bank.member_samples"); !valid)

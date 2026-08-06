@@ -4,6 +4,23 @@ import { describe, expect, it, vi } from 'vitest';
 import ObjectContextMenu from './ObjectContextMenu.svelte';
 
 describe('ObjectContextMenu', () => {
+    it('offers Sample Bank creation as a selection command', async () => {
+        const oncreatesamplebank = vi.fn();
+        render(ObjectContextMenu, {
+            props: {
+                objectName: '2 Samples',
+                selectionCount: 2,
+                left: 20,
+                top: 30,
+                oncreatesamplebank,
+                onclose: vi.fn(),
+            },
+        });
+
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Create Sample Bank from selection…' }));
+        expect(oncreatesamplebank).toHaveBeenCalledOnce();
+    });
+
     it('uses roving keyboard focus and restores the invoking control', async () => {
         const invoker = document.createElement('button');
         document.body.append(invoker);

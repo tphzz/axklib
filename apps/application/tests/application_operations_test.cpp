@@ -17,6 +17,7 @@ bool session_operation(std::string_view id) {
            id == "images.package_import.release" || id == "images.package_import" || id == "images.package_export" ||
            id == "images.audio_export.inspect" || id == "images.audio_export" ||
            id == "images.volume_package_export.inspect" || id == "images.volume_package_export" ||
+           id == "images.volume_floppy_export.inspect" || id == "images.volume_floppy_export" ||
            id == "images.sequence_export" || id == "images.media_conversion.inspect" || id == "images.media_conversion";
 }
 

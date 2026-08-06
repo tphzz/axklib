@@ -48,6 +48,7 @@ export type ImageTreeAction =
     | 'import-package'
     | 'export-package'
     | 'export-volume-packages'
+    | 'export-volume-floppies'
     | 'export-sfz'
     | 'export-cdrom'
     | 'export-floppy';
@@ -77,6 +78,7 @@ export interface SampleStructureItem {
     name: string;
     objectType: 'SBAC' | 'SBNK';
     object: SamplerObject;
+    sampleBankObjectIds?: string[];
     membershipLabel?: string;
     memberCount?: number;
 }

@@ -1,11 +1,17 @@
 import type {
     AudioImportItem,
+    AudioImportGrouping,
     AudioImportTarget,
+    SampleBankCreation,
     SequenceImportItem,
     SequenceImportTarget,
     SequenceSystemExclusivePolicy,
+    JobState,
 } from './transport';
-import { serverInput } from './httpTransportWire';
+import type { AxklibHttpApiClient } from './httpApiClient';
+import type { HttpImageSessions } from './httpImageSessions';
+import type { HttpJobController } from './httpJobController';
+import { randomIdempotencyKey, serverInput } from './httpTransportWire';
 
 const ALTERATION_MANIFEST_SCHEMA_VERSION = '1.0';
 
@@ -19,6 +25,49 @@ interface ImportAlterationRequest extends Record<string, unknown> {
         };
     };
     inputBindings: { manifestPath: string; input: ReturnType<typeof serverInput> }[];
+}
+
+export class HttpImportOperations {
+    constructor(
+        private readonly client: AxklibHttpApiClient,
+        private readonly jobs: HttpJobController,
+        private readonly imageSessions: HttpImageSessions,
+    ) {}
+
+    startAudioImport(
+        sessionId: number,
+        target: AudioImportTarget,
+        items: AudioImportItem[],
+        grouping: AudioImportGrouping,
+    ): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        return this.start(audioImportRequest(session.remoteId, session.revision, target, items, grouping));
+    }
+
+    startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        return this.start(sampleBankCreationRequest(session.remoteId, session.revision, creation));
+    }
+
+    startSequenceImport(
+        sessionId: number,
+        target: SequenceImportTarget,
+        items: SequenceImportItem[],
+        systemExclusivePolicy: SequenceSystemExclusivePolicy,
+    ): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        return this.start(
+            sequenceImportRequest(session.remoteId, session.revision, target, items, systemExclusivePolicy),
+        );
+    }
+
+    private async start(request: ImportAlterationRequest): Promise<JobState> {
+        const job = await this.client.invoke<never>('images.alter', request, {
+            idempotencyKey: randomIdempotencyKey(),
+        });
+        if (!this.jobs.isJob(job)) throw new Error('images.alter did not return a job');
+        return this.jobs.map(job);
+    }
 }
 
 function request(
@@ -45,6 +94,7 @@ export function audioImportRequest(
     expectedRevision: number,
     target: AudioImportTarget,
     items: AudioImportItem[],
+    grouping: AudioImportGrouping,
 ): ImportAlterationRequest {
     const operations: Record<string, unknown>[] = [];
     const inputBindings: ImportAlterationRequest['inputBindings'] = [];
@@ -89,7 +139,43 @@ export function audioImportRequest(
         });
         inputBindings.push({ manifestPath: logicalPath, input: serverInput(item.source) });
     });
+    if (grouping.kind === 'SAMPLE_BANK') {
+        operations.push({
+            id: 'sample-bank',
+            type: 'insert_sbac',
+            partition_index: target.partitionIndex,
+            volume_name: target.volumeName,
+            sample_bank: {
+                name: grouping.sampleBankName,
+                member_samples: items.map((item) => item.sampleName),
+            },
+        });
+    }
     return request(imageId, expectedRevision, operations, inputBindings);
+}
+
+export function sampleBankCreationRequest(
+    imageId: string,
+    expectedRevision: number,
+    creation: SampleBankCreation,
+): ImportAlterationRequest {
+    return request(
+        imageId,
+        expectedRevision,
+        [
+            {
+                id: 'sample-bank',
+                type: 'insert_sbac',
+                partition_index: creation.partitionIndex,
+                volume_name: creation.volumeName,
+                sample_bank: {
+                    name: creation.sampleBankName,
+                    member_samples: creation.sampleNames,
+                },
+            },
+        ],
+        [],
+    );
 }
 
 export function sequenceImportRequest(

@@ -40,6 +40,7 @@ export interface OpenedImage {
     packageImportAvailable: boolean;
     packageExportAvailable: boolean;
     volumePackageExportAvailable: boolean;
+    volumeFloppyExportAvailable: boolean;
     audioExportAvailable: boolean;
     sequenceExportAvailable: boolean;
     mediaConversionAvailable: boolean;
@@ -149,6 +150,12 @@ export interface ObjectDeletionInspection {
 export type VolumeDeletionInspection = components['schemas']['ImageVolumeDeletionInspection'];
 export type PlacementRepairScope = components['schemas']['ImagePlacementScope'];
 export type PlacementRepairInspection = components['schemas']['ImagePlacementInspection'];
+
+export type ImageSessionVolumeFloppyExportDestination =
+    components['schemas']['ImageSessionVolumeFloppyExportDestination'];
+export type ImageSessionVolumeFloppyExportInspection =
+    components['schemas']['ImageSessionVolumeFloppyExportInspection'];
+export type ImageSessionVolumeFloppyExportResult = components['schemas']['ImageSessionVolumeFloppyExportResult'];
 
 export type WaveDataOrphanCandidate = components['schemas']['ImageWaveDataOrphanCandidate'];
 export type WaveDataOrphanInspection = components['schemas']['ImageWaveDataOrphanInspection'];
@@ -395,6 +402,15 @@ export interface AudioImportTarget {
     volumeName: string;
 }
 
+export type AudioImportGrouping = { kind: 'SAMPLES' } | { kind: 'SAMPLE_BANK'; sampleBankName: string };
+
+export interface SampleBankCreation {
+    partitionIndex: number;
+    volumeName: string;
+    sampleBankName: string;
+    sampleNames: string[];
+}
+
 export interface SequenceImportItem {
     source: InputFileLocation;
     sequenceName: string;
@@ -472,7 +488,13 @@ export interface ImageTransport {
     audioImportCapabilities(): Promise<AudioImportCapabilities>;
     inspectAudio(source: InputFileLocation, targetSampleRate?: number): Promise<AudioSourceInfo>;
     inspectMidi(source: InputFileLocation): Promise<MidiInspection>;
-    startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState>;
+    startAudioImport(
+        sessionId: number,
+        target: AudioImportTarget,
+        items: AudioImportItem[],
+        grouping: AudioImportGrouping,
+    ): Promise<JobState>;
+    startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState>;
     startSequenceImport(
         sessionId: number,
         target: SequenceImportTarget,
@@ -513,6 +535,15 @@ export interface ImageTransport {
         sessionId: number,
         scopeId: string,
         destination: ImageSessionVolumePackageExportDestination,
+    ): Promise<JobState>;
+    inspectImageVolumeFloppyExport(
+        sessionId: number,
+        scopeId: string,
+    ): Promise<ImageSessionVolumeFloppyExportInspection>;
+    startImageVolumeFloppyExport(
+        sessionId: number,
+        scopeId: string,
+        destination: ImageSessionVolumeFloppyExportDestination,
     ): Promise<JobState>;
     inspectImageAudioExport(
         sessionId: number,

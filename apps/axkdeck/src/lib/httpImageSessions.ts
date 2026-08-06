@@ -293,6 +293,7 @@ export class HttpImageSessions {
             packageImportAvailable: (summary.availableOperations ?? []).includes('images.package.import'),
             packageExportAvailable: (summary.availableOperations ?? []).includes('images.package.export'),
             volumePackageExportAvailable: (summary.availableOperations ?? []).includes('images.volume_package_export'),
+            volumeFloppyExportAvailable: (summary.availableOperations ?? []).includes('images.volume_floppy_export'),
             audioExportAvailable: (summary.availableOperations ?? []).includes('images.audio_export'),
             sequenceExportAvailable: (summary.availableOperations ?? []).includes('images.sequence_export'),
             mediaConversionAvailable: (summary.availableOperations ?? []).includes('images.media_conversion'),

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <format>
 #include <limits>
 #include <map>
@@ -15,6 +16,16 @@
 #include "axklib/writer_internal.hpp"
 
 namespace axk::alteration_internal {
+
+namespace {
+
+bool ascii_case_equal(std::string_view left, std::string_view right) noexcept {
+    return left.size() == right.size() && std::ranges::equal(left, right, [](unsigned char lhs, unsigned char rhs) {
+               return std::tolower(lhs) == std::tolower(rhs);
+           });
+}
+
+} // namespace
 
 Result<OperationReport> delete_program(TransactionState &state, OperationContext context,
                                        const DeleteProgramOperation &operation, const CancellationToken &cancellation) {
@@ -321,7 +332,7 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
         return std::unexpected{existing_sample_banks.error()};
     std::set<std::string> existing_members;
     for (const auto &existing : *existing_sample_banks) {
-        if (existing.name == spec.name) {
+        if (ascii_case_equal(existing.name, spec.name)) {
             return std::unexpected{transaction_error("Sample Bank already exists")};
         }
         const auto *sample_bank = std::get_if<CurrentSbac>(&existing.decoded.payload);
@@ -344,10 +355,8 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
         if (!decoded)
             return std::unexpected{decoded.error()};
         const auto *current_sample = std::get_if<CurrentSbnk>(&decoded->payload);
-        if (current_sample == nullptr || current_sample->right_slot_present ||
-            (std::to_integer<std::uint8_t>((*sample_payload)[0xd0U]) & 1U) != 0U) {
-            return std::unexpected{
-                transaction_error("Sample Bank profile requires mono Samples without existing membership")};
+        if (current_sample == nullptr || (std::to_integer<std::uint8_t>((*sample_payload)[0xd0U]) & 1U) != 0U) {
+            return std::unexpected{transaction_error("Sample Bank requires Samples without existing membership")};
         }
         SampleSpec placeholder;
         placeholder.name = name;

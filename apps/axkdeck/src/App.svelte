@@ -9,6 +9,7 @@
     import { ExportWorkflow } from './features/export/workflow.svelte';
     import { MediaExportWorkflow } from './features/export/mediaWorkflow.svelte';
     import { VolumePackageExportWorkflow } from './features/export/volumePackageWorkflow.svelte';
+    import { VolumeFloppyExportWorkflow } from './features/export/volumeFloppyWorkflow.svelte';
     import { AudioImportWorkflow, audioExtensions } from './features/import/audioWorkflow.svelte';
     import { MediaDropWorkflow } from './features/import/mediaDropWorkflow.svelte';
     import { PackageImportWorkflow } from './features/import/packageWorkflow.svelte';
@@ -96,6 +97,14 @@
         sessionId: () => imageSessionWorkflow.sessionId,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
+    const volumeFloppyExportWorkflow = new VolumeFloppyExportWorkflow({
+        transport,
+        jobs: jobController,
+        picker: pickerController,
+        isDesktop,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+    });
     const catalogHooks = {
         stopPlayback: () => Promise.resolve(),
         resetPreviews: () => {},
@@ -130,6 +139,7 @@
         imageOpen: () => imageSessionWorkflow.location !== null,
         workspaceView: () => workspaceView,
         setWorkspaceView: (view) => (workspaceView = view),
+        clearSelection: () => (packageExportSelection = emptyPackageExportSelection()),
         refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
@@ -170,11 +180,13 @@
         setSelectedSource: (item) => (imageSessionWorkflow.selectedSource = item),
         sourceItems: () => imageSessionWorkflow.sourceItems,
         activeVolumeId: () => catalog.activeVolumeId,
+        sampleBanks: () => catalog.sampleBanks,
         samples: () => catalog.samples,
         loadVolume: (volumeId) => catalog.loadVolume(volumeId),
         refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
         invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
         selectWorkspace: (view) => auditionWorkflow.selectWorkspaceView(view),
+        selectSampleBank: (sampleBank) => void auditionWorkflow.selectBank(sampleBank),
         selectSample: (sample) => void auditionWorkflow.selectSample(sample),
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
@@ -216,6 +228,7 @@
         mutation: mutationWorkflow,
         exports: exportWorkflow,
         volumePackages: volumePackageExportWorkflow,
+        volumeFloppies: volumeFloppyExportWorkflow,
         mediaExports: mediaExportWorkflow,
         packageImport: packageImportWorkflow,
         deletion: deletionWorkflow,
@@ -230,6 +243,7 @@
     onDestroy(() => {
         exportWorkflow.dispose();
         volumePackageExportWorkflow.dispose();
+        volumeFloppyExportWorkflow.dispose();
         mediaExportWorkflow.dispose();
         deletionWorkflow.dispose();
         pickerController.dispose();
@@ -327,6 +341,12 @@
             if (!imageSessionWorkflow.volumePackageExportAvailable || item.kind !== 'partition') return;
             imageSessionWorkflow.selectedSource = item;
             void volumePackageExportWorkflow.open(item);
+            return;
+        }
+        if (action === 'export-volume-floppies') {
+            if (!imageSessionWorkflow.volumeFloppyExportAvailable || item.kind !== 'partition') return;
+            imageSessionWorkflow.selectedSource = item;
+            void volumeFloppyExportWorkflow.open(item);
             return;
         }
         if (action === 'export-sfz') {
@@ -486,6 +506,7 @@
     packageImportAvailable={imageSessionWorkflow.packageImportAvailable}
     packageExportAvailable={imageSessionWorkflow.packageExportAvailable}
     volumePackageExportAvailable={imageSessionWorkflow.volumePackageExportAvailable}
+    volumeFloppyExportAvailable={imageSessionWorkflow.volumeFloppyExportAvailable}
     audioExportAvailable={imageSessionWorkflow.audioExportAvailable}
     sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
     mediaConversionAvailable={imageSessionWorkflow.mediaConversionAvailable}
@@ -532,6 +553,7 @@
     packageImport={packageImportWorkflow}
     exports={exportWorkflow}
     volumePackages={volumePackageExportWorkflow}
+    volumeFloppies={volumeFloppyExportWorkflow}
     mediaExports={mediaExportWorkflow}
     deletion={deletionWorkflow}
     mediaDrop={mediaDropWorkflow}
@@ -540,6 +562,7 @@
     sequenceImport={sequenceImportWorkflow}
     {sequenceFileInput}
     sampleNames={samples.map((item) => item.name)}
+    sampleBankNames={sampleBanks.map((item) => item.name)}
     waveDataNames={waveData.map((item) => item.name)}
     sequenceNames={sequences.map((item) => item.name)}
 />

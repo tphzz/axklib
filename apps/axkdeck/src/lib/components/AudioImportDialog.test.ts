@@ -83,6 +83,40 @@ describe('AudioImportDialog', () => {
         expect(audioImportRowsSource).toContain('scrollbar-gutter: stable;');
     });
 
+    it('imports inspected Samples into a newly named Sample Bank', async () => {
+        const oncommit = vi.fn().mockResolvedValue(undefined);
+        render(AudioImportDialog, {
+            props: {
+                transport: transport(),
+                files: [new File([new Uint8Array(64)], 'Bass.wav', { type: 'audio/wav' })],
+                target: { partitionIndex: 0, volumeName: 'Sounds' },
+                existingSampleNames: [],
+                existingSampleBankNames: ['Existing'],
+                existingWaveformNames: [],
+                oncommit,
+                oncancel: vi.fn(),
+            },
+        });
+
+        await screen.findByDisplayValue('Bass');
+        await fireEvent.change(screen.getByRole('combobox', { name: 'Import mode' }), {
+            target: { value: 'SAMPLE_BANK' },
+        });
+        const name = screen.getByRole('textbox', { name: 'Sample Bank name' });
+        await fireEvent.input(name, { target: { value: 'existing' } });
+        expect(screen.getByText('Sample Bank name already exists: existing')).toBeTruthy();
+        expect((screen.getByRole('button', { name: 'Import 1 file' }) as HTMLButtonElement).disabled).toBe(true);
+
+        await fireEvent.input(name, { target: { value: 'Bass Bank' } });
+        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await waitFor(() =>
+            expect(oncommit).toHaveBeenCalledWith([expect.objectContaining({ sampleName: 'Bass' })], {
+                kind: 'SAMPLE_BANK',
+                sampleBankName: 'Bass Bank',
+            }),
+        );
+    });
+
     it('rejects an oversized local selection before staging any uploads', async () => {
         const imageTransport = transport();
         imageTransport.audioImportCapabilities = vi.fn().mockResolvedValue({
@@ -175,13 +209,16 @@ describe('AudioImportDialog', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
         await waitFor(() =>
-            expect(oncommit).toHaveBeenCalledWith([
-                expect.objectContaining({
-                    source: workspaceFile,
-                    sampleName: '16bit_11k 2',
-                    waveformNames: ['16bit_11k 2'],
-                }),
-            ]),
+            expect(oncommit).toHaveBeenCalledWith(
+                [
+                    expect.objectContaining({
+                        source: workspaceFile,
+                        sampleName: '16bit_11k 2',
+                        waveformNames: ['16bit_11k 2'],
+                    }),
+                ],
+                { kind: 'SAMPLES' },
+            ),
         );
         expect(imageTransport.releaseClientUpload).not.toHaveBeenCalled();
     });
@@ -339,23 +376,26 @@ describe('AudioImportDialog', () => {
         await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
 
         await waitFor(() =>
-            expect(oncommit).toHaveBeenCalledWith([
-                {
-                    source: expect.objectContaining({ reference: { uploadId: 'audio-stereo' } }),
-                    sampleName: 'Stereo piano',
-                    waveformNames: ['Stereo piano-L', 'Stereo piano-R'],
-                    rootKey: 69,
-                    fineTuneCents: 0,
-                    keyLow: 0,
-                    keyHigh: 127,
-                    velocityLow: 0,
-                    velocityHigh: 127,
-                    loopMode: 4,
-                    loopStartFrame: 0,
-                    loopLengthFrames: 0,
-                    targetSampleRate: 48_000,
-                },
-            ]),
+            expect(oncommit).toHaveBeenCalledWith(
+                [
+                    {
+                        source: expect.objectContaining({ reference: { uploadId: 'audio-stereo' } }),
+                        sampleName: 'Stereo piano',
+                        waveformNames: ['Stereo piano-L', 'Stereo piano-R'],
+                        rootKey: 69,
+                        fineTuneCents: 0,
+                        keyLow: 0,
+                        keyHigh: 127,
+                        velocityLow: 0,
+                        velocityHigh: 127,
+                        loopMode: 4,
+                        loopStartFrame: 0,
+                        loopLengthFrames: 0,
+                        targetSampleRate: 48_000,
+                    },
+                ],
+                { kind: 'SAMPLES' },
+            ),
         );
         expect(imageTransport.releaseClientUpload).toHaveBeenCalledWith(
             expect.objectContaining({ reference: { uploadId: 'audio-stereo' } }),
@@ -520,19 +560,22 @@ describe('AudioImportDialog', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
         await waitFor(() =>
-            expect(oncommit).toHaveBeenCalledWith([
-                expect.objectContaining({
-                    rootKey: 62,
-                    fineTuneCents: -63,
-                    keyLow: 12,
-                    keyHigh: 96,
-                    velocityLow: 8,
-                    velocityHigh: 110,
-                    loopMode: 1,
-                    loopStartFrame: 70_000,
-                    loopLengthFrames: 10_000,
-                }),
-            ]),
+            expect(oncommit).toHaveBeenCalledWith(
+                [
+                    expect.objectContaining({
+                        rootKey: 62,
+                        fineTuneCents: -63,
+                        keyLow: 12,
+                        keyHigh: 96,
+                        velocityLow: 8,
+                        velocityHigh: 110,
+                        loopMode: 1,
+                        loopStartFrame: 70_000,
+                        loopLengthFrames: 10_000,
+                    }),
+                ],
+                { kind: 'SAMPLES' },
+            ),
         );
     });
 
@@ -582,11 +625,14 @@ describe('AudioImportDialog', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
         await waitFor(() =>
-            expect(oncommit).toHaveBeenCalledWith([
-                expect.objectContaining({
-                    targetSampleRate: 22_050,
-                }),
-            ]),
+            expect(oncommit).toHaveBeenCalledWith(
+                [
+                    expect.objectContaining({
+                        targetSampleRate: 22_050,
+                    }),
+                ],
+                { kind: 'SAMPLES' },
+            ),
         );
     });
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ImageTransport, PlacementRepairInspection } from '../../lib/transport';
+import type { SampleStructureItem } from '../../lib/types';
 import { MutationWorkflow } from './workflow.svelte';
 
 const volume = {
@@ -19,21 +20,24 @@ const partition = {
     partitionIndex: 0,
 };
 
-function workflowWith(transport: Partial<ImageTransport>) {
+function workflowWith(transport: Partial<ImageTransport>, catalog: object = {}) {
     const run = vi.fn().mockImplementation(async (start: () => Promise<unknown>) => {
         await start();
         return { status: 'completed' };
     });
     const refreshSession = vi.fn().mockResolvedValue(undefined);
+    const setWorkspaceView = vi.fn();
+    const clearSelection = vi.fn();
     const workflow = new MutationWorkflow({
         transport: transport as ImageTransport,
         jobs: { run } as never,
-        catalog: {} as never,
+        catalog: catalog as never,
         audition: { invalidateSession: vi.fn().mockResolvedValue(undefined) } as never,
         sessionId: () => 7,
         imageOpen: () => true,
         workspaceView: () => 'samples',
-        setWorkspaceView: vi.fn(),
+        setWorkspaceView,
+        clearSelection,
         refreshSession,
         setStatus: vi.fn(),
         reportTiming: vi.fn(),
@@ -43,7 +47,7 @@ function workflowWith(transport: Partial<ImageTransport>) {
         partitionMutationsAvailable: true,
         objectRenameAvailable: false,
     });
-    return { workflow, run, refreshSession };
+    return { workflow, run, refreshSession, setWorkspaceView, clearSelection };
 }
 
 function placementInspection(overrides: Partial<PlacementRepairInspection> = {}): PlacementRepairInspection {
@@ -67,7 +71,60 @@ function placementInspection(overrides: Partial<PlacementRepairInspection> = {})
     };
 }
 
-describe('MutationWorkflow placement repair', () => {
+describe('MutationWorkflow', () => {
+    it('creates a Sample Bank from standalone Samples in the supplied order', async () => {
+        const sample = (name: string): SampleStructureItem => ({
+            id: `sample-${name}`,
+            objectId: `sample-${name}`,
+            name,
+            objectType: 'SBNK',
+            sampleBankObjectIds: [],
+            object: {
+                key: `sample-${name}`,
+                objectType: 'SBNK',
+                name,
+                partitionIndex: 0,
+                partitionName: 'Partition 1',
+                volumeName: 'Samples',
+                categoryName: 'SBNK',
+                sfsId: 1,
+                storedSizeBytes: 512,
+                sampleRate: 44_100,
+                rootKey: 60,
+                frameCount: 1,
+                sampleWidthBytes: 2,
+            },
+        });
+        const samples = [sample('Sample 2'), sample('Sample 10')];
+        const catalog = {
+            sampleBanks: [],
+            selectedBankId: '',
+            inspectorObjectId: '',
+            editorObjectIds: { 'sample-banks': '' },
+        };
+        const startSampleBankCreation = vi.fn().mockResolvedValue({ jobId: 1, status: 'queued' });
+        const { workflow, clearSelection, setWorkspaceView } = workflowWith({ startSampleBankCreation }, catalog);
+        workflow.setCapabilities({
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectRenameAvailable: true,
+        });
+
+        workflow.requestSampleBankCreation(samples);
+        expect(workflow.sampleBankCreationRequest?.samples).toEqual(samples);
+        await workflow.submitSampleBankCreation('Layered');
+
+        expect(startSampleBankCreation).toHaveBeenCalledWith(7, {
+            partitionIndex: 0,
+            volumeName: 'Samples',
+            sampleBankName: 'Layered',
+            sampleNames: ['Sample 2', 'Sample 10'],
+        });
+        expect(setWorkspaceView).toHaveBeenCalledWith('sample-banks');
+        expect(clearSelection).toHaveBeenCalledOnce();
+        expect(workflow.sampleBankCreationRequest).toBeNull();
+    });
+
     it('keeps deletion blocked and does not implicitly repair placement', async () => {
         const inspectVolumeDeletion = vi.fn().mockResolvedValue({
             imageId: 'image-1',

@@ -10,7 +10,13 @@ import type {
     VolumeDeletionInspection,
     VolumeMutation,
 } from '../../lib/transport';
-import type { DiskTreeItem, ImageTreeAction, ObjectRenameTarget, WorkspaceView } from '../../lib/types';
+import type {
+    DiskTreeItem,
+    ImageTreeAction,
+    ObjectRenameTarget,
+    SampleStructureItem,
+    WorkspaceView,
+} from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 
 interface MutationWorkflowDependencies {
@@ -22,6 +28,7 @@ interface MutationWorkflowDependencies {
     imageOpen: () => boolean;
     workspaceView: () => WorkspaceView;
     setWorkspaceView: (view: WorkspaceView) => void;
+    clearSelection: () => void;
     refreshSession: (preferred?: { partitionIndex: number; volumeName?: string }) => Promise<void>;
     setStatus: (status: string) => void;
     reportTiming: (operation: string, started: number, itemCount: number) => void;
@@ -66,6 +73,14 @@ export class MutationWorkflow {
         busy: boolean;
         error: string;
     } | null>(null);
+    sampleBankCreationRequest = $state<{
+        samples: SampleStructureItem[];
+        partitionIndex: number;
+        volumeName: string;
+        existingNames: string[];
+        busy: boolean;
+        error: string;
+    } | null>(null);
 
     constructor(private readonly dependencies: MutationWorkflowDependencies) {}
 
@@ -98,6 +113,93 @@ export class MutationWorkflow {
     requestObjectRename(target: ObjectRenameTarget): void {
         if (!this.objectRenameAvailable || this.dependencies.sessionId() === null) return;
         this.objectRenameRequest = { target, busy: false, error: '' };
+    }
+
+    requestSampleBankCreation(samples: SampleStructureItem[]): void {
+        if (!this.objectRenameAvailable || this.dependencies.sessionId() === null || samples.length === 0) return;
+        const first = samples[0]!.object;
+        const valid =
+            samples.length <= 127 &&
+            samples.every(
+                (sample) =>
+                    sample.objectType === 'SBNK' &&
+                    (sample.sampleBankObjectIds?.length ?? 0) === 0 &&
+                    sample.object.partitionIndex === first.partitionIndex &&
+                    sample.object.volumeName === first.volumeName,
+            );
+        if (!valid) return;
+        this.sampleBankCreationRequest = {
+            samples: [...samples],
+            partitionIndex: first.partitionIndex,
+            volumeName: first.volumeName,
+            existingNames: this.dependencies.catalog.sampleBanks
+                .filter(
+                    (bank) =>
+                        bank.object.partitionIndex === first.partitionIndex &&
+                        bank.object.volumeName === first.volumeName,
+                )
+                .map((bank) => bank.name),
+            busy: false,
+            error: '',
+        };
+    }
+
+    cancelSampleBankCreation(): void {
+        if (!this.sampleBankCreationRequest?.busy) this.sampleBankCreationRequest = null;
+    }
+
+    async submitSampleBankCreation(name: string): Promise<void> {
+        const request = this.sampleBankCreationRequest;
+        const sessionId = this.dependencies.sessionId();
+        if (!request || request.busy || sessionId === null) return;
+        const preferred = { partitionIndex: request.partitionIndex, volumeName: request.volumeName };
+        const started = performance.now();
+        request.busy = true;
+        request.error = '';
+        this.dependencies.setStatus(`Creating Sample Bank ${name}`);
+        try {
+            await this.dependencies.audition.invalidateSession(sessionId);
+            const completed = await this.dependencies.jobs.run(
+                () =>
+                    this.dependencies.transport.startSampleBankCreation(sessionId, {
+                        ...preferred,
+                        sampleBankName: name,
+                        sampleNames: request.samples.map((sample) => sample.name),
+                    }),
+                (update) => {
+                    if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
+                },
+            );
+            if (completed.status !== 'completed') {
+                throw new Error(completed.error ?? 'Sample Bank creation did not complete');
+            }
+            await this.dependencies.refreshSession(preferred);
+            this.dependencies.setWorkspaceView('sample-banks');
+            const inserted = this.dependencies.catalog.sampleBanks.find(
+                (bank) =>
+                    bank.object.partitionIndex === request.partitionIndex &&
+                    bank.object.volumeName === request.volumeName &&
+                    bank.name === name,
+            );
+            if (inserted) {
+                this.dependencies.catalog.selectedBankId = inserted.objectId;
+                this.dependencies.catalog.inspectorObjectId = inserted.objectId;
+                this.dependencies.catalog.editorObjectIds['sample-banks'] = inserted.objectId;
+            }
+            this.dependencies.clearSelection();
+            this.sampleBankCreationRequest = null;
+            this.dependencies.setStatus(`Created Sample Bank ${name}`);
+            this.dependencies.reportTiming('create-sample-bank', started, request.samples.length);
+        } catch (error) {
+            const message = userFacingMessage(error);
+            if (this.dependencies.sessionId() !== null)
+                await this.dependencies.refreshSession(preferred).catch(() => undefined);
+            if (this.sampleBankCreationRequest === request) {
+                request.busy = false;
+                request.error = message;
+            }
+            this.dependencies.setStatus(message);
+        }
     }
 
     cancelVolumeAction(): void {

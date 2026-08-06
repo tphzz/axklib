@@ -25,6 +25,7 @@
         packageImportEnabled?: boolean;
         packageExportEnabled?: boolean;
         volumePackageExportEnabled?: boolean;
+        volumeFloppyExportEnabled?: boolean;
         audioExportEnabled?: boolean;
         mediaConversionEnabled?: boolean;
         onimageaction: (item: DiskTreeItem, action: ImageTreeAction) => void;
@@ -47,6 +48,7 @@
         packageImportEnabled = false,
         packageExportEnabled = false,
         volumePackageExportEnabled = false,
+        volumeFloppyExportEnabled = false,
         audioExportEnabled = false,
         mediaConversionEnabled = false,
         onimageaction,
@@ -107,7 +109,7 @@
     function requestTreeMenu(item: DiskTreeItem, x: number, y: number): void {
         treeMenu = {
             item,
-            left: Math.max(8, Math.min(x, window.innerWidth - 180)),
+            left: Math.max(8, Math.min(x, window.innerWidth - 228)),
             top: Math.max(8, Math.min(y, window.innerHeight - 208)),
         };
     }
@@ -256,6 +258,7 @@
                         {packageImportEnabled}
                         {packageExportEnabled}
                         {volumePackageExportEnabled}
+                        {volumeFloppyExportEnabled}
                         {audioExportEnabled}
                         {mediaConversionEnabled}
                         onrequestmenu={requestTreeMenu}
@@ -305,6 +308,11 @@
                     >Export volume packages…</button
                 >
             {/if}
+            {#if volumeFloppyExportEnabled}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-volume-floppies')}
+                    >Export volumes to floppies…</button
+                >
+            {/if}
             {#if mediaConversionEnabled}
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-cdrom')}
                     >Export CD-ROM image…</button
@@ -313,7 +321,7 @@
                     <div class="context-menu-separator" role="separator"></div>
                 {/if}
             {/if}
-            {#if volumePackageExportEnabled && !mediaConversionEnabled && partitionActionsEnabled}
+            {#if (volumePackageExportEnabled || volumeFloppyExportEnabled) && !mediaConversionEnabled && partitionActionsEnabled}
                 <div class="context-menu-separator" role="separator"></div>
             {/if}
             {#if partitionActionsEnabled}

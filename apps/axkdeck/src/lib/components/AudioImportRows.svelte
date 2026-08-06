@@ -13,6 +13,7 @@
         capabilities?: AudioImportCapabilities;
         busy: boolean;
         committing: boolean;
+        grouped: boolean;
         audition: AudioImportAuditionState;
         onchangeTargetSampleRate: (row: AudioImportRow, event: Event) => void;
         onupdate: (id: number, update: Partial<AudioImportRow>) => void;
@@ -26,6 +27,7 @@
         capabilities,
         busy,
         committing,
+        grouped,
         audition,
         onchangeTargetSampleRate,
         onupdate,
@@ -57,9 +59,9 @@
 </script>
 
 <p class="audio-import-summary">
-    Each file creates one standalone Sample and {rows.some((row) => row.inspection?.channels === 2)
-        ? 'mono or stereo'
-        : 'mono'} Wave Data. WAV sampler metadata is mapped when it can be represented safely.
+    Each file creates one Sample and {rows.some((row) => row.inspection?.channels === 2) ? 'mono or stereo' : 'mono'} Wave
+    Data. {grouped ? 'The Samples will be added to the new Sample Bank.' : 'The Samples remain standalone.'}
+    WAV sampler metadata is mapped when it can be represented safely.
 </p>
 <div class="audio-import-rows">
     {#each rows as row, index (row.id)}

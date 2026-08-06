@@ -6,9 +6,11 @@ import {
 } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
 import type {
+    AudioImportGrouping,
     AudioImportItem,
     AudioImportCapabilities,
     AudioImportTarget,
+    SampleBankCreation,
     AudioSourceInfo,
     ContentPage,
     AuditionBundleDescriptor,
@@ -20,6 +22,8 @@ import type {
     ImageSessionPackageExportDestination,
     ImageSessionVolumePackageExportDestination,
     ImageSessionVolumePackageExportInspection,
+    ImageSessionVolumeFloppyExportDestination,
+    ImageSessionVolumeFloppyExportInspection,
     ImageSessionExportRoot,
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
@@ -71,7 +75,7 @@ import {
 import type { ClientUploadSource } from './clientUploadSource';
 import { downloadServerFile, readDirectoryArchive } from './httpDownloads';
 import { HttpImageSessions } from './httpImageSessions';
-import { audioImportRequest, sequenceImportRequest } from './httpImportOperations';
+import { HttpImportOperations } from './httpImportOperations';
 import { HttpJobController } from './httpJobController';
 import { HttpPackageOperations } from './httpPackageOperations';
 import type {
@@ -100,6 +104,7 @@ export class HttpImageTransport implements ImageTransport {
     private readonly client: AxklibHttpApiClient;
     private readonly imageSessions: HttpImageSessions;
     private readonly jobs: HttpJobController;
+    private readonly imports: HttpImportOperations;
     private readonly packages: HttpPackageOperations;
     private readonly createPlans = new Map<string, ApiWritePlan>();
 
@@ -107,6 +112,7 @@ export class HttpImageTransport implements ImageTransport {
         this.client = new AxklibHttpApiClient(connection);
         this.jobs = new HttpJobController(this.client);
         this.imageSessions = new HttpImageSessions(this.client, this.jobs);
+        this.imports = new HttpImportOperations(this.client, this.jobs, this.imageSessions);
         this.packages = new HttpPackageOperations(this.client, this.jobs, this.imageSessions);
     }
 
@@ -178,31 +184,26 @@ export class HttpImageTransport implements ImageTransport {
         return result;
     }
 
-    async startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState> {
-        const session = this.imageSessions.get(sessionId);
-        const job = await this.client.invoke<never>(
-            'images.alter',
-            audioImportRequest(session.remoteId, session.revision, target, items),
-            { idempotencyKey: randomIdempotencyKey() },
-        );
-        if (!this.jobs.isJob(job)) throw new Error('images.alter did not return a job');
-        return this.jobs.map(job);
+    startAudioImport(
+        sessionId: number,
+        target: AudioImportTarget,
+        items: AudioImportItem[],
+        grouping: AudioImportGrouping,
+    ): Promise<JobState> {
+        return this.imports.startAudioImport(sessionId, target, items, grouping);
     }
 
-    async startSequenceImport(
+    startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
+        return this.imports.startSampleBankCreation(sessionId, creation);
+    }
+
+    startSequenceImport(
         sessionId: number,
         target: SequenceImportTarget,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState> {
-        const session = this.imageSessions.get(sessionId);
-        const job = await this.client.invoke<never>(
-            'images.alter',
-            sequenceImportRequest(session.remoteId, session.revision, target, items, systemExclusivePolicy),
-            { idempotencyKey: randomIdempotencyKey() },
-        );
-        if (!this.jobs.isJob(job)) throw new Error('images.alter did not return a job');
-        return this.jobs.map(job);
+        return this.imports.startSequenceImport(sessionId, target, items, systemExclusivePolicy);
     }
 
     async downloadFile(location: FileLocation): Promise<ClientDownload> {
@@ -240,7 +241,6 @@ export class HttpImageTransport implements ImageTransport {
     inspectPackage(source: InputFileLocation, verify: boolean): Promise<PackageInspection> {
         return this.packages.inspect(source, verify);
     }
-
     planPackageImport(
         target: FileLocation,
         output: FileLocation,
@@ -250,11 +250,9 @@ export class HttpImageTransport implements ImageTransport {
     ): Promise<PackageImportPlan> {
         return this.packages.planImport(target, output, packages, destinations, overwrite);
     }
-
     startPackageImport(planToken: string): Promise<JobState> {
         return this.packages.startImport(planToken);
     }
-
     planImagePackageImport(
         sessionId: number,
         source: InputFileLocation,
@@ -265,15 +263,12 @@ export class HttpImageTransport implements ImageTransport {
     ): Promise<ImageSessionPackageImportPlan> {
         return this.packages.planImageImport(sessionId, source, partitionIndex, volumeName, renames, replacePlanToken);
     }
-
     releaseImagePackageImportPlan(planToken: string): Promise<void> {
         return this.packages.releaseImageImportPlan(planToken);
     }
-
     startImagePackageImport(planToken: string): Promise<JobState> {
         return this.packages.startImageImport(planToken);
     }
-
     startImagePackageExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
@@ -281,14 +276,12 @@ export class HttpImageTransport implements ImageTransport {
     ): Promise<JobState> {
         return this.packages.startImageExport(sessionId, roots, destination);
     }
-
     inspectImageVolumePackageExport(
         sessionId: number,
         scopeId: string,
     ): Promise<ImageSessionVolumePackageExportInspection> {
         return this.packages.inspectVolumePackageExport(sessionId, scopeId);
     }
-
     startImageVolumePackageExport(
         sessionId: number,
         scopeId: string,
@@ -296,14 +289,25 @@ export class HttpImageTransport implements ImageTransport {
     ): Promise<JobState> {
         return this.packages.startVolumePackageExport(sessionId, scopeId, destination);
     }
-
+    inspectImageVolumeFloppyExport(
+        sessionId: number,
+        scopeId: string,
+    ): Promise<ImageSessionVolumeFloppyExportInspection> {
+        return this.packages.inspectVolumeFloppyExport(sessionId, scopeId);
+    }
+    startImageVolumeFloppyExport(
+        sessionId: number,
+        scopeId: string,
+        destination: ImageSessionVolumeFloppyExportDestination,
+    ): Promise<JobState> {
+        return this.packages.startVolumeFloppyExport(sessionId, scopeId, destination);
+    }
     inspectImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
     ): Promise<ImageSessionAudioExportInspection> {
         return this.packages.inspectAudioExport(sessionId, roots);
     }
-
     startImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
@@ -312,7 +316,6 @@ export class HttpImageTransport implements ImageTransport {
     ): Promise<JobState> {
         return this.packages.startAudioExport(sessionId, roots, format, destination);
     }
-
     startImageSequenceExport(
         sessionId: number,
         objectIds: string[],
@@ -320,14 +323,12 @@ export class HttpImageTransport implements ImageTransport {
     ): Promise<JobState> {
         return this.packages.startSequenceExport(sessionId, objectIds, destination);
     }
-
     inspectImageMediaConversion(
         sessionId: number,
         selection: ImageSessionMediaConversionSelection,
     ): Promise<ImageSessionMediaConversionInspection> {
         return this.packages.inspectMediaConversion(sessionId, selection);
     }
-
     startImageMediaConversion(
         sessionId: number,
         selection: ImageSessionMediaConversionSelection,

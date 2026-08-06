@@ -73,6 +73,7 @@
         packageImportAvailable: boolean;
         packageExportAvailable: boolean;
         volumePackageExportAvailable: boolean;
+        volumeFloppyExportAvailable: boolean;
         audioExportAvailable: boolean;
         sequenceExportAvailable: boolean;
         mediaConversionAvailable: boolean;
@@ -129,6 +130,7 @@
         packageImportAvailable,
         packageExportAvailable,
         volumePackageExportAvailable,
+        volumeFloppyExportAvailable,
         audioExportAvailable,
         sequenceExportAvailable,
         mediaConversionAvailable,
@@ -272,6 +274,7 @@
             packageImportEnabled={packageImportAvailable}
             packageExportEnabled={packageExportAvailable}
             volumePackageExportEnabled={volumePackageExportAvailable}
+            volumeFloppyExportEnabled={volumeFloppyExportAvailable}
             audioExportEnabled={audioExportAvailable}
             mediaConversionEnabled={mediaConversionAvailable}
             onimageaction={imageAction}
@@ -322,6 +325,8 @@
                 auditionableSampleBankIds={audition.auditionableSampleBankObjectIds}
                 objectRenameAvailable={mutation.objectRenameAvailable}
                 onrenameobject={(target) => mutation.requestObjectRename(target)}
+                sampleBankCreationAvailable={mutation.objectRenameAvailable}
+                oncreatesamplebank={(selectedSamples) => mutation.requestSampleBankCreation(selectedSamples)}
                 {objectDeletionAvailable}
                 ondeleteobjects={deleteObjects}
                 {packageExportAvailable}

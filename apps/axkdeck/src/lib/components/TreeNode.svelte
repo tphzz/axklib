@@ -18,6 +18,7 @@
         packageImportEnabled?: boolean;
         packageExportEnabled?: boolean;
         volumePackageExportEnabled?: boolean;
+        volumeFloppyExportEnabled?: boolean;
         audioExportEnabled?: boolean;
         mediaConversionEnabled?: boolean;
         onrequestmenu?: (item: DiskTreeItem, x: number, y: number) => void;
@@ -34,6 +35,7 @@
         packageImportEnabled = false,
         packageExportEnabled = false,
         volumePackageExportEnabled = false,
+        volumeFloppyExportEnabled = false,
         audioExportEnabled = false,
         mediaConversionEnabled = false,
         onrequestmenu = () => undefined,
@@ -100,6 +102,7 @@
                 (volumeActionsEnabled ||
                     partitionActionsEnabled ||
                     volumePackageExportEnabled ||
+                    volumeFloppyExportEnabled ||
                     mediaConversionEnabled)) ||
                 (item.kind === 'volume' &&
                     (volumeActionsEnabled ||
@@ -188,6 +191,7 @@
                     {packageImportEnabled}
                     {packageExportEnabled}
                     {volumePackageExportEnabled}
+                    {volumeFloppyExportEnabled}
                     {audioExportEnabled}
                     {mediaConversionEnabled}
                     {onrequestmenu}

@@ -492,8 +492,8 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (!name)
                     return std::unexpected{name.error()};
                 if (!sample_bank["member_samples"].is_array() || sample_bank["member_samples"].empty() ||
-                    sample_bank["member_samples"].size() > 3U)
-                    return std::unexpected{transaction_error("member_samples must contain 1..3 names")};
+                    sample_bank["member_samples"].size() > maximum_sample_bank_members)
+                    return std::unexpected{transaction_error("member_samples must contain 1..127 names")};
                 SampleBankSpec spec;
                 spec.name = *name;
                 for (std::size_t member_index = 0; member_index < sample_bank["member_samples"].size();

@@ -1,4 +1,5 @@
 import type {
+    AudioImportGrouping,
     AudioImportItem,
     AudioImportTarget,
     AudioSourceInfo,
@@ -13,6 +14,8 @@ import type {
     ImageSessionPackageExportDestination,
     ImageSessionVolumePackageExportDestination,
     ImageSessionVolumePackageExportInspection,
+    ImageSessionVolumeFloppyExportDestination,
+    ImageSessionVolumeFloppyExportInspection,
     ImageSessionExportRoot,
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
@@ -40,6 +43,7 @@ import type {
     PreviewEnvelope,
     RelationshipPage,
     RelationshipPageFilter,
+    SampleBankCreation,
     SequenceImportItem,
     SequenceImportTarget,
     SequenceSystemExclusivePolicy,
@@ -78,6 +82,7 @@ export interface InMemoryImageTransportOptions {
         | 'packageImportAvailable'
         | 'packageExportAvailable'
         | 'volumePackageExportAvailable'
+        | 'volumeFloppyExportAvailable'
         | 'audioExportAvailable'
         | 'sequenceExportAvailable'
         | 'mediaConversionAvailable'
@@ -90,6 +95,7 @@ export interface InMemoryImageTransportOptions {
         packageImportAvailable?: boolean;
         packageExportAvailable?: boolean;
         volumePackageExportAvailable?: boolean;
+        volumeFloppyExportAvailable?: boolean;
         audioExportAvailable?: boolean;
         sequenceExportAvailable?: boolean;
         mediaConversionAvailable?: boolean;
@@ -153,6 +159,7 @@ export class InMemoryImageTransport implements ImageTransport {
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             volumePackageExportAvailable: this.options.opened.volumePackageExportAvailable ?? false,
+            volumeFloppyExportAvailable: this.options.opened.volumeFloppyExportAvailable ?? false,
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
             mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
@@ -176,6 +183,7 @@ export class InMemoryImageTransport implements ImageTransport {
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             volumePackageExportAvailable: this.options.opened.volumePackageExportAvailable ?? false,
+            volumeFloppyExportAvailable: this.options.opened.volumeFloppyExportAvailable ?? false,
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
             mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
@@ -311,8 +319,17 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('inspectMidi', [source]);
     }
 
-    startAudioImport(sessionId: number, target: AudioImportTarget, items: AudioImportItem[]): Promise<JobState> {
-        return this.invoke('startAudioImport', [sessionId, target, items]);
+    startAudioImport(
+        sessionId: number,
+        target: AudioImportTarget,
+        items: AudioImportItem[],
+        grouping: AudioImportGrouping,
+    ): Promise<JobState> {
+        return this.invoke('startAudioImport', [sessionId, target, items, grouping]);
+    }
+
+    startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
+        return this.invoke('startSampleBankCreation', [sessionId, creation]);
     }
 
     startSequenceImport(
@@ -420,6 +437,21 @@ export class InMemoryImageTransport implements ImageTransport {
         destination: ImageSessionVolumePackageExportDestination,
     ): Promise<JobState> {
         return this.invoke('startImageVolumePackageExport', [sessionId, scopeId, destination]);
+    }
+
+    inspectImageVolumeFloppyExport(
+        sessionId: number,
+        scopeId: string,
+    ): Promise<ImageSessionVolumeFloppyExportInspection> {
+        return this.invoke('inspectImageVolumeFloppyExport', [sessionId, scopeId]);
+    }
+
+    startImageVolumeFloppyExport(
+        sessionId: number,
+        scopeId: string,
+        destination: ImageSessionVolumeFloppyExportDestination,
+    ): Promise<JobState> {
+        return this.invoke('startImageVolumeFloppyExport', [sessionId, scopeId, destination]);
     }
 
     inspectImageAudioExport(

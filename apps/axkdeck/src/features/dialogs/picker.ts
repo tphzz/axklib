@@ -7,6 +7,7 @@ export type PickerParentDialog =
     | 'package-import'
     | 'package-export'
     | 'volume-package-export'
+    | 'volume-floppy-export'
     | 'audio-export'
     | 'sequence-export'
     | 'media-export'

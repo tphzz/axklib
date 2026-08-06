@@ -39,6 +39,7 @@ function opened(sessionId: number): OpenedImage {
         packageImportAvailable: false,
         packageExportAvailable: false,
         volumePackageExportAvailable: false,
+        volumeFloppyExportAvailable: false,
         audioExportAvailable: false,
         sequenceExportAvailable: false,
         mediaConversionAvailable: false,

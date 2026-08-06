@@ -11,6 +11,8 @@ import type {
     ImageSessionPackageExportDestination,
     ImageSessionVolumePackageExportDestination,
     ImageSessionVolumePackageExportInspection,
+    ImageSessionVolumeFloppyExportDestination,
+    ImageSessionVolumeFloppyExportInspection,
     ImageSessionPackageImportPlan,
     ImageSessionPackageRename,
     JobState,
@@ -151,6 +153,36 @@ export class HttpPackageOperations {
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.jobs.isJob(job)) throw new Error('images.volume_package_export did not return a job');
+        return this.jobs.map(job);
+    }
+
+    async inspectVolumeFloppyExport(
+        sessionId: number,
+        scopeId: string,
+    ): Promise<ImageSessionVolumeFloppyExportInspection> {
+        const session = this.imageSessions.get(sessionId);
+        const result = await this.client.invoke<ImageSessionVolumeFloppyExportInspection>(
+            'images.volume_floppy_export.inspect',
+            { imageId: session.remoteId, expectedRevision: session.revision, scopeId },
+        );
+        if (this.jobs.isJob(result)) {
+            throw new Error('images.volume_floppy_export.inspect unexpectedly returned a job');
+        }
+        return result;
+    }
+
+    async startVolumeFloppyExport(
+        sessionId: number,
+        scopeId: string,
+        destination: ImageSessionVolumeFloppyExportDestination,
+    ): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.volume_floppy_export',
+            { imageId: session.remoteId, expectedRevision: session.revision, scopeId, destination },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.volume_floppy_export did not return a job');
         return this.jobs.map(job);
     }
 

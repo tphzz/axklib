@@ -1531,7 +1531,7 @@ describe('HttpImageTransport', () => {
         });
     });
 
-    it('imports uploaded and workspace audio through one atomic alteration job', async () => {
+    it('imports uploaded and workspace audio into one Sample Bank through one atomic alteration job', async () => {
         let alterationBody: unknown;
         vi.stubGlobal(
             'fetch',
@@ -1604,38 +1604,43 @@ describe('HttpImageTransport', () => {
         const mono = clientUploadLocation({ uploadId: 'upload-mono' }, 'AUDIO', 'mono.wav');
         const stereo = serverFile('audio/stereo.flac');
         const opened = await transport.openImage(serverFile('images/base.hds'));
-        const job = await transport.startAudioImport(opened.sessionId, { partitionIndex: 3, volumeName: 'Imported' }, [
-            {
-                source: mono,
-                sampleName: 'Mono',
-                waveformNames: ['Mono Wave'],
-                rootKey: 60,
-                fineTuneCents: 0,
-                keyLow: 0,
-                keyHigh: 127,
-                velocityLow: 0,
-                velocityHigh: 127,
-                loopMode: 4,
-                loopStartFrame: 0,
-                loopLengthFrames: 0,
-                targetSampleRate: 44_100,
-            },
-            {
-                source: stereo,
-                sampleName: 'Stereo',
-                waveformNames: ['Stereo-L', 'Stereo-R'],
-                rootKey: 69,
-                fineTuneCents: -5,
-                keyLow: 12,
-                keyHigh: 108,
-                velocityLow: 4,
-                velocityHigh: 120,
-                loopMode: 1,
-                loopStartFrame: 100,
-                loopLengthFrames: 1_000,
-                targetSampleRate: 22_050,
-            },
-        ]);
+        const job = await transport.startAudioImport(
+            opened.sessionId,
+            { partitionIndex: 3, volumeName: 'Imported' },
+            [
+                {
+                    source: mono,
+                    sampleName: 'Mono',
+                    waveformNames: ['Mono Wave'],
+                    rootKey: 60,
+                    fineTuneCents: 0,
+                    keyLow: 0,
+                    keyHigh: 127,
+                    velocityLow: 0,
+                    velocityHigh: 127,
+                    loopMode: 4,
+                    loopStartFrame: 0,
+                    loopLengthFrames: 0,
+                    targetSampleRate: 44_100,
+                },
+                {
+                    source: stereo,
+                    sampleName: 'Stereo',
+                    waveformNames: ['Stereo-L', 'Stereo-R'],
+                    rootKey: 69,
+                    fineTuneCents: -5,
+                    keyLow: 12,
+                    keyHigh: 108,
+                    velocityLow: 4,
+                    velocityHigh: 120,
+                    loopMode: 1,
+                    loopStartFrame: 100,
+                    loopLengthFrames: 1_000,
+                    targetSampleRate: 22_050,
+                },
+            ],
+            { kind: 'SAMPLE_BANK', sampleBankName: 'Imported Bank' },
+        );
 
         expect(job).toMatchObject({ jobId: 1, kind: 'images.alter', status: 'queued' });
         expect(alterationBody).toEqual({
@@ -1716,6 +1721,16 @@ describe('HttpImageTransport', () => {
                                 loop_start_frame: 100,
                                 loop_length_frames: 1_000,
                                 level: 100,
+                            },
+                        },
+                        {
+                            id: 'sample-bank',
+                            type: 'insert_sbac',
+                            partition_index: 3,
+                            volume_name: 'Imported',
+                            sample_bank: {
+                                name: 'Imported Bank',
+                                member_samples: ['Mono', 'Stereo'],
                             },
                         },
                     ],
@@ -2248,6 +2263,30 @@ describe('HttpImageTransport', () => {
                                 implemented: true,
                             },
                             {
+                                id: 'images.volume_floppy_export.inspect',
+                                method: 'POST',
+                                route: '/api/v1/image-session-volume-floppy-export-inspections',
+                                mode: 'REQUEST',
+                                operationClass: 'READ',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageSessionVolumeFloppyExportInspectionRequest',
+                                resultSchema: 'ImageSessionVolumeFloppyExportInspection',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.volume_floppy_export',
+                                method: 'POST',
+                                route: '/api/v1/image-session-volume-floppy-exports',
+                                mode: 'JOB',
+                                operationClass: 'READ',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'ImageSessionVolumeFloppyExportRequest',
+                                resultSchema: 'ImageSessionVolumeFloppyExportResult',
+                                implemented: true,
+                            },
+                            {
                                 id: 'images.audio_export.inspect',
                                 method: 'POST',
                                 route: '/api/v1/image-session-audio-export-inspections',
@@ -2293,6 +2332,7 @@ describe('HttpImageTransport', () => {
                                 'images.package.import',
                                 'images.package.export',
                                 'images.volume_package_export',
+                                'images.volume_floppy_export',
                                 'images.audio_export',
                             ],
                             validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
@@ -2364,30 +2404,53 @@ describe('HttpImageTransport', () => {
                         ],
                     });
                 }
+                if (url.pathname.endsWith('/image-session-volume-floppy-export-inspections')) {
+                    return json({
+                        imageId: 'image-package',
+                        revision: 7,
+                        sourceMediaKind: 'SFS',
+                        scopeId: 'content-partition-0',
+                        scopeName: 'Partition 0',
+                        defaultDirectoryName: 'Partition 0 floppies',
+                        volumeCount: 1,
+                        exportableCount: 1,
+                        emptyCount: 0,
+                        blockedCount: 0,
+                        totalFloppyImageCount: 2,
+                        projectedDiskBytes: 2_949_120,
+                        volumes: [],
+                    });
+                }
                 if (
                     url.pathname.endsWith('/image-session-package-imports') ||
                     url.pathname.endsWith('/image-session-package-exports') ||
                     url.pathname.endsWith('/image-session-volume-package-exports') ||
+                    url.pathname.endsWith('/image-session-volume-floppy-exports') ||
                     url.pathname.endsWith('/image-session-audio-exports')
                 ) {
                     const audioExport = url.pathname.endsWith('/image-session-audio-exports');
                     const volumePackageExport = url.pathname.endsWith('/image-session-volume-package-exports');
+                    const volumeFloppyExport = url.pathname.endsWith('/image-session-volume-floppy-exports');
                     return json(
                         {
                             jobId: audioExport
                                 ? 'audio-export-job'
                                 : volumePackageExport
                                   ? 'volume-package-export-job'
-                                  : url.pathname.endsWith('exports')
-                                    ? 'export-job'
-                                    : 'import-job',
+                                  : volumeFloppyExport
+                                    ? 'volume-floppy-export-job'
+                                    : url.pathname.endsWith('exports')
+                                      ? 'export-job'
+                                      : 'import-job',
                             operationId: audioExport
                                 ? 'images.audio_export'
                                 : volumePackageExport
                                   ? 'images.volume_package_export'
-                                  : url.pathname.endsWith('exports')
-                                    ? 'images.package_export'
-                                    : 'images.package_import',
+                                  : volumeFloppyExport
+                                    ? 'images.volume_floppy_export'
+                                    : url.pathname.endsWith('exports')
+                                      ? 'images.package_export'
+                                      : 'images.package_import',
                             state: 'QUEUED',
                             latestSequence: 1,
                             progress: null,
@@ -2410,6 +2473,7 @@ describe('HttpImageTransport', () => {
             packageImportAvailable: true,
             packageExportAvailable: true,
             volumePackageExportAvailable: true,
+            volumeFloppyExportAvailable: true,
             audioExportAvailable: true,
         });
         const source = serverFile('packages/drums.axkvol');
@@ -2451,6 +2515,15 @@ describe('HttpImageTransport', () => {
                 directoryName: 'Partition 0 packages',
             }),
         ).resolves.toMatchObject({ kind: 'images.volume_package_export', status: 'queued' });
+        await expect(
+            transport.inspectImageVolumeFloppyExport(opened.sessionId, 'content-partition-0'),
+        ).resolves.toMatchObject({ exportableCount: 1, totalFloppyImageCount: 2 });
+        await expect(
+            transport.startImageVolumeFloppyExport(opened.sessionId, 'content-partition-0', {
+                kind: 'DOWNLOAD',
+                directoryName: 'Partition 0 floppies',
+            }),
+        ).resolves.toMatchObject({ kind: 'images.volume_floppy_export', status: 'queued' });
         await expect(
             transport.inspectImageAudioExport(opened.sessionId, [{ kind: 'SBAC', objectId: 'object-bank' }]),
         ).resolves.toMatchObject({ sfzEligible: true, defaultDirectoryName: 'DRUMS' });

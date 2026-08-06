@@ -616,7 +616,8 @@ input:focus-visible {
   position: fixed;
   z-index: 80;
   display: grid;
-  width: 172px;
+  width: 220px;
+  max-width: calc(100vw - 16px);
   padding: 4px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -632,7 +633,10 @@ input:focus-visible {
   background: transparent;
   cursor: pointer;
   font-size: 11px;
+  overflow: hidden;
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tree-context-menu button:hover {

@@ -173,15 +173,6 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                     return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                       "SBAC/PROG writer profile supports mono Samples only")};
                 }
-                for (const auto &member_name : sample_bank->second->member_samples) {
-                    const auto member = sample_specs.find(member_name);
-                    if (member == sample_specs.end() || member->second->right_waveform_id ||
-                        member->second->interleaved_audio_path) {
-                        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                          "SBAC/PROG writer profile supports mono "
-                                                          "Samples only")};
-                    }
-                }
                 if (sample_bank->second->member_samples.size() == 1U) {
                     const auto *member = sample_specs.at(sample_bank->second->member_samples[0]);
                     if (member->waveform_id != direct->second->waveform_id ||

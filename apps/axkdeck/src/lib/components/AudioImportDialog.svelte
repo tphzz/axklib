@@ -7,6 +7,7 @@
     import type { FileLocation, InputFileLocation } from '../storageLocations';
     import type {
         AudioImportCapabilities,
+        AudioImportGrouping,
         AudioImportItem,
         AudioImportTarget,
         AudioSourceInfo,
@@ -22,10 +23,11 @@
         files: (File | ClientUploadSource | FileLocation)[];
         target: AudioImportTarget;
         existingSampleNames: string[];
+        existingSampleBankNames?: string[];
         existingWaveformNames: string[];
         onchooseworkspace?: () => void;
         onchooselocal?: () => void;
-        oncommit: (items: AudioImportItem[]) => Promise<void>;
+        oncommit: (items: AudioImportItem[], grouping: AudioImportGrouping) => Promise<void>;
         oncancel: () => void;
     }
 
@@ -34,6 +36,7 @@
         files,
         target,
         existingSampleNames,
+        existingSampleBankNames = [],
         existingWaveformNames,
         onchooseworkspace,
         onchooselocal,
@@ -46,6 +49,8 @@
     let batchStaging = $state(false);
     let generalError = $state('');
     let stagingError = $state('');
+    let importMode = $state<AudioImportGrouping['kind']>('SAMPLES');
+    let sampleBankName = $state('');
     let nextRowId = 0;
     let audioImportCapabilities = $state<AudioImportCapabilities>();
     let auditionState = $state<AudioImportAuditionState>({ rowId: null, status: 'idle', error: '' });
@@ -54,12 +59,26 @@
     const abortController = new AbortController();
     const auditionController = new AudioImportAuditionController((state) => (auditionState = state));
     const validationErrors = $derived.by(() => (committing ? rows.map(() => '') : validateRows(rows)));
+    const sampleBankError = $derived.by(() => validateSampleBank());
     const inspectedCount = $derived(rows.filter((row) => row.status === 'inspected' || row.status === 'failed').length);
     const ready = $derived(
         rows.length > 0 &&
             rows.every((row) => row.status === 'ready') &&
-            validationErrors.every((error) => error === ''),
+            validationErrors.every((error) => error === '') &&
+            sampleBankError === '',
     );
+
+    function validateSampleBank(): string {
+        if (importMode !== 'SAMPLE_BANK') return '';
+        if (!validSamplerName(sampleBankName)) {
+            return 'Sample Bank name must be 1-16 printable ASCII characters.';
+        }
+        if (existingSampleBankNames.some((name) => name.toLocaleLowerCase() === sampleBankName.toLocaleLowerCase())) {
+            return `Sample Bank name already exists: ${sampleBankName}`;
+        }
+        if (rows.length > 127) return 'A Sample Bank can contain at most 127 Samples.';
+        return '';
+    }
 
     function isWorkspaceFile(candidate: ClientUploadSource | FileLocation): candidate is FileLocation {
         return 'kind' in candidate && candidate.kind === 'server-file';
@@ -332,22 +351,24 @@
         committing = true;
         generalError = '';
         try {
+            const items = rows.map((row) => ({
+                source: row.source!,
+                sampleName: row.sampleName,
+                waveformNames: [...row.waveformNames],
+                rootKey: row.rootKey,
+                fineTuneCents: row.fineTuneCents,
+                keyLow: row.keyLow,
+                keyHigh: row.keyHigh,
+                velocityLow: row.velocityLow,
+                velocityHigh: row.velocityHigh,
+                loopMode: row.loopMode,
+                loopStartFrame: row.loopStartFrame,
+                loopLengthFrames: row.loopLengthFrames,
+                targetSampleRate: row.targetSampleRate!,
+            }));
             await oncommit(
-                rows.map((row) => ({
-                    source: row.source!,
-                    sampleName: row.sampleName,
-                    waveformNames: [...row.waveformNames],
-                    rootKey: row.rootKey,
-                    fineTuneCents: row.fineTuneCents,
-                    keyLow: row.keyLow,
-                    keyHigh: row.keyHigh,
-                    velocityLow: row.velocityLow,
-                    velocityHigh: row.velocityHigh,
-                    loopMode: row.loopMode,
-                    loopStartFrame: row.loopStartFrame,
-                    loopLengthFrames: row.loopLengthFrames,
-                    targetSampleRate: row.targetSampleRate!,
-                })),
+                items,
+                importMode === 'SAMPLE_BANK' ? { kind: 'SAMPLE_BANK', sampleBankName } : { kind: 'SAMPLES' },
             );
             await releaseUploads();
             oncancel();
@@ -425,6 +446,28 @@
                     onchooselocal={() => onchooselocal?.()}
                 />
             {:else}
+                <div class="import-target-settings">
+                    <label>
+                        <span>Import mode</span>
+                        <select bind:value={importMode} disabled={busy}>
+                            <option value="SAMPLES">Import as Samples</option>
+                            <option value="SAMPLE_BANK">Import as Samples in a Sample Bank</option>
+                        </select>
+                    </label>
+                    {#if importMode === 'SAMPLE_BANK'}
+                        <label>
+                            <span>Sample Bank name</span>
+                            <input
+                                aria-invalid={sampleBankError !== ''}
+                                bind:value={sampleBankName}
+                                maxlength="16"
+                                autocomplete="off"
+                                disabled={busy}
+                            />
+                        </label>
+                        {#if sampleBankError}<p class="field-error" role="alert">{sampleBankError}</p>{/if}
+                    {/if}
+                </div>
                 {#if stagingError}
                     <p class="dialog-error" role="alert">{stagingError}</p>
                 {:else}
@@ -441,6 +484,7 @@
                         capabilities={audioImportCapabilities}
                         {busy}
                         {committing}
+                        grouped={importMode === 'SAMPLE_BANK'}
                         audition={auditionState}
                         onchangeTargetSampleRate={(row, event) => void changeTargetSampleRate(row, event)}
                         onupdate={updateRow}
@@ -485,6 +529,26 @@
         display: grid;
         gap: 5px;
         color: var(--color-text-muted);
+        font-size: 11px;
+    }
+    .import-target-settings {
+        display: grid;
+        grid-template-columns: minmax(240px, 360px);
+        gap: 8px;
+    }
+    .import-target-settings label {
+        display: grid;
+        gap: 5px;
+        color: var(--color-text-muted);
+        font-size: 11px;
+    }
+    .import-target-settings select,
+    .import-target-settings input {
+        width: 100%;
+    }
+    .field-error {
+        margin: 0;
+        color: var(--color-danger);
         font-size: 11px;
     }
     .inspection-progress progress {

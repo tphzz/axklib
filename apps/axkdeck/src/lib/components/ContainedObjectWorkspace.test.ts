@@ -72,6 +72,45 @@ const noAuditionableSamples = {
 };
 
 describe('ContainedObjectWorkspace', () => {
+    it('creates a Sample Bank from standalone Samples in displayed order', async () => {
+        const sample2 = structure('SBNK', 'Sample 2');
+        const sample10 = structure('SBNK', 'Sample 10');
+        const oncreatesamplebank = vi.fn();
+        const selected = [sample10, sample2].map((sample) => ({
+            kind: 'SBNK' as const,
+            objectId: sample.objectId,
+            name: sample.name,
+            typeLabel: 'Sample' as const,
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: 'Volume',
+        }));
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'samples',
+                sampleBanks: [],
+                samples: [sample10, sample2],
+                waveData: [],
+                activeSampleBankId: '',
+                activeSampleId: '',
+                activeWaveDataId: '',
+                queries: { primary: '', secondary: '', tertiary: '' },
+                sampleBankCreationAvailable: true,
+                oncreatesamplebank,
+                selection: { items: selected, anchors: {} },
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect Sample 10' }), {
+            clientX: 100,
+            clientY: 100,
+        });
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Create Sample Bank from selection…' }));
+        expect(oncreatesamplebank).toHaveBeenCalledWith([sample2, sample10]);
+    });
+
     it('extends row borders past playback controls while keeping them clear of overlay scrollbars', () => {
         const listRule = appStyles.match(/\.contained-list\s*\{[^}]+\}/)?.[0];
         const rowRule = appStyles.match(/\.contained-row\s*\{[^}]+\}/)?.[0];

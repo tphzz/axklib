@@ -1,7 +1,14 @@
+/// <reference types="node" />
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { serverFileLocation } from '../storageLocations';
 import ImageNavigator from './ImageNavigator.svelte';
+
+const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
 const common = {
     items: [],
@@ -262,7 +269,7 @@ describe('ImageNavigator', () => {
         );
     });
 
-    it('offers batch volume-package export on an addressable partition', async () => {
+    it('offers batch package and floppy-set exports on an addressable partition', async () => {
         const onimageaction = vi.fn();
         render(ImageNavigator, {
             props: {
@@ -278,6 +285,7 @@ describe('ImageNavigator', () => {
                     },
                 ],
                 volumePackageExportEnabled: true,
+                volumeFloppyExportEnabled: true,
                 onimageaction,
             },
         });
@@ -285,10 +293,30 @@ describe('ImageNavigator', () => {
         const partitionButton = screen.getByText('SYNTHS').closest('button');
         expect(partitionButton).not.toBeNull();
         await fireEvent.contextMenu(partitionButton!);
+        const menuGeometry = appStyles.match(/\.tree-context-menu\s*\{[^}]+\}/)?.[0];
+        const menuActionGeometry = appStyles.match(/\.tree-context-menu button\s*\{[^}]+\}/)?.[0];
+        expect(menuGeometry).toBeDefined();
+        expect(menuActionGeometry).toBeDefined();
+        const style = document.createElement('style');
+        style.textContent = `${menuGeometry}\n${menuActionGeometry}`;
+        document.head.append(style);
+        const menuStyle = getComputedStyle(screen.getByRole('menu'));
+        const floppyActionStyle = getComputedStyle(
+            screen.getByRole('menuitem', { name: 'Export volumes to floppies…' }),
+        );
+        expect(menuStyle.width).toBe('220px');
+        expect(floppyActionStyle.whiteSpace).toBe('nowrap');
+        style.remove();
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volume packages…' }));
         expect(onimageaction).toHaveBeenCalledWith(
             expect.objectContaining({ id: 'partition-0' }),
             'export-volume-packages',
+        );
+        await fireEvent.contextMenu(partitionButton!);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volumes to floppies…' }));
+        expect(onimageaction).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'partition-0' }),
+            'export-volume-floppies',
         );
     });
 

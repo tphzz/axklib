@@ -30,6 +30,17 @@ struct SourceVolume {
     std::vector<std::uint32_t> object_ids;
 };
 
+struct ConversionSource {
+    std::shared_ptr<const Container> container;
+    const Partition *partition{};
+    std::vector<SourceVolume> volumes;
+    MediaInventory inventory;
+    RelationshipGraph graph;
+    std::unordered_map<std::uint32_t, const ObjectSnapshot *> objects_by_id;
+    std::map<std::string, const ObjectSnapshot *, std::less<>> objects_by_key;
+    std::unordered_map<std::uint32_t, const IndexRecord *> records_by_id;
+};
+
 class RecordReader final : public RandomAccessReader {
   public:
     RecordReader(std::shared_ptr<const Container> container, PartitionIndex partition, SfsId record, std::uint64_t size,
@@ -234,26 +245,20 @@ std::string sanitized_iso_id(std::string value) {
     return value.empty() ? "AXKLIB" : value;
 }
 
-} // namespace
+bool valid_limits(const MediaBuildLimits &limits) {
+    return limits.maximum_object_bytes != 0U &&
+           limits.maximum_object_bytes <= std::numeric_limits<std::size_t>::max() &&
+           limits.maximum_aggregate_payload_bytes != 0U && limits.maximum_output_bytes != 0U;
+}
 
-Result<detail::PreparedMediaConversion>
-detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader,
-                                 const std::filesystem::path &source_path, const MediaConversionRequest &request,
-                                 const MediaBuildLimits &limits, const CancellationToken &cancellation) {
-    if (source_reader == nullptr || limits.maximum_object_bytes == 0U ||
-        limits.maximum_object_bytes > std::numeric_limits<std::size_t>::max() ||
-        limits.maximum_aggregate_payload_bytes == 0U || limits.maximum_output_bytes == 0U) {
+Result<std::unique_ptr<ConversionSource>>
+open_conversion_source(std::shared_ptr<const RandomAccessReader> source_reader,
+                       const std::filesystem::path &source_path, std::uint32_t partition_index,
+                       const MediaBuildLimits &limits, const CancellationToken &cancellation) {
+    if (source_reader == nullptr || !valid_limits(limits)) {
         return std::unexpected{
             make_error(ErrorCode::invalid_argument, ErrorCategory::io, "media conversion request is invalid")};
     }
-    if ((request.format == MediaImageFormat::iso9660 && request.scope != MediaConversionScope::partition) ||
-        (request.format == MediaImageFormat::fat12_floppy && request.scope != MediaConversionScope::volume) ||
-        (request.scope == MediaConversionScope::volume) != request.volume_directory_id.has_value()) {
-        return std::unexpected{make_error(ErrorCode::invalid_argument, ErrorCategory::io,
-                                          "CD-ROM conversion requires a partition and floppy conversion "
-                                          "requires one volume directory")};
-    }
-
     auto media = open_media(std::move(source_reader), source_path, cancellation);
     if (!media)
         return std::unexpected{media.error()};
@@ -261,49 +266,71 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "media conversion requires an open SFS HDA/HDS source image")};
     }
-    auto container = std::make_shared<Container>(std::get<Container>(media->storage()));
-    const auto partition = std::ranges::find(container->partitions(), request.partition_index,
+    auto result = std::make_unique<ConversionSource>();
+    result->container = std::make_shared<Container>(std::get<Container>(media->storage()));
+    const auto partition = std::ranges::find(result->container->partitions(), partition_index,
                                              [](const Partition &item) { return item.index.value; });
-    if (partition == container->partitions().end()) {
+    if (partition == result->container->partitions().end()) {
         return std::unexpected{
             make_error(ErrorCode::object_missing, ErrorCategory::object, "source partition does not exist")};
     }
+    result->partition = &*partition;
     auto volumes = source_volumes(*partition);
     if (!volumes)
         return std::unexpected{volumes.error()};
-    if (request.scope == MediaConversionScope::volume &&
-        std::ranges::find(*volumes, *request.volume_directory_id, &SourceVolume::directory_id) == volumes->end()) {
-        return std::unexpected{
-            make_error(ErrorCode::object_missing, ErrorCategory::object, "source volume directory does not exist")};
-    }
-
+    result->volumes = std::move(*volumes);
     auto inventory = build_media_inventory(*media, MediaObjectReadMode::decoded_metadata,
                                            static_cast<std::size_t>(limits.maximum_object_bytes), cancellation);
     if (!inventory)
         return std::unexpected{inventory.error()};
-    std::unordered_map<std::uint32_t, const ObjectSnapshot *> objects_by_id;
-    std::map<std::string, const ObjectSnapshot *, std::less<>> objects_by_key;
-    for (const auto &object : inventory->catalog.objects) {
-        objects_by_key.emplace(object.key, &object);
-        if (object.partition.value == request.partition_index)
-            objects_by_id.emplace(object.sfs_id.value, &object);
+    result->inventory = std::move(*inventory);
+    result->graph = build_relationship_graph(result->inventory.catalog);
+    for (const auto &object : result->inventory.catalog.objects) {
+        result->objects_by_key.emplace(object.key, &object);
+        if (object.partition.value == partition_index)
+            result->objects_by_id.emplace(object.sfs_id.value, &object);
     }
-    std::unordered_map<std::uint32_t, const IndexRecord *> records_by_id;
     for (const auto &record : partition->records)
-        records_by_id.emplace(record.sfs_id.value, &record);
+        result->records_by_id.emplace(record.sfs_id.value, &record);
+    return result;
+}
 
-    PreparedMediaConversion prepared;
+Result<detail::PreparedMediaConversion> prepare_media_conversion_from_source(const ConversionSource &source,
+                                                                             const MediaConversionRequest &request,
+                                                                             const MediaBuildLimits &limits,
+                                                                             const CancellationToken &cancellation) {
+    if ((request.format == MediaImageFormat::iso9660 && request.scope != MediaConversionScope::partition) ||
+        (request.format == MediaImageFormat::fat12_floppy && request.scope != MediaConversionScope::volume) ||
+        (request.scope == MediaConversionScope::volume) != request.volume_directory_id.has_value()) {
+        return std::unexpected{make_error(ErrorCode::invalid_argument, ErrorCategory::io,
+                                          "CD-ROM conversion requires a partition and floppy conversion "
+                                          "requires one volume directory")};
+    }
+    if (source.partition == nullptr || source.partition->index.value != request.partition_index) {
+        return std::unexpected{
+            make_error(ErrorCode::object_missing, ErrorCategory::object, "source partition does not exist")};
+    }
+    if (request.scope == MediaConversionScope::volume &&
+        std::ranges::find(source.volumes, *request.volume_directory_id, &SourceVolume::directory_id) ==
+            source.volumes.end()) {
+        return std::unexpected{
+            make_error(ErrorCode::object_missing, ErrorCategory::object, "source volume directory does not exist")};
+    }
+
+    const auto &partition = *source.partition;
+
+    detail::PreparedMediaConversion prepared;
     prepared.summary.format = request.format;
     prepared.summary.scope = request.scope;
     prepared.summary.partition_index = request.partition_index;
-    prepared.summary.partition_name = partition->name;
+    prepared.summary.partition_name = partition.name;
     prepared.summary.capacity_bytes =
         request.format == MediaImageFormat::fat12_floppy ? floppy_image_bytes : limits.maximum_output_bytes;
     prepared.image.manifest.schema_version = std::string{build_manifest_schema_version};
     prepared.image.manifest.format = request.format;
     prepared.image.manifest.iso_volume_id = sanitized_iso_id(request.iso_volume_id);
     prepared.image.manifest.raw_group = std::string{generated_raw_group};
-    prepared.image.manifest.group_name = partition->name;
+    prepared.image.manifest.group_name = partition.name;
     prepared.image.limits = limits;
     prepared.summary.output_extension = request.format == MediaImageFormat::iso9660 ? ".iso" : ".ima";
     prepared.summary.floppy_image_count = request.format == MediaImageFormat::fat12_floppy ? 1U : 0U;
@@ -312,15 +339,15 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
     std::unordered_map<std::string, std::uint32_t> volume_by_key;
     std::map<std::string, std::size_t, std::less<>> floppy_object_index_by_key;
     std::size_t output_volume_index{};
-    for (const auto &volume : *volumes) {
+    for (const auto &volume : source.volumes) {
         if (request.scope == MediaConversionScope::volume && volume.directory_id != *request.volume_directory_id)
             continue;
         ++output_volume_index;
-        PreparedIsoVolume prepared_volume{std::string{generated_raw_group},
-                                          partition->name,
-                                          std::format("F{:03}", output_volume_index),
-                                          volume.name,
-                                          {}};
+        detail::PreparedIsoVolume prepared_volume{std::string{generated_raw_group},
+                                                  partition.name,
+                                                  std::format("F{:03}", output_volume_index),
+                                                  volume.name,
+                                                  {}};
         MediaConversionVolumeSummary volume_summary{volume.directory_id, volume.name, prepared_volume.raw_volume};
         std::set<std::uint32_t> seen_ids;
         for (const auto object_id : volume.object_ids) {
@@ -329,9 +356,9 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
                           std::format("Volume '{}' contains a duplicate object directory link", volume.name));
                 continue;
             }
-            const auto object_found = objects_by_id.find(object_id);
-            const auto record_found = records_by_id.find(object_id);
-            if (object_found == objects_by_id.end() || record_found == records_by_id.end()) {
+            const auto object_found = source.objects_by_id.find(object_id);
+            const auto record_found = source.records_by_id.find(object_id);
+            if (object_found == source.objects_by_id.end() || record_found == source.records_by_id.end()) {
                 add_issue(prepared.summary, "MEDIA_CONVERSION_OBJECT_UNREADABLE",
                           std::format("Volume '{}' contains an unreadable object", volume.name));
                 continue;
@@ -357,7 +384,7 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
                 continue;
             }
             auto reader =
-                std::make_shared<RecordReader>(container, partition->index, object.sfs_id, size, cancellation);
+                std::make_shared<RecordReader>(source.container, partition.index, object.sfs_id, size, cancellation);
             if (request.format == MediaImageFormat::fat12_floppy)
                 floppy_object_index_by_key.emplace(object.key, prepared_volume.objects.size());
             prepared_volume.objects.emplace_back(object.object.header.type, object.object.header.name,
@@ -380,7 +407,7 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
     }
 
     if (request.scope == MediaConversionScope::partition) {
-        for (const auto &[id, object] : objects_by_id) {
+        for (const auto &[id, object] : source.objects_by_id) {
             static_cast<void>(id);
             if (!selected_keys.contains(object->key)) {
                 add_issue(prepared.summary, "MEDIA_CONVERSION_PARTITION_OBJECT_UNPLACED",
@@ -388,7 +415,7 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
                                       object->object.header.name));
             }
         }
-        for (const auto &issue : inventory->catalog.issues) {
+        for (const auto &issue : source.inventory.catalog.issues) {
             if (issue.partition.value == request.partition_index) {
                 add_issue(prepared.summary, issue.code,
                           std::format("Partition catalog issue prevents exact conversion: {}", issue.message));
@@ -396,14 +423,13 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
         }
     }
 
-    const auto graph = build_relationship_graph(inventory->catalog);
     std::size_t retained_program_row_count{};
     std::vector<std::string> retained_program_row_names;
-    for (const auto &relationship : graph.relationships) {
+    for (const auto &relationship : source.graph.relationships) {
         if (!selected_keys.contains(relationship.source_key) || !dependency_relationship(relationship))
             continue;
         if (relationship.quality != RelationshipQuality::known || !relationship.target_key) {
-            if (retained_disabled_program_row(relationship, objects_by_key)) {
+            if (retained_disabled_program_row(relationship, source.objects_by_key)) {
                 ++retained_program_row_count;
                 if (retained_program_row_names.size() < 5U &&
                     !std::ranges::contains(retained_program_row_names, relationship.assignment_name)) {
@@ -468,6 +494,53 @@ detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> sourc
     return prepared;
 }
 
+} // namespace
+
+Result<detail::PreparedMediaConversion>
+detail::prepare_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader,
+                                 const std::filesystem::path &source_path, const MediaConversionRequest &request,
+                                 const MediaBuildLimits &limits, const CancellationToken &cancellation) {
+    auto source =
+        open_conversion_source(std::move(source_reader), source_path, request.partition_index, limits, cancellation);
+    if (!source)
+        return std::unexpected{source.error()};
+    return prepare_media_conversion_from_source(**source, request, limits, cancellation);
+}
+
+Result<detail::PreparedVolumeFloppyExport>
+detail::prepare_volume_floppy_export(std::shared_ptr<const RandomAccessReader> source_reader,
+                                     const std::filesystem::path &source_path, const VolumeFloppyExportRequest &request,
+                                     const MediaBuildLimits &limits, const CancellationToken &cancellation) {
+    auto source =
+        open_conversion_source(std::move(source_reader), source_path, request.partition_index, limits, cancellation);
+    if (!source)
+        return std::unexpected{source.error()};
+
+    PreparedVolumeFloppyExport result;
+    result.summary.partition_index = request.partition_index;
+    result.summary.partition_name = (*source)->partition->name;
+    result.volumes.reserve((*source)->volumes.size());
+    result.summary.volumes.reserve((*source)->volumes.size());
+    for (const auto &volume : (*source)->volumes) {
+        if (const auto check = cancellation.check(); !check)
+            return std::unexpected{check.error()};
+        MediaConversionRequest conversion;
+        conversion.format = MediaImageFormat::fat12_floppy;
+        conversion.scope = MediaConversionScope::volume;
+        conversion.partition_index = request.partition_index;
+        conversion.volume_directory_id = volume.directory_id;
+        auto prepared = prepare_media_conversion_from_source(**source, conversion, limits, cancellation);
+        if (!prepared)
+            return std::unexpected{prepared.error()};
+        result.summary.volumes.push_back(
+            {volume.directory_id, volume.name, prepared->summary.can_export, prepared->summary.object_count,
+             prepared->summary.payload_bytes, prepared->summary.floppy_image_count,
+             prepared->summary.floppy_image_count * floppy_image_bytes, prepared->summary.issues});
+        result.volumes.push_back(std::move(*prepared));
+    }
+    return result;
+}
+
 Result<MediaConversionPlanSummary> plan_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader,
                                                          const std::filesystem::path &source_path,
                                                          const MediaConversionRequest &request,
@@ -475,6 +548,18 @@ Result<MediaConversionPlanSummary> plan_media_conversion(std::shared_ptr<const R
                                                          const CancellationToken &cancellation) {
     auto prepared =
         detail::prepare_media_conversion(std::move(source_reader), source_path, request, limits, cancellation);
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    return std::move(prepared->summary);
+}
+
+Result<VolumeFloppyExportPlanSummary> plan_volume_floppy_export(std::shared_ptr<const RandomAccessReader> source_reader,
+                                                                const std::filesystem::path &source_path,
+                                                                const VolumeFloppyExportRequest &request,
+                                                                const MediaBuildLimits &limits,
+                                                                const CancellationToken &cancellation) {
+    auto prepared =
+        detail::prepare_volume_floppy_export(std::move(source_reader), source_path, request, limits, cancellation);
     if (!prepared)
         return std::unexpected{prepared.error()};
     return std::move(prepared->summary);

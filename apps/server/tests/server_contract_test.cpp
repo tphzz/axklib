@@ -170,7 +170,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 49U);
+    EXPECT_EQ(entries.size(), 51U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -819,6 +819,9 @@ TEST(ServerContract, ImageSessionVolumeSelectorsUseExactContentIdentity) {
         {"scopeId", "content-partition-1"},
         {"destination", {{"kind", "WORKSPACE"}, {"output", {{"rootId", "workspace"}, {"relativePath", "packages"}}}}}};
     EXPECT_TRUE(validator.validate("ImageSessionVolumePackageExportRequest", request));
+    auto floppy_request = request;
+    floppy_request["destination"]["output"]["relativePath"] = "floppies";
+    EXPECT_TRUE(validator.validate("ImageSessionVolumeFloppyExportRequest", floppy_request));
 }
 
 TEST(ServerContract, SharedRouteSchemaAdmitsOnlyDeclaredOperationDiscriminators) {

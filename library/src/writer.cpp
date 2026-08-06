@@ -375,9 +375,9 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
         }
         const std::set<std::string> unique_members{sample_bank.member_samples.begin(),
                                                    sample_bank.member_samples.end()};
-        if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > 3U ||
+        if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > maximum_sample_bank_members ||
             unique_members.size() != sample_bank.member_samples.size()) {
-            return std::unexpected{manifest_error(sample_bank_context + " must contain 1..3 distinct members")};
+            return std::unexpected{manifest_error(sample_bank_context + " must contain 1..127 distinct members")};
         }
         for (const auto &member : sample_bank.member_samples) {
             if (!sample_names.contains(member)) {

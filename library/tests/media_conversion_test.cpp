@@ -524,6 +524,37 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     const auto archive_objects = archive_media->objects();
     ASSERT_TRUE(archive_objects) << archive_objects.error().message;
     EXPECT_EQ(archive_objects->size(), 5U);
+
+    const axk::VolumeFloppyExportRequest batch_request{0U};
+    const auto batch_plan = axk::plan_volume_floppy_export(open_reader(source_path), source_path, batch_request);
+    ASSERT_TRUE(batch_plan) << batch_plan.error().message;
+    ASSERT_EQ(batch_plan->volumes.size(), 2U);
+    EXPECT_EQ(batch_plan->partition_name, "PARTITION ONE");
+    for (const auto &volume : batch_plan->volumes) {
+        EXPECT_TRUE(volume.can_export);
+        EXPECT_EQ(volume.object_count, 5U);
+        EXPECT_EQ(volume.floppy_image_count, 2U);
+        EXPECT_EQ(volume.projected_disk_bytes, 2U * 1'474'560U);
+    }
+
+    const std::vector<axk::VolumeFloppyExportTarget> targets{
+        {batch_plan->volumes[0].directory_id, "Source Volume"},
+        {batch_plan->volumes[1].directory_id, "Second Volume"},
+    };
+    const auto batch =
+        axk::write_volume_floppy_export(open_reader(source_path), source_path, batch_request, root / "batch", targets);
+    ASSERT_TRUE(batch) << batch.error().message;
+    ASSERT_EQ(batch->volumes.size(), 2U);
+    for (const auto &volume : batch->volumes) {
+        EXPECT_EQ(volume.status, axk::VolumeFloppyExportStatus::exported);
+        ASSERT_EQ(volume.disks.size(), 2U);
+        EXPECT_EQ(volume.size_bytes, 2U * 1'474'560U);
+        EXPECT_EQ(volume.disks[0].path.filename(), "disk01.ima");
+        EXPECT_EQ(volume.disks[1].path.filename(), "disk02.ima");
+        EXPECT_EQ(volume.disks[0].sha256.size(), 64U);
+    }
+    EXPECT_EQ(read_bytes(root / "batch/Source Volume/disk01.ima"), archive->at(1U).bytes);
+    EXPECT_EQ(read_bytes(root / "batch/Source Volume/disk02.ima"), archive->at(2U).bytes);
     std::filesystem::remove_all(root, error);
 }
 
@@ -617,6 +648,61 @@ TEST(MediaConversion, ExportsExternalMultiFloppyArtifactWhenRequested) {
     const auto reopened_objects = reopened->objects();
     ASSERT_TRUE(reopened_objects) << reopened_objects.error().message;
     EXPECT_EQ(reopened_objects->size(), written->object_count);
+}
+
+TEST(MediaConversion, ExportsExternalPartitionVolumesAsExactRawFloppyMembersWhenRequested) {
+    const auto *source_value = std::getenv("AXK_VOLUME_FLOPPY_BATCH_SOURCE_IMAGE");
+    const auto *output_value = std::getenv("AXK_VOLUME_FLOPPY_BATCH_OUTPUT");
+    if (source_value == nullptr || *source_value == '\0' || output_value == nullptr || *output_value == '\0')
+        GTEST_SKIP() << "set AXK_VOLUME_FLOPPY_BATCH_SOURCE_IMAGE and AXK_VOLUME_FLOPPY_BATCH_OUTPUT";
+    const std::filesystem::path source_path{source_value};
+    const std::filesystem::path output_path{output_value};
+    const axk::VolumeFloppyExportRequest request{0U};
+    const auto plan = axk::plan_volume_floppy_export(open_reader(source_path), source_path, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+
+    std::vector<axk::VolumeFloppyExportTarget> targets;
+    for (const auto &volume : plan->volumes) {
+        if (volume.object_count != 0U && volume.can_export)
+            targets.push_back({volume.directory_id, std::format("volume-{}", volume.directory_id)});
+    }
+    ASSERT_FALSE(targets.empty());
+    std::error_code error;
+    std::filesystem::remove_all(output_path, error);
+    const auto batch =
+        axk::write_volume_floppy_export(open_reader(source_path), source_path, request, output_path, targets);
+    ASSERT_TRUE(batch) << batch.error().message;
+
+    const auto comparison_root = std::filesystem::temp_directory_path() / "axklib-volume-floppy-batch-comparison";
+    std::filesystem::remove_all(comparison_root, error);
+    std::filesystem::create_directories(comparison_root, error);
+    ASSERT_FALSE(error);
+    for (const auto &volume : batch->volumes) {
+        if (volume.status != axk::VolumeFloppyExportStatus::exported)
+            continue;
+        axk::MediaConversionRequest individual_request;
+        individual_request.format = axk::MediaImageFormat::fat12_floppy;
+        individual_request.scope = axk::MediaConversionScope::volume;
+        individual_request.partition_index = request.partition_index;
+        individual_request.volume_directory_id = volume.directory_id;
+        const auto individual_path = comparison_root / std::format("volume-{}.floppy", volume.directory_id);
+        const auto individual = axk::write_media_conversion(open_reader(source_path), source_path, individual_request,
+                                                            individual_path, true);
+        ASSERT_TRUE(individual) << individual.error().message;
+        ASSERT_EQ(individual->floppy_image_count, volume.disks.size());
+        if (individual->artifact_kind == axk::MediaConversionArtifactKind::image) {
+            ASSERT_EQ(volume.disks.size(), 1U);
+            EXPECT_EQ(read_bytes(volume.disks.front().path), read_bytes(individual_path));
+            continue;
+        }
+        ASSERT_EQ(individual->artifact_kind, axk::MediaConversionArtifactKind::floppy_disk_set);
+        const auto archive = axk::package_internal::read_archive(read_bytes(individual_path));
+        ASSERT_TRUE(archive) << archive.error().message;
+        ASSERT_EQ(archive->size(), volume.disks.size() + 1U);
+        for (std::size_t disk_index = 0U; disk_index < volume.disks.size(); ++disk_index)
+            EXPECT_EQ(read_bytes(volume.disks[disk_index].path), (*archive)[disk_index + 1U].bytes);
+    }
+    std::filesystem::remove_all(comparison_root, error);
 }
 
 TEST(MediaConversion, RewritesExternalCarrierControlWithExactObjectPayloadsWhenRequested) {

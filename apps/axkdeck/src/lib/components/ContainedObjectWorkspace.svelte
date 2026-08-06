@@ -48,6 +48,8 @@
         auditionableSampleBankIds: ReadonlySet<string>;
         objectRenameAvailable?: boolean;
         onrenameobject?: (target: ObjectRenameTarget) => void;
+        sampleBankCreationAvailable?: boolean;
+        oncreatesamplebank?: (samples: SampleStructureItem[]) => void;
         objectDeletionAvailable?: boolean;
         ondeleteobjects?: (objects: PackageExportObject[]) => void;
         packageExportAvailable?: boolean;
@@ -84,6 +86,8 @@
         auditionableSampleBankIds,
         objectRenameAvailable = false,
         onrenameobject = () => undefined,
+        sampleBankCreationAvailable = false,
+        oncreatesamplebank = () => undefined,
         objectDeletionAvailable = false,
         ondeleteobjects = () => undefined,
         packageExportAvailable = false,
@@ -100,6 +104,7 @@
         target: SamplerObject;
         renameTarget: ObjectRenameTarget;
         objects: PackageExportObject[];
+        sampleBankMembers: SampleStructureItem[] | null;
         left: number;
         top: number;
     } | null>(null);
@@ -202,7 +207,13 @@
         domain: SelectableItem[],
         target: SelectableItem,
     ): void {
-        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable && !audioExportAvailable)
+        if (
+            !objectRenameAvailable &&
+            !sampleBankCreationAvailable &&
+            !objectDeletionAvailable &&
+            !packageExportAvailable &&
+            !audioExportAvailable
+        )
             return;
         event.preventDefault();
         const targetId = objectId(target);
@@ -219,10 +230,25 @@
             menuSelection = result.selection;
             onselectionchange(menuSelection);
         }
+        const selectedIds = new Set(menuSelection.items.map((item) => item.objectId));
+        const selectedSamples = domain.filter(
+            (item): item is SampleStructureItem =>
+                'objectType' in item && item.objectType === 'SBNK' && selectedIds.has(item.objectId),
+        );
+        const sampleBankMembers =
+            sampleBankCreationAvailable &&
+            view === 'samples' &&
+            scope === 'samples' &&
+            selectedSamples.length === menuSelection.items.length &&
+            selectedSamples.length <= 127 &&
+            selectedSamples.every((sample) => (sample.sampleBankObjectIds?.length ?? 0) === 0)
+                ? selectedSamples
+                : null;
         objectMenu = {
             target: target.object,
             renameTarget: renameTarget(target),
             objects: menuSelection.items,
+            sampleBankMembers,
             left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
             top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
         };
@@ -237,7 +263,13 @@
     ): void {
         if (selectAll(event, scope, domain, visible, target)) return;
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
-        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable && !audioExportAvailable)
+        if (
+            !objectRenameAvailable &&
+            !sampleBankCreationAvailable &&
+            !objectDeletionAvailable &&
+            !packageExportAvailable &&
+            !audioExportAvailable
+        )
             return;
         event.preventDefault();
         const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -474,6 +506,9 @@
         onclose={() => (objectMenu = null)}
         onrename={objectRenameAvailable && objectMenu.objects.length === 1
             ? () => onrenameobject(objectMenu!.renameTarget)
+            : undefined}
+        oncreatesamplebank={objectMenu.sampleBankMembers
+            ? () => oncreatesamplebank(objectMenu!.sampleBankMembers!)
             : undefined}
         onexportpackage={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
         onexportsfz={audioExportAvailable ? () => onexportaudio(objectMenu!.objects) : undefined}

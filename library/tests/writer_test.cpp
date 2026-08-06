@@ -1,10 +1,12 @@
 #include <algorithm>
 #include <array>
+#include <format>
 #include <fstream>
 #include <limits>
 #include <map>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #if defined(__unix__)
 #include <csignal>
@@ -484,19 +486,45 @@ TEST(HdsWriter, RejectsAValidTypedManifestThatExceedsTheFixedDirectoryIndex) {
     EXPECT_EQ(records.error().code, axk::ErrorCode::unsupported_profile);
 }
 
-TEST(HdsWriter, DirectSampleBankPreparationRequiresOneToThreeUniqueMembers) {
+TEST(HdsWriter, DirectSampleBankPreparationSupportsOneToOneHundredTwentySevenUniqueMembers) {
     std::map<std::string, axk::SampleSpec> samples;
-    for (const auto *name : {"A", "B", "C", "D"}) {
+    std::vector<std::string> member_names;
+    for (std::size_t index = 1U; index <= 128U; ++index) {
+        auto name = std::format("Sample {}", index);
         axk::SampleSpec sample;
         sample.name = name;
         samples.emplace(name, std::move(sample));
+        member_names.push_back(std::move(name));
     }
     EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Empty", {}}, samples));
-    EXPECT_TRUE(axk::detail::prepare_sbac_payload({"Three", {"A", "B", "C"}}, samples));
-    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Duplicate", {"A", "A"}}, samples));
-    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Four", {"A", "B", "C", "D"}}, samples));
-    EXPECT_FALSE(axk::detail::prepare_sbac_payload(
-        {"Oversized", {"A", "B", "C", "D", "A", "B", "C", "D", "A", "B", "C"}}, samples));
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Duplicate", {"Sample 1", "Sample 1"}}, samples));
+
+    const std::vector<std::string> eight_members{member_names.begin(), member_names.begin() + 8};
+    const auto eight = axk::detail::prepare_sbac_payload({"Eight", eight_members}, samples);
+    ASSERT_TRUE(eight) << eight.error().message;
+    EXPECT_EQ(eight->size(), 0x210U);
+
+    const std::vector<std::string> nine_members{member_names.begin(), member_names.begin() + 9};
+    const auto nine = axk::detail::prepare_sbac_payload({"Nine", nine_members}, samples);
+    ASSERT_TRUE(nine) << nine.error().message;
+    EXPECT_EQ(nine->size(), 0x224U);
+
+    member_names.resize(127U);
+    const auto maximum = axk::detail::prepare_sbac_payload({"Maximum", member_names}, samples);
+    ASSERT_TRUE(maximum) << maximum.error().message;
+    EXPECT_EQ(maximum->size(), 0xb5cU);
+    const auto decoded = axk::decode_object(*maximum);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    EXPECT_EQ(decoded->header.record_size_or_header_used, 0xb08U);
+    EXPECT_EQ(decoded->header.payload_bytes_0x1c, 0xb2cU);
+    const auto *sample_bank = std::get_if<axk::CurrentSbac>(&decoded->payload);
+    ASSERT_NE(sample_bank, nullptr);
+    ASSERT_EQ(sample_bank->slots.size(), 127U);
+    EXPECT_EQ(sample_bank->slots.front().name, "Sample 1");
+    EXPECT_EQ(sample_bank->slots.back().name, "Sample 127");
+
+    member_names.push_back("Sample 128");
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Oversized", member_names}, samples));
 }
 
 TEST(HdsWriter, PrivateObjectCodecsRejectValuesOutsideTheirEncodedFields) {

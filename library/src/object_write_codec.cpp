@@ -344,20 +344,26 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
 Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
                                               const std::map<std::string, SampleSpec> &samples) {
     const std::set<std::string> unique_members{sample_bank.member_samples.begin(), sample_bank.member_samples.end()};
-    if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > 3U ||
+    if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > maximum_sample_bank_members ||
         unique_members.size() != sample_bank.member_samples.size()) {
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Sample Bank must contain 1..3 distinct Samples")};
+                                          "Sample Bank must contain 1..127 distinct Samples")};
     }
-    std::vector<std::byte> result(0x210);
+    constexpr std::size_t minimum_record_size = 0x210U;
+    constexpr std::size_t first_member_offset = 0x14cU;
+    constexpr std::size_t member_stride = 0x14U;
+    constexpr std::size_t trailing_parameter_bytes = 0x24U;
+    const auto populated_record_size =
+        first_member_offset + sample_bank.member_samples.size() * member_stride + trailing_parameter_bytes;
+    std::vector<std::byte> result(std::max(minimum_record_size, populated_record_size));
     ObjectPayloadWriter writer{result};
     std::ranges::transform(std::string_view{"FSFSDEV3SPLX"}, result.begin(),
                            [](char value) { return static_cast<std::byte>(value); });
     std::ranges::transform(std::string_view{"SBAC"}, result.begin() + 0x0c,
                            [](char value) { return static_cast<std::byte>(value); });
     writer.be32(0x14, 4);
-    writer.be32(0x18, 0x1bc);
-    writer.be32(0x1c, 0x1e0);
+    writer.be32(0x18, static_cast<std::uint32_t>(result.size() - 0x54U));
+    writer.be32(0x1c, static_cast<std::uint32_t>(result.size() - 0x30U));
     result[0x30] = std::byte{0x11};
     result[0x31] = std::byte{0x0c};
     auto name = ascii(sample_bank.name, 16);
@@ -373,7 +379,7 @@ Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
         auto member = ascii(found->second.name, 16);
         if (!member)
             return std::unexpected{member.error()};
-        const auto offset = 0x14cU + index * 0x14U;
+        const auto offset = first_member_offset + index * member_stride;
         auto destination = std::span{result}.subspan(offset, member->size());
         std::ranges::copy(*member, destination.begin());
     }

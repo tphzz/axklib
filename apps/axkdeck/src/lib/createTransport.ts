@@ -4,6 +4,7 @@ import type {
     ImageSessionPackageImportPlan,
     ImageSessionAudioExportInspection,
     ImageSessionVolumePackageExportInspection,
+    ImageSessionVolumeFloppyExportInspection,
     ImageSessionMediaConversionInspection,
     AudioImportCapabilities,
     AuditionBundleDescriptor,
@@ -74,6 +75,9 @@ class UnavailableTransport implements ImageTransport {
     startAudioImport(): Promise<never> {
         return this.unavailable();
     }
+    startSampleBankCreation(): Promise<never> {
+        return this.unavailable();
+    }
     startSequenceImport(): Promise<never> {
         return this.unavailable();
     }
@@ -108,6 +112,12 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startImageVolumePackageExport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    inspectImageVolumeFloppyExport(): Promise<ImageSessionVolumeFloppyExportInspection> {
+        return this.unavailable();
+    }
+    startImageVolumeFloppyExport(): Promise<JobState> {
         return this.unavailable();
     }
     inspectImageAudioExport(): Promise<ImageSessionAudioExportInspection> {

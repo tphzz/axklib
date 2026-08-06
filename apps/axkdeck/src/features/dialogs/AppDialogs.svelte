@@ -3,6 +3,7 @@
     import type { PickerRequest, PickerSelection } from './picker';
     import type { ExportWorkflow } from '../export/workflow.svelte';
     import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
+    import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
     import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
     import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
     import type { MediaDropWorkflow } from '../import/mediaDropWorkflow.svelte';
@@ -12,6 +13,7 @@
     import AudioImportDialog from '../../lib/components/AudioImportDialog.svelte';
     import CompanionDiskDialog from '../../lib/components/CompanionDiskDialog.svelte';
     import CreateHardDiskImageDialog from '../../lib/components/CreateHardDiskImageDialog.svelte';
+    import CreateSampleBankDialog from '../../lib/components/CreateSampleBankDialog.svelte';
     import Icon from '../../lib/components/Icon.svelte';
     import ImportUnavailableDialog from '../../lib/components/ImportUnavailableDialog.svelte';
     import ObjectDeletionDialog from '../../lib/components/ObjectDeletionDialog.svelte';
@@ -27,6 +29,7 @@
     import SfzExportDialog from '../../lib/components/SfzExportDialog.svelte';
     import VolumeActionDialog from '../../lib/components/VolumeActionDialog.svelte';
     import VolumePackageExportDialog from '../../lib/components/VolumePackageExportDialog.svelte';
+    import VolumeFloppyExportDialog from '../../lib/components/VolumeFloppyExportDialog.svelte';
     import WaveDataCleanupDialog from '../../lib/components/WaveDataCleanupDialog.svelte';
     import WorkspaceManager from '../../lib/components/WorkspaceManager.svelte';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from '../../lib/serverSettings';
@@ -67,6 +70,7 @@
         packageImport: PackageImportWorkflow;
         exports: ExportWorkflow;
         volumePackages: VolumePackageExportWorkflow;
+        volumeFloppies: VolumeFloppyExportWorkflow;
         mediaExports: MediaExportWorkflow;
         deletion: DeletionWorkflow;
         mediaDrop: MediaDropWorkflow;
@@ -75,6 +79,7 @@
         sequenceImport: SequenceImportWorkflow;
         sequenceFileInput?: HTMLInputElement;
         sampleNames: string[];
+        sampleBankNames: string[];
         waveDataNames: string[];
         sequenceNames: string[];
     }
@@ -104,6 +109,7 @@
         packageImport,
         exports,
         volumePackages,
+        volumeFloppies,
         mediaExports,
         deletion,
         mediaDrop,
@@ -112,6 +118,7 @@
         sequenceImport,
         sequenceFileInput,
         sampleNames,
+        sampleBankNames,
         waveDataNames,
         sequenceNames,
     }: Props = $props();
@@ -208,6 +215,17 @@
         />
     {/key}
 {/if}
+{#if mutation.sampleBankCreationRequest}
+    <CreateSampleBankDialog
+        volumeName={mutation.sampleBankCreationRequest.volumeName}
+        sampleCount={mutation.sampleBankCreationRequest.samples.length}
+        existingNames={mutation.sampleBankCreationRequest.existingNames}
+        busy={mutation.sampleBankCreationRequest.busy}
+        error={mutation.sampleBankCreationRequest.error}
+        oncancel={() => mutation.cancelSampleBankCreation()}
+        onsubmit={(name) => void mutation.submitSampleBankCreation(name)}
+    />
+{/if}
 {#if packageImport.request && pickerRequest?.parentDialog !== 'package-import'}
     <PackageImportDialog
         targetName={packageImport.request.item.name}
@@ -252,6 +270,20 @@
         onworkspace={() => void volumePackages.toWorkspace()}
         onlocal={() => void volumePackages.toComputer()}
         oncancel={() => volumePackages.cancel()}
+    />
+{/if}
+{#if volumeFloppies.request && pickerRequest?.parentDialog !== 'volume-floppy-export'}
+    <VolumeFloppyExportDialog
+        scopeName={volumeFloppies.request.scope.name}
+        inspection={volumeFloppies.request.inspection}
+        desktop={isDesktop}
+        loading={volumeFloppies.request.loading}
+        busy={volumeFloppies.request.busy}
+        progressLabel={volumeFloppies.request.progressLabel}
+        error={volumeFloppies.request.error}
+        onworkspace={() => void volumeFloppies.toWorkspace()}
+        onlocal={() => void volumeFloppies.toComputer()}
+        oncancel={() => volumeFloppies.cancel()}
     />
 {/if}
 {#if exports.audioRequest && pickerRequest?.parentDialog !== 'audio-export' && !companionRequest}
@@ -323,12 +355,13 @@
         files={audioImport.request.files}
         target={audioImport.request.target}
         existingSampleNames={sampleNames}
+        existingSampleBankNames={sampleBankNames}
         existingWaveformNames={waveDataNames}
         onchooseworkspace={() => void audioImport.chooseWorkspace()}
         onchooselocal={transport.supportsClientUploads && audioFileInput
             ? () => audioImport.chooseLocal(audioFileInput)
             : undefined}
-        oncommit={(items) => audioImport.commit(items)}
+        oncommit={(items, grouping) => audioImport.commit(items, grouping)}
         oncancel={() => (audioImport.request = null)}
     />
 {/if}

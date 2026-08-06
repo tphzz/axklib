@@ -10,6 +10,7 @@ import type { PickerController } from '../dialogs/picker';
 import type { ExportCompanionRetry, ExportWorkflow } from '../export/workflow.svelte';
 import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
 import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
+import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
 import { ImageSessionController } from './actions';
 import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
@@ -26,6 +27,7 @@ interface SessionCollaborators {
     mutation: MutationWorkflow;
     exports: ExportWorkflow;
     volumePackages: VolumePackageExportWorkflow;
+    volumeFloppies: VolumeFloppyExportWorkflow;
     mediaExports: MediaExportWorkflow;
     packageImport: PackageImportWorkflow;
     deletion: DeletionWorkflow;
@@ -62,6 +64,7 @@ export class ImageSessionWorkflow {
     packageImportAvailable = $state(false);
     packageExportAvailable = $state(false);
     volumePackageExportAvailable = $state(false);
+    volumeFloppyExportAvailable = $state(false);
     audioExportAvailable = $state(false);
     sequenceExportAvailable = $state(false);
     mediaConversionAvailable = $state(false);
@@ -302,6 +305,7 @@ export class ImageSessionWorkflow {
         this.packageImportAvailable = opened.packageImportAvailable;
         this.packageExportAvailable = opened.packageExportAvailable;
         this.volumePackageExportAvailable = opened.volumePackageExportAvailable;
+        this.volumeFloppyExportAvailable = opened.volumeFloppyExportAvailable;
         this.audioExportAvailable = opened.audioExportAvailable;
         this.sequenceExportAvailable = opened.sequenceExportAvailable;
         this.mediaConversionAvailable = opened.mediaConversionAvailable;
@@ -339,6 +343,7 @@ export class ImageSessionWorkflow {
         const collaborators = this.requireCollaborators();
         collaborators.exports.dispose();
         collaborators.volumePackages.dispose();
+        collaborators.volumeFloppies.dispose();
         collaborators.mediaExports.dispose();
         this.companionRequest = null;
         await collaborators.packageImport.dispose();
@@ -352,6 +357,7 @@ export class ImageSessionWorkflow {
         this.packageImportAvailable = false;
         this.packageExportAvailable = false;
         this.volumePackageExportAvailable = false;
+        this.volumeFloppyExportAvailable = false;
         this.audioExportAvailable = false;
         this.sequenceExportAvailable = false;
         this.mediaConversionAvailable = false;

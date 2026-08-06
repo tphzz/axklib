@@ -69,6 +69,21 @@ member and its first-use whole Wave Data begins the next, the Wave Data logical
 catalog path carries the destination member's two-digit suffix without
 repeating the Sample. Unrelated whole-object rollover does not add that suffix.
 
+Axkdeck also exposes **Export volumes to floppies...** for a complete
+file-backed SFS partition. This is a batch wrapper around that same per-volume
+profile, not a different disk topology. The selected destination has one
+collision-safe subdirectory per successful nonempty volume, and each
+subdirectory contains raw `disk01.ima`, `disk02.ima`, and subsequent members.
+The batch intentionally omits the individual export's ZIP wrapper so the
+result can be copied directly to physical media one member at a time. Matching
+batch and individual members are byte-identical.
+
+The root `volume-floppies.axklib.json` report records the partition identity,
+per-volume outcome, member paths, sizes, and SHA-256 digests. Empty and blocked
+volumes are recorded without a directory. Runtime failure removes only the
+affected volume directory; successful siblings remain. If nothing succeeds,
+no output is published.
+
 ## FAT12 Geometry
 
 Maintained 1.44 MB Yamaha floppies use the values in the `Yamaha profile`

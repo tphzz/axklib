@@ -141,6 +141,17 @@ struct FloppyDiskSetPlan {
     std::uint64_t projected_archive_bytes{};
 };
 
+struct FloppyDiskMember {
+    std::vector<std::byte> bytes;
+    std::string sha256;
+    std::string yamaha_symbol_sha256;
+};
+
+struct PreparedVolumeFloppyExport {
+    VolumeFloppyExportPlanSummary summary;
+    std::vector<PreparedMediaConversion> volumes;
+};
+
 Result<std::vector<std::byte>> prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
                                                     std::uint32_t reference_value);
 Result<std::vector<std::byte>> prepare_sbnk_payload(const SampleSpec &spec, const PreparedWaveformMember &left,
@@ -168,6 +179,11 @@ Result<PreparedMediaConversion> prepare_media_conversion(std::shared_ptr<const R
                                                          const MediaConversionRequest &request,
                                                          const MediaBuildLimits &limits,
                                                          const CancellationToken &cancellation);
+Result<PreparedVolumeFloppyExport> prepare_volume_floppy_export(std::shared_ptr<const RandomAccessReader> source_reader,
+                                                                const std::filesystem::path &source_path,
+                                                                const VolumeFloppyExportRequest &request,
+                                                                const MediaBuildLimits &limits,
+                                                                const CancellationToken &cancellation);
 Result<WrittenMediaImage>
 write_prepared_media_image(const PreparedMediaImage &image, const std::filesystem::path &output_path, bool overwrite,
                            const CancellationToken &cancellation,
@@ -184,6 +200,10 @@ Result<std::string> yamaha_floppy_object_path(ObjectType type, std::string_view 
 Result<std::string> yamaha_floppy_physical_filename(std::string_view logical_name, std::uint16_t slot);
 Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, std::string_view volume_name,
                                                const CancellationToken &cancellation);
+Result<std::uint64_t> projected_floppy_archive_bytes(const FloppyDiskSetPlan &plan);
+Result<std::vector<FloppyDiskMember>> build_floppy_disk_members(const PreparedMediaImage &image,
+                                                                const FloppyDiskSetPlan &plan,
+                                                                const CancellationToken &cancellation);
 Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image, const FloppyDiskSetPlan &plan,
                                                 const std::filesystem::path &output_path, bool overwrite,
                                                 const CancellationToken &cancellation);

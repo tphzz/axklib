@@ -71,6 +71,19 @@ axk::HdsBuildManifest chain_source_manifest(const std::filesystem::path &audio_p
     return result;
 }
 
+axk::HdsBuildManifest stereo_sample_source_manifest(const std::filesystem::path &audio_path) {
+    auto result = sample_source_manifest(audio_path);
+    auto &volume = result.partitions[0].volumes[0];
+    volume.name = "Stereo";
+    auto right = volume.waveforms.front();
+    right.id = "right";
+    right.name = "Wave R";
+    volume.waveforms.push_back(std::move(right));
+    volume.samples.front().name = "Stereo Sample";
+    volume.samples.front().right_waveform_id = "right";
+    return result;
+}
+
 axk::HdsBuildManifest wide_sample_bank_source_manifest(const std::filesystem::path &audio_path) {
     auto result = sample_source_manifest(audio_path);
     auto &volume = result.partitions[0].volumes[0];
@@ -1298,6 +1311,59 @@ TEST(Alteration, RejectsSharedSampleBankMember) {
     ]})");
     ASSERT_TRUE(shared);
     EXPECT_FALSE(axk::inspect_hds_alteration(source, *shared));
+
+    const auto duplicate_name = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Chain",
+       "sample_bank":{"name":"bank","member_samples":["Direct"]}}
+    ]})");
+    ASSERT_TRUE(duplicate_name);
+    const auto duplicate_inspection = axk::inspect_hds_alteration(source, *duplicate_name);
+    ASSERT_FALSE(duplicate_inspection);
+    EXPECT_EQ(duplicate_inspection.error().message, "Sample Bank already exists");
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, InsertsSampleBankContainingStereoSample) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-stereo-sample-bank";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(stereo_sample_source_manifest(audio), source));
+
+    const auto manifest = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Stereo",
+       "sample_bank":{"name":"Stereo Bank","member_samples":["Stereo Sample"]}}
+    ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto applied = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    const auto sample = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbnk && object.object.header.name == "Stereo Sample";
+    });
+    ASSERT_NE(sample, catalog->objects.end());
+    const auto *decoded_sample = std::get_if<axk::CurrentSbnk>(&sample->object.payload);
+    ASSERT_NE(decoded_sample, nullptr);
+    EXPECT_TRUE(decoded_sample->right_slot_present);
+    EXPECT_NE(decoded_sample->sample_flags & 1U, 0U);
+    const auto bank = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Stereo Bank";
+    });
+    ASSERT_NE(bank, catalog->objects.end());
+    const auto *decoded_bank = std::get_if<axk::CurrentSbac>(&bank->object.payload);
+    ASSERT_NE(decoded_bank, nullptr);
+    ASSERT_EQ(decoded_bank->slots.size(), 1U);
+    EXPECT_EQ(decoded_bank->slots.front().name, "Stereo Sample");
     std::filesystem::remove_all(root, error);
 }
 

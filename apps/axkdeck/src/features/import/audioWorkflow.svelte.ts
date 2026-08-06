@@ -1,7 +1,7 @@
 import { audioExtensions, audioMediaType } from '../../lib/audioImport';
 import { browserUploadSource, type ClientUploadSource } from '../../lib/clientUploadSource';
 import type { DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
-import type { AudioImportItem, AudioImportTarget, ImageTransport } from '../../lib/transport';
+import type { AudioImportGrouping, AudioImportItem, AudioImportTarget, ImageTransport } from '../../lib/transport';
 import type { DiskTreeItem, SampleStructureItem, WorkspaceView } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { PickerController } from '../dialogs/picker';
@@ -24,11 +24,13 @@ interface AudioImportDependencies {
     setSelectedSource: (item: DiskTreeItem) => void;
     sourceItems: () => DiskTreeItem[];
     activeVolumeId: () => string;
+    sampleBanks: () => SampleStructureItem[];
     samples: () => SampleStructureItem[];
     loadVolume: (volumeId: string) => Promise<void>;
     refreshSession: (preferred: { partitionIndex: number; volumeName?: string }) => Promise<void>;
     invalidateSession: (sessionId: number) => Promise<void>;
     selectWorkspace: (view: WorkspaceView) => void;
+    selectSampleBank: (sampleBank: SampleStructureItem) => void;
     selectSample: (sample: SampleStructureItem) => void;
     setStatus: (status: string) => void;
     reportTiming: (operation: string, started: number, itemCount: number) => void;
@@ -88,7 +90,7 @@ export class AudioImportWorkflow {
         input.click();
     }
 
-    async commit(items: AudioImportItem[]): Promise<void> {
+    async commit(items: AudioImportItem[], grouping: AudioImportGrouping): Promise<void> {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         if (!request || sessionId === null) throw new Error('Audio import target is no longer available');
@@ -99,16 +101,23 @@ export class AudioImportWorkflow {
         try {
             await this.dependencies.invalidateSession(sessionId);
             const completed = await this.dependencies.jobs.run(
-                () => this.dependencies.transport.startAudioImport(sessionId, target, items),
+                () => this.dependencies.transport.startAudioImport(sessionId, target, items, grouping),
                 (update) => {
                     if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
                 },
             );
             if (completed.status !== 'completed') throw new Error(completed.error ?? 'Audio import did not complete');
-            this.dependencies.selectWorkspace('samples');
+            this.dependencies.selectWorkspace(grouping.kind === 'SAMPLE_BANK' ? 'sample-banks' : 'samples');
             await this.dependencies.refreshSession(target);
-            const inserted = this.dependencies.samples().find((sample) => sample.name === firstName);
-            if (inserted) this.dependencies.selectSample(inserted);
+            if (grouping.kind === 'SAMPLE_BANK') {
+                const inserted = this.dependencies
+                    .sampleBanks()
+                    .find((sampleBank) => sampleBank.name === grouping.sampleBankName);
+                if (inserted) this.dependencies.selectSampleBank(inserted);
+            } else {
+                const inserted = this.dependencies.samples().find((sample) => sample.name === firstName);
+                if (inserted) this.dependencies.selectSample(inserted);
+            }
             this.dependencies.reportTiming('audio-import', started, items.length);
         } catch (error) {
             this.dependencies.setStatus(userFacingMessage(error));

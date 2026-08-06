@@ -164,12 +164,12 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     EXPECT_EQ(opened->source.relative_path, "fixture.hds");
     EXPECT_EQ(opened->format, "sfs");
     EXPECT_EQ(opened->available_operations,
-              (std::vector<std::string>{"images.content", "images.objects", "images.relationships",
-                                        "images.validation.issues", "images.preview", "auditions.prepare",
-                                        "images.package.export", "images.audio_export", "images.sequence_export",
-                                        "images.volume_package_export", "images.media_conversion",
-                                        "images.alter.volumes", "images.alter.partitions", "images.alter.objects",
-                                        "images.package.import", "images.deletion.orphans.inspect"}));
+              (std::vector<std::string>{
+                  "images.content", "images.objects", "images.relationships", "images.validation.issues",
+                  "images.preview", "auditions.prepare", "images.package.export", "images.audio_export",
+                  "images.sequence_export", "images.volume_package_export", "images.volume_floppy_export",
+                  "images.media_conversion", "images.alter.volumes", "images.alter.partitions", "images.alter.objects",
+                  "images.package.import", "images.deletion.orphans.inspect"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
@@ -227,6 +227,8 @@ TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation)
               opened->available_operations.end());
     EXPECT_NE(std::ranges::find(opened->available_operations, "images.volume_package_export"),
               opened->available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->available_operations, "images.volume_floppy_export"),
+              opened->available_operations.end());
     EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
               opened->available_operations.end());
     EXPECT_EQ(std::ranges::find(opened->available_operations, "images.deletion.orphans.inspect"),
@@ -277,6 +279,8 @@ TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
     EXPECT_NE(std::ranges::find(opened->available_operations, "images.audio_export"),
               opened->available_operations.end());
     EXPECT_EQ(std::ranges::find(opened->available_operations, "images.volume_package_export"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.volume_floppy_export"),
               opened->available_operations.end());
     EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
               opened->available_operations.end());

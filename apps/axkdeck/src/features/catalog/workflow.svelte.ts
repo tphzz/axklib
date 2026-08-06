@@ -349,17 +349,18 @@ function sampleItems(
     return objects
         .filter((object) => object.objectType === 'SBNK')
         .map((object) => {
-            const bankNames = relationships
+            const sampleBankObjects = relationships
                 .filter((item) => item.targetObjectId === object.key && item.relationshipType === 'SBAC_SLOT_TO_SBNK')
                 .map((item) => banks.find((candidate) => candidate.key === item.sourceObjectId))
-                .filter((bank): bank is SamplerObject => bank !== undefined)
-                .map((bank) => objectPresentationName(bank, names));
+                .filter((bank): bank is SamplerObject => bank !== undefined);
+            const bankNames = sampleBankObjects.map((bank) => objectPresentationName(bank, names));
             return {
                 id: object.key,
                 objectId: object.key,
                 object,
                 objectType: 'SBNK',
                 name: objectPresentationName(object, names),
+                sampleBankObjectIds: sampleBankObjects.map((bank) => bank.key),
                 membershipLabel:
                     bankNames.length === 0
                         ? 'Standalone'
