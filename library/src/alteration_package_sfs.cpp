@@ -206,6 +206,15 @@ Result<TransactionState> prepare_sfs_package_import_state(std::shared_ptr<const 
             !appended) {
             return std::unexpected{appended.error()};
         }
+        OperationReport report;
+        report.id = object.action_id;
+        report.type = "package_insert_object";
+        report.partition = PartitionIndex{object.partition_index};
+        report.volume_name = object.volume_name;
+        report.object_name = object.destination_name;
+        report.inserted_sfs_ids = {SfsId{*object.target_sfs_id}};
+        report.allocated_clusters = allocated->second;
+        state.reports.push_back(std::move(report));
         ++completed;
         if (progress) {
             progress->report({ProgressPhase::writing, completed, plan.objects.size(),

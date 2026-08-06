@@ -363,6 +363,80 @@ describe('AudioImportDialog', () => {
         await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
     });
 
+    it('shows neutral progress instead of self-conflicts while a committed import refreshes the catalog', async () => {
+        let finishCommit!: () => void;
+        const commit = new Promise<void>((resolve) => {
+            finishCommit = resolve;
+        });
+        const imageTransport = transport();
+        imageTransport.inspectAudio = vi.fn().mockResolvedValue(sourceInfo({ channels: 1 }));
+        const oncommit = vi.fn(() => commit);
+        const oncancel = vi.fn();
+        const file = serverFileLocation({ rootId: 'workspace', relativePath: 'Fresh.wav' }, 'Fresh.wav');
+        const baseProps = {
+            transport: imageTransport,
+            files: [file],
+            target: { partitionIndex: 0, volumeName: 'Import' },
+            existingSampleNames: [] as string[],
+            existingWaveformNames: [] as string[],
+            oncommit,
+            oncancel,
+        };
+        const rendered = render(AudioImportDialog, { props: baseProps });
+
+        expect(await screen.findAllByDisplayValue('Fresh')).toHaveLength(2);
+        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await waitFor(() => expect(oncommit).toHaveBeenCalledOnce());
+        await rendered.rerender({
+            ...baseProps,
+            existingSampleNames: ['Fresh'],
+            existingWaveformNames: ['Fresh'],
+        });
+
+        expect(screen.getByText('Importing…')).toBeTruthy();
+        expect(screen.queryByText('Sample name already exists: Fresh')).toBeNull();
+        expect(screen.queryByText('Wave data name already exists: Fresh')).toBeNull();
+        expect(screen.queryByText(/^Fits/)).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Import details for Fresh.wav' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Remove Fresh.wav' })).toBeNull();
+        expect((screen.getByRole('button', { name: 'Importing' }) as HTMLButtonElement).disabled).toBe(true);
+
+        finishCommit();
+        await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
+    });
+
+    it('restores current validation after a commit fails', async () => {
+        let failCommit!: (error: Error) => void;
+        const commit = new Promise<void>((_resolve, reject) => {
+            failCommit = reject;
+        });
+        const file = serverFileLocation({ rootId: 'workspace', relativePath: 'Retry.wav' }, 'Retry.wav');
+        const oncommit = vi.fn(() => commit);
+        const imageTransport = transport();
+        imageTransport.inspectAudio = vi.fn().mockResolvedValue(sourceInfo({ channels: 1 }));
+        const baseProps = {
+            transport: imageTransport,
+            files: [file],
+            target: { partitionIndex: 0, volumeName: 'Import' },
+            existingSampleNames: [] as string[],
+            existingWaveformNames: [] as string[],
+            oncommit,
+            oncancel: vi.fn(),
+        };
+        render(AudioImportDialog, { props: baseProps });
+
+        expect(await screen.findAllByDisplayValue('Retry')).toHaveLength(2);
+        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await waitFor(() => expect(oncommit).toHaveBeenCalledOnce());
+        expect(screen.getByText('Importing…')).toBeTruthy();
+
+        failCommit(new Error('Import transaction failed'));
+        expect(await screen.findByText('Import transaction failed')).toBeTruthy();
+        expect(screen.queryByText('Importing…')).toBeNull();
+        expect(screen.getByText(/^Fits/)).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Import details for Retry.wav' })).toBeTruthy();
+    });
+
     it('reviews WAV sampler metadata and commits the mapped pitch, ranges, and loop', async () => {
         const imageTransport = transport();
         imageTransport.inspectAudio = vi.fn().mockResolvedValue(

@@ -239,6 +239,8 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
     auto actual = open_image(temporary, options);
     if (!actual)
         return std::unexpected{actual.error()};
+    if (auto placements = validate_post_write_placements(state, *actual, cancellation); !placements)
+        return placements;
     auto expected_patches = collect_patches(state, cancellation);
     if (!expected_patches)
         return std::unexpected{expected_patches.error()};

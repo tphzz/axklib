@@ -119,6 +119,14 @@ Result<detail::PreparedAlteration> detail::prepare_hds_alteration(std::shared_pt
     auto patches = collect_patches(*prepared, cancellation);
     if (!patches)
         return std::unexpected{patches.error()};
+    OpenOptions options;
+    options.cancellation = cancellation;
+    auto overlay = patched_reader(prepared->source, *patches);
+    auto actual = open_image(std::move(overlay), source_path, options);
+    if (!actual)
+        return std::unexpected{actual.error()};
+    if (auto placements = validate_post_write_placements(*prepared, *actual, cancellation); !placements)
+        return std::unexpected{placements.error()};
     return PreparedAlteration{std::move(source_path), prepared->container.image_size_bytes(),
                               std::move(prepared->reports), std::move(*patches)};
 }
@@ -391,6 +399,15 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
                 !appended) {
                 return std::unexpected{appended.error()};
             }
+            OperationReport report;
+            report.id = object.action_id;
+            report.type = "package_insert_object";
+            report.partition = PartitionIndex{object.partition_index};
+            report.volume_name = object.volume_name;
+            report.object_name = object.destination_name;
+            report.inserted_sfs_ids = {SfsId{*object.target_sfs_id}};
+            report.allocated_clusters = allocated->second;
+            state.reports.push_back(std::move(report));
             ++completed;
             if (progress) {
                 progress->report({ProgressPhase::writing, completed, plan.objects.size(),

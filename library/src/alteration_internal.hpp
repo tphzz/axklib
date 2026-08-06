@@ -61,6 +61,12 @@ struct OperationContext {
     std::string_view type;
 };
 
+struct ExpectedObjectPlacement {
+    PartitionIndex partition;
+    SfsId sfs_id;
+    std::string volume_name;
+};
+
 struct ParsedDirectoryEntry {
     SfsId id;
     std::string name;
@@ -190,6 +196,10 @@ Result<OperationReport> rename_sbac(TransactionState &state, OperationContext co
 
 Result<std::vector<detail::AlterationPatch>> collect_patches(const TransactionState &state,
                                                              const CancellationToken &cancellation);
+Result<void> validate_post_write_placements(const ObjectCatalog &before, const ObjectCatalog &after,
+                                            std::span<const ExpectedObjectPlacement> expected_objects);
+Result<void> validate_post_write_placements(const TransactionState &state, const Container &actual,
+                                            const CancellationToken &cancellation);
 Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAccessReader> source,
                                                 const std::filesystem::path &source_path,
                                                 const CancellationToken &cancellation, ProgressSink *progress,

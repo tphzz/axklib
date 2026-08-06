@@ -13,6 +13,7 @@ import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflo
 import { ImageSessionController } from './actions';
 import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
+import { validationStatus } from './validationStatus';
 
 export type CompanionRetry =
     { kind: 'audition'; objectId: string } | { kind: 'sample-bank'; bankId: string } | ExportCompanionRetry;
@@ -311,7 +312,7 @@ export class ImageSessionWorkflow {
         this.selectedSource = preferredItem ?? opened.initialVolume ?? opened.tree[0] ?? this.selectedSource;
         if (this.selectedSource.kind === 'volume') await catalog.loadVolume(this.selectedSource.id);
         else catalog.clear();
-        this.status = opened.validation.valid ? 'Ready' : `${opened.validation.errorCount} validation errors`;
+        this.status = validationStatus(opened.validation);
         if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(null);
     }
 

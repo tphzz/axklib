@@ -42,6 +42,7 @@
     }: Props = $props();
     let rows = $state<AudioImportRow[]>([]);
     let busy = $state(false);
+    let committing = $state(false);
     let batchStaging = $state(false);
     let generalError = $state('');
     let stagingError = $state('');
@@ -52,7 +53,7 @@
     let stagingPromise: Promise<void> = Promise.resolve();
     const abortController = new AbortController();
     const auditionController = new AudioImportAuditionController((state) => (auditionState = state));
-    const validationErrors = $derived.by(() => validateRows(rows));
+    const validationErrors = $derived.by(() => (committing ? rows.map(() => '') : validateRows(rows)));
     const inspectedCount = $derived(rows.filter((row) => row.status === 'inspected' || row.status === 'failed').length);
     const ready = $derived(
         rows.length > 0 &&
@@ -328,6 +329,7 @@
         if (!ready || busy) return;
         auditionController.stop();
         busy = true;
+        committing = true;
         generalError = '';
         try {
             await oncommit(
@@ -351,6 +353,7 @@
             oncancel();
         } catch (error) {
             generalError = error instanceof Error ? error.message : String(error);
+            committing = false;
             busy = false;
         }
     }
@@ -437,6 +440,7 @@
                         {validationErrors}
                         capabilities={audioImportCapabilities}
                         {busy}
+                        {committing}
                         audition={auditionState}
                         onchangeTargetSampleRate={(row, event) => void changeTargetSampleRate(row, event)}
                         onupdate={updateRow}

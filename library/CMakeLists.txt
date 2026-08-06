@@ -207,6 +207,7 @@ add_library(
   src/alteration_sample.cpp
   src/alteration_sequence.cpp
   src/alteration_support.cpp
+  src/alteration_validation.cpp
   src/alteration_volume.cpp
   src/deletion.cpp
   src/media_build.cpp

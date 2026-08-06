@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include "../src/alteration_internal.hpp"
 #include "axklib/alteration.hpp"
 #include "axklib/alteration_transaction.hpp"
 #include "axklib/audio.hpp"
@@ -1463,7 +1464,45 @@ TEST(Alteration, GrowsCategoryDirectoryWhenQueuedWaveDataExceedsItsInitialCapaci
     EXPECT_EQ(directory->directory_entries.size(), waveform_count + 2U);
     EXPECT_EQ(directory->data_size, (waveform_count + 2U) * 32U);
     EXPECT_GE(directory->cluster_count, 3U);
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    EXPECT_TRUE(catalog->issues.empty());
+    EXPECT_EQ(std::ranges::count_if(catalog->objects,
+                                    [](const auto &object) {
+                                        return object.object.header.type == axk::ObjectType::smpl &&
+                                               object.placement_resolution == axk::PlacementResolution::exact &&
+                                               object.placement && object.placement->volume_name == "Queue" &&
+                                               object.placement->category_name == "SMPL";
+                                    }),
+              waveform_count);
     std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, PostWritePlacementValidationToleratesUnchangedBaselineIssues) {
+    axk::ObjectCatalog before;
+    before.issues.push_back({"CATALOG_OBJECT_PLACEMENT_MISSING", "existing", axk::PartitionIndex{0U}, axk::SfsId{7U}});
+    auto after = before;
+
+    const auto validated = axk::alteration_internal::validate_post_write_placements(before, after, {});
+    EXPECT_TRUE(validated) << validated.error().message;
+}
+
+TEST(Alteration, PostWritePlacementValidationRejectsNewAndUnplacedInsertedObjects) {
+    axk::ObjectCatalog before;
+    axk::ObjectCatalog after;
+    after.issues.push_back({"CATALOG_OBJECT_PLACEMENT_MISSING", "new", axk::PartitionIndex{0U}, axk::SfsId{8U}});
+
+    const auto newly_unplaced = axk::alteration_internal::validate_post_write_placements(before, after, {});
+    ASSERT_FALSE(newly_unplaced);
+    EXPECT_EQ(newly_unplaced.error().message,
+              "post-write introduced CATALOG_OBJECT_PLACEMENT_MISSING for partition 0 SFS ID 8");
+
+    const std::array expected{
+        axk::alteration_internal::ExpectedObjectPlacement{axk::PartitionIndex{0U}, axk::SfsId{9U}, "Target"}};
+    const auto missing_inserted = axk::alteration_internal::validate_post_write_placements(before, before, expected);
+    ASSERT_FALSE(missing_inserted);
+    EXPECT_EQ(missing_inserted.error().message,
+              "post-write inserted object in partition 0 SFS ID 9 could not be reopened");
 }
 
 TEST(Alteration, WaveformDeletionRequiresPriorSampleDeletion) {

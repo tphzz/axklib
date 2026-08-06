@@ -12,6 +12,7 @@
         validationErrors: string[];
         capabilities?: AudioImportCapabilities;
         busy: boolean;
+        committing: boolean;
         audition: AudioImportAuditionState;
         onchangeTargetSampleRate: (row: AudioImportRow, event: Event) => void;
         onupdate: (id: number, update: Partial<AudioImportRow>) => void;
@@ -24,6 +25,7 @@
         validationErrors,
         capabilities,
         busy,
+        committing,
         audition,
         onchangeTargetSampleRate,
         onupdate,
@@ -106,12 +108,14 @@
                     {:else}
                         <small>Waiting</small>
                     {/if}
-                    {#if audition.rowId === row.id && audition.status === 'failed'}
+                    {#if !committing && audition.rowId === row.id && audition.status === 'failed'}
                         <small class="error-text">Preview unavailable: {audition.error}</small>
                     {/if}
                 </div>
                 <div class="card-header-actions">
-                    {#if row.status === 'waiting'}
+                    {#if committing}
+                        <span class="status-neutral">Importing…</span>
+                    {:else if row.status === 'waiting'}
                         <span class="status-neutral">Checking…</span>
                     {:else if row.status === 'uploading'}
                         <span class="status-neutral">Uploading {Math.round(row.progress * 100)}%</span>
@@ -132,7 +136,7 @@
                             <span>{fitMessage(row.inspection)}</span>
                         </span>
                     {/if}
-                    {#if row.status === 'ready' && row.inspection}
+                    {#if !committing && row.status === 'ready' && row.inspection}
                         <button
                             class:has-adjustments={hasAdjustments}
                             class="details-button icon-button"
@@ -147,7 +151,7 @@
                             {#if hasAdjustments}<span class="adjustment-marker" aria-hidden="true"></span>{/if}
                         </button>
                     {/if}
-                    {#if ['ready', 'failed'].includes(row.status) && validationError}
+                    {#if !committing && ['ready', 'failed'].includes(row.status) && validationError}
                         <button
                             class="icon-button row-remove-button"
                             type="button"
@@ -184,6 +188,7 @@
                             data-dialog-initial-focus={index === 0 ? 'select' : undefined}
                             value={row.sampleName}
                             maxlength="16"
+                            disabled={busy}
                             oninput={(event) =>
                                 onupdate(row.id, {
                                     sampleName: (event.currentTarget as HTMLInputElement).value,
@@ -196,6 +201,7 @@
                             aria-label={`Wave data (mono/left) for ${row.fileName}`}
                             value={row.waveformNames[0]}
                             maxlength="16"
+                            disabled={busy}
                             oninput={(event) => updateWaveformName(row, 0, event)}
                         />
                     </label>
@@ -206,6 +212,7 @@
                                 aria-label={`Wave data (right) for ${row.fileName}`}
                                 value={row.waveformNames[1]}
                                 maxlength="16"
+                                disabled={busy}
                                 oninput={(event) => updateWaveformName(row, 1, event)}
                             />
                         </label>
@@ -214,7 +221,7 @@
                 <AudioSamplerSettings {row} disabled={busy} {onupdate} />
             {/if}
 
-            {#if detailsOpen && row.inspection}
+            {#if !committing && detailsOpen && row.inspection}
                 <AudioImportDetails {row} panelId={detailsPanelId} />
             {/if}
         </section>
