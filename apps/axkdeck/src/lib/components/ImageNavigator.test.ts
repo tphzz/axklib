@@ -342,4 +342,44 @@ describe('ImageNavigator', () => {
             'export-floppy',
         );
     });
+
+    it('offers explicit placement repair on writable partitions and volumes', async () => {
+        const onimageaction = vi.fn();
+        render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'disk.hds' }),
+                items: [
+                    {
+                        id: 'partition',
+                        name: 'PARTITION 1',
+                        kind: 'partition',
+                        partitionIndex: 0,
+                        childCount: 1,
+                        children: [
+                            {
+                                id: 'volume',
+                                name: 'DRUMS',
+                                kind: 'volume',
+                                partitionIndex: 0,
+                                childCount: 0,
+                            },
+                        ],
+                    },
+                ],
+                partitionActionsEnabled: true,
+                volumeActionsEnabled: true,
+                onimageaction,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByText('PARTITION 1').closest('button')!);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Repair object placement…' }));
+        expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'partition' }), 'repair-placement');
+
+        await fireEvent.click(screen.getByRole('button', { name: /Expand PARTITION 1/ }));
+        await fireEvent.contextMenu(screen.getByRole('button', { name: /DRUMS/ }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Repair object placement…' }));
+        expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'volume' }), 'repair-placement');
+    });
 });

@@ -317,6 +317,9 @@
                 <div class="context-menu-separator" role="separator"></div>
             {/if}
             {#if partitionActionsEnabled}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('repair-placement')}
+                    >Repair object placement…</button
+                >
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('rename-partition')}
                     >Rename partition</button
                 >
@@ -348,6 +351,9 @@
                 {#if packageImportEnabled || packageExportEnabled || audioExportEnabled || mediaConversionEnabled}
                     <div class="context-menu-separator" role="separator"></div>
                 {/if}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('repair-placement')}
+                    >Repair object placement…</button
+                >
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('rename-volume')}
                     >Rename volume</button
                 >

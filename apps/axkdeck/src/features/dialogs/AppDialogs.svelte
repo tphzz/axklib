@@ -18,6 +18,7 @@
     import ObjectRenameDialog from '../../lib/components/ObjectRenameDialog.svelte';
     import PackageExportDialog from '../../lib/components/PackageExportDialog.svelte';
     import PackageImportDialog from '../../lib/components/PackageImportDialog.svelte';
+    import PlacementRepairDialog from '../../lib/components/PlacementRepairDialog.svelte';
     import MidiExportDialog from '../../lib/components/MidiExportDialog.svelte';
     import MidiImportDialog from '../../lib/components/MidiImportDialog.svelte';
     import MediaExportDialog from '../../lib/components/MediaExportDialog.svelte';
@@ -174,9 +175,25 @@
             action={mutation.volumeAction.action}
             item={mutation.volumeAction.item}
             busy={mutation.volumeActionBusy}
+            phase={mutation.volumeActionPhase}
             error={mutation.volumeActionError}
+            deletionInspection={mutation.volumeDeletionInspection}
             oncancel={() => mutation.cancelVolumeAction()}
             onsubmit={(name) => void mutation.submitVolumeAction(name)}
+        />
+    {/key}
+{/if}
+{#if mutation.placementRepairRequest}
+    {#key mutation.placementRepairRequest.item.id}
+        <PlacementRepairDialog
+            item={mutation.placementRepairRequest.item}
+            inspection={mutation.placementRepairRequest.inspection}
+            busy={mutation.placementRepairRequest.busy}
+            phase={mutation.placementRepairRequest.phase}
+            error={mutation.placementRepairRequest.error}
+            message={mutation.placementRepairRequest.message}
+            oncancel={() => mutation.cancelPlacementRepair()}
+            onsubmit={(recoveryVolumeName) => void mutation.submitPlacementRepair(recoveryVolumeName)}
         />
     {/key}
 {/if}

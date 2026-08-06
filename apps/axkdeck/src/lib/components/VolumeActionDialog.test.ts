@@ -11,6 +11,16 @@ const volume = {
     partitionIndex: 2,
 };
 
+const safeDeletion = {
+    imageId: 'image-1',
+    revision: 1,
+    partitionIndex: 2,
+    volumeName: 'ORIGINAL',
+    canDelete: true,
+    crossingRelationshipCount: 0,
+    blockers: [],
+};
+
 describe('VolumeActionDialog', () => {
     it('shows the active volume operation while submission is pending', () => {
         render(VolumeActionDialog, {
@@ -18,7 +28,9 @@ describe('VolumeActionDialog', () => {
                 action: 'add-volume',
                 item: { ...volume, kind: 'partition' },
                 busy: true,
+                phase: 'submitting',
                 error: '',
+                deletionInspection: null,
                 oncancel: vi.fn(),
                 onsubmit: vi.fn(),
             },
@@ -36,7 +48,9 @@ describe('VolumeActionDialog', () => {
                 action: 'add-volume',
                 item: { ...volume, kind: 'partition' },
                 busy: false,
+                phase: 'idle',
                 error: '',
+                deletionInspection: null,
                 oncancel: vi.fn(),
                 onsubmit,
             },
@@ -53,7 +67,16 @@ describe('VolumeActionDialog', () => {
     it('uses one explicit warning without typed-name confirmation for permanent deletion', async () => {
         const onsubmit = vi.fn();
         render(VolumeActionDialog, {
-            props: { action: 'delete-volume', item: volume, busy: false, error: '', oncancel: vi.fn(), onsubmit },
+            props: {
+                action: 'delete-volume',
+                item: volume,
+                busy: false,
+                phase: 'idle',
+                error: '',
+                deletionInspection: safeDeletion,
+                oncancel: vi.fn(),
+                onsubmit,
+            },
         });
 
         const submit = screen.getByRole('button', { name: 'Delete permanently' });
@@ -63,6 +86,30 @@ describe('VolumeActionDialog', () => {
         expect(onsubmit).toHaveBeenCalledWith('ORIGINAL');
     });
 
+    it('points to the explicit placement repair action when deletion is blocked', () => {
+        render(VolumeActionDialog, {
+            props: {
+                action: 'delete-volume',
+                item: volume,
+                busy: false,
+                phase: 'idle',
+                error: '',
+                deletionInspection: {
+                    ...safeDeletion,
+                    canDelete: false,
+                    crossingRelationshipCount: 2,
+                    blockers: [{ code: 'KNOWN_RELATIONSHIP_CROSSES_VOLUME', message: 'Crossing link', count: 2 }],
+                },
+                oncancel: vi.fn(),
+                onsubmit: vi.fn(),
+            },
+        });
+
+        expect(screen.getByText(/Repair object placement from the volume or partition context menu/)).toBeTruthy();
+        expect((screen.getByRole('button', { name: 'Delete permanently' }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.queryByRole('button', { name: 'Repair placement' })).toBeNull();
+    });
+
     it('validates and submits partition renames with the same naming rules as volumes', async () => {
         const onsubmit = vi.fn();
         render(VolumeActionDialog, {
@@ -70,7 +117,9 @@ describe('VolumeActionDialog', () => {
                 action: 'rename-partition',
                 item: { ...volume, id: 'partition-2', name: 'PARTITION 3', kind: 'partition' },
                 busy: false,
+                phase: 'idle',
                 error: '',
+                deletionInspection: null,
                 oncancel: vi.fn(),
                 onsubmit,
             },

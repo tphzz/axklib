@@ -198,12 +198,15 @@ add_library(
   src/alteration.cpp
   src/alteration_manifest.cpp
   src/alteration_manifest_json.cpp
+  src/alteration_manifest_placement.cpp
   src/alteration_manifest_sequence.cpp
+  src/alteration_operation.cpp
     src/alteration_package_flat.cpp
     src/alteration_package_adjustment.cpp
     src/alteration_package_sfs.cpp
   src/alteration_program.cpp
   src/alteration_publication.cpp
+  src/alteration_placement.cpp
   src/alteration_sample.cpp
   src/alteration_sequence.cpp
   src/alteration_support.cpp

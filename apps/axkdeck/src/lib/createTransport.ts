@@ -19,9 +19,11 @@ import type {
     PackageInspection,
     RetainedDownload,
     PlanSummary,
+    PlacementRepairInspection,
     PreviewEnvelope,
     RelationshipPage,
     WaveDataOrphanInspection,
+    VolumeDeletionInspection,
 } from './transport';
 import type { DirectoryListing, DirectoryRef, FileRef, SandboxRoot } from './storageLocations';
 
@@ -163,6 +165,15 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startObjectRename(): Promise<JobState> {
+        return this.unavailable();
+    }
+    inspectVolumeDeletion(): Promise<VolumeDeletionInspection> {
+        return this.unavailable();
+    }
+    inspectPlacement(): Promise<PlacementRepairInspection> {
+        return this.unavailable();
+    }
+    startPlacementRepair(): Promise<JobState> {
         return this.unavailable();
     }
     inspectObjectDeletion(): Promise<ObjectDeletionInspection> {

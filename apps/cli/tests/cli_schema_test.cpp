@@ -167,6 +167,7 @@ TEST(CliSchema, AlterationV1DistinguishesNullEmptyAndPresentValues) {
         .object_name = "Object",
         .removed_sfs_ids = {},
         .inserted_sfs_ids = {4'294'967'295U},
+        .placed_sfs_ids = {65'535U},
         .freed_clusters = std::numeric_limits<std::uint64_t>::max(),
         .allocated_clusters = 0,
         .audio_import = std::nullopt,
@@ -178,6 +179,7 @@ TEST(CliSchema, AlterationV1DistinguishesNullEmptyAndPresentValues) {
     EXPECT_TRUE(parsed["output_path"].is_null());
     EXPECT_EQ(parsed["operations"][0]["volume_name"], "");
     EXPECT_TRUE(parsed["operations"][0]["removed_sfs_ids"].empty());
+    EXPECT_EQ(parsed["operations"][0]["placed_sfs_ids"], nlohmann::json::array({65'535U}));
     EXPECT_TRUE(parsed["operations"][0]["audio_import"].is_null());
     EXPECT_EQ(parsed["operations"][0]["freed_clusters"], std::numeric_limits<std::uint64_t>::max());
 }

@@ -170,7 +170,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 46U);
+    EXPECT_EQ(entries.size(), 49U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -608,6 +608,59 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
                        {"estimatedFreedBytes", 1024U},
                        {"estimatedFreedClusters", 1U}};
     EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageObjectDeletionInspection", inspection));
+}
+
+TEST(ServerContract, VolumeDeletionAndScopedPlacementRepairUseSeparateRevisionBoundedContracts) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    const auto deletion_request = nlohmann::json{
+        {"imageId", "image-1"}, {"expectedRevision", 4U}, {"partitionIndex", 0U}, {"volumeName", "Samples"}};
+    EXPECT_TRUE(
+        axk::server::validate_openapi_value(document, "ImageVolumeDeletionInspectionRequest", deletion_request));
+    auto invalid_partition = deletion_request;
+    invalid_partition["partitionIndex"] = 8U;
+    EXPECT_FALSE(
+        axk::server::validate_openapi_value(document, "ImageVolumeDeletionInspectionRequest", invalid_partition));
+
+    const auto deletion_inspection = nlohmann::json{
+        {"imageId", "image-1"},
+        {"revision", 4U},
+        {"partitionIndex", 0U},
+        {"volumeName", "Samples"},
+        {"canDelete", false},
+        {"crossingRelationshipCount", 1U},
+        {"blockers", nlohmann::json::array({{{"code", "KNOWN_RELATIONSHIP_CROSSES_VOLUME"},
+                                             {"message", "A known relationship crosses the volume boundary"},
+                                             {"count", 1U}}})}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageVolumeDeletionInspection", deletion_inspection));
+
+    const auto partition_scope = nlohmann::json{{"kind", "PARTITION"}, {"partitionIndex", 0U}};
+    const auto volume_scope = nlohmann::json{{"kind", "VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Samples"}};
+    for (const auto &scope : {partition_scope, volume_scope}) {
+        const auto request = nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"scope", scope}};
+        EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImagePlacementInspectionRequest", request));
+        EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImagePlacementRepairRequest", request));
+    }
+    auto invalid_scope = partition_scope;
+    invalid_scope["volumeName"] = "Samples";
+    const auto invalid_request =
+        nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"scope", invalid_scope}};
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImagePlacementInspectionRequest", invalid_request));
+
+    const auto placement_inspection =
+        nlohmann::json{{"imageId", "image-1"},
+                       {"revision", 4U},
+                       {"scope", partition_scope},
+                       {"canRepair", true},
+                       {"repairObjectCount", 62U},
+                       {"blockedObjectCount", 0U},
+                       {"recoveryVolumeName", "Recovered"},
+                       {"destinations", nlohmann::json::array({{{"volumeName", "Recovered"},
+                                                                {"createsVolume", true},
+                                                                {"objectCount", 62U},
+                                                                {"objectTypeCounts", {{"SMPL", 62U}}}}})},
+                       {"blockers", nlohmann::json::array()}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImagePlacementInspection", placement_inspection));
 }
 
 TEST(ServerContract, WaveDataOrphanInspectionIsVolumeScopedAndResponseBounded) {

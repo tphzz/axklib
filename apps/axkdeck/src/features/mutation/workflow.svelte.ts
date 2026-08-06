@@ -1,7 +1,15 @@
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { AuditionWorkflow } from '../audition/workflow.svelte';
 import type { JobController } from '../jobs/actions';
-import type { ImageTransport, ObjectRenameMutation, PartitionMutation, VolumeMutation } from '../../lib/transport';
+import type {
+    ImageTransport,
+    ObjectRenameMutation,
+    PartitionMutation,
+    PlacementRepairInspection,
+    PlacementRepairScope,
+    VolumeDeletionInspection,
+    VolumeMutation,
+} from '../../lib/transport';
 import type { DiskTreeItem, ImageTreeAction, ObjectRenameTarget, WorkspaceView } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 
@@ -34,12 +42,25 @@ interface ObjectSelectionSnapshot {
 }
 
 export class MutationWorkflow {
+    private volumeActionGeneration = 0;
+    private placementRepairGeneration = 0;
     volumeAvailable = $state(false);
     partitionAvailable = $state(false);
     objectRenameAvailable = $state(false);
     volumeAction = $state<{ item: DiskTreeItem; action: ImageTreeAction } | null>(null);
     volumeActionBusy = $state(false);
+    volumeActionPhase = $state<'idle' | 'checking' | 'submitting'>('idle');
     volumeActionError = $state('');
+    volumeDeletionInspection = $state<VolumeDeletionInspection | null>(null);
+    placementRepairRequest = $state<{
+        item: DiskTreeItem;
+        scope: PlacementRepairScope;
+        inspection: PlacementRepairInspection | null;
+        busy: boolean;
+        phase: 'inspecting' | 'idle' | 'repairing';
+        error: string;
+        message: string;
+    } | null>(null);
     objectRenameRequest = $state<{
         target: ObjectRenameTarget;
         busy: boolean;
@@ -59,13 +80,18 @@ export class MutationWorkflow {
     }
 
     requestVolumeAction(item: DiskTreeItem, action: ImageTreeAction): boolean {
+        if (action === 'repair-placement') return this.requestPlacementRepair(item);
         const partitionAction = action === 'rename-partition';
         if (partitionAction && (!this.partitionAvailable || item.kind !== 'partition')) return false;
         if (!partitionAction && !this.volumeAvailable) return false;
         if (action === 'add-volume' && item.kind !== 'partition') return false;
         if ((action === 'rename-volume' || action === 'delete-volume') && item.kind !== 'volume') return false;
         this.volumeActionError = '';
-        this.volumeAction = { item, action };
+        this.volumeDeletionInspection = null;
+        const request = { item, action };
+        const generation = ++this.volumeActionGeneration;
+        this.volumeAction = request;
+        if (action === 'delete-volume') void this.inspectVolumeDeletion(request, generation);
         return true;
     }
 
@@ -75,7 +101,81 @@ export class MutationWorkflow {
     }
 
     cancelVolumeAction(): void {
-        if (!this.volumeActionBusy) this.volumeAction = null;
+        if (!this.volumeActionBusy) {
+            ++this.volumeActionGeneration;
+            this.volumeAction = null;
+            this.volumeDeletionInspection = null;
+            this.volumeActionPhase = 'idle';
+        }
+    }
+
+    cancelPlacementRepair(): void {
+        if (!this.placementRepairRequest?.busy) {
+            ++this.placementRepairGeneration;
+            this.placementRepairRequest = null;
+        }
+    }
+
+    async submitPlacementRepair(recoveryVolumeName?: string): Promise<void> {
+        const request = this.placementRepairRequest;
+        const sessionId = this.dependencies.sessionId();
+        if (!request?.inspection?.canRepair || request.busy || sessionId === null) return;
+        const generation = this.placementRepairGeneration;
+        const repairCount = request.inspection.repairObjectCount;
+        const partitionIndex = request.scope.partitionIndex;
+        const preferredVolumeName =
+            request.scope.kind === 'VOLUME' ? request.scope.volumeName : recoveryVolumeName?.trim();
+        const started = performance.now();
+        request.busy = true;
+        request.phase = 'repairing';
+        request.error = '';
+        request.message = '';
+        this.dependencies.setStatus('Repairing object placement');
+        try {
+            await this.dependencies.audition.invalidateSession(sessionId);
+            const completed = await this.dependencies.jobs.run(
+                () =>
+                    this.dependencies.transport.startPlacementRepair(
+                        sessionId,
+                        request.scope,
+                        request.scope.kind === 'PARTITION' ? preferredVolumeName : undefined,
+                    ),
+                (update) => {
+                    if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
+                },
+            );
+            if (completed.status !== 'completed') {
+                throw new Error(completed.error ?? 'Object placement repair did not complete');
+            }
+            await this.dependencies.refreshSession({ partitionIndex, volumeName: preferredVolumeName });
+            if (!this.isCurrentPlacementRepair(generation)) return;
+            const refreshedSessionId = this.dependencies.sessionId();
+            if (refreshedSessionId === null) throw new Error('Image session is no longer available');
+            request.inspection = await this.dependencies.transport.inspectPlacement(refreshedSessionId, request.scope);
+            const repairedObjects = `${repairCount} ${repairCount === 1 ? 'object' : 'objects'}`;
+            const blockedCount = request.inspection.blockedObjectCount;
+            request.message =
+                blockedCount > 0
+                    ? `Repaired ${repairedObjects}. ${blockedCount} ambiguous ${blockedCount === 1 ? 'object remains' : 'objects remain'} unchanged.`
+                    : `Repaired placement for ${repairedObjects}.`;
+            this.dependencies.setStatus(request.message);
+            this.dependencies.reportTiming('repair-object-placement', started, repairCount);
+        } catch (error) {
+            if (this.isCurrentPlacementRepair(generation)) {
+                request.error = userFacingMessage(error);
+                this.dependencies.setStatus(request.error);
+            }
+            if (this.dependencies.sessionId() !== null) {
+                await this.dependencies
+                    .refreshSession({ partitionIndex, volumeName: preferredVolumeName })
+                    .catch(() => undefined);
+            }
+        } finally {
+            if (this.isCurrentPlacementRepair(generation)) {
+                request.busy = false;
+                request.phase = 'idle';
+            }
+        }
     }
 
     cancelObjectRename(): void {
@@ -83,18 +183,24 @@ export class MutationWorkflow {
     }
 
     reset(): void {
+        ++this.volumeActionGeneration;
         this.volumeAvailable = false;
         this.partitionAvailable = false;
         this.objectRenameAvailable = false;
         this.volumeAction = null;
         this.volumeActionBusy = false;
+        this.volumeActionPhase = 'idle';
         this.volumeActionError = '';
+        this.volumeDeletionInspection = null;
+        ++this.placementRepairGeneration;
+        this.placementRepairRequest = null;
         this.objectRenameRequest = null;
     }
 
     async submitVolumeAction(name: string): Promise<void> {
         if (!this.volumeAction || !this.dependencies.imageOpen()) return;
         const requested = this.volumeAction;
+        if (requested.action === 'delete-volume' && !this.volumeDeletionInspection?.canDelete) return;
         const partitionIndex = requested.item.partitionIndex;
         if (partitionIndex === undefined) return;
         const previousVolumeName = requested.item.kind === 'volume' ? requested.item.name : undefined;
@@ -124,6 +230,7 @@ export class MutationWorkflow {
             requested.action === 'add-volume' || requested.action === 'rename-volume' ? name : undefined;
 
         this.volumeActionBusy = true;
+        this.volumeActionPhase = 'submitting';
         this.volumeActionError = '';
         this.dependencies.setStatus(
             requested.action === 'add-volume'
@@ -155,6 +262,7 @@ export class MutationWorkflow {
             if (completed.status !== 'completed') {
                 throw new Error(completed.error ?? 'Image change did not complete');
             }
+            ++this.volumeActionGeneration;
             this.volumeAction = null;
             await this.dependencies.refreshSession({ partitionIndex, volumeName: preferredVolumeName });
             this.dependencies.reportTiming(requested.action, started, 1);
@@ -168,7 +276,95 @@ export class MutationWorkflow {
             }
         } finally {
             this.volumeActionBusy = false;
+            this.volumeActionPhase = 'idle';
         }
+    }
+
+    private async inspectVolumeDeletion(
+        requested: { item: DiskTreeItem; action: ImageTreeAction },
+        generation: number,
+    ): Promise<void> {
+        const partitionIndex = requested.item.partitionIndex;
+        const sessionId = this.dependencies.sessionId();
+        if (partitionIndex === undefined || sessionId === null) {
+            if (this.isCurrentVolumeAction(generation)) {
+                this.volumeActionError = 'Image session is no longer available';
+            }
+            return;
+        }
+        this.volumeActionBusy = true;
+        this.volumeActionPhase = 'checking';
+        this.dependencies.setStatus('Checking volume relationships');
+        try {
+            const inspection = await this.dependencies.transport.inspectVolumeDeletion(
+                sessionId,
+                partitionIndex,
+                requested.item.name,
+            );
+            if (this.isCurrentVolumeAction(generation)) this.volumeDeletionInspection = inspection;
+        } catch (error) {
+            if (this.isCurrentVolumeAction(generation)) {
+                this.volumeActionError = userFacingMessage(error);
+                this.dependencies.setStatus(this.volumeActionError);
+            }
+        } finally {
+            if (this.isCurrentVolumeAction(generation)) {
+                this.volumeActionBusy = false;
+                this.volumeActionPhase = 'idle';
+            }
+        }
+    }
+
+    private requestPlacementRepair(item: DiskTreeItem): boolean {
+        if (item.partitionIndex === undefined || this.dependencies.sessionId() === null) return false;
+        if (item.kind === 'partition' && !this.partitionAvailable) return false;
+        if (item.kind === 'volume' && !this.volumeAvailable) return false;
+        if (item.kind !== 'partition' && item.kind !== 'volume') return false;
+        const scope: PlacementRepairScope =
+            item.kind === 'volume'
+                ? { kind: 'VOLUME', partitionIndex: item.partitionIndex, volumeName: item.name }
+                : { kind: 'PARTITION', partitionIndex: item.partitionIndex };
+        const request = {
+            item,
+            scope,
+            inspection: null,
+            busy: true,
+            phase: 'inspecting' as const,
+            error: '',
+            message: '',
+        };
+        const generation = ++this.placementRepairGeneration;
+        this.placementRepairRequest = request;
+        void this.inspectPlacementRepair(scope, generation);
+        return true;
+    }
+
+    private async inspectPlacementRepair(scope: PlacementRepairScope, generation: number): Promise<void> {
+        const sessionId = this.dependencies.sessionId();
+        if (sessionId === null) return;
+        this.dependencies.setStatus('Inspecting object placement');
+        try {
+            const inspection = await this.dependencies.transport.inspectPlacement(sessionId, scope);
+            if (this.isCurrentPlacementRepair(generation)) this.placementRepairRequest!.inspection = inspection;
+        } catch (error) {
+            if (this.isCurrentPlacementRepair(generation)) {
+                this.placementRepairRequest!.error = userFacingMessage(error);
+                this.dependencies.setStatus(this.placementRepairRequest!.error);
+            }
+        } finally {
+            if (this.isCurrentPlacementRepair(generation)) {
+                this.placementRepairRequest!.busy = false;
+                this.placementRepairRequest!.phase = 'idle';
+            }
+        }
+    }
+
+    private isCurrentPlacementRepair(generation: number): boolean {
+        return this.placementRepairRequest !== null && this.placementRepairGeneration === generation;
+    }
+
+    private isCurrentVolumeAction(generation: number): boolean {
+        return this.volumeAction !== null && this.volumeActionGeneration === generation;
     }
 
     async submitObjectRename(name: string): Promise<void> {

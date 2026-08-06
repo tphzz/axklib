@@ -35,6 +35,8 @@ import type {
     RetainedDownload,
     PartitionMutation,
     PlanSummary,
+    PlacementRepairInspection,
+    PlacementRepairScope,
     PreviewEnvelope,
     RelationshipPage,
     RelationshipPageFilter,
@@ -43,6 +45,7 @@ import type {
     SequenceSystemExclusivePolicy,
     MidiInspection,
     VolumeMutation,
+    VolumeDeletionInspection,
     WaveDataOrphanInspection,
 } from '../transport';
 import type {
@@ -217,6 +220,30 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState> {
         return this.invoke('startObjectRename', [sessionId, mutation]);
+    }
+
+    inspectVolumeDeletion(
+        sessionId: number,
+        partitionIndex: number,
+        volumeName: string,
+    ): Promise<VolumeDeletionInspection> {
+        return this.invoke('inspectVolumeDeletion', [sessionId, partitionIndex, volumeName]);
+    }
+
+    inspectPlacement(
+        sessionId: number,
+        scope: PlacementRepairScope,
+        recoveryVolumeName?: string,
+    ): Promise<PlacementRepairInspection> {
+        return this.invoke('inspectPlacement', [sessionId, scope, recoveryVolumeName]);
+    }
+
+    startPlacementRepair(
+        sessionId: number,
+        scope: PlacementRepairScope,
+        recoveryVolumeName?: string,
+    ): Promise<JobState> {
+        return this.invoke('startPlacementRepair', [sessionId, scope, recoveryVolumeName]);
     }
 
     inspectObjectDeletion(

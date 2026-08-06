@@ -1132,6 +1132,161 @@ describe('HttpImageTransport', () => {
         ]);
     });
 
+    it('keeps deletion inspection separate from scoped placement inspection and repair', async () => {
+        const bodies = new Map<string, unknown>();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return json({
+                        apiVersion: 'v1',
+                        limits: {},
+                        operations: [
+                            {
+                                id: 'images.volume_deletion.inspect',
+                                method: 'POST',
+                                route: '/api/v1/image-volume-deletion-inspections',
+                                mode: 'request',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageVolumeDeletionInspectionRequest',
+                                resultSchema: 'ImageVolumeDeletionInspection',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.placement.inspect',
+                                method: 'POST',
+                                route: '/api/v1/image-object-placement-inspections',
+                                mode: 'request',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImagePlacementInspectionRequest',
+                                resultSchema: 'ImagePlacementInspection',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.placement.repair',
+                                method: 'POST',
+                                route: '/api/v1/image-object-placement-repairs',
+                                mode: 'job',
+                                operationClass: 'write',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'ImagePlacementRepairRequest',
+                                resultSchema: 'ImageSessionAlterationResult',
+                                implemented: true,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return json({
+                        imageId: 'image-repair',
+                        revision: 4,
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
+                        format: 'sfs',
+                        rootCount: 0,
+                        objectCount: 2,
+                        relationshipCount: 1,
+                        availableOperations: [
+                            'images.alter.volumes',
+                            'images.placement.inspect',
+                            'images.placement.repair',
+                        ],
+                        validation: { valid: false, infoCount: 0, warningCount: 1, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                if (url.pathname.endsWith('/image-volume-deletion-inspections')) {
+                    bodies.set('inspect', JSON.parse(String(init?.body)));
+                    return json({
+                        imageId: 'image-repair',
+                        revision: 4,
+                        partitionIndex: 0,
+                        volumeName: 'Samples',
+                        canDelete: false,
+                        crossingRelationshipCount: 1,
+                        blockers: [
+                            {
+                                code: 'KNOWN_RELATIONSHIP_CROSSES_VOLUME',
+                                message: 'A known relationship crosses the volume boundary',
+                                count: 1,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/image-object-placement-inspections')) {
+                    bodies.set('placementInspect', JSON.parse(String(init?.body)));
+                    return json({
+                        imageId: 'image-repair',
+                        revision: 4,
+                        scope: { kind: 'VOLUME', partitionIndex: 0, volumeName: 'Samples' },
+                        canRepair: true,
+                        repairObjectCount: 1,
+                        blockedObjectCount: 0,
+                        destinations: [
+                            {
+                                volumeName: 'Samples',
+                                createsVolume: false,
+                                objectCount: 1,
+                                objectTypeCounts: { SBNK: 1 },
+                            },
+                        ],
+                        blockers: [],
+                    });
+                }
+                if (url.pathname.endsWith('/image-object-placement-repairs')) {
+                    bodies.set('repair', JSON.parse(String(init?.body)));
+                    return json(
+                        {
+                            jobId: 'repair-job',
+                            operationId: 'images.placement.repair',
+                            state: 'QUEUED',
+                            latestSequence: 0,
+                            progress: null,
+                            result: null,
+                            error: null,
+                        },
+                        202,
+                    );
+                }
+                throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const deletion = await transport.inspectVolumeDeletion(opened.sessionId, 0, 'Samples');
+        expect(deletion).toMatchObject({ canDelete: false, crossingRelationshipCount: 1 });
+        const scope = { kind: 'VOLUME' as const, partitionIndex: 0, volumeName: 'Samples' };
+        const inspection = await transport.inspectPlacement(opened.sessionId, scope);
+        expect(inspection).toMatchObject({ canRepair: true, repairObjectCount: 1 });
+        const repair = await transport.startPlacementRepair(opened.sessionId, scope);
+        expect(repair).toMatchObject({ kind: 'images.placement.repair', status: 'queued' });
+        expect(bodies.get('inspect')).toEqual({
+            imageId: 'image-repair',
+            expectedRevision: 4,
+            partitionIndex: 0,
+            volumeName: 'Samples',
+        });
+        expect(bodies.get('placementInspect')).toEqual({
+            imageId: 'image-repair',
+            expectedRevision: 4,
+            scope,
+        });
+        expect(bodies.get('repair')).toEqual(bodies.get('placementInspect'));
+    });
+
     it('inspects and starts revision-bound object deletion through typed operations', async () => {
         const bodies = new Map<string, unknown>();
         vi.stubGlobal(

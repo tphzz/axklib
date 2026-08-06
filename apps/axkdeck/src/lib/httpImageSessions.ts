@@ -1,5 +1,6 @@
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
+import { HttpJobController } from './httpJobController';
 import {
     type ApiContentItem,
     type ApiImageSummary,
@@ -22,14 +23,24 @@ import type {
     OpenedImage,
     RelationshipPage,
     RelationshipPageFilter,
+    JobState,
+    PlacementRepairInspection,
+    PlacementRepairScope,
+    VolumeDeletionInspection,
 } from './transport';
+import { randomIdempotencyKey } from './httpTransportWire';
 import type { DiskTreeItem } from './types';
+
+const ALTERATION_MANIFEST_SCHEMA_VERSION = '1.0';
 
 export class HttpImageSessions {
     private readonly sessions = new Map<number, SessionState>();
     private nextSessionId = 1;
 
-    constructor(private readonly client: AxklibHttpApiClient) {}
+    constructor(
+        private readonly client: AxklibHttpApiClient,
+        private readonly jobs: HttpJobController,
+    ) {}
 
     async open(location: ImageLocation): Promise<OpenedImage> {
         if (location.kind !== 'server-file' && location.kind !== 'axk-object-directory') {
@@ -174,6 +185,79 @@ export class HttpImageSessions {
         if (!session) return;
         await this.client.request('DELETE', `/images/${encodeURIComponent(session.remoteId)}`);
         this.sessions.delete(sessionId);
+    }
+
+    async inspectVolumeDeletion(
+        sessionId: number,
+        partitionIndex: number,
+        volumeName: string,
+    ): Promise<VolumeDeletionInspection> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<VolumeDeletionInspection>('images.volume_deletion.inspect', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            partitionIndex,
+            volumeName,
+        });
+        if (this.jobs.isJob(result)) throw new Error('images.volume_deletion.inspect unexpectedly returned a job');
+        return result;
+    }
+
+    async inspectPlacement(
+        sessionId: number,
+        scope: PlacementRepairScope,
+        recoveryVolumeName?: string,
+    ): Promise<PlacementRepairInspection> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<PlacementRepairInspection>('images.placement.inspect', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            scope,
+            ...(recoveryVolumeName ? { recoveryVolumeName } : {}),
+        });
+        if (this.jobs.isJob(result)) throw new Error('images.placement.inspect unexpectedly returned a job');
+        return result;
+    }
+
+    async startPlacementRepair(
+        sessionId: number,
+        scope: PlacementRepairScope,
+        recoveryVolumeName?: string,
+    ): Promise<JobState> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<never>(
+            'images.placement.repair',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                scope,
+                ...(recoveryVolumeName ? { recoveryVolumeName } : {}),
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(result)) throw new Error('images.placement.repair did not return a job');
+        return this.jobs.map(result);
+    }
+
+    async startMutation(sessionId: number, operation: Record<string, unknown>): Promise<JobState> {
+        const session = this.get(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.alter',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                manifest: {
+                    inline: {
+                        schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,
+                        operations: [operation],
+                    },
+                },
+                inputBindings: [],
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.alter did not return a job');
+        return this.jobs.map(job);
     }
 
     get(sessionId: number): SessionState {

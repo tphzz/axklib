@@ -65,8 +65,16 @@ Result<std::vector<std::byte>> Container::read_record_data(PartitionIndex partit
         return std::unexpected{std::move(error)};
     }
     if (data->size() != record->data_size) {
+        ErrorContext context;
+        context.partition_index = partition_index.value;
+        context.object_type = record->object_type;
+        context.object_name =
+            record->object_name.empty() ? "SFS ID " + std::to_string(record_id.value) : record->object_name;
+        context.raw_offset = record->record_offset.value;
         return std::unexpected{make_error(ErrorCode::io_short_read, ErrorCategory::io,
-                                          "logical SFS record read did not produce its declared size")};
+                                          "logical SFS record " + std::to_string(record_id.value) +
+                                              " read did not produce its declared size",
+                                          std::move(context))};
     }
     return std::move(*data);
 }

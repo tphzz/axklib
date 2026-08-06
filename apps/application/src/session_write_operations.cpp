@@ -31,6 +31,7 @@
 #include "axklib/application/alteration_journal.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/secure_random.hpp"
+#include "axklib/application/session_placement_operations.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package_archive.hpp"
@@ -296,5 +297,5 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         if (!bound)
             return bound;
     }
-    return {};
+    return bind_session_placement_operations(registry, images, alter_session);
 }

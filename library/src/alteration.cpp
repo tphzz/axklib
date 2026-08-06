@@ -79,6 +79,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return rename_sequence(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, RenameVolumeOperation>)
                     return rename_volume(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, RepairObjectPlacementsOperation>)
+                    return repair_object_placements(state, context, operation, cancellation);
                 else
                     return rename_partition(state, context, operation, cancellation);
             },

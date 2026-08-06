@@ -65,6 +65,7 @@ struct ExpectedObjectPlacement {
     PartitionIndex partition;
     SfsId sfs_id;
     std::string volume_name;
+    bool preserve_payload{};
 };
 
 struct ParsedDirectoryEntry {
@@ -129,6 +130,7 @@ std::vector<SfsId> free_ids(const MutablePartition &partition, std::size_t count
 Result<std::vector<Extent>> allocate_extents(MutablePartition &partition, std::uint32_t count);
 Result<std::vector<std::uint32_t>> allocate_list_clusters(MutablePartition &partition, std::size_t count);
 std::vector<Extent> merge_extents(std::span<const Extent> existing, std::span<const Extent> added);
+Result<void> normalize_extent_byte_counts(std::span<Extent> extents, std::size_t payload_size);
 Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(TransactionState &state,
                                                                         MutablePartition &partition, SfsId id,
                                                                         std::uint64_t required_size,
@@ -138,6 +140,9 @@ Result<std::pair<SfsId, std::uint64_t>> allocate_record(MutablePartition &partit
                                                         std::uint16_t directory_tail = 0U);
 Result<void> append_directory_entry(TransactionState &state, MutablePartition &partition, SfsId directory, SfsId child,
                                     std::string_view name, const CancellationToken &cancellation);
+Result<void> ensure_directory_entry_for_repair(TransactionState &state, MutablePartition &partition, SfsId directory,
+                                               SfsId child, std::string_view name,
+                                               const CancellationToken &cancellation);
 Result<void> rename_directory_entry(TransactionState &state, MutablePartition &partition, SfsId directory, SfsId child,
                                     std::string_view old_name, std::string_view new_name,
                                     const CancellationToken &cancellation);
@@ -156,6 +161,9 @@ Result<OperationReport> rename_volume(TransactionState &state, OperationContext 
 Result<OperationReport> rename_partition(TransactionState &state, OperationContext context,
                                          const RenamePartitionOperation &operation,
                                          const CancellationToken &cancellation);
+Result<OperationReport> repair_object_placements(TransactionState &state, OperationContext context,
+                                                 const RepairObjectPlacementsOperation &operation,
+                                                 const CancellationToken &cancellation);
 Result<OperationReport> delete_sbnk(TransactionState &state, OperationContext context,
                                     const DeleteSampleOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext context,

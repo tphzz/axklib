@@ -85,6 +85,7 @@ schema::operations_v1::OperationOutput operation_output(const nlohmann::json &op
         .object_name = operation.at("objectName").get<std::string>(),
         .removed_sfs_ids = operation.at("removedSfsIds").get<std::vector<std::uint32_t>>(),
         .inserted_sfs_ids = operation.at("insertedSfsIds").get<std::vector<std::uint32_t>>(),
+        .placed_sfs_ids = operation.at("placedSfsIds").get<std::vector<std::uint32_t>>(),
         .freed_clusters = operation.at("freedClusters").get<std::uint64_t>(),
         .allocated_clusters = operation.at("allocatedClusters").get<std::uint64_t>(),
         .audio_import = std::nullopt,

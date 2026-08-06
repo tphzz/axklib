@@ -100,6 +100,9 @@ Json operation_report_json(const axk::OperationReport &operation,
     auto inserted = Json::array();
     for (const auto id : operation.inserted_sfs_ids)
         inserted.push_back(id.value);
+    auto placed = Json::array();
+    for (const auto id : operation.placed_sfs_ids)
+        placed.push_back(id.value);
     Json result{{"id", operation.id},
                 {"type", std::move(wire_type)},
                 {"partitionIndex", operation.partition.value},
@@ -107,6 +110,7 @@ Json operation_report_json(const axk::OperationReport &operation,
                 {"objectName", operation.object_name},
                 {"removedSfsIds", std::move(removed)},
                 {"insertedSfsIds", std::move(inserted)},
+                {"placedSfsIds", std::move(placed)},
                 {"freedClusters", operation.freed_clusters},
                 {"allocatedClusters", operation.allocated_clusters}};
     if (operation.audio_import) {

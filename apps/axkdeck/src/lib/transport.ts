@@ -146,6 +146,10 @@ export interface ObjectDeletionInspection {
     estimatedFreedClusters: number;
 }
 
+export type VolumeDeletionInspection = components['schemas']['ImageVolumeDeletionInspection'];
+export type PlacementRepairScope = components['schemas']['ImagePlacementScope'];
+export type PlacementRepairInspection = components['schemas']['ImagePlacementInspection'];
+
 export type WaveDataOrphanCandidate = components['schemas']['ImageWaveDataOrphanCandidate'];
 export type WaveDataOrphanInspection = components['schemas']['ImageWaveDataOrphanInspection'];
 
@@ -428,6 +432,21 @@ export interface ImageTransport {
     startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState>;
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState>;
     startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState>;
+    inspectVolumeDeletion(
+        sessionId: number,
+        partitionIndex: number,
+        volumeName: string,
+    ): Promise<VolumeDeletionInspection>;
+    inspectPlacement(
+        sessionId: number,
+        scope: PlacementRepairScope,
+        recoveryVolumeName?: string,
+    ): Promise<PlacementRepairInspection>;
+    startPlacementRepair(
+        sessionId: number,
+        scope: PlacementRepairScope,
+        recoveryVolumeName?: string,
+    ): Promise<JobState>;
     inspectObjectDeletion(
         sessionId: number,
         targetObjectIds: string[],

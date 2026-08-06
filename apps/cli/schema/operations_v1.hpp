@@ -40,6 +40,7 @@ struct OperationOutput {
     std::string object_name;
     std::vector<std::uint32_t> removed_sfs_ids;
     std::vector<std::uint32_t> inserted_sfs_ids;
+    std::vector<std::uint32_t> placed_sfs_ids;
     std::uint64_t freed_clusters{};
     std::uint64_t allocated_clusters{};
     std::optional<AudioImportOutput> audio_import;

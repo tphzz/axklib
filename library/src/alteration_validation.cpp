@@ -34,8 +34,12 @@ Result<std::vector<ExpectedObjectPlacement>> expected_object_placements(const Tr
                     std::format("post-write inserted object in partition {} SFS ID {} has no operation target",
                                 partition_index, id.value))};
             }
-            result.push_back({PartitionIndex{partition_index}, id, report->volume_name});
+            result.push_back({PartitionIndex{partition_index}, id, report->volume_name, false});
         }
+    }
+    for (const auto &report : state.reports) {
+        for (const auto id : report.placed_sfs_ids)
+            result.push_back({report.partition, id, report.volume_name, true});
     }
     return result;
 }
@@ -55,26 +59,37 @@ Result<void> validate_post_write_placements(const ObjectCatalog &before, const O
             return candidate.partition.value == expected.partition.value && candidate.sfs_id == expected.sfs_id;
         });
         if (object == after.objects.end()) {
-            return std::unexpected{transaction_error(
-                std::format("post-write inserted object in partition {} SFS ID {} could not be reopened",
-                            expected.partition.value, expected.sfs_id.value))};
+            return std::unexpected{
+                transaction_error(std::format("post-write object in partition {} SFS ID {} could not be reopened",
+                                              expected.partition.value, expected.sfs_id.value))};
         }
         if (object->placement_resolution != PlacementResolution::exact || !object->placement) {
-            return std::unexpected{transaction_error(std::format(
-                "post-write inserted object in partition {} SFS ID {} has no exact volume/category placement",
-                expected.partition.value, expected.sfs_id.value))};
+            return std::unexpected{transaction_error(
+                std::format("post-write object in partition {} SFS ID {} has no exact volume/category placement",
+                            expected.partition.value, expected.sfs_id.value))};
         }
         if (object->placement->volume_name != expected.volume_name) {
-            return std::unexpected{transaction_error(std::format(
-                "post-write inserted object in partition {} SFS ID {} is placed in volume '{}' instead of '{}'",
-                expected.partition.value, expected.sfs_id.value, object->placement->volume_name,
-                expected.volume_name))};
+            return std::unexpected{transaction_error(
+                std::format("post-write object in partition {} SFS ID {} is placed in volume '{}' instead of '{}'",
+                            expected.partition.value, expected.sfs_id.value, object->placement->volume_name,
+                            expected.volume_name))};
         }
         if (object->placement->category_name != object->object.header.raw_type) {
-            return std::unexpected{transaction_error(std::format(
-                "post-write inserted object in partition {} SFS ID {} is placed in category '{}' instead of '{}'",
-                expected.partition.value, expected.sfs_id.value, object->placement->category_name,
-                object->object.header.raw_type))};
+            return std::unexpected{transaction_error(
+                std::format("post-write object in partition {} SFS ID {} is placed in category '{}' instead of '{}'",
+                            expected.partition.value, expected.sfs_id.value, object->placement->category_name,
+                            object->object.header.raw_type))};
+        }
+        if (expected.preserve_payload) {
+            const auto source = std::ranges::find_if(before.objects, [&](const ObjectSnapshot &candidate) {
+                return candidate.partition == expected.partition && candidate.sfs_id == expected.sfs_id;
+            });
+            if (source == before.objects.end() || source->placement_resolution != PlacementResolution::missing ||
+                source->raw_payload != object->raw_payload) {
+                return std::unexpected{transaction_error(
+                    std::format("post-write placement repair changed partition {} SFS ID {} payload or source state",
+                                expected.partition.value, expected.sfs_id.value))};
+            }
         }
     }
 
@@ -90,16 +105,13 @@ Result<void> validate_post_write_placements(const ObjectCatalog &before, const O
 
 Result<void> validate_post_write_placements(const TransactionState &state, const Container &actual,
                                             const CancellationToken &cancellation) {
-    auto before = detail::build_object_catalog(state.container, 64U * 1024U * 1024U, cancellation, false);
-    if (!before)
-        return std::unexpected{before.error()};
-    auto after = detail::build_object_catalog(actual, 64U * 1024U * 1024U, cancellation, false);
+    auto after = detail::build_object_catalog(actual, 64U * 1024U * 1024U, cancellation, true);
     if (!after)
         return std::unexpected{after.error()};
     auto expected = expected_object_placements(state);
     if (!expected)
         return std::unexpected{expected.error()};
-    return validate_post_write_placements(*before, *after, *expected);
+    return validate_post_write_placements(state.catalog, *after, *expected);
 }
 
 } // namespace axk::alteration_internal

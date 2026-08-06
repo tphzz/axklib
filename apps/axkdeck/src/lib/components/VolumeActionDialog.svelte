@@ -1,4 +1,5 @@
 <script lang="ts">
+    import type { VolumeDeletionInspection } from '../transport';
     import type { DiskTreeItem, ImageTreeAction } from '../types';
     import { modal } from '../modal';
 
@@ -6,12 +7,14 @@
         action: ImageTreeAction;
         item: DiskTreeItem;
         busy: boolean;
+        phase: 'idle' | 'checking' | 'submitting';
         error: string;
+        deletionInspection: VolumeDeletionInspection | null;
         oncancel: () => void;
         onsubmit: (name: string) => void;
     }
 
-    let { action, item, busy, error, oncancel, onsubmit }: Props = $props();
+    let { action, item, busy, phase, error, deletionInspection, oncancel, onsubmit }: Props = $props();
     let value = $state('');
     let initialized = false;
 
@@ -51,11 +54,10 @@
     const canSubmit = $derived(
         !busy &&
             (action === 'delete-volume'
-                ? true
+                ? deletionInspection?.canDelete === true
                 : nameValid &&
                   (action !== 'rename-volume' && action !== 'rename-partition' ? true : trimmedValue !== item.name)),
     );
-
     function submit(event: SubmitEvent): void {
         event.preventDefault();
         if (canSubmit) onsubmit(action === 'delete-volume' ? item.name : trimmedValue);
@@ -81,6 +83,14 @@
                 {#if action === 'delete-volume'}
                     <strong>Permanently delete “{item.name}”?</strong>
                     <p>The volume and all objects it contains will be destroyed. This action cannot be undone.</p>
+                    {#if phase === 'checking' && !deletionInspection}
+                        <p role="status">Checking object relationships…</p>
+                    {:else if deletionInspection && !deletionInspection.canDelete}
+                        <p class="dialog-error" role="alert">
+                            A known object relationship crosses the volume boundary. Repair object placement from the
+                            volume or partition context menu, then retry deletion.
+                        </p>
+                    {/if}
                 {:else}
                     <label>
                         <span>{subject} name</span>

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <string_view>
@@ -245,6 +246,17 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                 if (operation.partition_name == operation.new_partition_name)
                     return std::unexpected{manifest_error("new_partition_name must differ")};
                 return {};
+            } else if constexpr (std::same_as<T, RepairObjectPlacementsOperation>) {
+                if (auto valid = require_text(operation.volume_name, "volume_name"); !valid)
+                    return valid;
+                if (operation.object_sfs_ids.empty() || operation.object_sfs_ids.size() > 4096U)
+                    return std::unexpected{manifest_error("object_sfs_ids must contain 1..4096 SFS IDs")};
+                std::set<std::uint32_t> ids;
+                for (const auto id : operation.object_sfs_ids) {
+                    if (id.value <= 2U || !ids.insert(id.value).second)
+                        return std::unexpected{manifest_error("object_sfs_ids must contain unique object SFS IDs")};
+                }
+                return {};
             } else {
                 if (auto valid = require_text(operation.volume_name, "volume_name"); !valid)
                     return valid;
@@ -343,6 +355,52 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
         data);
 }
 
+Result<void> validate_placement_repair_transaction(const AlterationManifest &manifest) {
+    const auto repair_count = std::ranges::count_if(manifest.operations, [](const AlterationOperation &operation) {
+        return std::holds_alternative<RepairObjectPlacementsOperation>(operation.data);
+    });
+    if (repair_count == 0U)
+        return {};
+
+    std::optional<PartitionIndex> partition;
+    std::set<std::uint32_t> repaired_ids;
+    std::size_t inserted_volume_count{};
+    bool repair_seen{};
+    for (const auto &operation : manifest.operations) {
+        const auto *repair = std::get_if<RepairObjectPlacementsOperation>(&operation.data);
+        const auto *insert = std::get_if<InsertVolumeOperation>(&operation.data);
+        if (!repair && !insert) {
+            return std::unexpected{
+                manifest_error("placement repair transactions may only create an empty recovery volume")};
+        }
+        const auto &selector = repair ? repair->partition : insert->partition;
+        const auto *operation_partition = std::get_if<PartitionIndex>(&selector);
+        if (!operation_partition)
+            return std::unexpected{manifest_error("placement repair transactions require an explicit partition")};
+        if (partition && *partition != *operation_partition)
+            return std::unexpected{manifest_error("placement repair transaction operations must use one partition")};
+        partition = *operation_partition;
+
+        if (insert) {
+            ++inserted_volume_count;
+            if (inserted_volume_count > 1U || repair_seen || !insert->volume.waveforms.empty() ||
+                !insert->volume.samples.empty() || !insert->volume.sample_banks.empty() ||
+                !insert->volume.programs.empty()) {
+                return std::unexpected{
+                    manifest_error("placement repair may create one empty recovery volume before repair operations")};
+            }
+            continue;
+        }
+
+        repair_seen = true;
+        for (const auto id : repair->object_sfs_ids) {
+            if (!repaired_ids.insert(id.value).second)
+                return std::unexpected{manifest_error("placement repair object SFS IDs must be globally unique")};
+        }
+    }
+    return {};
+}
+
 } // namespace
 
 Result<void> validate_alteration_manifest(const AlterationManifest &manifest) {
@@ -350,6 +408,8 @@ Result<void> validate_alteration_manifest(const AlterationManifest &manifest) {
         return std::unexpected{manifest_error("manifest schema version must be 1.0")};
     if (manifest.operations.empty())
         return std::unexpected{manifest_error("manifest.operations must be a non-empty array")};
+    if (auto valid = validate_placement_repair_transaction(manifest); !valid)
+        return valid;
 
     std::set<std::string> seen;
     for (const auto &operation : manifest.operations) {

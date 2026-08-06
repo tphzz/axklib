@@ -2982,11 +2982,11 @@
       "AlterationOperationReport": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "partitionIndex", "volumeName", "objectName", "removedSfsIds", "insertedSfsIds", "freedClusters", "allocatedClusters", "audioImport"],
+        "required": ["id", "type", "partitionIndex", "volumeName", "objectName", "removedSfsIds", "insertedSfsIds", "placedSfsIds", "freedClusters", "allocatedClusters", "audioImport"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "type": {
-            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "DELETE_SEQUENCE", "INSERT_SEQUENCE", "RENAME_SEQUENCE", "RENAME_VOLUME", "RENAME_PARTITION"],
+            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "DELETE_SEQUENCE", "INSERT_SEQUENCE", "RENAME_SEQUENCE", "RENAME_VOLUME", "RENAME_PARTITION", "REPAIR_OBJECT_PLACEMENTS"],
             "x-axklib-application-enum": {
               "DELETE_VOLUME": "delete_volume",
               "INSERT_VOLUME": "insert_volume",
@@ -3006,7 +3006,8 @@
               "INSERT_SEQUENCE": "insert_sequence",
               "RENAME_SEQUENCE": "rename_sequence",
               "RENAME_VOLUME": "rename_volume",
-              "RENAME_PARTITION": "rename_partition"
+              "RENAME_PARTITION": "rename_partition",
+              "REPAIR_OBJECT_PLACEMENTS": "repair_object_placements"
             }
           },
           "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
@@ -3014,6 +3015,7 @@
           "objectName": {"type": "string"},
           "removedSfsIds": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
           "insertedSfsIds": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
+          "placedSfsIds": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
           "freedClusters": {"type": "integer", "minimum": 0},
           "allocatedClusters": {"type": "integer", "minimum": 0},
           "audioImport": {"oneOf": [{"$ref": "#/components/schemas/AlterationAudioImportSummary"}, {"type": "null"}]}
@@ -3085,6 +3087,118 @@
           "expectedRevision": {"type": "integer", "minimum": 1},
           "manifest": {"$ref": "#/components/schemas/ManifestInput"},
           "inputBindings": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/components/schemas/InputBinding"}}
+        }
+      },
+      "ImageVolumeDeletionInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "partitionIndex", "volumeName"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
+          "volumeName": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImagePlacementPartitionScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "partitionIndex"],
+        "properties": {
+          "kind": {"const": "PARTITION"},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7}
+        }
+      },
+      "ImagePlacementVolumeScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "partitionIndex", "volumeName"],
+        "properties": {
+          "kind": {"const": "VOLUME"},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
+          "volumeName": {"type": "string", "minLength": 1, "maxLength": 16}
+        }
+      },
+      "ImagePlacementScope": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/ImagePlacementPartitionScope"},
+          {"$ref": "#/components/schemas/ImagePlacementVolumeScope"}
+        ]
+      },
+      "ImagePlacementInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "scope"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "scope": {"$ref": "#/components/schemas/ImagePlacementScope"},
+          "recoveryVolumeName": {"type": "string", "minLength": 1, "maxLength": 16, "pattern": "^[ -~]+$"}
+        }
+      },
+      "ImagePlacementRepairRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "scope"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "scope": {"$ref": "#/components/schemas/ImagePlacementScope"},
+          "recoveryVolumeName": {"type": "string", "minLength": 1, "maxLength": 16, "pattern": "^[ -~]+$"}
+        }
+      },
+      "ImagePlacementIssue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "count"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "count": {"type": "integer", "minimum": 1}
+        }
+      },
+      "ImagePlacementDestination": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["volumeName", "createsVolume", "objectCount", "objectTypeCounts"],
+        "properties": {
+          "volumeName": {"type": "string", "minLength": 1, "maxLength": 16},
+          "createsVolume": {"type": "boolean"},
+          "objectCount": {"type": "integer", "minimum": 1},
+          "objectTypeCounts": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 1}
+          }
+        }
+      },
+      "ImagePlacementInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "scope", "canRepair", "repairObjectCount", "blockedObjectCount", "destinations", "blockers"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "scope": {"$ref": "#/components/schemas/ImagePlacementScope"},
+          "canRepair": {"type": "boolean"},
+          "repairObjectCount": {"type": "integer", "minimum": 0},
+          "blockedObjectCount": {"type": "integer", "minimum": 0},
+          "destinations": {"type": "array", "maxItems": 257, "items": {"$ref": "#/components/schemas/ImagePlacementDestination"}},
+          "blockers": {"type": "array", "maxItems": 16, "items": {"$ref": "#/components/schemas/ImagePlacementIssue"}},
+          "recoveryVolumeName": {"type": "string", "minLength": 1, "maxLength": 16}
+        }
+      },
+      "ImageVolumeDeletionInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "partitionIndex", "volumeName", "canDelete", "crossingRelationshipCount", "blockers"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
+          "volumeName": {"type": "string", "minLength": 1},
+          "canDelete": {"type": "boolean"},
+          "crossingRelationshipCount": {"type": "integer", "minimum": 0},
+          "blockers": {"type": "array", "maxItems": 16, "items": {"$ref": "#/components/schemas/ImagePlacementIssue"}}
         }
       },
       "ImageSessionAlterationResult": {

@@ -157,12 +157,19 @@ struct RenamePartitionOperation {
     std::string new_partition_name;
 };
 
+struct RepairObjectPlacementsOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::vector<SfsId> object_sfs_ids;
+};
+
 using AlterationOperationData =
     std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
                  InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleOperation,
                  DeleteSampleBankOperation, InsertSampleBankOperation, RenameSampleBankOperation,
                  DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation, DeleteSequenceOperation,
-                 InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation, RenamePartitionOperation>;
+                 InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation, RenamePartitionOperation,
+                 RepairObjectPlacementsOperation>;
 
 struct AlterationOperation {
     std::string id;
@@ -206,6 +213,7 @@ struct OperationReport {
     std::string object_name;
     std::vector<SfsId> removed_sfs_ids;
     std::vector<SfsId> inserted_sfs_ids;
+    std::vector<SfsId> placed_sfs_ids;
     std::uint64_t freed_clusters{};
     std::uint64_t allocated_clusters{};
     std::optional<AudioImportSummary> audio_import;

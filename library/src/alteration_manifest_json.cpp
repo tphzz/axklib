@@ -15,6 +15,7 @@
 #include "axklib/file_publication.hpp"
 
 #include "alteration_manifest_internal.hpp"
+#include "alteration_manifest_placement.hpp"
 #include "alteration_manifest_sequence.hpp"
 
 namespace axk {
@@ -126,19 +127,6 @@ Result<std::string> program_name(const Json &row, std::string_view field, std::s
 
 } // namespace
 
-std::string_view operation_type_name(const AlterationOperationData &operation) noexcept {
-    constexpr std::array names{
-        std::string_view{"delete_volume"},    std::string_view{"insert_volume"},   std::string_view{"delete_sbnk"},
-        std::string_view{"insert_sbnk"},      std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
-        std::string_view{"rename_waveform"},  std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
-        std::string_view{"insert_sbac"},      std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
-        std::string_view{"insert_program"},   std::string_view{"rename_program"},  std::string_view{"delete_sequence"},
-        std::string_view{"insert_sequence"},  std::string_view{"rename_sequence"}, std::string_view{"rename_volume"},
-        std::string_view{"rename_partition"},
-    };
-    return names[operation.index()];
-}
-
 Result<std::string> serialize_alteration_manifest_template() {
     try {
         OrderedJson operation = OrderedJson::object();
@@ -227,7 +215,7 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
                 *type != "rename_sbac" && *type != "rename_program" && *type != "delete_sequence" &&
                 *type != "insert_sequence" && *type != "rename_sequence" && *type != "rename_volume" &&
-                *type != "rename_partition") {
+                *type != "rename_partition" && *type != "repair_object_placements") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
             }
@@ -248,7 +236,12 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
             } else
                 return std::unexpected{transaction_error("partition selector is invalid")};
             AlterationOperationData data;
-            if (*type == "delete_volume") {
+            if (*type == "repair_object_placements") {
+                auto parsed = detail::parse_placement_operation_json(row, std::move(selector), context);
+                if (!parsed)
+                    return std::unexpected{parsed.error()};
+                data = std::move(*parsed);
+            } else if (*type == "delete_volume") {
                 if (auto valid = exact_fields(row, {"id", "type", "partition_index", "volume_name"}, context); !valid)
                     return std::unexpected{valid.error()};
                 auto volume = required_text(row, "volume_name", context);

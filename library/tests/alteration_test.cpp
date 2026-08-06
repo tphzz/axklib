@@ -1478,6 +1478,62 @@ TEST(Alteration, GrowsCategoryDirectoryWhenQueuedWaveDataExceedsItsInitialCapaci
     std::filesystem::remove_all(root, error);
 }
 
+TEST(Alteration, GrowsCategoryDirectoryWhenQueuedSamplesExceedItsInitialCapacity) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-sample-directory-growth";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    auto source_spec = sample_source_manifest(audio);
+    source_spec.partitions.front().volumes.front().samples.clear();
+    ASSERT_TRUE(axk::write_hds_image(source_spec, source));
+
+    axk::AlterationManifest manifest{"1.0", {}};
+    constexpr std::size_t sample_count = 63U;
+    manifest.operations.reserve(sample_count);
+    for (std::size_t index = 0U; index < sample_count; ++index) {
+        axk::SampleSpec sample;
+        sample.name = std::format("Sample {:02}", index);
+        sample.waveform_id = "Wave";
+        sample.root_key = 60U;
+        sample.key_high = 127U;
+        manifest.operations.push_back(
+            {std::format("sample-{:02}", index),
+             axk::InsertSampleOperation{axk::PartitionIndex{0U}, "Samples", std::move(sample)}});
+    }
+
+    const auto applied = axk::alter_hds(source, manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+    ASSERT_EQ(applied->operations.size(), sample_count);
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto &records = reopened->partitions().front().records;
+    const auto directory = std::ranges::find_if(records, [](const auto &record) {
+        return record.payload_kind == axk::PayloadKind::directory &&
+               std::ranges::any_of(record.directory_entries,
+                                   [](const auto &entry) { return entry.name == "Sample 62"; });
+    });
+    ASSERT_NE(directory, records.end());
+    EXPECT_EQ(directory->directory_entries.size(), sample_count + 2U);
+    EXPECT_EQ(directory->data_size, (sample_count + 2U) * 32U);
+    EXPECT_GE(directory->cluster_count, 3U);
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    EXPECT_TRUE(catalog->issues.empty());
+    EXPECT_EQ(std::ranges::count_if(catalog->objects,
+                                    [](const auto &object) {
+                                        return object.object.header.type == axk::ObjectType::sbnk &&
+                                               object.placement_resolution == axk::PlacementResolution::exact &&
+                                               object.placement && object.placement->volume_name == "Samples" &&
+                                               object.placement->category_name == "SBNK";
+                                    }),
+              sample_count);
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(Alteration, PostWritePlacementValidationToleratesUnchangedBaselineIssues) {
     axk::ObjectCatalog before;
     before.issues.push_back({"CATALOG_OBJECT_PLACEMENT_MISSING", "existing", axk::PartitionIndex{0U}, axk::SfsId{7U}});
@@ -1501,8 +1557,209 @@ TEST(Alteration, PostWritePlacementValidationRejectsNewAndUnplacedInsertedObject
         axk::alteration_internal::ExpectedObjectPlacement{axk::PartitionIndex{0U}, axk::SfsId{9U}, "Target"}};
     const auto missing_inserted = axk::alteration_internal::validate_post_write_placements(before, before, expected);
     ASSERT_FALSE(missing_inserted);
-    EXPECT_EQ(missing_inserted.error().message,
-              "post-write inserted object in partition 0 SFS ID 9 could not be reopened");
+    EXPECT_EQ(missing_inserted.error().message, "post-write object in partition 0 SFS ID 9 could not be reopened");
+}
+
+TEST(Alteration, RepairsExplicitlySelectedMissingObjectPlacementWithoutChangingPayload) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-placement-repair";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(sample_source_manifest(audio), source));
+
+    auto opened = axk::open_image(source);
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto &partition = opened->partitions().front();
+    const auto sample_directory = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.payload_kind == axk::PayloadKind::directory &&
+               std::ranges::any_of(record.directory_entries,
+                                   [](const auto &entry) { return entry.name == "Old Sample"; });
+    });
+    ASSERT_NE(sample_directory, partition.records.end());
+    ASSERT_EQ(sample_directory->directory_entries.size(), 3U);
+    const auto sample_entry =
+        std::ranges::find(sample_directory->directory_entries, "Old Sample", &axk::DirectoryEntry::name);
+    ASSERT_NE(sample_entry, sample_directory->directory_entries.end());
+    const auto sample_sfs_id = axk::SfsId{sample_entry->link_id.value};
+    patch_index_be32(source, *sample_directory, 6U, 64U);
+
+    opened = axk::open_image(source);
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto before = axk::build_object_catalog(*opened);
+    ASSERT_TRUE(before) << before.error().message;
+    const auto unplaced = std::ranges::find_if(before->objects, [&](const auto &object) {
+        return object.partition.value == 0U && object.sfs_id == sample_sfs_id;
+    });
+    ASSERT_NE(unplaced, before->objects.end());
+    ASSERT_EQ(unplaced->placement_resolution, axk::PlacementResolution::missing);
+    const auto expected_payload = unplaced->raw_payload;
+
+    axk::AlterationManifest manifest{
+        "1.0",
+        {{"repair", axk::RepairObjectPlacementsOperation{axk::PartitionIndex{0U}, "Samples", {sample_sfs_id}}}},
+    };
+    const auto applied = axk::alter_hds(source, manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+    ASSERT_EQ(applied->operations.size(), 1U);
+    EXPECT_EQ(applied->operations.front().placed_sfs_ids, std::vector{sample_sfs_id});
+
+    const auto repaired = axk::open_image(output);
+    ASSERT_TRUE(repaired) << repaired.error().message;
+    const auto after = axk::build_object_catalog(*repaired);
+    ASSERT_TRUE(after) << after.error().message;
+    EXPECT_TRUE(after->issues.empty());
+    const auto placed = std::ranges::find_if(after->objects, [&](const auto &object) {
+        return object.partition.value == 0U && object.sfs_id == sample_sfs_id;
+    });
+    ASSERT_NE(placed, after->objects.end());
+    ASSERT_TRUE(placed->placement);
+    EXPECT_EQ(placed->placement_resolution, axk::PlacementResolution::exact);
+    EXPECT_EQ(placed->placement->volume_name, "Samples");
+    EXPECT_EQ(placed->placement->category_name, "SBNK");
+    EXPECT_EQ(placed->raw_payload, expected_payload);
+
+    const auto graph = axk::build_relationship_graph(*after);
+    EXPECT_TRUE(std::ranges::any_of(graph.relationships, [&](const auto &relationship) {
+        return relationship.source_key == placed->key && relationship.quality == axk::RelationshipQuality::known;
+    }));
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, AtomicallyCreatesRecoveryVolumeAndRepairsOwnerlessObjectPlacement) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-placement-recovery-volume";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    auto source_spec = sample_source_manifest(audio);
+    source_spec.partitions.front().volumes.front().samples.clear();
+    ASSERT_TRUE(axk::write_hds_image(source_spec, source));
+
+    auto opened = axk::open_image(source);
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto &partition = opened->partitions().front();
+    const auto waveform_directory = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.payload_kind == axk::PayloadKind::directory &&
+               std::ranges::any_of(record.directory_entries, [](const auto &entry) { return entry.name == "Wave"; });
+    });
+    ASSERT_NE(waveform_directory, partition.records.end());
+    ASSERT_EQ(waveform_directory->directory_entries.size(), 3U);
+    const auto waveform_entry =
+        std::ranges::find(waveform_directory->directory_entries, "Wave", &axk::DirectoryEntry::name);
+    ASSERT_NE(waveform_entry, waveform_directory->directory_entries.end());
+    const auto waveform_sfs_id = axk::SfsId{waveform_entry->link_id.value};
+    patch_index_be32(source, *waveform_directory, 6U, 64U);
+
+    opened = axk::open_image(source);
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto before = axk::build_object_catalog(*opened);
+    ASSERT_TRUE(before) << before.error().message;
+    const auto unplaced = std::ranges::find_if(before->objects, [&](const auto &object) {
+        return object.partition.value == 0U && object.sfs_id == waveform_sfs_id;
+    });
+    ASSERT_NE(unplaced, before->objects.end());
+    ASSERT_EQ(unplaced->placement_resolution, axk::PlacementResolution::missing);
+    const auto expected_payload = unplaced->raw_payload;
+
+    axk::VolumeSpec recovered;
+    recovered.name = "Recovered";
+    axk::AlterationManifest manifest{
+        "1.0",
+        {{"create-recovery-volume", axk::InsertVolumeOperation{axk::PartitionIndex{0U}, std::move(recovered)}},
+         {"repair-ownerless-wave-data",
+          axk::RepairObjectPlacementsOperation{axk::PartitionIndex{0U}, "Recovered", {waveform_sfs_id}}}},
+    };
+    const auto applied = axk::alter_hds(source, manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+    ASSERT_EQ(applied->operations.size(), 2U);
+    EXPECT_EQ(applied->operations.back().placed_sfs_ids, std::vector{waveform_sfs_id});
+
+    const auto repaired = axk::open_image(output);
+    ASSERT_TRUE(repaired) << repaired.error().message;
+    const auto after = axk::build_object_catalog(*repaired);
+    ASSERT_TRUE(after) << after.error().message;
+    EXPECT_TRUE(after->issues.empty());
+    const auto placed = std::ranges::find_if(after->objects, [&](const auto &object) {
+        return object.partition.value == 0U && object.sfs_id == waveform_sfs_id;
+    });
+    ASSERT_NE(placed, after->objects.end());
+    ASSERT_TRUE(placed->placement);
+    EXPECT_EQ(placed->placement_resolution, axk::PlacementResolution::exact);
+    EXPECT_EQ(placed->placement->volume_name, "Recovered");
+    EXPECT_EQ(placed->placement->category_name, "SMPL");
+    EXPECT_EQ(placed->raw_payload, expected_payload);
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, RecoversDirectoryEntriesHiddenByAStaleExtentByteCount) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-placement-byte-count-repair";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(sample_source_manifest(audio), source));
+
+    auto opened = axk::open_image(source);
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto &partition = opened->partitions().front();
+    const auto sample_directory = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.payload_kind == axk::PayloadKind::directory &&
+               std::ranges::any_of(record.directory_entries,
+                                   [](const auto &entry) { return entry.name == "Old Sample"; });
+    });
+    ASSERT_NE(sample_directory, partition.records.end());
+    const auto sample_entry =
+        std::ranges::find(sample_directory->directory_entries, "Old Sample", &axk::DirectoryEntry::name);
+    ASSERT_NE(sample_entry, sample_directory->directory_entries.end());
+    const auto sample_sfs_id = axk::SfsId{sample_entry->link_id.value};
+    const auto sample_directory_sfs_id = sample_directory->sfs_id;
+    patch_index_be32(source, *sample_directory, 0x12U, 64U);
+
+    opened = axk::open_image(source);
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto before = axk::build_object_catalog(*opened);
+    ASSERT_TRUE(before) << before.error().message;
+    const auto unplaced = std::ranges::find_if(before->objects, [&](const auto &object) {
+        return object.partition.value == 0U && object.sfs_id == sample_sfs_id;
+    });
+    ASSERT_NE(unplaced, before->objects.end());
+    ASSERT_EQ(unplaced->placement_resolution, axk::PlacementResolution::missing);
+    const auto expected_payload = unplaced->raw_payload;
+
+    const axk::AlterationManifest manifest{
+        "1.0",
+        {{"repair", axk::RepairObjectPlacementsOperation{axk::PartitionIndex{0U}, "Samples", {sample_sfs_id}}}},
+    };
+    const auto applied = axk::alter_hds(source, manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto repaired = axk::open_image(output);
+    ASSERT_TRUE(repaired) << repaired.error().message;
+    const auto after = axk::build_object_catalog(*repaired);
+    ASSERT_TRUE(after) << after.error().message;
+    EXPECT_TRUE(after->issues.empty());
+    const auto placed = std::ranges::find_if(after->objects, [&](const auto &object) {
+        return object.partition.value == 0U && object.sfs_id == sample_sfs_id;
+    });
+    ASSERT_NE(placed, after->objects.end());
+    EXPECT_EQ(placed->placement_resolution, axk::PlacementResolution::exact);
+    EXPECT_EQ(placed->raw_payload, expected_payload);
+    const auto repaired_directory =
+        std::ranges::find(repaired->partitions().front().records, sample_directory_sfs_id, &axk::IndexRecord::sfs_id);
+    ASSERT_NE(repaired_directory, repaired->partitions().front().records.end());
+    ASSERT_EQ(repaired_directory->extents.size(), 1U);
+    EXPECT_EQ(repaired_directory->extents.front().byte_count, repaired_directory->data_size);
+    std::filesystem::remove_all(root, error);
 }
 
 TEST(Alteration, WaveformDeletionRequiresPriorSampleDeletion) {
@@ -1779,4 +2036,43 @@ TEST(Alteration, WritesAndReopensFortyEightExtentContinuationList) {
     EXPECT_EQ(inserted->extents.size(), 48U);
     EXPECT_EQ(inserted->continuation_clusters.size(), 1U);
     std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, DirectoryGrowthPreservesLogicalExtentOrderAcrossEarlierFreeSpace) {
+    const std::array existing{
+        axk::Extent{100U, 2U, 2048U},
+        axk::Extent{120U, 1U, 1024U},
+    };
+    const std::array added{
+        axk::Extent{10U, 1U, 1024U},
+        axk::Extent{11U, 1U, 1024U},
+    };
+
+    const auto merged = axk::alteration_internal::merge_extents(existing, added);
+
+    ASSERT_EQ(merged.size(), 3U);
+    EXPECT_EQ(merged[0].cluster_offset, 100U);
+    EXPECT_EQ(merged[0].cluster_count, 2U);
+    EXPECT_EQ(merged[1].cluster_offset, 120U);
+    EXPECT_EQ(merged[1].cluster_count, 1U);
+    EXPECT_EQ(merged[2].cluster_offset, 10U);
+    EXPECT_EQ(merged[2].cluster_count, 2U);
+    EXPECT_EQ(merged[2].byte_count, 2048U);
+}
+
+TEST(Alteration, ContinuationExtentByteCountsCoverTheLogicalDirectoryPayload) {
+    std::array extents{
+        axk::Extent{4684U, 2U, 64U},   axk::Extent{5074U, 1U, 1024U}, axk::Extent{5270U, 1U, 1024U},
+        axk::Extent{5459U, 1U, 1024U}, axk::Extent{5654U, 1U, 1024U}, axk::Extent{5850U, 1U, 1024U},
+    };
+
+    const auto normalized = axk::alteration_internal::normalize_extent_byte_counts(extents, 6464U);
+
+    ASSERT_TRUE(normalized) << normalized.error().message;
+    EXPECT_EQ(extents[0].byte_count, 2048U);
+    EXPECT_EQ(extents[5].byte_count, 320U);
+    EXPECT_EQ(
+        std::ranges::fold_left(
+            extents, 0U, [](std::uint32_t total, const axk::Extent &extent) { return total + extent.byte_count; }),
+        6464U);
 }

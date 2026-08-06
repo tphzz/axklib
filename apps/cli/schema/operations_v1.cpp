@@ -56,6 +56,7 @@ AlterationOutput project_alteration(const AlterationResult &altered) {
             .object_name = operation.object_name,
             .removed_sfs_ids = {},
             .inserted_sfs_ids = {},
+            .placed_sfs_ids = {},
             .freed_clusters = operation.freed_clusters,
             .allocated_clusters = operation.allocated_clusters,
             .audio_import = std::nullopt,
@@ -63,6 +64,8 @@ AlterationOutput project_alteration(const AlterationResult &altered) {
         std::ranges::transform(operation.removed_sfs_ids, std::back_inserter(projected.removed_sfs_ids),
                                [](SfsId id) { return id.value; });
         std::ranges::transform(operation.inserted_sfs_ids, std::back_inserter(projected.inserted_sfs_ids),
+                               [](SfsId id) { return id.value; });
+        std::ranges::transform(operation.placed_sfs_ids, std::back_inserter(projected.placed_sfs_ids),
                                [](SfsId id) { return id.value; });
         if (operation.audio_import) {
             const auto &audio = *operation.audio_import;
@@ -105,6 +108,7 @@ Result<std::string> serialize(const AlterationOutput &output, bool pretty) {
                 {"object_name", operation.object_name},
                 {"removed_sfs_ids", operation.removed_sfs_ids},
                 {"inserted_sfs_ids", operation.inserted_sfs_ids},
+                {"placed_sfs_ids", operation.placed_sfs_ids},
                 {"freed_clusters", operation.freed_clusters},
                 {"allocated_clusters", operation.allocated_clusters},
                 {"audio_import", operation.audio_import ? audio_json(*operation.audio_import) : OrderedJson(nullptr)},

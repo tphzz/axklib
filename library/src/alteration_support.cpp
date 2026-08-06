@@ -238,7 +238,9 @@ Result<void> replace_record_payload(TransactionState &state, MutablePartition &p
     if (payload.size() > capacity) {
         return std::unexpected{transaction_error("record payload growth exceeds its current extent capacity")};
     }
-    if (target->capacity_expanded) {
+    if (target->capacity_expanded || target->extents.size() > 4U) {
+        if (auto normalized = normalize_extent_byte_counts(target->extents, payload.size()); !normalized)
+            return std::unexpected{normalized.error()};
         const ByteReader current_index{target->raw_index};
         const auto tail = current_index.be16(0x46U);
         if (!tail)

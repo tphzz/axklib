@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -5,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <ranges>
 #include <span>
 #include <string>
 #include <vector>
@@ -18,6 +21,7 @@
 #include "axklib/application/write_operations.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
 
 namespace {
@@ -37,6 +41,30 @@ void write_tone(const std::filesystem::path &path) {
     waveform.frame_count = 3;
     waveform.pcm = {std::byte{}, std::byte{}, std::byte{0xe8}, std::byte{0x03}, std::byte{0x18}, std::byte{0xfc}};
     ASSERT_TRUE(axk::write_wav_atomic(path, waveform));
+}
+
+axk::HdsBuildManifest placement_repair_manifest(const std::filesystem::path &audio_path) {
+    axk::VolumeSpec volume;
+    volume.name = "Samples";
+    volume.waveforms.push_back({"wave", "Wave", audio_path, 60U, {}});
+    axk::SampleSpec sample;
+    sample.name = "Old Sample";
+    sample.waveform_id = "wave";
+    sample.root_key = 60U;
+    sample.key_high = 127U;
+    volume.samples.push_back(std::move(sample));
+    return {"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
+}
+
+void patch_index_be32(const std::filesystem::path &path, const axk::IndexRecord &record, std::size_t offset,
+                      std::uint32_t value) {
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    const std::array bytes{static_cast<char>((value >> 24U) & 0xffU), static_cast<char>((value >> 16U) & 0xffU),
+                           static_cast<char>((value >> 8U) & 0xffU), static_cast<char>(value & 0xffU)};
+    image.seekp(static_cast<std::streamoff>(record.record_offset.value + offset));
+    image.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    ASSERT_TRUE(image);
 }
 
 std::vector<std::byte> read_bytes(const std::filesystem::path &path) {
@@ -781,6 +809,155 @@ TEST_F(WriteOperationsTest, SessionAlterationCommitsInPlaceAndRefreshesTheExisti
         context());
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
+}
+
+TEST_F(WriteOperationsTest, SessionVolumePlacementRepairMakesDeletionSafe) {
+    write_tone(root_ / "repair.wav");
+    const auto source = root_ / "placement-repair.hds";
+    ASSERT_TRUE(axk::write_hds_image(placement_repair_manifest(root_ / "repair.wav"), source));
+    auto container = axk::open_image(source);
+    ASSERT_TRUE(container) << container.error().message;
+    const auto sample_directory = std::ranges::find_if(container->partitions().front().records, [](const auto &record) {
+        return record.payload_kind == axk::PayloadKind::directory &&
+               std::ranges::contains(record.directory_entries, "Old Sample", &axk::DirectoryEntry::name);
+    });
+    ASSERT_NE(sample_directory, container->partitions().front().records.end());
+    ASSERT_EQ(sample_directory->directory_entries.size(), 3U);
+    const auto sample_entry =
+        std::ranges::find(sample_directory->directory_entries, "Old Sample", &axk::DirectoryEntry::name);
+    ASSERT_NE(sample_entry, sample_directory->directory_entries.end());
+    const auto sample_sfs_id = axk::SfsId{sample_entry->link_id.value};
+    patch_index_be32(source, *sample_directory, 6U, 64U);
+
+    container = axk::open_image(source);
+    ASSERT_TRUE(container) << container.error().message;
+    const auto before = axk::build_object_catalog(*container);
+    ASSERT_TRUE(before) << before.error().message;
+    const auto missing = std::ranges::find_if(before->objects, [&](const auto &object) {
+        return object.partition.value == 0U && object.sfs_id == sample_sfs_id;
+    });
+    ASSERT_NE(missing, before->objects.end());
+    ASSERT_EQ(missing->placement_resolution, axk::PlacementResolution::missing);
+    const auto payload_before = missing->raw_payload;
+
+    const auto opened = images_->open({"workspace", "placement-repair.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const nlohmann::json request = {{"imageId", opened->image_id},
+                                    {"expectedRevision", opened->revision},
+                                    {"partitionIndex", 0U},
+                                    {"volumeName", "Samples"}};
+    const auto inspected = registry_.invoke("images.volume_deletion.inspect", request, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_FALSE(inspected->at("canDelete").get<bool>());
+    EXPECT_EQ(inspected->at("crossingRelationshipCount"), 1U);
+    ASSERT_EQ(inspected->at("blockers").size(), 1U);
+
+    auto absent_volume_request = request;
+    absent_volume_request["volumeName"] = "Absent";
+    const auto absent_volume = registry_.invoke("images.volume_deletion.inspect", absent_volume_request, context());
+    ASSERT_FALSE(absent_volume);
+    EXPECT_EQ(absent_volume.error().code, "volume_scope_invalid");
+
+    const nlohmann::json placement_request = {
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"scope", {{"kind", "VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Samples"}}},
+    };
+    const auto placement = registry_.invoke("images.placement.inspect", placement_request, context());
+    ASSERT_TRUE(placement) << placement.error().message;
+    EXPECT_TRUE(placement->at("canRepair").get<bool>());
+    EXPECT_EQ(placement->at("repairObjectCount"), 1U);
+    EXPECT_EQ(placement->at("blockedObjectCount"), 0U);
+    ASSERT_EQ(placement->at("destinations").size(), 1U);
+    EXPECT_EQ(placement->at("destinations").front().at("volumeName"), "Samples");
+    EXPECT_FALSE(placement->at("destinations").front().at("createsVolume").get<bool>());
+    EXPECT_EQ(placement->at("destinations").front().at("objectTypeCounts").at("SBNK"), 1U);
+
+    const auto repaired = registry_.invoke("images.placement.repair", placement_request, context());
+    ASSERT_TRUE(repaired) << repaired.error().message;
+    EXPECT_EQ(repaired->at("revision"), 2U);
+    ASSERT_EQ(repaired->at("operations").size(), 1U);
+    EXPECT_EQ(repaired->at("operations").front().at("type"), "REPAIR_OBJECT_PLACEMENTS");
+    EXPECT_EQ(repaired->at("operations").front().at("placedSfsIds"), nlohmann::json::array({sample_sfs_id.value}));
+
+    auto follow_up_request = request;
+    follow_up_request["expectedRevision"] = 2U;
+    const auto follow_up = registry_.invoke("images.volume_deletion.inspect", follow_up_request, context());
+    ASSERT_TRUE(follow_up) << follow_up.error().message;
+    EXPECT_TRUE(follow_up->at("canDelete").get<bool>());
+    EXPECT_EQ(follow_up->at("crossingRelationshipCount"), 0U);
+    EXPECT_TRUE(follow_up->at("blockers").empty());
+
+    const auto after_container = axk::open_image(source);
+    ASSERT_TRUE(after_container) << after_container.error().message;
+    const auto after = axk::build_object_catalog(*after_container);
+    ASSERT_TRUE(after) << after.error().message;
+    const auto placed = std::ranges::find_if(after->objects, [&](const auto &object) {
+        return object.partition.value == 0U && object.sfs_id == sample_sfs_id;
+    });
+    ASSERT_NE(placed, after->objects.end());
+    ASSERT_TRUE(placed->placement);
+    EXPECT_EQ(placed->placement_resolution, axk::PlacementResolution::exact);
+    EXPECT_EQ(placed->placement->volume_name, "Samples");
+    EXPECT_EQ(placed->raw_payload, payload_before);
+}
+
+TEST_F(WriteOperationsTest, SessionPartitionPlacementRepairRecoversOwnerlessWaveDataIntoNewVolume) {
+    write_tone(root_ / "ownerless.wav");
+    const auto source = root_ / "partition-placement-repair.hds";
+    auto source_manifest = placement_repair_manifest(root_ / "ownerless.wav");
+    source_manifest.partitions.front().volumes.front().samples.clear();
+    ASSERT_TRUE(axk::write_hds_image(source_manifest, source));
+    auto container = axk::open_image(source);
+    ASSERT_TRUE(container) << container.error().message;
+    const auto waveform_directory =
+        std::ranges::find_if(container->partitions().front().records, [](const auto &record) {
+            return record.payload_kind == axk::PayloadKind::directory &&
+                   std::ranges::contains(record.directory_entries, "Wave", &axk::DirectoryEntry::name);
+        });
+    ASSERT_NE(waveform_directory, container->partitions().front().records.end());
+    const auto waveform_entry =
+        std::ranges::find(waveform_directory->directory_entries, "Wave", &axk::DirectoryEntry::name);
+    ASSERT_NE(waveform_entry, waveform_directory->directory_entries.end());
+    const auto waveform_sfs_id = axk::SfsId{waveform_entry->link_id.value};
+    patch_index_be32(source, *waveform_directory, 6U, 64U);
+
+    const auto opened = images_->open({"workspace", "partition-placement-repair.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const nlohmann::json request = {
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"scope", {{"kind", "PARTITION"}, {"partitionIndex", 0U}}},
+    };
+    const auto inspected = registry_.invoke("images.placement.inspect", request, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_TRUE(inspected->at("canRepair").get<bool>());
+    EXPECT_EQ(inspected->at("repairObjectCount"), 1U);
+    EXPECT_EQ(inspected->at("recoveryVolumeName"), "Recovered");
+    ASSERT_EQ(inspected->at("destinations").size(), 1U);
+    EXPECT_TRUE(inspected->at("destinations").front().at("createsVolume").get<bool>());
+    EXPECT_EQ(inspected->at("destinations").front().at("objectTypeCounts").at("SMPL"), 1U);
+
+    const auto repaired = registry_.invoke("images.placement.repair", request, context());
+    ASSERT_TRUE(repaired) << repaired.error().message;
+    EXPECT_EQ(repaired->at("revision"), 2U);
+    ASSERT_EQ(repaired->at("operations").size(), 2U);
+    EXPECT_EQ(repaired->at("operations").front().at("type"), "INSERT_VOLUME");
+    EXPECT_EQ(repaired->at("operations").back().at("type"), "REPAIR_OBJECT_PLACEMENTS");
+    EXPECT_EQ(repaired->at("operations").back().at("placedSfsIds"), nlohmann::json::array({waveform_sfs_id.value}));
+
+    container = axk::open_image(source);
+    ASSERT_TRUE(container) << container.error().message;
+    const auto after = axk::build_object_catalog(*container);
+    ASSERT_TRUE(after) << after.error().message;
+    EXPECT_TRUE(after->issues.empty());
+    const auto placed = std::ranges::find_if(after->objects, [&](const auto &object) {
+        return object.partition.value == 0U && object.sfs_id == waveform_sfs_id;
+    });
+    ASSERT_NE(placed, after->objects.end());
+    ASSERT_TRUE(placed->placement);
+    EXPECT_EQ(placed->placement_resolution, axk::PlacementResolution::exact);
+    EXPECT_EQ(placed->placement->volume_name, "Recovered");
 }
 
 TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedClosure) {

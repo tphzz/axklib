@@ -151,21 +151,34 @@ Result<std::vector<std::uint32_t>> allocate_list_clusters(MutablePartition &part
 }
 
 std::vector<Extent> merge_extents(std::span<const Extent> existing, std::span<const Extent> added) {
-    std::vector<Extent> all;
-    all.reserve(existing.size() + added.size());
-    all.insert(all.end(), existing.begin(), existing.end());
-    all.insert(all.end(), added.begin(), added.end());
-    std::ranges::sort(all, {}, &Extent::cluster_offset);
     std::vector<Extent> result;
-    for (const auto &extent : all) {
+    result.reserve(existing.size() + added.size());
+    const auto append = [&result](const Extent &extent) {
         if (!result.empty() && result.back().cluster_offset + result.back().cluster_count == extent.cluster_offset) {
             result.back().cluster_count += extent.cluster_count;
             result.back().byte_count += extent.byte_count;
         } else {
             result.push_back(extent);
         }
-    }
+    };
+    std::ranges::for_each(existing, append);
+    std::ranges::for_each(added, append);
     return result;
+}
+
+Result<void> normalize_extent_byte_counts(std::span<Extent> extents, std::size_t payload_size) {
+    std::uint64_t remaining = payload_size;
+    for (auto &extent : extents) {
+        const auto capacity = static_cast<std::uint64_t>(extent.cluster_count) * 1024U;
+        const auto byte_count = std::min(remaining == 0U ? capacity : remaining, capacity);
+        if (byte_count == 0U || byte_count > std::numeric_limits<std::uint32_t>::max())
+            return std::unexpected{transaction_error("SFS extent byte count is outside its encoded range")};
+        extent.byte_count = static_cast<std::uint32_t>(byte_count);
+        remaining = remaining > byte_count ? remaining - byte_count : 0U;
+    }
+    if (remaining != 0U)
+        return std::unexpected{transaction_error("record payload exceeds its allocated extent capacity")};
+    return {};
 }
 
 Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(TransactionState &state,
@@ -211,6 +224,8 @@ Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(Transact
     if (!added)
         return std::unexpected{added.error()};
     auto extents = merge_extents(target->extents, *added);
+    if (auto normalized = normalize_extent_byte_counts(extents, static_cast<std::size_t>(required_size)); !normalized)
+        return std::unexpected{normalized.error()};
     constexpr std::size_t extents_per_list_cluster = (1024U - 12U) / 12U;
     const auto required_lists =
         extents.size() <= 4U ? 0U : (extents.size() + extents_per_list_cluster - 1U) / extents_per_list_cluster;

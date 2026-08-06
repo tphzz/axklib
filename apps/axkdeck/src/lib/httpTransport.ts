@@ -42,6 +42,8 @@ import type {
     PackageInspection,
     PartitionMutation,
     PlanSummary,
+    PlacementRepairInspection,
+    PlacementRepairScope,
     PreviewEnvelope,
     RelationshipPage,
     RelationshipPageFilter,
@@ -50,6 +52,7 @@ import type {
     SequenceSystemExclusivePolicy,
     MidiInspection,
     VolumeMutation,
+    VolumeDeletionInspection,
 } from './transport';
 
 import {
@@ -89,8 +92,6 @@ import {
     volumeMutationOperation,
 } from './httpTransportWire';
 
-const ALTERATION_MANIFEST_SCHEMA_VERSION = '1.0';
-
 type HttpImageTransportConnection = AxklibApiConnection;
 
 export class HttpImageTransport implements ImageTransport {
@@ -104,8 +105,8 @@ export class HttpImageTransport implements ImageTransport {
 
     constructor(connection: HttpImageTransportConnection) {
         this.client = new AxklibHttpApiClient(connection);
-        this.imageSessions = new HttpImageSessions(this.client);
         this.jobs = new HttpJobController(this.client);
+        this.imageSessions = new HttpImageSessions(this.client, this.jobs);
         this.packages = new HttpPackageOperations(this.client, this.jobs, this.imageSessions);
     }
 
@@ -373,11 +374,11 @@ export class HttpImageTransport implements ImageTransport {
     }
 
     async startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState> {
-        return this.startImageMutation(sessionId, volumeMutationOperation(mutation));
+        return this.imageSessions.startMutation(sessionId, volumeMutationOperation(mutation));
     }
 
     async startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState> {
-        return this.startImageMutation(sessionId, {
+        return this.imageSessions.startMutation(sessionId, {
             id: 'partition-rename',
             type: 'rename_partition',
             partition_index: mutation.partitionIndex,
@@ -387,7 +388,31 @@ export class HttpImageTransport implements ImageTransport {
     }
 
     async startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState> {
-        return this.startImageMutation(sessionId, objectRenameOperation(mutation));
+        return this.imageSessions.startMutation(sessionId, objectRenameOperation(mutation));
+    }
+
+    inspectVolumeDeletion(
+        sessionId: number,
+        partitionIndex: number,
+        volumeName: string,
+    ): Promise<VolumeDeletionInspection> {
+        return this.imageSessions.inspectVolumeDeletion(sessionId, partitionIndex, volumeName);
+    }
+
+    inspectPlacement(
+        sessionId: number,
+        scope: PlacementRepairScope,
+        recoveryVolumeName?: string,
+    ): Promise<PlacementRepairInspection> {
+        return this.imageSessions.inspectPlacement(sessionId, scope, recoveryVolumeName);
+    }
+
+    startPlacementRepair(
+        sessionId: number,
+        scope: PlacementRepairScope,
+        recoveryVolumeName?: string,
+    ): Promise<JobState> {
+        return this.imageSessions.startPlacementRepair(sessionId, scope, recoveryVolumeName);
     }
 
     async inspectObjectDeletion(
@@ -435,27 +460,6 @@ export class HttpImageTransport implements ImageTransport {
         );
         if (!this.jobs.isJob(result)) throw new Error('images.delete did not return a job');
         return this.jobs.map(result);
-    }
-
-    private async startImageMutation(sessionId: number, operation: Record<string, unknown>): Promise<JobState> {
-        const session = this.imageSessions.get(sessionId);
-        const job = await this.client.invoke<never>(
-            'images.alter',
-            {
-                imageId: session.remoteId,
-                expectedRevision: session.revision,
-                manifest: {
-                    inline: {
-                        schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,
-                        operations: [operation],
-                    },
-                },
-                inputBindings: [],
-            },
-            { idempotencyKey: randomIdempotencyKey() },
-        );
-        if (!this.jobs.isJob(job)) throw new Error('images.alter did not return a job');
-        return this.jobs.map(job);
     }
 
     preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {
