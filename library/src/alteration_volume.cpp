@@ -302,6 +302,8 @@ Result<void> append_directory_entry(TransactionState &state, MutablePartition &p
     std::fill(entry.begin() + 8U, entry.begin() + 24U, std::byte{' '});
     std::ranges::transform(name, entry.begin() + 8U, [](char value) { return static_cast<std::byte>(value); });
     payload->insert(payload->end(), entry.begin(), entry.end());
+    if (auto grown = grow_directory_capacity(state, partition, directory, payload->size(), cancellation); !grown)
+        return std::unexpected{grown.error()};
     return replace_record_payload(state, partition, directory, std::move(*payload), cancellation);
 }
 

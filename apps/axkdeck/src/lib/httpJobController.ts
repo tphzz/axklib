@@ -1,5 +1,6 @@
 import type { ApiJobEvent, ApiJobSnapshot, EventConnection } from './httpApiClient';
 import type { AxklibHttpApiClient } from './httpApiClient';
+import { AxklibApiError } from './httpErrors';
 import type { JobState } from './transport';
 
 const maximumRetainedTerminalJobs = 128;
@@ -98,9 +99,23 @@ export class HttpJobController {
                 const mapped = this.mapEvent(event, jobId);
                 onUpdate(mapped);
             };
+            const readSnapshot = async (): Promise<void> => {
+                const snapshot = await this.client.request<ApiJobSnapshot>(
+                    'GET',
+                    `/jobs/${encodeURIComponent(remoteId)}`,
+                );
+                publishSnapshot(snapshot);
+            };
             const reconcile = async (): Promise<void> => {
                 if (settled) return;
-                const replay = await this.client.replayJobEvents(remoteId, afterSequence);
+                let replay: { events: ApiJobEvent[] };
+                try {
+                    replay = await this.client.replayJobEvents(remoteId, afterSequence);
+                } catch (reason) {
+                    if (!(reason instanceof AxklibApiError) || reason.code !== 'job_event_replay_expired') throw reason;
+                    await readSnapshot();
+                    return;
+                }
                 for (const event of replay.events) {
                     if (event.sequence <= afterSequence) continue;
                     if (event.sequence !== afterSequence + 1) {
@@ -108,11 +123,7 @@ export class HttpJobController {
                     }
                     publishEvent(event);
                 }
-                const snapshot = await this.client.request<ApiJobSnapshot>(
-                    'GET',
-                    `/jobs/${encodeURIComponent(remoteId)}`,
-                );
-                publishSnapshot(snapshot);
+                await readSnapshot();
             };
             const enqueue = (task: () => Promise<void>): void => {
                 work = work.then(task).catch(fail);
@@ -140,13 +151,7 @@ export class HttpJobController {
                 }
                 publishEvent(event);
                 if (this.terminalState(event.state)) {
-                    enqueue(async () => {
-                        const snapshot = await this.client.request<ApiJobSnapshot>(
-                            'GET',
-                            `/jobs/${encodeURIComponent(remoteId)}`,
-                        );
-                        publishSnapshot(snapshot);
-                    });
+                    enqueue(readSnapshot);
                 }
             };
             const connect = async (): Promise<void> => {

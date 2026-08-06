@@ -1,5 +1,6 @@
 import { planDirectPlayback } from './directPlaybackSchedule';
 import type { PlaybackTimeline } from './playbackTimeline';
+import { decodeRiffWavePcm } from './riffWavePcm';
 
 export type AudioImportAuditionStatus = 'idle' | 'preparing' | 'playing' | 'failed';
 
@@ -87,7 +88,8 @@ export class AudioImportAuditionController {
     private async loadBuffer(context: AudioContext, request: AudioImportAuditionRequest): Promise<AudioBuffer> {
         if (this.cached?.rowId === request.rowId) return this.cached.buffer;
         const blob = await request.loadBlob();
-        const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+        const content = await blob.arrayBuffer();
+        const buffer = decodeRiffWavePcm(context, content) ?? (await context.decodeAudioData(content));
         this.cached = { rowId: request.rowId, buffer };
         return buffer;
     }

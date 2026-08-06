@@ -1420,6 +1420,52 @@ TEST(Alteration, QueuedWaveformAndSampleInsertionUsesEvolvingState) {
     std::filesystem::remove_all(root, error);
 }
 
+TEST(Alteration, GrowsCategoryDirectoryWhenQueuedWaveDataExceedsItsInitialCapacity) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-wave-directory-growth";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    axk::HdsBuildManifest source_spec{"1.0", 4U * 1024U * 1024U, {}};
+    axk::VolumeSpec volume;
+    volume.name = "Queue";
+    source_spec.partitions.push_back({"hd1", {std::move(volume)}});
+    ASSERT_TRUE(axk::write_hds_image(source_spec, source));
+
+    axk::AlterationManifest manifest{"1.0", {}};
+    constexpr std::size_t waveform_count = 63U;
+    manifest.operations.reserve(waveform_count);
+    for (std::size_t index = 0U; index < waveform_count; ++index) {
+        const auto name = std::format("Wave {:02}", index);
+        axk::InsertWaveformSpec waveform;
+        waveform.path = audio;
+        waveform.waveform_names = {name};
+        waveform.root_key = 60U;
+        manifest.operations.push_back(
+            {std::format("wave-{:02}", index),
+             axk::InsertWaveformOperation{axk::PartitionIndex{0U}, "Queue", std::move(waveform)}});
+    }
+
+    const auto applied = axk::alter_hds(source, manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+    ASSERT_EQ(applied->operations.size(), waveform_count);
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto &records = reopened->partitions().front().records;
+    const auto directory = std::ranges::find_if(records, [](const auto &record) {
+        return record.payload_kind == axk::PayloadKind::directory &&
+               std::ranges::any_of(record.directory_entries, [](const auto &entry) { return entry.name == "Wave 62"; });
+    });
+    ASSERT_NE(directory, records.end());
+    EXPECT_EQ(directory->directory_entries.size(), waveform_count + 2U);
+    EXPECT_EQ(directory->data_size, (waveform_count + 2U) * 32U);
+    EXPECT_GE(directory->cluster_count, 3U);
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(Alteration, WaveformDeletionRequiresPriorSampleDeletion) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-wave-delete";
     const auto audio = root / "tone.wav";
