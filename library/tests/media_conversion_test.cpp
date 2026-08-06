@@ -619,6 +619,62 @@ TEST(MediaConversion, ExportsExternalMultiFloppyArtifactWhenRequested) {
     EXPECT_EQ(reopened_objects->size(), written->object_count);
 }
 
+TEST(MediaConversion, RewritesExternalCarrierControlWithExactObjectPayloadsWhenRequested) {
+    const auto *source_value = std::getenv("AXK_MULTIFLOPPY_CARRIER_CONTROL");
+    const auto *output_value = std::getenv("AXK_MULTIFLOPPY_ARTIFACT_OUTPUT");
+    if (source_value == nullptr || *source_value == '\0' || output_value == nullptr || *output_value == '\0')
+        GTEST_SKIP() << "set AXK_MULTIFLOPPY_CARRIER_CONTROL and AXK_MULTIFLOPPY_ARTIFACT_OUTPUT";
+    const std::filesystem::path source_path{source_value};
+    const std::filesystem::path output_path{output_value};
+    const auto source = axk::open_media(source_path);
+    ASSERT_TRUE(source) << source.error().message;
+    const auto source_objects = source->objects();
+    ASSERT_TRUE(source_objects) << source_objects.error().message;
+    ASSERT_EQ(source_objects->size(), 7U);
+
+    axk::detail::PreparedMediaImage image;
+    for (const auto &object : *source_objects)
+        image.objects.emplace_back(object.decoded.header.type, object.decoded.header.name, object.raw_payload);
+    const auto object_index = [&](axk::ObjectType type, std::string_view name) {
+        const auto found = std::ranges::find_if(
+            image.objects, [&](const auto &object) { return object.type == type && object.name == name; });
+        return static_cast<std::size_t>(std::distance(image.objects.begin(), found));
+    };
+    const auto filler_a = object_index(axk::ObjectType::sbnk, "Filler C3 A");
+    const auto filler_b = object_index(axk::ObjectType::sbnk, "Filler C3 B");
+    const auto span_sample = object_index(axk::ObjectType::sbnk, "Span C3 01-03");
+    const auto fill_wave = object_index(axk::ObjectType::smpl, "Fill Wave C3");
+    const auto span_wave = object_index(axk::ObjectType::smpl, "Span Wave C3");
+    ASSERT_LT(filler_a, image.objects.size());
+    ASSERT_LT(filler_b, image.objects.size());
+    ASSERT_LT(span_sample, image.objects.size());
+    ASSERT_LT(fill_wave, image.objects.size());
+    ASSERT_LT(span_wave, image.objects.size());
+    image.sample_wave_dependencies = {{filler_a, fill_wave}, {filler_b, fill_wave}, {span_sample, span_wave}};
+
+    const auto plan = axk::detail::plan_floppy_disk_set(image, "4F SPAN", {});
+    std::string source_order;
+    for (const auto &object : image.objects)
+        source_order += std::format("{}:{}, ", std::to_underlying(object.type), object.name);
+    ASSERT_TRUE(plan) << plan.error().message << " source order: " << source_order;
+    ASSERT_EQ(plan->disks.size(), 4U);
+    EXPECT_EQ(plan->disks[0].marker_name, "A3000F.SYM");
+    EXPECT_EQ(plan->disks[1].marker_name, "A3000F.SYM");
+    EXPECT_EQ(plan->disks[2].marker_name, "A3000F.SYM");
+    EXPECT_EQ(plan->disks[3].marker_name, "A3000E.SYM");
+    ASSERT_FALSE(plan->disks[0].segments.empty());
+    ASSERT_FALSE(plan->disks[1].segments.empty());
+    EXPECT_EQ(plan->disks[0].segments.back().object_index, fill_wave);
+    EXPECT_EQ(plan->disks[1].segments.front().object_index, fill_wave);
+    EXPECT_EQ(plan->disks[1].segments.front().payload_bytes, 512U);
+
+    const auto written = axk::detail::write_floppy_disk_set(image, *plan, output_path, true, {});
+    ASSERT_TRUE(written) << written.error().message;
+    const auto reopened = axk::open_media(output_path);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    EXPECT_EQ(payloads(*reopened), payloads(*source));
+}
+
 TEST(MediaConversion, WritesMultiSectorProgramAndSampleDirectories) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-media-conversion-multisector";
     const auto audio_path = root / "source.wav";
@@ -654,13 +710,14 @@ TEST(MediaConversion, WritesMultiSectorProgramAndSampleDirectories) {
     floppy_request.volume_directory_id = only_volume_directory(*source_media);
     const auto floppy_plan = axk::plan_media_conversion(open_reader(source_path), source_path, floppy_request);
     ASSERT_TRUE(floppy_plan) << floppy_plan.error().message;
-    EXPECT_TRUE(floppy_plan->can_export);
-    EXPECT_FALSE(std::ranges::any_of(floppy_plan->issues, &axk::MediaConversionIssue::blocking));
-    EXPECT_TRUE(std::ranges::contains(floppy_plan->issues,
-                                      std::string{"MEDIA_CONVERSION_MULTI_FLOPPY_HARDWARE_VALIDATION_PENDING"},
-                                      &axk::MediaConversionIssue::code));
-    EXPECT_EQ(floppy_plan->artifact_kind, axk::MediaConversionArtifactKind::floppy_disk_set);
-    EXPECT_GT(floppy_plan->floppy_image_count, 1U);
+    EXPECT_FALSE(floppy_plan->can_export);
+    const auto unsupported =
+        std::ranges::find(floppy_plan->issues, std::string{"MEDIA_CONVERSION_FLOPPY_LAYOUT_UNSUPPORTED"},
+                          &axk::MediaConversionIssue::code);
+    ASSERT_NE(unsupported, floppy_plan->issues.end());
+    EXPECT_TRUE(unsupported->blocking);
+    EXPECT_EQ(unsupported->message,
+              "generated multi-floppy sets require a complete terminal Wave Data object at every rollover");
 
     const auto written = axk::write_media_conversion(open_reader(source_path), source_path, request, iso_path);
     ASSERT_TRUE(written) << written.error().message;
@@ -787,9 +844,7 @@ TEST(MediaConversion, RejectsAggregateIsoSectorOverflowWithoutAllocatingPayloads
 
 TEST(MediaConversion, PlansEveryRequiredFloppyBeforeTheThirtyTwoImageAdmissionLimitIsApplied) {
     axk::detail::PreparedMediaImage image;
-    const auto payload = sparse_smpl(1'420'000U);
-    for (std::size_t index = 1U; index <= 33U; ++index)
-        image.objects.emplace_back(axk::ObjectType::smpl, std::format("Wave {:02}", index), payload);
+    image.objects.emplace_back(axk::ObjectType::smpl, "Wave", sparse_smpl(47'000'000U));
 
     const auto plan = axk::detail::plan_floppy_disk_set(image, "Disk set", {});
     ASSERT_TRUE(plan) << plan.error().message;
@@ -798,8 +853,8 @@ TEST(MediaConversion, PlansEveryRequiredFloppyBeforeTheThirtyTwoImageAdmissionLi
     EXPECT_EQ(plan->disks.back().name, "DISK SET      33");
 }
 
-TEST(MediaConversion, UsesOrdinaryMarkersWhenWholeObjectsMoveToTheNextMember) {
-    const auto output_path = std::filesystem::temp_directory_path() / "axklib-media-conversion-ordinary-members.zip";
+TEST(MediaConversion, SplitsTerminalWholeWaveDataToChainWholeObjects) {
+    const auto output_path = std::filesystem::temp_directory_path() / "axklib-media-conversion-chained-members.zip";
     std::error_code error;
     std::filesystem::remove(output_path, error);
 
@@ -811,9 +866,25 @@ TEST(MediaConversion, UsesOrdinaryMarkersWhenWholeObjectsMoveToTheNextMember) {
     const auto plan = axk::detail::plan_floppy_disk_set(image, "Three disk", {});
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_EQ(plan->disks.size(), 3U);
-    EXPECT_EQ(plan->disks[0].marker_name, "A3000.SYM");
-    EXPECT_EQ(plan->disks[1].marker_name, "A3000.SYM");
+    EXPECT_EQ(plan->disks[0].marker_name, "A3000F.SYM");
+    EXPECT_EQ(plan->disks[1].marker_name, "A3000F.SYM");
     EXPECT_EQ(plan->disks[2].marker_name, "A3000E.SYM");
+    ASSERT_EQ(plan->disks[0].segments.size(), 1U);
+    ASSERT_EQ(plan->disks[1].segments.size(), 2U);
+    ASSERT_EQ(plan->disks[2].segments.size(), 2U);
+    for (std::size_t boundary = 0U; boundary < 2U; ++boundary) {
+        const auto &left = plan->disks[boundary].segments.back();
+        const auto &right = plan->disks[boundary + 1U].segments.front();
+        EXPECT_TRUE(left.split);
+        EXPECT_TRUE(right.split);
+        EXPECT_EQ(left.object_index, boundary);
+        EXPECT_EQ(right.object_index, boundary);
+        EXPECT_EQ(left.payload_bytes, 1'000'000U - 0xacU - 512U);
+        EXPECT_EQ(right.payload_offset, left.payload_bytes);
+        EXPECT_EQ(right.payload_bytes, 512U);
+        EXPECT_EQ(left.catalog_segment_ordinal, 1U);
+        EXPECT_EQ(right.catalog_segment_ordinal, 2U);
+    }
 
     const auto written = axk::detail::write_floppy_disk_set(image, *plan, output_path, false, {});
     ASSERT_TRUE(written) << written.error().message;
@@ -831,7 +902,7 @@ TEST(MediaConversion, UsesOrdinaryMarkersWhenWholeObjectsMoveToTheNextMember) {
     const auto catalog = axk::detail::decode_yamaha_floppy_catalog(*catalog_bytes);
     ASSERT_TRUE(catalog) << catalog.error().message;
     const auto marker =
-        std::ranges::find(catalog->files, R"(\A3000.SYM)", &axk::YamahaFloppyCatalogEntry::logical_path);
+        std::ranges::find(catalog->files, R"(\A3000F.SYM)", &axk::YamahaFloppyCatalogEntry::logical_path);
     ASSERT_NE(marker, catalog->files.end());
     EXPECT_EQ(marker->slot, plan->disks[0].marker_slot);
 }
@@ -849,6 +920,25 @@ TEST(MediaConversion, UsesFileContinuationMarkerWhenWaveDataSpansMembers) {
     EXPECT_TRUE(plan->disks[1].segments.front().split);
     EXPECT_EQ(plan->disks[0].marker_name, "A3000F.SYM");
     EXPECT_EQ(plan->disks[1].marker_name, "A3000E.SYM");
+}
+
+TEST(MediaConversion, RejectsAnOrdinaryMarkerAtPublicationTime) {
+    const auto output_path = std::filesystem::temp_directory_path() / "axklib-media-conversion-ordinary-marker.zip";
+    std::error_code error;
+    std::filesystem::remove(output_path, error);
+
+    axk::detail::PreparedMediaImage image;
+    image.objects.emplace_back(axk::ObjectType::smpl, "Split Wave", sparse_smpl(2'000'000U));
+    auto plan = axk::detail::plan_floppy_disk_set(image, "Split wave", {});
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->disks.size(), 2U);
+    plan->disks.front().marker_name = "A3000.SYM";
+
+    const auto written = axk::detail::write_floppy_disk_set(image, *plan, output_path, false, {});
+    ASSERT_FALSE(written);
+    EXPECT_EQ(written.error().code, axk::ErrorCode::unsupported_profile);
+    EXPECT_EQ(written.error().message,
+              "generated multi-floppy sets require a Wave Data continuation at every nonfinal boundary");
 }
 
 TEST(MediaConversion, UsesSegmentLocalSuffixesWhenALaterWaveDataSplitStartsOnMemberTwo) {
@@ -993,7 +1083,7 @@ TEST(MediaConversion, EmitsSharedWaveDataOnlyAtItsFirstSampleUse) {
     image.objects.emplace_back(axk::ObjectType::sbnk, "Sample 01", std::vector<std::byte>(392U));
     image.objects.emplace_back(axk::ObjectType::sbnk, "Sample 02", std::vector<std::byte>(392U));
     image.objects.emplace_back(axk::ObjectType::smpl, "Shared Wave", sparse_smpl(900'000U));
-    image.objects.emplace_back(axk::ObjectType::smpl, "Unreferenced", sparse_smpl(900'000U));
+    image.objects.emplace_back(axk::ObjectType::smpl, "Unreferenced", sparse_smpl(1'600'000U));
     image.sample_wave_dependencies = {{2U, 4U}, {3U, 4U}};
 
     const auto plan = axk::detail::plan_floppy_disk_set(image, "Shared", {});
@@ -1008,40 +1098,55 @@ TEST(MediaConversion, EmitsSharedWaveDataOnlyAtItsFirstSampleUse) {
                 order.push_back(segment.object_index);
         }
     }
-    EXPECT_EQ(order, (std::vector<std::size_t>{0U, 2U, 4U, 3U, 5U, 1U}));
+    EXPECT_EQ(order, (std::vector<std::size_t>{0U, 2U, 3U, 4U, 5U, 1U}));
     EXPECT_EQ(shared_segments, 1U);
 }
 
-TEST(MediaConversion, DoesNotInventAnUnrelatedWaveDataBoundaryCarrier) {
+TEST(MediaConversion, UsesTerminalWholeWaveDataAsAnExactBoundaryCarrier) {
     axk::detail::PreparedMediaImage image;
     image.objects.emplace_back(axk::ObjectType::smpl, "Full Disk", sparse_smpl(1'447'424U));
     image.objects.emplace_back(axk::ObjectType::smpl, "Next Disk", sparse_smpl(100'000U));
 
-    const auto plan = axk::detail::plan_floppy_disk_set(image, "No carrier", {});
+    const auto plan = axk::detail::plan_floppy_disk_set(image, "Carrier", {});
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_EQ(plan->disks.size(), 2U);
     ASSERT_EQ(plan->disks[0].segments.size(), 1U);
-    ASSERT_EQ(plan->disks[1].segments.size(), 1U);
+    ASSERT_EQ(plan->disks[1].segments.size(), 2U);
     EXPECT_EQ(plan->disks[0].segments.front().object_index, 0U);
-    EXPECT_EQ(plan->disks[1].segments.front().object_index, 1U);
-    EXPECT_FALSE(plan->disks[0].segments.front().split);
-    EXPECT_FALSE(plan->disks[1].segments.front().split);
-    EXPECT_EQ(plan->disks[0].segments.front().catalog_segment_ordinal, 0U);
-    EXPECT_EQ(plan->disks[1].segments.front().catalog_segment_ordinal, 0U);
+    EXPECT_EQ(plan->disks[1].segments.front().object_index, 0U);
+    EXPECT_EQ(plan->disks[1].segments.back().object_index, 1U);
+    EXPECT_TRUE(plan->disks[0].segments.front().split);
+    EXPECT_TRUE(plan->disks[1].segments.front().split);
+    EXPECT_FALSE(plan->disks[1].segments.back().split);
+    EXPECT_EQ(plan->disks[0].segments.front().payload_bytes, 1'447'424U - 0xacU - 512U);
+    EXPECT_EQ(plan->disks[1].segments.front().payload_offset, 1'447'424U - 0xacU - 512U);
+    EXPECT_EQ(plan->disks[1].segments.front().payload_bytes, 512U);
+    EXPECT_EQ(plan->disks[0].marker_name, "A3000F.SYM");
+    EXPECT_EQ(plan->disks[1].marker_name, "A3000E.SYM");
 }
 
-TEST(MediaConversion, PlacesNonWaveObjectsOnLaterMembersWhenCapacityRequiresIt) {
+TEST(MediaConversion, RejectsAnOrdinaryBoundaryAfterANonWaveObject) {
     axk::detail::PreparedMediaImage image;
     image.objects.emplace_back(axk::ObjectType::prog, "Foundation", std::make_shared<SparseReader>(1'447'424U));
     image.objects.emplace_back(axk::ObjectType::smpl, "Wave", sparse_smpl(900'000U));
 
     const auto plan = axk::detail::plan_floppy_disk_set(image, "Later object", {});
-    ASSERT_TRUE(plan) << plan.error().message;
-    ASSERT_EQ(plan->disks.size(), 2U);
-    ASSERT_EQ(plan->disks[0].segments.size(), 1U);
-    ASSERT_EQ(plan->disks[1].segments.size(), 1U);
-    EXPECT_EQ(plan->disks[0].segments.front().object_index, 0U);
-    EXPECT_EQ(plan->disks[1].segments.front().object_index, 1U);
+    ASSERT_FALSE(plan);
+    EXPECT_EQ(plan.error().code, axk::ErrorCode::unsupported_profile);
+    EXPECT_EQ(plan.error().message,
+              "generated multi-floppy sets require a complete terminal Wave Data object at every rollover");
+}
+
+TEST(MediaConversion, RejectsResplittingACompletedContinuationToCarryAnotherObject) {
+    axk::detail::PreparedMediaImage image;
+    image.objects.emplace_back(axk::ObjectType::smpl, "Split Wave", sparse_smpl(2'000'000U));
+    image.objects.emplace_back(axk::ObjectType::sequ, "Later Sequence", std::make_shared<SparseReader>(1'000'000U));
+
+    const auto plan = axk::detail::plan_floppy_disk_set(image, "No resplit", {});
+    ASSERT_FALSE(plan);
+    EXPECT_EQ(plan.error().code, axk::ErrorCode::unsupported_profile);
+    EXPECT_EQ(plan.error().message,
+              "generated multi-floppy sets require a complete terminal Wave Data object at every rollover");
 }
 
 TEST(MediaConversion, PropagatesCancellationWhilePlanningAFloppyDiskSet) {

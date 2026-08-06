@@ -28,9 +28,9 @@ constexpr std::uint64_t yamaha_catalog_clusters = 20U;
 constexpr std::size_t maximum_single_objects = 222U;
 constexpr std::size_t maximum_member_segments = 221U;
 constexpr std::size_t maximum_floppy_images = 32U;
-constexpr std::string_view ordinary_marker_name = "A3000.SYM";
 constexpr std::string_view continuation_marker_name = "A3000F.SYM";
 constexpr std::string_view final_marker_name = "A3000E.SYM";
+constexpr auto carrier = "generated multi-floppy sets require a complete terminal Wave Data object at every rollover";
 
 struct DiskState {
     FloppyDiskLayout layout;
@@ -44,7 +44,7 @@ struct WaveDataPlan {
 
 struct DependencyPlan {
     std::vector<std::size_t> objects;
-    std::vector<std::optional<std::size_t>> first_sample_by_wave;
+    std::vector<std::optional<std::size_t>> anchor_sample_by_wave;
 };
 
 Error floppy_error(std::string message) {
@@ -116,6 +116,31 @@ Result<void> add_wave_segment(DiskState &disk, const WaveDataPlan &wave, std::ui
     disk.layout.segments.push_back(
         {wave.object_index, *slot, offset, bytes, wave.header.header_size, true, segment_ordinal});
     disk.used_clusters += *clusters;
+    return {};
+}
+
+bool continues_wave_data(const PreparedMediaImage &image, const FloppyDiskLayout &left, const FloppyDiskLayout &right) {
+    if (left.segments.empty() || right.segments.empty())
+        return false;
+    const auto &left_segment = left.segments.back();
+    const auto &right_segment = right.segments.front();
+    return left_segment.split && right_segment.split && left_segment.object_index == right_segment.object_index &&
+           left_segment.object_index < image.objects.size() &&
+           image.objects[left_segment.object_index].type == ObjectType::smpl &&
+           right_segment.payload_offset == left_segment.payload_offset + left_segment.payload_bytes &&
+           right_segment.catalog_segment_ordinal == left_segment.catalog_segment_ordinal + 1U;
+}
+
+Result<void> validate_continuation_markers(const PreparedMediaImage &image, const FloppyDiskSetPlan &plan) {
+    for (std::size_t index = 0U; index + 1U < plan.disks.size(); ++index) {
+        if (plan.disks[index].marker_name != continuation_marker_name ||
+            !continues_wave_data(image, plan.disks[index], plan.disks[index + 1U])) {
+            return std::unexpected{floppy_error(
+                "generated multi-floppy sets require a Wave Data continuation at every nonfinal boundary")};
+        }
+    }
+    if (plan.disks.empty() || plan.disks.back().marker_name != final_marker_name)
+        return std::unexpected{floppy_error("generated multi-floppy sets require a final A3000E.SYM marker")};
     return {};
 }
 
@@ -304,6 +329,7 @@ Result<void> validate_reassembly(const PreparedMediaImage &source,
 
 Result<DependencyPlan> dependency_order(const PreparedMediaImage &image, const CancellationToken &cancellation) {
     std::vector<std::vector<std::size_t>> wave_data_by_sample(image.objects.size());
+    std::vector<std::size_t> remaining_sample_uses(image.objects.size());
     for (const auto &dependency : image.sample_wave_dependencies) {
         if (dependency.sample_object_index >= image.objects.size() ||
             dependency.wave_data_object_index >= image.objects.size() ||
@@ -312,12 +338,14 @@ Result<DependencyPlan> dependency_order(const PreparedMediaImage &image, const C
             return std::unexpected{floppy_error("prepared Sample-to-Wave Data dependency is invalid")};
         }
         auto &targets = wave_data_by_sample[dependency.sample_object_index];
-        if (!std::ranges::contains(targets, dependency.wave_data_object_index))
+        if (!std::ranges::contains(targets, dependency.wave_data_object_index)) {
             targets.push_back(dependency.wave_data_object_index);
+            ++remaining_sample_uses[dependency.wave_data_object_index];
+        }
     }
 
     DependencyPlan result;
-    result.first_sample_by_wave.resize(image.objects.size());
+    result.anchor_sample_by_wave.resize(image.objects.size());
     std::vector<bool> emitted(image.objects.size());
     const auto emit = [&](std::size_t index) {
         if (!emitted[index]) {
@@ -340,8 +368,11 @@ Result<DependencyPlan> dependency_order(const PreparedMediaImage &image, const C
             continue;
         emit(index);
         for (const auto wave_data : wave_data_by_sample[index]) {
+            --remaining_sample_uses[wave_data];
+            if (remaining_sample_uses[wave_data] != 0U)
+                continue;
             if (!emitted[wave_data])
-                result.first_sample_by_wave[wave_data] = index;
+                result.anchor_sample_by_wave[wave_data] = index;
             emit(wave_data);
         }
     }
@@ -405,6 +436,46 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
         return disk.layout.segments.size() < maximum_member_segments &&
                clusters <= floppy_data_clusters - disk.used_clusters;
     };
+    const auto chain_disk = [&]() -> Result<DiskState *> {
+        auto &disk = disks.back();
+        if (disk.layout.segments.empty() || disk.layout.segments.back().split)
+            return std::unexpected{floppy_error(carrier)};
+        auto &terminal = disk.layout.segments.back();
+        const auto &object = image.objects[terminal.object_index];
+        if (object.type != ObjectType::smpl)
+            return std::unexpected{floppy_error(carrier)};
+        auto header = read_object_header(object, cancellation);
+        if (!header)
+            return std::unexpected{header.error()};
+        if (auto valid = validate_complete_smpl(object, *header); !valid)
+            return std::unexpected{valid.error()};
+        constexpr std::uint64_t tail_bytes = cluster_bytes;
+        if (header->payload_bytes_0x1c <= tail_bytes)
+            return std::unexpected{floppy_error(carrier)};
+        auto whole_clusters = allocated_clusters(object.size());
+        auto left_clusters = allocated_clusters(static_cast<std::uint64_t>(header->header_size) +
+                                                header->payload_bytes_0x1c - tail_bytes);
+        if (!whole_clusters || !left_clusters)
+            return std::unexpected{!whole_clusters ? whole_clusters.error() : left_clusters.error()};
+        terminal = {terminal.object_index,
+                    terminal.catalog_slot,
+                    0U,
+                    header->payload_bytes_0x1c - tail_bytes,
+                    header->header_size,
+                    true,
+                    1U};
+        disk.used_clusters -= *whole_clusters - *left_clusters;
+        const auto object_index = terminal.object_index;
+        const auto left_payload_bytes = terminal.payload_bytes;
+        auto next = add_disk();
+        if (!next)
+            return std::unexpected{next.error()};
+        if (auto added = add_wave_segment(**next, {object_index, *header}, left_payload_bytes, tail_bytes, 2U);
+            !added) {
+            return std::unexpected{added.error()};
+        }
+        return *next;
+    };
 
     constexpr auto empty_member_clusters = floppy_data_clusters - yamaha_catalog_clusters;
     for (std::size_t order_index = 0U; order_index < object_order->objects.size(); ++order_index) {
@@ -421,7 +492,7 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
             continue;
         }
         if (object.type != ObjectType::smpl) {
-            auto next = add_disk();
+            auto next = chain_disk();
             if (!next)
                 return std::unexpected{next.error()};
             if (!fits(**next, *whole_clusters))
@@ -436,23 +507,29 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
         if (auto valid = validate_complete_smpl(object, *header); !valid)
             return std::unexpected{valid.error()};
         const WaveDataPlan wave{object_index, std::move(*header)};
-        const auto first_sample = object_order->first_sample_by_wave[object_index];
+        const auto anchor_sample = object_order->anchor_sample_by_wave[object_index];
         const bool sample_on_current_member =
-            first_sample &&
-            std::ranges::contains(disks.back().layout.segments, *first_sample, &FloppyObjectSegment::object_index);
+            anchor_sample &&
+            std::ranges::contains(disks.back().layout.segments, *anchor_sample, &FloppyObjectSegment::object_index);
         const auto available_bytes = (floppy_data_clusters - disks.back().used_clusters) * cluster_bytes;
-        if (*whole_clusters <= empty_member_clusters && !sample_on_current_member) {
-            auto next = add_disk();
-            if (!next)
-                return std::unexpected{next.error()};
-            if (auto added = add_whole_object(**next, object_index, object.size(), *whole_clusters); !added)
-                return std::unexpected{added.error()};
-            continue;
-        }
         if (sample_on_current_member && (disks.back().layout.segments.size() >= maximum_member_segments ||
                                          available_bytes <= wave.header.header_size)) {
             return std::unexpected{floppy_error(
                 "a Sample and its first-use Wave Data cannot be separated without a continuation segment")};
+        }
+        if (*whole_clusters <= empty_member_clusters && !sample_on_current_member) {
+            auto next = chain_disk();
+            if (!next)
+                return std::unexpected{next.error()};
+            if (fits(**next, *whole_clusters)) {
+                if (auto added = add_whole_object(**next, object_index, object.size(), *whole_clusters); !added)
+                    return std::unexpected{added.error()};
+                continue;
+            }
+        } else if (!sample_on_current_member && (disks.back().layout.segments.size() >= maximum_member_segments ||
+                                                 available_bytes <= wave.header.header_size)) {
+            if (auto next = chain_disk(); !next)
+                return std::unexpected{next.error()};
         }
         std::uint64_t offset{};
         std::uint16_t segment_ordinal{1U};
@@ -498,16 +575,11 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
         }
         if (!marker_slot)
             return std::unexpected{floppy_error("Yamaha floppy member has no free member-marker slot")};
-        const auto continues_file =
-            index + 1U < disks.size() && std::ranges::any_of(disk.layout.segments, [&](const auto &segment) {
-                return segment.split &&
-                       std::ranges::any_of(disks[index + 1U].layout.segments, [&](const auto &next_segment) {
-                           return next_segment.split && next_segment.object_index == segment.object_index;
-                       });
-            });
-        disk.layout.marker_name = std::string{index + 1U == disks.size() ? final_marker_name
-                                              : continues_file           ? continuation_marker_name
-                                                                         : ordinary_marker_name};
+        if (index + 1U < disks.size() && !continues_wave_data(image, disk.layout, disks[index + 1U].layout))
+            return std::unexpected{floppy_error(
+                "generated multi-floppy sets require a Wave Data continuation at every nonfinal boundary")};
+        disk.layout.marker_name =
+            std::string{index + 1U == disks.size() ? final_marker_name : continuation_marker_name};
         disk.layout.marker_slot = *marker_slot;
         result.disks.push_back(std::move(disk.layout));
     }
@@ -523,6 +595,8 @@ Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image,
                                                 const CancellationToken &cancellation) {
     if (plan.disks.size() < 2U || plan.disks.size() > maximum_floppy_images)
         return std::unexpected{floppy_error("multi-floppy output requires between 2 and 32 images")};
+    if (auto valid = validate_continuation_markers(image, plan); !valid)
+        return std::unexpected{valid.error()};
     std::vector<package_internal::ArchiveEntry> entries;
     std::vector<std::string> digests;
     std::vector<std::string> catalog_digests;
