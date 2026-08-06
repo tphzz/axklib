@@ -1416,6 +1416,7 @@ export interface components {
             maximumQueuedJobs: number;
             maximumUploadBytes: number;
             maximumUploadChunkBytes: number;
+            maximumUploads: number;
             maximumUploadTotalBytes: number;
             maximumWebsocketDeliveryBytes: number;
             maximumWebsocketDeliveryEvents: number;

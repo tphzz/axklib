@@ -94,6 +94,37 @@ describe('HttpImageTransport', () => {
         vi.unstubAllGlobals();
     });
 
+    it('combines audio import support with the server upload entry limit', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL) => {
+                const url = new URL(String(input));
+                if (!url.pathname.endsWith('/system/capabilities')) throw new Error(`unexpected request GET ${url}`);
+                return json({
+                    apiVersion: 'v1',
+                    operations: [],
+                    limits: { maximumUploads: 1024 },
+                    audioImport: {
+                        supportedSampleRates: [44_100],
+                        defaultUnsupportedSampleRate: 44_100,
+                        supportedOutputSampleWidthsBits: [16],
+                        sampleWidthPolicy: 'PRESERVE_PCM16_EXPAND_PCM8',
+                    },
+                });
+            }),
+        );
+
+        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+
+        await expect(transport.audioImportCapabilities()).resolves.toEqual({
+            supportedSampleRates: [44_100],
+            defaultUnsupportedSampleRate: 44_100,
+            supportedOutputSampleWidthsBits: [16],
+            sampleWidthPolicy: 'PRESERVE_PCM16_EXPAND_PCM8',
+            maximumUploads: 1024,
+        });
+    });
+
     it('opens and lazily pages one Crow image session without reconstructing the full tree', async () => {
         const requests: string[] = [];
         vi.stubGlobal(

@@ -146,6 +146,7 @@ describe('App panel layout', () => {
             defaultUnsupportedSampleRate: 44_100,
             supportedOutputSampleWidthsBits: [16],
             sampleWidthPolicy: 'PRESERVE_PCM16_EXPAND_PCM8',
+            maximumUploads: 1024,
         });
         mocks.inspectAudio.mockReset().mockResolvedValue({
             sourceFormat: 'WAV',

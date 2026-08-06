@@ -156,9 +156,10 @@ export class HttpImageTransport implements ImageTransport {
     }
 
     async audioImportCapabilities(): Promise<AudioImportCapabilities> {
-        const capabilities = (await this.client.serverCapabilities()).audioImport;
+        const serverCapabilities = await this.client.serverCapabilities();
+        const capabilities = serverCapabilities.audioImport;
         if (!capabilities) throw new Error('The connected server does not publish audio import capabilities');
-        return capabilities;
+        return { ...capabilities, maximumUploads: serverCapabilities.limits.maximumUploads };
     }
 
     async inspectAudio(source: InputFileLocation, targetSampleRate?: number): Promise<AudioSourceInfo> {

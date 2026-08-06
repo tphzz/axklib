@@ -111,6 +111,7 @@ TEST(ServerConfig, ParsesSafeLoopbackConfiguration) {
     EXPECT_EQ(parsed->config.job_retention_seconds, 60U);
     EXPECT_EQ(parsed->config.replay_events_per_job, 23U);
     EXPECT_EQ(parsed->config.maximum_event_tickets, 29U);
+    EXPECT_EQ(parsed->config.maximum_uploads, 1024U);
     EXPECT_EQ(parsed->config.connection_file, root / "axklib-server.json");
     EXPECT_EQ(parsed->config.parent_process_id, 4242U);
     EXPECT_EQ(parsed->config.workspace_store, root / "workspaces.json");
@@ -250,6 +251,17 @@ TEST(ServerConfig, RejectsInvalidJobResourceLimits) {
     auto queue = axk::server::validate_config(config);
     ASSERT_FALSE(queue);
     EXPECT_NE(queue.error().message.find("queued jobs"), std::string::npos);
+}
+
+TEST(ServerConfig, BoundsUploadEntryLimit) {
+    auto config = axk::server::Config{};
+    config.bearer_token = "0123456789abcdef";
+
+    config.maximum_uploads = 10000U;
+    EXPECT_TRUE(axk::server::validate_config(config));
+
+    config.maximum_uploads = 10001U;
+    EXPECT_FALSE(axk::server::validate_config(config));
 }
 
 TEST(ServerConfig, ParsesAndBoundsConcurrentArchiveDownloads) {

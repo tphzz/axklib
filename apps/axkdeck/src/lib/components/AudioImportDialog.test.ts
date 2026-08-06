@@ -11,6 +11,7 @@ const capabilities: AudioImportCapabilities = {
     defaultUnsupportedSampleRate: 44_100,
     supportedOutputSampleWidthsBits: [16],
     sampleWidthPolicy: 'PRESERVE_PCM16_EXPAND_PCM8',
+    maximumUploads: 1024,
 };
 
 function sourceInfo(overrides: Partial<AudioSourceInfo> = {}): AudioSourceInfo {
@@ -66,6 +67,34 @@ function transport(): ImageTransport {
 }
 
 describe('AudioImportDialog', () => {
+    it('rejects an oversized local selection before staging any uploads', async () => {
+        const imageTransport = transport();
+        imageTransport.audioImportCapabilities = vi.fn().mockResolvedValue({
+            ...capabilities,
+            maximumUploads: 2,
+        });
+        render(AudioImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [
+                    new File([new Uint8Array(64)], 'First.wav', { type: 'audio/wav' }),
+                    new File([new Uint8Array(64)], 'Second.wav', { type: 'audio/wav' }),
+                    new File([new Uint8Array(64)], 'Third.wav', { type: 'audio/wav' }),
+                ],
+                target: { partitionIndex: 0, volumeName: 'Bulk' },
+                existingSampleNames: [],
+                existingWaveformNames: [],
+                oncommit: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(
+            await screen.findByText('This server can stage at most 2 local files at once; 3 were selected.'),
+        ).toBeTruthy();
+        expect(imageTransport.uploadClientFile).not.toHaveBeenCalled();
+    });
+
     it('offers the shared workspace and local source choices before staging files', async () => {
         const onchooseworkspace = vi.fn();
         const onchooselocal = vi.fn();

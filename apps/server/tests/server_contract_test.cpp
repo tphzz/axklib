@@ -358,9 +358,9 @@ TEST(ServerContract, EveryHttpResponseCarriesRequestIdAndPaginationIsBounded) {
     EXPECT_EQ(bins->at("schema").at("maximum"), 4096);
 
     const auto &limits = document.at("components").at("schemas").at("ApiLimits");
-    for (const auto name :
-         {"maximumDownloadArchiveDepth", "maximumDownloadArchivePathBytes", "maximumConcurrentArchiveDownloads",
-          "maximumMediaBuildObjectBytes", "maximumMediaBuildPayloadBytes", "maximumMediaBuildOutputBytes"}) {
+    for (const auto name : {"maximumDownloadArchiveDepth", "maximumDownloadArchivePathBytes",
+                            "maximumConcurrentArchiveDownloads", "maximumMediaBuildObjectBytes",
+                            "maximumMediaBuildPayloadBytes", "maximumMediaBuildOutputBytes", "maximumUploads"}) {
         EXPECT_TRUE(std::ranges::contains(limits.at("required"), name)) << name;
     }
 }

@@ -1297,7 +1297,7 @@
       "ApiLimits": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["maximumJsonBytes", "maximumJsonDepth", "maximumJsonNodes", "maximumJsonContainerItems", "maximumJsonStringBytes", "maximumUploadBytes", "maximumUploadTotalBytes", "maximumUploadChunkBytes", "maximumDownloadRangeBytes", "maximumAuditionBundleBytes", "maximumDownloadArchiveBytes", "maximumDownloadArchiveTotalBytes", "maximumDownloadArchiveEntries", "maximumDownloadArchiveDepth", "maximumDownloadArchivePathBytes", "maximumConcurrentArchiveDownloads", "downloadArchiveRetentionSeconds", "maximumWebsocketDeliveryEvents", "maximumWebsocketDeliveryBytes", "maximumQueuedJobs", "maximumImageSessions", "maximumMediaBuildObjectBytes", "maximumMediaBuildPayloadBytes", "maximumMediaBuildOutputBytes", "maximumPageSize"],
+        "required": ["maximumJsonBytes", "maximumJsonDepth", "maximumJsonNodes", "maximumJsonContainerItems", "maximumJsonStringBytes", "maximumUploadBytes", "maximumUploadTotalBytes", "maximumUploads", "maximumUploadChunkBytes", "maximumDownloadRangeBytes", "maximumAuditionBundleBytes", "maximumDownloadArchiveBytes", "maximumDownloadArchiveTotalBytes", "maximumDownloadArchiveEntries", "maximumDownloadArchiveDepth", "maximumDownloadArchivePathBytes", "maximumConcurrentArchiveDownloads", "downloadArchiveRetentionSeconds", "maximumWebsocketDeliveryEvents", "maximumWebsocketDeliveryBytes", "maximumQueuedJobs", "maximumImageSessions", "maximumMediaBuildObjectBytes", "maximumMediaBuildPayloadBytes", "maximumMediaBuildOutputBytes", "maximumPageSize"],
         "properties": {
           "maximumJsonBytes": {"type": "integer", "minimum": 1},
           "maximumJsonDepth": {"type": "integer", "minimum": 1},
@@ -1306,6 +1306,7 @@
           "maximumJsonStringBytes": {"type": "integer", "minimum": 1},
           "maximumUploadBytes": {"type": "integer", "minimum": 1},
           "maximumUploadTotalBytes": {"type": "integer", "minimum": 1},
+          "maximumUploads": {"type": "integer", "minimum": 1, "maximum": 10000},
           "maximumUploadChunkBytes": {"type": "integer", "minimum": 1},
           "maximumDownloadRangeBytes": {"type": "integer", "minimum": 1},
           "maximumAuditionBundleBytes": {"type": "integer", "minimum": 45},

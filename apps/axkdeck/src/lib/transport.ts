@@ -367,6 +367,7 @@ export interface AudioImportCapabilities {
     defaultUnsupportedSampleRate: number;
     supportedOutputSampleWidthsBits: (8 | 16)[];
     sampleWidthPolicy: 'PRESERVE_PCM16_EXPAND_PCM8';
+    maximumUploads: number;
 }
 
 export interface AudioImportItem {

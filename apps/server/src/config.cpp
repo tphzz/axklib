@@ -550,7 +550,7 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
         return std::unexpected(argument_error("event ticket limits are invalid"));
     }
     if (config.maximum_upload_bytes == 0U || config.maximum_upload_total_bytes < config.maximum_upload_bytes ||
-        config.maximum_uploads == 0U || config.maximum_upload_chunk_bytes == 0U ||
+        config.maximum_uploads == 0U || config.maximum_uploads > 10000U || config.maximum_upload_chunk_bytes == 0U ||
         config.maximum_upload_chunk_bytes > config.maximum_upload_bytes || config.maximum_download_range_bytes == 0U ||
         config.maximum_audition_bundle_bytes < 45U ||
         config.maximum_audition_bundle_bytes > 4ULL * 1024ULL * 1024ULL * 1024ULL ||

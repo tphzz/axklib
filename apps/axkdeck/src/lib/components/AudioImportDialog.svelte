@@ -42,6 +42,7 @@
     let rows = $state<AudioImportRow[]>([]);
     let busy = $state(false);
     let generalError = $state('');
+    let stagingError = $state('');
     let nextRowId = 0;
     let audioImportCapabilities = $state<AudioImportCapabilities>();
     let disposed = false;
@@ -59,6 +60,7 @@
     }
 
     $effect(() => {
+        stagingError = '';
         rows = files.map((input) => {
             const candidate = 'kind' in input ? input : 'readChunk' in input ? input : browserUploadSource(input);
             const fileName = isWorkspaceFile(candidate)
@@ -154,6 +156,11 @@
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             rows = rows.map((row) => ({ ...row, status: 'failed', error: message }));
+            return;
+        }
+        const uploadCount = rows.filter((row) => !isWorkspaceFile(row.candidate)).length;
+        if (uploadCount > audioImportCapabilities.maximumUploads) {
+            stagingError = `This server can stage at most ${audioImportCapabilities.maximumUploads} local files at once; ${uploadCount} were selected.`;
             return;
         }
         const ids = rows.map((row) => row.id);
@@ -367,15 +374,19 @@
                     onchooselocal={() => onchooselocal?.()}
                 />
             {:else}
-                <AudioImportRows
-                    {rows}
-                    {validationErrors}
-                    capabilities={audioImportCapabilities}
-                    {busy}
-                    onchangeTargetSampleRate={(row, event) => void changeTargetSampleRate(row, event)}
-                    onupdate={replaceRow}
-                    onremove={(row) => void removeRow(row)}
-                />
+                {#if stagingError}
+                    <p class="dialog-error" role="alert">{stagingError}</p>
+                {:else}
+                    <AudioImportRows
+                        {rows}
+                        {validationErrors}
+                        capabilities={audioImportCapabilities}
+                        {busy}
+                        onchangeTargetSampleRate={(row, event) => void changeTargetSampleRate(row, event)}
+                        onupdate={replaceRow}
+                        onremove={(row) => void removeRow(row)}
+                    />
+                {/if}
             {/if}
             {#if generalError}<p class="dialog-error" role="alert">{generalError}</p>{/if}
         </div>

@@ -157,6 +157,7 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
         limits = capabilities.json()["data"]["limits"]
         assert limits["maximumJsonBytes"] == 512
         assert limits["maximumUploadTotalBytes"] == 20
+        assert limits["maximumUploads"] == 2
         assert limits["maximumImageSessions"] == 1
 
         fixed_length_rejection = rejected_raw_request(

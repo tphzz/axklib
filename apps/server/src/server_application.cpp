@@ -78,6 +78,7 @@ crow::response ServerApplication::capability_response(const crow::request &reque
                       {"maximumJsonStringBytes", config_.maximum_json_string_bytes},
                       {"maximumUploadBytes", config_.maximum_upload_bytes},
                       {"maximumUploadTotalBytes", config_.maximum_upload_total_bytes},
+                      {"maximumUploads", config_.maximum_uploads},
                       {"maximumUploadChunkBytes", config_.maximum_upload_chunk_bytes},
                       {"maximumDownloadRangeBytes", config_.maximum_download_range_bytes},
                       {"maximumAuditionBundleBytes", config_.maximum_audition_bundle_bytes},

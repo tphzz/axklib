@@ -348,6 +348,11 @@
             "minimum": 1,
             "type": "integer"
           },
+          "maximumUploads": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
           "maximumWebsocketDeliveryBytes": {
             "minimum": 1,
             "type": "integer"
@@ -365,6 +370,7 @@
           "maximumJsonStringBytes",
           "maximumUploadBytes",
           "maximumUploadTotalBytes",
+          "maximumUploads",
           "maximumUploadChunkBytes",
           "maximumDownloadRangeBytes",
           "maximumAuditionBundleBytes",
